@@ -235,6 +235,10 @@ export default defineConfig({
         // #1624: the holiday decorations' one call and steady glow, in a real
         // context. `decoration-harness.ts` says what it draws.
         decoration: 'browser/decoration.html',
+        // #1814: Delivery's parcels, markers and obstacles in three calls, a
+        // marker gone from the frame after its delivery, in a real context.
+        // `delivery-harness.ts` says what it draws.
+        delivery: 'browser/delivery.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

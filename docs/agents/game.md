@@ -655,6 +655,23 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that writes to a trainer (found by rule, ADR 0059
                         §Amendments). Fails closed on `import.meta.glob`
                         and on a worker it cannot name
+    src/game/delivery/in-view.ts
+                        what a Delivery frame draws (#1814): a marker on each
+                        house still EXPECTING a parcel, a parcel only while it
+                        flies, every obstacle where `obstacles.ts` has it,
+                        placed on the frame's corridor as `scene.ts` places a
+                        rider and dropped off its ends. It reaches the view on
+                        `port.ts` §`SceneFrame.delivery`, which nothing fills
+                        until #1816 (`@unwired`). ⚠️ The frame's types are
+                        `port.ts`' and the obstacles' footprints are restated
+                        in the renderer (pinned by `delivery-belt.test.ts`):
+                        a view that imported a `delivery/` module would make
+                        every unwired export there a `WIRE002`. `three-renderer.ts`
+                        §`DeliveryBelt` draws it in THREE instanced calls
+                        whatever the count, the obstacles' three shapes sharing
+                        one by a vertex-kind collapse, and a view builds the
+                        belt only on the first frame that carries a round, so
+                        an ordinary ride's village frame stays at 50
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`

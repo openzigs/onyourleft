@@ -625,7 +625,17 @@ import {
   type SceneryModel,
 } from './scenery-models';
 import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from './scenery-palette';
-import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
+import type {
+  CameraPose,
+  DeliveryInView,
+  DeliveryObstacleKind,
+  DeliveryObstaclePiece,
+  DeliveryPiece,
+  GameRenderer,
+  GameView,
+  RiderMarker,
+  SceneFrame,
+} from './port';
 import {
   SCATTER_BAND_METRES,
   SCENERY_KINDS,
@@ -10100,6 +10110,567 @@ function inReach(
 }
 
 /**
+ * The most of each Delivery piece one frame draws — #1814: **32** parcels, 32
+ * markers and 32 obstacles. A round holds at most `round.ts` §`MOST_HOUSES`
+ * (12) houses; at most three parcels are in flight at once (`throw.ts`: a
+ * 24-tick flight and a 10-tick cool-down); and obstacles stand one in each
+ * 250 m (`obstacles.ts` §`OBSTACLE_SPACING_METRES`), so a corridor of
+ * `terrain.ts` §`VIEW_AHEAD_METRES` and §`VIEW_BEHIND_METRES` holds two or
+ * three. 32 is past each with room, and past the browser gate's 20. A frame
+ * handed more draws the first 32 of each and not the rest; it is never a
+ * second call.
+ */
+export const DELIVERY_PIECE_CAPACITY = 32;
+
+/** Which of a Delivery frame's three kinds of piece. @see DeliveryBelt */
+export type DeliveryPieceKind = 'parcels' | 'markers' | 'obstacles';
+
+/** A piece the Delivery belt drew, read back off its instance matrices. @see DeliveryBelt.drawn */
+export interface DrawnDeliveryPiece {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
+  readonly kind: DeliveryObstacleKind | undefined;
+}
+
+/**
+ * The vertex attribute saying which of `obstacles.ts` §`OBSTACLE_KINDS` an
+ * obstacle-shape vertex belongs to, by its index in the roster — #1814.
+ * @see withObstacleKinds
+ */
+const DELIVERY_PIECE_KIND_ATTRIBUTE = 'oylPieceKind';
+
+/** The instanced attribute saying which of the roster an obstacle instance is. @see withObstacleKinds */
+const DELIVERY_OBSTACLE_KIND_ATTRIBUTE = 'oylObstacleKind';
+
+/**
+ * Each obstacle's footprint, metres: `delivery/obstacles.ts` §`OBSTACLE_KINDS`'
+ * half sizes, along the road and across it, so what the rider sees is what
+ * the rider hits. ⚠️ **Restated, not imported**: nothing the view reaches may
+ * import Delivery's modules before #1816 wires them (`port.ts`
+ * §`DeliveryObstacleKind`), and `delivery-belt.test.ts` holds every drawn
+ * footprint to `OBSTACLE_KINDS`, so a change there and not here is red.
+ */
+const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
+  Record<DeliveryObstacleKind, { readonly halfLength: number; readonly halfWidth: number }>
+> = {
+  bin: { halfLength: 0.37, halfWidth: 0.3 },
+  trolley: { halfLength: 0.25, halfWidth: 0.3 },
+  cone: { halfLength: 0.2, halfWidth: 0.2 },
+};
+
+/** The roster, in order: a kind's index is its number in both attributes. */
+const DELIVERY_OBSTACLE_ORDER = Object.keys(
+  DELIVERY_OBSTACLE_FOOTPRINTS,
+) as readonly DeliveryObstacleKind[];
+
+/**
+ * Teaches a material to draw ONE of the obstacle roster's shapes per instance
+ * — #1814. Every obstacle instance carries all three kinds' triangles, each
+ * vertex marked with its kind ({@link DELIVERY_PIECE_KIND_ATTRIBUTE}); a vertex
+ * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_KIND_ATTRIBUTE})
+ * is collapsed to the instance's origin, so its triangles have no area and
+ * draw no pixel. That is what lets a wheelie bin, a hand trolley and a cone
+ * share one instanced call: an instanced draw is ONE geometry, and three's
+ * `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's page's
+ * counter does not see (`browser/realistic/draws.ts`).
+ *
+ * The cost is the other kinds' vertices run through the vertex shader and
+ * dropped before any pixel: no pass, no fragment, no transparency.
+ * `delivery.browser.spec.ts` reads a pixel only the bin covers and one only
+ * the cone covers, so a splice that stopped collapsing is a red test.
+ * Chained after whatever the material already does, and keyed apart, for
+ * {@link withSurfaceDetail}'s reason; a three bump that moved a chunk throws.
+ */
+function withObstacleKinds<M extends Material>(material: M): M {
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1814's obstacle kinds";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_KIND_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) );`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-delivery-kinds`;
+  return material;
+}
+
+/** One part of a Delivery piece: placed in the piece's own frame (its `+z` along the road), painted, glowing or not. */
+interface DeliveryPart {
+  readonly made: BufferGeometry;
+  readonly colour: number;
+  readonly glows?: boolean;
+  /** For an obstacle: which of the roster, by index. */
+  readonly kind?: number;
+}
+
+/**
+ * Parts as ONE unindexed geometry — #1814: positions, normals, the paint in
+ * the vertex colour, the glow in {@link DECORATION_GLOW_ATTRIBUTE} (the
+ * decorations' materials read it, so a marker glows in the call it is drawn
+ * in), and, where any part names a kind, each vertex's kind. The parts'
+ * geometries are disposed.
+ */
+function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
+  const flats = parts.map((part) =>
+    part.made.index === null ? part.made : part.made.toNonIndexed(),
+  );
+  const vertices = flats.reduce((sum, flat) => sum + flat.getAttribute('position').count, 0);
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const glow = new Float32Array(vertices);
+  const kinds = new Float32Array(vertices);
+  const paint = new Color();
+  let at = 0;
+  parts.forEach((part, index) => {
+    const flat = flats[index] as BufferGeometry;
+    const count = flat.getAttribute('position').count;
+    positions.set(flat.getAttribute('position').array, at * 3);
+    normals.set(flat.getAttribute('normal').array, at * 3);
+    paint.set(part.colour);
+    for (let corner = at; corner < at + count; corner += 1) {
+      colours[corner * 3] = paint.r;
+      colours[corner * 3 + 1] = paint.g;
+      colours[corner * 3 + 2] = paint.b;
+      glow[corner] = part.glows === true ? 1 : 0;
+      kinds[corner] = part.kind ?? 0;
+    }
+    at += count;
+    if (flat !== part.made) flat.dispose();
+    part.made.dispose();
+  });
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
+  if (parts.some((part) => part.kind !== undefined)) {
+    geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
+  }
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** A box `width` across, `height` up and `length` along, its middle at `(x, y, z)`. */
+function deliveryBox(
+  width: number,
+  height: number,
+  length: number,
+  x: number,
+  y: number,
+  z: number,
+): BufferGeometry {
+  return new BoxGeometry(width, height, length).translate(x, y, z);
+}
+
+/** A wheel of `radius`, `width` across, its axle across the road, its middle at `(x, y, z)`. */
+function deliveryWheel(
+  radius: number,
+  width: number,
+  x: number,
+  y: number,
+  z: number,
+): BufferGeometry {
+  return new CylinderGeometry(radius, radius, width, 8, 1, false)
+    .rotateZ(Math.PI / 2)
+    .translate(x, y, z);
+}
+
+/**
+ * Delivery's paints — #1814, this project's own (DL1): a brown card parcel
+ * with a pale tape band; a white post on the doorstep with a glowing amber
+ * diamond above it and a glowing ring on the step; a green wheelie bin, a red
+ * hand trolley and an orange cone with a white band, each on black wheels or
+ * a black foot. No sprite, colour scheme or shape is taken from another game.
+ */
+const DELIVERY_PAINT = {
+  card: 0xa8794a,
+  tape: 0xe6d8b4,
+  post: 0xe6e4da,
+  glow: 0xf5b82e,
+  binBody: 0x2f5d3a,
+  binLid: 0x244a2e,
+  trolleyFrame: 0xb3362c,
+  trolleyPlate: 0x8c8c8c,
+  coneBody: 0xe8661c,
+  coneBand: 0xe6e6e6,
+  black: 0x1e1e1e,
+} as const;
+
+/** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
+function parcelShape(): BufferGeometry {
+  return deliveryShape([
+    { made: deliveryBox(0.34, 0.22, 0.28, 0, 0, 0), colour: DELIVERY_PAINT.card },
+    { made: deliveryBox(0.35, 0.23, 0.07, 0, 0, 0), colour: DELIVERY_PAINT.tape },
+  ]);
+}
+
+/** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
+function markerShape(): BufferGeometry {
+  return deliveryShape([
+    { made: deliveryBox(0.05, 1.5, 0.05, 0, 0.75, 0), colour: DELIVERY_PAINT.post },
+    {
+      made: new OctahedronGeometry(0.2, 0).scale(1, 1.4, 1).translate(0, 1.8, 0),
+      colour: DELIVERY_PAINT.glow,
+      glows: true,
+    },
+    {
+      made: new TorusGeometry(0.4, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      colour: DELIVERY_PAINT.glow,
+      glows: true,
+    },
+  ]);
+}
+
+/**
+ * The obstacle roster, all three kinds in one geometry, each vertex marked
+ * with its kind (@see withObstacleKinds), standing on the road at the
+ * origin. Each kind's footprint is its collision box in `obstacles.ts`
+ * §`OBSTACLE_KINDS`, `2 × halfWidth` across and `2 × halfLength` along, so
+ * what the rider sees is what the rider hits; the test holds the two equal.
+ */
+function obstacleShape(): BufferGeometry {
+  const parts: DeliveryPart[] = [];
+  const add = (kind: DeliveryObstacleKind, made: BufferGeometry, colour: number): void => {
+    parts.push({ made, colour, kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind) });
+  };
+  {
+    const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfWidth;
+    const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfLength;
+    add('bin', deliveryBox(across - 0.04, 0.95, along - 0.04, 0, 0.475, 0), DELIVERY_PAINT.binBody);
+    add('bin', deliveryBox(across, 0.06, along, 0, 0.98, 0), DELIVERY_PAINT.binLid);
+    for (const side of [-1, 1]) {
+      add(
+        'bin',
+        deliveryWheel(0.1, 0.06, side * (across / 2 - 0.03), 0.1, -(along / 2 - 0.1)),
+        DELIVERY_PAINT.black,
+      );
+    }
+  }
+  {
+    const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.trolley.halfWidth;
+    const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.trolley.halfLength;
+    const back = -along / 2 + 0.07;
+    add(
+      'trolley',
+      deliveryBox(across - 0.1, 0.03, along * 0.6, 0, 0.015, along / 2 - along * 0.3),
+      DELIVERY_PAINT.trolleyPlate,
+    );
+    for (const side of [-1, 1]) {
+      add(
+        'trolley',
+        deliveryBox(0.04, 1.1, 0.04, side * (across / 2 - 0.08), 0.6, back),
+        DELIVERY_PAINT.trolleyFrame,
+      );
+      add(
+        'trolley',
+        deliveryWheel(0.12, 0.06, side * (across / 2 - 0.03), 0.12, -along / 2 + 0.12),
+        DELIVERY_PAINT.black,
+      );
+    }
+    for (const up of [0.6, 1.13]) {
+      add(
+        'trolley',
+        deliveryBox(across - 0.12, 0.04, 0.04, 0, up, back),
+        DELIVERY_PAINT.trolleyFrame,
+      );
+    }
+  }
+  {
+    const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.cone.halfWidth;
+    const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.cone.halfLength;
+    const foot = 0.04;
+    const height = 0.7;
+    const radius = 0.15;
+    const radiusAt = (up: number): number => (radius * (foot + height - up)) / height;
+    add('cone', deliveryBox(across, foot, along, 0, foot / 2, 0), DELIVERY_PAINT.black);
+    add(
+      'cone',
+      new ConeGeometry(radius, height, 10, 1, true).translate(0, foot + height / 2, 0),
+      DELIVERY_PAINT.coneBody,
+    );
+    // The band, a hair proud of the cone's surface between 0.35 m and 0.47 m.
+    add(
+      'cone',
+      new CylinderGeometry(
+        radiusAt(0.47) + 0.004,
+        radiusAt(0.35) + 0.004,
+        0.12,
+        10,
+        1,
+        true,
+      ).translate(0, 0.41, 0),
+      DELIVERY_PAINT.coneBand,
+    );
+  }
+  return deliveryShape(parts);
+}
+
+/** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
+const DELIVERY_MATRIX = new Matrix4();
+
+/**
+ * Delivery's parcels in flight, the markers on the houses still on the round
+ * and the obstacles — #1814, resting on the owner's ruling DL6b (epic #1803,
+ * ADR 0059 D-3): **three instanced meshes and at most THREE draw calls**,
+ * whatever the count, and none on a frame that carries no Delivery. Each kind
+ * of piece is one instanced draw of one shape, so twenty parcels cost what
+ * one does; the obstacles' three shapes share theirs ({@link withObstacleKinds}).
+ *
+ * ⚠️ **Built by the view only on the first frame that carries a Delivery
+ * round** (`SceneFrame.delivery`), so an ordinary ride has no mesh, no
+ * program and no buffer of it, and `realistic-town.browser.spec.ts` reads
+ * the village frame's 50 calls unchanged.
+ *
+ * What it adds to a frame: no shadow caster (`castShadow` is three's default
+ * `false`), no shadow lookup, nothing transparent, no new pass. It wears the
+ * holiday decorations' materials ({@link decorationMaterials}): the stylised
+ * world's lit or flat by the rung, the realistic world's physically based and
+ * in its air, with the markers' glow in the same program.
+ *
+ * ⚠️ **Not frustum-culled**: three works an instanced mesh's bounding sphere
+ * out once and keeps it, and these move every frame. Three calls are all a
+ * cull could save.
+ *
+ * Instances are rewritten every frame that carries a round, a matrix each:
+ * at most {@link DELIVERY_PIECE_CAPACITY} of each, 16 floats an instance.
+ */
+export class DeliveryBelt {
+  readonly #meshes: Readonly<Record<DeliveryPieceKind, InstancedMesh>>;
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  readonly #obstacleMaterials: { readonly lit: Material; readonly flat: Material };
+  /** Each obstacle instance's kind, by its index in the roster. */
+  readonly #kinds = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY), 1);
+  #shown = true;
+
+  constructor(world: 'stylised' | 'realistic') {
+    this.#materials = decorationMaterials(world);
+    const obstacle = decorationMaterials(world);
+    const lit = withObstacleKinds(obstacle.lit);
+    this.#obstacleMaterials = {
+      lit,
+      flat: obstacle.flat === obstacle.lit ? lit : withObstacleKinds(obstacle.flat),
+    };
+    const obstacles = obstacleShape();
+    this.#kinds.setUsage(DynamicDrawUsage);
+    obstacles.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#kinds);
+    const made = (geometry: BufferGeometry, material: Material): InstancedMesh => {
+      const mesh = new InstancedMesh(geometry, material, DELIVERY_PIECE_CAPACITY);
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      return mesh;
+    };
+    this.#meshes = {
+      parcels: made(parcelShape(), this.#materials.lit),
+      markers: made(markerShape(), this.#materials.lit),
+      obstacles: made(obstacles, this.#obstacleMaterials.lit),
+    };
+  }
+
+  addTo(scene: Scene): void {
+    for (const mesh of Object.values(this.#meshes)) scene.add(mesh);
+  }
+
+  /** One kind's mesh. For the jsdom suite and the browser gate's probes. */
+  meshOf(what: DeliveryPieceKind): InstancedMesh {
+    return this.#meshes[what];
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) for (const mesh of Object.values(this.#meshes)) mesh.visible = false;
+  }
+
+  /** Shades the pieces, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#meshes.parcels.material = this.#materials[shading];
+    this.#meshes.markers.material = this.#materials[shading];
+    this.#meshes.obstacles.material = this.#obstacleMaterials[shading];
+  }
+
+  /** This frame's pieces, or none: a frame with no Delivery round draws nothing of it. */
+  update(view: DeliveryInView | undefined): void {
+    this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
+    this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES);
+    const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
+    this.#place(this.#meshes.obstacles, obstacles);
+    const kinds = this.#kinds.array as Float32Array;
+    const count = this.#meshes.obstacles.count;
+    for (let at = 0; at < count; at += 1) {
+      kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf((obstacles[at] as DeliveryObstaclePiece).kind);
+    }
+    if (count > 0) this.#kinds.needsUpdate = true;
+  }
+
+  #place(mesh: InstancedMesh, pieces: readonly DeliveryPiece[]): void {
+    const count = Math.min(pieces.length, DELIVERY_PIECE_CAPACITY);
+    for (let at = 0; at < count; at += 1) {
+      const piece = pieces[at] as DeliveryPiece;
+      DELIVERY_MATRIX.makeRotationY(piece.yaw).setPosition(piece.x, piece.y, piece.z);
+      mesh.setMatrixAt(at, DELIVERY_MATRIX);
+    }
+    mesh.count = count;
+    if (count > 0) mesh.instanceMatrix.needsUpdate = true;
+    mesh.visible = this.#shown && count > 0;
+  }
+
+  /**
+   * What the last frame drew of `what`, read back off the belt's own instance
+   * buffers — the CPU copy of what three uploads, not the frame it was handed.
+   * That the copy reaches the GPU is `needsUpdate`'s job, and delivery-belt.test.ts
+   * asserts the attributes' `version` rises. Nothing where the mesh is not drawn.
+   */
+  drawn(what: DeliveryPieceKind): readonly DrawnDeliveryPiece[] {
+    const mesh = this.#meshes[what];
+    if (!mesh.visible) return [];
+    const matrices = mesh.instanceMatrix.array;
+    const kinds = this.#kinds.array;
+    const drawn: DrawnDeliveryPiece[] = [];
+    for (let at = 0; at < mesh.count; at += 1) {
+      drawn.push({
+        x: matrices[at * 16 + 12] as number,
+        y: matrices[at * 16 + 13] as number,
+        z: matrices[at * 16 + 14] as number,
+        kind: what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined,
+      });
+    }
+    return drawn;
+  }
+
+  /** Takes the meshes out of whatever scene holds them, and releases every buffer and material. */
+  dispose(): void {
+    for (const mesh of Object.values(this.#meshes)) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+      mesh.dispose();
+    }
+    for (const materials of [this.#materials, this.#obstacleMaterials]) {
+      materials.lit.dispose();
+      if (materials.flat !== materials.lit) materials.flat.dispose();
+    }
+  }
+}
+
+/** No pieces: what a frame with no Delivery round hands the belt. */
+const NO_DELIVERY_PIECES: readonly DeliveryPiece[] = [];
+const NO_DELIVERY_OBSTACLES: readonly DeliveryObstaclePiece[] = [];
+
+/**
+ * What {@link deliveryCallsProbe} counted: three's own draw calls with the
+ * belt shown and hidden, and how many of each piece it drew.
+ *
+ * @test-facing read by `browser/delivery-harness.ts` and its spec
+ */
+export interface DeliveryCalls {
+  readonly shown: number;
+  readonly hidden: number;
+  readonly drawn: Readonly<Record<DeliveryPieceKind, number>>;
+}
+
+/**
+ * The Delivery belt's draw calls in a real context — #1814, for the browser
+ * gate, which cannot import three (`three-seam.test.ts`): a
+ * {@link DeliveryBelt} in `world`'s materials holding `view`, alone in a
+ * scene, drawn and then hidden and drawn again. Three's own
+ * `renderer.info.render.calls` for each.
+ *
+ * @test-facing read by `browser/delivery-harness.ts`; the product's belt is
+ * drawn in the view's own frame, which the same harness also counts
+ */
+export function deliveryCallsProbe(
+  canvas: HTMLCanvasElement,
+  world: 'stylised' | 'realistic',
+  view: DeliveryInView,
+): DeliveryCalls {
+  const renderer = new WebGLRenderer({ canvas, antialias: false });
+  renderer.setSize(64, 32, false);
+  const belt = new DeliveryBelt(world);
+  const scene = new Scene();
+  belt.addTo(scene);
+  belt.update(view);
+  const drawn = {
+    parcels: belt.drawn('parcels').length,
+    markers: belt.drawn('markers').length,
+    obstacles: belt.drawn('obstacles').length,
+  };
+  const eye = new PerspectiveCamera(60, 2, 0.1, 500);
+  eye.position.set(0, 30, 1);
+  eye.lookAt(0, 0, 0);
+  renderer.render(scene, eye);
+  const shown = renderer.info.render.calls;
+  belt.setShown(false);
+  renderer.render(scene, eye);
+  const hidden = renderer.info.render.calls;
+  belt.dispose();
+  renderer.dispose();
+  return { shown, hidden, drawn };
+}
+
+/**
+ * One obstacle of `kind`, seen from straight in front, far off and narrow, so
+ * nearly square-on — #1814: whether each of `points` (the obstacle's own
+ * metres, `x` across and `y` up) reads back as the background or as painted.
+ * The browser gate's proof that {@link withObstacleKinds} draws only the
+ * instance's own kind.
+ *
+ * @test-facing read by `browser/delivery-harness.ts`; the product draws
+ * obstacles through {@link DeliveryBelt} only
+ */
+export function deliveryKindProbe(
+  canvas: HTMLCanvasElement,
+  world: 'stylised' | 'realistic',
+  kind: DeliveryObstacleKind,
+  points: readonly (readonly [number, number])[],
+): readonly boolean[] {
+  const size = 256;
+  const background = 0xff00ff;
+  const renderer = new WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  renderer.setSize(size, size, false);
+  renderer.setClearColor(background, 1);
+  const belt = new DeliveryBelt(world);
+  const scene = new Scene();
+  belt.addTo(scene);
+  belt.update({ parcels: [], markers: [], obstacles: [{ x: 0, y: 0, z: 0, yaw: 0, kind }] });
+  const sun = new DirectionalLight(0xffffff, 1);
+  sun.position.set(0, 1, 1);
+  scene.add(sun);
+  const eye = new PerspectiveCamera(2, 1, 1, 200);
+  eye.position.set(0, 0.6, 50);
+  eye.lookAt(0, 0.6, 0);
+  eye.updateMatrixWorld();
+  renderer.render(scene, eye);
+  const gl = renderer.getContext();
+  const pixel = new Uint8Array(4);
+  const point = new Vector3();
+  const painted = points.map(([x, y]) => {
+    point.set(x, y, 0).project(eye);
+    const column = Math.round(((point.x + 1) / 2) * size);
+    const row = Math.round(((point.y + 1) / 2) * size);
+    gl.readPixels(column, row, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    return !(pixel[0] === 0xff && pixel[1] === 0x00 && pixel[2] === 0xff);
+  });
+  belt.dispose();
+  renderer.dispose();
+  return painted;
+}
+
+/**
  * The stylised world's wordmark, once loaded — #966. Module state for
  * {@link sceneryGeometries}' reason: a view is built synchronously, so the
  * texture is loaded first, by {@link loadGameWordmark}.
@@ -18634,6 +19205,22 @@ export function foliageOrderedOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * What a view's Delivery belt drew of `what` on its last frame — #1814, read
+ * back off the instance matrices three uploads, not off the frame the view
+ * was handed. Nothing on a view that has drawn no Delivery round.
+ *
+ * @test-facing read by `browser/delivery-harness.ts`, whose spec delivers to
+ * one house and finds its marker gone from the next frame; the product never
+ * asks what it drew
+ */
+export function deliveryDrawnOf(
+  view: GameView,
+  what: DeliveryPieceKind,
+): readonly DrawnDeliveryPiece[] {
+  return view instanceof ThreeGameView ? view.deliveryDrawn(what) : [];
+}
+
+/**
  * Draws a view's realistic firs with their depth pre-pass, without it, or —
  * the browser gate's control — with the EQUAL test and no pre-pass, which
  * draws no fir. Drawn and off must read back identical: the pre-pass is a
@@ -18870,6 +19457,12 @@ class ThreeGameView implements GameView {
   readonly #furniture = new FurnitureBelt('stylised');
   /** The stylised world's holiday decorations — #1624. The realistic world draws its own. */
   readonly #decorations = new DecorationBelt('stylised');
+  /**
+   * Delivery's parcels, markers and obstacles — #1814, in the world this view
+   * draws. Built on the first frame that carries a Delivery round and dropped
+   * when the world changes, so an ordinary ride never builds one. @see #updateDelivery
+   */
+  #delivery: DeliveryBelt | undefined;
   /** The cross streets — #1565: ONE belt for both worlds, in whatever the road wears. */
   readonly #sideRoads: SideRoadBelt;
   /**
@@ -19128,6 +19721,8 @@ class ThreeGameView implements GameView {
     this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
     this.#realistic?.people.update(frame.people);
+    // #1814: and a Delivery round's pieces, on a frame that carries one.
+    this.#updateDelivery(frame.delivery);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -19136,6 +19731,25 @@ class ThreeGameView implements GameView {
     );
     this.#updateShadows(frame);
     this.#placeCamera(rig);
+  }
+
+  /**
+   * A Delivery round's pieces — #1814: the belt built on the first frame that
+   * carries a round, in the world this view draws and at its rung's shading,
+   * and handed every frame after. A frame with no round hides it.
+   */
+  #updateDelivery(view: DeliveryInView | undefined): void {
+    if (view !== undefined && this.#delivery === undefined) {
+      this.#delivery = new DeliveryBelt(this.#drawing);
+      this.#delivery.setShading(this.#quality.shading);
+      this.#delivery.addTo(this.#scene);
+    }
+    this.#delivery?.update(view);
+  }
+
+  /** What the Delivery belt drew of `what` on the last frame. @see deliveryDrawnOf */
+  deliveryDrawn(what: DeliveryPieceKind): readonly DrawnDeliveryPiece[] {
+    return this.#delivery?.drawn(what) ?? [];
   }
 
   /**
@@ -19274,6 +19888,10 @@ class ThreeGameView implements GameView {
     }
     this.#drawing = world;
     const realistic = world === 'realistic';
+    // #1814: the Delivery belt wears one world's materials; the next frame
+    // that carries a round builds it again in this one.
+    this.#delivery?.dispose();
+    this.#delivery = undefined;
     if (realistic && loaded !== undefined && this.#renderer !== undefined) {
       if (this.#realistic === undefined) {
         this.#realistic = new RealisticDrawing(
@@ -19776,6 +20394,7 @@ class ThreeGameView implements GameView {
     this.#pavements.setShading(shading);
     this.#furniture.setShading(shading);
     this.#decorations.setShading(shading);
+    this.#delivery?.setShading(shading);
   }
 
   /**
@@ -19877,6 +20496,7 @@ class ThreeGameView implements GameView {
     this.#pavements.dispose();
     this.#furniture.dispose();
     this.#decorations.dispose();
+    this.#delivery?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
