@@ -362,7 +362,10 @@ export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set([
  *   in every bay of every storey whose window top is at most `top` storeys up,
  *   which is the eaves — so none is cut by a roof. On the ground storey,
  *   bay `skip` has none: the front door is there (−1 where it is not).
- * - **`top = 0`, plain**: the photograph and nothing on it.
+ * - **`top = 0`, plain**: the photograph and nothing on it. Since #1679 a
+ *   parapet's outer face under a cornice has its `skip` the cornice's lower
+ *   edge, in storeys above the floor, as its `v` is; every other plain face's
+ *   is −1.
  * - **`top = −1`, a door**: `u` and `v` across its quad, `[0, 1]`, which
  *   holds the leaf and its surround ({@link DOOR_SURROUND_METRES}).
  * - **`top = −2`, paint**: the trim's colour in place of the photograph.
@@ -374,7 +377,8 @@ export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set([
  *   `u` and `v` in metres across the face and up it (down an awning's slope);
  *   the style's `width` is the face's width, and its `extra` a shop front's or
  *   a sign's height, or an awning's paint; a sign's `flags` are its paint, and
- *   an awning's 1 where it is striped.
+ *   an awning's 1 where it is striped. Since #1679 a shop front's `skip` is
+ *   the awning's depth over it, in metres, and 0 where it has none.
  * - **`top = −5`, a porch's railing** (#1589): `u` and `v` in metres along
  *   it and up it; the style's `width` is its length and its `extra` its
  *   height.
@@ -418,7 +422,8 @@ export const FACADE_RAILING = -5;
  *   overhanging roof shades the wall's top) and
  *   {@link STYLE_BRICK_FOUNDATION} (a clapboard wall's foundation band is
  *   brick, not block); since #1661 {@link STYLE_FLAT_ROOF} (a parapet above);
- *   since #1636 {@link STYLE_GLAZED} (a tower's curtain wall).
+ *   since #1636 {@link STYLE_GLAZED} (a tower's curtain wall); since #1679
+ *   {@link STYLE_CORNICE} (a cornice over the parapet).
  * - **`width`**: a windowed wall's bay, in metres — what pairs its windows;
  *   a dormer's or a garage's face's width.
  * - **`extra`**: a windowed wall's picture-window bay on the ground storey,
@@ -485,6 +490,15 @@ export const GLAZED_MIN_STOREYS = 9;
  * is flat. Bit **64**: 32 is #1636's. @see STYLE_FLOATS
  */
 export const STYLE_FLAT_ROOF = 64;
+
+/**
+ * `flags`: a wall under #1590's cornice — #1679, where the cornice's own
+ * shadow falls on it (`facade.ts` §`corniceShadeAt`). Set exactly where
+ * {@link cornice} is drawn: a building part, or a plan that does without its
+ * cornice to fit, carries {@link STYLE_FLAT_ROOF} and not this. Bit **128**:
+ * 64 is #1661's. @see STYLE_FLOATS
+ */
+export const STYLE_CORNICE = 128;
 
 /** What a plan is clad in — #1588. */
 export interface FootprintCladding {
@@ -1633,6 +1647,12 @@ interface WallOptions {
    * ({@link partyFaceFrom}), with no window, door or shutter.
    */
   readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
+  /**
+   * #1679: the outer ring's faces are under a cornice whose lower edge is
+   * this many storeys above `from` — a parapet's — and carry it as their
+   * `skip` ({@link FACADE_FLOATS}). Not a party wall's stretch, nor a hole's.
+   */
+  readonly cornice?: number;
 }
 
 /**
@@ -1655,8 +1675,13 @@ function ringWalls(
   options: WallOptions = {},
 ): void {
   const [bottom, top, from] = heights;
-  const { inside = false, windows, metres, party } = options;
+  const { inside = false, windows: all, metres, party, cornice } = options;
   rings.forEach((ring, index) => {
+    // #1679: a cornice runs round the outer ring alone, so no hole's wall is under it.
+    const windows =
+      index > 0 && all !== undefined && (all.flags & STYLE_CORNICE) !== 0
+        ? { ...all, flags: all.flags - STYLE_CORNICE }
+        : all;
     const n = ring.length / 2;
     const counter = signedArea(ring) > 0;
     // Out of the outer ring is `(dz, −dx)` of a counter-clockwise edge; a
@@ -1682,6 +1707,7 @@ function ringWalls(
           windows,
           metres,
           front: index === 0 && windows !== undefined && i === windows.doorEdge,
+          ...(index === 0 && cornice !== undefined ? { cornice } : {}),
         });
         round += length;
         continue;
@@ -1692,7 +1718,13 @@ function ringWalls(
         const ends: Four<number> = [ax + ex * s0, az + ez * s0, ax + ex * s1, az + ez * s1];
         const along: Pair = [round + s0, s1 - s0];
         if (wall === undefined) {
-          wallPiece(into, ends, normal, along, heights, { inside, windows, metres, front: false });
+          wallPiece(into, ends, normal, along, heights, {
+            inside,
+            windows,
+            metres,
+            front: false,
+            ...(cornice !== undefined ? { cornice } : {}),
+          });
           continue;
         }
         const shows = partyFaceFrom(wall, party.eaves, bottom, top);
@@ -1733,6 +1765,8 @@ function wallPiece(
     readonly front: boolean;
     /** #1635: a party wall's face, plain in `metres`, its facade in bays and storeys as a wall's. */
     readonly plain?: boolean;
+    /** #1679: a plain face's cornice over it. @see WallOptions */
+    readonly cornice?: number;
   },
 ): void {
   const [ax, az, bx, bz] = ends;
@@ -1790,6 +1824,16 @@ function wallPiece(
             skip: front && bays % 2 === 1 ? (bays - 1) / 2 : -1,
             style,
           };
+  } else if (options.cornice !== undefined) {
+    face = { top: FACADE_PLAIN, skip: options.cornice, style: NO_STYLE };
+    // #1679: and a `u` along it, in bays round the ring as a wall's, from
+    // which the shader finds the face's frame and so the sun's slant on it.
+    facade = [
+      [u0, v0],
+      [u1, v0],
+      [u1, v1],
+      [u0, v1],
+    ];
   } else if (metres !== undefined) {
     face = plainIn(metres);
     if (options.plain !== true) {
@@ -2399,7 +2443,8 @@ function shopFront(into: number[], at: EdgeFrame, floor: number, shop: ShopPlan)
     UNMAPPED,
     {
       top: FACADE_SHOPFRONT,
-      skip: -1,
+      // #1679: the awning's depth over it, so that the shader draws its shadow.
+      skip: shop.awning,
       style: [CLAD_PHOTOGRAPH, STYLE_COMMERCIAL, shop.width, shop.height],
     },
     metres(shop.width, shop.height),
@@ -4454,6 +4499,12 @@ function planFootprint(
       'porch-trim': [],
     };
     const drew: Extras = { garage: false, dormers: 0, cornice: false };
+    // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
+    const corniced = withCornice && roof === 'flat' && (use === 'commercial' || terraced) && !part;
+    // #1679: and the walls under it say so, as the parapet's face does.
+    const walled: Windows = corniced
+      ? { ...windows, flags: windows.flags + STYLE_CORNICE }
+      : windows;
     if (!part) {
       ringWalls(
         writing.plinth,
@@ -4462,15 +4513,17 @@ function planFootprint(
         clapboard ? { metres: [cladOf(brickFoundation ? CLAD_BRICK : CLAD_BLOCK), 0, 0, -1] } : {},
       );
     }
-    ringWalls(writing.wall, rings, [floor, eaves, floor], { windows, ...shared });
+    ringWalls(writing.wall, rings, [floor, eaves, floor], { windows: walled, ...shared });
     if (roof === 'flat') {
       flatRoof(writing.roof, rings, eaves);
       ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], {
         inside: true,
         ...shared,
+        ...(corniced
+          ? { cornice: (eaves + PARAPET_METRES - CORNICE.depth - floor) / STOREY_METRES }
+          : {}),
       });
-      // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
-      if (withCornice && (use === 'commercial' || terraced) && !part) {
+      if (corniced) {
         cornice(writing.trim, drawn, eaves + PARAPET_METRES, shared.party);
         drew.cornice = true;
       }

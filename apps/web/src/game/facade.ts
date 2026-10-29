@@ -96,9 +96,13 @@
  * shadow from the eaves' edge down, as deep as the sun's slant makes it
  * ({@link overhangShadowDepth}, {@link overhangShadowAt}, the shader's
  * `oylOverhangShadow`); a wall the sun is behind keeps #1588's soft band
- * ({@link FACADE_AO}), and {@link eavesShadeAt} is both. A cornice's and an
- * awning's shadow are not drawn: a wall's floats do not say that a cornice is
- * over it, nor a shop front's that an awning is.
+ * ({@link FACADE_AO}), and {@link eavesShadeAt} is both. Since #1679 a
+ * cornice's shadow falls the same way on the parapet's face under it and on
+ * the wall below ({@link corniceShadeAt}; the wall's flag
+ * `footprint-buildings.ts` §`STYLE_CORNICE`, the parapet's `skip`), and an
+ * awning's on the shop front under it ({@link awningShadeAt}; the shop
+ * front's `skip` is the awning's depth). Every one is
+ * {@link overhangShadeAt}, the shader's `oylOverhangShadeOf`.
  *
  * ## The weathering (#1661)
  *
@@ -134,12 +138,14 @@
 import { linearFromSrgb, type Rgb } from './building-paint';
 import { OPENING_RECESS_METRES, WINDOW } from './buildings';
 import {
+  AWNING,
   BAY_METRES,
   CLAD_BLOCK,
   CLAD_BRICK,
   CLAD_CLAPBOARD,
   CLAD_PAVING,
   CLAD_SHINGLE,
+  CORNICE,
   DOOR_FACE,
   DOOR_SURROUND_METRES,
   EAVES_OVERHANG_METRES,
@@ -152,6 +158,7 @@ import {
   FACADE_SIGN,
   FACADE_RAILING,
   GARAGE,
+  PARAPET_METRES,
   ROOF_PITCHES_DEGREES,
   ROOF_THICKNESS_METRES,
   STOREY_METRES,
@@ -447,6 +454,12 @@ const MIDDLE_PITCH_DEGREES =
  * `ROOF_THICKNESS_METRES` deep under that. ⚠️ A wall's floats do not carry its
  * roof's pitch, so the edge is placed for the middle pitch: on the shallowest
  * roof it is 9 cm too low and on the steepest 12 cm too high.
+ *
+ * Since #1679 the two other overhangs' edges: `corniceRise`, how far a
+ * cornice's lower edge is **above** the wall's top — the parapet's height
+ * less the cornice's band (`footprint-buildings.ts` §`CORNICE`'s `depth`) —
+ * and `awningEdge`, how far an awning's valance's foot, its lowest edge,
+ * `AWNING`'s `drop` and `valance`, is below the shop front's top.
  */
 export const OVERHANG_SHADOW = {
   shade: REVEAL.shade,
@@ -454,6 +467,8 @@ export const OVERHANG_SHADOW = {
   edge:
     ROOF_THICKNESS_METRES +
     EAVES_OVERHANG_METRES * Math.tan((MIDDLE_PITCH_DEGREES * Math.PI) / 180),
+  corniceRise: PARAPET_METRES - CORNICE.depth,
+  awningEdge: AWNING.drop + AWNING.valance,
 } as const;
 
 /** GLSL's `smoothstep`, and with `lo === hi` a step at it. */
@@ -503,6 +518,64 @@ export function overhangShadowAt(
 }
 
 /**
+ * What share of its light a point `below` metres under an overhang's edge
+ * `projection` metres proud keeps in the sun `sun` — #1679, #1658's rule for
+ * every overhang, the shader's `oylOverhangShadeOf`: in the shadow
+ * ({@link overhangShadowAt}) it keeps {@link OVERHANG_SHADOW}'s `shade` at a
+ * sun square to the face at the lowest sun the world has, and more as the
+ * sun comes round to graze the face; where the sun is behind it, all of it.
+ *
+ * @test-facing held by `overhang-shadows.test.ts`; the product draws it in the shader
+ */
+export function overhangShadeAt(
+  below: number,
+  projection: number,
+  sun: FaceDirection,
+  options: { readonly pw?: number; readonly wall?: number } = {},
+): number {
+  const strength =
+    (1 - OVERHANG_SHADOW.shade) * Math.min(1, Math.max(0, sun[2] / OVERHANG_SHADOW.square));
+  return 1 - strength * overhangShadowAt(below, projection, sun, options.pw ?? 0, options.wall);
+}
+
+/**
+ * What share of its light a point `below` metres under a wall's top keeps
+ * under a cornice — #1679: in the shadow of the cornice's lower edge,
+ * {@link OVERHANG_SHADOW}'s `corniceRise` above the wall's top and
+ * `footprint-buildings.ts` §`CORNICE`'s `projection` proud. A `below` under
+ * nought is up the parapet's face, between the wall's top and the cornice.
+ * `wall` is how far the edge is above the floor: the most the shadow reaches.
+ *
+ * @test-facing held by `overhang-shadows.test.ts`; the product draws it in the shader
+ */
+export function corniceShadeAt(
+  below: number,
+  sun: FaceDirection,
+  options: { readonly pw?: number; readonly wall?: number } = {},
+): number {
+  return overhangShadeAt(below + OVERHANG_SHADOW.corniceRise, CORNICE.projection, sun, options);
+}
+
+/**
+ * What share of its light a point `below` metres under a shop front's top
+ * keeps under an awning `depth` metres deep — #1679: in the shadow of the
+ * valance's foot, {@link OVERHANG_SHADOW}'s `awningEdge` under the top, as
+ * deep as `depth · s.y / s.z`; all of it with no awning (`depth` 0). `wall`
+ * is how far the edge is above the shop front's foot.
+ *
+ * @test-facing held by `overhang-shadows.test.ts`; the product draws it in the shader
+ */
+export function awningShadeAt(
+  below: number,
+  depth: number,
+  sun: FaceDirection,
+  options: { readonly pw?: number; readonly wall?: number } = {},
+): number {
+  if (!(depth > 0)) return 1;
+  return overhangShadeAt(below - OVERHANG_SHADOW.awningEdge, depth, sun, options);
+}
+
+/**
  * What share of its light a point `below` metres under a wall's top keeps
  * under its eaves — #1658, the shader's §"3. The shade": #1588's soft band
  * ({@link FACADE_AO}'s `eaves` over `eavesMetres`) on a face the sun is behind,
@@ -520,16 +593,10 @@ export function eavesShadeAt(
 ): number {
   const ao = 1 - (1 - FACADE_AO.eaves) * (1 - smoothstep(0, FACADE_AO.eavesMetres, below));
   if (options.shadows === false) return ao;
-  const strength =
-    (1 - OVERHANG_SHADOW.shade) * Math.min(1, Math.max(0, sun[2] / OVERHANG_SHADOW.square));
-  const shadow = overhangShadowAt(
-    below - OVERHANG_SHADOW.edge,
-    EAVES_OVERHANG_METRES,
-    sun,
-    options.pw ?? 0,
-    options.wall,
+  return Math.min(
+    ao,
+    overhangShadeAt(below - OVERHANG_SHADOW.edge, EAVES_OVERHANG_METRES, sun, options),
   );
-  return Math.min(ao, 1 - strength * shadow);
 }
 
 /**

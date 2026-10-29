@@ -7,31 +7,73 @@
  * term and its lever read off the program three is handed. What needs a GPU
  * — that the shadow reaches the screen, and that the lever takes it off — is
  * `game.browser.spec.ts` §"#1658".
+ *
+ * #1679: the cornice's and the awning's — the twins (`corniceShadeAt`,
+ * `awningShadeAt`, both `overhangShadeAt`) held to the issue's numbers, the
+ * floats that say the overhang is there read back from the plans and from
+ * the belt's buffer the shader is handed, the shader's `oylOverhangShadeOf`
+ * run against the twin, and the splices and the lever. On screen:
+ * `game.browser.spec.ts` §"#1679".
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { RouteProfile } from '@onyourleft/domain';
+import type { BuildingFeature } from '@onyourleft/map-features';
+
 import {
+  awningShadeAt,
+  corniceShadeAt,
   eavesShadeAt,
   FACADE_AO,
   OVERHANG_SHADOW,
+  overhangShadeAt,
   overhangShadowAt,
   overhangShadowDepth,
   REVEAL,
   type FaceDirection,
 } from './facade';
 import {
+  AWNING,
+  CORNICE,
   EAVES_OVERHANG_METRES,
+  FACADE_AWNING,
+  FACADE_OFFSET,
+  FACADE_PLAIN,
+  FACADE_SHOPFRONT,
+  FOOTPRINT_MAX_VERTICES,
+  FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
+  PARAPET_METRES,
   ROOF_PITCHES_DEGREES,
+  ROOF_ROLES,
   ROOF_THICKNESS_METRES,
+  STOREY_METRES,
+  STYLE_COMMERCIAL,
+  STYLE_CORNICE,
+  STYLE_FLAT_ROOF,
+  STYLE_OFFSET,
+  type FootprintPlan,
+  type FootprintRole,
 } from './footprint-buildings';
-import { rowTownFixture } from './footprint-fixtures-testing';
+import {
+  buildingBeside,
+  landBeside,
+  mixedTownFixture,
+  polygonBeside,
+  rectangleBeside,
+  rowTownFixture,
+  starBeside,
+} from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
-import { mappedBuildingsOf } from './mapped-buildings';
+import { mappedBuildingsOf, NEAR_ROLES } from './mapped-buildings';
+import { MAPPED_BUILDING_TRIANGLES } from './realistic-budget';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
+import { northRoute } from './route-fixtures-testing';
+import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
 import { MappedBuildingBelt, overhangShadowsOf, windowRevealsOf } from './three-renderer';
 import { SUN_ELEVATION_AT_POLE_DEGREES, SUN_ELEVATION_AT_EQUATOR_DEGREES } from './world';
+import type { WorldCorridor } from './world-data/corridor';
 
 const radians = (degrees: number): number => (degrees * Math.PI) / 180;
 
@@ -359,5 +401,457 @@ describe('the overhang’s shadow, in the shader — #1658', () => {
     const { fragment, defines } = compiled();
     expect(fragment).toContain('float oylOverhangShadow(');
     expect(defines).toMatchObject({ OYL_WINDOW_REVEALS: 0, OYL_OVERHANG_SHADOWS: 1 });
+  });
+});
+
+describe('the cornice’s and the awning’s shadows, in the twin — #1679', () => {
+  /** How dark a face's shadow is under `sun`: #1658's, faded as the sun grazes it. */
+  const darkest = (sun: FaceDirection): number =>
+    1 - (1 - OVERHANG_SHADOW.shade) * Math.min(1, sun[2] / OVERHANG_SHADOW.square);
+
+  it('places each overhang’s edge where the plan draws it', () => {
+    // The cornice's band hangs from the parapet's top, so its edge is above the wall's.
+    expect(OVERHANG_SHADOW.corniceRise).toBeCloseTo(PARAPET_METRES - CORNICE.depth, 12);
+    expect(OVERHANG_SHADOW.corniceRise).toBeCloseTo(0.2, 12);
+    // An awning's lowest edge is its valance's foot, under its own drop.
+    expect(OVERHANG_SHADOW.awningEdge).toBeCloseTo(AWNING.drop + AWNING.valance, 12);
+  });
+
+  it('throws the awning’s shadow AWNING.depth · s.y / s.z down the shop front from its edge', () => {
+    for (const depth of [AWNING.depth.least, AWNING.depth.most]) {
+      for (const [elevation, round] of [
+        [55, 0],
+        [60, 0],
+        [60, 40],
+      ] as const) {
+        const sun = sunAt(elevation, round);
+        const reach = (depth * sun[1]) / sun[2];
+        const end = OVERHANG_SHADOW.awningEdge + reach;
+        expect(awningShadeAt(end - 0.01, depth, sun)).toBeCloseTo(darkest(sun), 12);
+        expect(awningShadeAt(end + 0.01, depth, sun)).toBe(1);
+        // Right under the awning, behind its valance, too.
+        expect(awningShadeAt(0.1, depth, sun)).toBeCloseTo(darkest(sun), 12);
+      }
+    }
+    // A 1 m awning under the lowest sun leaves the foot of a 2.7 m shop front lit.
+    const low = sunAt(SUN_ELEVATION_AT_POLE_DEGREES);
+    expect(OVERHANG_SHADOW.awningEdge + overhangShadowDepth(1, low)).toBeLessThan(2.2);
+    expect(awningShadeAt(2.0, 1, low)).toBeLessThan(1);
+    expect(awningShadeAt(2.3, 1, low)).toBe(1);
+  });
+
+  it('throws none from no awning, and none with the sun behind the shop front', () => {
+    const sun = sunAt(60);
+    for (const below of [0, 0.3, 1, 2]) {
+      expect(awningShadeAt(below, 0, sun)).toBe(1);
+      expect(awningShadeAt(below, AWNING.depth.most, opposite(sun))).toBe(1);
+    }
+  });
+
+  it('throws the cornice’s shadow CORNICE.projection · s.y / s.z from its edge, over the parapet and down the wall', () => {
+    expect(CORNICE.projection).toBe(0.25);
+    for (const [elevation, round] of [
+      [55, 0],
+      [60, 0],
+      [70, 0],
+      [60, -45],
+    ] as const) {
+      const sun = sunAt(elevation, round);
+      const reach = (CORNICE.projection * sun[1]) / sun[2];
+      // On the wall: from the wall's top down to the shadow's end under the edge.
+      const end = reach - OVERHANG_SHADOW.corniceRise;
+      expect(end).toBeGreaterThan(0.15);
+      expect(corniceShadeAt(end - 0.01, sun)).toBeCloseTo(darkest(sun), 12);
+      expect(corniceShadeAt(end + 0.01, sun)).toBe(1);
+      expect(corniceShadeAt(0.05, sun)).toBeCloseTo(darkest(sun), 12);
+      // On the parapet's face between the wall's top and the cornice: every sun the world has.
+      for (const below of [-0.19, -0.1, -0.01]) {
+        expect(corniceShadeAt(below, sun)).toBeCloseTo(darkest(sun), 12);
+      }
+      // None with the sun behind the face.
+      expect(corniceShadeAt(0.05, opposite(sun))).toBe(1);
+    }
+  });
+
+  it('is #1658’s rule for every overhang: the eaves’ shade is it, past #1588’s band', () => {
+    for (const elevation of [55, 65]) {
+      for (const round of [-60, 0, 30, 150]) {
+        const sun = sunAt(elevation, round);
+        for (let below = 0.6; below <= 3; below += 0.1) {
+          expect(eavesShadeAt(below, sun, { pw: 0.02, wall: 6 })).toBeCloseTo(
+            overhangShadeAt(below - OVERHANG_SHADOW.edge, EAVES_OVERHANG_METRES, sun, {
+              pw: 0.02,
+              wall: 6,
+            }),
+            12,
+          );
+        }
+      }
+    }
+  });
+});
+
+/** One vertex's facade and style, read from a plan's triangles. */
+interface Floats {
+  readonly u: number;
+  readonly v: number;
+  readonly top: number;
+  readonly skip: number;
+  readonly flags: number;
+}
+
+function floatsOf(plan: FootprintPlan, role: FootprintRole): Floats[] {
+  const floats = plan.triangles[role];
+  const out: Floats[] = [];
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    const f = (k: number): number => floats[at + k] as number;
+    out.push({
+      u: f(FACADE_OFFSET),
+      v: f(FACADE_OFFSET + 1),
+      top: f(FACADE_OFFSET + 2),
+      skip: f(FACADE_OFFSET + 3),
+      flags: f(STYLE_OFFSET + 1),
+    });
+  }
+  return out;
+}
+
+const corniceOn = (vertex: Floats): boolean => (vertex.flags & STYLE_CORNICE) !== 0;
+
+const mixed = mixedTownFixture();
+const { plans: mixedPlans } = footprintPlans(
+  mixed.corridor,
+  landClassMask(mixed.corridor),
+  mixed.profile,
+  mixed.origin,
+);
+
+/** The awning a plan drew, from its own faces: how far out its valance hangs, or 0. */
+function awningDepthOf(plan: FootprintPlan): number {
+  const awning = plan.triangles.shopfront;
+  let most = 0;
+  for (let at = 0; at < awning.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    if (awning[at + FACADE_OFFSET + 2] !== FACADE_AWNING) continue;
+    most = Math.max(most, awning[at + FACADE_OFFSET + 1] as number);
+  }
+  // Down the canvas's slope and its valance, in metres: back to the depth out.
+  return most === 0 ? 0 : Math.sqrt((most - AWNING.valance) ** 2 - AWNING.drop ** 2);
+}
+
+/** Buildings on retail land beside a straight road, planned together. */
+function plannedOnRetail(
+  routeId: string,
+  buildings: (profile: RouteProfile, origin: CorridorOrigin) => BuildingFeature[],
+): readonly FootprintPlan[] {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const corridor: WorldCorridor = {
+    routeId,
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+    landUse: [landBeside(profile, origin, 'landuse', 'retail', 900, 1_200, -80, 80)],
+    buildings: buildings(profile, origin),
+    paths: [],
+    streets: [],
+  };
+  return footprintPlans(corridor, landClassMask(corridor), profile, origin).plans;
+}
+
+describe('the floats say the overhang is there — #1679, footprint-buildings.ts', () => {
+  it('gives a shop front its awning’s depth as its skip, and 0 where it has none', () => {
+    const shops = mixedPlans.filter((plan) => plan.shop.front);
+    const awned = shops.filter((plan) => plan.shop.awning);
+    expect(awned.length).toBeGreaterThan(5);
+    expect(shops.length - awned.length).toBeGreaterThan(5);
+    for (const plan of shops) {
+      const front = floatsOf(plan, 'shopfront').filter((v) => v.top === FACADE_SHOPFRONT);
+      expect(front).toHaveLength(6);
+      const depth = awningDepthOf(plan);
+      expect(depth > 0).toBe(plan.shop.awning);
+      for (const vertex of front) expect(vertex.skip).toBeCloseTo(depth, 4);
+      if (plan.shop.awning) {
+        expect(depth).toBeGreaterThanOrEqual(AWNING.leastDepth - 1e-6);
+        expect(depth).toBeLessThanOrEqual(AWNING.depth.most + 1e-6);
+      }
+    }
+  });
+
+  it('flags every wall under a cornice, and no other wall', () => {
+    let flagged = 0;
+    let unflagged = 0;
+    for (const plan of mixedPlans) {
+      const walls = floatsOf(plan, 'wall');
+      if (plan.shop.cornice) {
+        // Every wall's face, for a cornice runs round the whole roof.
+        expect(walls.length).toBeGreaterThan(0);
+        expect(walls.every(corniceOn)).toBe(true);
+        flagged += 1;
+      } else {
+        expect(walls.some(corniceOn)).toBe(false);
+        unflagged += 1;
+      }
+    }
+    expect(flagged).toBeGreaterThan(5);
+    expect(unflagged).toBeGreaterThan(5);
+  });
+
+  it('gives a parapet’s outer face under a cornice the cornice’s edge as its skip, and its back none', () => {
+    const corniced = mixedPlans.filter((plan) => plan.shop.cornice);
+    let checked = 0;
+    for (const plan of corniced) {
+      const parapet = floatsOf(plan, 'parapet');
+      const outer = parapet.filter((vertex) => vertex.skip > 0);
+      // The outer ring's faces, and not their backs (the roof's side): half of them.
+      expect(outer.length * 2).toBe(parapet.length);
+      const top = floatsOf(plan, 'wall').find((vertex) => vertex.top > 0)?.top;
+      for (const vertex of outer) {
+        expect(vertex.top).toBe(FACADE_PLAIN);
+        // In storeys above the floor, as the face's `v` is: the walls' top and the rise.
+        if (top !== undefined) {
+          expect(vertex.skip).toBeCloseTo(top + OVERHANG_SHADOW.corniceRise / STOREY_METRES, 5);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(5 * 6);
+    // Each such face has a `u` along it, as a wall's: the shader finds the
+    // face's frame from it, and with none its sun has no slant down the face.
+    for (const plan of corniced) {
+      const outer = floatsOf(plan, 'parapet').filter((vertex) => vertex.skip > 0);
+      for (let at = 0; at < outer.length; at += 6) {
+        const us = outer.slice(at, at + 6).map((vertex) => vertex.u);
+        expect(Math.max(...us) - Math.min(...us)).toBeGreaterThan(0.5);
+      }
+    }
+    // No parapet without a cornice says one is over it.
+    for (const plan of mixedPlans.filter((each) => !each.shop.cornice)) {
+      expect(floatsOf(plan, 'parapet').some((vertex) => vertex.skip > 0)).toBe(false);
+    }
+  });
+
+  it('flags no wall of a commercial plan that did without its cornice to fit', () => {
+    const plans = plannedOnRetail('cornice-shadow-budget', (profile, origin) => [
+      buildingBeside(profile, origin, [starBeside(1_000, 40, 12, 9, FOOTPRINT_MAX_VERTICES)], 6),
+      buildingBeside(profile, origin, [polygonBeside(1_100, 40, 12, 4)], 6),
+    ]);
+    const many = plans.find((plan) => plan.footprint.length / 2 === FOOTPRINT_MAX_VERTICES);
+    const few = plans.find((plan) => plan.footprint.length / 2 === 4);
+    if (many === undefined || few === undefined) throw new Error('the two plans were not kept');
+    const walls = floatsOf(many, 'wall');
+    expect(many.roof).toBe('flat');
+    expect(walls.every((vertex) => (vertex.flags & STYLE_COMMERCIAL) !== 0)).toBe(true);
+    expect(walls.every((vertex) => (vertex.flags & STYLE_FLAT_ROOF) !== 0)).toBe(true);
+    expect(many.shop.cornice).toBe(false);
+    expect(walls.some(corniceOn)).toBe(false);
+    expect(floatsOf(many, 'parapet').some((vertex) => vertex.skip > 0)).toBe(false);
+    // Control: four walls take one, and say so.
+    expect(few.shop.cornice).toBe(true);
+    expect(floatsOf(few, 'wall').every(corniceOn)).toBe(true);
+  });
+
+  it('flags no courtyard’s wall, which the cornice round the outer ring does not cross', () => {
+    const outer = rectangleBeside(1_000, 40, 24, 20);
+    const [plan] = plannedOnRetail('cornice-shadow-courtyard', (profile, origin) => [
+      buildingBeside(profile, origin, [outer, polygonBeside(1_000, 40, 4, 6)], 6),
+    ]);
+    if (plan === undefined) throw new Error('the plan was not kept');
+    expect(plan.shop.cornice).toBe(true);
+    // The outer ring's four walls are flagged; the courtyard's six are not.
+    const faces = new Map<string, boolean>();
+    const walls = plan.triangles.wall;
+    for (let at = 0; at < walls.length; at += 6 * FOOTPRINT_VERTEX_FLOATS) {
+      const normal = `${(walls[at + 3] as number).toFixed(3)},${(walls[at + 5] as number).toFixed(3)}`;
+      const flagged = ((walls[at + STYLE_OFFSET + 1] as number) & STYLE_CORNICE) !== 0;
+      faces.set(normal, flagged || (faces.get(normal) ?? false));
+    }
+    const flagged = [...faces.values()].filter(Boolean).length;
+    expect(faces.size).toBe(4 + 6);
+    expect(flagged).toBe(4);
+    // And the parapet's: the outer ring's outer faces alone.
+    const parapet = floatsOf(plan, 'parapet');
+    expect(parapet.filter((vertex) => vertex.skip > 0)).toHaveLength(4 * 6);
+  });
+
+  it('flags no wall of a building part, which has no cornice', () => {
+    const planned = (part: boolean): FootprintPlan => {
+      const [plan] = plannedOnRetail('cornice-shadow-part', (profile, origin) => [
+        buildingBeside(
+          profile,
+          origin,
+          [rectangleBeside(1_000, 40, 14, 12)],
+          12,
+          part ? { minHeightMetres: 4 } : undefined,
+        ),
+      ]);
+      if (plan === undefined) throw new Error('the plan was not kept');
+      return plan;
+    };
+    const part = planned(true);
+    const whole = planned(false);
+    expect(part.roof).toBe('flat');
+    expect(part.shop.cornice).toBe(false);
+    expect(floatsOf(part, 'wall').some(corniceOn)).toBe(false);
+    // Control: the whole building takes one, and says so.
+    expect(whole.shop.cornice).toBe(true);
+    expect(floatsOf(whole, 'wall').every(corniceOn)).toBe(true);
+  });
+
+  it('hands the shader both, through the belt’s own buffer', () => {
+    const belt = new MappedBuildingBelt(mappedBuildingsOf(mixedPlans), textures);
+    belts.push(belt);
+    let awnings = 0;
+    let cornices = 0;
+    for (let along = 1_600; along <= 2_050; along += 50) {
+      const frame = drawnRoadFrame(mixed.profile, mixed.origin, along);
+      if (frame === undefined) throw new Error('no road');
+      const stats = belt.refill(frame.x, frame.z, MAPPED_BUILDING_TRIANGLES);
+      const facade = belt.mesh.geometry.getAttribute('oylFacade');
+      const style = belt.mesh.geometry.getAttribute('oylStyle');
+      for (let place = 0; place < stats.buildings; place += 1) {
+        const drawn = belt.drawnAt(place);
+        if (drawn === undefined || drawn.far || drawn.wallAt < 0) continue;
+        const plan = mixedPlans[drawn.plan] as FootprintPlan;
+        // Where each of the wall surface's roles starts in its range.
+        const starts = new Map<FootprintRole, number>();
+        let at = drawn.wallAt;
+        for (const role of NEAR_ROLES) {
+          if (ROOF_ROLES.has(role)) continue;
+          starts.set(role, at);
+          at += plan.triangles[role].length / FOOTPRINT_VERTEX_FLOATS;
+        }
+        const wallAt = starts.get('wall') ?? -1;
+        floatsOf(plan, 'wall').forEach((_, index) => {
+          expect((style.getY(wallAt + index) & STYLE_CORNICE) !== 0).toBe(plan.shop.cornice);
+        });
+        if (plan.shop.cornice) cornices += 1;
+        const shopAt = starts.get('shopfront') ?? -1;
+        floatsOf(plan, 'shopfront').forEach((vertex, index) => {
+          if (vertex.top !== FACADE_SHOPFRONT) return;
+          expect(facade.getZ(shopAt + index)).toBe(FACADE_SHOPFRONT);
+          expect(facade.getW(shopAt + index)).toBeCloseTo(awningDepthOf(plan), 4);
+          if (plan.shop.awning) awnings += 1;
+        });
+      }
+    }
+    expect(cornices).toBeGreaterThan(5);
+    expect(awnings).toBeGreaterThan(5 * 6);
+  });
+});
+
+/**
+ * The program's own `oylOverhangShadeOf`, run: its body as the shader holds
+ * it, calling the program's own `oylOverhangShadow` with its own constants.
+ */
+function shaderOverhangShade(
+  fragment: string,
+): (below: number, projection: number, s: FaceDirection, pw: number, wall: number) => number {
+  const found =
+    /float oylOverhangShadeOf\(float below, float projection, vec3 s, float pw, float wall\) \{([^}]*)\}/.exec(
+      fragment,
+    );
+  if (found?.[1] === undefined) throw new Error('the program has no oylOverhangShadeOf');
+  const shadow = shaderOverhangShadow(fragment);
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- runs the shader's own function text
+  const run = new Function(
+    'below',
+    'projection',
+    's',
+    'pw',
+    'wall',
+    'clamp',
+    'oylOverhangShadow',
+    'oylOverhangShade',
+    'oylOverhangSquare',
+    found[1],
+  ) as (...args: unknown[]) => number;
+  const shade = constantOf(fragment, 'oylOverhangShade');
+  const square = constantOf(fragment, 'oylOverhangSquare');
+  return (below, projection, s, pw, wall) =>
+    run(
+      below,
+      projection,
+      { x: s[0], y: s[1], z: s[2] },
+      pw,
+      wall,
+      (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x)),
+      (b: number, p: number, v: { x: number; y: number; z: number }, w: number, h: number) =>
+        shadow(b, p, [v.x, v.y, v.z], w, h),
+      shade,
+      square,
+    );
+}
+
+describe('the cornice’s and the awning’s shadows, in the shader — #1679', () => {
+  it('runs the twin’s rule: the program’s own shade gives the twin’s', () => {
+    const { fragment } = compiled();
+    const shade = shaderOverhangShade(fragment);
+    for (const [elevation, round] of [
+      [55, 0],
+      [60, 30],
+      [70, -60],
+      [60, 180],
+    ] as const) {
+      const s = sunAt(elevation, round);
+      for (const projection of [CORNICE.projection, AWNING.depth.least, AWNING.depth.most]) {
+        for (let below = -0.3; below <= 3; below += 0.09) {
+          expect(shade(below, projection, s, 0.02, 4)).toBeCloseTo(
+            overhangShadeAt(below, projection, s, { pw: 0.02, wall: 4 }),
+            5,
+          );
+        }
+      }
+    }
+  });
+
+  it('generates its numbers from the twin’s and the plan’s', () => {
+    const { fragment } = compiled();
+    expect(constantOf(fragment, 'oylCorniceFlag')).toBe(STYLE_CORNICE);
+    expect(constantOf(fragment, 'oylCorniceRise')).toBeCloseTo(OVERHANG_SHADOW.corniceRise, 5);
+    expect(constantOf(fragment, 'oylCorniceProjection')).toBeCloseTo(CORNICE.projection, 5);
+    expect(constantOf(fragment, 'oylAwningEdge')).toBeCloseTo(OVERHANG_SHADOW.awningEdge, 5);
+  });
+
+  it('splices the cornice’s under the wall’s flag, the parapet’s by its skip, and the awning’s by the shop front’s', () => {
+    const { fragment } = compiled();
+    // The wall: under the cornice's edge, the rise above its top, into the shade #1658 applies.
+    expect(fragment).toContain(
+      'if (oylFlag(oylFlags, oylCorniceFlag) > 0.5) {\n        float oylCorniceAt = oylTop * oylStoreyM + oylCorniceRise;',
+    );
+    expect(fragment).toContain(
+      'oylCorniceAt - vOylFacade.y * oylStoreyM, oylCorniceProjection, oylSunF, oylMw.y, oylCorniceAt',
+    );
+    const shade = fragment.indexOf('oylCorniceAt - vOylFacade.y');
+    expect(shade).toBeLessThan(
+      fragment.indexOf(
+        'diffuseColor.rgb *= oylEavesShade * (1.0 - (1.0 - oylAoBase) * oylAtFoot);',
+      ),
+    );
+    // The parapet: a plain face whose skip is the edge, the chain's last branch.
+    expect(fragment).toContain('} else if (abs(oylTop) < 0.5 && vOylFacade.w > 0.0) {');
+    expect(fragment).toContain(
+      '(vOylFacade.w - vOylFacade.y) * oylStoreyM, oylCorniceProjection, oylSunF, oylMw.y, vOylFacade.w * oylStoreyM',
+    );
+    // The shop front: its skip the awning's depth, after the shop front is drawn.
+    const shop = fragment.slice(fragment.indexOf('} else if (abs(oylTop - oylShopTop) < 0.5) {'));
+    const branch = shop.slice(0, shop.indexOf('} else if (abs(oylTop - oylSignTop) < 0.5) {'));
+    expect(branch).toContain(
+      'if (vOylFacade.w > 0.0) {\n        float oylAwningAt = oylShopH - oylAwningEdge;',
+    );
+    expect(branch).toContain('oylAwningAt - oylS.y, vOylFacade.w, oylSunF, oylMw.y, oylAwningAt');
+    expect(branch.indexOf('diffuseColor.rgb = vColor.rgb * mix(oylDrawn')).toBeLessThan(
+      branch.indexOf('if (vOylFacade.w > 0.0)'),
+    );
+  });
+
+  it('builds none of it with `-overhang-shadows`', () => {
+    overhangShadowsOf({} as never, false);
+    const { fragment } = compiled();
+    expect(fragment).not.toContain('oylOverhangShadeOf');
+    expect(fragment).not.toContain('oylCorniceFlag');
+    expect(fragment).not.toContain('oylAwningEdge');
+    expect(fragment).not.toContain('abs(oylTop) < 0.5 && vOylFacade.w > 0.0');
+    // The chain still closes: the railing's branch is its last.
+    expect(fragment).toContain('oylTilt = 0.0;\n    }\n  }');
   });
 });

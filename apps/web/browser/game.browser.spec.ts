@@ -3820,6 +3820,88 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
   });
 
+  test('#1679 a sunlit mapped wall and its parapet are in its cornice’s shadow and not 1 m under its top, and neither with -overhang-shadows', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { corniceShadow: shadow } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a wall under a cornice ${shadow.projection.toFixed(2)} m proud seen from ` +
+      `${shadow.metres.toFixed(0)} m, the sun ${shadow.sunDegrees.toFixed(0)}° high and square ` +
+      `to it (the shadow ${shadow.depth.toFixed(2)} m under the cornice's edge): ` +
+      `${rgb(shadow.parapet)} on the parapet and ${rgb(shadow.near)} 0.12 m under the wall's top ` +
+      `against ${rgb(shadow.far)} 1 m under; ${rgb(shadow.parapetOff)}, ${rgb(shadow.nearOff)} ` +
+      `and ${rgb(shadow.farOff)} with -overhang-shadows`;
+    testInfo.annotations.push({
+      type: 'the shadow under a mapped wall’s cornice',
+      description: measured,
+    });
+    console.log(`the shadow under a mapped wall’s cornice — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(shadow.aimed).toBe(true);
+    for (const values of [
+      shadow.near,
+      shadow.far,
+      shadow.parapet,
+      shadow.nearOff,
+      shadow.farOff,
+      shadow.parapetOff,
+    ]) {
+      expect(values).toHaveLength(3);
+    }
+    // In the shadow, as #1658's under the eaves: past the tolerance of 4, three times over.
+    // Measured locally (SwiftShader, 2026-10-29), a two-storey wall from 4 m:
+    // 122/105/101 on the parapet and 124/107/103 0.12 m under the top against
+    // 139/121/117 1 m under; 140/123/118, 142/125/120 and 139/121/117 with the lever.
+    expect(luminance(shadow.far) - luminance(shadow.near)).toBeGreaterThan(12);
+    expect(luminance(shadow.far) - luminance(shadow.parapet)).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program, neither place under the
+    // cornice is darker than the wall past it — the same wall in the same sun —
+    // and it is the shadow that darkened the two ...
+    expect(luminance(shadow.nearOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
+    expect(luminance(shadow.parapetOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
+    expect(luminance(shadow.nearOff) - luminance(shadow.near)).toBeGreaterThan(12);
+    expect(luminance(shadow.parapetOff) - luminance(shadow.parapet)).toBeGreaterThan(12);
+    // ... and not the wall past it.
+    expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
+  });
+
+  test('#1679 a sunlit shop front is in its awning’s shadow above where it ends and not below, and neither with -overhang-shadows', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { awningShadow: shadow } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a shop front's stile ${shadow.pixels.toFixed(1)} px wide under an awning ` +
+      `${shadow.projection.toFixed(2)} m deep seen from ${shadow.metres.toFixed(0)} m, the sun ` +
+      `${shadow.sunDegrees.toFixed(1)}° high and ${shadow.roundDegrees.toFixed(0)}° round it ` +
+      `(the shadow ${shadow.depth.toFixed(2)} m ` +
+      `under the valance's foot): ${rgb(shadow.near)} 0.95 m under the top against ` +
+      `${rgb(shadow.far)} 1.75 m under; ${rgb(shadow.nearOff)} and ${rgb(shadow.farOff)} ` +
+      `with -overhang-shadows`;
+    testInfo.annotations.push({ type: 'the shadow under a shop’s awning', description: measured });
+    console.log(`the shadow under a shop’s awning — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(shadow.aimed).toBe(true);
+    for (const values of [shadow.near, shadow.far, shadow.nearOff, shadow.farOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The stile is wide enough on screen that a three-pixel column is the stile's.
+    expect(shadow.pixels).toBeGreaterThanOrEqual(5);
+    // Measured locally (SwiftShader, 2026-10-29), a cream stile under a 1.19 m
+    // awning from 4 m: 148/147/145 0.95 m under the top against 169/168/166
+    // 1.75 m under; 174/173/171 and 169/168/166 with the lever.
+    expect(luminance(shadow.far) - luminance(shadow.near)).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program the stile in the shadow is
+    // no darker than below it (it read 5 lighter: the same stile, 0.8 m higher) ...
+    expect(luminance(shadow.nearOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
+    // ... and it is the shadow, not the stile, that darkened it.
+    expect(luminance(shadow.nearOff) - luminance(shadow.near)).toBeGreaterThan(12);
+    expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
+  });
+
   test('#1661 a mapped render wall is grimed 0.3 m above its floor and not 1.5 m up, and neither with -weathering', async ({
     harnessRun,
   }, testInfo) => {
