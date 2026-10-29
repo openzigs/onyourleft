@@ -2337,7 +2337,11 @@ export function GameView(props: GameViewProps): JSX.Element {
         // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,
         // DL6b); every ordinary ride's frame carries none and keeps the 50.
         // Placed at the newest step and the time past it, so a parcel does
-        // not move at 20 Hz on a 60 Hz screen.
+        // not move at 20 Hz on a 60 Hz screen. ⚠️ That is up to one step
+        // (50 ms) AHEAD of where the rider is drawn, which `drawnAt` blends a
+        // step behind the newest state (#323): `in-view.ts` takes no time
+        // before a step, and a parcel drawn behind its throw would be worse.
+        // Where a parcel lands is the step's either way (`throw.ts`).
         const round = deliveryRef.current;
         const frame =
           round === undefined
