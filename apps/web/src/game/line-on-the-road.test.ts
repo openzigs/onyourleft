@@ -279,6 +279,118 @@ describe('two riders level on the road are not drawn inside each other — #499'
   });
 });
 
+describe('a rider a Delivery round steered, and the riders level with them — #1853', () => {
+  /** #499's separation: a handlebar clear, between two riders level on the road. */
+  const SIDE_BY_SIDE = 1.2;
+  /** How far from the centre a rider is ever drawn: half a handlebar and 0.1 m inside the edge. */
+  const DRAWN_LIMIT = ROAD_WIDTH_METRES / 2 - RIDER_HALF_WIDTH_METRES - 0.1;
+  /** How level two riders `gap` apart are: `scene.ts`' fade, restated. */
+  const levelAt = (gap: number): number =>
+    Math.min(1, Math.max(0, (BICYCLE_LENGTH_METRES + 2 - Math.abs(gap)) / 2));
+  const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 10_000] });
+
+  /** The rider steered to `steered`, the bot `gap` ahead and the ghost level with the rider, placed. */
+  function placed(
+    route: RouteProfile,
+    at: number,
+    gap: number,
+    steered: number | undefined,
+  ): { rider: number; bot: number; ghost: number } {
+    const input = {
+      profile: route,
+      origin: corridorOrigin(route),
+      state: stateAt(route, at, 8, { distance: at + gap, speed: 8 }, at / 10),
+      botDistance: at + gap,
+      ghost,
+      steeredLateral: steered,
+    };
+    const riders = placedRiders(input, roadCorridor(route, corridorOrigin(route), at));
+    const of = (kind: RiderMarker['kind']): number => {
+      const found = riders.find((each) => each.marker.kind === kind);
+      if (found === undefined) throw new Error(`no ${kind} placed`);
+      return found.lateral;
+    };
+    return { rider: of('rider'), bot: of('bot'), ghost: of('ghost') };
+  }
+
+  it.each([
+    ['on a straight', northRoute(2_000, () => 0), 1_000],
+    ['at the hairpin’s apex, where the line is at the edge', hairpin, APEX],
+    ['on the way in, where the line is wide', hairpin, 390],
+  ] as const)(
+    'draws the rider where it steered and the bot and the ghost a handlebar clear of it %s',
+    (_, route, at) => {
+      let squeezed = 0;
+      for (let steered = -1.75; steered <= 1.75 + 1e-9; steered += 0.25) {
+        for (let gap = -6; gap <= 6 + 1e-9; gap += 0.5) {
+          const drawn = placed(route, at, gap, steered);
+          // Exactly where it steered: the offset `ride-round.ts` hands the obstacles.
+          expect(drawn.rider).toBe(steered);
+          // The ghost, level, and the bot whenever it is within a bicycle's
+          // length (beyond, they are a length apart along the road: #499's
+          // rule), kept a handlebar clear across it.
+          const botLevel = levelAt(gap) === 1;
+          expect(Math.abs(drawn.ghost - drawn.rider)).toBeGreaterThanOrEqual(SIDE_BY_SIDE - 1e-9);
+          if (botLevel) {
+            expect(Math.abs(drawn.bot - drawn.rider)).toBeGreaterThanOrEqual(SIDE_BY_SIDE - 1e-9);
+            expect(Math.abs(drawn.ghost - drawn.bot)).toBeGreaterThanOrEqual(SIDE_BY_SIDE - 1e-9);
+          }
+          for (const each of [drawn.rider, drawn.bot, drawn.ghost]) {
+            expect(Math.abs(each)).toBeLessThanOrEqual(DRAWN_LIMIT + 1e-9);
+          }
+          // Non-vacuity: count the places the line alone would have put one of them inside the rider.
+          const unsteered = placed(route, at, gap, undefined);
+          if (
+            (botLevel && Math.abs(unsteered.bot - steered) < SIDE_BY_SIDE - 1e-6) ||
+            Math.abs(unsteered.ghost - steered) < SIDE_BY_SIDE - 1e-6
+          ) {
+            squeezed += 1;
+          }
+          // A bot a fade or more away from everybody is drawn where it was without steering.
+          if (levelAt(gap) === 0) expect(drawn.bot).toBe(unsteered.bot);
+        }
+      }
+      expect(squeezed).toBeGreaterThan(10);
+    },
+  );
+
+  it('moves a level bot and ghost aside smoothly as the rider steers across them, never jumping', () => {
+    const route = northRoute(2_000, () => 0);
+    const step = 0.05;
+    // The bot level, and the bot part-way through the fade.
+    for (const gap of [0, BICYCLE_LENGTH_METRES + 1]) {
+      let previous: { rider: number; bot: number; ghost: number } | undefined;
+      for (let steered = -1.75; steered <= 1.75 + 1e-9; steered += step) {
+        const drawn = placed(route, 1_000, gap, steered);
+        if (previous !== undefined) {
+          expect(Math.abs(drawn.bot - previous.bot)).toBeLessThanOrEqual(step + 1e-9);
+          expect(Math.abs(drawn.ghost - previous.ghost)).toBeLessThanOrEqual(step + 1e-9);
+        }
+        previous = drawn;
+      }
+    }
+  });
+
+  it('eases the bot aside as it closes on a steered rider, rather than jumping it', () => {
+    // #499's own sweep, with the rider steered to the centre line, so the bot,
+    // alone on the line in the right-hand lane, has to come across to the
+    // rider's left: 2.95 m over the 2 m fade, so steeper than #499's 10 cm a
+    // step. At its steepest, where it starts to come level, that is
+    // `0.5 · (1.75·0.31 + 1.2 + 2.95)` ≈ 2.35 m a metre of gap, 11.7 cm a step.
+    const route = northRoute(2_000, () => 0);
+    let previous: number | undefined;
+    let steepest = 0;
+    for (let gap = -6; gap <= 6; gap += 0.05) {
+      const { bot } = placed(route, 1_000, gap, 0);
+      if (previous !== undefined) steepest = Math.max(steepest, Math.abs(bot - previous));
+      previous = bot;
+    }
+    expect(steepest).toBeLessThan(0.12);
+    // Non-vacuity: it did come across.
+    expect(steepest).toBeGreaterThan(0.05);
+  });
+});
+
 describe('the camera follows the rider across the road — #499', () => {
   it('stands where the rider is, sideways as well as along', () => {
     for (const at of [300, 390, APEX, 470]) {

@@ -176,7 +176,7 @@ apps/                 AGPL-3.0-or-later, without exception
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
   instance/           the self-hostable instance server (#767, ADR 0036/0037):
                         a fetch-style handler behind a thin node:http listener,
-                        run by Node 24 as TypeScript. See "The instance" below
+                        run by Node 26 as TypeScript. See "The instance" below
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis
@@ -1120,7 +1120,7 @@ alternatives are there.
 | Concern | Choice |
 |---|---|
 | Language | TypeScript 6.0.3 — *not* 7.x, because typed linting does not support it yet |
-| Runtime | Node 24 "Krypton" (Active LTS until 2026-10-20) |
+| Runtime | Node 26 (Active LTS from 2026-10-28; ADR 0005's amendment of 2026-10-29) |
 | Package manager | pnpm 11 workspaces |
 | Web client | React 19 + Vite 8 |
 | Mobile client | Capacitor, wrapping the same web build — **not scaffolded yet**; #85 |
@@ -1812,7 +1812,7 @@ room's newest frame with the same function (`net/room-session.ts` §`draftFactor
 as a share of drag, never watts. No bot pacer or ghost is ever in a frame, so neither gives nor takes
 a draft.
 
-**No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
+**No build step, and two third-party runtime dependencies.** Node 26 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
 `erasableSyntaxOnly`; this repository's packages name no extension on their relative imports, and
 `src/node-imports.ts` is the resolve hook that lets Node load them (#780). The instance imports

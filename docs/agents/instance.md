@@ -16,7 +16,7 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
   instance/           the self-hostable instance server (#767, ADR 0036, ADR 0037)
                         — one fetch-style handler (`Request → Response`,
                         `src/handler.ts`) behind a thin `node:http` listener
-                        (`src/node-listener.ts`), run as TypeScript by Node 24
+                        (`src/node-listener.ts`), run as TypeScript by Node 26
                         with no build step (`node src/main.ts`). It answers
                         `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
                         `/openapi.json` and `/licences/third-party.txt` on a

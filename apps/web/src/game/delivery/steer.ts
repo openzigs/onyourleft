@@ -144,11 +144,8 @@ export function steerIntentOfKey(event: SteerKeyEvent): SteerIntent | undefined 
 }
 
 /**
- * Where a steered rider is across the road, in memory for the round only.
- *
- * @unwired #1816 runs a Delivery round inside a game ride and holds one of
- * these for it; until it lands only the functions below, and their tests,
- * name it.
+ * Where a steered rider is across the road, in memory for the round only:
+ * `ride-round.ts` §`DeliveryRide.steer` holds one for a round (#1853).
  */
 export interface SteerState {
   /** The lane they are steering to, an index into {@link LANE_OFFSETS_METRES}. */
@@ -170,10 +167,7 @@ function refuse(constraint: string): never {
  * §`lineOffsetAt`), not the drawn `PlacedRider.lateral`: the drawn one has
  * already made room for a bot or a ghost level with the rider, and a round
  * started from it would start the rider in the wrong lane (#1853).
- *
- * @unwired #1816 runs a Delivery round inside a game ride; until it lands no
- * ride holds a steer state, and this is wired there, from the rider's drawn
- * line at the round's start.
+ * `ride-round.ts` §`startDeliveryRide` calls it at the press.
  */
 export function startSteer(offset: number): SteerState {
   if (!Number.isFinite(offset)) refuse('the starting offset is a finite number of metres');
@@ -189,10 +183,8 @@ export function startSteer(offset: number): SteerState {
 /**
  * The state after the rider asked for `intent`: one lane further that way,
  * and no further than the outermost lane. Where the rider is drawn moves only
- * as {@link stepSteer} runs.
- *
- * @unwired #1816 implements `steer-port.ts` in `GameView` and calls this for
- * each lane change the HUD hands it; until then only the tests do.
+ * as {@link stepSteer} runs. `GameView`'s `steer-port.ts` calls it for each
+ * lane change the HUD hands it (#1853).
  */
 export function steerToward(state: SteerState, intent: SteerIntent): SteerState {
   const lane = Math.min(
@@ -205,10 +197,8 @@ export function steerToward(state: SteerState, intent: SteerIntent): SteerState 
 /**
  * The state `seconds` later: the drawn offset moved toward the lane steered
  * to at the steady sideways speed {@link LANE_CHANGE_SECONDS} sets, and never
- * past it.
- *
- * @unwired #1816 steps this on the ride's simulation tick, before it steps
- * the obstacles with the offset; until then only the tests do.
+ * past it. `ride-round.ts` §`stepDeliveryRide` steps it on every simulation
+ * step that ran, before it steps the obstacles with the offset (#1853).
  */
 export function stepSteer(state: SteerState, seconds: number): SteerState {
   if (!Number.isFinite(seconds) || seconds < 0) {
@@ -225,9 +215,7 @@ export function stepSteer(state: SteerState, seconds: number): SteerState {
  * The offset the scene draws the rider at (`SceneInput.steeredLateral`), or
  * `undefined` when there is none to draw: no round is steering, or the ride
  * is in a room, which ignores steering (DL9) so the rider rides the line.
- *
- * @unwired #1816 hands this to `sceneFrame` on every frame of a Delivery
- * round; until then only the tests do.
+ * `GameView` hands it to `sceneFrame` on every frame (#1853).
  */
 export function steeredLateralFor(
   state: SteerState | undefined,

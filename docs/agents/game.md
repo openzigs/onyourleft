@@ -732,7 +732,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `simulation.ts`. A room ride ignores it (DL9). With
                         steering, `obstacles.ts` may place an obstacle that
                         STANDS in one lane, one per stretch, so a lane is
-                        always clear. `@unwired` until #1816 runs a round
+                        always clear. Wired into the ride by #1853: the
+                        round holds the steer state and steps it, and the
+                        rider is drawn exactly where the obstacles meet them,
+                        a level bot or ghost making the room
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
@@ -1006,7 +1009,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`
-                        builds it out. Since #1661 every mapped face is
+                        builds it out. Since #1679 a cornice's too, on the
+                        walls flagged `STYLE_CORNICE` and the parapet face
+                        whose `skip` is its edge (`corniceShadeAt`), and an
+                        awning's on the shop front whose `skip` is its depth
+                        (`awningShadeAt`). Since #1661 every mapped face is
                         weathered (`WEATHERING`, `weatheringAt`, the shader's
                         `oylWeather*`; the photograph laid per building by
                         `photographShiftOf`); `-weathering` builds it out.

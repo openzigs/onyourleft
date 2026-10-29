@@ -308,6 +308,7 @@ import {
   CLAD_CLAPBOARD,
   CLAD_PAVING,
   CLAD_SHINGLE,
+  CORNICE,
   DOOR_FACE,
   DOOR_SURROUND_METRES,
   FACADE_AWNING,
@@ -327,6 +328,7 @@ import {
   STOREY_METRES,
   STYLE_BRICK_FOUNDATION,
   STYLE_COMMERCIAL,
+  STYLE_CORNICE,
   STYLE_EAVES,
   STYLE_FLAT_ROOF,
   STYLE_FLOATS,
@@ -15616,8 +15618,11 @@ function revealGlsl(built: boolean): string {
  * `projection` metres proud is in the sun's shadow (`s`, the sun in the
  * face's frame), softened over `pw` and at most the wall's height `wall`
  * deep; and {@link OVERHANG_SHADOW}'s constants, which the shade's splice in
- * {@link facadeFragmentGlsl} reads. With `overhang-shadows` off
- * (`realistic/config.ts` §`LEVERS`) none of it is built.
+ * {@link facadeFragmentGlsl} reads. Since #1679 `oylOverhangShadeOf`,
+ * `facade.ts` §`overhangShadeAt`: the share of its light such a point keeps,
+ * which the cornice's and the awning's shadows are drawn with, and their
+ * numbers. With `overhang-shadows` off (`realistic/config.ts` §`LEVERS`) none
+ * of it is built.
  */
 function overhangGlsl(built: boolean): string {
   if (!built) return '';
@@ -15626,9 +15631,17 @@ function overhangGlsl(built: boolean): string {
   const float oylOverhangSquare = ${glslFloat(OVERHANG_SHADOW.square)};
   const float oylEavesEdge = ${glslFloat(OVERHANG_SHADOW.edge)};
   const float oylEavesOverhang = ${glslFloat(EAVES_OVERHANG_METRES)};
+  const float oylCorniceFlag = ${glslFloat(STYLE_CORNICE)};
+  const float oylCorniceRise = ${glslFloat(OVERHANG_SHADOW.corniceRise)};
+  const float oylCorniceProjection = ${glslFloat(CORNICE.projection)};
+  const float oylAwningEdge = ${glslFloat(OVERHANG_SHADOW.awningEdge)};
   float oylOverhangShadow(float below, float projection, vec3 s, float pw, float wall) {
     float oylDepth = min(projection * max(s.y, 0.0) / max(s.z, 0.0001), wall);
     return step(0.0001, s.z) * (1.0 - smoothstep(oylDepth - pw, oylDepth + pw, below));
+  }
+  float oylOverhangShadeOf(float below, float projection, vec3 s, float pw, float wall) {
+    return 1.0 - (1.0 - oylOverhangShade) * clamp(s.z / oylOverhangSquare, 0.0, 1.0)
+      * oylOverhangShadow(below, projection, s, pw, wall);
   }
 `;
 }
@@ -15984,6 +15997,43 @@ const OVERHANG_SHADE_GLSL = /* glsl */ `
         float oylSunShadow = 1.0 - (1.0 - oylOverhangShade) * clamp(oylSunF.z / oylOverhangSquare, 0.0, 1.0)
           * oylOverhangShadow(oylBelowTop - oylEavesEdge, oylEavesOverhang, oylSunF, oylMw.y, oylTop * oylStoreyM);
         oylEavesShade = min(oylEavesShade, oylSunShadow);
+      }
+      // #1679: on a wall under a cornice, by its flag: the cornice's lower edge is over the wall's top.
+      if (oylFlag(oylFlags, oylCorniceFlag) > 0.5) {
+        float oylCorniceAt = oylTop * oylStoreyM + oylCorniceRise;
+        oylEavesShade = min(oylEavesShade, oylOverhangShadeOf(
+          oylCorniceAt - vOylFacade.y * oylStoreyM, oylCorniceProjection, oylSunF, oylMw.y, oylCorniceAt
+        ));
+      }`;
+
+/**
+ * #1679's shadow on a parapet's face under its cornice — `facade.ts`
+ * §`corniceShadeAt` above the wall's top: a plain face whose `skip` is the
+ * cornice's lower edge (`footprint-buildings.ts` §`FACADE_FLOATS`), in
+ * storeys above the floor, as its `v` is. The last branch of
+ * {@link facadeFragmentGlsl}'s chain, built only with `overhangs`.
+ */
+const CORNICE_PARAPET_GLSL = /* glsl */ ` else if (abs(oylTop) < 0.5 && vOylFacade.w > 0.0) {
+      // #1679: a parapet's face, under its cornice.
+      diffuseColor.rgb *= oylOverhangShadeOf(
+        (vOylFacade.w - vOylFacade.y) * oylStoreyM, oylCorniceProjection, oylSunF, oylMw.y, vOylFacade.w * oylStoreyM
+      );
+    }`;
+
+/**
+ * #1679's shadow on a shop front under its awning — `facade.ts`
+ * §`awningShadeAt`: the shop front's `skip` is the awning's depth, 0 where it
+ * has none, and its lower edge {@link OVERHANG_SHADOW}'s `awningEdge` under
+ * the shop front's top. Spliced into the shop front's branch of
+ * {@link facadeFragmentGlsl}, built only with `overhangs`.
+ */
+const AWNING_SHADE_GLSL = /* glsl */ `
+      // #1679: under its awning, where it has one.
+      if (vOylFacade.w > 0.0) {
+        float oylAwningAt = oylShopH - oylAwningEdge;
+        diffuseColor.rgb *= oylOverhangShadeOf(
+          oylAwningAt - oylS.y, vOylFacade.w, oylSunF, oylMw.y, oylAwningAt
+        );
       }`;
 
 /**
@@ -16079,7 +16129,10 @@ export const FACADE_SHOWN_GLSL =
  *    Since #1658, on a wall the sun lights, the darker of that band and the
  *    sun's own shadow from the eaves' edge, as deep as the sun's slant makes
  *    it (`oylOverhangShadow`, {@link overhangGlsl}); with `overhangs` false,
- *    the band alone, as before.
+ *    the band alone, as before. Since #1679, the same way, the cornice's
+ *    shadow on the wall under it and on its parapet's face
+ *    ({@link CORNICE_PARAPET_GLSL}), and an awning's on the shop front
+ *    ({@link AWNING_SHADE_GLSL}).
  *
  * Since #1661, with `weathering`, each step weathers its own part
  * ({@link weatheringGlsl}): after the cladding and under the openings, the
@@ -16463,6 +16516,7 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
       vec3 oylFrameC = mix(vOylTrim, vOylTrim * 0.8, oylRiser * oylInside);
       vec3 oylDrawn = mix(oylFrameC, oylShopGlass, oylPaneOn);
       diffuseColor.rgb = vColor.rgb * mix(oylDrawn, vec3(0.035, 0.033, 0.03), oylDoorway * oylInside);
+      ${overhangs ? AWNING_SHADE_GLSL : ''}
       oylGlass = oylPaneOn;
       oylFlat = 1.0;
       oylTilt = 0.0;
@@ -16502,7 +16556,7 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
       diffuseColor.rgb = vColor.rgb * mix(oylRailingGap, 1.0, oylOn);
       oylFlat = 1.0;
       oylTilt = 0.0;
-    }
+    }${overhangs ? CORNICE_PARAPET_GLSL : ''}
   }
 `;
 }

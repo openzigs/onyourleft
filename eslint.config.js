@@ -238,7 +238,7 @@ const PLATFORM_GLOBALS = [
   'global',
   'require',
   // Network I/O. `fetch` is the one that matters most: it is a global in both
-  // Node 24 and every browser, so it is the shortest path from "pure leaf
+  // Node 26 and every browser, so it is the shortest path from "pure leaf
   // package" to an outbound request.
   'fetch',
   'XMLHttpRequest',
