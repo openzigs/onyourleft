@@ -10530,9 +10530,10 @@ export class DeliveryBelt {
   }
 
   /**
-   * What the last frame drew of `what`, read back off the instance matrices
-   * three uploads — not off the frame it was handed. Nothing where the mesh is
-   * not drawn.
+   * What the last frame drew of `what`, read back off the belt's own instance
+   * buffers — the CPU copy of what three uploads, not the frame it was handed.
+   * That the copy reaches the GPU is `needsUpdate`'s job, and delivery-belt.test.ts
+   * asserts the attributes' `version` rises. Nothing where the mesh is not drawn.
    */
   drawn(what: DeliveryPieceKind): readonly DrawnDeliveryPiece[] {
     const mesh = this.#meshes[what];

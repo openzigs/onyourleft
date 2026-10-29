@@ -259,6 +259,28 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
+  it('marks every instance buffer it rewrites for upload, on every frame that carries pieces', () => {
+    // `drawn()` reads the CPU copy, which three never uploads on its own: only a
+    // rise in `version` sends the rewritten instances to the GPU.
+    const belt = new DeliveryBelt('stylised');
+    const view = pieces(3);
+    const versions = (): number[] => [
+      belt.meshOf('parcels').instanceMatrix.version,
+      belt.meshOf('markers').instanceMatrix.version,
+      belt.meshOf('obstacles').instanceMatrix.version,
+      (belt.meshOf('obstacles').geometry.getAttribute('oylObstacleKind') as { version: number })
+        .version,
+    ];
+    const start = versions();
+    belt.update(view);
+    const first = versions();
+    belt.update({ ...view, markers: view.markers.slice(1) });
+    const second = versions();
+    first.forEach((each, at) => expect(each).toBeGreaterThan(start[at] as number));
+    second.forEach((each, at) => expect(each).toBeGreaterThan(first[at] as number));
+    belt.dispose();
+  });
+
   it('shades by the rung in the stylised world, and wears one physically based material in the realistic', () => {
     const stylised = new DeliveryBelt('stylised');
     stylised.setShading('flat');

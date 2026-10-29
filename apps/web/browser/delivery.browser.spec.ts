@@ -111,6 +111,8 @@ test.describe('Delivery’s belt — #1814', () => {
     await page.evaluate(() => window.__oylDelivery?.showcase());
     const shot = await page.locator('#delivery-showcase').screenshot();
     await testInfo.attach('delivery-showcase', { body: shot, contentType: 'image/png' });
-    expect(shot.byteLength).toBeGreaterThan(0);
+    // A PNG, and not a flat fill: a one-colour frame compresses to a few hundred bytes.
+    expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(shot.byteLength).toBeGreaterThan(5000);
   });
 });
