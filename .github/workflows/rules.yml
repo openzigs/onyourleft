@@ -123,8 +123,8 @@ jobs:
       # --- The workspace toolchain, from here down (docs/agents/commands.md section 4a) ------
 
       # Reads .nvmrc so the runner and a contributor cannot disagree about the
-      # major version. ADR 0005 pins Node 24 "Krypton"; Node 26 becomes Active
-      # LTS on 2026-10-28 and the move happens on that date, not before.
+      # major version. ADR 0005 pins the Active LTS line: Node 26 since its
+      # amendment of 2026-10-29 (#1597), the day after 26 entered Active LTS.
       - name: Set up Node
         # Pinned to a full commit SHA, not a tag. Provenance, so a reviewer can
         # check rather than trust:

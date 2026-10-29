@@ -428,7 +428,7 @@ the commands above would restore into ITS volume. Give the drill a project of it
 [#807](https://github.com/openzigs/onyourleft/issues/807) asks for a measurement, not a number from a
 forum. From a **different** machine (a laptop on a phone's hotspot is ideal — but if you set up
 step 3's address rule, a hotspot is blocked: use another machine on your home network), with the
-repository and Node 24:
+repository and Node 26:
 
 ```bash
 cd apps/instance

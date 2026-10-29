@@ -17,7 +17,7 @@ code block that stayed in the root:
 
 Every command, what it prints and what it enforces is [`docs/agents/commands.md`](commands.md) §4a — **read it
 literally**: a command listed there has been run, and nothing else may be quoted as if it had. What
-CI runs is [`docs/agents/ci.md`](ci.md) §4c. The ones nearly every change needs (Node 24 from `.nvmrc`,
+CI runs is [`docs/agents/ci.md`](ci.md) §4c. The ones nearly every change needs (Node 26 from `.nvmrc`,
 pnpm 11 from `packageManager` through `corepack enable pnpm`):
 
 **Read this section literally.** Commands are split into ones that work **today** and ones that do
@@ -95,13 +95,13 @@ bash scripts/check-shard-results.test.sh
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 ```
 
-**The workspace — needs Node 24 and pnpm 11, and the first run needs the network.**
+**The workspace — needs Node 26 and pnpm 11, and the first run needs the network.**
 Executed in this order on a clean clone on 2026-09-03, from nothing installed to green:
 
 ```bash
-# Node 24 "Krypton", read from .nvmrc so the runner and you cannot disagree.
+# Node 26 (LTS since 2026-10-28), read from .nvmrc so the runner and you cannot disagree.
 # With nvm: `nvm install` then `nvm use`. Any other version manager is fine;
-# what matters is that `node --version` reports v24.
+# what matters is that `node --version` reports v26.
 nvm install && nvm use
 
 # pnpm 11, from the `packageManager` field in package.json rather than a global
@@ -791,7 +791,7 @@ The stack the workspace is built on is decided in ADR 0005 and is not open:
 | Concern | Decision |
 |---|---|
 | Language | TypeScript **6.0.3** — *not* 7.x, see §8 |
-| Runtime | Node **24 "Krypton"** (Active LTS until 2026-10-20) |
+| Runtime | Node **26** (Active LTS from 2026-10-28; ADR 0005's amendment of 2026-10-29) |
 | Package manager | **pnpm 11** workspaces |
 | Web client | React 19 + Vite 8 |
 | Styling | `theme.css` over `design/tokens.ts`, and since #950 Tailwind CSS **4.3.3** utilities built from those tokens (`tw:` prefix, no preflight) — [ADR 0042](../adr/0042-tailwind-and-radix-over-the-tokens.md) |

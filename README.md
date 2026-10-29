@@ -199,11 +199,11 @@ The choices, and what was rejected: [`docs/adr/0005-tech-stack.md`](docs/adr/000
 
 ## Getting started
 
-Needs Node 24 and pnpm 11. Both are pinned by the repository — `.nvmrc` for Node, the
+Needs Node 26 and pnpm 11. Both are pinned by the repository — `.nvmrc` for Node, the
 `packageManager` field for pnpm — so neither is a choice you have to make.
 
 ```bash
-nvm install && nvm use        # or any version manager; `node --version` must report v24
+nvm install && nvm use        # or any version manager; `node --version` must report v26
 corepack enable pnpm
 pnpm install --frozen-lockfile
 

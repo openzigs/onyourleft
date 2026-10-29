@@ -28,3 +28,11 @@ packages:
 allowBuilds:
   unrs-resolver: false
   workerd: false
+
+# Refuse to install on a Node or pnpm version outside the root package.json's
+# `engines` (ADR 0005: Node 26 since its amendment of 2026-10-29, pnpm 11),
+# rather than installing and failing later in a way that reads as a code bug.
+# ⚠️ Here and not in `.npmrc` (#1597): pnpm 11 reads only auth, registry, TLS
+# and proxy settings from `.npmrc`, so the `engine-strict=true` there had been
+# ignored — Node 24 was let through a Node 26 `engines` with a warning.
+engineStrict: true

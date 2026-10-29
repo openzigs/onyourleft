@@ -18,13 +18,14 @@
 # the context's allowlist — BuildKit reads it for this Dockerfile alone — so
 # nothing else in the repository reaches the build.
 #
-# No build step: Node 24 runs the TypeScript as committed, and `src/main.ts`
+# No build step: Node 26 runs the TypeScript as committed, and `src/main.ts`
 # registers the resolve hook that lets it load the packages'
 # extensionless imports (`src/node-imports.ts`).
 #
 # ⚠️ The base image is pinned by DIGEST as well as by version, for the reason
 # CLAUDE.md §8 pins every action to a commit: a tag is mutable. Read with
-# `docker buildx imagetools inspect node:24.21.0-bookworm-slim` on 2026-09-29.
+# `docker buildx imagetools inspect node:26.13.0-bookworm-slim` on 2026-10-29
+# (#1597: 26.13.0 is Node 26's first Active LTS release, of 2026-10-28).
 # Both stages name the same image, so a build pulls it once.
 #
 # ⚠️ It is pulled from the project's GHCR mirror of Docker Hub's official
@@ -36,7 +37,7 @@
 # a tampered mirror tag cannot change it. `IMG008`
 # (scripts/check-instance-image.sh) fails a base image from anywhere else.
 
-FROM ghcr.io/openzigs/node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS install
+FROM ghcr.io/openzigs/node:26.13.0-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS install
 
 # A production install of the instance and the workspace packages it names,
 # from the lockfile and nothing else: `--frozen-lockfile` fails rather than
@@ -61,7 +62,7 @@ COPY packages/analysis packages/analysis
 COPY packages/fit packages/fit
 COPY apps/instance apps/instance
 
-FROM ghcr.io/openzigs/node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+FROM ghcr.io/openzigs/node:26.13.0-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9
 
 # The commit is REQUIRED: `GET /source` answers with the source of this exact
 # build (AGPL-3.0 §13, ADR 0036 D-6), and an image that does not know which

@@ -3,11 +3,12 @@
 /**
  * A module resolve hook that lets `node` run this workspace's TypeScript.
  *
- * Node 24 strips types from a `.ts` file it is given, but it does not resolve
+ * Node 26 strips types from a `.ts` file it is given, but it does not resolve
  * an extensionless specifier: `import { x } from './y'` inside a `.ts` file
  * fails with `ERR_MODULE_NOT_FOUND` on `./y`, and so does every extensionless
  * import inside `@onyourleft/domain` once the generator reaches it. Checked on
- * Node v24.20.0 and v22.22.3 on 2026-09-03; both fail.
+ * Node v24.20.0 and v22.22.3 on 2026-09-03; both fail. v26.13.0 still fails
+ * the same way (2026-10-29, #1597).
  *
  * Node also refuses a **directory** specifier outright, with
  * `ERR_UNSUPPORTED_DIR_IMPORT` rather than `ERR_MODULE_NOT_FOUND`: `import … from

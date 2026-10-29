@@ -485,3 +485,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   admitted one primitive at a time for behaviour only, never in the entry chunk. The stack table's
   "Web framework" row is unchanged; the client now also carries a utility compiler and one headless
   primitive (`@radix-ui/react-alert-dialog`). Nothing else in this ADR changes.
+- **2026-10-29** — **The runtime is Node 26, not Node 24 "Krypton"** ([#1597](https://github.com/openzigs/onyourleft/issues/1597)).
+  The "Runtime version" section above said to move to Node 26 when it entered Active LTS on
+  2026-10-28, "not before"; it did, with **26.13.0** (released 2026-10-28T16:57Z, the release's own
+  title reading *"'Lithium' (LTS)"*), and that is the version the instance's image pins, by digest.
+  `.nvmrc` reads `26`, `engines.node` reads `>=26 <27`, and `@types/node` is 26.x.
+  `nodejs/Release/schedule.json`, read 2026-10-29, gives v26 Maintenance from 2027-10-20 and end of
+  life on 2029-04-30, and gives **v27** Active LTS from **2027-10-20**: that is the next move, on
+  that date. The comparison row in *Alternatives considered* records why 26 was rejected on
+  2026-09-03 and is not reopened. Nothing else in this ADR changes.
