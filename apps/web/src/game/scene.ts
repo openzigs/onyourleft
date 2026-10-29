@@ -676,6 +676,11 @@ const LEVEL_FADE_METRES = 2;
  * large in the foreground; beyond it, it eases back to its own line over
  * {@link LEVEL_FADE_METRES}, wholly behind the eye, where no frame shows it.
  * At 30 km/h the hold and the fade are 0.9 s of road.
+ *
+ * Exact on a straight. `behind` is measured along the road, while the eye sits
+ * {@link CAMERA_BEHIND_METRES} straight back along the rider's heading, so on a
+ * bend the front wheel is level with the eye only to within a fraction of a
+ * metre (about 0.5 m sideways on a 20 m hairpin, outside the frustum).
  */
 const HELD_BEHIND_METRES = CAMERA_BEHIND_METRES + BICYCLE_FRONT_METRES;
 

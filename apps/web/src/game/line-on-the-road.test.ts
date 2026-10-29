@@ -494,7 +494,7 @@ describe('a pacer or ghost just behind a steered rider, in front of the camera �
     },
   );
 
-  it('holds that in the frame the renderer is handed, measured from the camera’s eye', () => {
+  it('holds that in the frame the renderer is handed, measured from the camera’s eye, on a straight', () => {
     const route = northRoute(2_000, () => 0);
     let inFront = 0;
     let behindTheEye = 0;
