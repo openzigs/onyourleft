@@ -17,7 +17,11 @@ import {
   REVOKE_MARK_TEXT,
   revokeKeyName,
 } from '../instance/account-change-notices';
-import { ACCOUNT_CHANGES_UNAVAILABLE_TEXT, type InstancePort } from '../instance/instance-port';
+import {
+  ACCOUNT_CHANGES_UNAVAILABLE_TEXT,
+  RENAME_REFUSAL_TEXT,
+  type InstancePort,
+} from '../instance/instance-port';
 import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
 import {
   SCRIPTED_ACCOUNT_CHANGES,
@@ -34,8 +38,10 @@ import {
   typeIntoTextArea,
   type Mounted,
 } from '../testing/mount';
+import { CHANGE_NAME_TEXT } from './InstanceName';
 import {
   DISCONNECT_KEEPS_RIDES,
+  INSTANCE_CONNECTED_KEPT_VISIBLE,
   INSTANCE_KEPT_VISIBLE,
   INSTANCE_NO_PORT,
   INSTANCE_RECEIVES,
@@ -739,5 +745,103 @@ describe('deleting the account on the instance from the Instance screen — #906
     );
     await settle();
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
+  });
+});
+
+describe('changing the name other riders see, from the Instance screen — #906 item 2', () => {
+  /** The rename section's field, found by its label. */
+  function renameField(): HTMLInputElement {
+    const label = [...(mounted?.container.querySelectorAll('label') ?? [])].find(
+      (each) => each.textContent === CHANGE_NAME_TEXT.label,
+    );
+    const field = mounted?.container.querySelector(`[id="${label?.htmlFor ?? ''}"]`);
+    if (!(field instanceof HTMLInputElement)) throw new Error('no rename field');
+    return field;
+  }
+
+  async function renameTo(name: string): Promise<void> {
+    const field = renameField();
+    await typeInto(field, name);
+    const form = field.closest('form');
+    if (form === null) throw new Error('no rename form');
+    await submitForm(form);
+    await settle();
+  }
+
+  /** The name the Connected panel shows, beside "Your name there". */
+  function shownName(): string | null | undefined {
+    const term = [...(mounted?.container.querySelectorAll('dt') ?? [])].find(
+      (each) => each.textContent === 'Your name there',
+    );
+    return term?.nextElementSibling?.textContent;
+  }
+
+  it('says the earlier names are kept before the press, and sends nothing until it', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(CHANGE_NAME_TEXT.heading);
+    expect(INSTANCE_CONNECTED_KEPT_VISIBLE).toContain(CHANGE_NAME_TEXT.earlierNames);
+    const note = [...mounted.container.querySelectorAll('p')].find(
+      (each) => each.textContent === CHANGE_NAME_TEXT.earlierNames,
+    );
+    expect(note).toBeDefined();
+    expect(
+      (note as Element).compareDocumentPosition(button(CHANGE_NAME_TEXT.change)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(scripted.calls.some((call) => call.startsWith('rename'))).toBe(false);
+  });
+
+  it('changes it, and shows the name READ BACK from the instance, not the one typed', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    // The instance keeps its own idea of the name: whatever it says is what shows.
+    const port: InstancePort = {
+      ...scripted.port,
+      rename: async (name) => {
+        const outcome = await scripted.port.rename(name);
+        scripted.held.displayName = 'Name from the instance';
+        return outcome;
+      },
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    expect(shownName()).toBe('Rider');
+    const reads = scripted.calls.filter((call) => call === 'current').length;
+    await renameTo('Anna B');
+    expect(scripted.calls).toContain('rename Anna B');
+    expect(scripted.calls.filter((call) => call === 'current').length).toBeGreaterThan(reads);
+    expect(shownName()).toBe('Name from the instance');
+    expect(text()).toContain(CHANGE_NAME_TEXT.changed);
+    expect(renameField().value).toBe('');
+  });
+
+  it('says why a name was not changed, and keeps the name shown and the one typed', async () => {
+    const scripted = scriptedInstance({
+      connected: true,
+      renameAnswer: { kind: 'refused', text: RENAME_REFUSAL_TEXT.rate_limited },
+    });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    await renameTo('Anna B');
+    expect(text()).toContain(RENAME_REFUSAL_TEXT.rate_limited);
+    expect(text()).not.toContain(CHANGE_NAME_TEXT.changed);
+    expect(shownName()).toBe('Rider');
+    expect(renameField().value).toBe('Anna B');
+  });
+
+  it('is not offered to a device that is not signed in', async () => {
+    const signedOut = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    mounted = await mount(<InstanceView port={signedOut.port} />);
+    await settle();
+    expect(text()).toContain('Not signed in');
+    expect(text()).not.toContain(CHANGE_NAME_TEXT.heading);
+    mounted.unmount();
+    mounted = await mount(<InstanceView port={scriptedInstance({ connected: false }).port} />);
+    await settle();
+    expect(text()).not.toContain(CHANGE_NAME_TEXT.heading);
   });
 });

@@ -7,7 +7,7 @@
   "description": "A free, open alternative to Strava + Zwift for cycling \u2014 workspace root.",
   "packageManager": "pnpm@11.18.0",
   "engines": {
-    "node": ">=24 <25",
+    "node": ">=26 <27",
     "pnpm": ">=11 <12"
   },
   "scripts": {
@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/node": "24.13.3",
+    "@types/node": "26.6.6",
     "@vitest/coverage-v8": "4.1.12",
     "eslint": "10.13.0",
     "eslint-import-resolver-typescript": "4.4.5",

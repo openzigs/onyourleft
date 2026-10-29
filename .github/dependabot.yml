@@ -79,6 +79,14 @@ updates:
       - dependency-name: '@vitest/*'
         update-types:
           - 'version-update:semver-major'
+      # ⚠️ `@types/node`'s major follows the Node line `.nvmrc` pins (#1200),
+      # and unlike the three above this entry stays: types ahead of the runtime
+      # let code typecheck against an API that does not exist when it runs. The
+      # pull request that moves `.nvmrc` moves this major by hand (Node 26 was
+      # #1597). Minor and patch updates of the pinned major still come.
+      - dependency-name: '@types/node'
+        update-types:
+          - 'version-update:semver-major'
     groups:
       # Grouped so a toolchain bump is one review with one licence check rather
       # than eight. They move together in practice anyway.

@@ -8,7 +8,7 @@
  * node apps/web/tools/realistic/fetch-assets.ts --lock   # re-read and rewrite the lock
  * ```
  *
- * Needs Node 24 (it runs this `.ts` file directly, as `icons:generate` does)
+ * Needs Node 26 (it runs this `.ts` file directly, as `icons:generate` does)
  * and the network: about 150 MB, most of it the tree scans' geometry — and
  * since #623 MakeHuman's CC0 system assets archive, 281 MB, of which six files
  * are taken (`zip-member.ts`) after each one's own row on the pack's page is
