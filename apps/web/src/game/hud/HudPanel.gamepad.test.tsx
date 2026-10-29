@@ -193,6 +193,55 @@ describe('a gamepad on a Delivery ride — #1821', () => {
     expect(thrown).toEqual([]);
   });
 
+  it('throws once for a held button while the ride re-renders with a new inline throw port', async () => {
+    const onThrow = (intent: ThrowIntent): void => {
+      thrown = [...thrown, intent];
+    };
+    const profile = route();
+    const state = atStartLine(profile);
+    const panel = (): JSX.Element => (
+      <HudPanel
+        profile={profile}
+        state={state}
+        cadence={{ value: 88, live: true }}
+        heartRate={{ value: 150, live: true }}
+        announcement=""
+        paused={false}
+        onPause={() => undefined}
+        onEnd={() => undefined}
+        // A new port on every render, as a ride that writes it inline does.
+        throwing={{ throwParcel: onThrow }}
+      />
+    );
+    thrown = [];
+    listed = [pad([0])];
+    mounted = await mount(panel());
+    frames(3);
+    for (let render = 0; render < 5; render += 1) {
+      await mounted.rerender(panel());
+      frames(3);
+    }
+    expect(thrown).toEqual(['next-house']);
+  });
+
+  it('cancels its scheduled frame on unmount, and hands no port an intent after it', async () => {
+    listed = [pad()];
+    await ride();
+    frames(2);
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame');
+    mounted?.unmount();
+    mounted = undefined;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    const after = asked;
+    listed = [pad([0], -0.9)];
+    frames(10);
+    event('gamepadconnected');
+    frames(10);
+    expect(asked).toBe(after);
+    expect(thrown).toEqual([]);
+    expect(steered?.lane).toBe(1);
+  });
+
   it('polls no pad at all on a ride with no round', async () => {
     listed = [pad([0])];
     await ride(false);

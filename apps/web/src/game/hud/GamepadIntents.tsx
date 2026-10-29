@@ -16,11 +16,19 @@
  * disconnect wakes it (`gamepad-port.ts` §`onConnectionChange`). A ride with
  * no pad pays for one `getGamepads()` call, not one a frame.
  *
+ * ⚠️ **What is held survives a re-render.** The held buttons live in a ref,
+ * and the ports are read through refs, so a ride that hands the HUD a new
+ * port object on each render neither restarts the polling nor forgets a
+ * held button and throws it again.
+ *
+ * Gamepad input deliberately bypasses the #1432 touch lock, as keys do,
+ * under ADR 0059 D-5.
+ *
  * Mounted only on a ride that hands the HUD a throw or a steer port, which
  * until #1816 is none.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { NO_PADS_HELD, readGamepads } from '../delivery/gamepad-input';
 import type { SteerInputPort } from '../delivery/steer-port';
@@ -41,18 +49,26 @@ const isThrow = (intent: string): intent is ThrowIntent =>
 /** @see the module header */
 export function GamepadIntents(props: GamepadIntentsProps): null {
   const { throwing, steering, pads } = props;
+  const held = useRef(NO_PADS_HELD);
+  const throwingRef = useRef(throwing);
+  const steeringRef = useRef(steering);
+  const padsRef = useRef(pads);
   useEffect(() => {
-    const port = pads ?? navigatorGamepads(window);
-    let state = NO_PADS_HELD;
+    throwingRef.current = throwing;
+    steeringRef.current = steering;
+    padsRef.current = pads;
+  });
+  useEffect(() => {
+    const platform = navigatorGamepads(window);
     let frame: number | undefined;
     const poll = (): void => {
       frame = undefined;
-      const now = port.pads();
-      const read = readGamepads(state, now);
-      state = read.state;
+      const now = (padsRef.current ?? platform).pads();
+      const read = readGamepads(held.current, now);
+      held.current = read.state;
       for (const intent of read.intents) {
-        if (isThrow(intent)) throwing?.throwParcel(intent);
-        else steering?.steer(intent);
+        if (isThrow(intent)) throwingRef.current?.throwParcel(intent);
+        else steeringRef.current?.steer(intent);
       }
       if (now.some((pad) => pad?.connected === true)) frame = window.requestAnimationFrame(poll);
     };
@@ -60,11 +76,11 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
       if (frame === undefined) frame = window.requestAnimationFrame(poll);
     };
     wake();
-    const stop = port.onConnectionChange(wake);
+    const stop = (padsRef.current ?? platform).onConnectionChange(wake);
     return () => {
       stop();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [throwing, steering, pads]);
+  }, []);
   return null;
 }

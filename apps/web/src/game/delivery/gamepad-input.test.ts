@@ -121,6 +121,20 @@ describe('one press, one intent', () => {
     ).toEqual(['lane-right', 'lane-right', 'lane-left']);
   });
 
+  it('holds the same hysteresis on the left: once over, it asks again only once let go', () => {
+    const at = (stick: number): PadSnapshot[] => [pad([], stick)];
+    expect(
+      polls([
+        at(-0.6),
+        at(-(STICK_RELEASE + 0.05)), // still over: no second press
+        at(-0.6),
+        at(-(STICK_RELEASE - 0.05)), // let go
+        at(-0.6), // a second press
+        at(0.9), // straight across to the other side
+      ]).intents,
+    ).toEqual(['lane-left', 'lane-left', 'lane-right']);
+  });
+
   it('counts a button already down on a pad’s first poll: that press is what listed the pad', () => {
     expect(polls([[null], [pad([0])]]).intents).toEqual(['next-house']);
   });
