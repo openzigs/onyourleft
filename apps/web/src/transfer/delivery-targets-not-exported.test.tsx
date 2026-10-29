@@ -192,6 +192,7 @@ function theRound() {
     profile: town.profile,
     origin: ORIGIN,
     riderDistance: 0,
+    lineOffset: 0,
     storage: { getItem: (key) => store.get(key) ?? null, setItem: () => undefined },
   });
   vi.restoreAllMocks();

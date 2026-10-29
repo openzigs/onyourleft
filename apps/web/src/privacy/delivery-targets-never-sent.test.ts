@@ -255,6 +255,7 @@ function aRide() {
     profile: town.profile,
     origin: town.origin,
     riderDistance: 0,
+    lineOffset: 0,
     storage: undefined,
   });
   if (ride === undefined) throw new Error('the fixture town gave the round no house');
@@ -309,7 +310,6 @@ const THROWS: Readonly<Record<string, readonly (readonly [string, () => unknown]
           ticks: FIRST.fromRoad,
           along: FIRST.distance,
           speed: FIRST.fromRoad,
-          lateral: () => FIRST.x,
         }),
     ],
   ],
