@@ -38,6 +38,7 @@ import type {
   InstancePort,
   InstanceState,
   KeysOutcome,
+  RenameOutcome,
 } from './instance-port';
 import {
   MODERATION_REFUSAL_TEXT,
@@ -177,6 +178,8 @@ export interface ScriptedInstanceOptions {
   readonly keys?: KeysOutcome;
   /** What `offerCard` answers, when not what the held pin implies. */
   readonly cardAnswer?: CardOutcome;
+  /** What `rename` answers, when not a plain success; a refusal changes nothing held. */
+  readonly renameAnswer?: RenameOutcome;
 }
 
 export function scriptedInstance(options: ScriptedInstanceOptions = {}): ScriptedInstance {
@@ -347,6 +350,14 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
           },
         ];
         return Promise.resolve({ kind: 'revoked' } as const);
+      },
+      rename: (displayName) => {
+        calls.push(`rename ${displayName}`);
+        // As the instance does: trimmed, kept, and answered — the screen reads it back.
+        const name = displayName.trim();
+        if (options.renameAnswer !== undefined) return Promise.resolve(options.renameAnswer);
+        scripted.held.displayName = name;
+        return Promise.resolve({ kind: 'renamed', displayName: name } as const);
       },
       markTermsRead: (version) => {
         calls.push(`markTermsRead ${version}`);

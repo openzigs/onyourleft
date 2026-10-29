@@ -184,6 +184,9 @@ describe('the declaration filed on Play', () => {
     expect(name?.why).toContain('each time the rider presses Connect with a name typed');
     expect(name?.why).toContain('only when it has not seen this device before');
     expect(name?.why).toContain('each earlier name');
+    // #906 item 2: the app changes it, so the answer says so.
+    expect(name?.why).toContain('The rider can change it from the app');
+    expect(name?.why).not.toContain('later changed on the instance');
     expect(name?.why).not.toContain(
       'sent to that instance when it has not seen this device before',
     );
