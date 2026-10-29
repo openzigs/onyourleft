@@ -194,12 +194,12 @@ describe('a gamepad on a Delivery ride — #1821', () => {
   });
 
   it('throws once for a held button while the ride re-renders with a new inline throw port', async () => {
-    const onThrow = (intent: ThrowIntent): void => {
-      thrown = [...thrown, intent];
-    };
     const profile = route();
     const state = atStartLine(profile);
-    const panel = (): JSX.Element => (
+    const took: string[] = [];
+    // A new port on every render, as a ride that writes it inline does; each
+    // throw is tagged with the render whose port took it.
+    const panel = (render: number): JSX.Element => (
       <HudPanel
         profile={profile}
         state={state}
@@ -209,19 +209,27 @@ describe('a gamepad on a Delivery ride — #1821', () => {
         paused={false}
         onPause={() => undefined}
         onEnd={() => undefined}
-        // A new port on every render, as a ride that writes it inline does.
-        throwing={{ throwParcel: onThrow }}
+        throwing={{
+          throwParcel: (intent) => {
+            took.push(`${intent}@${String(render)}`);
+          },
+        }}
       />
     );
-    thrown = [];
     listed = [pad([0])];
-    mounted = await mount(panel());
+    mounted = await mount(panel(0));
     frames(3);
-    for (let render = 0; render < 5; render += 1) {
-      await mounted.rerender(panel());
+    for (let render = 1; render <= 5; render += 1) {
+      await mounted.rerender(panel(render));
       frames(3);
     }
-    expect(thrown).toEqual(['next-house']);
+    expect(took).toEqual(['next-house@0']);
+    // Let go and press again: the throw reaches the port of the latest render.
+    listed = [pad()];
+    frames(2);
+    listed = [pad([0])];
+    frames(2);
+    expect(took).toEqual(['next-house@0', 'next-house@5']);
   });
 
   it('cancels its scheduled frame on unmount, and hands no port an intent after it', async () => {
