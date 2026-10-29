@@ -140,6 +140,12 @@ import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
+import {
+  OBSTACLE_SETTINGS,
+  readDeliveryAssist,
+  writeDeliveryAssist,
+  type DeliveryAssist,
+} from '../game/delivery/assist-preference';
 import { presentationFor } from '../ride/MetricGrid';
 import type { RideMetricId } from '../ride/metrics';
 import {
@@ -247,6 +253,13 @@ export const WEIGHT_WHERE_IT_GOES =
 export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on this device only.';
 
 /**
+ * What the Delivery choices touch (#1813): a privacy sentence, so it stays on
+ * the screen under the controls, not behind the section's ⓘ (`SectionHelp`).
+ */
+export const DELIVERY_ASSIST_STAYS_HERE =
+  'They change nothing on any other ride and nothing your trainer is sent. They are kept on this device only.';
+
+/**
  * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
@@ -257,6 +270,7 @@ export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on t
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   WEIGHT_WHERE_IT_GOES,
   ANNOUNCEMENTS_STAY_HERE,
+  DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
   'sends the map area and your device’s IP address to',
   'It sends no ride data.',
@@ -614,6 +628,17 @@ export function SettingsView({
           {...(kit === undefined ? {} : { port: kit })}
           {...(kitColour === undefined ? {} : { kitColour })}
           {...(onKitColourChange === undefined ? {} : { onKitColourChange })}
+        />
+
+        {/*
+          #1813: how the rider plays Delivery, beside the kit they ride it in.
+          Here rather than in *The ride* because there it made that card 2.25×
+          *Your words* beside it on the CI runner (2.19× locally, compact),
+          over #1026's balance rule (`sections.browser.spec.ts`
+          §`ROW_BALANCE_LIMIT`); here it evens this card's row instead.
+        */}
+        <DeliveryAssistPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
         />
 
         {/*
@@ -1358,6 +1383,179 @@ function GameWorldPanel({
           Holiday decorations
         </label>
       </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What the assisted Delivery setting says (#1813). Each number in it is a
+ * constant in the module that applies it, and a test holds the sentence to
+ * that constant: `throw.ts` §`ASSISTED_THROW_SCALE`, `obstacles.ts`
+ * §`OBSTACLE_SPACING_METRES` and §`FEWER_OBSTACLES_KEEP_ONE_IN`.
+ */
+export const DELIVERY_ASSIST_TEXT = {
+  heading: 'Delivery',
+  about:
+    'Delivery is a round of houses in the trainer game: you throw parcels to doorsteps as you ride past. These choices make a round easier.',
+  stays: DELIVERY_ASSIST_STAYS_HERE,
+  widerLabel: 'Wider throw windows',
+  widerDetail:
+    'A parcel counts from three times as far along the road from the doorstep, so you have longer to throw.',
+  obstaclesLegend: 'Obstacles',
+  obstacles: {
+    normal: {
+      label: 'As usual',
+      detail: 'A bin, a trolley or a cone rolls across the road about every 250 metres.',
+    },
+    fewer: { label: 'Fewer', detail: 'Half as many: about one every 500 metres.' },
+    none: { label: 'None', detail: 'Nothing rolls across the road.' },
+  },
+  noFailLabel: 'Keep missed houses on the round',
+  noFailDetail: 'A house you miss stays on the next day’s round instead of dropping out.',
+} as const satisfies {
+  readonly [part: string]: unknown;
+  readonly obstacles: Readonly<
+    Record<(typeof OBSTACLE_SETTINGS)[number], { label: string; detail: string }>
+  >;
+};
+
+/**
+ * The assisted Delivery setting — #1813, the owner's ruling DL10: wider throw
+ * windows, fewer or no obstacles, and no fail, so the throw's timing need not
+ * be a barrier (WCAG 2.2 SC 2.2.1 is not leaned on for an exception).
+ *
+ * ⚠️ **A device choice**, as {@link GameWorldPanel}'s is
+ * (`game/delivery/assist-preference.ts`). Two switches and a group of three
+ * native radios. What each changes is its sentence in the section's help,
+ * behind its ⓘ (#1031), and each control is described by that sentence
+ * through `aria-describedby`, so a screen reader reads what it changes as well
+ * as its name — as {@link AppearancePanel}'s group is. The group's
+ * description is the chosen option's own sentence, and every option's is in
+ * the help, so the ones not chosen are still on the screen (#666).
+ *
+ * In *You and your bike*, after the kit, and not in *The ride*: there it made
+ * that card 2.25× *Your words* beside it on the CI runner's landscape tablet,
+ * over #1026's balance rule (`sections.browser.spec.ts`
+ * §`ROW_BALANCE_LIMIT`). The sentences are in the help, as the other game
+ * panels' are, rather than under each control.
+ *
+ * The switches take the announcement switch's 24×24 target from `theme.css`
+ * by this section's own class, `oyl-delivery-assist`, which is also the
+ * tests' hook: `.oyl-announce` is how the announcement tests find their own
+ * controls.
+ */
+function DeliveryAssistPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [assist, setAssist] = useState<DeliveryAssist>(() => readDeliveryAssist(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  function keep(next: DeliveryAssist): void {
+    setAssist(next);
+    setMessage(
+      writeDeliveryAssist(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+  const text = DELIVERY_ASSIST_TEXT;
+  return (
+    <section
+      className="oyl-panel oyl-delivery-assist"
+      aria-labelledby="oyl-delivery-assist-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-delivery-assist-heading"
+        help={
+          <>
+            <p className="oyl-muted">{text.about}</p>
+            <dl className="oyl-muted">
+              <div>
+                <dt>{text.widerLabel}</dt>
+                <dd id="oyl-delivery-wider-detail">{text.widerDetail}</dd>
+              </div>
+              {/* #666: every obstacle choice's sentence, the ones not chosen too. */}
+              {OBSTACLE_SETTINGS.map((option) => (
+                <div key={option}>
+                  <dt>
+                    {text.obstaclesLegend}: {text.obstacles[option].label}
+                  </dt>
+                  <dd id={`oyl-delivery-obstacles-${option}-detail`}>
+                    {text.obstacles[option].detail}
+                  </dd>
+                </div>
+              ))}
+              <div>
+                <dt>{text.noFailLabel}</dt>
+                <dd id="oyl-delivery-no-fail-detail">{text.noFailDetail}</dd>
+              </div>
+            </dl>
+          </>
+        }
+      >
+        {text.heading}
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={assist.widerWindows}
+            aria-describedby="oyl-delivery-wider-detail"
+            onChange={(event) => {
+              keep({ ...assist, widerWindows: event.currentTarget.checked });
+            }}
+          />{' '}
+          {text.widerLabel}
+        </label>
+      </p>
+      <fieldset
+        className="oyl-segmented"
+        aria-describedby={`oyl-delivery-obstacles-${assist.obstacles}-detail`}
+      >
+        <legend>{text.obstaclesLegend}</legend>
+        <div className="oyl-segmented__options">
+          {OBSTACLE_SETTINGS.map((option) => (
+            <label key={option} htmlFor={`oyl-delivery-obstacles-${option}`}>
+              <input
+                type="radio"
+                id={`oyl-delivery-obstacles-${option}`}
+                name="oyl-delivery-obstacles"
+                value={option}
+                checked={assist.obstacles === option}
+                onChange={() => {
+                  keep({ ...assist, obstacles: option });
+                }}
+              />{' '}
+              {text.obstacles[option].label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={assist.noFail}
+            aria-describedby="oyl-delivery-no-fail-detail"
+            onChange={(event) => {
+              keep({ ...assist, noFail: event.currentTarget.checked });
+            }}
+          />{' '}
+          {text.noFailLabel}
+        </label>
+      </p>
+      <KeptVisible>
+        <p className="oyl-muted">{text.stays}</p>
+      </KeptVisible>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}

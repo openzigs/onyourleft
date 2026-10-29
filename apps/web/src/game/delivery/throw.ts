@@ -68,6 +68,16 @@
  * where the round and its targets are, so the HUD's input module imports
  * nothing of a round.
  *
+ * ## Wider windows, the assist setting (#1813, DL10)
+ *
+ * With {@link ThrowInput.widerWindows} set, the catch radius and the
+ * window's closing edge are both {@link ASSISTED_THROW_SCALE} times their
+ * usual size, so the moment a throw counts lasts that much longer. The
+ * window's opening edge is not widened: {@link THROW_WINDOW_BEFORE_METRES}
+ * already fills the 20 m `targets.ts` §`TARGET_WINDOW_HALF_METRES` keeps
+ * clear before each house, so a wider one would reach into the window of the
+ * house before. The setting itself is `assist-preference.ts`'.
+ *
  * ## Nothing here leaves the ride
  *
  * Parcels, landings and targets are held in memory for the ride only (DL11),
@@ -124,6 +134,14 @@ export const THROW_WINDOW_BEFORE_METRES = 20;
  * owner's approval in #1809's pull request.
  */
 export const THROW_WINDOW_AFTER_METRES = 1;
+
+/**
+ * How many times wider the catch radius and the window's closing edge are
+ * with the assist setting's wider windows (#1813): 4.5 m and 3 m. The closing
+ * edge stays inside the catch radius, as at the default. This project's own
+ * number, for the owner's approval in #1813's pull request.
+ */
+export const ASSISTED_THROW_SCALE = 3;
 
 /**
  * How long after a throw the next one is refused, in seconds. This project's
@@ -201,6 +219,8 @@ export interface ThrowInput {
   readonly throwTo?: ThrowSide;
   /** Ticks to run, a whole number, `0` or more. One unless given. */
   readonly ticks?: number;
+  /** The assist setting's wider windows (#1813): {@link ASSISTED_THROW_SCALE}. Off unless asked for. */
+  readonly widerWindows?: boolean;
 }
 
 export interface ThrowStep {
@@ -218,11 +238,16 @@ function acrossAfter(ticks: number): number {
   return PARCEL_THROW_SPEED_METRES_PER_SECOND * ticks * DELIVERY_TICK_SECONDS;
 }
 
+/** How much the catch radius and the window's closing edge are widened: `1`, or the assist's. */
+function scaleFor(widerWindows: boolean | undefined): number {
+  return widerWindows === true ? ASSISTED_THROW_SCALE : 1;
+}
+
 /** The throw left the rider inside the target's window. */
-function windowOpen(parcel: ParcelInFlight, target: ThrowTarget): boolean {
+function windowOpen(parcel: ParcelInFlight, target: ThrowTarget, scale: number): boolean {
   return (
     parcel.launchAlong >= target.along - THROW_WINDOW_BEFORE_METRES &&
-    parcel.launchAlong <= target.along + THROW_WINDOW_AFTER_METRES
+    parcel.launchAlong <= target.along + THROW_WINDOW_AFTER_METRES * scale
   );
 }
 
@@ -236,6 +261,7 @@ function landingOn(
   tick: number,
   targets: readonly ThrowTarget[],
   round: Round,
+  scale: number,
 ): Landing | undefined {
   const flown = tick - parcel.launchTick;
   const from = acrossAfter(flown - 1);
@@ -244,13 +270,13 @@ function landingOn(
   for (const target of targets) {
     if (target.side !== parcel.side) continue;
     if (round.houses[target.position] !== 'expecting') continue;
-    if (!windowOpen(parcel, target)) continue;
+    if (!windowOpen(parcel, target, scale)) continue;
     const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
     if (across <= from || across > to) continue;
     if (caught !== undefined && across >= caught.across) continue;
     const along =
       parcel.launchAlong + parcel.speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
-    if (Math.abs(along - target.along) > TARGET_CATCH_RADIUS_METRES) continue;
+    if (Math.abs(along - target.along) > TARGET_CATCH_RADIUS_METRES * scale) continue;
     caught = {
       kind: 'delivery',
       position: target.position,
@@ -294,6 +320,7 @@ export function stepThrows(state: ThrowState, input: ThrowInput): ThrowStep {
     ];
     readyAt = state.tick + THROW_COOLDOWN_TICKS;
   }
+  const scale = scaleFor(input.widerWindows);
   let round = input.round;
   let tick = state.tick;
   const landings: Landing[] = [];
@@ -301,7 +328,7 @@ export function stepThrows(state: ThrowState, input: ThrowInput): ThrowStep {
     tick += 1;
     const flying: ParcelInFlight[] = [];
     for (const parcel of inFlight) {
-      const landing = landingOn(parcel, tick, input.targets, round);
+      const landing = landingOn(parcel, tick, input.targets, round, scale);
       if (landing === undefined) {
         flying.push(parcel);
         continue;

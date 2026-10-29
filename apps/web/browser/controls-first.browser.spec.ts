@@ -281,6 +281,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   settings: [
     'Units',
     'Your weight',
+    // #1813: what Delivery is and what each of its assists changes.
+    'Delivery',
     'Menu sounds',
     'Appearance',
     'Announcements',
