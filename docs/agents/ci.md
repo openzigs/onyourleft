@@ -407,7 +407,7 @@ mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's 
 | `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
 | `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts`, since #1626 `realistic-wreath.browser.spec.ts` | #1283, #1294, #1523, #1626 | 7 | 259 s |
 | `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1624 (#1625, #1626), #1689 | 6 | — |
-| `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts` | #1657, #1636 | 3 | — |
+| `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts`, since #1815 `realistic-delivery.browser.spec.ts` | #1657, #1636, #1815 | 4 | — |
 
 The last column is the sum of those cases on the one-job run, not a run of the shard; #1626's
 loads (one in the town's shard, the wreath's two in the trees') came after it. Split by
@@ -425,10 +425,12 @@ load to `realistic-town.browser.spec.ts` and each passed alone; together the fil
 the 7 a shard may hold. The mapped towns' describes (#1657's lever, #1636's city centre) moved to
 `realistic-mapped.browser.spec.ts` in `browser-5`, by the procedure below; the heading keeps
 #1698's name because the spec files cite it. The loads column counts as the test does, lexically:
-#1636's case loads the page twice in one loop, so `browser-5` makes four loads.
+#1636's case loads the page twice in one loop, so `browser-5` makes four loads, and five since
+#1815's Delivery village frame joined it.
 
-**Where the next lever's describe goes**: shards 2, 3, 4 and 5 hold 6, 7, 6 and 3 loads (504 s is
-the cap: 7 loads), so a describe with one load in shard 3 is a red case. Put it in the shard with the
+**Where the next lever's describe goes**: shards 2, 3, 4 and 5 hold 6, 7, 7 and 4 loads (504 s is
+the cap: 7 loads; counted lexically on 2026-10-29 for #1815, which found shard 4 at 7 since #1566),
+so a describe with one load in shard 3 or 4 is a red case. Put it in the shard with the
 fewest loads (shard 5); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
 a `test:browser:nightly:shard-6` script and a `browser-6` job copied from `browser-5`, name the new
 `spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a

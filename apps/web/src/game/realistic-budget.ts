@@ -65,6 +65,7 @@
  * native renderer, if #434 adopts one, has its own.
  */
 
+import type { SceneFrame } from './port';
 import type { RealisticVegetationKind } from './realistic-assets';
 import type { TreeLevels } from './tree-levels';
 
@@ -487,6 +488,63 @@ export const REALISTIC_WOODED_DRAW_CALLS = 35;
  * frame at the WebGL entry points
  */
 export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
+
+/**
+ * The most draw calls the owner's page may make on its village frame **while
+ * a Delivery round runs** — the same hold as {@link REALISTIC_VILLAGE_DRAW_CALLS}'
+ * (`route=village` at `VILLAGE_HOLD_METRES`, the top rung, on Halloween),
+ * carrying #1814's worst case: **53**, proposed for the owner's approval on
+ * #1815's pull request.
+ *
+ * ⚠️ **It applies only while Delivery runs** — owner ruling DL6b of
+ * 2026-10-27 on the epic #1803, recorded as ADR 0059 D-3. A frame carrying no
+ * round (`port.ts` §`SceneFrame.delivery` absent, every ordinary ride) is held
+ * to the frozen 50, which this does not raise and does not replace:
+ * {@link villageDrawCallCeiling} is the one place the choice is made. The
+ * owner accepts the cost in dropped frames on the tablet for Delivery only,
+ * while #1523 holds its GPU at its ceiling; that is why this is a second
+ * constant and not a raise of the first.
+ *
+ * ## Where 53 comes from — #1815
+ *
+ * The frozen frame's 50, plus the three calls `three-renderer.ts`
+ * §`DeliveryBelt` adds: one instanced call each for the parcels, the house
+ * markers and the obstacles, whatever their count (#1814, held by
+ * `delivery.browser.spec.ts`). Nothing is rounded up past it: the belt's
+ * count does not move with the pieces' number or place (it is not
+ * frustum-culled), and the held frame's count did not move between runs, so
+ * a margin would be room for a fourth call nobody has asked the owner for.
+ * Measured on the frozen frame with 20 of each piece (`?delivery=20`,
+ * `realistic-delivery.browser.spec.ts`) in the pinned Chromium on 2026-10-29:
+ * 53 calls and 171 874 triangles, against 50 and 164 474 on the same frame
+ * with no round, in every one of five loads of each — three in SwiftShader
+ * and two on a Mac's own GPU.
+ *
+ * ⚠️ **The call count is the desktop half.** It does not depend on the GPU,
+ * so the pinned Chromium counts what the tablet would; what the three calls
+ * COST there — frames over 20 ms, the GPU's frequency — is #1815's tablet
+ * step for #733, which the owner reads against this number.
+ *
+ * @test-facing held by `realistic-delivery.browser.spec.ts`, which counts
+ * the Delivery village frame at the WebGL entry points, and by
+ * `realistic-budget-village.test.ts`; nothing in the product applies a
+ * draw-call ceiling at run time
+ */
+export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
+
+/**
+ * Which village ceiling a frame is held to — #1815, DL6b: the Delivery
+ * ceiling while the frame carries a round, and the frozen one on every
+ * other frame. A round with nothing in view is still a round running.
+ *
+ * @test-facing the owner's page publishes it for the frame it drew
+ * (`realistic-harness.ts`), and `realistic-delivery.browser.spec.ts` holds
+ * that frame to it; `realistic-budget-village.test.ts` holds an ordinary
+ * frame one call over 50 to be over it
+ */
+export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery'>): number {
+  return frame.delivery === undefined ? REALISTIC_VILLAGE_DRAW_CALLS : DELIVERY_VILLAGE_DRAW_CALLS;
+}
 
 /**
  * The trees as they were drawn before #617 — the nearest six as full meshes,

@@ -671,7 +671,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         whatever the count, the obstacles' three shapes sharing
                         one by a vertex-kind collapse, and a view builds the
                         belt only on the first frame that carries a round, so
-                        an ordinary ride's village frame stays at 50
+                        an ordinary ride's village frame stays at 50.
+                        ⚠️ **Since #1815 the village frame has TWO ceilings**
+                        (`realistic-budget.ts`, owner ruling DL6b, ADR 0059
+                        D-3): `REALISTIC_VILLAGE_DRAW_CALLS`, frozen at 50, for
+                        every frame with no round, and
+                        `DELIVERY_VILLAGE_DRAW_CALLS`, 53 (the 50 and the
+                        belt's three), only while a frame carries one;
+                        `villageDrawCallCeiling` is the one place that choice
+                        is made. A second constant and not a raise of the
+                        first, because the owner accepts the tablet's extra
+                        dropped frames (#1523) for Delivery only. The owner's
+                        page's `?delivery=20` draws the worst case
+                        (`browser/realistic/delivery.ts`), held by
+                        `realistic-delivery.browser.spec.ts` (nightly); that an
+                        ordinary frame is never held to 53 is
+                        `realistic-budget-village.test.ts`
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`

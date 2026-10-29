@@ -69,6 +69,7 @@ import {
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
+import { villageDrawCallCeiling } from '../src/game/realistic-budget';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
 import { deviceToday } from '../src/game/season';
@@ -79,6 +80,7 @@ import {
   decorationBeltOf,
   decorationKindTriangles,
   decorationKindsOf,
+  deliveryDrawnOf,
   facadeWreathOf,
   firDepthPrepassOf,
   foliageOrderedOf,
@@ -116,6 +118,7 @@ import {
   type Lever,
   type Percentiles,
 } from './realistic/config';
+import { deliveryAhead } from './realistic/delivery';
 import { drawCounter } from './realistic/draws';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
@@ -308,6 +311,20 @@ declare global {
        * Absent with the result, or before a realistic frame.
        */
       readonly villageHouses?: VillageHouseStats;
+      /**
+       * #1815: what the view's Delivery belt drew on the last frame before the
+       * result was published, read back off its instances
+       * (`three-renderer.ts` §`deliveryDrawnOf`). Absent unless `?delivery=`
+       * asked for a round. @see realistic/delivery.ts
+       */
+      readonly delivery?: Readonly<Record<'parcels' | 'markers' | 'obstacles', number>>;
+      /**
+       * #1815: the village ceiling that same frame is held to,
+       * `realistic-budget.ts` §`villageDrawCallCeiling` of the frame the page
+       * drew — the Delivery one while it carries a round, the frozen 50
+       * otherwise. Absent with the result.
+       */
+      readonly villageCeiling?: number;
     };
   }
 }
@@ -593,6 +610,10 @@ async function run(): Promise<void> {
       countrysideOff: countrysideWithLevers(config.leversOff),
       ...(town === undefined ? {} : { town }),
     });
+    // #1815: a Delivery round's worst case on the road ahead, or no round at all.
+    if (config.delivery !== undefined) {
+      drawn = { ...drawn, delivery: deliveryAhead(drawn, distance, config.delivery) };
+    }
     view.render(drawn);
     lastFrameCalls = counter.takeCalls();
     callsInWindow += lastFrameCalls;
@@ -632,12 +653,22 @@ async function run(): Promise<void> {
               treeTriangles: VILLAGE_TREE_TRIANGLES,
             };
       const villageHouses = villageHouseStatsOf(view);
+      const delivery =
+        config.delivery === undefined
+          ? undefined
+          : {
+              parcels: deliveryDrawnOf(view, 'parcels').length,
+              markers: deliveryDrawnOf(view, 'markers').length,
+              obstacles: deliveryDrawnOf(view, 'obstacles').length,
+            };
       publish({
         result,
         layers,
         census,
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
+        ...(delivery === undefined ? {} : { delivery }),
+        ...(drawn === undefined ? {} : { villageCeiling: villageDrawCallCeiling(drawn) }),
       });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
