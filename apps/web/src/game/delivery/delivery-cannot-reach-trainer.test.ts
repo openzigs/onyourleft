@@ -114,9 +114,19 @@ const DELIVERY_ROOT = 'apps/web/src/game/delivery';
 /** A module's source by its path from the repository root, or `undefined` when there is none. */
 type ReadSource = (path: string) => string | undefined;
 
+/**
+ * Every file this test has read, by path. The tree does not change while the
+ * file runs, and the walks below read the same few hundred modules again and
+ * again, which under coverage was most of what a case cost (#1849).
+ */
+const DISK = new Map<string, string | undefined>();
+
 const readFromDisk: ReadSource = (path) => {
-  const file = join(REPOSITORY, path);
-  return existsSync(file) ? readFileSync(file, 'utf8') : undefined;
+  if (!DISK.has(path)) {
+    const file = join(REPOSITORY, path);
+    DISK.set(path, existsSync(file) ? readFileSync(file, 'utf8') : undefined);
+  }
+  return DISK.get(path);
 };
 
 /**
@@ -293,6 +303,14 @@ function modulesUnder(directory: string): string[] {
 
 /** `@onyourleft/<name>[/<subpath>]` → the source file its `package.json` exports it from. */
 function workspaceExports(): ReadonlyMap<string, string> {
+  workspaceExportsOnDisk ??= readWorkspaceExports();
+  return workspaceExportsOnDisk;
+}
+
+/** {@link workspaceExports}, read once: the manifests are the real ones in every case. */
+let workspaceExportsOnDisk: ReadonlyMap<string, string> | undefined;
+
+function readWorkspaceExports(): ReadonlyMap<string, string> {
   const found = new Map<string, string>();
   for (const tree of ['apps', 'packages']) {
     for (const entry of readdirSync(join(REPOSITORY, tree), { withFileTypes: true })) {
@@ -363,6 +381,22 @@ const IMPORT_META_LOADS_NOTHING = new Set(['url', 'env', 'hot']);
 
 /** Every value edge in `code`, read by the TypeScript parser. */
 function edgesIn(code: string, path: string): ModuleEdges {
+  // Parsing is the cost of a walk. The edges are a pure function of the path and
+  // the source, so a module read again, unchanged, is not parsed again; a
+  // planted module has other source and so is parsed.
+  const known = EDGES.get(path);
+  if (known?.code === code) {
+    return known.edges;
+  }
+  const edges = readEdges(code, path);
+  EDGES.set(path, { code, edges });
+  return edges;
+}
+
+/** {@link edgesIn}'s results, by path, each with the source it was read from. */
+const EDGES = new Map<string, { readonly code: string; readonly edges: ModuleEdges }>();
+
+function readEdges(code: string, path: string): ModuleEdges {
   const source = parse(code, path);
   const cannotFollow = (node: ts.Node, what: string): Error =>
     new Error(`${path} ${what}, which the walk cannot follow: ${node.getText(source)}`);
@@ -604,6 +638,17 @@ function seamViolations(
 
 const WIRING_SOURCE = readFileSync(join(REPOSITORY, 'scripts/check-wiring.mjs'), 'utf8');
 
+/**
+ * {@link forbiddenModules} over the real tree and the real wiring script,
+ * worked out on first use and not again: it reads the seam and checks that
+ * every path of it names a file, which is the same answer every time.
+ */
+let forbiddenOnDisk: string[] | undefined;
+function forbiddenInTheTree(): string[] {
+  forbiddenOnDisk ??= forbiddenModules(WIRING_SOURCE);
+  return forbiddenOnDisk;
+}
+
 /** A tree that is the real one, with `planted` modules added over it. */
 function plantedOver(planted: Readonly<Record<string, string>>): ReadSource {
   return (path) => planted[path] ?? readFromDisk(path);
@@ -611,9 +656,7 @@ function plantedOver(planted: Readonly<Record<string, string>>): ReadSource {
 
 describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #1807)', () => {
   it('reaches no trainer module from any Delivery module, by any static import chain', () => {
-    expect(seamViolations(modulesUnder(DELIVERY_ROOT), forbiddenModules(WIRING_SOURCE))).toEqual(
-      [],
-    );
+    expect(seamViolations(modulesUnder(DELIVERY_ROOT), forbiddenInTheTree())).toEqual([]);
   });
 
   it('reads the seam off scripts/check-wiring.mjs, every module of it', () => {
@@ -621,7 +664,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
     // The five modules #363 named; more is a seam that grew, fewer is a lost entry.
     expect(seam.length).toBeGreaterThanOrEqual(5);
     expect(seam).toContain('packages/sensors/protocol/src/fitness-machine-control.ts');
-    const forbidden = forbiddenModules(WIRING_SOURCE);
+    const forbidden = forbiddenInTheTree();
     for (const path of [...seam, ...GAME_TRAINER_MODULES]) {
       expect(forbidden).toContain(path);
     }
@@ -666,7 +709,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
     });
     const found = seamViolations(
       [...modulesUnder(DELIVERY_ROOT), `${DELIVERY_ROOT}/planted-entry.ts`],
-      forbiddenModules(WIRING_SOURCE),
+      forbiddenInTheTree(),
       read,
     );
     expect(found).toContain(
@@ -680,7 +723,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
         "import { chooseTrainerControl } from '@onyourleft/sensors/protocol';\nvoid chooseTrainerControl;\n",
     });
     expect(
-      seamViolations([`${DELIVERY_ROOT}/planted-entry.ts`], forbiddenModules(WIRING_SOURCE), read),
+      seamViolations([`${DELIVERY_ROOT}/planted-entry.ts`], forbiddenInTheTree(), read),
     ).toEqual([
       `${DELIVERY_ROOT}/planted-entry.ts → packages/sensors/protocol/src/index.ts → packages/sensors/protocol/src/trainer-control-choice.ts`,
     ]);
@@ -692,7 +735,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
     const violations = (code: string): string[] =>
       seamViolations(
         [`${DELIVERY_ROOT}/planted-entry.ts`],
-        forbiddenModules(WIRING_SOURCE),
+        forbiddenInTheTree(),
         plantedOver({ [`${DELIVERY_ROOT}/planted-entry.ts`]: code }),
       );
     expect(violations("import { METRES_PER_MILE } from '@onyourleft/domain';")).toEqual([]);
@@ -707,7 +750,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
     const reaches = (code: string): boolean =>
       seamViolations(
         [`${DELIVERY_ROOT}/planted-entry.ts`],
-        forbiddenModules(WIRING_SOURCE),
+        forbiddenInTheTree(),
         plantedOver({ [`${DELIVERY_ROOT}/planted-entry.ts`]: code }),
       ).length > 0;
     // Value spellings: each reaches the port.
@@ -755,7 +798,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
       [`${DELIVERY_ROOT}/planted-other.ts`]:
         "export { gameTrainerPort as viaOther } from './planted-barrel';\n",
     });
-    const forbidden = forbiddenModules(WIRING_SOURCE);
+    const forbidden = forbiddenInTheTree();
     expect(seamViolations([`${DELIVERY_ROOT}/planted-entry.ts`], forbidden, read)).toEqual([]);
     expect(walk([`${DELIVERY_ROOT}/planted-entry.ts`], read).modules).toContain(
       `${DELIVERY_ROOT}/planted-hop.ts`,
@@ -782,7 +825,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
       // `export *` never passes `default` on, so asking for it alone reaches nothing.
       [`${DELIVERY_ROOT}/planted-default.ts`]: "import port from './planted-star';\nvoid port;\n",
     });
-    const forbidden = forbiddenModules(WIRING_SOURCE);
+    const forbidden = forbiddenInTheTree();
     const chain = (entry: string): string =>
       `${DELIVERY_ROOT}/${entry} → ${DELIVERY_ROOT}/planted-star.ts → apps/web/src/game/trainer-port.ts`;
     expect(seamViolations([`${DELIVERY_ROOT}/planted-entry.ts`], forbidden, read)).toContain(
@@ -846,11 +889,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
         [`${DELIVERY_ROOT}/planted-picture.png`]: 'not a module',
       });
     const violations = (code: string): string[] =>
-      seamViolations(
-        [`${DELIVERY_ROOT}/planted-entry.ts`],
-        forbiddenModules(WIRING_SOURCE),
-        plant(code),
-      );
+      seamViolations([`${DELIVERY_ROOT}/planted-entry.ts`], forbiddenInTheTree(), plant(code));
     const port = `${DELIVERY_ROOT}/planted-entry.ts → apps/web/src/game/trainer-port.ts`;
     for (const code of [
       "const w = new Worker(new URL('../trainer-port.ts', import.meta.url), { type: 'module' });",
@@ -889,7 +928,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
     for (const path of KNOWN_TRAINER_CONTROL_WRITERS) {
       expect(WRITERS_ON_DISK, path).toContain(path);
     }
-    const forbidden = forbiddenModules(WIRING_SOURCE);
+    const forbidden = forbiddenInTheTree();
     for (const path of WRITERS_ON_DISK) {
       expect(forbidden, path).toContain(path);
     }
@@ -926,7 +965,7 @@ describe('Delivery cannot reach the trainer-command seam (DL5, ADR 0059 D-2, #18
     const violations = (code: string): string[] =>
       seamViolations(
         [`${DELIVERY_ROOT}/planted-entry.ts`],
-        forbiddenModules(WIRING_SOURCE),
+        forbiddenInTheTree(),
         plantedOver({ [`${DELIVERY_ROOT}/planted-entry.ts`]: code }),
       );
     // Each by the specifier its real consumers use, and the module the chain must end at.
