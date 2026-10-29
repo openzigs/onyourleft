@@ -406,7 +406,7 @@ mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's 
 | `test:browser:nightly:shard-1` | `heavy` | every nightly spec but the page's | (#1675) | — | — |
 | `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
 | `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts`, since #1626 `realistic-wreath.browser.spec.ts` | #1283, #1294, #1523, #1626 | 7 | 259 s |
-| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1624 (#1625, #1626), #1689 | 6 | — |
+| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1624 (#1625, #1626), #1689 | 7 | — |
 | `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts`, since #1815 `realistic-delivery.browser.spec.ts` | #1657, #1636, #1815 | 4 | — |
 
 The last column is the sum of those cases on the one-job run, not a run of the shard; #1626's

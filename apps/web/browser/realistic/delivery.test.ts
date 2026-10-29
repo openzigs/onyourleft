@@ -26,20 +26,6 @@ const frame = rideFrame({
   rung: REALISTIC_LADDER[0] as QualitySettings,
 });
 
-/** The centreline point nearest `x`, `z`, and its `along`. */
-function alongOf(x: number, z: number): number {
-  let best = frame.corridor.centre[0];
-  for (const point of frame.corridor.centre) {
-    if (
-      best === undefined ||
-      Math.hypot(point.x - x, point.z - z) < Math.hypot(best.x - x, best.z - z)
-    ) {
-      best = point;
-    }
-  }
-  return best?.along ?? Number.NaN;
-}
-
 describe('the realistic page’s Delivery round — #1815', () => {
   it('hands the frame the count the URL asks for, of each piece, every obstacle kind among them', () => {
     const count = parseConfig('?route=village&delivery=20').delivery ?? 0;
@@ -53,24 +39,48 @@ describe('the realistic page’s Delivery round — #1815', () => {
     );
   });
 
-  it('stands each piece on the road ahead of the rider, the first 10 m on and each 2 m after', () => {
+  it('stands each piece on the road ahead of the rider, the first 10 m on and each 2 m after, parcels and markers to its right and obstacles to its left', () => {
     const round = deliveryAhead(frame, VILLAGE_HOLD_METRES, 5);
+    // The numbers are written here, not read from delivery.ts, so changing them there fails this.
+    expect(DELIVERY_AHEAD_METRES).toBe(10);
+    expect(DELIVERY_SPACING_METRES).toBe(2);
+    const centre = frame.corridor.centre;
+    /** Where `piece` stands: along the road, and signed metres across it (positive to the right). */
+    const stood = (piece: { readonly x: number; readonly z: number }) => {
+      let index = 0;
+      centre.forEach((point, at) => {
+        const best = centre[index];
+        if (
+          best === undefined ||
+          Math.hypot(point.x - piece.x, point.z - piece.z) <
+            Math.hypot(best.x - piece.x, best.z - piece.z)
+        ) {
+          index = at;
+        }
+      });
+      const at = centre[index];
+      const from = centre[Math.max(0, index - 1)];
+      const to = centre[Math.min(centre.length - 1, index + 1)];
+      if (at === undefined || from === undefined || to === undefined) throw new Error('no road');
+      const length = Math.hypot(to.x - from.x, to.z - from.z);
+      const headingX = (to.x - from.x) / length;
+      const headingZ = (to.z - from.z) / length;
+      return {
+        along: at.along,
+        across: -headingZ * (piece.x - at.x) + headingX * (piece.z - at.z),
+      };
+    };
     round.obstacles.forEach((obstacle, index) => {
-      const along = alongOf(obstacle.x, obstacle.z);
-      const wanted = VILLAGE_HOLD_METRES + DELIVERY_AHEAD_METRES + DELIVERY_SPACING_METRES * index;
+      const wanted = VILLAGE_HOLD_METRES + 10 + 2 * index;
       // Within one corridor point's spacing of where it was asked for.
-      expect(Math.abs(along - wanted), `obstacle ${String(index)}`).toBeLessThan(3);
+      expect(Math.abs(stood(obstacle).along - wanted), `obstacle ${String(index)}`).toBeLessThan(3);
     });
-    // Beside the road, not on the rider: every marker is off the centreline.
-    for (const marker of round.markers) {
-      const nearest = frame.corridor.centre.reduce((best, point) =>
-        Math.hypot(point.x - marker.x, point.z - marker.z) <
-        Math.hypot(best.x - marker.x, best.z - marker.z)
-          ? point
-          : best,
-      );
-      expect(Math.hypot(nearest.x - marker.x, nearest.z - marker.z)).toBeGreaterThan(4);
+    for (const marker of round.markers) expect(stood(marker).across).toBeCloseTo(6, 0);
+    for (const parcel of round.parcels) {
+      expect(stood(parcel).across).toBeCloseTo(3, 0);
+      expect(parcel.y - (frame.corridor.centre[0]?.y ?? 0)).toBeGreaterThan(0.5);
     }
+    for (const obstacle of round.obstacles) expect(stood(obstacle).across).toBeCloseTo(-1.5, 0);
   });
 
   it('hands no round to a frame whose URL asks for none, as an ordinary ride’s', () => {
