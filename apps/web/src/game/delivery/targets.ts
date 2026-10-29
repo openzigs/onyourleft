@@ -67,8 +67,9 @@
  *
  * ## The numbers are this project's own, proposed for the owner's approval
  *
- * {@link TARGET_WINDOW_HALF_METRES}, {@link TARGET_GAP_METRES},
- * {@link TARGET_MOST_FROM_ROAD_METRES} and {@link TARGET_TAKE_SHARE}.
+ * {@link TARGET_WINDOW_HALF_METRES}, {@link TARGET_GAP_METRES} and
+ * {@link TARGET_TAKE_SHARE}. {@link TARGET_MOST_FROM_ROAD_METRES} is not a
+ * number of its own: it is the throw's reach (#1856).
  *
  * No error message here formats a coordinate, a distance or a seed
  * (CLAUDE.md §6, ADR 0004 D): each names the field and the constraint. A
@@ -90,6 +91,7 @@ import { fmix32, mixInto, uniformFrom } from '../seeded';
 import { drawnRoadPosition, type CorridorOrigin } from '../terrain';
 
 import { MOST_HOUSES } from './round';
+import { PARCEL_REACH_METRES } from './throw';
 
 /**
  * How far before and after a house its throw window is reserved, metres:
@@ -104,8 +106,35 @@ export const TARGET_GAP_METRES = 10;
 /** The least route distance between two targets, so no two windows overlap: **50 m**. */
 export const TARGET_SPACING_METRES = 2 * TARGET_WINDOW_HALF_METRES + TARGET_GAP_METRES;
 
-/** The farthest a house's front step stands from the drawn road's centreline to be a target: **25 m**. */
-export const TARGET_MOST_FROM_ROAD_METRES = 25;
+/**
+ * The farthest a house's front step stands from the drawn road's centreline
+ * to be a target: **12 m**, the throw's own reach, `throw.ts`
+ * §`PARCEL_REACH_METRES` — the throw speed times the flight, 10 m/s for 1.2 s
+ * (#1856, under the owner's ruling of 2026-10-29 that only a house a parcel
+ * can reach is picked).
+ *
+ * The derivation, term by term:
+ *
+ * - **Where the throw leaves from.** `throw.ts` flies a parcel from the
+ *   road's centre line at the rider's simulated distance, and `in-view.ts`
+ *   draws it from there; neither reads where the rider is drawn across the
+ *   road (the racing line, room made for a pacer level with them, or
+ *   #1820's lanes). So the reach is measured from the centre line, as
+ *   `fromRoad` is, and the place the rider is drawn takes nothing off it.
+ *   `targets.test.ts` holds that: a round ridden at the drawn extremes
+ *   delivers as one ridden on the centre line. A change that throws from the
+ *   drawn rider must take the outermost drawn offset off this.
+ * - **The catch radius.** `throw.ts` §`TARGET_CATCH_RADIUS_METRES` is along
+ *   the route, not across it: a parcel is caught at the instant it reaches
+ *   the step's depth, so it takes nothing off the reach either.
+ * - **Inside the window.** A parcel reaching the deepest step flies 1.2 s, so
+ *   a rider throws `1.2 × speed` before the house, inside
+ *   `THROW_WINDOW_BEFORE_METRES` (20 m) at any speed to 60 km/h.
+ *
+ * A pick returning only houses a parcel can be delivered to is
+ * `targets.test.ts`' (#1856), riding a round through `ride-round.ts`.
+ */
+export const TARGET_MOST_FROM_ROAD_METRES = PARCEL_REACH_METRES;
 
 /**
  * The share of the houses that fit that a round's first pass takes: **0.5**,
