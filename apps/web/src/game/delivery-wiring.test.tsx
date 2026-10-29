@@ -642,7 +642,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     },
   );
 
-  it('keeps a round the ride ends first, every house still expecting counted missed', async () => {
+  it('keeps the week as it was when End ride comes before any house is reached (#1857)', async () => {
     stubSeed(script.seed);
     mounted = await mount(
       <GameView
@@ -658,8 +658,9 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
-    // Every house missed and no assist: none is left, so the week is over (`round.ts` §`endRound`).
-    expect(readDeliveryProgress(localStorage)).toEqual({ day: 1, houses: 8, score: 0 });
+    // No house passed, so none is delivered or missed, and a mis-pressed End
+    // ride does not reset the week to a fresh one (`round.ts` §`endRound`).
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
   });
 
   it('runs no round on a ride in a room, which is solo’s alone (DL9)', async () => {

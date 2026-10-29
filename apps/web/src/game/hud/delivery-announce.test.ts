@@ -303,9 +303,11 @@ describe('each said once, in the order chosen, through the real core — #1812',
     const round = startRound(3);
     const delivered = recordDelivery(round, 0);
     caller.owed = oweCrash(oweRoundChange(NOTHING_OWED, round, delivered));
+    // The round over with the other two missed: a house still expecting is one
+    // never reached, which no round's end counts (#1857).
     caller.owed = oweRoundOver(
       caller.owed,
-      endRound(FRESH_WEEK, delivered),
+      endRound(FRESH_WEEK, recordMiss(recordMiss(delivered, 1), 2)),
       roundTally(delivered).score,
     );
     caller.ride(0, 20);
