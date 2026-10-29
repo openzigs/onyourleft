@@ -9,8 +9,8 @@
  * at the press, {@link stepDeliveryRide} on every simulation step that ran,
  * and {@link endDeliveryRide} when the round is over or the ride ends. It
  * composes the round (`round.ts`), the target pick (`targets.ts`), the throw
- * (`throw.ts`) and the obstacles (`obstacles.ts`); what each of those decides
- * is still theirs.
+ * (`throw.ts`), the obstacles (`obstacles.ts`) and the lane steering
+ * (`steer.ts`, #1853); what each of those decides is still theirs.
  *
  * ## Nothing here reaches the trainer (DL5, ADR 0059 D-2)
  *
@@ -32,6 +32,20 @@
  * paused, so a paused ride steps nothing. A frame that ran several steps
  * places the rider at each by sharing the frame's distance between them, so
  * an obstacle is swept at every step rather than at the frame's end.
+ *
+ * ## The rider steers, and the obstacles meet them where they are drawn
+ *
+ * A round runs on a solo ride only, so its rider can always steer (#1820,
+ * DL9): its obstacles are placed with `steering` on, so some stand in a lane,
+ * and {@link DeliveryRide.steer} starts in the lane nearest the racing line at
+ * the press (`racing-line.ts` §`lineOffsetAt`, never the drawn
+ * `PlacedRider.lateral`, which has made room for a bot or a ghost). `GameView`
+ * turns it with `steer.ts` §`steerToward` for each lane key; every step that
+ * ran steps it ({@link stepDeliveryRide}) BEFORE the obstacles, and hands them
+ * its offset as the rider's lateral. The same offset is what `scene.ts`
+ * §`lateralOf` draws the rider at, exactly, so a crash is drawn as one
+ * (#1853). It is held in memory for the round, as the rest is, and never
+ * stored: a stored ride has no lateral field.
  *
  * ## A house is missed when its window has closed behind the rider
  *
@@ -109,6 +123,7 @@ import {
   type RoundOutcome,
   type WeekProgress,
 } from './round';
+import { startSteer, stepSteer, type SteerState } from './steer';
 import {
   drawRoundSeed,
   pickRoundTargets,
@@ -146,6 +161,8 @@ export interface DeliveryRide {
   readonly score: number;
   /** The assist's wider windows (#1813), for the throw and for the misses. */
   readonly widerWindows: boolean;
+  /** Where the rider has steered across the road (#1820), stepped on every step that ran. */
+  readonly steer: SteerState;
   /** The rider's distance after the last step that ran, metres. */
   readonly along: number;
   /** The round's end, once every house is settled or the ride has ended it. */
@@ -160,6 +177,11 @@ export interface DeliveryRideStart {
   readonly origin: CorridorOrigin;
   /** The rider's odometer reading at the press, metres. */
   readonly riderDistance: number;
+  /**
+   * The racing line's offset at the press, metres right of the centre line
+   * (`racing-line.ts` §`lineOffsetAt`): the steering starts from it.
+   */
+  readonly lineOffset: number;
   /**
    * The device's storage, for the week it has kept (`delivery-progress.ts`)
    * and the assist setting (`assist-preference.ts`), both read here so that
@@ -194,6 +216,8 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     { from: input.riderDistance, to: last.distance + TARGET_WINDOW_HALF_METRES },
     seed,
     assist.obstacles,
+    // A round runs solo only, so its rider can always steer (DL9).
+    true,
   );
   return {
     week,
@@ -211,6 +235,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     changes: [],
     score: 0,
     widerWindows: assist.widerWindows,
+    steer: startSteer(input.lineOffset),
     along: input.riderDistance,
     outcome: undefined,
   };
@@ -224,8 +249,6 @@ export interface DeliveryRideStep {
   readonly along: number;
   /** The rider's speed after them, metres a second, which a parcel thrown now carries. */
   readonly speed: number;
-  /** How far across the road the rider is drawn at a distance, metres right of the centre line. */
-  readonly lateral: (along: number) => number;
   /** A throw the rider asked for since the last step, already resolved to a side. */
   readonly throwTo?: ThrowSide | undefined;
 }
@@ -269,7 +292,8 @@ function recordMisses(
 
 /**
  * Run the frame's simulation steps through the round: the throw asked for,
- * the parcels, the misses and the obstacles, one tick of each a step.
+ * the parcels, the misses, the steering and the obstacles, one tick of each a
+ * step.
  * @see the header
  */
 export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): DeliveryRideStepped {
@@ -283,7 +307,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   // Never backwards: a room's correction does not run on a Delivery ride
   // (DL9), and a distance that went back would sweep no road.
   const to = Math.max(from, step.along);
-  let { round, throws, obstacleState, outcome } = ride;
+  let { round, throws, obstacleState, outcome, steer } = ride;
   const changes = [...ride.changes];
   let crashes = 0;
   let thrown = false;
@@ -299,8 +323,9 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     });
     thrown ||= thrownNow.thrown;
     throws = thrownNow.state;
+    steer = stepSteer(steer, DELIVERY_TICK_SECONDS);
     const obstaclesNow = stepObstacles(obstacleState, {
-      rider: { along: at, lateral: step.lateral(at), speed: (at - before) / DELIVERY_TICK_SECONDS },
+      rider: { along: at, lateral: steer.offset, speed: (at - before) / DELIVERY_TICK_SECONDS },
       obstacles: ride.obstacles,
     });
     obstacleState = obstaclesNow.state;
@@ -322,6 +347,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       obstacleState,
       changes,
       score: roundScore(changes),
+      steer,
       along: to,
       outcome,
     },

@@ -123,8 +123,8 @@ jobs:
       # --- The workspace toolchain, from here down (docs/agents/commands.md section 4a) ------
 
       # Reads .nvmrc so the runner and a contributor cannot disagree about the
-      # major version. ADR 0005 pins Node 24 "Krypton"; Node 26 becomes Active
-      # LTS on 2026-10-28 and the move happens on that date, not before.
+      # major version. ADR 0005 pins the Active LTS line: Node 26 since its
+      # amendment of 2026-10-29 (#1597), the day after 26 entered Active LTS.
       - name: Set up Node
         # Pinned to a full commit SHA, not a tag. Provenance, so a reviewer can
         # check rather than trust:
@@ -142,10 +142,18 @@ jobs:
       # cache in the dependency path of every job, to save a couple of seconds on
       # a workspace this size. Revisit when the install is slow enough to notice.
       # (#651 measured it: 3 to 5 s. Still not worth an action.)
+      #
+      # ⚠️ Since Node 26 (#1597) corepack itself comes from npm: Node stopped
+      # shipping it with v25, so `setup-node`'s Node has none. It is pinned to
+      # an exact version, has no dependencies and no install script, and
+      # `--ignore-scripts` holds it to that. The same pin is in every job here,
+      # in nightly.yml, release.yml and apps/instance/Dockerfile: move them
+      # together.
       - name: Enable pnpm through corepack
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
         run: |
+          npm install --global --ignore-scripts corepack@0.36.0
           corepack enable pnpm
           pnpm --version
 
@@ -419,6 +427,7 @@ jobs:
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
         run: |
+          npm install --global --ignore-scripts corepack@0.36.0
           corepack enable pnpm
           pnpm --version
 
@@ -588,6 +597,7 @@ jobs:
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
         run: |
+          npm install --global --ignore-scripts corepack@0.36.0
           corepack enable pnpm
           pnpm --version
 
@@ -705,6 +715,7 @@ jobs:
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
         run: |
+          npm install --global --ignore-scripts corepack@0.36.0
           corepack enable pnpm
           pnpm --version
 
@@ -752,6 +763,7 @@ jobs:
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
         run: |
+          npm install --global --ignore-scripts corepack@0.36.0
           corepack enable pnpm
           pnpm --version
 

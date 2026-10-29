@@ -18,6 +18,14 @@ export default defineConfig({
     // accidental `document` reference in a recorder still fails rather than
     // being hidden behind a working global.
     setupFiles: ['fake-indexeddb/auto'],
+    // ⚠️ Since Node 26 (#1597): Node 25 unflagged its own Web Storage, so a
+    // worker starts with a global `localStorage` that is `undefined` without
+    // `--localstorage-file`, and a `@vitest-environment jsdom` file then reads
+    // that rather than jsdom's — `localStorage.clear()` throws in 39 files.
+    // Turning Node's off leaves the global to jsdom, which is what every test
+    // here was written against. Node's storage is not what the app runs on
+    // anyway: the app runs in a browser.
+    execArgv: ['--no-experimental-webstorage'],
     // ⚠️ `browser/` as well as `src/`, since #63's fixture archive. The browser
     // gate's directory is not all Playwright specs: `pmtiles-fixture.ts` is a
     // pure encoder that `vite.browser.config.ts` calls at build time, and its
