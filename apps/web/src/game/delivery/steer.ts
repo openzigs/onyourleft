@@ -86,6 +86,17 @@ export const STEER_KEYS: Readonly<Record<string, SteerIntent>> = Object.freeze({
 });
 
 /**
+ * The same two keys by `KeyboardEvent.code`, the physical key, for a layout
+ * whose A and D keys type something else — AZERTY, Cyrillic or Greek — so
+ * the keys in the place a QWERTY rider finds them still steer. Read only when
+ * {@link STEER_KEYS} has no entry for the event's `key`.
+ */
+export const STEER_CODES: Readonly<Record<string, SteerIntent>> = Object.freeze({
+  KeyA: 'lane-left',
+  KeyD: 'lane-right',
+});
+
+/**
  * The lanes, left to right, in metres right of the centre line: the middle of
  * the left-hand lane, the centre line, and the middle of the right-hand lane,
  * which is the racing line's home. Proposed in #1820's pull request.
@@ -108,19 +119,24 @@ const FIELD = 'input, select, textarea, [contenteditable]:not([contenteditable="
 /** The parts of a key event {@link steerIntentOfKey} reads. */
 export type SteerKeyEvent = Pick<
   KeyboardEvent,
-  'key' | 'target' | 'repeat' | 'altKey' | 'ctrlKey' | 'metaKey' | 'defaultPrevented'
+  'key' | 'code' | 'target' | 'repeat' | 'altKey' | 'ctrlKey' | 'metaKey' | 'defaultPrevented'
 >;
 
 /**
  * The lane change a key asks for, or `undefined` when it asks for none —
- * because it is not in {@link STEER_KEYS}, or because it belongs to a focused
+ * because neither its key is in {@link STEER_KEYS} nor its physical key in
+ * {@link STEER_CODES}, or because it belongs to a focused
  * field, a shortcut, a handler that already took it, or a held key's repeat.
  */
 export function steerIntentOfKey(event: SteerKeyEvent): SteerIntent | undefined {
   if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) {
     return undefined;
   }
-  const intent = Object.hasOwn(STEER_KEYS, event.key) ? STEER_KEYS[event.key] : undefined;
+  const intent = Object.hasOwn(STEER_KEYS, event.key)
+    ? STEER_KEYS[event.key]
+    : Object.hasOwn(STEER_CODES, event.code)
+      ? STEER_CODES[event.code]
+      : undefined;
   if (intent === undefined) return undefined;
   const target = event.target;
   if (target instanceof Element && target.closest(FIELD) !== null) return undefined;
@@ -149,6 +165,11 @@ function refuse(constraint: string): never {
  * Steering from where the rider is drawn when the round starts, `offset`
  * metres right of the centre line: in the nearest lane, and moving to it from
  * there, so the round's first frame does not jump the rider sideways.
+ *
+ * Pass the racing line's offset at the rider's distance (`racing-line.ts`
+ * §`lineOffsetAt`), not the drawn `PlacedRider.lateral`: the drawn one has
+ * already made room for a bot or a ghost level with the rider, and a round
+ * started from it would start the rider in the wrong lane (#1853).
  *
  * @unwired #1816 runs a Delivery round inside a game ride; until it lands no
  * ride holds a steer state, and this is wired there, from the rider's drawn
