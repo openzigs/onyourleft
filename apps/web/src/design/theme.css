@@ -6570,10 +6570,11 @@ select.oyl-input {
 
 /* #1810: A DELIVERY ROUND'S THROWS, a row of three ride-time controls under
    *Pause* and *End ride*, each at #94's 72 px floor (set inline from
-   CONTROL_MINIMUM_PIXELS). Only a Delivery round shows it, and until #1816
-   no ride runs one, so no browser spec measures where it lands yet. The row
-   wraps, as .oyl-hud__controls does, rather than overflow a landscape
-   phone's narrow actions panel. */
+   CONTROL_MINIMUM_PIXELS). Only a Delivery round shows it, and since #1816
+   `ride-delivery.browser.spec.ts` measures where it lands on the stage
+   (§"A DELIVERY ROUND ON A PHONE" below is what it found). The row wraps, as
+   .oyl-hud__controls does, rather than overflow a landscape phone's narrow
+   actions panel. */
 .oyl-hud__throws {
   display: grid;
   gap: var(--oyl-space-xs);
@@ -7370,6 +7371,52 @@ select.oyl-input {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+/*
+ * A DELIVERY ROUND ON THE STAGE — #1816, found by
+ * `ride-delivery.browser.spec.ts`, the first gate to measure a round inside a
+ * real game ride (#1846's review asked for it).
+ *
+ * ⚠️ **A round's two readings size their track by its width, never their
+ * phrase.** On a tablet (51 rem wide or more) the secondary tier's last track
+ * is `minmax(max-content, 1fr)`, for the moving time, and *Houses* lands in it
+ * on the widest ride: its phrase, *10 delivered, 2 missed*, has a break after
+ * the comma that max-content ignores, so the track took the phrase's whole
+ * width and ran the field 9 px off a 1280×800 stage. `contain: inline-size`
+ * takes the field's content out of the track's sizing, and the phrase wraps
+ * inside the track the moving time sized, as it does on a phone.
+ *
+ * ⚠️ #419 asks that what gives way be recorded, so: **on a phone, on a
+ * Delivery round, the trainer line is not shown.** The round's throw control
+ * is a third row of 72 px controls in the actions panel, and with it the
+ * panel ran 22 px below a 736×360 stage at the round's start, 44 px once the
+ * line wrapped to two (*… (92 sent)*), carried the route panel and the map
+ * credit below it too, and at 360×800 and 360×752 without anchor
+ * positioning stood 12 px over the leaning rider. The line is the rider's
+ * evidence that the road reaches the trainer (#362), and it is the one thing
+ * in that panel nobody presses: it is visually hidden by clip, so a screen
+ * reader still reads it, the HUD's one region still says a trainer fault, and
+ * on a tablet, and on every ride without a round, it is where it always was.
+ * The tablet step of #1816 (for #733) is where the trade is looked at.
+ */
+.oyl-game--riding .oyl-hud__field--delivery {
+  contain: inline-size;
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__actions:has(.oyl-hud__throws) > .oyl-hud__trainer {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

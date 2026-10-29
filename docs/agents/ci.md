@@ -1258,6 +1258,9 @@ workers to come free, and the `game` run's 75 s after the third shard's part. Th
 `shell-demo.browser.spec.ts`, the demo's eight cases and the costliest of them a realistic-world
 climb, went to the shard with the most room, `browser-3` (its `chromium` part 3.1 to 4.6 m of
 720 s on #1720's runs below). The table keeps #1720's counts as the record.
+**And 14 since [#1816](https://github.com/openzigs/onyourleft/issues/1816)**:
+`ride-delivery.browser.spec.ts`, three cases that ride a Delivery round in the real game stage (one
+of them on Playwright's clock, about 25 s on a Mac), beside `ride-room.browser.spec.ts`.
 
 `playwright test --list` over each script's arguments gives 887 + 439 + 434 cases in 14 + 18 + 12
 files, the 1 760 cases in 44 files of the whole `chromium` project (the other four listed files

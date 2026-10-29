@@ -111,6 +111,9 @@ import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import { corridorRide, corridorRideKind } from './ride-corridor';
+import { writeDeliveryAssist } from '../src/game/delivery/assist-preference';
+import { writeDeliveryProgress } from '../src/game/delivery/delivery-progress';
+import { deliveryTown } from '../src/game/delivery/delivery-town-testing';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -398,6 +401,25 @@ const CORRIDOR_KIND = corridorRideKind(window.location.search);
 const CORRIDOR =
   CORRIDOR_KIND === undefined ? undefined : corridorRide(CORRIDOR_KIND, 'harness', errors);
 
+/**
+ * `ride.html?delivery=round` — #1816: the widest ride the picker starts, with
+ * a Delivery round on, started the way a developer starts one: the game's
+ * developer route (`#/game?delivery=on`, `shell/routes.ts`
+ * §`gameDeliveryFromHash`) and the Ride press. The week is day 7 with twelve
+ * houses on the round, the largest round there is (`round.ts`
+ * §`MOST_HOUSES`), and the assist is wider windows and no obstacles, each
+ * written through the product's own preference module before the shell
+ * renders, as a ride and Settings would. The route is a synthetic town whose
+ * houses stand near the road (`delivery-town-testing.ts`), handed over as the
+ * ride's corridor, so the round's houses are picked from it at the press.
+ *
+ * The page is ready with the round at its start, *12 left*.
+ * `ride-delivery.browser.spec.ts` rides it on to *10 delivered, 2 missed*
+ * itself, on Playwright's clock.
+ */
+const DELIVERY = new URLSearchParams(window.location.search).get('delivery') === 'round';
+const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
+
 const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
@@ -408,16 +430,25 @@ const GAME: GamePort = {
         // #1312: `?lap=riding` and `?lap=ended` ride a loop. @see LAP
         // #1552: `?corridor=` rides the corridor fixture's route.
         profile:
-          CORRIDOR !== undefined
-            ? CORRIDOR.profile
-            : new URLSearchParams(window.location.search).get('lap') === null
-              ? route()
-              : lapCircuit(),
+          DELIVERY_TOWN !== undefined
+            ? DELIVERY_TOWN.profile
+            : CORRIDOR !== undefined
+              ? CORRIDOR.profile
+              : new URLSearchParams(window.location.search).get('lap') === null
+                ? route()
+                : lapCircuit(),
         attempts: 1,
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
   ...(CORRIDOR === undefined ? {} : { loadWorldCorridor: CORRIDOR.loadWorldCorridor }),
+  // #1816: the Delivery town's corridor, ready at once, so the press fixes it.
+  ...(DELIVERY_TOWN === undefined
+    ? {}
+    : {
+        loadWorldCorridor: () =>
+          Promise.resolve({ kind: 'ready' as const, corridor: DELIVERY_TOWN.corridor }),
+      }),
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
@@ -897,6 +928,10 @@ function measure(): StageMeasurement {
   for (const control of document.querySelectorAll('.oyl-hud__room-row button')) {
     items.push(item(`room: ${textOf(control)}`, control));
   }
+  // #1816: a Delivery round's throws, a row of their own under Pause.
+  for (const control of document.querySelectorAll('.oyl-hud__throws button')) {
+    items.push(item(`throw: ${textOf(control)}`, control));
+  }
   // #400: the mute and the volume, when the rider turned sounds on.
   for (const control of document.querySelectorAll('.oyl-sound button, .oyl-sound input')) {
     items.push(item(`sound: ${textOf(control.closest('label') ?? control)}`, control));
@@ -1126,8 +1161,13 @@ async function run(): Promise<void> {
   if (host === null) {
     throw new Error('ride harness: #shell is missing from ride.html');
   }
-  // The real route, so the shell renders the real view.
-  window.location.hash = '#/game';
+  // The real route, so the shell renders the real view — and, for a Delivery
+  // round, the developer route that asks for one (#1816).
+  window.location.hash = DELIVERY ? '#/game?delivery=on' : '#/game';
+  if (DELIVERY) {
+    writeDeliveryProgress(localStorage, { day: 7, houses: 12, score: 0 });
+    writeDeliveryAssist(localStorage, { widerWindows: true, obstacles: 'none', noFail: false });
+  }
   // #400: a fresh origin every run, so absent means off.
   localStorage.removeItem(CUES_STORAGE_KEY);
   if (WITH_SOUNDS) {
@@ -1208,6 +1248,16 @@ async function run(): Promise<void> {
   ride.click();
 
   await until('the ride to take the stage', () => document.querySelector(`.${STAGE_CLASS}`));
+  // #1816: the round, at its start — twelve houses left on day 7.
+  if (DELIVERY) {
+    await until('the Delivery round at its start', () =>
+      [...document.querySelectorAll('.oyl-hud__field--delivery')].find(
+        (field) =>
+          field.querySelector('dt')?.textContent === 'Houses' &&
+          field.querySelector('dd')?.firstChild?.textContent === '12',
+      ),
+    );
+  }
   if (RACE_ROOM !== undefined) {
     // #785: the room answers the ride's hello as a race, and sends no frame.
     await until('the race room to be asked for', () =>
