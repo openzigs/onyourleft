@@ -736,6 +736,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         round holds the steer state and steps it, and the
                         rider is drawn exactly where the obstacles meet them,
                         a level bot or ghost making the room
+    src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
+                        a gamepad's throws and lane changes (#1821), through
+                        the W3C Gamepad API: polled once a frame by
+                        `hud/GamepadIntents.tsx`, only while a pad is there,
+                        to the same two ports the keys reach. Only a
+                        `standard`-mapping pad is read, at the W3C indices;
+                        one press is one intent; an axis outside −1..1 or not
+                        finite asks for nothing. ⚠️ Whether the Android
+                        shell delivers pads is spike 0027 (#1819), unmeasured
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
