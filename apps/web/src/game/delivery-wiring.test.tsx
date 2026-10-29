@@ -547,12 +547,13 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
   });
 
-  it('takes no throw while the ride is paused', async () => {
+  it('takes no throw while the ride is paused, and the next one once it rides again', async () => {
     stubSeed(script.seed);
+    const drawn: SceneFrame[] = [];
     mounted = await mount(
       <GameView
         port={port()}
-        renderer={() => Promise.resolve(capturingRenderer([]))}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
         now={() => nowMs}
         delivery
       />,
@@ -565,9 +566,13 @@ describe('a Delivery round inside a game ride — #1816', () => {
     await pressThrow('right');
     await clickThrough(buttonStarting('Resume'));
     for (let index = 0; index < 30; index += 1) await pump();
-    // No parcel was thrown: the flight would have landed by now, wasted, and none is in the air.
-    expect(offered.filter((kind) => kind.startsWith('delivery-'))).toEqual([]);
-    expect(field('Houses')?.detail).toBe('0\u00a0delivered, 0\u00a0missed');
+    // No parcel was drawn in the air after the pause: neither throw was taken.
+    expect(drawn.length).toBeGreaterThan(30);
+    expect(drawn.every((frame) => frame.delivery?.parcels.length === 0)).toBe(true);
+    // The control: the same key, riding, throws.
+    await pressThrow('left');
+    for (let index = 0; index < 3; index += 1) await pump();
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
   });
 });
 

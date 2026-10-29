@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PreferenceStorage } from '../hud/announce-preference';
+import { roadCorridor } from '../terrain';
 
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './assist-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery-progress';
@@ -28,13 +29,16 @@ import {
   stepDeliveryRide,
   type DeliveryRide,
 } from './ride-round';
+import { deliveryInView } from './in-view';
 import { FIRST_DAY_HOUSES, FRESH_WEEK, roundTally, type WeekProgress } from './round';
+import type { DeliveryTarget } from './targets';
 import {
   ASSISTED_THROW_SCALE,
   CARRIAGEWAY_HALF_WIDTH_METRES,
   DELIVERY_TICK_SECONDS,
   PARCEL_FLIGHT_TICKS,
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
+  TARGET_CATCH_RADIUS_METRES,
   THROW_WINDOW_AFTER_METRES,
   type ThrowTarget,
 } from './throw';
@@ -148,6 +152,41 @@ describe('a round at the press — #1816', () => {
       expect(CARRIAGEWAY_HALF_WIDTH_METRES + (thrown?.clear ?? -1)).toBeCloseTo(target.fromRoad, 9);
     });
     expect(new Set(ride.throwTargets.map((each) => each.side))).toEqual(new Set(['left', 'right']));
+  });
+
+  it('draws a delivered parcel coming down on the doorstep it was thrown to, on its side of the road', () => {
+    const ride = withoutObstacles(started());
+    for (const [index, target] of ride.throwTargets.slice(0, 2).entries()) {
+      const house = ride.targets[index] as DeliveryTarget;
+      let now = rideTo(ride, throwPoint(target)).ride;
+      now = stepDeliveryRide(now, {
+        ticks: 1,
+        along: now.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+        lateral: CENTRE,
+        throwTo: target.side,
+      }).ride;
+      // The last tick the parcel is in the air, and where the frame draws it then.
+      let last: DeliveryRide = now;
+      while (now.throws.inFlight.length > 0) {
+        last = now;
+        now = rideTo(now, now.along + SPEED * DELIVERY_TICK_SECONDS).ride;
+      }
+      expect(now.round.houses[target.position]).toBe('delivered');
+      const drawn = deliveryInView({
+        corridor: roadCorridor(town.profile, town.origin, last.along),
+        targets: last.targets,
+        round: last.round,
+        throws: last.throws,
+        obstacles: [],
+        obstacleState: last.obstacleState,
+      });
+      const parcel = drawn.parcels[0];
+      expect(parcel).toBeDefined();
+      const off = Math.hypot((parcel?.x ?? 0) - house.x, (parcel?.z ?? 0) - house.z);
+      // Within a tick's flight and the catch radius, never across the road.
+      expect(off).toBeLessThan(TARGET_CATCH_RADIUS_METRES + 1);
+    }
   });
 
   it('keeps no seed on the round (DL11): the ride is counts, positions and points only', () => {
