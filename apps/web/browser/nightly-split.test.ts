@@ -668,6 +668,21 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     );
   });
 
+  it('takes the coverage report in a job of its own, with no browser shard or other suite beside it — #1701', () => {
+    // After browser shard 1 in `heavy` the report took that job to 1 242 s of
+    // its 1 800 s stop (run 40853930991): a slow runner would have stopped the
+    // job and cancelled shard 1's tests with it.
+    const homes = [...jobsOf(nightly)].filter(([, job]) =>
+      job.includes('run: pnpm run test:coverage\n'),
+    );
+    expect(homes).toHaveLength(1);
+    const [, job = ''] = homes[0] ?? [];
+    const suites = [...job.matchAll(/^ +run: pnpm (?:run )?(\S+)/gm)].map((match) =>
+      String(match[1]),
+    );
+    expect(suites).toEqual(['install', 'test:coverage']);
+  });
+
   it('still takes and publishes the report when an earlier nightly step went red — #1286’s review', () => {
     // A step runs only if every step before it succeeded, unless it says
     // otherwise. Without this condition one red nightly browser check costs
