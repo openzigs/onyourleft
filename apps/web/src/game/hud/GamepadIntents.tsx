@@ -21,6 +21,12 @@
  * port object on each render neither restarts the polling nor forgets a
  * held button and throws it again.
  *
+ * ⚠️ **In the Android shell it also reads the numbered buttons
+ * `MainActivity` forwards** (#1858): the platform port is built with
+ * `support/capacitor.ts` §`isNativeShell`, so a generic pad, whose buttons
+ * the WebView drops, can throw as well as steer (`gamepad-port.ts`). In a
+ * browser nothing changes.
+ *
  * Gamepad input deliberately bypasses the #1432 touch lock, as keys do,
  * under ADR 0059 D-5.
  *
@@ -34,6 +40,7 @@ import { NO_PADS_HELD, readGamepads } from '../delivery/gamepad-input';
 import type { SteerInputPort } from '../delivery/steer-port';
 import { THROW_INTENTS, type ThrowIntent } from '../delivery/throw-input';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
+import { isNativeShell, platformCapacitor } from '../../support/capacitor';
 import { navigatorGamepads, type GamepadPort } from '../gamepad-port';
 
 export interface GamepadIntentsProps {
@@ -59,7 +66,7 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
     padsRef.current = pads;
   });
   useEffect(() => {
-    const platform = navigatorGamepads(window);
+    const platform = navigatorGamepads(window, isNativeShell(platformCapacitor()));
     let frame: number | undefined;
     const poll = (): void => {
       frame = undefined;

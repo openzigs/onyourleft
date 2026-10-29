@@ -3,16 +3,18 @@
 /**
  * #1821 — Delivery's intents from a gamepad, read poll by poll as
  * `hud/GamepadIntents.tsx` reads them, from snapshots shaped as the Gamepad
- * API's.
+ * API's. #1858 — a pad with no standard mapping, and the numbered buttons the
+ * Android shell forwards, listed as `gamepad-port.ts` lists them.
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { PadSnapshot } from '../gamepad-port';
+import { FORWARDED_BUTTONS, FORWARDED_MAPPING, type PadSnapshot } from '../gamepad-port';
 import {
   type GamepadIntent,
   type GamepadInputState,
   NO_PADS_HELD,
+  NUMBERED_BUTTONS,
   readGamepads,
   STANDARD_BUTTONS,
   STICK_PRESS,
@@ -91,13 +93,127 @@ describe('a standard pad, at the W3C indices', () => {
     );
   });
 
-  it('reads nothing from a pad whose mapping is not the standard one', () => {
-    expect(polls([[pad([0, 1, 2, 14, 15], 1, { mapping: '' })]]).intents).toEqual([]);
+  it('reads no button of a pad whose mapping is not the standard one (#1858: only its axis 0)', () => {
+    expect(polls([[pad([0, 1, 2, 14, 15], 0, { mapping: '' })]]).intents).toEqual([]);
     expect(polls([[pad([0], 0, { mapping: 'xr-standard' })]]).intents).toEqual([]);
   });
 
   it('reads each pad on its own, so two pads each throw', () => {
     expect(polls([[pad([2]), null, pad([1])]]).intents).toEqual(['left', 'right']);
+  });
+});
+
+/** A pad the browser does not map, as spike 0027's generic USB pad: its d-pad on axes 0 and 1. */
+function generic(dpadX = 0, dpadY = 0, down: readonly number[] = []): PadSnapshot {
+  return pad(down, 0, { mapping: '', axes: [dpadX, dpadY, 0, 0] });
+}
+
+/** The pad `gamepad-port.ts` lists for the shell's forwarded buttons: button `n` at index `n - 1`. */
+function forwarded(down: readonly number[]): PadSnapshot {
+  return {
+    connected: true,
+    mapping: FORWARDED_MAPPING,
+    axes: [],
+    buttons: Array.from({ length: FORWARDED_BUTTONS }, (_, index) => ({
+      pressed: down.includes(index + 1),
+    })),
+  };
+}
+
+describe('a pad with no standard mapping (#1858): its axis 0 changes lane', () => {
+  it.each([
+    [-1, 'lane-left'],
+    [1, 'lane-right'],
+  ] as const)('the d-pad at %d on axis 0 asks for %s', (x, intent) => {
+    expect(polls([[generic(x)]]).intents).toEqual([intent]);
+  });
+
+  it('asks for nothing from axis 1, up and down, or from any button of its own', () => {
+    expect(
+      polls([[generic(0, -1)], [generic(0, 1)], [generic(0, 0, [0, 1, 2, 3, 14, 15])]]).intents,
+    ).toEqual([]);
+  });
+
+  it('holds the standard stick’s hysteresis, on both sides', () => {
+    const at = (x: number): PadSnapshot[] => [generic(x)];
+    expect(
+      polls([
+        at(0.6),
+        at(STICK_RELEASE + 0.05), // still over
+        at(0.6),
+        at(STICK_RELEASE - 0.05), // let go
+        at(0.6),
+        at(-0.6),
+        at(-(STICK_RELEASE + 0.05)), // still over
+        at(-0.6),
+      ]).intents,
+    ).toEqual(['lane-right', 'lane-right', 'lane-left']);
+  });
+
+  it('changes lane once for a d-pad held over many polls', () => {
+    expect(polls(Array.from({ length: 50 }, () => [generic(-1)])).intents).toEqual(['lane-left']);
+  });
+
+  it('bounds its axis as a standard pad’s: no intent from NaN, Infinity or 5', () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, 5, -5]) {
+      expect(polls([[generic(value)]]).intents).toEqual([]);
+    }
+    expect(polls([[generic(1)], [generic(Number.NaN)], [generic(1)]]).intents).toEqual([
+      'lane-right',
+    ]);
+  });
+
+  it('stops on a disconnect mid-round, and reads as new when it comes back', () => {
+    const { intents, state } = polls([[generic(1)], [null]]);
+    expect(intents).toEqual(['lane-right']);
+    expect(state.held[0]).toBeUndefined();
+    expect(
+      polls([[generic(1)], [{ ...generic(1), connected: false }]]).state.held[0],
+    ).toBeUndefined();
+  });
+});
+
+describe('the numbered buttons the Android shell forwards (#1858)', () => {
+  it('throws, and only throws: each numbered button asks for one throw, and every throw has one', () => {
+    for (const intent of Object.values(NUMBERED_BUTTONS)) expect(THROW_INTENTS).toContain(intent);
+    expect(Object.values(NUMBERED_BUTTONS)).toHaveLength(THROW_INTENTS.length);
+    expect(new Set(Object.values(NUMBERED_BUTTONS))).toEqual(new Set(THROW_INTENTS));
+    for (const button of Object.keys(NUMBERED_BUTTONS).map(Number)) {
+      expect(Number.isInteger(button) && button >= 1 && button <= FORWARDED_BUTTONS).toBe(true);
+    }
+  });
+
+  it.each([
+    [4, 'left'],
+    [2, 'right'],
+    [3, 'next-house'],
+  ] as const)('button %i asks for %s', (button, intent) => {
+    expect(NUMBERED_BUTTONS[button]).toBe(intent);
+    expect(polls([[forwarded([button])]]).intents).toEqual([intent]);
+  });
+
+  it('asks for nothing from the other numbered buttons', () => {
+    const others = Array.from({ length: FORWARDED_BUTTONS }, (_, index) => index + 1).filter(
+      (button) => !Object.hasOwn(NUMBERED_BUTTONS, button),
+    );
+    expect(others).toHaveLength(13);
+    expect(polls([[forwarded(others)]]).intents).toEqual([]);
+  });
+
+  it('throws once for a button held across many polls, and again for the next press', () => {
+    const held = Array.from({ length: 40 }, () => [forwarded([2])]);
+    expect(polls([...held, [null], [forwarded([2])]]).intents).toEqual(['right', 'right']);
+  });
+
+  it('throws from the shell’s buttons and steers from the generic pad’s d-pad, side by side', () => {
+    expect(
+      polls([
+        [null, generic(1)],
+        [forwarded([4]), generic(1)],
+        [forwarded([4, 3]), generic(0)],
+        [null, generic(-1)],
+      ]).intents,
+    ).toEqual(['lane-right', 'left', 'next-house', 'lane-left']);
   });
 });
 
