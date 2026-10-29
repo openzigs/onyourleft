@@ -124,6 +124,7 @@ import {
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
+import { TRIM_PAINTS } from '../src/game/building-paint';
 import {
   COMMERCIAL_WINDOW_IN_BAY,
   facadePartAt,
@@ -132,16 +133,21 @@ import {
   REVEAL_GRAZE,
   SASH,
   SASH_TOP_SHARE,
+  SHOP_FRONT,
+  shopFrontPartAt,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
 } from '../src/game/facade';
 import {
+  CORNICE,
   FACADE_OFFSET,
+  FACADE_SHOPFRONT,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   mappedTown,
   STOREY_METRES,
   STYLE_COMMERCIAL,
+  STYLE_CORNICE,
   STYLE_EAVES,
   STYLE_OFFSET,
   STYLE_SASH,
@@ -4319,6 +4325,503 @@ function overhangShadowProbe(
   }
 }
 
+/**
+ * What {@link overhangPairProbes} publishes —
+ * #1679: a sunlit face under an overhang, read in its shadow and past it,
+ * with the shadows built and with `-overhang-shadows`.
+ */
+interface OverhangPairMeasurement {
+  /** Whether a face under the overhang was found facing the road, plain at every place read. */
+  readonly aimed: boolean;
+  /** How far the camera is from the face, metres. */
+  readonly metres: number;
+  /** The sun's elevation, and how far round the face's normal it is, degrees. */
+  readonly sunDegrees: number;
+  readonly roundDegrees: number;
+  /** How far the overhang stands proud of the face, metres: the cornice's projection, the awning's depth. */
+  readonly projection: number;
+  /** How far down the face its shadow reaches from the overhang's edge, metres: `projection · s.y / s.z`. */
+  readonly depth: number;
+  /** How wide on screen the strip read is, pixels: a shop front's stile; the wall's bay line is wide. */
+  readonly pixels: number;
+  /** In the shadow, with the shadows built, and with them out. */
+  readonly near: readonly number[];
+  readonly nearOff: readonly number[];
+  /** Past it, with the shadows built, and with them out. */
+  readonly far: readonly number[];
+  readonly farOff: readonly number[];
+  /** The cornice's only: the parapet's face between the wall's top and the cornice, both ways. */
+  readonly parapet: readonly number[];
+  readonly parapetOff: readonly number[];
+}
+
+const NO_OVERHANG_PAIR: OverhangPairMeasurement = {
+  aimed: false,
+  metres: 0,
+  sunDegrees: 0,
+  roundDegrees: 0,
+  projection: 0,
+  depth: 0,
+  pixels: 0,
+  near: [],
+  nearOff: [],
+  far: [],
+  farOff: [],
+  parapet: [],
+  parapetOff: [],
+};
+
+/** How far {@link overhangPairProbes}' camera is from each face: **4 m**. */
+const OVERHANG_PAIR_METRES = 4;
+
+/**
+ * Where {@link overhangPairProbes} reads a wall under a cornice, metres under its top — in
+ * the cornice's shadow **0.12 m** and past it **1 m** — and the parapet's
+ * face **0.1 m** over it, half way to the cornice; under a sun
+ * {@link CORNICE_PROBE_SUN_DEGREES} high square to the wall.
+ */
+const CORNICE_PROBE_AT = { near: 0.12, far: 1, parapet: -0.1 } as const;
+
+/** The sun {@link overhangPairProbes} sets for the cornice, square to the wall: **65°** high, so the shadow is 0.34 m down the wall. */
+const CORNICE_PROBE_SUN_DEGREES = 65;
+
+/**
+ * Where {@link overhangPairProbes} reads a shop front's stile, metres under its
+ * top — **0.95 m** and **1.75 m** — with the sun set
+ * {@link AWNING_PROBE_ROUND_DEGREES} round it and so low that the awning's
+ * shadow ends half way between them, **1.35 m** under.
+ */
+const AWNING_PROBE_AT = { near: 0.95, far: 1.75, end: 1.35 } as const;
+
+/**
+ * How far round the shop front's normal {@link overhangPairProbes} sets the
+ * sun: **50°**. Square to it, a sun that low glints off the stile into a
+ * level camera, more above the eye than below, and the glint is no shadow's.
+ */
+const AWNING_PROBE_ROUND_DEGREES = 50;
+
+/** One mapped face's vertical strip to read, and the face's frame. */
+interface OverhangLine {
+  readonly foot: { readonly x: number; readonly y: number; readonly z: number };
+  readonly nx: number;
+  readonly nz: number;
+  /** The face's top above its foot, metres. */
+  readonly height: number;
+  /** The overhang's depth proud of it, metres. */
+  readonly projection: number;
+  /** Along the face, the strip's width either side of `foot`, metres. */
+  readonly half: number;
+  readonly ex: number;
+  readonly ez: number;
+}
+
+/** The world {@link overhangPairProbes} reads in: #1581's mixed town, planned once for both. */
+interface OverhangPairWorld {
+  readonly town: ReturnType<typeof mixedTownFixture>;
+  readonly land: ReturnType<typeof landClassMask>;
+  readonly mappedBuildings: MappedBuildings;
+}
+
+/** One read {@link overhangPairProbes} makes: its frame, the places on screen, and the strip's width. */
+interface OverhangPairSetup {
+  readonly frame: SceneFrame;
+  readonly points: readonly { readonly x: number; readonly y: number; readonly z: number }[];
+  readonly pixels: number;
+}
+
+/**
+ * #1679: the frame that reads `line` at each of `below` (metres under its
+ * top) in a level view {@link OVERHANG_PAIR_METRES} out, square to it, under
+ * a sun `elevation` degrees high and `round` degrees round its normal along
+ * it — off square, so that its glint off the face is thrown away from the
+ * camera and not into it.
+ */
+function overhangPairSetup(
+  world: OverhangPairWorld,
+  canvas: HTMLCanvasElement,
+  chosen: { readonly along: number; readonly line: OverhangLine },
+  sunDegrees: { readonly elevation: number; readonly round: number },
+  below: readonly number[],
+): OverhangPairSetup {
+  const { town, land, mappedBuildings } = world;
+  const { profile, origin, corridor } = town;
+  const { line } = chosen;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  const at = (under: number): Point3 => ({
+    x: line.foot.x + line.nx * 0.01,
+    y: line.foot.y + line.height - under,
+    z: line.foot.z + line.nz * 0.01,
+  });
+  const points = below.map(at);
+  const ys = points.map((point) => point.y);
+  const eye = {
+    x: line.foot.x + line.nx * OVERHANG_PAIR_METRES,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+    z: line.foot.z + line.nz * OVERHANG_PAIR_METRES,
+  };
+  const headingX = -line.nx;
+  const headingZ = -line.nz;
+  const start = atStartLine(profile);
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(chosen.along) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings,
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  const elevation = (sunDegrees.elevation * Math.PI) / 180;
+  const round = (sunDegrees.round * Math.PI) / 180;
+  const across = Math.hypot(line.nx, line.nz);
+  const out = Math.cos(elevation) * Math.cos(round);
+  const along = Math.cos(elevation) * Math.sin(round);
+  const frame: SceneFrame = {
+    ...base,
+    scatter: [],
+    markers: [],
+    world: {
+      ...base.world,
+      sun: {
+        ...base.world.sun,
+        x: (line.nx / across) * out + line.ex * along,
+        y: Math.sin(elevation),
+        z: (line.nz / across) * out + line.ez * along,
+      },
+    },
+    camera: {
+      ...base.camera,
+      x: eye.x + headingX * CAMERA_BEHIND_METRES,
+      z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+      targetRoadY: eye.y,
+    },
+  };
+  // The strip's width on screen, at its middle height.
+  const middle = points[0] as Point3;
+  const left = pixelFor(frame, canvas, {
+    ...middle,
+    x: middle.x - line.ex * line.half,
+    z: middle.z - line.ez * line.half,
+  });
+  const right = pixelFor(frame, canvas, {
+    ...middle,
+    x: middle.x + line.ex * line.half,
+    z: middle.z + line.ez * line.half,
+  });
+  return { frame, points, pixels: Math.hypot(right.x - left.x, right.y - left.y) };
+}
+
+/** #1679: what the screen holds at each of `setup`'s places, as last rendered. */
+function overhangPairMeans(
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  setup: OverhangPairSetup,
+): number[][] {
+  type Point3 = OverhangPairSetup['points'][number];
+  const { frame } = setup;
+  // A column 0.1 m tall and three pixels wide, about each place.
+  const meanAt = (point: Point3): number[] => {
+    const top = pixelFor(frame, canvas, { ...point, y: point.y + 0.05 });
+    const bottom = pixelFor(frame, canvas, { ...point, y: point.y - 0.05 });
+    const x = Math.round((top.x + bottom.x) / 2) - 1;
+    const y0 = Math.round(Math.min(top.y, bottom.y));
+    const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
+    const pixelsRead = readRegion(gl, x, y0, 3, rows);
+    const sums = [0, 0, 0];
+    for (let k = 0; k < pixelsRead.length; k += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixelsRead[k + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixelsRead.length / 4));
+  };
+  return setup.points.map(meanAt);
+}
+
+/** The nearest of `lines` facing the road 8 to 40 m from it, from 1 000 m along it on. */
+function overhangLineFacingRoad(
+  town: ReturnType<typeof mixedTownFixture>,
+  lines: readonly OverhangLine[],
+): { readonly along: number; readonly line: OverhangLine } | undefined {
+  let chosen: { readonly along: number; readonly line: OverhangLine } | undefined;
+  for (let along = 1_000; along <= 2_100 && chosen === undefined; along += 50) {
+    const road = drawnRoadFrame(town.profile, town.origin, along);
+    if (road === undefined) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const line of lines) {
+      const distance = Math.hypot(road.x - line.foot.x, road.z - line.foot.z);
+      const facing =
+        ((road.x - line.foot.x) * line.nx + (road.z - line.foot.z) * line.nz) / distance;
+      if (distance < 8 || distance > 40 || facing < 0.7) continue;
+      if (distance < nearest) {
+        nearest = distance;
+        chosen = { along, line };
+      }
+    }
+  }
+  return chosen;
+}
+
+/**
+ * #1679, the cornice's: of the walls under a cornice (`STYLE_CORNICE`), two
+ * storeys high or more, on a four-cornered building, every bay line with
+ * plain wall either side at the places {@link CORNICE_PROBE_AT} reads.
+ */
+function corniceLinesOf(plans: readonly FootprintPlan[]): OverhangLine[] {
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  const lines: OverhangLine[] = [];
+  for (const plan of plans) {
+    if (!plan.shop.cornice || plan.footprint.length !== 8) continue;
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const skip = f(0, FACADE_OFFSET + 3);
+      const flags = f(0, STYLE_OFFSET + 1);
+      if (!(top > 0) || (flags & STYLE_CORNICE) === 0) continue;
+      const style = { flags, width: f(0, STYLE_OFFSET + 2), extra: f(0, STYLE_OFFSET + 3) };
+      let a: OverhangLine['foot'] | undefined;
+      let b: OverhangLine['foot'] | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      // Two storeys or more, so that every place read is above a shop front and its sign band.
+      if (a === undefined || b === undefined || bays < 2 || top < 2) continue;
+      const height = top * STOREY_METRES;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      const bay = length / bays;
+      const plain = (k: number): boolean =>
+        [CORNICE_PROBE_AT.near, CORNICE_PROBE_AT.far].every((below) =>
+          [-0.15, 0, 0.15].every((off) =>
+            [-0.05, 0, 0.05].every(
+              (up) =>
+                facadePartAt(
+                  k + off / bay,
+                  (height - below + up) / STOREY_METRES,
+                  top,
+                  skip,
+                  style,
+                ) === 'wall',
+            ),
+          ),
+        );
+      for (let k = 1; k < bays; k += 1) {
+        if (!plain(k)) continue;
+        lines.push({
+          foot: {
+            x: a.x + ((b.x - a.x) / length) * k * bay,
+            y: floor,
+            z: a.z + ((b.z - a.z) / length) * k * bay,
+          },
+          nx: f(0, 3),
+          nz: f(0, 5),
+          height,
+          projection: CORNICE.projection,
+          half: 0.15,
+          ex: (b.x - a.x) / length,
+          ez: (b.z - a.z) / length,
+        });
+      }
+    }
+  }
+  return lines;
+}
+
+/**
+ * #1679, the awning's: of the shop fronts under an awning (their `skip` its
+ * depth) in a white or cream trim, each one's left stile — its frame, the
+ * trim's paint, top to foot (`facade.ts` §`shopFrontPartAt`).
+ */
+function awningLinesOf(plans: readonly FootprintPlan[]): OverhangLine[] {
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  const lines: OverhangLine[] = [];
+  for (const plan of plans) {
+    if (!plan.shop.awning) continue;
+    // A white or cream trim: on a dark one the shadow's share of its light is
+    // under the gate's tolerance three times over, however deep it is.
+    const [r, g, b] = TRIM_PAINTS[plan.paint.trim] ?? [0, 0, 0];
+    if (0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5) continue;
+    const faces = plan.triangles.shopfront;
+    for (let at = 0; at + 6 * stride <= faces.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => faces[at + vertex * stride + k] as number;
+      if (f(0, FACADE_OFFSET + 2) !== FACADE_SHOPFRONT) continue;
+      const depth = f(0, FACADE_OFFSET + 3);
+      const height = f(0, STYLE_OFFSET + 3);
+      if (!(depth > 0) || height < AWNING_PROBE_AT.far + 0.3) continue;
+      let a: OverhangLine['foot'] | undefined;
+      let b: OverhangLine['foot'] | undefined;
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, FACADE_OFFSET + 1) !== 0) continue;
+        const point = { x: f(vertex, 0), y: f(vertex, 1), z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else b = point;
+      }
+      if (a === undefined || b === undefined) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      const ex = (b.x - a.x) / length;
+      const ez = (b.z - a.z) / length;
+      // The stile's middle: frame at either height, across the whole column read.
+      const u = SHOP_FRONT.frame / 2;
+      const framed = [AWNING_PROBE_AT.near, AWNING_PROBE_AT.far].every((below) =>
+        [-0.02, 0, 0.02].every(
+          (off) => shopFrontPartAt(u + off, height - below, length, height) === 'frame',
+        ),
+      );
+      if (!framed) continue;
+      lines.push({
+        foot: { x: a.x + ex * u, y: a.y, z: a.z + ez * u },
+        nx: f(0, 3),
+        nz: f(0, 5),
+        height,
+        projection: depth,
+        half: SHOP_FRONT.frame / 2,
+        ex,
+        ez,
+      });
+    }
+  }
+  return lines;
+}
+
+/**
+ * #1679: the cornice's and the awning's shadows reach the screen. #1581's
+ * mixed town, planned once for both, and a camera
+ * {@link OVERHANG_PAIR_METRES} out from each face, level:
+ *
+ * - **the cornice's**: the nearest of {@link corniceLinesOf} facing the road.
+ *   The sun square to it at {@link CORNICE_PROBE_SUN_DEGREES} throws the
+ *   shadow `CORNICE.projection · tan 65°` under the cornice's edge, which is
+ *   `OVERHANG_SHADOW.corniceRise` over the wall's top: the parapet's face
+ *   under the cornice and the wall 0.12 m under its top are in it, and 1 m
+ *   under is not.
+ * - **the awning's**: the nearest of {@link awningLinesOf} facing the road.
+ *   The sun is set {@link AWNING_PROBE_ROUND_DEGREES} round it so low that
+ *   the shadow, `depth · s.y / s.z` under the valance's foot
+ *   (`OVERHANG_SHADOW.awningEdge` under the top), ends
+ *   {@link AWNING_PROBE_AT}'s `end` under the top: the stile 0.95 m under is
+ *   in it and 1.75 m under is not.
+ *
+ * Both read with the shadows built, and then as the owner's
+ * `&levers=-overhang-shadows` takes them out (`overhangShadowsOf`, once for
+ * both, for it compiles every facade program again): the control, in which
+ * none of the places is in a shadow. The weathering is out for both, as
+ * #1658's probe has it.
+ */
+function overhangPairProbes(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): { readonly cornice: OverhangPairMeasurement; readonly awning: OverhangPairMeasurement } {
+  const town = mixedTownFixture();
+  const land = landClassMask(town.corridor);
+  const mappedBuildings = mappedBuildingsOf(
+    footprintPlans(town.corridor, land, town.profile, town.origin).plans,
+  );
+  const world: OverhangPairWorld = { town, land, mappedBuildings };
+  const corniced = overhangLineFacingRoad(town, corniceLinesOf(mappedBuildings.plans));
+  const awned = overhangLineFacingRoad(town, awningLinesOf(mappedBuildings.plans));
+  // `depth · s.y / s.z` is `depth · tan e / cos r`: the elevation that ends it at `end`.
+  const reach = AWNING_PROBE_AT.end - OVERHANG_SHADOW.awningEdge;
+  const round = (AWNING_PROBE_ROUND_DEGREES * Math.PI) / 180;
+  const awningDegrees =
+    awned === undefined
+      ? 0
+      : (Math.atan2(reach * Math.cos(round), awned.line.projection) * 180) / Math.PI;
+  const corniceSetup =
+    corniced === undefined
+      ? undefined
+      : overhangPairSetup(
+          world,
+          canvas,
+          corniced,
+          { elevation: CORNICE_PROBE_SUN_DEGREES, round: 0 },
+          [CORNICE_PROBE_AT.near, CORNICE_PROBE_AT.far, CORNICE_PROBE_AT.parapet],
+        );
+  const awningSetup =
+    awned === undefined
+      ? undefined
+      : overhangPairSetup(
+          world,
+          canvas,
+          awned,
+          { elevation: awningDegrees, round: AWNING_PROBE_ROUND_DEGREES },
+          [AWNING_PROBE_AT.near, AWNING_PROBE_AT.far],
+        );
+  const read = (setup: OverhangPairSetup | undefined): number[][] => {
+    if (setup === undefined) return [];
+    view.render(setup.frame);
+    view.render(setup.frame);
+    return overhangPairMeans(gl, canvas, setup);
+  };
+  weatheringOf(view, false);
+  let corniceOn: number[][];
+  let awningOn: number[][];
+  let corniceOff: number[][];
+  let awningOff: number[][];
+  try {
+    corniceOn = read(corniceSetup);
+    awningOn = read(awningSetup);
+    // The owner's lever, read as the page reads it.
+    overhangShadowsOf(
+      view,
+      overhangShadowsWithLevers(parseConfig('?levers=-overhang-shadows').leversOff),
+    );
+    corniceOff = read(corniceSetup);
+    awningOff = read(awningSetup);
+  } finally {
+    overhangShadowsOf(view, true);
+    weatheringOf(view, true);
+  }
+  const cornice: OverhangPairMeasurement =
+    corniceSetup === undefined
+      ? NO_OVERHANG_PAIR
+      : {
+          aimed: true,
+          metres: OVERHANG_PAIR_METRES,
+          sunDegrees: CORNICE_PROBE_SUN_DEGREES,
+          roundDegrees: 0,
+          projection: CORNICE.projection,
+          depth: CORNICE.projection * Math.tan((CORNICE_PROBE_SUN_DEGREES * Math.PI) / 180),
+          pixels: corniceSetup.pixels,
+          near: corniceOn[0] ?? [],
+          far: corniceOn[1] ?? [],
+          parapet: corniceOn[2] ?? [],
+          nearOff: corniceOff[0] ?? [],
+          farOff: corniceOff[1] ?? [],
+          parapetOff: corniceOff[2] ?? [],
+        };
+  const awning: OverhangPairMeasurement =
+    awningSetup === undefined || awned === undefined
+      ? NO_OVERHANG_PAIR
+      : {
+          ...NO_OVERHANG_PAIR,
+          aimed: true,
+          metres: OVERHANG_PAIR_METRES,
+          sunDegrees: awningDegrees,
+          roundDegrees: AWNING_PROBE_ROUND_DEGREES,
+          projection: awned.line.projection,
+          depth: reach,
+          pixels: awningSetup.pixels,
+          near: awningOn[0] ?? [],
+          far: awningOn[1] ?? [],
+          nearOff: awningOff[0] ?? [],
+          farOff: awningOff[1] ?? [],
+        };
+  return { cornice, awning };
+}
+
 /** What {@link weatheringProbe} publishes — #1661. */
 interface WeatheringMeasurement {
   /** Whether a mapped render wall was found facing the road, with plain wall at both heights. */
@@ -7065,6 +7568,10 @@ export interface RealisticMeasurement {
   readonly windowReveal: WindowRevealMeasurement;
   /** #1658: a sunlit mapped wall under its eaves, with the overhang's shadow and without. @see overhangShadowProbe */
   readonly overhangShadow: OverhangShadowMeasurement;
+  /** #1679: a sunlit mapped wall under a cornice, with the cornice's shadow and without. @see overhangPairProbes */
+  readonly corniceShadow: OverhangPairMeasurement;
+  /** #1679: a sunlit shop front under an awning, with the awning's shadow and without. @see overhangPairProbes */
+  readonly awningShadow: OverhangPairMeasurement;
   /** #1661: a mapped render wall's foot and above it, weathered and not. @see weatheringProbe */
   readonly weathering: WeatheringMeasurement;
   /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
@@ -9190,6 +9697,8 @@ const NO_REALISTIC: RealisticMeasurement = {
   mappedFacade: NO_MAPPED_FACADE,
   windowReveal: NO_WINDOW_REVEAL,
   overhangShadow: NO_OVERHANG_SHADOW,
+  corniceShadow: NO_OVERHANG_PAIR,
+  awningShadow: NO_OVERHANG_PAIR,
   weathering: NO_WEATHERING,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
@@ -10765,6 +11274,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const overhangShadow = overhangShadowProbe(view, gl, canvas);
   phaseEnds('realistic: the shadow under a mapped wall’s eaves — #1658');
 
+  // #1679, on the same view: a sunlit wall under a cornice and a shop front under an awning.
+  const { cornice: corniceShadow, awning: awningShadow } = overhangPairProbes(view, gl, canvas);
+  phaseEnds('realistic: the shadows under a cornice and an awning — #1679');
+
   // #1661, on the same view: a mapped render wall's foot and 1.5 m up, weathered and not.
   const weathering = weatheringProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped wall’s weathering — #1661');
@@ -11022,6 +11535,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedFacade,
     windowReveal,
     overhangShadow,
+    corniceShadow,
+    awningShadow,
     weathering,
     townEdge,
     lots,
