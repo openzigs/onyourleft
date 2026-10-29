@@ -58,7 +58,10 @@
  * its outcome is settled then and held: the ride goes on, the parcels still in
  * the air and the obstacles still crossing are drawn, and nothing after it
  * scores. A ride that ends first ends its round there ({@link endDeliveryRide}),
- * and a house still expecting then counts as missed, as `endRound` says.
+ * counting only the houses the rider has passed (#1857, the owner's ruling of
+ * 2026-10-29): one passed and not delivered is missed, and one not yet reached
+ * is neither, so a mis-pressed *End ride* costs no more than the houses
+ * already behind the rider.
  *
  * ## A house the town cannot draw is not on the round
  *
@@ -322,11 +325,19 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
 }
 
 /**
- * The round's end: the one it reached, or the one a ride ending now gives it,
- * a house still expecting counted as missed.
+ * The round's end: the one it reached, or the one a ride ending now gives it
+ * (#1857). Then a house whose window has closed behind the rider and that was
+ * not delivered is missed, though a parcel thrown to it is still in the air:
+ * the ride is over, so it cannot land. A house the rider has not yet passed is
+ * neither, and `round.ts` §`endRound` counts it for nothing.
  */
 export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
-  return ride.outcome ?? endRound(ride.week, ride.round);
+  if (ride.outcome !== undefined) return ride.outcome;
+  const scale = ride.widerWindows ? ASSISTED_THROW_SCALE : 1;
+  return endRound(
+    ride.week,
+    recordMisses(ride.round, NO_PARCELS, ride.throwTargets, ride.along, scale),
+  );
 }
 
 /**
