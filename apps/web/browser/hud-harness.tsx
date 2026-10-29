@@ -149,6 +149,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { recordDelivery, recordMiss, startRound, type Round } from '../src/game/delivery/round';
 import type { GhostOutcome } from '../src/game/ghost-outcome';
 import type { ChasedGap } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
@@ -291,6 +292,30 @@ export interface DraftMeasurement {
   readonly screen: Box;
 }
 
+/**
+ * A Delivery round's two readings, on one Delivery stage — #1812 — and the
+ * secondary panel they sit in. The `none` stage is the same ride with no
+ * round, measured so the round's panel can be compared with it.
+ */
+export interface DeliveryMeasurement {
+  /** `none`, `start` or `end`: see {@link DELIVERY_STAGES}. */
+  readonly stage: string;
+  /** The secondary panel. */
+  readonly panel: Box | undefined;
+  /** The round's fields, by label, with whether each value spills out of its box. */
+  readonly fields: readonly {
+    readonly label: string;
+    readonly box: Box;
+    readonly valueOverflows: boolean;
+  }[];
+  /** Every OTHER field's box on the stage, by label: laid out at no size when it gives way. */
+  readonly others: readonly { readonly label: string; readonly box: Box }[];
+  /** The ride's controls, `.oyl-hud__actions` (Pause / End ride): the panel and each control in it. */
+  readonly actions: readonly { readonly label: string; readonly box: Box }[];
+  /** The part of the stage a rider sees with no scrolling. */
+  readonly screen: Box;
+}
+
 /** A box, serialisable. */
 export interface Box {
   readonly left: number;
@@ -317,6 +342,8 @@ export interface HudMeasurement {
   readonly sound: readonly SoundControlMeasurement[];
   /** #787: the draft field and its gauge, on each draft stage. */
   readonly draft: readonly DraftMeasurement[];
+  /** #1812: a Delivery round's readings, on each Delivery stage. */
+  readonly delivery: readonly DeliveryMeasurement[];
 }
 
 declare global {
@@ -518,6 +545,30 @@ function Harness(): JSX.Element {
           />
         </section>
       ))}
+      {DELIVERY_STAGES.map(({ stage, round, day }) => (
+        <section
+          key={`delivery-${stage}`}
+          className="oyl-game oyl-game--riding"
+          style={STAGE_IN_FLOW}
+          data-oyl-delivery-stage={stage}
+        >
+          <HudPanel
+            profile={PROFILE}
+            state={STATE}
+            cadence={{ value: 92, live: true }}
+            heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
+            chases={[]}
+            paused={false}
+            onPause={() => undefined}
+            onEnd={() => undefined}
+            announcement=""
+            delivery={
+              round === undefined ? undefined : { round, week: { day, houses: 12, score: 0 } }
+            }
+          />
+        </section>
+      ))}
       {REGION_STAGES.map((stage) => (
         <section
           key={stage}
@@ -559,6 +610,34 @@ function Harness(): JSX.Element {
  * attribute, so no other measurement on this page counts them.
  */
 const DRAFT_STAGES = [59, 20] as const;
+
+/**
+ * #1812's Delivery stages: a solo ride with nobody chased, so the pacer's
+ * dashed field is on it, with no round (`none`, what the others are compared
+ * with), with the largest round at its start (`12 left`, day 7), and with it
+ * nearly over (`10 delivered, 2 missed`, a score of 10): the widest value and
+ * the widest phrase each field can show. Their own attribute, so no other
+ * measurement on this page counts them.
+ */
+const DELIVERY_STAGES: readonly {
+  readonly stage: string;
+  readonly round: Round | undefined;
+  readonly day: number;
+}[] = [
+  { stage: 'none', round: undefined, day: 1 },
+  { stage: 'start', round: startRound(12), day: 7 },
+  {
+    stage: 'end',
+    round: [10, 11].reduce(
+      (round, position) => recordMiss(round, position),
+      Array.from({ length: 10 }, (_, position) => position).reduce(
+        (round, position) => recordDelivery(round, position),
+        startRound(12),
+      ),
+    ),
+    day: 7,
+  },
+];
 
 /** The three region stages — see the header's "The live region". */
 const REGION_STAGES = ['empty', 'populated', 'hidden-control', 'sound'] as const;
@@ -674,6 +753,7 @@ function measure(): HudMeasurement {
     displacement: measureDisplacement(),
     sound: measureSound(),
     draft: measureDraft(),
+    delivery: measureDelivery(),
   };
 }
 
@@ -741,7 +821,11 @@ function ancestorHides(element: Element): boolean {
 function measureRegions(): RegionMeasurement[] {
   const regions = [...document.querySelectorAll<HTMLElement>('[data-oyl-announcer="hud"]')];
   return regions
-    .filter((region) => region.closest('[data-oyl-draft-stage]') === null)
+    .filter(
+      (region) =>
+        region.closest('[data-oyl-draft-stage]') === null &&
+        region.closest('[data-oyl-delivery-stage]') === null,
+    )
     .map((region) => {
       const style = window.getComputedStyle(region);
       const box = region.getBoundingClientRect();
@@ -796,6 +880,50 @@ function measureDraft(): DraftMeasurement[] {
           label: textOf(each.querySelector('.oyl-hud__label') ?? each),
           box: boxOf(each) as Box,
         })),
+      screen: {
+        left: bounds.left,
+        top: bounds.top,
+        right: bounds.left + window.innerWidth,
+        bottom: bounds.top + window.innerHeight,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+    };
+  });
+}
+
+/** The round's two fields on a Delivery stage — #1812. */
+const DELIVERY_LABELS: readonly string[] = ['Houses', 'Score'];
+
+/** @see DeliveryMeasurement */
+function measureDelivery(): DeliveryMeasurement[] {
+  return [...document.querySelectorAll('[data-oyl-delivery-stage]')].map((stage) => {
+    const fields = [...stage.querySelectorAll('.oyl-hud__field')];
+    const label = (each: Element): string => textOf(each.querySelector('.oyl-hud__label') ?? each);
+    const bounds = stage.getBoundingClientRect();
+    return {
+      stage: stage.getAttribute('data-oyl-delivery-stage') ?? '',
+      panel: boxOf(stage.querySelector('.oyl-hud__fields--secondary')),
+      fields: fields
+        .filter((each) => DELIVERY_LABELS.includes(label(each)))
+        .map((each) => {
+          const value = each.querySelector('.oyl-hud__value');
+          return {
+            label: label(each),
+            box: boxOf(each) as Box,
+            valueOverflows: value === null ? true : value.scrollWidth > value.clientWidth,
+          };
+        }),
+      others: fields
+        .filter((each) => !DELIVERY_LABELS.includes(label(each)))
+        .map((each) => ({ label: label(each), box: boxOf(each) as Box })),
+      actions: [...stage.querySelectorAll('.oyl-hud__actions')].flatMap((panel) => [
+        { label: 'the ride controls', box: boxOf(panel) as Box },
+        ...[...panel.querySelectorAll('button')].map((control) => ({
+          label: textOf(control),
+          box: boxOf(control) as Box,
+        })),
+      ]),
       screen: {
         left: bounds.left,
         top: bounds.top,

@@ -7340,11 +7340,20 @@ select.oyl-input {
  * still run the bottom row of a phone on its side a few pixels below the
  * stage — that is #1358's. `ride-room.browser.spec.ts` §"#1356" holds a room ride at every overlay
  * viewport, both ways, and undoes this block as its control.
+ *
+ * ⚠️ **A Delivery round's two readings (#1812) take the same places**, for
+ * the same height: *Houses* and *Score* would be a third row beside the
+ * pacer's dashed field. On a Delivery round what a rider rides against is
+ * the round, so the pacer, the ghost and the wind give way to it, as they do
+ * to a room's. `hud.browser.spec.ts` §"#1812" holds the secondary panel on a
+ * phone to the same two rows with the round's readings as without (no row
+ * added; the phrase under each value is a line of its own), and undoes this
+ * rule as its control.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding
-    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room, > .oyl-hud__field--delivery)
     > .oyl-hud__field--gives-way {
     position: absolute;
     width: 1px;
