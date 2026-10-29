@@ -22,6 +22,7 @@ import { HostedServicePanel } from '../ride-analysis/HostedServicePanel';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { InstanceDevices } from './InstanceDevices';
+import { CHANGE_NAME_TEXT, InstanceNamePanel } from './InstanceName';
 import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
 import { SyncPanel } from './SyncPanel';
 
@@ -59,7 +60,7 @@ import { SyncPanel } from './SyncPanel';
  */
 export const INSTANCE_RECEIVES: readonly string[] = [
   'This device’s public key, which is how the instance knows it is you. The private key never leaves this device.',
-  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. An instance keeps your earlier names there too, for moderation.',
+  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. An instance keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
@@ -108,7 +109,11 @@ export const INSTANCE_KEPT_VISIBLE: readonly string[] = [
 ];
 
 /** And once connected — #666. */
-export const INSTANCE_CONNECTED_KEPT_VISIBLE: readonly string[] = [DISCONNECT_KEEPS_RIDES];
+export const INSTANCE_CONNECTED_KEPT_VISIBLE: readonly string[] = [
+  DISCONNECT_KEEPS_RIDES,
+  // #906 item 2: what a rename keeps, said before the press.
+  CHANGE_NAME_TEXT.earlierNames,
+];
 
 /** Said where there is no port: nothing on this platform can connect. */
 export const INSTANCE_NO_PORT =
@@ -486,6 +491,16 @@ export function InstanceView({
           {disconnectControl}
         </section>
       )}
+
+      {/* #906 item 2: only for a device signed in; the name shown above is read back. */}
+      {state.kind === 'connected' ? (
+        <InstanceNamePanel
+          port={port}
+          onRenamed={() => {
+            void read();
+          }}
+        />
+      ) : null}
 
       {statements === undefined ? null : (
         <StatementsPanel

@@ -341,7 +341,7 @@ async function world(options?: Parameters<IdentityTesting['startIdentityInstance
 }
 
 describe('a copy of the app a website served seals nothing (#1192, ADR 0047 D-11)', () => {
-  it('lists no devices, mints no link code, reads no account-change log, revokes nothing and reads no moderators’ page — and sends nothing for them', async () => {
+  it('lists no devices, mints no link code, reads no account-change log, revokes nothing, renames nothing and reads no moderators’ page — and sends nothing for them', async () => {
     const w = await world();
     const send = wire(w);
     const card = (await w.instanceKeys.show()).card;
@@ -367,6 +367,8 @@ describe('a copy of the app a website served seals nothing (#1192, ADR 0047 D-11
       kind: 'unavailable',
       text: WEB_BUILD_TEXT,
     });
+    // #906 item 2: a rename is sealed-only too.
+    expect(await website.port.rename('Anna B')).toEqual({ kind: 'refused', text: WEB_BUILD_TEXT });
     expect(await createModerationPort(website.dependencies).mintInvite('A friend')).toEqual({
       kind: 'refused',
       text: WEB_BUILD_TEXT,

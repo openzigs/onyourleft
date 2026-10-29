@@ -34,13 +34,34 @@ export interface DeliveryTown {
   readonly buildings: MappedBuildings;
 }
 
+/**
+ * Where the town's houses stand: the first one's middle along the road, and
+ * every middle's distance from the centre line, metres. 50 and 12 unless
+ * given; #1817 moves both off round numbers, so a target's point is digits
+ * nothing else in a ride spells.
+ */
+export interface DeliveryTownLayout {
+  readonly firstAlong?: number;
+  readonly lateral?: number;
+}
+
+/** #1817's layout: every house's point, and so every target's, a run of digits. */
+export const DISTINCTIVE_TOWN_LAYOUT: DeliveryTownLayout = {
+  firstAlong: 50.3719,
+  lateral: 12.4683,
+};
+
 /** The town, its corridor named for the route `routeId` (a ride is drawn from it only then). */
-export function deliveryTown(routeId = 'delivery-town'): DeliveryTown {
+export function deliveryTown(
+  routeId = 'delivery-town',
+  layout: DeliveryTownLayout = {},
+): DeliveryTown {
   const profile = northRoute(DELIVERY_TOWN_METRES, (along) => 10 + 20 * Math.sin(along / 300));
   const origin = corridorOrigin(profile);
   const houses: BuildingFeature[] = [];
-  for (let along = 50; along < DELIVERY_TOWN_METRES - 50; along += 14) {
-    for (const lateral of [12, -12]) {
+  const middle = layout.lateral ?? 12;
+  for (let along = layout.firstAlong ?? 50; along < DELIVERY_TOWN_METRES - 50; along += 14) {
+    for (const lateral of [middle, -middle]) {
       houses.push(buildingBeside(profile, origin, [rectangleBeside(along, lateral, 8, 8)], 6));
     }
   }
