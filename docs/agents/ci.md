@@ -1592,7 +1592,9 @@ bump that leaves it saying 1.56.0 is the drift §4c forbids.
 It runs on `ubuntu-latest`, holds `permissions: contents: read`, and pins `actions/checkout` and
 `actions/setup-node` to full commit SHAs with the `gh api` command that produced each in a comment.
 All of that is §8 rules rather than preference. Node comes from `.nvmrc` and pnpm from
-`packageManager` via corepack, so the runner cannot drift from a contributor. There is deliberately
+`packageManager` via corepack, so the runner cannot drift from a contributor. Since Node 26
+([#1597](https://github.com/openzigs/onyourleft/issues/1597)) corepack itself is installed from npm
+at a pinned version first, because Node stopped shipping it with v25. There is deliberately
 **no dependency cache**: it would mean another action to pin and a writable cache in every job's
 dependency path, to save seconds on a workspace this size.
 

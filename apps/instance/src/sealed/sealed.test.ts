@@ -788,7 +788,9 @@ describe('`last_used_at` (D-8)', () => {
 describe('what the AAD binds', () => {
   it('names the session by the hash the instance stores', async () => {
     expect(await sha256Hex('token')).toBe(
-      toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', utf8Encode('token')))),
+      toHex(
+        new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(utf8Encode('token')))),
+      ),
     );
     expect(PAD_MINIMUM_BYTES).toBe(256);
   });
