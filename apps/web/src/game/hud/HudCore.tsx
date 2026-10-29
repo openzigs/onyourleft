@@ -48,6 +48,7 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
+import { GamepadIntents } from './GamepadIntents';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -258,6 +259,10 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         )}
         {/* #1820: a Delivery round's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}
+        {/* #1821: a gamepad's throws and lane changes, to the same two ports. Nothing drawn. */}
+        {props.throwing === undefined && props.steering === undefined ? null : (
+          <GamepadIntents throwing={props.throwing} steering={props.steering} />
+        )}
         {props.moreActions}
       </div>
 

@@ -28,6 +28,11 @@
  * so there is a crash. The shadow runs the same pure round
  * (`delivery/ride-round.ts`), and the HUD of the real ride is held to what it
  * predicts: a wiring that dropped a step, a throw or a crash is red there.
+ *
+ * Since #1853 the script also presses the lane keys ({@link STEERS}), so every
+ * case that rides it — DL5's writes and the stored ride among them — rides
+ * with steering in it, and each drawn frame's `steeredLateral` is read back
+ * off the input `sceneFrame` was handed and held to the shadow's.
  */
 
 import { act } from 'react';
@@ -50,6 +55,7 @@ import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
 import { roundTally, type WeekProgress } from './delivery/round';
+import { LANE_OFFSETS_METRES, startSteer, steerToward, type SteerIntent } from './delivery/steer';
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
@@ -90,13 +96,37 @@ vi.mock('./hud/announce', async (importOriginal) => {
 
 /** Set by one case: the round's step then faults, as a RangeError guard in it would. */
 const roundFaults = vi.hoisted(() => ({ on: false }));
+/** Every round `GameView` started, as `startDeliveryRide` returned it (#1853). */
+const startedRounds = vi.hoisted((): unknown[] => []);
 vi.mock('./delivery/ride-round', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./delivery/ride-round')>();
   return {
     ...actual,
+    startDeliveryRide: (...args: Parameters<typeof actual.startDeliveryRide>) => {
+      const started = actual.startDeliveryRide(...args);
+      startedRounds.push(started);
+      return started;
+    },
     stepDeliveryRide: (...args: Parameters<typeof actual.stepDeliveryRide>) => {
       if (roundFaults.on) throw new RangeError('the round faulted');
       return actual.stepDeliveryRide(...args);
+    },
+  };
+});
+
+/**
+ * The `steeredLateral` of every input `GameView` built a frame from, in order
+ * — #1853. `scene.ts` §`SceneInput.steeredLateral` is optional the unsafe way
+ * round, so it is read back off the input the drawn frame was made from.
+ */
+const steeredInputs = vi.hoisted((): (number | undefined)[] => []);
+vi.mock('./scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./scene')>();
+  return {
+    ...actual,
+    sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
+      steeredInputs.push(args[0].steeredLateral);
+      return actual.sceneFrame(...args);
     },
   };
 });
@@ -238,12 +268,20 @@ function buttonStarting(words: string): HTMLButtonElement | undefined {
   );
 }
 
+/**
+ * One animation frame, as a browser runs it: every callback asked for before
+ * the frame runs in it, with the one timestamp, and a callback asked for
+ * during it waits for the next. The clock moves once a frame, not once a
+ * callback, so another `requestAnimationFrame` consumer (the HUD's gamepad
+ * poll, #1821) cannot spend one of the ride's frames.
+ */
 async function pump(): Promise<void> {
-  const next = pending.shift();
-  if (next === undefined) throw new Error('the ride asked for no frame');
+  const due = pending;
+  if (due.length === 0) throw new Error('the ride asked for no frame');
+  pending = [];
   nowMs += FRAME_MS;
   await act(async () => {
-    next(nowMs);
+    for (const callback of due) callback(nowMs);
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -255,6 +293,20 @@ async function pressThrow(side: ThrowSide): Promise<void> {
     window.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: side === 'left' ? 'ArrowLeft' : 'ArrowRight',
+        cancelable: true,
+      }),
+    );
+    await Promise.resolve();
+  });
+}
+
+/** The key the HUD's lane keys map to a lane change (`steer.ts` §`STEER_KEYS`). */
+async function pressSteer(intent: SteerIntent): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: intent === 'lane-left' ? 'a' : 'd',
+        code: intent === 'lane-left' ? 'KeyA' : 'KeyD',
         cancelable: true,
       }),
     );
@@ -326,6 +378,22 @@ const SKIPPED = 1;
  */
 const FRAMES = 330;
 
+/**
+ * The lane keys pressed after each frame's tick, by frame index — #1853: from
+ * the lane the line starts in, two to the left, then back across the road and
+ * once past its edge, so the ride is steered into every lane and through the
+ * moves between them, and DL5's case rides with steering presses in it.
+ */
+const STEERS: ReadonlyMap<number, SteerIntent> = new Map([
+  [30, 'lane-left'],
+  [31, 'lane-left'],
+  [100, 'lane-right'],
+  [170, 'lane-right'],
+  [171, 'lane-right'],
+  [172, 'lane-right'],
+  [240, 'lane-left'],
+]);
+
 interface Script {
   readonly seed: number;
   /** The throw pressed after each frame's tick, by frame index. */
@@ -333,6 +401,8 @@ interface Script {
   /** What the shadow round came to. */
   readonly ride: DeliveryRide;
   readonly crashes: number;
+  /** Where the shadow round had steered the rider after each frame's tick, by frame index. */
+  readonly steered: readonly number[];
 }
 
 /**
@@ -348,13 +418,14 @@ function scriptFor(seed: number, shadow: readonly ShadowFrame[]): Script | undef
     profile: town.profile,
     origin: corridorOrigin(town.profile),
     riderDistance: 0,
+    lineOffset: lineOffsetAt(racingLine(town.profile), 0),
     storage: { getItem: (key) => store.get(key) ?? null, setItem: () => undefined },
   });
   vi.restoreAllMocks();
   if (ride === undefined) return undefined;
-  const line = racingLine(town.profile);
   const throws = new Map<number, ThrowSide>();
   const aimedAt = new Set<number>();
+  const steered: number[] = [];
   let crashes = 0;
   let asked: ThrowSide | undefined;
   shadow.forEach((frame, index) => {
@@ -364,13 +435,16 @@ function scriptFor(seed: number, shadow: readonly ShadowFrame[]): Script | undef
         ticks: frame.steps,
         along: frame.along,
         speed: frame.speed,
-        lateral: (along) => lineOffsetAt(line, along),
         throwTo: asked,
       });
       asked = undefined;
       ride = stepped.ride;
       crashes += stepped.crashes;
     }
+    steered.push(ride.steer.offset);
+    // The lane key pressed after this frame, as `GameView`'s port takes it.
+    const intent = STEERS.get(index);
+    if (intent !== undefined) ride = { ...ride, steer: steerToward(ride.steer, intent) };
     // One throw at each house but the skipped one, from where its parcel lands on the step.
     for (const target of ride.throwTargets) {
       if (target.position === SKIPPED || aimedAt.has(target.position)) continue;
@@ -385,7 +459,7 @@ function scriptFor(seed: number, shadow: readonly ShadowFrame[]): Script | undef
       break;
     }
   });
-  return { seed, throws, ride, crashes };
+  return { seed, throws, ride, crashes, steered };
 }
 
 let script: Script;
@@ -413,6 +487,8 @@ async function rideTheTrace(options: {
   readonly room?: Pick<Parameters<typeof GameView>[0], 'room' | 'roomId'> | undefined;
   /** How many frames to ride: the whole trace unless given. */
   readonly frames?: number | undefined;
+  /** Filled with the `steeredLateral` each drawn frame's input carried, by frame index. */
+  readonly steered?: Map<number, number | undefined> | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
@@ -428,10 +504,14 @@ async function rideTheTrace(options: {
   await settle();
   await clickThrough(buttonStarting('Ride '));
   for (let index = 0; index < (options.frames ?? FRAMES); index += 1) {
+    const built = steeredInputs.length;
     await pump();
+    if (steeredInputs.length > built) options.steered?.set(index, steeredInputs.at(-1));
     await options.onFrame?.(index);
     const side = options.delivery ? script.throws.get(index) : undefined;
     if (side !== undefined) await pressThrow(side);
+    const intent = options.delivery ? STEERS.get(index) : undefined;
+    if (intent !== undefined) await pressSteer(intent);
   }
   await settle();
 }
@@ -451,6 +531,10 @@ interface RideResult {
   readonly keptRiding: WeekProgress;
   readonly keptEnded: WeekProgress;
   readonly storedKeys: readonly string[];
+  /** The `steeredLateral` each drawn frame's input carried, by frame index (#1853). */
+  readonly steered: ReadonlyMap<number, number | undefined>;
+  /** Every round `GameView` started on the ride. */
+  readonly started: readonly unknown[];
 }
 
 /** The scripted ride, start to *End ride*, read and unmounted. */
@@ -462,8 +546,12 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
   localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK));
   const writes: Write[] = [];
   const drawn: SceneFrame[] = [];
-  await rideTheTrace({ delivery, trainer: trainerPort(writes), drawn });
+  const steered = new Map<number, number | undefined>();
+  startedRounds.length = 0;
+  await rideTheTrace({ delivery, trainer: trainerPort(writes), drawn, steered });
   const read = {
+    steered,
+    started: [...startedRounds],
     houses: field('Houses'),
     score: field('Score'),
     throwControl: mounted?.container.querySelector('[aria-label="Throw a parcel"]') !== null,
@@ -642,7 +730,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     },
   );
 
-  it('keeps a round the ride ends first, every house still expecting counted missed', async () => {
+  it('keeps the week as it was when End ride comes before any house is reached (#1857)', async () => {
     stubSeed(script.seed);
     mounted = await mount(
       <GameView
@@ -658,18 +746,54 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
-    // Every house missed and no assist: none is left, so the week is over (`round.ts` §`endRound`).
-    expect(readDeliveryProgress(localStorage)).toEqual({ day: 1, houses: 8, score: 0 });
+    // No house passed, so none is delivered or missed, and a mis-pressed End
+    // ride does not reset the week to a fresh one (`round.ts` §`endRound`).
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
   });
 
-  it('runs no round on a ride in a room, which is solo’s alone (DL9)', async () => {
+  it('keeps the week with the houses passed counted missed when End ride comes mid-round (#1857)', async () => {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    // Ride on without a throw until the first house's window has closed behind the rider.
+    for (let index = 0; index < FRAMES; index += 1) {
+      await pump();
+      if (field('Houses')?.detail.includes('1\u00a0missed')) break;
+    }
+    const houses = field('Houses');
+    expect(houses?.detail).toBe('0\u00a0delivered, 1\u00a0missed');
+    // The round is still going: houses are still to come, and nothing is kept yet.
+    expect(Number(houses?.value)).toBeGreaterThan(0);
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+    await clickThrough(buttonStarting('End ride'));
+    // The week the device keeps differs from the one it held: the passed house is missed.
+    expect(readDeliveryProgress(localStorage)).toEqual({
+      day: WEEK.day + 1,
+      houses: WEEK.houses - 1,
+      score: WEEK.score,
+    });
+  });
+
+  it('runs no round on a ride in a room, which is solo’s alone, and never steers (DL9)', async () => {
     const clock = new ManualClock();
     const room = new ScriptedRoom();
     const drawn: SceneFrame[] = [];
+    const steered = new Map<number, number | undefined>();
+    startedRounds.length = 0;
     await rideTheTrace({
       delivery: true,
       drawn,
+      // Past the script's first two lane presses, which `rideTheTrace` makes.
       frames: 40,
+      steered,
       room: {
         room: roomPortOver(() => room.link(), { timers: clock, now: () => nowMs }),
         roomId: 'room-1',
@@ -677,6 +801,11 @@ describe('a Delivery round inside a game ride — #1816', () => {
     });
     expect(drawn.length).toBeGreaterThan(30);
     expect(drawn.every((frame) => frame.delivery === undefined)).toBe(true);
+    // #1853: no round was started, and no frame was handed a steered offset.
+    expect(startedRounds).toEqual([]);
+    // One more than were rendered: the first frame is the one the view is prepared with.
+    expect(steered.size).toBe(drawn.length + 1);
+    expect([...steered.values()].every((each) => each === undefined)).toBe(true);
     expect(field('Houses')).toBeUndefined();
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
     await clickThrough(buttonStarting('End ride'));
@@ -712,6 +841,79 @@ describe('a Delivery round inside a game ride — #1816', () => {
   });
 });
 
+describe('lane steering inside a game ride — #1853', () => {
+  it(
+    'hands every frame of the round the offset the shadow round steered to, on the steps that ran',
+    SHARED_RIDE,
+    async () => {
+      const ride = await withRound();
+      // One more than were rendered: the first frame is the one the view is prepared with.
+      expect(ride.steered.size).toBe(ride.drawn.length + 1);
+      expect(ride.steered.size).toBeGreaterThan(100);
+      for (const [index, offset] of ride.steered) {
+        expect(offset, `frame ${String(index)}`).toBe(script.steered[index]);
+      }
+      // Non-vacuity: the ride was drawn in every lane, and part-way between them.
+      const drawnAt = new Set(ride.steered.values());
+      for (const lane of LANE_OFFSETS_METRES) expect(drawnAt).toContain(lane);
+      expect(
+        [...drawnAt].some(
+          (offset) => offset !== undefined && !LANE_OFFSETS_METRES.includes(offset),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it(
+    'starts the round with obstacles placed for a rider who can steer: some stand in a lane',
+    SHARED_RIDE,
+    async () => {
+      const ride = await withRound();
+      expect(ride.started).toHaveLength(1);
+      const [started] = ride.started as DeliveryRide[];
+      expect(started?.obstacles.some((obstacle) => obstacle.stands !== undefined)).toBe(true);
+      // And from the racing line at the press, as the shadow round was.
+      expect(started?.steer).toEqual(startSteer(lineOffsetAt(racingLine(town.profile), 0)));
+    },
+  );
+
+  it('hands no steered offset to any frame of a ride with no round', SHARED_RIDE, async () => {
+    const ride = await without();
+    expect(ride.steered.size).toBeGreaterThan(100);
+    expect([...ride.steered.values()].every((each) => each === undefined)).toBe(true);
+  });
+
+  it('takes no lane press while the ride is paused, and the next one once it rides again', async () => {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 20; index += 1) await pump();
+    const before = steeredInputs.at(-1);
+    expect(before).toBeDefined();
+    await clickThrough(buttonStarting('Pause'));
+    await pressSteer('lane-left');
+    await pressSteer('lane-left');
+    await clickThrough(buttonStarting('Resume'));
+    const resumed = steeredInputs.length;
+    for (let index = 0; index < 30; index += 1) await pump();
+    // Every frame after the pause was drawn where the rider was before it.
+    expect(steeredInputs.length - resumed).toBeGreaterThan(10);
+    expect(steeredInputs.slice(resumed).every((each) => each === before)).toBe(true);
+    // The control: the same key, riding, steers.
+    await pressSteer('lane-left');
+    for (let index = 0; index < 5; index += 1) await pump();
+    expect(steeredInputs.at(-1)).toBeLessThan(before as number);
+  });
+});
+
 /** The ride's stored channels, read back from the store on a fresh connection. */
 interface Recorded {
   readonly power: readonly (number | undefined)[];
@@ -725,9 +927,14 @@ interface Recorded {
 
 describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
   /** The scripted ride, recorded by the real ride controller against the #44 simulator, and saved. */
-  async function recordedRide(
-    delivery: boolean,
-  ): Promise<{ readonly recorded: Recorded; readonly houses: string | undefined }> {
+  async function recordedRide(delivery: boolean): Promise<{
+    readonly recorded: Recorded;
+    readonly houses: string | undefined;
+    /** Every field name of the stored activity and its streams. */
+    readonly names: readonly string[];
+    /** How many distinct steered offsets the ride's frames were handed. */
+    readonly steered: number;
+  }> {
     pending = [];
     nowMs = START_MS;
     const harness = createStoreHarness();
@@ -765,8 +972,10 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     });
     await controller.pair('trainer');
     await controller.start();
+    const steered = new Map<number, number | undefined>();
     await rideTheTrace({
       delivery,
+      steered,
       trainer: gameTrainerPortOver(controller),
       // The bench keeps whole seconds; five of the game's frames are one.
       onFrame: async (index) => {
@@ -795,7 +1004,24 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     mounted = undefined;
     if (activity === undefined || streams === undefined) throw new Error('the ride was not saved');
     const { channels } = streams;
+    // Every field name the store gave back, at any depth: what a stored ride carries.
+    const names: string[] = [];
+    const walk = (value: unknown): void => {
+      if (value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) return;
+      if (Array.isArray(value)) {
+        for (const each of value) walk(each);
+        return;
+      }
+      for (const [name, inner] of Object.entries(value)) {
+        names.push(name);
+        walk(inner);
+      }
+    };
+    walk(activity);
+    walk(streams);
     return {
+      names,
+      steered: new Set(steered.values()).size,
       recorded: {
         power: [...(channels.power ?? [])],
         cadence: [...(channels.cadence ?? [])],
@@ -828,6 +1054,12 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
         `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
       );
       expect(withRound.recorded).toStrictEqual(without.recorded);
+      // #1853, not recorded: the round was steered across the road, and the
+      // stored ride has no field for where across it the rider was.
+      expect(withRound.steered).toBeGreaterThan(3);
+      expect(withRound.names.length).toBeGreaterThan(10);
+      expect(withRound.names.filter((name) => /lateral|lane|steer|across/i.test(name))).toEqual([]);
+      expect([...withRound.names].sort()).toEqual([...without.names].sort());
     },
   );
 });

@@ -9,7 +9,7 @@ applies to it and to any other box.
 
 Every command below runs inside the instance's image. From the home deployment's directory
 (`apps/instance/deploy/home`) that is `docker compose run --rm --no-deps --entrypoint node migrate
-src/operator/cli.ts <command>`; on a clone with Node 24, it is `node src/operator/cli.ts <command>`
+src/operator/cli.ts <command>`; on a clone with Node 26, it is `node src/operator/cli.ts <command>`
 from `apps/instance`, with `OYL_INSTANCE_DATABASE` and `OYL_INSTANCE_BLOBS` pointing at the data.
 
 ## Is it up, and may riders be sent to it?

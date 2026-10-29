@@ -655,6 +655,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that writes to a trainer (found by rule, ADR 0059
                         §Amendments). Fails closed on `import.meta.glob`
                         and on a worker it cannot name
+    src/transfer/delivery-targets-not-exported.test.tsx
+    src/privacy/delivery-targets-never-sent.test.ts
+                        DL11 (ADR 0059 D-4, #1817): a real recorded round
+                        over `delivery-town-testing.ts`
+                        §`DISTINCTIVE_TOWN_LAYOUT` leaves no target point,
+                        seed or Delivery word in the stored ride, any table,
+                        the device's `localStorage` (the week is its three
+                        counts), any FIT/GPX/TCX export or the sync payload;
+                        and, in source, nothing under `instance/`,
+                        `transfer/`, `recording/` or `apps/instance/`
+                        imports `delivery/` (through relative chains),
+                        `delivery/` calls no `console`, and every throw in
+                        it has a case whose message is held free of the
+                        fixture's digits, counted against the throw sites
     src/game/delivery/ride-round.ts
                         a Delivery round inside a game ride (#1816, ADR
                         0059): started at the press (the week and the assist
@@ -718,7 +732,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `simulation.ts`. A room ride ignores it (DL9). With
                         steering, `obstacles.ts` may place an obstacle that
                         STANDS in one lane, one per stretch, so a lane is
-                        always clear. `@unwired` until #1816 runs a round
+                        always clear. Wired into the ride by #1853: the
+                        round holds the steer state and steps it, and the
+                        rider is drawn exactly where the obstacles meet them,
+                        a level bot or ghost making the room
+    src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
+                        a gamepad's throws and lane changes (#1821), through
+                        the W3C Gamepad API: polled once a frame by
+                        `hud/GamepadIntents.tsx`, only while a pad is there,
+                        to the same two ports the keys reach. Only a
+                        `standard`-mapping pad is read, at the W3C indices;
+                        one press is one intent; an axis outside −1..1 or not
+                        finite asks for nothing. ⚠️ Whether the Android
+                        shell delivers pads is spike 0027 (#1819), unmeasured
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`

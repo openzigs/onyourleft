@@ -329,8 +329,9 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // connect to an instance and type the name other riders will see; it is
     // sent to that instance on every Connect with a name typed, and kept only
     // when the instance has not seen the device before (#892's review: this
-    // said it was SENT only then, which `sign-in.ts` never did). A rename on
-    // the instance keeps each earlier name for moderation (migration 0004). Collected on #387's reasoning even for an instance the rider
+    // said it was SENT only then, which `sign-in.ts` never did). A rename,
+    // which the app offers since #906 item 2, sends the new name, and the
+    // instance keeps each earlier name for moderation (migration 0004). Collected on #387's reasoning even for an instance the rider
     // runs themselves, and plainly so for the project's own instance, which is
     // ours. `shared: false`: the instance is the rider's or ours, and the
     // project's traffic passes through Cloudflare as our service provider.
@@ -341,7 +342,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality', 'Account management'],
-    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance each time the rider presses Connect with a name typed, and kept by it with the rider’s account only when it has not seen this device before. If the name is later changed on the instance, the instance also keeps each earlier name, and when it changed, with the account, for moderation. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
+    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance each time the rider presses Connect with a name typed, and kept by it with the rider’s account only when it has not seen this device before. The rider can change it from the app, on the Instance screen (#906), which sends the new name to that instance; the instance also keeps each earlier name, and when it changed, with the account, for moderation. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
   },
   {
     // #777: the account an instance gives a rider, and the session that

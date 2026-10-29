@@ -382,3 +382,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   Node-adapter module under `apps/instance/src/analysis/` imports `ai`, and the agent's engine is
   written against a model port and a clock, so the Durable Object adapter is not foreclosed. The
   body above is not edited.
+- **2026-10-29** — **D-1's "Node 24" is now Node 26.** D-1 chose *"the Node version `.nvmrc`
+  pins"*, and [ADR 0005](0005-tech-stack.md)'s amendment of this date moves that pin to Node 26
+  ([#1597](https://github.com/openzigs/onyourleft/issues/1597)); the instance's image builds from
+  `node:26.13.0-bookworm-slim`, digest-pinned and mirrored as before. Read on v26.13.0 the same
+  day: `node:sqlite` loads, the types are still stripped from `src/main.ts` with no flag, and
+  `node:quic` is still not a built-in (`ERR_UNKNOWN_BUILTIN_MODULE`), so the WebTransport row's
+  reason holds. The body above is not edited.

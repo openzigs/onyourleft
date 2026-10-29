@@ -20,8 +20,10 @@ import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  startObstacles,
   type Obstacle,
 } from './obstacles';
+import { LANE_CHANGE_SECONDS, LANE_OFFSETS_METRES, steerToward } from './steer';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
@@ -83,14 +85,13 @@ function started(storage = storageOf(), riderDistance = 0): DeliveryRide {
     profile: town.profile,
     origin: town.origin,
     riderDistance,
+    lineOffset: 0,
     storage,
   });
   if (ride === undefined) throw new Error('the town gave no round');
   return ride;
 }
 
-/** The rider on a straight road on the centre line, as `GameView` hands it over. */
-const CENTRE = (): number => 0;
 const SPEED = 8;
 
 /** Ride `ride` on at {@link SPEED}, one step a call, to `along`, throwing `throwTo` on the first. */
@@ -108,7 +109,6 @@ function rideTo(
       ticks: 1,
       along: next,
       speed: SPEED,
-      lateral: CENTRE,
       ...(first && throwTo !== undefined ? { throwTo } : {}),
     });
     first = false;
@@ -163,7 +163,6 @@ describe('a round at the press — #1816', () => {
         ticks: 1,
         along: now.along + SPEED * DELIVERY_TICK_SECONDS,
         speed: SPEED,
-        lateral: CENTRE,
         throwTo: target.side,
       }).ride;
       // The last tick the parcel is in the air, and where the frame draws it then.
@@ -215,6 +214,7 @@ describe('a round at the press — #1816', () => {
       profile: empty.profile,
       origin: empty.origin,
       riderDistance: 0,
+      lineOffset: 0,
       storage: storageOf(),
     });
     expect(none).toBeUndefined();
@@ -261,7 +261,6 @@ describe('a round ridden, step by step — #1816', () => {
       ticks: 1,
       along: atEdge.ride.along + SPEED * DELIVERY_TICK_SECONDS,
       speed: SPEED,
-      lateral: CENTRE,
       throwTo: first.side,
     });
     expect(thrown.thrown).toBe(true);
@@ -340,14 +339,13 @@ describe('a round ridden, step by step — #1816', () => {
       ticks: 1,
       along: 5,
       speed: 1,
-      lateral: CENTRE,
     });
     expect(ridden.crashes).toBe(1);
     // And a rider who covered almost nothing, whatever speed they end on, has
     // not run into a bin 3 m behind them.
     const near = stepDeliveryRide(
       { ...crossing(2), along: 5 },
-      { ticks: 1, along: 5.01, speed: 100, lateral: CENTRE },
+      { ticks: 1, along: 5.01, speed: 100 },
     );
     expect(near.crashes).toBe(0);
   });
@@ -358,7 +356,6 @@ describe('a round ridden, step by step — #1816', () => {
       ticks: 0,
       along: 500,
       speed: SPEED,
-      lateral: CENTRE,
       throwTo: 'left',
     });
     expect(stepped.ride).toBe(ride);
@@ -373,14 +370,12 @@ describe('a round ridden, step by step — #1816', () => {
         ticks: 1,
         along: (300 * step) / 4,
         speed: SPEED,
-        lateral: CENTRE,
       }).ride;
     }
     const together = stepDeliveryRide(ride, {
       ticks: 4,
       along: 300,
       speed: SPEED,
-      lateral: CENTRE,
     });
     expect(together.ride).toEqual(apart);
   });
@@ -388,10 +383,69 @@ describe('a round ridden, step by step — #1816', () => {
   it('refuses a step of a part or a negative number of ticks, naming no position', () => {
     const ride = started();
     for (const ticks of [-1, 0.5]) {
-      expect(() => stepDeliveryRide(ride, { ticks, along: 1, speed: 1, lateral: CENTRE })).toThrow(
+      expect(() => stepDeliveryRide(ride, { ticks, along: 1, speed: 1 })).toThrow(
         'a Delivery ride step runs a whole number of ticks, 0 or more',
       );
     }
+  });
+});
+
+describe('a round the rider steers — #1853', () => {
+  /** The ride with one bin standing in `stands`, 40 m ahead, and nothing else in the road. */
+  function binIn(stands: number): DeliveryRide {
+    const ride = started();
+    return {
+      ...ride,
+      obstacles: [{ kind: 'bin', along: 40, stands }],
+      obstacleState: startObstacles([{ kind: 'bin', along: 40, stands }]),
+    };
+  }
+
+  it('places obstacles that stand in a lane, as a ride the rider can steer has', () => {
+    const { obstacles } = started();
+    expect(obstacles.length).toBeGreaterThan(0);
+    const standing = obstacles.filter((obstacle) => obstacle.stands !== undefined);
+    expect(standing.length).toBeGreaterThan(0);
+    for (const obstacle of standing) expect(LANE_OFFSETS_METRES).toContain(obstacle.stands);
+  });
+
+  it('starts in the lane nearest the racing line at the press, and from where the line is', () => {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 1.5,
+      storage: storageOf(),
+    });
+    expect(ride?.steer).toEqual({ lane: 2, offset: 1.5 });
+  });
+
+  it('meets the obstacles at the steered offset: in the bin’s lane a crash, a lane away none', () => {
+    // The rider starts on the centre line, lane 1. A bin standing there is hit…
+    expect(rideTo(binIn(0), 60).crashes).toBe(1);
+    // …a bin a lane to the left is not, until the rider steers into it.
+    const left = LANE_OFFSETS_METRES[0] as number;
+    expect(rideTo(binIn(left), 60).crashes).toBe(0);
+    const steered = binIn(left);
+    expect(rideTo({ ...steered, steer: steerToward(steered.steer, 'lane-left') }, 60).crashes).toBe(
+      1,
+    );
+  });
+
+  it('steps the steering on each step that ran, so four in one call move it four steps’ worth', () => {
+    const ride = started();
+    const pressed = { ...ride, steer: steerToward(ride.steer, 'lane-left') };
+    const one = stepDeliveryRide(pressed, { ticks: 1, along: 0.4, speed: SPEED }).ride;
+    const four = stepDeliveryRide(pressed, { ticks: 4, along: 1.6, speed: SPEED }).ride;
+    const lane = (LANE_OFFSETS_METRES[1] as number) - (LANE_OFFSETS_METRES[0] as number);
+    const perStep = (lane * DELIVERY_TICK_SECONDS) / LANE_CHANGE_SECONDS;
+    expect(one.steer.offset).toBeCloseTo(-perStep, 9);
+    expect(four.steer.offset).toBeCloseTo(-4 * perStep, 9);
+    // A frame no step ran on moves it not at all.
+    expect(stepDeliveryRide(pressed, { ticks: 0, along: 5, speed: SPEED }).ride.steer).toBe(
+      pressed.steer,
+    );
   });
 });
 
@@ -418,13 +472,89 @@ describe('the round’s end — #1816', () => {
     expect(later.ride.score).toBe(ride.score);
   });
 
-  it('ends a round the ride ends first, a house still expecting counted missed', () => {
+  it('ends a round the ride ends first, counting no house the rider has not reached (#1857)', () => {
     const ride = withoutObstacles(started());
     const first = ride.throwTargets[0] as ThrowTarget;
     const one = rideTo(rideTo(ride, throwPoint(first)).ride, throwPoint(first) + 12, first.side);
     expect(one.ride.outcome).toBeUndefined();
     const outcome = endDeliveryRide(one.ride);
-    expect(outcome).toMatchObject({ delivered: 1, missed: FIRST_DAY_HOUSES - 1 });
+    expect(outcome).toMatchObject({ delivered: 1, missed: 0, perfect: false });
+    // Not perfect, so no house is added; nothing missed, so none is dropped.
+    expect(outcome.next).toEqual({ day: 2, houses: FIRST_DAY_HOUSES, score: 1 });
+  });
+
+  it('keeps a day-2 round ended after two deliveries and one passed house as just those, read back from the device (#1857)', () => {
+    const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    let ride = withoutObstacles(started(storage));
+    expect(ride.week).toEqual(week);
+    const [first, second, third, fourth] = ride.throwTargets as [
+      ThrowTarget,
+      ThrowTarget,
+      ThrowTarget,
+      ThrowTarget,
+    ];
+    for (const target of [first, second]) {
+      ride = rideTo(ride, throwPoint(target)).ride;
+      ride = rideTo(ride, ride.along + 1, target.side).ride;
+    }
+    // The third house passed with no throw, and the ride ended short of the fourth's window.
+    ride = rideTo(ride, third.along + THROW_WINDOW_AFTER_METRES + 2).ride;
+    expect(ride.along).toBeLessThan(fourth.along);
+    expect(roundTally(ride.round)).toEqual({
+      expecting: FIRST_DAY_HOUSES - 3,
+      delivered: 2,
+      missed: 1,
+      score: 2,
+    });
+    expect(ride.outcome).toBeUndefined();
+    const outcome = endDeliveryRide(ride);
+    expect(outcome).toMatchObject({ delivered: 2, missed: 1, perfect: false, weekOver: false });
+    expect(keepDeliveryWeek(storage, outcome)).toBe(true);
+    // Tomorrow, one house fewer for the one missed, and the two delivered scored:
+    // no fresh week from the five never reached.
+    expect(readDeliveryProgress(storage)).toEqual({
+      day: 3,
+      houses: FIRST_DAY_HOUSES - 1,
+      score: week.score + 2,
+    });
+  });
+
+  it('counts a house passed with a parcel still in the air as missed when the ride ends (#1857)', () => {
+    let ride = withoutObstacles(started());
+    const first = ride.throwTargets[0] as ThrowTarget;
+    // Thrown from the doorstep's own distance, inside the window but too late
+    // to land on it, and the rider past the window before the parcel comes down.
+    ride = rideTo(ride, first.along).ride;
+    ride = rideTo(ride, first.along + THROW_WINDOW_AFTER_METRES + 0.5, first.side).ride;
+    expect(ride.throws.inFlight).toHaveLength(1);
+    expect(ride.round.houses[first.position]).toBe('expecting');
+    expect(endDeliveryRide(ride)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
+  it('counts no house missed whose widened window the rider is still in when the ride ends (#1857)', () => {
+    const ride = withoutObstacles({ ...started(), widerWindows: true });
+    const first = ride.throwTargets[0] as ThrowTarget;
+    // Past the usual window's closing edge, inside the assist's wider one.
+    const along = first.along + THROW_WINDOW_AFTER_METRES + 1;
+    expect(along).toBeLessThan(first.along + THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE);
+    const riding = rideTo(ride, along).ride;
+    expect(endDeliveryRide(riding)).toMatchObject({ delivered: 0, missed: 0 });
+    // Without the assist the same place has closed the window: the house is missed.
+    const plain = rideTo(withoutObstacles(started()), along).ride;
+    expect(endDeliveryRide(plain)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
+  it('leaves the week as it was when the ride ends before any house is reached (#1857)', () => {
+    const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    const ride = started(storage);
+    const first = ride.throwTargets[0] as ThrowTarget;
+    const short = rideTo(ride, first.along - 30).ride;
+    const outcome = endDeliveryRide(short);
+    expect(outcome).toMatchObject({ delivered: 0, missed: 0, weekOver: false });
+    expect(keepDeliveryWeek(storage, outcome)).toBe(true);
+    expect(readDeliveryProgress(storage)).toEqual(week);
   });
 
   it('keeps the next day’s counts, which a fresh reader of the device reads back', () => {

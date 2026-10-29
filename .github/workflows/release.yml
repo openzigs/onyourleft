@@ -51,6 +51,9 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # Node 26 ships no corepack (#1597): rules.yml's setup says why it is
+      # installed from npm, at this pinned version.
+      - run: npm install --global --ignore-scripts corepack@0.36.0
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
 

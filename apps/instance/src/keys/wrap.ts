@@ -114,7 +114,7 @@ export async function wrapPrivateKey(
     readonly keyId: string;
     readonly instanceOrigin: string;
   },
-  pkcs8: Uint8Array,
+  pkcs8: Uint8Array<ArrayBuffer>,
 ): Promise<{ readonly iv: Uint8Array; readonly wrapped: Uint8Array }> {
   const iv = crypto.getRandomValues(new Uint8Array(WRAP_IV_BYTES));
   const wrapped = await crypto.subtle.encrypt(
@@ -164,7 +164,7 @@ export async function unwrapPrivateKey(
   },
   sealed: { readonly iv: Uint8Array; readonly wrapped: Uint8Array },
 ): Promise<InstanceCryptoKey | undefined> {
-  let pkcs8: Uint8Array | undefined;
+  let pkcs8: Uint8Array<ArrayBuffer> | undefined;
   try {
     pkcs8 = new Uint8Array(
       await crypto.subtle.decrypt(
