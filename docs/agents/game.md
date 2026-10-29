@@ -687,6 +687,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `realistic-delivery.browser.spec.ts` (nightly); that an
                         ordinary frame is never held to 53 is
                         `realistic-budget-village.test.ts`
+    src/game/delivery/steer.ts
+                        lane steering in a Delivery round (#1820): three
+                        lanes, a steady 0.4 s move between them, keys A and
+                        D through `hud/SteerKeys.tsx` and `steer-port.ts`. A
+                        DRAWING: it reaches `scene.ts` §`lateralOf` through
+                        `SceneInput.steeredLateral` (the rider only) and the
+                        obstacles through their rider offset, never
+                        `simulation.ts`. A room ride ignores it (DL9). With
+                        steering, `obstacles.ts` may place an obstacle that
+                        STANDS in one lane, one per stretch, so a lane is
+                        always clear. `@unwired` until #1816 runs a round
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
