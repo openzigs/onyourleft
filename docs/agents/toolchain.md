@@ -29,8 +29,11 @@ ADR 0005's amendment of that date). It entered Active LTS on 2026-10-28 with 26.
 instance's image pins that release by digest. Four places name the major and move together:
 `.nvmrc` (every workflow's `setup-node` reads it), `engines.node` in the root `package.json`
 (binding through `engineStrict: true` in `pnpm-workspace.yaml`; pnpm 11 ignores `.npmrc`'s `engine-strict`), both `FROM` lines of
-`apps/instance/Dockerfile`, and `@types/node` in the four `package.json` files that name it. The
-next line is 27: `nodejs/Release/schedule.json`, read 2026-10-29, gives it Active LTS on
+`apps/instance/Dockerfile`, and `@types/node` in the four `package.json` files that name it.
+⚠️ **Node 26 ships no corepack** (Node dropped it in v25), so every place that runs `corepack
+enable pnpm` — each job in `rules.yml` and `nightly.yml`, `release.yml`, the instance's
+`Dockerfile`, the README — first runs `npm install --global --ignore-scripts corepack@0.36.0`; move
+that pin in all of them at once. The next line is 27: `nodejs/Release/schedule.json`, read 2026-10-29, gives it Active LTS on
 **2027-10-20** (an odd major with an LTS date, unlike 25). Move on that date, not before.
 ⚠️ Since [#1200](https://github.com/openzigs/onyourleft/issues/1200) `.github/dependabot.yml` **ignores semver-major updates of `@types/node`**: types ahead of the
 runtime let code typecheck against an API that does not exist when it runs, so the types' major

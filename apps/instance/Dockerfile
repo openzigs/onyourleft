@@ -46,7 +46,9 @@ FROM ghcr.io/openzigs/node:26.13.0-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8ba
 # the instance depends on has an install script to run (pnpm-workspace.yaml).
 WORKDIR /srv
 ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable pnpm
+# Node 26 ships no corepack (#1597), so it comes from npm at the version
+# .github/workflows/rules.yml pins; it has no dependency and no install script.
+RUN npm install --global --ignore-scripts corepack@0.36.0 && corepack enable pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/instance/package.json apps/instance/
 COPY packages/domain/package.json packages/domain/

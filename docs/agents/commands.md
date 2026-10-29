@@ -105,11 +105,14 @@ Executed in this order on a clean clone on 2026-09-03, from nothing installed to
 nvm install && nvm use
 
 # pnpm 11, from the `packageManager` field in package.json rather than a global
-# install, so the version is the one the lockfile was written by. Corepack ships
-# with Node. The first `pnpm` command after this downloads that exact version,
+# install, so the version is the one the lockfile was written by. ⚠️ Corepack no
+# longer ships with Node (since v25; #1597), so it is installed from npm first,
+# at the version CI pins (.github/workflows/rules.yml). The first `pnpm` command
+# after `corepack enable` downloads that exact version,
 # and in an interactive terminal corepack asks before it does — answer yes, or
 # set COREPACK_ENABLE_DOWNLOAD_PROMPT=0. CI sets neither because corepack does
 # not prompt when CI=true.
+npm install --global --ignore-scripts corepack@0.36.0
 corepack enable pnpm
 
 # Install. --frozen-lockfile is what CI runs: it fails rather than quietly

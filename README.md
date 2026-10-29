@@ -204,6 +204,7 @@ Needs Node 26 and pnpm 11. Both are pinned by the repository — `.nvmrc` for No
 
 ```bash
 nvm install && nvm use        # or any version manager; `node --version` must report v26
+npm install --global --ignore-scripts corepack@0.36.0   # Node 26 ships no corepack
 corepack enable pnpm
 pnpm install --frozen-lockfile
 
