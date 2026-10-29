@@ -623,6 +623,17 @@ export function SettingsView({
         />
 
         {/*
+          #1813: how the rider plays Delivery, beside the kit they ride it in.
+          Here rather than in *The ride* because there it made that card 2.25×
+          *Your words* beside it on the CI runner (2.19× locally, compact),
+          over #1026's balance rule (`sections.browser.spec.ts`
+          §`ROW_BALANCE_LIMIT`); here it evens this card's row instead.
+        */}
+        <DeliveryAssistPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
+
+        {/*
           #946: the menus' own switch and volume — how the app answers the
           rider's own presses, apart from the ride's sounds in *Look and sound*.
           Here rather than beside those because there it made that card 2.07×
@@ -669,11 +680,6 @@ export function SettingsView({
         />
 
         <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
-
-        {/* #1813: the assisted Delivery setting, beside the other game choices. */}
-        <DeliveryAssistPanel
-          storage={announcements === undefined ? deviceStorage() : announcements}
-        />
 
         {/* #787: whether a ride in a room shows and says this rider's draft. */}
         <DraftReadingPanel
@@ -1418,14 +1424,23 @@ export const DELIVERY_ASSIST_TEXT = {
  *
  * ⚠️ **A device choice**, as {@link GameWorldPanel}'s is
  * (`game/delivery/assist-preference.ts`). Two switches and a group of three
- * native radios, each control described by the visible sentence under it
- * through `aria-describedby`, so a screen reader reads what it changes as
- * well as its name. Every obstacle choice's sentence is also in the help, so
- * the ones not chosen are still on the screen (#666), as
- * {@link AppearancePanel} does. The `oyl-announce` class is on each
- * switch's paragraph, for its 24×24 target, and not on the section: the
- * announcement tests find their own groups as `.oyl-announce fieldset`.
- * `oyl-delivery-assist` is the tests' hook.
+ * native radios. What each changes is its sentence in the section's help,
+ * behind its ⓘ (#1031), and each control is described by that sentence
+ * through `aria-describedby`, so a screen reader reads what it changes as well
+ * as its name — as {@link AppearancePanel}'s group is. The group's
+ * description is the chosen option's own sentence, and every option's is in
+ * the help, so the ones not chosen are still on the screen (#666).
+ *
+ * In *You and your bike*, after the kit, and not in *The ride*: there it made
+ * that card 2.25× *Your words* beside it on the CI runner's landscape tablet,
+ * over #1026's balance rule (`sections.browser.spec.ts`
+ * §`ROW_BALANCE_LIMIT`). The sentences are in the help, as the other game
+ * panels' are, rather than under each control.
+ *
+ * The switches take the announcement switch's 24×24 target from `theme.css`
+ * by this section's own class, `oyl-delivery-assist`, which is also the
+ * tests' hook: `.oyl-announce` is how the announcement tests find their own
+ * controls.
  */
 function DeliveryAssistPanel({
   storage,
@@ -1455,21 +1470,33 @@ function DeliveryAssistPanel({
           <>
             <p className="oyl-muted">{text.about}</p>
             <p className="oyl-muted">{text.stays}</p>
-            {/* #666: every obstacle choice's sentence, the ones not chosen too. */}
             <dl className="oyl-muted">
+              <div>
+                <dt>{text.widerLabel}</dt>
+                <dd id="oyl-delivery-wider-detail">{text.widerDetail}</dd>
+              </div>
+              {/* #666: every obstacle choice's sentence, the ones not chosen too. */}
               {OBSTACLE_SETTINGS.map((option) => (
                 <div key={option}>
-                  <dt>{text.obstacles[option].label}</dt>
-                  <dd>{text.obstacles[option].detail}</dd>
+                  <dt>
+                    {text.obstaclesLegend}: {text.obstacles[option].label}
+                  </dt>
+                  <dd id={`oyl-delivery-obstacles-${option}-detail`}>
+                    {text.obstacles[option].detail}
+                  </dd>
                 </div>
               ))}
+              <div>
+                <dt>{text.noFailLabel}</dt>
+                <dd id="oyl-delivery-no-fail-detail">{text.noFailDetail}</dd>
+              </div>
             </dl>
           </>
         }
       >
         {text.heading}
       </SectionHeading>
-      <p className="oyl-announce tw:mb-xs">
+      <p>
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
@@ -1483,10 +1510,10 @@ function DeliveryAssistPanel({
           {text.widerLabel}
         </label>
       </p>
-      <p id="oyl-delivery-wider-detail" className="oyl-muted tw:mt-0">
-        {text.widerDetail}
-      </p>
-      <fieldset className="oyl-segmented" aria-describedby="oyl-delivery-obstacles-detail">
+      <fieldset
+        className="oyl-segmented"
+        aria-describedby={`oyl-delivery-obstacles-${assist.obstacles}-detail`}
+      >
         <legend>{text.obstaclesLegend}</legend>
         <div className="oyl-segmented__options">
           {OBSTACLE_SETTINGS.map((option) => (
@@ -1506,10 +1533,7 @@ function DeliveryAssistPanel({
           ))}
         </div>
       </fieldset>
-      <p id="oyl-delivery-obstacles-detail" className="oyl-muted tw:mt-xs">
-        {text.obstacles[assist.obstacles].detail}
-      </p>
-      <p className="oyl-announce tw:mb-xs">
+      <p>
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
@@ -1522,9 +1546,6 @@ function DeliveryAssistPanel({
           />{' '}
           {text.noFailLabel}
         </label>
-      </p>
-      <p id="oyl-delivery-no-fail-detail" className="oyl-muted tw:mt-0">
-        {text.noFailDetail}
       </p>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>

@@ -6,8 +6,9 @@
  * pass the accessibility gate.
  *
  * The real shell at the real route, as a rider reaches it: every control in
- * the panel has a name, is described by the visible sentence that says what
- * it changes, is reachable by keyboard and works from it, and the screen
+ * the panel has a name, is described by the sentence in the section's ⓘ
+ * that says what it changes, is reachable by keyboard and works from it, and
+ * the screen
  * passes the audit before and after each choice. What a keyboard chose is
  * read back through `assist-preference.ts`' own reader over the device's
  * storage, the path #1816's round reads it by.
@@ -19,7 +20,6 @@ import {
   accessibleName,
   auditAccessibility,
   formatViolations,
-  isHiddenFromAssistiveTechnology,
   keyboardReachableElements,
 } from '../a11y/audit';
 import { readDeliveryAssist } from '../game/delivery/assist-preference';
@@ -43,7 +43,13 @@ function expectClean(where: string): void {
   expect(violations.length === 0 ? '' : `${where}\n${formatViolations(violations)}`).toBe('');
 }
 
-/** The text of every element `aria-describedby` names, joined as a screen reader reads it. */
+/**
+ * The text of every element `aria-describedby` names, joined as a screen
+ * reader reads it. Each must be in this section's ⓘ, where a sighted rider
+ * reads the same sentence; a closed `<details>` does not stop a description,
+ * because accessible-name computation takes content an `aria-describedby`
+ * names directly even where it is hidden, as Appearance's group relies on.
+ */
 function description(element: Element): string {
   return (element.getAttribute('aria-describedby') ?? '')
     .split(/\s+/)
@@ -51,7 +57,10 @@ function description(element: Element): string {
     .map((id) => {
       const target = document.getElementById(id);
       expect(target, `#${id} is named by aria-describedby and is not on the page`).not.toBeNull();
-      expect(isHiddenFromAssistiveTechnology(target as Element), `#${id} is hidden`).toBe(false);
+      expect(
+        target?.closest('section.oyl-delivery-assist details.oyl-section-help'),
+        `#${id} is not in the Delivery section's help`,
+      ).not.toBeNull();
       return (target?.textContent ?? '').replace(/\s+/g, ' ').trim();
     })
     .join(' ');

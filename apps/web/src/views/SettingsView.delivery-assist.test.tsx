@@ -119,10 +119,14 @@ describe('the assisted Delivery setting on Settings — #1813', () => {
     mounted.unmount();
   });
 
-  it('says the chosen obstacle setting under the group, and every one in the help', async () => {
+  it('describes the obstacle group by the chosen option’s sentence, and has every sentence in the help', async () => {
     const mounted = await settings(disk());
-    const detail = (): string =>
-      mounted.container.querySelector('#oyl-delivery-obstacles-detail')?.textContent ?? '';
+    const detail = (): string => {
+      const id = mounted.container
+        .querySelector(`${PANEL} fieldset`)
+        ?.getAttribute('aria-describedby');
+      return mounted.container.querySelector(`#${id ?? 'none'}`)?.textContent ?? '';
+    };
     expect(detail()).toBe(DELIVERY_ASSIST_TEXT.obstacles.normal.detail);
     await press(controls(mounted.container).radios.find((radio) => radio.value === 'none'));
     expect(detail()).toBe(DELIVERY_ASSIST_TEXT.obstacles.none.detail);
@@ -130,7 +134,14 @@ describe('the assisted Delivery setting on Settings — #1813', () => {
     for (const option of Object.values(DELIVERY_ASSIST_TEXT.obstacles)) {
       expect(help).toContain(option.detail);
     }
-    expect(help).toContain(DELIVERY_ASSIST_TEXT.stays);
+    for (const sentence of [
+      DELIVERY_ASSIST_TEXT.about,
+      DELIVERY_ASSIST_TEXT.stays,
+      DELIVERY_ASSIST_TEXT.widerDetail,
+      DELIVERY_ASSIST_TEXT.noFailDetail,
+    ]) {
+      expect(help).toContain(sentence);
+    }
     mounted.unmount();
   });
 
