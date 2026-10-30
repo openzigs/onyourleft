@@ -4209,6 +4209,16 @@ const OVERHANG_PROBE_METRES = 5;
 /** The sun {@link overhangShadowProbe} sets, square to the wall: **60°** high. */
 const OVERHANG_PROBE_SUN_DEGREES = 60;
 
+/**
+ * How far either side of its bay line {@link overhangShadowProbe} needs plain
+ * wall, and reads it: **0.15 m**. #1715: the read is the whole of that
+ * stretch, not a column three pixels wide, because the wall's photograph
+ * moves a three-pixel column's light by about ±5 from one place to the next
+ * on the same plain wall (measured locally, SwiftShader, 2026-10-29: 110 to
+ * 131 along one wall in the same sun), and the control compares two places.
+ */
+const OVERHANG_PROBE_HALF_WIDTH = 0.15;
+
 const NO_OVERHANG_SHADOW: OverhangShadowMeasurement = {
   aimed: false,
   metres: 0,
@@ -4296,7 +4306,7 @@ function overhangShadowProbe(
       const bay = length / bays;
       const plain = (k: number): boolean =>
         [nearBelow, farBelow].every((below) =>
-          [-0.15, 0, 0.15].every((off) =>
+          [-OVERHANG_PROBE_HALF_WIDTH, 0, OVERHANG_PROBE_HALF_WIDTH].every((off) =>
             [-0.1, 0, 0.1].every(
               (up) =>
                 facadePartAt(
@@ -4395,15 +4405,28 @@ function overhangShadowProbe(
       targetRoadY: eye.y,
     },
   };
+  // Along the wall: its normal turned a quarter.
+  const alongX = -line.nz / across;
+  const alongZ = line.nx / across;
   const meanAt = (point: Point3): number[] => {
-    // A column 0.2 m tall and three pixels wide: a clapboard course or more, so
-    // that the read is the wall's and not where on its course it falls.
+    // A patch 0.2 m tall, a clapboard course or more, so that the read is the
+    // wall's and not where on its course it falls; and as wide as the plain
+    // wall either side of the bay line, so that it is not where on the
+    // photograph it falls either (#1715).
     const top = pixelFor(frame, canvas, { ...point, y: point.y + 0.1 });
     const bottom = pixelFor(frame, canvas, { ...point, y: point.y - 0.1 });
-    const x = Math.round((top.x + bottom.x) / 2) - 1;
+    const side = (sign: number): number =>
+      pixelFor(frame, canvas, {
+        ...point,
+        x: point.x + sign * alongX * OVERHANG_PROBE_HALF_WIDTH,
+        z: point.z + sign * alongZ * OVERHANG_PROBE_HALF_WIDTH,
+      }).x;
+    const [left, right] = [side(-1), side(1)].sort((a, b) => a - b) as [number, number];
+    const x = Math.round(left);
+    const columns = Math.max(3, Math.round(right - left));
     const y0 = Math.round(Math.min(top.y, bottom.y));
     const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
-    const pixels = readRegion(gl, x, y0, 3, rows);
+    const pixels = readRegion(gl, x, y0, columns, rows);
     const sums = [0, 0, 0];
     for (let at = 0; at < pixels.length; at += 4) {
       for (let channel = 0; channel < 3; channel += 1) {
