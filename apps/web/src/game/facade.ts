@@ -123,8 +123,23 @@
  * a band of glass every storey over an opaque spandrel, a transom between
  * them and thin mullions at an even module across each bay. **No texture and
  * no new material**: the flag is a bit of the style the wall already carries.
- * The glass is drawn flat, a dark pane giving back the sky: the rooms behind
- * it are #1662's.
+ * The glass gives back the sky, and since #1662 an office stands behind it.
+ *
+ * ## The rooms behind the glass (#1662)
+ *
+ * Every pane — a sash, a casement, a commercial window, a dormer's, a curtain
+ * wall's, a fanlight, a shop door's and a shop front's — shows a room
+ * ({@link INTERIOR}, {@link interiorAt}, the shader's `oylInterior`): the
+ * eye's ray through the glass followed into a box behind it, its back wall,
+ * floor, ceiling and side walls painted from a home's, a shop's or an
+ * office's palette ({@link INTERIOR_PALETTES}) by a seed of the window's cell
+ * and its building ({@link roomSeedAt}), sometimes a blind or a plain dark
+ * shape against the back wall, and #1581's one lit room in five
+ * ({@link litRoomAt}) warm. The pane is a dielectric: the environment it gives
+ * back is weighted by Schlick's Fresnel from F0 0.04, and the room by what is
+ * left ({@link glassWeightsAt}), so a pane is its room head-on and the sky at
+ * a graze. Far off a pane fades to the same mean as before. **No texture, no
+ * cubemap, no atlas.**
  *
  * ## The porch (#1589)
  *
@@ -1337,4 +1352,299 @@ export function weatheringAt(term: WeatheringTerm, at: WeatheringAt): Weathered 
     case 'parging':
       return term.parged ? { ...none, light: 1 + WEATHERING.parging.lighten } : none;
   }
+}
+
+/**
+ * The room behind a mapped window's glass — #1662, by interior mapping (van
+ * Dongen 2008): the eye's ray through the glass is followed into a box set
+ * behind the pane in the face's frame, and the plane it meets — the back
+ * wall, the floor, the ceiling or a side wall — is painted from a short
+ * palette by a seed of the window's cell and its building. **No texture, no
+ * cubemap and no atlas**: every plane is a flat paint, shaded by how deep it
+ * is. Every length is metres.
+ *
+ * - `depth`: the back wall, behind the glass.
+ * - `side`, `below`, `above`: the box's side walls `side` beyond the pane's
+ *   either edge, its floor `below` the pane's foot (a sill's height) and its
+ *   ceiling `above` its head. The box is the pane's own, so that every
+ *   window kind — a sash, a casement, a shop's light, a fanlight — is asked
+ *   the same way, with its glass's rectangle.
+ * - `graze`: the least slant the eye's ray is followed at, so that a ray
+ *   along the glass meets a side wall rather than dividing by nought.
+ * - `backShade`: the light at the back wall, as a share of the light just
+ *   behind the glass: a room is darker the deeper it is seen into.
+ * - `sideWall`: how much light a side wall keeps against the back wall's,
+ *   so that a corner reads.
+ * - `blind`: the `share` of rooms with a blind drawn down from the pane's
+ *   head, `drop` of the pane's height, in one of `paints`.
+ * - `silhouette`: the `share` of rooms with a plain dark shape against the
+ *   back wall — a cabinet, a sofa's back — `width` and `height` metres, in
+ *   `paint`. **Never text, a logo, a poster or a brand** (#1590's ruling).
+ * - `unlit` and `lit`: what the room's paints are multiplied by — a room
+ *   lit only through its windows, a little cool, or a lit room, warm; both
+ *   below 1, so the palette's paints bound every colour a room shows
+ *   (`three-renderer.ts` §`LIT_COLOURS`).
+ * - `fresnel`: Schlick's F0, glass's 0.04: the share of the environment a
+ *   pane gives back head-on ({@link glassWeightsAt}).
+ */
+export const INTERIOR = {
+  depth: 3.5,
+  side: 0.9,
+  below: 0.9,
+  above: 0.35,
+  graze: 0.02,
+  backShade: 0.55,
+  sideWall: 0.85,
+  blind: {
+    share: 0.3,
+    drop: [0.12, 0.4],
+    paints: [0xe8_e0_cc, 0xc9_c2_b2, 0x8a_7f_6c],
+  },
+  silhouette: { share: 0.3, width: [0.5, 1.3], height: [0.6, 1.4], paint: 0x2a_26_22 },
+  unlit: [0.1, 0.105, 0.115] as Rgb,
+  lit: [0.3, 0.22, 0.13] as Rgb,
+  fresnel: 0.04,
+} as const;
+
+/** How many walls, floors and ceilings each of {@link INTERIOR_PALETTES} holds: **6**. */
+export const INTERIOR_PAINTS = 6;
+
+/**
+ * The palettes a room is painted from — #1662: a home's, a shop's and an
+ * office's, {@link INTERIOR_PAINTS} walls, floors and ceilings apiece, sRGB.
+ * Picked by the room's seed ({@link interiorAt}); a wall window's room takes
+ * an even wall in an even bay and an odd one in an odd bay ({@link roomSeedAt}),
+ * so each palette's walls alternate warm and cool, light and dark of each:
+ * two rooms side by side differ in hue whatever their seeds draw.
+ */
+export const INTERIOR_PALETTES = {
+  home: {
+    walls: [0xd9_cf_bb, 0xb8_c4_c0, 0xc8_b0_a0, 0x6f_7a_86, 0x9c_8f_7e, 0xc4_d0_d8],
+    floors: [0x6b_4f_35, 0x8c_6a_46, 0x4a_3a_2e, 0x7b_74_6a, 0x9a_8a_70, 0x55_48_40],
+    ceilings: [0xee_ea_e0, 0xe2_dc_cc, 0xd8_d6_d0, 0xf0_e8_d8, 0xe6_e2_da, 0xdc_d4_c4],
+  },
+  shop: {
+    walls: [0xe8_dc_c4, 0xc4_cc_d0, 0xd8_c8_b8, 0xe8_ec_ee, 0xb0_a8_98, 0xa8_b0_b8],
+    floors: [0x8c_86_7c, 0x5a_52_4a, 0xa8_a0_94, 0x70_60_50, 0x4c_4c_4c, 0x9c_90_80],
+    ceilings: [0xee_ee_e8, 0xe8_e8_e4, 0xdc_dc_d8, 0xf0_ec_e0, 0xe4_e0_d8, 0xec_ec_ec],
+  },
+  office: {
+    walls: [0xd8_d4_cc, 0xc0_c4_c8, 0xe0_dc_d4, 0xa8_ac_b0, 0xb8_b4_ac, 0xcc_d0_d4],
+    floors: [0x5c_60_64, 0x74_70_6c, 0x4a_4e_54, 0x88_84_7c, 0x60_58_50, 0x6c_74_7c],
+    ceilings: [0xec_ec_ea, 0xe0_e2_e4, 0xf0_ee_ea, 0xe4_e4_e0, 0xd8_da_dc, 0xee_ec_e6],
+  },
+} as const;
+
+/** {@link INTERIOR_PALETTES}' order, as the shader's `palette` argument numbers them: 0, 1, 2. */
+export const INTERIOR_PALETTE_ORDER = ['home', 'shop', 'office'] as const;
+
+/** One of {@link INTERIOR_PALETTES}. */
+export type InteriorPalette = (typeof INTERIOR_PALETTE_ORDER)[number];
+
+/**
+ * The seeds' salts — #1662: added to a window's cell before it is hashed, so
+ * that a room's seed is not its lit hash ({@link litRoomAt}), and a dormer's,
+ * a front door's hall's and a shop's are not a wall window's.
+ */
+export const INTERIOR_SALT = {
+  room: [37, 11],
+  dormer: [5, 9],
+  hall: [23, 41],
+  shop: [13, 29],
+} as const;
+
+/** Which plane of the room's box a ray meets, or the blind drawn over the glass. */
+export type InteriorSurface = 'back' | 'floor' | 'ceiling' | 'left' | 'right' | 'blind';
+
+/**
+ * What one point of a pane shows of the room behind it — #1662: the
+ * `surface` the eye's ray meets, how `deep` behind the glass it meets it, in
+ * metres, and its colour, linear, before the glass's Fresnel weight
+ * ({@link glassWeightsAt}).
+ *
+ * @test-facing what {@link interiorAt} answers, for `facade.test.ts`
+ */
+export interface InteriorHit {
+  readonly surface: InteriorSurface;
+  readonly deep: number;
+  readonly colour: Rgb;
+}
+
+/**
+ * The hash a window is seeded by — #1581's, the shader's `oylWindowHash`:
+ * `fract(sin(dot(cell, (12.9898, 78.233))) · 43758.5453)`. In double
+ * precision here, so its values are not the GPU's for large arguments; its
+ * share below a threshold is.
+ */
+function windowHash(x: number, y: number): number {
+  return fractOf(Math.sin(x * 12.9898 + y * 78.233) * 43758.5453);
+}
+
+/**
+ * Whether the window in bay `cell` of a building of seeded `tint` is a lit
+ * room — #1581's one in five, the shader's `oylLit`: its hash at least 0.8.
+ *
+ * @test-facing held by `facade.test.ts`; the product computes it in the shader
+ */
+export function litRoomAt(
+  cell: readonly [number, number],
+  tint: readonly [number, number, number],
+): boolean {
+  return (
+    windowHash(cell[0] + Math.floor(tint[0] * 1000), cell[1] + Math.floor(tint[1] * 1000)) >= 0.8
+  );
+}
+
+/**
+ * The seed of the room behind the window in bay `cell` of a building of
+ * seeded `tint` — #1662, the shader's `oylRoomSeedOf`: the window's hash with
+ * {@link INTERIOR_SALT}'s `room`, so that it is not its lit hash; laid so
+ * that its wall paint ({@link roomPaintOf}) is one of the palette's even
+ * entries in an even bay and one of its odd entries in an odd bay, so two
+ * rooms side by side on a storey never share a wall paint.
+ *
+ * @test-facing held by `facade.test.ts`; the product computes it in the shader
+ */
+export function roomSeedAt(
+  cell: readonly [number, number],
+  tint: readonly [number, number, number],
+): number {
+  const [sx, sy] = INTERIOR_SALT.room;
+  const hash = windowHash(
+    cell[0] + Math.floor(tint[0] * 1000) + sx,
+    cell[1] + Math.floor(tint[1] * 1000) + sy,
+  );
+  const half = INTERIOR_PAINTS / 2;
+  return (2 * Math.floor(hash * half) + modOf(cell[0], 2) + fractOf(hash * half)) / INTERIOR_PAINTS;
+}
+
+/** Draw `k` of a room of `seed`, 0 to 1 — the shader's `oylRoomDraw`: small arguments, so the GPU's sine holds them. */
+function roomDraw(seed: number, k: number): number {
+  return windowHash(seed * 61, k);
+}
+
+/** A `0xRRGGBB` sRGB colour, linear. */
+export function interiorLinear(hex: number): Rgb {
+  return [
+    linearFromSrgb(((hex >> 16) & 0xff) / 255),
+    linearFromSrgb(((hex >> 8) & 0xff) / 255),
+    linearFromSrgb((hex & 0xff) / 255),
+  ];
+}
+
+/** Entry `draw` (0 to 1) of `paints`, as the shader's `int(draw · n)` picks it. */
+function pickOf(paints: readonly number[], draw: number): number {
+  return paints[Math.min(paints.length - 1, Math.floor(draw * paints.length))] as number;
+}
+
+/**
+ * The wall paint of a room of `seed` in `palette` — #1662, its sRGB: what
+ * two neighbouring rooms are told apart by.
+ *
+ * @test-facing held by `facade.test.ts`; the product picks it in the shader
+ */
+export function roomPaintOf(seed: number, palette: InteriorPalette = 'home'): number {
+  return pickOf(INTERIOR_PALETTES[palette].walls, seed);
+}
+
+/**
+ * What a point of a pane shows of the room behind it — #1662, the shader's
+ * `oylInterior`, from the same numbers. `pane` is the point on the glass, in
+ * metres from the pane's middle across and up the face; `size` the glass's
+ * width and height; `eye` the unit direction toward the eye in the face's
+ * frame ({@link FaceDirection}); `seed` the room's ({@link roomSeedAt});
+ * `lit` whether it is a lit room ({@link litRoomAt}).
+ *
+ * The ray runs from the point away from the eye, into the face; it meets the
+ * back wall {@link INTERIOR}'s `depth` behind the glass unless a side wall,
+ * the floor or the ceiling is nearer along it. "Right" is the box's `+u`
+ * side, as the reveal's right-hand jamb is.
+ *
+ * @test-facing held by `facade.test.ts`; the product draws it in the shader
+ */
+export function interiorAt(
+  pane: readonly [number, number],
+  size: readonly [number, number],
+  eye: FaceDirection,
+  seed: number,
+  palette: InteriorPalette,
+  lit: boolean,
+): InteriorHit {
+  const [x, y] = pane;
+  const [w, h] = size;
+  const [ex, ey, ez] = eye;
+  const { depth, side, below, above, graze, backShade, sideWall, blind, silhouette } = INTERIOR;
+  const paints = INTERIOR_PALETTES[palette];
+  const light = lit ? INTERIOR.lit : INTERIOR.unlit;
+  const shaded = (hex: number, share: number, deep: number): Rgb => {
+    const linear = interiorLinear(hex);
+    const fall = mixOf(1, backShade, Math.min(deep / depth, 1)) * share;
+    return [linear[0] * light[0] * fall, linear[1] * light[1] * fall, linear[2] * light[2] * fall];
+  };
+  // A blind, drawn down from the pane's head on the glass itself.
+  if (roomDraw(seed, 5) < blind.share) {
+    const drop = mixOf(blind.drop[0], blind.drop[1], roomDraw(seed, 6));
+    if (y > h / 2 - drop * h) {
+      const paint = pickOf(blind.paints, roomDraw(seed, 7));
+      return { surface: 'blind', deep: 0, colour: shaded(paint, 1, 0) };
+    }
+  }
+  const halfW = w / 2 + side;
+  const floor = -(h / 2 + below);
+  const ceiling = h / 2 + above;
+  // Into the room: away from the eye.
+  const dx = -ex;
+  const dy = -ey;
+  const dz = Math.max(ez, graze);
+  const tBack = depth / dz;
+  const tSide = dx > 0 ? (halfW - x) / dx : dx < 0 ? (-halfW - x) / dx : Number.POSITIVE_INFINITY;
+  const tUp = dy > 0 ? (ceiling - y) / dy : dy < 0 ? (floor - y) / dy : Number.POSITIVE_INFINITY;
+  const t = Math.min(tBack, tSide, tUp);
+  const deep = t * dz;
+  if (tSide <= t) {
+    const surface = dx > 0 ? 'right' : 'left';
+    return { surface, deep, colour: shaded(pickOf(paints.walls, seed), sideWall, deep) };
+  }
+  if (tUp <= t) {
+    return dy > 0
+      ? {
+          surface: 'ceiling',
+          deep,
+          colour: shaded(pickOf(paints.ceilings, roomDraw(seed, 2)), 1, deep),
+        }
+      : {
+          surface: 'floor',
+          deep,
+          colour: shaded(pickOf(paints.floors, roomDraw(seed, 1)), 1, deep),
+        };
+  }
+  // The back wall, and a plain dark shape against it on a seeded share.
+  if (roomDraw(seed, 3) < silhouette.share) {
+    const width = mixOf(silhouette.width[0], silhouette.width[1], roomDraw(seed, 4));
+    const height = mixOf(silhouette.height[0], silhouette.height[1], roomDraw(seed, 8));
+    const left = mixOf(-halfW, halfW - width, roomDraw(seed, 9));
+    const bx = x + dx * t;
+    const by = y + dy * t;
+    if (bx >= left && bx <= left + width && by <= floor + height) {
+      return { surface: 'back', deep, colour: shaded(silhouette.paint, 1, deep) };
+    }
+  }
+  return { surface: 'back', deep, colour: shaded(pickOf(paints.walls, seed), 1, deep) };
+}
+
+/**
+ * How much of the environment and of the room a pane shows, seen `cosine`
+ * off its normal (the eye's `out` in the face's frame) — #1662: Schlick's
+ * Fresnel with {@link INTERIOR}'s F0, the environment weighted by it and the
+ * room by what is left. Head-on a pane is the room; at a graze, the sky.
+ *
+ * @test-facing held by `facade.test.ts`; the product weights it in the shader
+ */
+export function glassWeightsAt(cosine: number): {
+  readonly environment: number;
+  readonly room: number;
+} {
+  const off = 1 - Math.min(Math.max(cosine, 0), 1);
+  const environment = INTERIOR.fresnel + (1 - INTERIOR.fresnel) * off ** 5;
+  return { environment, room: 1 - environment };
 }

@@ -271,8 +271,11 @@ describe('the city centre, in the shader — #1636', () => {
     const glazed = source.indexOf('if (oylFlag(oylFlags, oylGlazedFlag) > 0.5) {');
     expect(glazed).toBeGreaterThan(source.indexOf('// 2. The openings.'));
     expect(glazed).toBeLessThan(source.indexOf('} else if (oylSashOn > 0.5) {'));
-    // No texture: no rooms behind the glass until #1662.
-    expect(source).not.toContain('oylInterior');
+    // No texture: since #1662 an office behind each module's glass, from the
+    // one interior every pane calls, with the office palette.
+    expect(source).toContain(
+      'oylInterior(oylQ - (oylLo + oylHi) * 0.5, oylHi - oylLo, oylEyeF, oylRoomSeed, 2.0, oylLit)',
+    );
   });
 
   it('adds no surface: a city centre’s plans wear the surfaces they wore, and the belt stays in six calls', () => {

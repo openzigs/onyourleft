@@ -129,6 +129,7 @@ import {
   COMMERCIAL_WINDOW_IN_BAY,
   facadePartAt,
   OVERHANG_SHADOW,
+  PAIR_MIN_BAY_METRES,
   REVEAL_DEPTH_METRES,
   REVEAL_GRAZE,
   SASH,
@@ -253,6 +254,7 @@ import {
   waterReflectsOf,
   remoteRiderControlOf,
   windowRevealsOf,
+  windowRoomsOf,
   overhangShadowsOf,
   weatheringOf,
 } from '../src/game/three-renderer';
@@ -261,6 +263,7 @@ import {
   parseConfig,
   weatheringWithLevers,
   windowRevealsWithLevers,
+  windowRoomsWithLevers,
 } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { bannerPlace, standPoint } from '../src/game/gantry';
@@ -4065,6 +4068,213 @@ function windowRevealProbe(
   }
 }
 
+/** What {@link windowRoomsProbe} publishes — #1662. */
+interface WindowRoomsMeasurement {
+  /** Whether two neighbouring sashes facing the road were found, and matched with the rooms out. */
+  readonly aimed: boolean;
+  /** How far the camera is from the wall, square on, metres; and how many pairs were read to find one. */
+  readonly metres: number;
+  readonly pairsTried: number;
+  /** The two lower sashes' middles, with the rooms built: RGB, 0 to 255. */
+  readonly left: readonly number[];
+  readonly right: readonly number[];
+  /** The same two places with `-window-rooms`: #1581's flat room, the control. */
+  readonly leftOff: readonly number[];
+  readonly rightOff: readonly number[];
+}
+
+/** How far {@link windowRoomsProbe}'s camera is from the wall, square on: **15 m**, the issue's. */
+const ROOMS_PROBE_METRES = 15;
+
+/** The gate's tolerance two places are held to as the same colour: **4**, #1659's control's. */
+const ROOMS_PROBE_TOLERANCE = 4;
+
+const NO_WINDOW_ROOMS: WindowRoomsMeasurement = {
+  aimed: false,
+  metres: 0,
+  pairsTried: 0,
+  left: [],
+  right: [],
+  leftOff: [],
+  rightOff: [],
+};
+
+/**
+ * #1662: two neighbouring rooms behind a mapped wall's glass differ, and
+ * with `-window-rooms` they are #1581's same flat room. #1581's mixed town
+ * (`?town=mixed`'s): of the single sashes on its walls' first floors that face
+ * the road, 8 to 40 m from it somewhere from 1 000 m along, two in
+ * neighbouring bays, and a camera {@link ROOMS_PROBE_METRES} out from the
+ * wall, square on to the point between them and level with their lower
+ * sashes. #1581's flat room is lit one window in five, so a pair is read
+ * first with the rooms taken out as the owner's `&levers=-window-rooms`
+ * takes them (`windowRoomsOf`) and kept where the two match within
+ * {@link ROOMS_PROBE_TOLERANCE} — both unlit, or both lit, as on `main` —
+ * then read again with the rooms built.
+ */
+function windowRoomsProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): WindowRoomsMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Pair {
+    readonly a: Point3;
+    readonly ux: number;
+    readonly uz: number;
+    readonly nx: number;
+    readonly nz: number;
+    readonly bay: number;
+    readonly k: number;
+    readonly floor: number;
+  }
+  // Every pair of neighbouring single sashes on a first floor, by its wall's corner and its left bay.
+  const pairs: Pair[] = [];
+  for (const plan of plans) {
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const flags = f(0, STYLE_OFFSET + 1);
+      const bayWidth = f(0, STYLE_OFFSET + 2);
+      if ((flags & STYLE_SASH) === 0 || top < 1 + SASH_TOP_SHARE) continue;
+      if (!(bayWidth < PAIR_MIN_BAY_METRES)) continue;
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 2) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let k = 0; k + 1 < bays; k += 1) {
+        pairs.push({
+          a,
+          ux: (b.x - a.x) / length,
+          uz: (b.z - a.z) / length,
+          nx: f(0, 3),
+          nz: f(0, 5),
+          bay: length / bays,
+          k,
+          floor: floor + STOREY_METRES,
+        });
+      }
+    }
+  }
+  // The lower sash's middle, between the sill's frame and the meeting rail, metres above its floor.
+  const paneUp = WINDOW_SILL_METRES + SASH.frame + (SASH.height / 2 - SASH.frame) / 2;
+  const on = (p: Pair, m: number): Point3 => ({
+    x: p.a.x + p.ux * m + p.nx * 0.01,
+    y: p.floor + paneUp,
+    z: p.a.z + p.uz * m + p.nz * 0.01,
+  });
+  const start = atStartLine(profile);
+  // The pairs facing the road from 1 000 m on, nearest first.
+  const facing: { readonly along: number; readonly pair: Pair; readonly distance: number }[] = [];
+  for (let along = 1_000; along <= 2_000; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    for (const p of pairs) {
+      const middle = on(p, (p.k + 1) * p.bay);
+      const distance = Math.hypot(road.x - middle.x, road.z - middle.z);
+      const toward = ((road.x - middle.x) * p.nx + (road.z - middle.z) * p.nz) / distance;
+      if (distance < 8 || distance > 40 || toward < 0.5) continue;
+      facing.push({ along, pair: p, distance });
+    }
+    if (facing.length >= 24) break;
+  }
+  facing.sort((x, y) => x.distance - y.distance);
+  const frameFor = (along: number, p: Pair): SceneFrame => {
+    const middle = on(p, (p.k + 1) * p.bay);
+    const eye = {
+      x: middle.x + p.nx * ROOMS_PROBE_METRES,
+      y: middle.y,
+      z: middle.z + p.nz * ROOMS_PROBE_METRES,
+    };
+    const base = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(along) } },
+      worldCorridor: corridor,
+      landClass: land,
+      mappedBuildings,
+      structureItems: REALISTIC_STRUCTURE_ITEMS,
+    });
+    return {
+      ...base,
+      scatter: [],
+      markers: [],
+      camera: {
+        ...base.camera,
+        x: eye.x - p.nx * CAMERA_BEHIND_METRES,
+        z: eye.z - p.nz * CAMERA_BEHIND_METRES,
+        headingX: -p.nx,
+        headingZ: -p.nz,
+        eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+        targetRoadY: eye.y,
+      },
+    };
+  };
+  const meanAt = (frame: SceneFrame, point: Point3): number[] => {
+    const centre = pixelFor(frame, canvas, point);
+    const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 9);
+  };
+  const apart = (x: readonly number[], y: readonly number[]): number =>
+    Math.max(...x.map((value, channel) => Math.abs(value - (y[channel] ?? 0))));
+  // The owner's lever, read as the page reads it: the rooms out, the control first.
+  windowRoomsOf(view, windowRoomsWithLevers(parseConfig('?levers=-window-rooms').leversOff));
+  try {
+    let tried = 0;
+    for (const { along, pair } of facing.slice(0, 8)) {
+      tried += 1;
+      const frame = frameFor(along, pair);
+      view.render(frame);
+      view.render(frame);
+      const leftAt = on(pair, (pair.k + 0.5) * pair.bay);
+      const rightAt = on(pair, (pair.k + 1.5) * pair.bay);
+      const leftOff = meanAt(frame, leftAt);
+      const rightOff = meanAt(frame, rightAt);
+      if (apart(leftOff, rightOff) >= ROOMS_PROBE_TOLERANCE) continue;
+      windowRoomsOf(view, true);
+      view.render(frame);
+      view.render(frame);
+      return {
+        aimed: true,
+        metres: ROOMS_PROBE_METRES,
+        pairsTried: tried,
+        left: meanAt(frame, leftAt),
+        right: meanAt(frame, rightAt),
+        leftOff,
+        rightOff,
+      };
+    }
+    return { ...NO_WINDOW_ROOMS, pairsTried: tried };
+  } finally {
+    windowRoomsOf(view, true);
+  }
+}
+
 /** What {@link overhangShadowProbe} publishes — #1658. */
 interface OverhangShadowMeasurement {
   /** Whether a mapped wall under eaves was found facing the road, with plain wall at both heights. */
@@ -7566,6 +7776,8 @@ export interface RealisticMeasurement {
   readonly mappedFacade: MappedFacadeMeasurement;
   /** #1659: a mapped casement's jamb from the side, with its reveal and without. @see windowRevealProbe */
   readonly windowReveal: WindowRevealMeasurement;
+  /** #1662: two neighbouring rooms behind mapped glass, with the rooms and without. @see windowRoomsProbe */
+  readonly windowRooms: WindowRoomsMeasurement;
   /** #1658: a sunlit mapped wall under its eaves, with the overhang's shadow and without. @see overhangShadowProbe */
   readonly overhangShadow: OverhangShadowMeasurement;
   /** #1679: a sunlit mapped wall under a cornice, with the cornice's shadow and without. @see overhangPairProbes */
@@ -9696,6 +9908,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
   windowReveal: NO_WINDOW_REVEAL,
+  windowRooms: NO_WINDOW_ROOMS,
   overhangShadow: NO_OVERHANG_SHADOW,
   corniceShadow: NO_OVERHANG_PAIR,
   awningShadow: NO_OVERHANG_PAIR,
@@ -11270,6 +11483,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const windowReveal = windowRevealProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped window’s reveal — #1659');
 
+  // #1662, on the same view: two neighbouring rooms behind a mapped wall's glass, with the rooms and without.
+  const windowRooms = windowRoomsProbe(view, gl, canvas);
+  phaseEnds('realistic: the rooms behind mapped glass — #1662');
+
   // #1658, on the same view: a sunlit mapped wall under its eaves, with the overhang's shadow and without.
   const overhangShadow = overhangShadowProbe(view, gl, canvas);
   phaseEnds('realistic: the shadow under a mapped wall’s eaves — #1658');
@@ -11534,6 +11751,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedTown,
     mappedFacade,
     windowReveal,
+    windowRooms,
     overhangShadow,
     corniceShadow,
     awningShadow,

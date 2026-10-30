@@ -274,6 +274,12 @@ import {
   OVERHANG_SHADOW,
   FOUNDATION,
   GARAGE_DOOR,
+  INTERIOR,
+  INTERIOR_PAINTS,
+  INTERIOR_PALETTE_ORDER,
+  INTERIOR_PALETTES,
+  INTERIOR_SALT,
+  interiorLinear,
   LOT_CLAPBOARD_COURSE_METRES,
   MULLION_METRES,
   PAIR_MIN_BAY_METRES,
@@ -2247,6 +2253,17 @@ export const LIT_COLOURS: readonly number[] = [
   // #1626. The winter lights' wreath, on a village door and drawn on a mapped one.
   WREATH_GREEN,
   WREATH_BERRY,
+  // #1662. The paints of the rooms behind mapped glass, every palette's, and
+  // their blinds and silhouette: a room's colour is one of these times a
+  // light below 1 (`facade.ts` §`INTERIOR`), lit room or not, so these bound it.
+  ...new Set([
+    ...INTERIOR_PALETTE_ORDER.flatMap((palette) => {
+      const { walls, floors, ceilings } = INTERIOR_PALETTES[palette];
+      return [...walls, ...floors, ...ceilings];
+    }),
+    ...INTERIOR.blind.paints,
+    INTERIOR.silhouette.paint,
+  ]),
 ];
 
 /**
@@ -15272,6 +15289,12 @@ let overhangShadowsBuilt = true;
 let weatheringBuilt = true;
 
 /**
+ * Whether the facade's program is built with #1662's rooms behind the glass
+ * and its Fresnel: always, in the product. @see windowRoomsOf
+ */
+let windowRoomsBuilt = true;
+
+/**
  * The define a facade material carries for {@link windowRevealsBuilt} — 1
  * built, 0 not — read by its `onBeforeCompile`. ⚠️ **A define, not the cache
  * key**: `withAtmosphere`, spliced after the facade, captures the key it
@@ -15287,6 +15310,9 @@ const OVERHANG_SHADOWS_DEFINE = 'OYL_OVERHANG_SHADOWS';
 
 /** The define for {@link weatheringBuilt} — #1661, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
 const WEATHERING_DEFINE = 'OYL_WEATHERING';
+
+/** The define for {@link windowRoomsBuilt} — #1662, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
+const WINDOW_ROOMS_DEFINE = 'OYL_WINDOW_ROOMS';
 
 /** Whether `material` is built with #1659's window reveals, by its define. */
 function revealsBuiltIn(material: Material): boolean {
@@ -15305,11 +15331,17 @@ function weatheringBuiltIn(material: Material): boolean {
   return (material as { defines?: Record<string, unknown> }).defines?.[WEATHERING_DEFINE] !== 0;
 }
 
+/** Whether `material` is built with #1662's rooms behind the glass, by its define. */
+function roomsBuiltIn(material: Material): boolean {
+  return (material as { defines?: Record<string, unknown> }).defines?.[WINDOW_ROOMS_DEFINE] !== 0;
+}
+
 /**
  * Sets `material`'s {@link WINDOW_REVEALS_DEFINE} to {@link windowRevealsBuilt}
  * and, since #1658, its {@link OVERHANG_SHADOWS_DEFINE} to
  * {@link overhangShadowsBuilt}; since #1661 its {@link WEATHERING_DEFINE} to
- * {@link weatheringBuilt}.
+ * {@link weatheringBuilt}; since #1662 its {@link WINDOW_ROOMS_DEFINE} to
+ * {@link windowRoomsBuilt}.
  */
 function defineFacadeLevers(material: Material): void {
   const carrier = material as { defines?: Record<string, unknown> };
@@ -15318,6 +15350,7 @@ function defineFacadeLevers(material: Material): void {
     [WINDOW_REVEALS_DEFINE]: windowRevealsBuilt ? 1 : 0,
     [OVERHANG_SHADOWS_DEFINE]: overhangShadowsBuilt ? 1 : 0,
     [WEATHERING_DEFINE]: weatheringBuilt ? 1 : 0,
+    [WINDOW_ROOMS_DEFINE]: windowRoomsBuilt ? 1 : 0,
   };
 }
 
@@ -15373,6 +15406,25 @@ export function overhangShadowsOf(view: GameView, on: boolean): void {
  */
 export function weatheringOf(view: GameView, on: boolean): void {
   weatheringBuilt = on;
+  if (view instanceof ThreeGameView) view.facadesRecompiled();
+}
+
+/**
+ * Builds every mapped building's facade with #1662's rooms behind the glass
+ * — each pane's ray followed into a procedural room ({@link INTERIOR_GLSL}),
+ * and the pane's reflection weighted by Schlick's Fresnel in place of a
+ * constant metalness — or, `on` false, without them: the function, its calls
+ * and the finish's splice left out of the program, so every pane is #1581's
+ * dark room and gradient at metalness 0.35, as before #1662. As
+ * {@link weatheringOf} does, a setting of the module's, and the materials
+ * already in `view`'s scene are compiled again.
+ *
+ * @test-facing the owner's page's `-window-rooms` lever (`realistic-harness.ts`)
+ * and the browser gate's read of it (`game-harness.ts` §`windowRoomsProbe`);
+ * the product always builds them
+ */
+export function windowRoomsOf(view: GameView, on: boolean): void {
+  windowRoomsBuilt = on;
   if (view instanceof ThreeGameView) view.facadesRecompiled();
 }
 
@@ -15911,19 +15963,157 @@ const WEATHER_DRIP_GLSL = /* glsl */ `
         diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y);
       }`;
 
+/** {@link INTERIOR_PALETTES}' `key` paints in {@link INTERIOR_PALETTE_ORDER}'s order, linear: the shader's array. */
+function interiorPaintsGlsl(key: 'walls' | 'floors' | 'ceilings'): string {
+  const paints = INTERIOR_PALETTE_ORDER.flatMap((palette) =>
+    INTERIOR_PALETTES[palette][key].map(interiorLinear),
+  );
+  return `vec3[${String(paints.length)}](${paints.map(glslVec).join(', ')})`;
+}
+
+/**
+ * #1662's room behind the glass, in GLSL — `facade.ts` §`interiorAt` from
+ * the same numbers ({@link INTERIOR}, {@link INTERIOR_PALETTES}), and
+ * §`glassWeightsAt`'s Schlick Fresnel (`oylFresnelOf`).
+ *
+ * ⚠️ **`oylInterior`'s signature is a contract**: #1636's shop glazing and
+ * tower glazing and #1665's village lots call the same function with their
+ * own pane and palette, rather than writing a second interior.
+ *
+ * `vec3 oylInterior(vec2 pane, vec2 paneSize, vec3 eyeFace, float seed, float palette, float lit)`
+ *
+ * - `pane`: the point of the glass, metres from the pane's middle, across
+ *   (`u`) and up the face;
+ * - `paneSize`: the glass's width and height, metres;
+ * - `eyeFace`: toward the eye in the face's frame (`oylEyeF`: along `u`, up,
+ *   out of the face), unit length;
+ * - `seed`: the room's, 0 to 1 (`oylWindowHash` of its cell and building,
+ *   salted);
+ * - `palette`: 0 a home's, 1 a shop's, 2 an office's
+ *   ({@link INTERIOR_PALETTE_ORDER});
+ * - `lit`: 1 a lit room (#1581's `oylLit`), 0 not; #1626's lights or a
+ *   later night mode plug in here.
+ *
+ * It answers the room's colour, linear, before the glass's Fresnel: the
+ * caller weights it by `1.0 - oylFresnelOf(eyeFace.z)` and the finish
+ * weights the reflection by `oylFresnelOf` ({@link withFacade}). **Zero
+ * bytes**: no texture, no cubemap and no atlas, only paints.
+ */
+const INTERIOR_GLSL = /* glsl */ `
+  const float oylRoomDepth = ${glslFloat(INTERIOR.depth)};
+  const float oylRoomSide = ${glslFloat(INTERIOR.side)};
+  const float oylRoomBelow = ${glslFloat(INTERIOR.below)};
+  const float oylRoomAbove = ${glslFloat(INTERIOR.above)};
+  const float oylRoomGraze = ${glslFloat(INTERIOR.graze)};
+  const float oylRoomBack = ${glslFloat(INTERIOR.backShade)};
+  const float oylRoomSideWall = ${glslFloat(INTERIOR.sideWall)};
+  const float oylBlindShare = ${glslFloat(INTERIOR.blind.share)};
+  const vec2 oylBlindDrop = ${glslVec(INTERIOR.blind.drop)};
+  const vec3 oylBlindPaints[${String(INTERIOR.blind.paints.length)}] = vec3[${String(INTERIOR.blind.paints.length)}](${INTERIOR.blind.paints.map((hex) => glslVec(interiorLinear(hex))).join(', ')});
+  const float oylFigureShare = ${glslFloat(INTERIOR.silhouette.share)};
+  const vec2 oylFigureW = ${glslVec(INTERIOR.silhouette.width)};
+  const vec2 oylFigureH = ${glslVec(INTERIOR.silhouette.height)};
+  const vec3 oylFigureC = ${glslVec(interiorLinear(INTERIOR.silhouette.paint))};
+  const vec3 oylRoomUnlit = ${glslVec(INTERIOR.unlit)};
+  const vec3 oylRoomLit = ${glslVec(INTERIOR.lit)};
+  const float oylGlassF0 = ${glslFloat(INTERIOR.fresnel)};
+  const float oylRoomPaints = ${glslFloat(INTERIOR_PAINTS)};
+  const vec2 oylRoomSalt = ${glslVec(INTERIOR_SALT.room)};
+  const vec2 oylDormerSalt = ${glslVec(INTERIOR_SALT.dormer)};
+  const vec2 oylHallSalt = ${glslVec(INTERIOR_SALT.hall)};
+  const vec2 oylShopSalt = ${glslVec(INTERIOR_SALT.shop)};
+  const vec3 oylRoomWalls[${String(INTERIOR_PALETTE_ORDER.length * INTERIOR_PAINTS)}] = ${interiorPaintsGlsl('walls')};
+  const vec3 oylRoomFloors[${String(INTERIOR_PALETTE_ORDER.length * INTERIOR_PAINTS)}] = ${interiorPaintsGlsl('floors')};
+  const vec3 oylRoomCeilings[${String(INTERIOR_PALETTE_ORDER.length * INTERIOR_PAINTS)}] = ${interiorPaintsGlsl('ceilings')};
+  float oylRoomDraw(float seed, float k) {
+    return oylWindowHash(vec2(seed * 61.0, k));
+  }
+  // facade.ts' roomSeedAt: an even bay's room an even wall paint, an odd bay's an odd one.
+  float oylRoomSeedOf(vec2 cell, vec2 tint) {
+    float oylH = oylWindowHash(cell + floor(tint * 1000.0) + oylRoomSalt) * (oylRoomPaints * 0.5);
+    return (2.0 * floor(oylH) + mod(cell.x, 2.0) + fract(oylH)) / oylRoomPaints;
+  }
+  int oylRoomPick(float draw, float palette) {
+    return int(palette + 0.5) * int(oylRoomPaints) + int(min(floor(draw * oylRoomPaints), oylRoomPaints - 1.0));
+  }
+  // facade.ts' interiorAt's ray, in scalars: from (px, py) on a w by h pane,
+  // away from the eye e, into the box. The plane it meets — 0 the back wall,
+  // 1 the floor, 2 the ceiling, 3 the left (-u) wall, 4 the right (+u) — and
+  // how far along the ray, per unit of e's.
+  vec2 oylRoomHit(float px, float py, float w, float h, float ex, float ey, float ez) {
+    float oylDz = max(ez, oylRoomGraze);
+    float oylHalfW = w * 0.5 + oylRoomSide;
+    float oylTBack = oylRoomDepth / oylDz;
+    float oylTSide = abs(ex) > 1e-5 ? ((ex < 0.0 ? oylHalfW : -oylHalfW) - px) / -ex : 1e6;
+    float oylTUp = abs(ey) > 1e-5 ? ((ey < 0.0 ? h * 0.5 + oylRoomAbove : -(h * 0.5 + oylRoomBelow)) - py) / -ey : 1e6;
+    float oylT = min(oylTBack, min(oylTSide, oylTUp));
+    float oylPlane = oylTSide <= oylT ? (ex < 0.0 ? 4.0 : 3.0) : (oylTUp <= oylT ? (ey < 0.0 ? 2.0 : 1.0) : 0.0);
+    return vec2(oylPlane, oylT);
+  }
+  float oylFresnelOf(float cosine) {
+    float oylOff = 1.0 - clamp(cosine, 0.0, 1.0);
+    float oylOff2 = oylOff * oylOff;
+    return oylGlassF0 + (1.0 - oylGlassF0) * oylOff2 * oylOff2 * oylOff;
+  }
+  vec3 oylInterior(vec2 pane, vec2 paneSize, vec3 eyeFace, float seed, float palette, float lit) {
+    vec3 oylLight = mix(oylRoomUnlit, oylRoomLit, lit);
+    // A blind, drawn down from the pane's head on the glass itself.
+    float oylDrop = mix(oylBlindDrop.x, oylBlindDrop.y, oylRoomDraw(seed, 6.0));
+    if (oylRoomDraw(seed, 5.0) < oylBlindShare && pane.y > paneSize.y * 0.5 - oylDrop * paneSize.y) {
+      int oylBlind = int(min(floor(oylRoomDraw(seed, 7.0) * ${glslFloat(INTERIOR.blind.paints.length)}), ${glslFloat(INTERIOR.blind.paints.length - 1)}));
+      return oylBlindPaints[oylBlind] * oylLight;
+    }
+    vec2 oylHit = oylRoomHit(pane.x, pane.y, paneSize.x, paneSize.y, eyeFace.x, eyeFace.y, eyeFace.z);
+    float oylDeep = oylHit.y * max(eyeFace.z, oylRoomGraze);
+    float oylFall = mix(1.0, oylRoomBack, min(oylDeep / oylRoomDepth, 1.0));
+    vec3 oylPaint = oylRoomWalls[oylRoomPick(seed, palette)];
+    if (oylHit.x > 2.5) {
+      oylPaint *= oylRoomSideWall;
+    } else if (oylHit.x > 1.5) {
+      oylPaint = oylRoomCeilings[oylRoomPick(oylRoomDraw(seed, 2.0), palette)];
+    } else if (oylHit.x > 0.5) {
+      oylPaint = oylRoomFloors[oylRoomPick(oylRoomDraw(seed, 1.0), palette)];
+    } else if (oylRoomDraw(seed, 3.0) < oylFigureShare) {
+      // The back wall, and a plain dark shape against it on a seeded share.
+      vec2 oylBack = pane - eyeFace.xy * oylHit.y;
+      float oylHalfW = paneSize.x * 0.5 + oylRoomSide;
+      float oylFigW = mix(oylFigureW.x, oylFigureW.y, oylRoomDraw(seed, 4.0));
+      float oylFigH = mix(oylFigureH.x, oylFigureH.y, oylRoomDraw(seed, 8.0));
+      float oylFigL = mix(-oylHalfW, oylHalfW - oylFigW, oylRoomDraw(seed, 9.0));
+      if (oylBack.x >= oylFigL && oylBack.x <= oylFigL + oylFigW && oylBack.y <= oylFigH - (paneSize.y * 0.5 + oylRoomBelow)) {
+        oylPaint = oylFigureC;
+      }
+    }
+    return oylPaint * oylLight * oylFall;
+  }
+`;
+
+/**
+ * {@link INTERIOR_GLSL} where `built` — #1662 — and nothing with
+ * `window-rooms` off (`realistic/config.ts` §`LEVERS`): the program holds
+ * none of the term, the cost pair's "before".
+ */
+function interiorGlsl(built: boolean): string {
+  return built ? INTERIOR_GLSL : '';
+}
+
 /**
  * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal
  * ({@link revealGlsl}) and its sash window, which since #1659 takes the eye
  * and the sun in the face's frame (`e`, `s`) for the reveal, and gives back
  * the opening's `side` seen past the glass, whether it is `sideLit`, and the
  * wall in its sill's shadow (`sillShade`); since #1658 the overhang's
- * shadow ({@link overhangGlsl}).
+ * shadow ({@link overhangGlsl}). Since #1662 the room behind the glass
+ * ({@link interiorGlsl}), and the sash gives back the point of its glass seen
+ * through `p` from the glass's middle (`pane`) and the glass's size
+ * (`paneSize`), which the room is asked with.
  */
 function facadeCommonGlsl(
   reveals: boolean,
   overhangs: boolean,
   weathering: boolean,
   surface: StructureSurface,
+  rooms: boolean,
 ): string {
   return /* glsl */ `
   uniform float oylFacadeOn;
@@ -15935,10 +16125,11 @@ function facadeCommonGlsl(
   ${revealGlsl(reveals)}
   ${overhangGlsl(overhangs)}
   ${weatheringGlsl(weathering, surface)}
+  ${interiorGlsl(rooms)}
   void oylSash(
     vec2 p, vec2 pw, vec3 win, float bay, float paired, float picture, float shutters, vec3 e, vec3 s,
     out float frame, out float glass, out float reveal, out float shutter, out float sill,
-    out float side, out float sideLit, out float sillShade
+    out float side, out float sideLit, out float sillShade, out vec2 pane, out vec2 paneSize
   ) {
     float oylHalfW = win.x * 0.5;
     float oylHead = win.z + win.y;
@@ -15967,6 +16158,9 @@ function facadeCommonGlsl(
     glass = oylOpen * oylSeen * (1.0 - oylRailOn);
     side = oylOpen * (1.0 - oylSeen);
     frame = max(oylOuter - glass - side, 0.0);
+    // #1662: the glass seen, from its middle, and its size: what the room behind it is asked with.
+    pane = oylQ - (oylLo + oylHi) * 0.5;
+    paneSize = oylHi - oylLo;
     float oylShutterW = win.x * oylShutterShare;
     float oylOut = mix(abs(p.x), oylAcross, paired);
     float oylFits = step(2.0 * (oylSpan + oylShutterGap + oylShutterW + oylShutterMargin), bay);
@@ -16041,10 +16235,11 @@ const AWNING_SHADE_GLSL = /* glsl */ `
  * same numbers: in every storey up to the eaves, glass over an opaque
  * spandrel with a transom between, and mullions at an even module across
  * each bay; faded far off to the three parts' mean by their shares. The
- * glass is flat — a dark pane that gives back the sky through the finish
- * (`oylGlass`) — until #1662 puts rooms behind it.
+ * glass gives back the sky through the finish (`oylGlass`); since #1662, with
+ * `rooms`, an office behind each module's glass ({@link INTERIOR_GLSL}), and
+ * without, #1636's flat dark pane.
  */
-const CURTAIN_WALL_GLSL = /* glsl */ `
+const curtainWallGlsl = (rooms: boolean): string => /* glsl */ `
         float oylBayW = max(vOylStyle.z, 0.1);
         float oylModules = max(1.0, floor(oylBayW / oylCurtainModule + 0.5));
         float oylModW = oylBayW / oylModules;
@@ -16070,7 +16265,7 @@ const CURTAIN_WALL_GLSL = /* glsl */ `
         }
         float oylPaneOn = oylOpen * oylSeen;
         float oylSide = oylOpen * (1.0 - oylSeen);
-        vec3 oylPaneC = oylCurtainGlassC * (1.0 - oylRevealShade * oylShadeOn);
+        vec3 oylPaneC = ${rooms ? 'oylInterior(oylQ - (oylLo + oylHi) * 0.5, oylHi - oylLo, oylEyeF, oylRoomSeed, 2.0, oylLit) * (1.0 - oylGlassF)' : 'oylCurtainGlassC'} * (1.0 - oylRevealShade * oylShadeOn);
         vec3 oylSideC = oylCurtainMullionC * (1.0 - oylRevealShade * (1.0 - oylSideLit));
         vec3 oylDrawn = mix(
           mix(mix(oylPaneC, oylCurtainSpandrelC, oylSpandrel), oylCurtainMullionC, oylBars),
@@ -16141,13 +16336,21 @@ export const FACADE_SHOWN_GLSL =
  * the openings, the wall under each sill streaked; in the shade, a flat
  * roof's wall dripped on from its parapet. Without it, none of it is built.
  *
+ * Since #1662, with `rooms`, every pane — a sash's, a casement's, a
+ * commercial window's, a dormer's, a curtain wall's, a fanlight, a shop
+ * door's and a shop front's — shows the room behind it ({@link INTERIOR_GLSL})
+ * weighted by `1 − F` of Schlick's Fresnel (`oylGlassF`), and the finish
+ * gives back the environment by `F` ({@link withFacade}). Far off a pane
+ * still fades to the mean it faded to before, which reads #1581's flat room,
+ * so the far picture does not move. Without `rooms`, #1581's flat room.
+ *
  * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
  * after every declaration — so that one window in five is a lit room by
  * where it is on which building, not the same window on every house.
  */
-function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
+function facadeFragmentGlsl(overhangs: boolean, weathering: boolean, rooms: boolean): string {
   return /* glsl */ `
-  float oylGlass = 0.0;
+  float oylGlass = 0.0;${rooms ? "\n  // #1662: Schlick's Fresnel for the glass, from the eye's slant: the finish reads it.\n  float oylGlassF = oylGlassF0;" : ''}
   float oylFlat = 0.0;
   float oylRough = 0.6;
   float oylTilt = 0.0;
@@ -16190,7 +16393,7 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
     float oylTop = vOylFacade.z;
     // #1659: the eye and the sun in the face's frame, for every window's reveal.
     vec3 oylEyeF = vec3(dot(oylToEyeV, oylFaceU), dot(oylToEyeV, oylFaceUp), dot(oylToEyeV, oylFaceN));
-    vec3 oylSunF = vec3(dot(oylToSunV, oylFaceU), dot(oylToSunV, oylFaceUp), dot(oylToSunV, oylFaceN));
+    vec3 oylSunF = vec3(dot(oylToSunV, oylFaceU), dot(oylToSunV, oylFaceUp), dot(oylToSunV, oylFaceN));${rooms ? '\n    oylGlassF = oylFresnelOf(oylEyeF.z);' : ''}
     float oylKind = floor(vOylStyle.x + 0.0001);
     float oylCourse = max(vOylStyle.x - oylKind, 0.001);
     float oylFlags = vOylStyle.y;
@@ -16270,9 +16473,9 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
       vec3 oylWall = diffuseColor.rgb;
       float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
       ${weathering ? 'float oylStreakAt = mix(oylStreakShare, 1.0, step(abs(oylKind - oylClapboard), 0.5));' : ''}
-      vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);
+      vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);${rooms ? "\n      // #1662: the room behind this bay's glass, seeded by where it is on which building.\n      float oylRoomSeed = oylRoomSeedOf(oylCell, vOylTint.xy);" : ''}
       if (oylFlag(oylFlags, oylGlazedFlag) > 0.5) {
-        ${CURTAIN_WALL_GLSL}
+        ${curtainWallGlsl(rooms)}
       } else if (oylSashOn > 0.5) {
         float oylBayW = vOylStyle.z;
         vec2 oylP = vec2((oylAt.x - 0.5) * oylBayW, oylAt.y * oylStoreyM);
@@ -16287,11 +16490,13 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
         float oylSideOn;
         float oylSideLit;
         float oylSillShade;
+        vec2 oylPaneAt;
+        vec2 oylPaneSize;
         oylSash(
           oylP, oylMw, vec3(oylWinW, oylSashH, oylSillM), oylBayW, oylPaired, oylPicture,
           oylFlag(oylFlags, oylShuttersFlag), oylEyeF, oylSunF,
           oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn,
-          oylSideOn, oylSideLit, oylSillShade
+          oylSideOn, oylSideLit, oylSillShade, oylPaneAt, oylPaneSize
         );
         oylFrameOn *= oylShown;
         oylPaneOn *= oylShown;
@@ -16299,7 +16504,7 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
         oylSillOn *= oylShown;
         oylSideOn *= oylShown;
         oylSillShade *= oylShown;
-        vec3 oylPane = (oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylSillM, oylSillM + oylSashH, oylP.y))
+        vec3 oylPane = ${rooms ? 'oylInterior(oylPaneAt, oylPaneSize, oylEyeF, oylRoomSeed, 0.0, oylLit) * (1.0 - oylGlassF)' : '(oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylSillM, oylSillM + oylSashH, oylP.y))'}
           * (1.0 - oylRevealShade * oylRevealOn);
         float oylSlat = oylLine(oylP.y / oylLouvre, 0.15, oylMw.y / oylLouvre);
         vec3 oylShutterC = vOylTrim * (0.92 - 0.25 * oylSlat);
@@ -16365,7 +16570,8 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
           ? oylSillShadeOf(oylAt * oylToM, oylSillLo * oylToM, oylSillHi * oylToM, oylW * oylToM, oylSunF)
             * (1.0 - oylSill) * (1.0 - oylOuter) * oylShown
           : 0.0;
-        vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWB, oylWT, oylAt.y);
+        vec3 oylFlatPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWB, oylWT, oylAt.y);
+        vec3 oylPane = ${rooms ? 'oylInterior(oylQ - (oylLo + oylHi) * 0.5 * oylToM, (oylHi - oylLo) * oylToM, oylEyeF, oylRoomSeed, 0.0, oylLit) * (1.0 - oylGlassF)' : 'oylFlatPane'};
         vec3 oylSideC = oylWall * (1.0 - oylRevealShade * (1.0 - oylSideLit));
         vec3 oylDrawn = mix(
           mix(
@@ -16377,7 +16583,7 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
           oylPaneShare
         );
         float oylArea = (oylWR - oylWL) * (oylWT - oylWB) * oylShown;
-        vec3 oylMean = mix(oylWall, mix(vOylTrim, oylPane, 0.75), oylArea);
+        vec3 oylMean = mix(oylWall, mix(vOylTrim, oylFlatPane, 0.75), oylArea);
         float oylFade = clamp(max(oylW.x, oylW.y) * 8.0 - 0.5, 0.0, 1.0);
         diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
         ${weathering ? WEATHER_CASEMENT_STREAK_GLSL : ''}
@@ -16408,8 +16614,22 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
         vec2(0.27, oylFan - 0.06),
         oylW
       );
-      vec3 oylDoor = mix(vOylTrim, vColor.rgb * (1.0 - 0.3 * oylPanels), oylLeaf);
-      diffuseColor.rgb = mix(oylDoor, vec3(0.02, 0.025, 0.03), oylFanlight);
+      vec3 oylDoor = mix(vOylTrim, vColor.rgb * (1.0 - 0.3 * oylPanels), oylLeaf);${
+        rooms
+          ? `
+      // #1662: the hall behind the fanlight, and behind a shop door's glass.
+      vec2 oylDoorM = vec2(oylDoorW, oylDoorH);
+      float oylHallSeed = oylWindowHash(floor(vOylTint.xy * 1000.0) + oylHallSalt);
+      float oylHallLit = step(0.8, oylWindowHash(floor(vOylTint.xy * 1000.0) + oylHallSalt.yx));
+      vec3 oylFanPane = oylInterior(
+        (oylAt - vec2(0.5, (oylFan + 1.0 - oylDoorU - 0.02) * 0.5)) * oylDoorM,
+        vec2(1.0 - 2.0 * oylDoorA - 0.08, 1.0 - oylDoorU - 0.02 - oylFan) * oylDoorM,
+        oylEyeF, oylHallSeed, 0.0, oylHallLit
+      ) * (1.0 - oylGlassF);`
+          : `
+      vec3 oylFanPane = vec3(0.02, 0.025, 0.03);`
+      }
+      diffuseColor.rgb = mix(oylDoor, oylFanPane, oylFanlight);
       oylFlat = 1.0;
       oylGlass = oylFanlight;
       if (oylFlag(vOylStyle.y, oylCommercialFlag) > 0.5) {
@@ -16424,7 +16644,15 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
           oylDw
         );
         vec3 oylRecess = vec3(0.035, 0.033, 0.03);
-        vec3 oylShopPane = vec3(0.02, 0.025, 0.03) + vec3(0.05, 0.04, 0.025) * step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0)));
+        vec3 oylShopPane = ${
+          rooms
+            ? `oylInterior(
+          oylD - vec2(oylDoorW * 0.5, (oylShopDoorRail + oylDoorH - oylDoorSurround - oylShopDoorFrame) * 0.5),
+          vec2(oylDoorW - 2.0 * (oylDoorSurround + oylShopDoorFrame), oylDoorH - oylDoorSurround - oylShopDoorFrame - oylShopDoorRail),
+          oylEyeF, oylHallSeed, 1.0, step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0)))
+        ) * (1.0 - oylGlassF)`
+            : 'vec3(0.02, 0.025, 0.03) + vec3(0.05, 0.04, 0.025) * step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0)))'
+        };
         diffuseColor.rgb = mix(oylRecess, mix(vOylTrim, oylShopPane, oylPane), oylIn);
         oylGlass = oylPane;
       }
@@ -16451,12 +16679,22 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
       float oylSideOn;
       float oylSideLit;
       float oylSillShade;
+      vec2 oylPaneAt;
+      vec2 oylPaneSize;
       oylSash(
         oylP, oylMw, oylWin, oylFaceW, 0.0, 0.0, 0.0, oylEyeF, oylSunF,
         oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn,
-        oylSideOn, oylSideLit, oylSillShade
+        oylSideOn, oylSideLit, oylSillShade, oylPaneAt, oylPaneSize
       );
-      vec3 oylPane = vec3(0.012, 0.014, 0.018) * (1.0 - oylRevealShade * oylRevealOn) + vec3(0.03, 0.04, 0.05);
+      vec3 oylPane = ${
+        rooms
+          ? `oylInterior(
+        oylPaneAt, oylPaneSize, oylEyeF,
+        oylWindowHash(floor(vOylTint.xy * 1000.0) + oylDormerSalt), 0.0,
+        step(0.8, oylWindowHash(floor(vOylTint.xy * 1000.0) + oylDormerSalt.yx))
+      ) * (1.0 - oylGlassF) * (1.0 - oylRevealShade * oylRevealOn)`
+          : 'vec3(0.012, 0.014, 0.018) * (1.0 - oylRevealShade * oylRevealOn) + vec3(0.03, 0.04, 0.05)'
+      };
       vec3 oylFront = diffuseColor.rgb;
       vec3 oylSideC = oylFront * (1.0 - oylRevealShade * (1.0 - oylSideLit));
       diffuseColor.rgb = mix(
@@ -16512,7 +16750,18 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
       float oylPaneOn = oylInside * (1.0 - oylDoorway) * (1.0 - oylRiser) * (1.0 - oylBars);
       float oylLitShop = step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0) + vec2(7.0, 3.0)));
       vec3 oylShopRoom = mix(vec3(0.015, 0.016, 0.02), vec3(0.11, 0.085, 0.05), oylLitShop);
-      vec3 oylShopGlass = oylShopRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylShopRiser, oylShopH, oylS.y);
+      vec3 oylShopGlass = ${
+        rooms
+          ? `oylInterior(
+        oylS - vec2(oylFromX + oylSpan * 0.5, (oylShopRiser + oylShopSill + oylShopH - oylShopFrame) * 0.5),
+        vec2(oylSpan, oylShopH - oylShopFrame - oylShopRiser - oylShopSill),
+        oylEyeF,
+        oylWindowHash(floor(vOylTint.xy * 1000.0) + oylShopSalt + vec2(step(oylShopW * 0.5, oylS.x), 0.0)),
+        1.0,
+        oylLitShop
+      ) * (1.0 - oylGlassF)`
+          : 'oylShopRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylShopRiser, oylShopH, oylS.y)'
+      };
       vec3 oylFrameC = mix(vOylTrim, vOylTrim * 0.8, oylRiser * oylInside);
       vec3 oylDrawn = mix(oylFrameC, oylShopGlass, oylPaneOn);
       diffuseColor.rgb = vColor.rgb * mix(oylDrawn, vec3(0.035, 0.033, 0.03), oylDoorway * oylInside);
@@ -16651,6 +16900,8 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
     shader.uniforms.oylRoofSnow = SEASON.oylRoofSnow;
     // #1661: the photograph laid per building, and the world for the weathering's noise.
     const weathered = weatheringBuiltIn(material);
+    // #1662: the rooms behind the glass, and the glass's Fresnel.
+    const rooms = roomsBuiltIn(material);
     // #1626: the winter lights' wreath on the front door.
     shader.uniforms.oylWreath = SEASON.oylWreath;
     shader.vertexShader = replacedOrThrown(
@@ -16669,14 +16920,14 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface, rooms)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
       'fragment',
       spliced,
     );
     fragment = replacedOrThrown(
       fragment,
       '#include <color_fragment>',
-      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material), weathered)}`,
+      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material), weathered, rooms)}`,
       'fragment',
       spliced,
     );
@@ -16690,7 +16941,12 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
     fragment = replacedOrThrown(
       fragment,
       '#include <metalnessmap_fragment>',
-      '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.35, oylGlass);',
+      // #1662: glass is a dielectric. At metalness 0 three's own Fresnel —
+      // F0 0.04, `lights_physical_fragment`'s `specularColor`, toward 1 at a
+      // graze — weights the environment the pane gives back, and the room
+      // under it carries the 1 − F of the same Schlick term (`oylGlassF`).
+      // Before #1662, and with `-window-rooms`, a constant 0.35.
+      `#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, ${rooms ? '0.0' : '0.35'}, oylGlass);`,
       'fragment',
       spliced,
     );
