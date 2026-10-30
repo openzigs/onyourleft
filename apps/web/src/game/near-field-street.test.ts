@@ -84,7 +84,7 @@ import {
   type DecorationPart,
 } from './decorations';
 import {
-  cityCentreFixture,
+  cityStreetscapeFixture,
   kerbsideFixture,
   mixedTownFixture,
   richmondStreetFixture,
@@ -491,7 +491,7 @@ const RIDES: Readonly<Record<string, () => Ride>> = {
   "a planner's route": () => plainRide(plannerRoute()),
   "a planner's route, mirrored": () => plainRide(plannerRoute({ mirrored: true })),
   // #1637's city centre: 3.5 m pavements, a lamp post every 16 m, people.
-  'a city centre': () => townRide(pressed(cityCentreFixture()), 950, 2_050),
+  'a city centre': () => townRide(pressed(cityStreetscapeFixture()), 950, 2_050),
   // #1581's mixed town: mapped houses and a high street, models among them.
   'a mixed town': () => townRide(pressed(mixedTownFixture()), 950, 2_050),
   // #1585's street of house models: models and extrusions side by side.

@@ -3545,6 +3545,15 @@ const terraceScratch = new Float64Array(LOT_FLOATS);
  * stretch of the road by its clearance (ADR 0054 D-5.2, D-5.4), and with no
  * wall on the pavement even where a bend's chord sags toward it.
  *
+ * ⚠️ **Planned with #1635's party walls — #1719.** Neighbouring blocks share a
+ * side wall, so every block is measured first and the party walls found
+ * between them ({@link partyWallsOf}) before any is planned: a shared face has
+ * no window, and where a block is a storey taller than the next, only the
+ * strip above the lower roof is drawn, plain. A block keeps clear of every
+ * mapped footprint, so a party wall is only ever between two blocks. Until
+ * #1719 each was planned with none, and a taller block's side kept its
+ * windows down to the pavement against its neighbour.
+ *
  * The first lap only: a plan stands in the corridor's frame, once a place.
  */
 function terracePlans(
@@ -3570,7 +3579,7 @@ function terracePlans(
   const front = KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES + TERRACE_GAP_METRES;
   const back = front + TERRACE_DEPTH_METRES;
   const lot = { x: span / 2, back: -TERRACE_DEPTH_METRES / 2, front: TERRACE_DEPTH_METRES / 2 };
-  const planned: FootprintPlan[] = [];
+  const blocks: Measured[] = [];
   for (let plot = 0; plot < plots; plot += 1) {
     const along = (plot + 0.5) * span;
     if (urban.classAt(along) !== 'city-centre') continue;
@@ -3612,8 +3621,9 @@ function terracePlans(
       }
       const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
       const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
-      // #1635: measured, then planned, as a mapped footprint is; with no party
-      // wall found between two blocks: a commercial block is flat whatever.
+      // #1635: measured, then planned, as a mapped footprint is — every block
+      // measured before any is planned, so the party walls between them are
+      // found first (#1719).
       const measured = measureFootprint(
         {
           kind: 'building',
@@ -3632,22 +3642,23 @@ function terracePlans(
         others.terrace === true,
       );
       if (typeof measured === 'string') continue;
-      planned.push(
-        planFootprint(
-          measured,
-          land,
-          profile,
-          origin,
-          seed,
-          maxVertices,
-          others,
-          NO_PARTY_WALLS,
-          roofing,
-        ),
-      );
+      blocks.push(measured);
     }
   }
-  return planned;
+  const party = partyWallsOf(blocks);
+  return blocks.map((measured, block) =>
+    planFootprint(
+      measured,
+      land,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      others,
+      party.get(block) ?? NO_PARTY_WALLS,
+      roofing,
+    ),
+  );
 }
 
 /** The entry a seeded draw in `[0, 1)` comes to, of `count`. */
