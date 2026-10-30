@@ -9,6 +9,10 @@
  * This is the one place the demo names the browser's own seams — the frame
  * clock, the reduced-motion preference, the intersection observer — and hands
  * them to {@link DemoPage}, which is tested with each of them replaced.
+ *
+ * `?render` (#1655) replaces the frame clock with {@link RenderClock}, which
+ * `tools/demo/render-video.ts` steps through `window.__oylDemoRender`, and
+ * takes reduced motion as not asked for: a video is the same for everybody.
  */
 
 import { StrictMode } from 'react';
@@ -26,6 +30,8 @@ import {
   threeGameRenderer,
 } from '../game/three-renderer';
 import { DemoPage } from './DemoPage';
+import { parseDemoQuery } from './query';
+import { RenderClock, type DemoRenderControl } from './render-clock';
 import type { DemoSnapshot, FrameScheduler } from './stage';
 
 declare global {
@@ -38,6 +44,13 @@ declare global {
      * @test-facing read by the demo's browser gate and the video render
      */
     __oylDemo?: DemoSnapshot;
+    /**
+     * #1655: present only on `?render`, for `tools/demo/render-video.ts` to
+     * step the page's clock with. Nothing in the demo reads it.
+     *
+     * @test-facing driven by the video render
+     */
+    __oylDemoRender?: DemoRenderControl;
   }
 }
 
@@ -65,6 +78,15 @@ function publish(snapshot: DemoSnapshot): void {
   window.__oylDemo = snapshot;
 }
 
+/** Two turns of the event loop: React commits what a step published, and the page lays it out. */
+async function settled(): Promise<void> {
+  for (let turn = 0; turn < 2; turn += 1) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
+}
+
 async function start(): Promise<void> {
   const root = document.getElementById('root');
   if (root === null) {
@@ -73,14 +95,32 @@ async function start(): Promise<void> {
   // The scenery's shapes and the wordmark before the first view, as the app's
   // `main.tsx` §`loadGameRenderer` awaits them.
   await Promise.all([loadSceneryModels(), loadGameWordmark()]);
+  const query = parseDemoQuery(location.search);
+  const clock = query.ok && query.render === true ? new RenderClock() : undefined;
+  let showClosingCard: (() => void) | undefined;
+  if (clock !== undefined) {
+    window.__oylDemoRender = {
+      step: async (stepMs) => {
+        const drawn = clock.step(stepMs);
+        await settled();
+        return drawn;
+      },
+      closingCard: async () => {
+        showClosingCard?.();
+        await settled();
+      },
+    };
+  }
   createRoot(root).render(
     <StrictMode>
       <DemoPage
         search={location.search}
         renderer={threeGameRenderer}
         drawnWorld={drawnWorldOf}
-        frames={FRAMES}
-        reducedMotion={matchMedia('(prefers-reduced-motion: reduce)').matches}
+        frames={clock ?? FRAMES}
+        reducedMotion={
+          clock === undefined && matchMedia('(prefers-reduced-motion: reduce)').matches
+        }
         observeInView={observeInView}
         publish={publish}
         // #1652: a baked route's files, same-origin, into memory.
@@ -89,6 +129,14 @@ async function start(): Promise<void> {
         drawnSeason={seasonOf}
         // #1653: the decorations the view drew, which the showcase reads back.
         drawnDecorations={drawnDecorations}
+        // #1655: the video render's closing card.
+        registerClosingCard={
+          clock === undefined
+            ? undefined
+            : (show) => {
+                showClosingCard = show;
+              }
+        }
       />
     </StrictMode>,
   );
