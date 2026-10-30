@@ -702,10 +702,12 @@ export function accountManifest(input: {
  */
 export interface CameraManifest {
   /**
-   * How many pictures this device is holding for the athlete — **all of them**.
+   * How many pictures this device is holding for the athlete — **all of them**,
+   * less the snapshots of rides in Recently deleted, which leave the export
+   * with their rides (#1063).
    *
-   * ⚠️ Read with `countCameraFrames`, never taken from the length of the
-   * bounded list this run wrote from. See `transfer/store-port.ts`
+   * ⚠️ Read with `countExportableCameraFrames`, never taken from the length of
+   * the bounded list this run wrote from. See `transfer/store-port.ts`
    * §`AccountStore.countCameraFrames` for what a capped `kept` cost a rider.
    */
   readonly kept: number;
@@ -970,7 +972,9 @@ export async function exportEverything(
   // holds, so an archive of 200 out of 300 reported "200 of 201" and invited
   // the rider to erase a device holding a hundred pictures this archive does
   // not contain.
-  const keptCameraFrames = await store.countCameraFrames(athleteId);
+  // #1063: less the snapshots of rides in Recently deleted, which the list
+  // below leaves out with their rides — the owner's ruling of 2026-10-30.
+  const keptCameraFrames = await store.countExportableCameraFrames(athleteId);
   const cameraFiles: string[] = [];
   const snapshots: ManifestSnapshot[] = [];
   // ⚠️ A function rather than a `const`, and not only for the typechecker's

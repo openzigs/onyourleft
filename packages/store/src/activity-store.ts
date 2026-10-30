@@ -2347,17 +2347,68 @@ export class ActivityStore {
    * lookup would be a read a screen could be built on, and D-11's first rule is
    * that a kept frame is reached from the report the rider opens deliberately
    * and from nowhere else.
+   *
+   * ⚠️ **Leaves out the snapshots of a ride in Recently deleted** (#1063, the
+   * owner's ruling of 2026-10-30): a snapshot follows its ride, and the account
+   * export leaves that ride out. Restoring the ride brings them back, because
+   * they never moved; `#deleteRideParts` deletes them when the ride leaves
+   * Recently deleted for good.
    */
   async listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]> {
-    let query = this.#cameraFrames
-      .where(INDEX.cameraFrameByAthleteAndCapturedAt)
-      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
-      .reverse();
-    if (limit !== undefined) {
-      query = query.limit(limit);
-    }
-    const rows = await query.toArray();
-    return rows.map(fromPersistedCameraFrame);
+    return this.#db.transaction('r', [this.#cameraFrames, this.#recentlyDeleted], async () => {
+      const away = await this.#ridesInRecentlyDeleted(owner);
+      // ⚠️ The filter goes on BEFORE the limit: Dexie applies them in order,
+      // so a limit taken first would count a deleted ride's snapshots against
+      // the export's budget and then drop them, writing fewer than it could.
+      let query = this.#cameraFrames
+        .where(INDEX.cameraFrameByAthleteAndCapturedAt)
+        .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+        .reverse()
+        .filter((row) => row.activityId === null || !away.has(row.activityId));
+      if (limit !== undefined) {
+        query = query.limit(limit);
+      }
+      const rows = await query.toArray();
+      return rows.map(fromPersistedCameraFrame);
+    });
+  }
+
+  /**
+   * How many of this athlete's pictures {@link ActivityStore.listCameraFrames}
+   * would hand the account export with no limit: every one, less the
+   * snapshots of rides in Recently deleted (#1063, the owner's ruling of
+   * 2026-10-30). The export's manifest says `kept` from here, so an archive
+   * that left a deleted ride's snapshots out, as it leaves the ride out, is not
+   * reported as short.
+   *
+   * Counted through the indexes, for {@link ActivityStore.countCameraFrames}'
+   * reason: the whole count, less each deleted ride's count on
+   * `[athleteId+activityId]`. Both are scoped to `owner`.
+   */
+  async countExportableCameraFrames(owner: AthleteId): Promise<number> {
+    return this.#db.transaction('r', [this.#cameraFrames, this.#recentlyDeleted], async () => {
+      let count = await this.#cameraFrames.where(INDEX.cameraFrameByAthlete).equals(owner).count();
+      for (const id of await this.#ridesInRecentlyDeleted(owner)) {
+        count -= await this.#cameraFrames
+          .where(INDEX.cameraFrameByAthleteAndActivity)
+          .equals([owner, id])
+          .count();
+      }
+      return count;
+    });
+  }
+
+  /**
+   * The ids of this athlete's rides in Recently deleted — expired or not, since
+   * an expired ride not yet purged is out of the export too. Scoped to `owner`:
+   * another athlete's deleted ride says nothing about this athlete's pictures.
+   */
+  async #ridesInRecentlyDeleted(owner: AthleteId): Promise<Set<string>> {
+    const ids = await this.#recentlyDeleted
+      .where(INDEX.recentlyDeletedByAthlete)
+      .equals(owner)
+      .primaryKeys();
+    return new Set(ids.map(String));
   }
 
   /**

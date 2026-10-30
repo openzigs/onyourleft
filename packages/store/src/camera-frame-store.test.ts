@@ -385,6 +385,25 @@ describe('a side-camera snapshot', () => {
     expect(read.map((each) => each.id)).toStrictEqual([snapshot.id]);
   });
 
+  it('is left out of the account export’s read while its ride is in Recently deleted, inside the budget (#1063)', async () => {
+    // The owner's ruling of 2026-10-30. The deleted ride's snapshot is the
+    // NEWEST picture, so a budget of one taken before the filter would come
+    // back empty instead of with the kept frame.
+    const ride = await seedRide(harness, ATHLETE_A);
+    const kept = cameraFrameFor(ATHLETE_A);
+    const snapshot = {
+      ...snapshotFor(ATHLETE_A, ride.id),
+      capturedAt: unixSeconds(kept.capturedAt + 1_000),
+    };
+    await harness.write(async (store) => {
+      await store.putCameraFrame(kept);
+      await store.putCameraFrame(snapshot);
+      await store.moveActivityToRecentlyDeleted(ATHLETE_A, ride.id, unixSeconds(1_800_000_000));
+    });
+    const read = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A, 1));
+    expect(read.map((each) => each.id)).toStrictEqual([kept.id]);
+  });
+
   it('goes when its ride leaves Recently deleted for good (#1431)', async () => {
     const ride = await seedRide(harness, ATHLETE_A);
     const at = unixSeconds(1_800_000_000);

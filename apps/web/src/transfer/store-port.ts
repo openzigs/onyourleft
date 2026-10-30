@@ -132,6 +132,10 @@ export interface AccountStore {
    *
    * Usually **empty**, and that is the ordinary case rather than a fault: D-2
    * discards a frame unless the rider turned that ride's keep on.
+   *
+   * ⚠️ **Leaves out the snapshots of a ride in Recently deleted** (#1063, the
+   * owner's ruling of 2026-10-30): a snapshot follows its ride out of the
+   * export, and back into it when the ride is restored.
    */
   listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]>;
   /**
@@ -151,6 +155,14 @@ export interface AccountStore {
    * avoid.
    */
   countCameraFrames(owner: AthleteId): Promise<number>;
+  /**
+   * How many pictures {@link AccountStore.listCameraFrames} would carry with
+   * no budget: {@link AccountStore.countCameraFrames} less the snapshots of
+   * rides in Recently deleted (#1063). ⚠️ **The manifest's `kept` comes from
+   * here**, not from `countCameraFrames`: a deleted ride's snapshots are left
+   * out on purpose, so counting them would report every such archive as short.
+   */
+  countExportableCameraFrames(owner: AthleteId): Promise<number>;
   /**
    * The side camera's framing reference — #528, ADR 0033 D-7: *"carried in
    * the account export under ADR 0004 E, because it is the athlete's own

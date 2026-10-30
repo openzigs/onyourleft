@@ -827,6 +827,35 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'countExportableCameraFrames',
+    leaks:
+      'how many pictures everybody on this device has kept, which says that somebody else has been taking them',
+    async run(store, mine, theirs) {
+      // Two each — a kept frame and a snapshot (#1063) — so a count that
+      // ignored the owner would be six.
+      await expect(store.countExportableCameraFrames(mine.owner)).resolves.toBe(2);
+      // Their ride in Recently deleted says nothing about my pictures, and
+      // mine leaves my snapshot out of my count only.
+      await store.moveActivityToRecentlyDeleted(
+        theirs.owner,
+        theirs.ride.id,
+        theirs.ride.startedAt,
+      );
+      await expect(store.countExportableCameraFrames(mine.owner)).resolves.toBe(2);
+      await store.moveActivityToRecentlyDeleted(mine.owner, mine.ride.id, mine.ride.startedAt);
+      await expect(store.countExportableCameraFrames(mine.owner)).resolves.toBe(1);
+      await expect(store.countExportableCameraFrames(theirs.owner)).resolves.toBe(1);
+      // ⚠️ Put both back: every probe shares one seeded device, and this one
+      // runs again against the third athlete.
+      await expect(
+        store.restoreRecentlyDeleted(theirs.owner, theirs.ride.id, theirs.ride.startedAt),
+      ).resolves.toBe('restored');
+      await expect(
+        store.restoreRecentlyDeleted(mine.owner, mine.ride.id, mine.ride.startedAt),
+      ).resolves.toBe('restored');
+    },
+  },
+  {
     member: 'deleteCameraFrames',
     leaks: 'another athlete’s pictures, destroyed — and nothing can re-create one',
     async run(store, mine, theirs) {

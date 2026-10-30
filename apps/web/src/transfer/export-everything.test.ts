@@ -991,6 +991,50 @@ describe('exporting the pictures the rider kept (#384)', () => {
     expect(manifestText).not.toContain('"bytes"');
   });
 
+  it('leaves out the snapshot of a ride in Recently deleted, and carries it again once the ride is restored — #1063', async () => {
+    // The owner's ruling of 2026-10-30: a snapshot follows its ride. One ride
+    // live and one in Recently deleted, each with a snapshot, read back
+    // through the export a rider runs.
+    const { written } = await seedLibrary(2);
+    const live = written[0]!.ride;
+    const deleted = written[1]!.ride;
+    const liveSnapshot = snapshotFor(ATHLETE_A, live.id);
+    const deletedSnapshot = snapshotFor(ATHLETE_A, deleted.id);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(liveSnapshot);
+      await store.putCameraFrame(deletedSnapshot);
+      await store.moveActivityToRecentlyDeleted(ATHLETE_A, deleted.id, unixSeconds(1_800_000_000));
+    });
+
+    const before = await runExport();
+    const carried = (files: readonly DownloadableFile[]) =>
+      files.filter((file) => file.mediaType === 'image/jpeg').map((file) => file.bytes);
+    expect(carried(before.files)).toStrictEqual([liveSnapshot.bytes]);
+    const camera = manifestOf(before.files)['camera'] as Record<string, unknown>;
+    expect((camera['snapshots'] as { ride: string }[]).map((each) => each.ride)).toStrictEqual([
+      live.id,
+    ]);
+    // The deleted ride's snapshot is not counted as kept-but-not-written: the
+    // archive is whole, and says so.
+    expect(camera['kept']).toBe(1);
+    expect(camera['written']).toBe(1);
+    expect(JSON.stringify(manifestOf(before.files))).not.toContain(deleted.id);
+
+    await harness.write(async (store) => {
+      await expect(
+        store.restoreRecentlyDeleted(ATHLETE_A, deleted.id, unixSeconds(1_800_000_001)),
+      ).resolves.toBe('restored');
+    });
+    const after = await runExport();
+    const restoredCamera = manifestOf(after.files)['camera'] as Record<string, unknown>;
+    expect(
+      (restoredCamera['snapshots'] as { ride: string }[]).map((each) => each.ride).sort(),
+    ).toStrictEqual([live.id, deleted.id].sort());
+    expect(restoredCamera['kept']).toBe(2);
+    expect(restoredCamera['written']).toBe(2);
+    expect(carried(after.files)).toContainEqual(deletedSnapshot.bytes);
+  });
+
   it('says so when a rider kept none, rather than omitting the row', async () => {
     // Silence is the defect #384 names: *"Either answer, asserted; **silence is
     // the defect**."* An absent `camera` key and "you kept none" read the same

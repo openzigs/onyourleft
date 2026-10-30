@@ -206,6 +206,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     putCameraFrame: async (record) => real.putCameraFrame(record),
     listCameraFrames: async (owner, limit) => real.listCameraFrames(owner, limit),
     countCameraFrames: async (owner) => real.countCameraFrames(owner),
+    countExportableCameraFrames: async (owner) => real.countExportableCameraFrames(owner),
     deleteCameraFrames: async (owner) => real.deleteCameraFrames(owner),
     listRideSnapshots: async (owner, activity) => real.listRideSnapshots(owner, activity),
     countRideSnapshots: async (owner, activity) => real.countRideSnapshots(owner, activity),
