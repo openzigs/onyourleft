@@ -440,8 +440,8 @@ describe('the caps — #1784', () => {
  * The plans before #1784, fingerprinted by `footprint-fixtures-testing.ts`
  * §`planFingerprint`, each town with its urban class: `origin/main`'s at
  * `ac20712c` with every later lever off as well (its own frozen record), and
- * #1786's head (`feature/issue-1786-dormer-variants` at `b178f7c4`) as it
- * planned them.
+ * #1786's head (`feature/issue-1786-dormer-variants` at `daf51fa5`, re-derived
+ * there after #1785's 2026-10-30 saltbox-eaves fix) as it planned them.
  *
  * A frozen record of the planner before #1784, not a snapshot to refresh. If
  * #1785 or #1786 changes before it merges, #1786's head's two are re-derived
@@ -449,7 +449,7 @@ describe('the caps — #1784', () => {
  */
 const BEFORE = {
   main: { mixed: '18e7375f', houses: '15da7210' },
-  dormerVariants: { mixed: 'cdb29b12', houses: '29c7aa09' },
+  dormerVariants: { mixed: 'b56558df', houses: 'afc65b24' },
 } as const;
 
 describe('the lever — #1784', () => {
