@@ -227,7 +227,10 @@ describe('the full-width porch, read back from the plan — #1784', () => {
         ['foursquare', 'bungalow', 'farmhouse'].includes(archetype) ? 'full' : 'seeded',
       );
     }
-    for (const each of ofArchetype('farmhouse').filter((plan) => plan.porch)) {
+    const farmhouses = ofArchetype('farmhouse').filter((plan) => plan.porch);
+    // A floor, so the loop cannot pass on an empty set: the fixtures give it one.
+    expect(farmhouses.length).toBeGreaterThanOrEqual(1);
+    for (const each of farmhouses) {
       const [from, to] = deckOf(each);
       expect(to - from).toBeCloseTo(frontLengthOf(each) - 2 * FRONT_PORCH.endMargin, 2);
     }
@@ -290,6 +293,8 @@ describe('the full-width porch keeps #1540’s road clearance — #1784, as #158
   });
 
   it('drops one that would reach it even at its least depth', () => {
+    expect(close.plans.length).toBeGreaterThan(10);
+    expect(close.plans.every((each) => each.archetype === 'foursquare')).toBe(true);
     expect(close.plans.filter((each) => each.porch)).toStrictEqual([]);
   });
 });

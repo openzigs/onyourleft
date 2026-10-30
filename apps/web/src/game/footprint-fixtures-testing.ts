@@ -1018,7 +1018,9 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
  * How far a plan's eaves overhang its walls across a slope, as the product
  * plans it — #1784: its archetype's own, or {@link EAVES_OVERHANG_METRES}.
  * Not for a plan made with `archetypePorches: false`, whose every overhang is
- * the constant.
+ * the constant. It reads the same table production does, so a test using it
+ * checks consistency; the values themselves are pinned as literals in
+ * `archetype-porches.test.ts`.
  */
 export function eavesOverhangOf(plan: FootprintPlan): number {
   const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
