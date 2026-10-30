@@ -4145,9 +4145,12 @@ function overhangShadowProbe(
   const lines: Line[] = [];
   for (const plan of plans) {
     if (plan.porch || plan.garage || plan.shop.front) continue;
-    // A four-cornered house only: since #1660 an L's short wall by its notch
-    // came first, beside the other wing's eaves, whose own geometry darkens the
-    // wall's top with the shader's shadow out — not the control this reads.
+    // A four-cornered house only, which keeps the 7.0 m wall this probe read
+    // before #1660's split roofs put an L-shaped house's short wall first.
+    // That wall was not darkened by its notch: with the shadow term out, its
+    // near place keeps about 0.97 of its far place's light, as this one's does.
+    // What went red there was the control's absolute floor (`> -4`) on a wall
+    // that read brighter; since #1718 the spec's controls are ratios.
     if (plan.footprint.length !== 8) continue;
     const walls = plan.triangles.wall;
     for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
