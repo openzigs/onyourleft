@@ -347,7 +347,14 @@ export function DemoPage(props: DemoPageProps) {
           <p
             role="status"
             className="oyl-demo__status"
-            style={{ margin: 0, padding: '0 var(--oyl-space-sm)' }}
+            // #1654: small, as the source offer is, so a 320 × 180 frame keeps
+            // a stage under a two-line notice (CI's fonts left it none at 1 rem).
+            style={{
+              fontSize: 'var(--oyl-font-size-sm)',
+              lineHeight: 1.3,
+              margin: 0,
+              padding: '0 var(--oyl-space-sm)',
+            }}
           >
             {[loading ? REALISTIC_LOADING : undefined, routeNotice, notice]
               .filter((each) => each !== undefined)

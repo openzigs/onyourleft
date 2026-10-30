@@ -727,6 +727,8 @@ test.describe('the demo, built and served — #1648', () => {
       readonly panelsOffStage: string[];
       /** Whether the stage scrolls within itself: the product's stacked layout. */
       readonly stageScrolls: boolean;
+      /** How tall the stage's box is, in CSS pixels: what the lines around it leave the world. */
+      readonly stageHeight: number;
     }
 
     function fit(frame: Frame): Promise<Fit> {
@@ -771,6 +773,7 @@ test.describe('the demo, built and served — #1648', () => {
           outside,
           panelsOffStage,
           stageScrolls,
+          stageHeight: Math.round(box.height),
         };
       });
     }
@@ -811,7 +814,7 @@ test.describe('the demo, built and served — #1648', () => {
         await frameWidth(page, frame, width);
         await expect
           .poll(() => fit(frame))
-          .toEqual({
+          .toMatchObject({
             document: [width, Math.round((width * 9) / 16), width, Math.round((width * 9) / 16)],
             outside: [],
             panelsOffStage: [],
@@ -828,6 +831,13 @@ test.describe('the demo, built and served — #1648', () => {
           outside: [],
           stageScrolls: true,
         });
+      // Printed, for the arithmetic: what a two-line notice and the offer leave.
+      const smallest = await fit(frame);
+      console.info(`demo in a 320 × 180 frame: a stage ${String(smallest.stageHeight)} px tall`);
+      // Some stage is left under the realistic world's two-line failure notice:
+      // with that line at 1 rem, CI's fonts left none and the page ran 2 px past
+      // the frame. How much is left goes with the fonts (39 px on a Mac).
+      expect(smallest.stageHeight).toBeGreaterThan(0);
       await expect(frame.getByRole('link', { name: 'Source code' })).toBeInViewport();
       await expect(frame.getByText('Demo: scripted riders, not a real ride')).toBeInViewport();
 
