@@ -29,7 +29,9 @@
  * - {@link REALISTIC_SURFACES} are the road's and the ground's tiled maps.
  * - {@link REALISTIC_VEGETATION} is ADR 0026 D-12's second layer: the four
  *   kinds `scatter.ts` places that a photoscan can stand in for. Trees carry an
- *   impostor strip for the far band.
+ *   impostor strip for the far band. ⚠️ Since #1283 a broadleaf tree is
+ *   GENERATED rather than scanned ({@link REALISTIC_BROADLEAVES}), and the
+ *   scans it replaced are still shipped beside it.
  * - {@link REALISTIC_STRUCTURE_SURFACES} are ADR 0026 D-12's third layer
  *   (#475): the photographic surfaces the structures wear. The structures'
  *   SHAPES are built from numbers — a building's in `buildings.ts` since #500,
@@ -77,8 +79,32 @@ export interface SurfaceMaps {
    * 3 m and the grass's 4 m are #457's, read off its screenshots on the
    * tablet; the ground also samples at nine times that and blends by distance,
    * which is the cheapest cure for a tiling that reads as a grid at 150 m.
+   *
+   * For a map that is not square ({@link aspect}) this is the repeat's
+   * HEIGHT, its second texture coordinate.
    */
   readonly tileMetres: number;
+  /**
+   * How many times wider than tall the map is — #1548: 2 for ambientCG's
+   * `PaintedPlaster017`, published at 1024 × 512. Absent for a square map,
+   * which every other is. `realistic-budget.test.ts` holds it to the
+   * committed files' own sizes, so a map that would be drawn stretched is a
+   * red test.
+   */
+  readonly aspect?: number;
+}
+
+/**
+ * How many metres one repeat of a surface covers, across and up — #1548:
+ * {@link SurfaceMaps.tileMetres} up and that times its aspect across, so a
+ * texel of a map twice as wide as it is tall is as square on a wall as it was
+ * in the photograph.
+ */
+export function surfaceRepeat(maps: SurfaceMaps): {
+  readonly across: number;
+  readonly up: number;
+} {
+  return { across: maps.tileMetres * (maps.aspect ?? 1), up: maps.tileMetres };
 }
 
 /**
@@ -88,12 +114,21 @@ export interface SurfaceMaps {
  * (`ground-blend.ts`). Their repeats are this repository's own: gravel at
  * 2.5 m and stones at 3 m, near the scans' own sizes (Poly Haven's
  * `dimensions`, 2.48 m and 3 m) so a pebble is about a pebble's size.
+ *
+ * ⚠️ **Since #1274 a steep bank wears `crag`, and `rock` is the scree alone.**
+ * `rock` is loose stones on earth, which is what lies above a tree line and is
+ * exactly what does not stay on a bank past the angle of repose; `crag` is a
+ * fractured rock face — ambientCG's `Rock026`, the first asset taken from that
+ * source — at 3 m a repeat, this repository's own figure (its page states no
+ * size), which makes a block of it about a metre. A reviewer who remembers
+ * one photograph for both is reading the old file.
  */
 export const REALISTIC_SURFACES: {
   readonly road: SurfaceMaps;
   readonly ground: SurfaceMaps;
   readonly verge: SurfaceMaps;
   readonly rock: SurfaceMaps;
+  readonly crag: SurfaceMaps;
 } = {
   road: {
     colour: 'asphalt_02_diff_1k.ktx2',
@@ -115,6 +150,11 @@ export const REALISTIC_SURFACES: {
     normal: 'rocks_ground_05_nor_gl_512.ktx2',
     tileMetres: 3,
   },
+  crag: {
+    colour: 'Rock026_diff_512.ktx2',
+    normal: 'Rock026_nor_gl_512.ktx2',
+    tileMetres: 3,
+  },
 };
 
 /**
@@ -122,6 +162,9 @@ export const REALISTIC_SURFACES: {
  * #475 — and the two that wear no photograph: `painted`, a signpost's pole,
  * and — since #500 — `glass`, a window's pane, which takes its look from the
  * environment the sky already lights the world with and costs no texture.
+ *
+ * Since #1548 also the three a MAPPED town's buildings wear that the
+ * procedural kinds never did ({@link TOWN_STRUCTURE_SURFACES}).
  */
 export type StructureSurface =
   | 'brick'
@@ -131,8 +174,29 @@ export type StructureSurface =
   | 'planks'
   | 'corrugated'
   | 'hedge'
+  | 'paving'
+  | 'render'
+  | 'concrete'
+  | 'flat-roof'
   | 'painted'
   | 'glass';
+
+/**
+ * The surfaces a mapped town's buildings wear that no procedural kind does —
+ * #1548, ADR 0054: a rendered or plastered facade (`render`), a concrete
+ * commercial block (`concrete`) and a flat roof under gravel (`flat-roof`).
+ * Each is an ambientCG CC0 material at **1K**, colour and normal map, where
+ * every other structure surface is a 512 px Poly Haven one: the owner ruled on
+ * #1548 (2026-10-21) to raise the realistic build ceiling for them rather than
+ * shrink them to 512² (`realistic-budget.ts` §`REALISTIC_BUILD_BYTES`).
+ *
+ * ⚠️ **Loaded, and worn by no procedural kind.** Nothing in
+ * {@link REALISTIC_BUILDING_SURFACES} or {@link REALISTIC_BOUNDARY_PARTS}
+ * names them: the buildings planned from map data (#1540, drawn by #1549) are
+ * their wearers, and until those land each is a belt with no mesh in it
+ * (`three-renderer.ts` §`RealisticStructureBelts`) and two textures held.
+ */
+export const TOWN_STRUCTURE_SURFACES = ['render', 'concrete', 'flat-roof'] as const;
 
 /** A surface that is a photograph. */
 export type PhotographicSurface = Exclude<StructureSurface, 'painted' | 'glass'>;
@@ -151,13 +215,17 @@ export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly PhotographicSurface[] = [
   'planks',
   'corrugated',
   'hedge',
+  'paving',
+  // #1548: the mapped towns' three.
+  ...TOWN_STRUCTURE_SURFACES,
 ];
 
 /**
  * The structures' photographic surfaces — #475. Each is a Poly Haven CC0
  * texture, downsized by the pipeline to 512 px (`tools/realistic/sources.ts`
  * §`STRUCTURE_TEXTURES` says which, and why these), and its `tileMetres` is
- * Poly Haven's own stated size for the texture.
+ * Poly Haven's own stated size for the texture. Since #1548 three more are
+ * ambientCG's, at 1K ({@link TOWN_STRUCTURE_SURFACES}).
  *
  * ⚠️ **Surfaces and not buildings, and that is a finding rather than a
  * shortcut.** ADR 0026 D-12 layer 3 asks for realistic structures sourced per
@@ -179,10 +247,30 @@ export const REALISTIC_STRUCTURE_SURFACES: Readonly<Record<PhotographicSurface, 
   planks: structureMaps('dark_planks', 2),
   corrugated: structureMaps('corrugated_iron', 1.12),
   hedge: structureMaps('forest_leaves_02', 3),
+  // #1535: a village's pavement — `streets.ts`, drawn by `three-renderer.ts`
+  // §`PavementBelt` and worn by no structure kind. ambientCG's rather than
+  // Poly Haven's, and its page states no size: the photograph is four flags
+  // across, each taken as the common 0.5 m square, so one repeat is 2 m and a
+  // 2 m pavement is four flags wide.
+  paving: structureMaps('PavingStones136', 2),
+  // #1548: ambientCG's, at 1K — `tools/realistic/sources.ts`
+  // §`TOWN_STRUCTURE_TEXTURES` says which, and why these. The gravel's 1.9 m
+  // is ambientCG's own stated size for the scan; the plaster's and the
+  // concrete's pages state none, and 2 m is this repository's figure, the
+  // brick's and the stone's. The plaster is published at 1024 × 512, so its
+  // repeat is 4 m across and 2 m up.
+  render: { ...townMaps('PaintedPlaster017', 2), aspect: 2 },
+  concrete: townMaps('Concrete048', 2),
+  'flat-roof': townMaps('Gravel035', 1.9),
 };
 
 function structureMaps(id: string, tileMetres: number): SurfaceMaps {
   return { colour: `${id}_diff_512.ktx2`, normal: `${id}_nor_gl_512.ktx2`, tileMetres };
+}
+
+/** A {@link TOWN_STRUCTURE_SURFACES} entry's maps: an ambientCG 1K pair, encoded as it came — #1548. */
+function townMaps(id: string, tileMetres: number): SurfaceMaps {
+  return { colour: `${id}_diff_1k.ktx2`, normal: `${id}_nor_gl_1k.ktx2`, tileMetres };
 }
 
 /**
@@ -209,6 +297,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'roof-tiles',
   },
   barn: {
     wall: 'planks',
@@ -219,6 +309,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'corrugated',
   },
   church: {
     wall: 'stone',
@@ -229,6 +321,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'slate',
   },
   'shop-row': {
     wall: 'brick',
@@ -239,6 +333,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'slate',
   },
   shed: {
     wall: 'corrugated',
@@ -249,6 +345,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'corrugated',
     door: 'corrugated',
     glass: 'glass',
+    porch: 'corrugated',
+    'porch-roof': 'corrugated',
   },
 };
 
@@ -301,53 +399,181 @@ export interface RealisticModel {
   readonly middle?: string;
 }
 
+/** How a tree was made: generated to its size (ADR 0049 D-1), or a photoscan cut down to it. */
+export type TreeMaking = 'generated' | 'scanned';
+
 /**
- * The shapes, by kind, in variant order. An item's `variant` picks among them
- * modulo their count, exactly as `three-renderer.ts` §`ScatterBelt` does for the
- * stylised world — so the same item wears the same variant slot in both worlds
- * and only the shape changes (ADR 0026 D-2).
+ * Which trees a realistic world is drawn with — #1283, and since #1294 three
+ * sets where there were two:
+ *
+ * - `generated` — every tree generated: the broadleaves (#1283) and the firs
+ *   (#1294). What a ride draws.
+ * - `scanned-conifers` — the generated broadleaves beside the SCANNED firs:
+ *   the world #1283 left, and the other half of the fir's own before/after
+ *   pair.
+ * - `scanned` — every tree a scan: the world before #1283.
+ *
+ * Three and not four: scanned broadleaves beside generated firs is a world
+ * nobody drew and no row of validation 0002 asks for.
  */
-export const REALISTIC_VEGETATION: Readonly<
-  Record<RealisticVegetationKind, readonly RealisticModel[]>
+export type RealisticTrees = 'generated' | 'scanned-conifers' | 'scanned';
+
+/**
+ * All of them, in a fixed order.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, `realistic-assets.test.ts`
+ * and `realistic-textures.test.ts`, which hold EACH set to the budget and load
+ * each for real, and read by {@link realisticFiles}; a ride draws one set and
+ * never asks which others there are
+ */
+export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = [
+  'generated',
+  'scanned-conifers',
+  'scanned',
+];
+
+/** How each kind of tree in a set was made. */
+export const REALISTIC_TREE_MAKING: Readonly<
+  Record<RealisticTrees, { readonly broadleaves: TreeMaking; readonly conifers: TreeMaking }>
 > = {
-  'tree-broadleaf': [
-    {
-      name: 'island_tree_02',
-      file: 'island_tree_02.glb',
-      impostor: 'island_tree_02-impostor.ktx2',
-      impostorNormals: 'island_tree_02-impostor-normals.ktx2',
-      middle: 'island_tree_02-middle.glb',
-    },
-    {
-      name: 'tree_small_02',
-      file: 'tree_small_02.glb',
-      impostor: 'tree_small_02-impostor.ktx2',
-      impostorNormals: 'tree_small_02-impostor-normals.ktx2',
-      middle: 'tree_small_02-middle.glb',
-    },
-  ],
-  'tree-conifer': [
-    {
-      name: 'fir_sapling_medium_a',
-      file: 'fir_sapling_medium_a.glb',
-      impostor: 'fir_sapling_medium_a-impostor.ktx2',
-      impostorNormals: 'fir_sapling_medium_a-impostor-normals.ktx2',
-      middle: 'fir_sapling_medium_a-middle.glb',
-    },
-    {
-      name: 'fir_sapling_medium_b',
-      file: 'fir_sapling_medium_b.glb',
-      impostor: 'fir_sapling_medium_b-impostor.ktx2',
-      impostorNormals: 'fir_sapling_medium_b-impostor-normals.ktx2',
-      middle: 'fir_sapling_medium_b-middle.glb',
-    },
-  ],
-  shrub: [
-    { name: 'shrub_02_a', file: 'shrub_02_a.glb' },
-    { name: 'shrub_02_c', file: 'shrub_02_c.glb' },
-  ],
-  rock: [{ name: 'boulder_01', file: 'boulder_01.glb' }],
+  generated: { broadleaves: 'generated', conifers: 'generated' },
+  'scanned-conifers': { broadleaves: 'generated', conifers: 'scanned' },
+  scanned: { broadleaves: 'scanned', conifers: 'scanned' },
 };
+
+/**
+ * The broadleaf trees a ride draws: the **generated** ones — #1283, ADR 0049
+ * D-1.
+ *
+ * ## Why generated is the default, and what that rests on
+ *
+ * Measured in the browser gate on 2026-10-12, same route position, same
+ * camera (`realistic-budget.ts` §`REALISTIC_TRIANGLES`, "The generated trees,
+ * measured", has the table): the generated trees submit fewer triangles a
+ * frame, ask for less texture memory, and are four shapes of two species where
+ * the scans are two trees — and they make two MORE draw calls, a call a shape,
+ * inside a ceiling that did not move and that the owner's page is two under.
+ * On the page's own pictures they read as trees in leaf where the scans read
+ * as bare limbs; that is this change's author looking at two screenshots, not
+ * the owner looking at a tablet. What none of it can say is how they look
+ * there or what they cost its GPU: those are validation 0002's rows for
+ * #1283, which are the owner's, and ADR 0049 D-1 keeps a generated tree "only
+ * where the tablet measurement says it should".
+ *
+ * ⚠️ **So the scans are still committed and still loadable**, behind the
+ * owner's page (`browser/realistic/config.ts` §`LEVERS`, `-generated-trees`)
+ * and `three-renderer.ts` §`setRealisticTrees`. Removing them, or making them
+ * the default again, is the change after the rows.
+ *
+ * ⚠️ **Since #1294 the firs are generated too** ({@link REALISTIC_CONIFERS},
+ * which says what that default rests on), and a reviewer who remembers this
+ * note saying "broadleaves only" is reading #1283's file.
+ */
+export const REALISTIC_TREES_DEFAULT: RealisticTrees = 'generated';
+
+const tree = (name: string): RealisticModel => ({
+  name,
+  file: `${name}.glb`,
+  impostor: `${name}-impostor.ktx2`,
+  impostorNormals: `${name}-impostor-normals.ktx2`,
+  middle: `${name}-middle.glb`,
+});
+
+/**
+ * The broadleaf trees of each set, in variant order.
+ *
+ * - `generated` — #1283: two oaks and two hornbeams, each a seed of its
+ *   species (`tools/realistic/generated-trees.ts` §`GENERATED_TREES`, which
+ *   says why two and why there is no `_b`), interleaved so that two
+ *   neighbouring variant slots are different species as well as different
+ *   seeds.
+ * - `scanned` — the two Poly Haven photoscans every realistic world drew until
+ *   #1283, decimated to their budget.
+ */
+export const REALISTIC_BROADLEAVES: Readonly<Record<TreeMaking, readonly RealisticModel[]>> = {
+  generated: [
+    tree('generated_oak_a'),
+    tree('generated_hornbeam_a'),
+    tree('generated_oak_c'),
+    tree('generated_hornbeam_c'),
+  ],
+  scanned: [tree('island_tree_02'), tree('tree_small_02')],
+};
+
+/**
+ * The conifers of each making, in variant order — #1294.
+ *
+ * - `generated` — two firs, two seeds of one species
+ *   (`tools/realistic/generated-trees.ts` §`GENERATED_TREES`): the pinned
+ *   generator's evergreen, each bough carrying cards of Poly Haven's
+ *   photographed fir sprigs (ADR 0049 D-1 and its amendment of 2026-10-12).
+ * - `scanned` — the two Poly Haven fir photoscans every realistic world drew
+ *   until #1294, decimated to their budget.
+ *
+ * ## Why generated is the default, and what that rests on
+ *
+ * A scanned fir's needles are each an eight-triangle prism: the source tree
+ * has about 84 000 of them and a 24 000-triangle budget keeps about 1 900, so
+ * the scan is drawn nearly bare, and the owner's route is mostly conifers. A
+ * generated fir carries 1 100 sprig cards in 4 792 triangles, a fifth of the
+ * scan's, and 878 at its middle level against 5 998;
+ * `realistic-budget.ts` §`REALISTIC_TRIANGLES`, "The generated firs,
+ * measured", has the frame's figures. That it reads as a fir in needle is
+ * this change's author looking at screenshots, and nothing here was measured
+ * on a device.
+ *
+ * ⚠️ **So the scanned firs are still committed and still loadable**, as the
+ * scanned broadleaves are: the owner's page loads them with
+ * `?levers=-generated-conifers` (`browser/realistic/config.ts` §`LEVERS`).
+ * ADR 0049 D-1 keeps a generated tree "only where the tablet measurement
+ * says it should", and those rows are the owner's (validation 0002).
+ *
+ * ⚠️ **A sprig card has more cut-out edge than a leaf card**, and a fragment
+ * that is cut away was still shaded up to the cut. What that costs a tablet's
+ * GPU is not measured by anything in this repository.
+ */
+export const REALISTIC_CONIFERS: Readonly<Record<TreeMaking, readonly RealisticModel[]>> = {
+  generated: [tree('generated_fir_a'), tree('generated_fir_b')],
+  scanned: [tree('fir_sapling_medium_a'), tree('fir_sapling_medium_b')],
+};
+
+/**
+ * The shapes one set draws, by kind, in variant order. An item's `variant`
+ * picks among them modulo their count, exactly as `three-renderer.ts`
+ * §`ScatterBelt` does for the stylised world — so the same item wears the same
+ * variant slot in both worlds and only the shape changes (ADR 0026 D-2).
+ *
+ * ⚠️ **The sets differ only in their trees** (#1283, #1294,
+ * {@link REALISTIC_TREE_MAKING}): the shrubs and the rock are the same files
+ * in all of them.
+ */
+export function realisticVegetation(
+  trees: RealisticTrees,
+): Readonly<Record<RealisticVegetationKind, readonly RealisticModel[]>> {
+  const making = REALISTIC_TREE_MAKING[trees];
+  return {
+    'tree-broadleaf': REALISTIC_BROADLEAVES[making.broadleaves],
+    'tree-conifer': REALISTIC_CONIFERS[making.conifers],
+    shrub: [
+      { name: 'shrub_02_a', file: 'shrub_02_a.glb' },
+      { name: 'shrub_02_c', file: 'shrub_02_c.glb' },
+    ],
+    rock: [{ name: 'boulder_01', file: 'boulder_01.glb' }],
+  };
+}
+
+/**
+ * The shapes a RIDE draws: {@link realisticVegetation} of
+ * {@link REALISTIC_TREES_DEFAULT}.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, `near-field.test.ts`,
+ * `realistic-textures.test.ts` and `game.browser.spec.ts`, which read the
+ * committed files of what a ride draws off this table; since #1283 the
+ * renderer asks {@link realisticVegetation} for the set it was told to load,
+ * and `realistic-assets.test.ts` holds this to that function's answer for the
+ * default
+ */
+export const REALISTIC_VEGETATION = realisticVegetation(REALISTIC_TREES_DEFAULT);
 
 /** The four kinds, in a fixed order. */
 export const REALISTIC_VEGETATION_KINDS: readonly RealisticVegetationKind[] = [
@@ -456,6 +682,40 @@ export const REALISTIC_BICYCLE_MAP_NAMES: readonly RealisticBicycleMap[] = [
 export const REALISTIC_WORDMARK = 'game-wordmark.ktx2';
 
 /**
+ * The house models a mapped footprint may be drawn as — #1585: GildedAge's
+ * RVA set and Orzechu's brick building with shop, CC-BY-4.0, each a GLB of
+ * geometry alone (`<id>.glb`), every one mapped into the one colour atlas,
+ * {@link REALISTIC_HOUSE_ATLAS}, so that every model drawn is one draw call.
+ * `house-models.ts` says what each is and which footprints it fits.
+ */
+export const REALISTIC_HOUSE_MODEL_IDS = [
+  'old_american_brick_shop',
+  'rva_detached_house_01a',
+  'rva_detached_house_02a',
+  'rva_detached_house_02b',
+  'rva_detached_house_03a',
+  'rva_detached_house_03c',
+  'rva_detached_house_04a',
+  'rva_detached_house_04b',
+  'rva_duplex_01a',
+  'rva_duplex_01b',
+  'rva_duplex_02a',
+  'rva_duplex_02b',
+  'rva_house_01_brick_alternate',
+] as const;
+
+/** One of {@link REALISTIC_HOUSE_MODEL_IDS}. */
+export type HouseModelId = (typeof REALISTIC_HOUSE_MODEL_IDS)[number];
+
+/** A house model's file. */
+export function houseModelFile(id: HouseModelId): string {
+  return `${id}.glb`;
+}
+
+/** The one colour atlas every house model is mapped into — #1585, KTX2 ETC1S. */
+export const REALISTIC_HOUSE_ATLAS = 'house_models_atlas.ktx2';
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -472,10 +732,18 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.verge.normal,
     REALISTIC_SURFACES.rock.colour,
     REALISTIC_SURFACES.rock.normal,
-    ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
-      REALISTIC_VEGETATION[kind].flatMap((model) =>
-        [model.file, model.impostor, model.impostorNormals, model.middle].filter(
-          (file): file is string => file !== undefined,
+    REALISTIC_SURFACES.crag.colour,
+    REALISTIC_SURFACES.crag.normal,
+    // #1283, #1294: EVERY set's trees, each file once — the sets a ride does
+    // not draw still ship, and are still held to their budget.
+    ...new Set(
+      REALISTIC_TREE_SETS.flatMap((trees) =>
+        REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
+          realisticVegetation(trees)[kind].flatMap((model) =>
+            [model.file, model.impostor, model.impostorNormals, model.middle].filter(
+              (file): file is string => file !== undefined,
+            ),
+          ),
         ),
       ),
     ),
@@ -487,6 +755,8 @@ export function realisticFiles(): readonly string[] {
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
     REALISTIC_WORDMARK,
+    ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),
+    REALISTIC_HOUSE_ATLAS,
   ];
 }
 

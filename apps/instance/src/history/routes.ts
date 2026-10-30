@@ -30,6 +30,7 @@ export const HISTORY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/history/search',
+    sealed: 'only',
     operationId: 'searchHistory',
     reaches: 'own',
     summary: `The passages of YOUR history — past write-ups, ride summaries, goals, notes and documents you synced — that best match \`query\`, at most \`limit\` of them (1–${String(MAXIMUM_SEARCH_PASSAGES)}) and \`characters\` in all (1–${String(MAXIMUM_SEARCH_CHARACTERS)}); a passage is never cut to fit. \`rideId\`, the synced id of the ride being written about, leaves that ride out and dates the others against it in whole weeks. \`query\` is at most ${String(MAXIMUM_QUERY_CHARACTERS)} characters. \`rate_limited\` past ${String(DEFAULT_HISTORY_SEARCHES.limit)} searches a minute on an instance with the default limits. \`unavailable\` when this instance has no embedding model, or cannot reach it.`,

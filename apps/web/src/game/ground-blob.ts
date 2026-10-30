@@ -285,11 +285,26 @@ export function groundUnder(
 ): boolean {
   const rows = mesh.rows;
   if (rows < 2 || centre.length !== rows) return false;
-  const nearest = nearestRow(centre, x, z);
+  search.x = x;
+  search.z = z;
+  const nearest = nearestRow(centre);
   const from = Math.max(0, nearest - NEAR_ROWS);
   const to = Math.min(rows - 1, nearest + NEAR_ROWS);
-  return quadsUnder(mesh, from, to, x, z, into) || quadsUnder(mesh, 0, rows - 1, x, z, into);
+  return quadsUnder(mesh, from, to, into) || quadsUnder(mesh, 0, rows - 1, into);
 }
+
+/**
+ * What the search below is asked, every call: the point `(x, z)` it looks
+ * under, the height `y` it seeks there ({@link sheetUnder}), and how far a
+ * blob reaches ({@link roadClip}).
+ *
+ * ⚠️ **Written here rather than passed as arguments** (#1674). V8 hands a
+ * number to a call it does not inline as a heap object, so every double read
+ * off a field or computed and then passed costs an allocation — a dozen a
+ * blob, every blob, every frame. A field written in place costs none.
+ * `ground-blob-belt.test.ts` holds the belt's frame to that.
+ */
+const search = { x: 0, z: 0, y: 0, reach: 0 };
 
 /**
  * How far from the height a sheet is expected at a triangle may be and still
@@ -334,24 +349,101 @@ export function groundUnderBlob(
   into: GroundPoint,
 ): boolean {
   if (mesh.rows < 2 || centre.length !== mesh.rows) return false;
-  const foot = nearestRow(centre, caster.x, caster.z);
-  const footOnRoad = nearestSquared < ROAD_EDGE_SQUARED;
-  const middle = nearestRow(centre, blob.x, blob.z);
-  const middleOnRoad = nearestSquared < ROAD_EDGE_SQUARED;
-  if (footOnRoad || !sheetUnder(mesh, caster.x, caster.z, foot, foot, caster.y, into)) {
-    return !middleOnRoad && sheetUnder(mesh, blob.x, blob.z, middle, foot, caster.y, into);
-  }
+  search.x = caster.x;
+  search.z = caster.z;
+  search.y = caster.y;
+  const foot = nearestRow(centre);
+  const footOnRoad = (nearestSquared[0] as number) < ROAD_EDGE_SQUARED;
+  const footFound = !footOnRoad && sheetUnder(mesh, foot, foot, into);
+  search.x = blob.x;
+  search.z = blob.z;
+  const middle = nearestRow(centre);
+  const middleOnRoad = (nearestSquared[0] as number) < ROAD_EDGE_SQUARED;
+  if (!footFound) return !middleOnRoad && sheetUnder(mesh, middle, foot, into);
   // The foot's triangle's plane, carried out to the middle.
   const expected =
     into.y - (into.nx * (blob.x - caster.x) + into.nz * (blob.z - caster.z)) / into.ny;
-  if (!middleOnRoad && sheetUnder(mesh, blob.x, blob.z, middle, foot, expected, into)) return true;
+  search.y = expected;
+  if (!middleOnRoad && sheetUnder(mesh, middle, foot, into)) return true;
   // No ground under the middle: that plane is the ground it lies on.
   into.y = expected;
   return true;
 }
 
-/** The index of the cross-section nearest `(x, z)`, and its squared distance in {@link nearestSquared}. */
-function nearestRow(centre: readonly CorridorPoint[], x: number, z: number): number {
+/**
+ * `Math.hypot(pair[0], pair[1])`, written into `pair[2]`, without the
+ * builtin's allocation (#1674): V8's `Math.hypot` copies its arguments into a
+ * fresh array on every call and the optimiser does not inline it, so the
+ * belt's frame paid for one per call — hundreds a blob.
+ *
+ * ⚠️ **V8's own arithmetic, step for step** (`math.tq` §`MathHypot`: scale by
+ * the largest, a compensated sum of squares, the root times the largest), so
+ * for finite input it gives the same double the builtin did and the blob
+ * buffers are byte for byte what they were — `ground-blob-belt.test.ts` holds
+ * the digest. Not `Math.sqrt(a * a + b * b)`, which can differ in the last bit.
+ *
+ * ⚠️ **In and out through {@link pair}, not arguments and a result**, for
+ * {@link search}'s reason: handed no number and returning none, it allocates
+ * nothing whether V8 inlines it or not.
+ */
+function measurePair(): void {
+  const absA = Math.abs(pair[0] as number);
+  const absB = Math.abs(pair[1] as number);
+  const max = Math.max(absA, absB);
+  if (max === 0) {
+    pair[2] = 0;
+    return;
+  }
+  const na = absA / max;
+  const nb = absB / max;
+  pair[2] = Math.sqrt(na * na + nb * nb) * max;
+}
+
+/** {@link measurePair}'s two numbers, and its answer. */
+const pair = new Float64Array(3);
+
+/**
+ * The three numbers in {@link unit}, divided in place by their length as
+ * `Math.hypot` measures it — V8's arithmetic, step for step, for
+ * {@link measurePair}'s reason.
+ *
+ * ⚠️ **In and out through {@link unit}, not arguments and a result**: a
+ * `hypot3(nx, ny, nz)` that V8 did not inline into one of `nearestQuad`'s two
+ * calls of {@link onTriangle} was measured boxing four numbers a triangle
+ * found (#1674; {@link search} says why).
+ */
+function toUnitLength(): void {
+  const a = unit[0] as number;
+  const b = unit[1] as number;
+  const c = unit[2] as number;
+  const absA = Math.abs(a);
+  const absB = Math.abs(b);
+  const absC = Math.abs(c);
+  const max = Math.max(Math.max(absA, absB), absC);
+  let length = 0;
+  if (max !== 0) {
+    const na = absA / max;
+    const nb = absB / max;
+    const nc = absC / max;
+    // V8's Kahan summation; its first step carries no compensation.
+    const first = na * na;
+    const summand = nb * nb;
+    const second = first + summand;
+    const compensation = second - first - summand;
+    length = Math.sqrt(second + (nc * nc - compensation)) * max;
+  }
+  unit[0] = a / length;
+  unit[1] = b / length;
+  unit[2] = c / length;
+}
+
+/** The vector {@link toUnitLength} scales. */
+const unit = new Float64Array(3);
+
+/** The index of the cross-section nearest {@link search}'s point, and its squared distance in {@link nearestSquared}. */
+function nearestRow(centre: readonly CorridorPoint[]): number {
+  const x = search.x;
+  const z = search.z;
   let nearest = 0;
   let best = Number.POSITIVE_INFINITY;
   for (let row = 0; row < centre.length; row += 1) {
@@ -362,11 +454,16 @@ function nearestRow(centre: readonly CorridorPoint[], x: number, z: number): num
       nearest = row;
     }
   }
-  nearestSquared = best;
+  nearestSquared[0] = best;
   return nearest;
 }
 
-let nearestSquared = 0;
+/**
+ * {@link nearestRow}'s squared distance. A typed array and not a module `let`:
+ * V8 boxes a double written to a `let` afresh on every write, and this is
+ * written twice a blob (#1674). {@link sheetGap} likewise; @see search
+ */
+const nearestSquared = new Float64Array(1);
 
 /**
  * A point nearer a cross-section than this is on the carriageway, where no
@@ -377,36 +474,28 @@ const ROAD_EDGE_SQUARED = ROAD_EDGE_METRES * ROAD_EDGE_METRES;
 /** The best triangle {@link sheetUnder} has found so far, and how far it is from the height sought. */
 const sheetBest: GroundPoint = { y: 0, nx: 0, ny: 1, nz: 0 };
 const sheetCandidate: GroundPoint = { y: 0, nx: 0, ny: 1, nz: 0 };
-let sheetGap = Number.POSITIVE_INFINITY;
+const sheetGap = new Float64Array([Number.POSITIVE_INFINITY]);
 
 /**
- * The triangle under `(x, z)` whose height there is nearest `y`, searching the
- * quads near cross-section `here` — the one nearest the point — and near
- * `foot`, and every quad only when those hold none within
+ * The triangle under {@link search}'s `(x, z)` whose height there is nearest
+ * its `y`, searching the quads near cross-section `here` — the one nearest the
+ * point — and near `foot`, and every quad only when those hold none within
  * {@link SAME_SHEET_SLACK_METRES} of `y`. @see groundUnderBlob
  */
-function sheetUnder(
-  mesh: TerrainMesh,
-  x: number,
-  z: number,
-  here: number,
-  foot: number,
-  y: number,
-  into: GroundPoint,
-): boolean {
+function sheetUnder(mesh: TerrainMesh, here: number, foot: number, into: GroundPoint): boolean {
   const rows = mesh.rows;
-  sheetGap = Number.POSITIVE_INFINITY;
+  sheetGap[0] = Number.POSITIVE_INFINITY;
   const hereFrom = Math.max(0, here - NEAR_ROWS);
   const hereTo = Math.min(rows - 1, here + NEAR_ROWS);
   const footFrom = Math.max(0, foot - NEAR_ROWS);
   const footTo = Math.min(rows - 1, foot + NEAR_ROWS);
   if (footFrom <= hereTo && hereFrom <= footTo) {
-    nearestQuad(mesh, Math.min(hereFrom, footFrom), Math.max(hereTo, footTo), x, z, y);
-  } else if (!nearestQuad(mesh, hereFrom, hereTo, x, z, y)) {
-    nearestQuad(mesh, footFrom, footTo, x, z, y);
+    nearestQuad(mesh, Math.min(hereFrom, footFrom), Math.max(hereTo, footTo));
+  } else if (!nearestQuad(mesh, hereFrom, hereTo)) {
+    nearestQuad(mesh, footFrom, footTo);
   }
-  if (sheetGap > SAME_SHEET_SLACK_METRES) nearestQuad(mesh, 0, rows - 1, x, z, y);
-  if (sheetGap === Number.POSITIVE_INFINITY) return false;
+  if (sheetGap[0] > SAME_SHEET_SLACK_METRES) nearestQuad(mesh, 0, rows - 1);
+  if (sheetGap[0] === Number.POSITIVE_INFINITY) return false;
   into.y = sheetBest.y;
   into.nx = sheetBest.nx;
   into.ny = sheetBest.ny;
@@ -415,20 +504,13 @@ function sheetUnder(
 }
 
 /**
- * Every triangle between cross-sections `from` and `to` that `(x, z)` is
- * over, kept if nearer `y` than the best so far.
+ * Every triangle between cross-sections `from` and `to` that {@link search}'s
+ * `(x, z)` is over, kept if nearer its `y` than the best so far.
  *
  * @returns `true` when one within {@link SHEET_MATCH_METRES} was found, and
  * the search stopped there.
  */
-function nearestQuad(
-  mesh: TerrainMesh,
-  from: number,
-  to: number,
-  x: number,
-  z: number,
-  y: number,
-): boolean {
+function nearestQuad(mesh: TerrainMesh, from: number, to: number): boolean {
   const perRow = COLUMNS * 2;
   for (let row = from; row < to; row += 1) {
     for (let side = 0; side < 2; side += 1) {
@@ -437,36 +519,29 @@ function nearestQuad(
         const b = a + 1;
         const c = a + perRow;
         const d = c + 1;
-        if (onTriangle(mesh.vertices, a, b, c, x, z, sheetCandidate) && keptNearer(y)) return true;
-        if (onTriangle(mesh.vertices, b, d, c, x, z, sheetCandidate) && keptNearer(y)) return true;
+        if (onTriangle(mesh.vertices, a, b, c, sheetCandidate) && keptNearer()) return true;
+        if (onTriangle(mesh.vertices, b, d, c, sheetCandidate) && keptNearer()) return true;
       }
     }
   }
   return false;
 }
 
-/** Keeps the candidate if it is nearer `y` than the best; whether it is near enough to stop. */
-function keptNearer(y: number): boolean {
-  const gap = Math.abs(sheetCandidate.y - y);
-  if (gap < sheetGap) {
-    sheetGap = gap;
+/** Keeps the candidate if it is nearer {@link search}'s `y` than the best; whether it is near enough to stop. */
+function keptNearer(): boolean {
+  const gap = Math.abs(sheetCandidate.y - search.y);
+  if (gap < (sheetGap[0] as number)) {
+    sheetGap[0] = gap;
     sheetBest.y = sheetCandidate.y;
     sheetBest.nx = sheetCandidate.nx;
     sheetBest.ny = sheetCandidate.ny;
     sheetBest.nz = sheetCandidate.nz;
   }
-  return sheetGap <= SHEET_MATCH_METRES;
+  return (sheetGap[0] as number) <= SHEET_MATCH_METRES;
 }
 
-/** The first triangle between cross-sections `from` and `to` that `(x, z)` is over. */
-function quadsUnder(
-  mesh: TerrainMesh,
-  from: number,
-  to: number,
-  x: number,
-  z: number,
-  into: GroundPoint,
-): boolean {
+/** The first triangle between cross-sections `from` and `to` that {@link search}'s `(x, z)` is over. */
+function quadsUnder(mesh: TerrainMesh, from: number, to: number, into: GroundPoint): boolean {
   const perRow = COLUMNS * 2;
   for (let row = from; row < to; row += 1) {
     for (let side = 0; side < 2; side += 1) {
@@ -477,24 +552,24 @@ function quadsUnder(
         const b = a + 1;
         const c = a + perRow;
         const d = c + 1;
-        if (onTriangle(mesh.vertices, a, b, c, x, z, into)) return true;
-        if (onTriangle(mesh.vertices, b, d, c, x, z, into)) return true;
+        if (onTriangle(mesh.vertices, a, b, c, into)) return true;
+        if (onTriangle(mesh.vertices, b, d, c, into)) return true;
       }
     }
   }
   return false;
 }
 
-/** Whether `(x, z)` is over triangle `(p, q, r)`, and if so the ground there. */
+/** Whether {@link search}'s `(x, z)` is over triangle `(p, q, r)`, and if so the ground there. */
 function onTriangle(
   vertices: Float32Array,
   p: number,
   q: number,
   r: number,
-  x: number,
-  z: number,
   into: GroundPoint,
 ): boolean {
+  const x = search.x;
+  const z = search.z;
   const px = vertices[p * 3] as number;
   const py = vertices[p * 3 + 1] as number;
   const pz = vertices[p * 3 + 2] as number;
@@ -528,10 +603,13 @@ function onTriangle(
     ny = -ny;
     nz = -nz;
   }
-  const length = Math.hypot(nx, ny, nz);
-  into.nx = nx / length;
-  into.ny = ny / length;
-  into.nz = nz / length;
+  unit[0] = nx;
+  unit[1] = ny;
+  unit[2] = nz;
+  toUnitLength();
+  into.nx = unit[0];
+  into.ny = unit[1];
+  into.nz = unit[2];
   return true;
 }
 
@@ -563,6 +641,10 @@ const stretchTo = new Int32Array(MAXIMUM_STRETCHES);
  * widened by {@link ROAD_EDGE_METRES}, so its furthest reach along a normal is
  * the furthest of the chords' ENDPOINTS along it, plus the edge. A stretch's
  * plane is placed there, facing the blob from the stretch's nearest point.
+ *
+ * @test-facing held by `ground-blob.test.ts`, which asks it for the planes
+ * around a point and out to a reach of its own choosing; the belt asks
+ * {@link blobRoadClip}, which takes the placed blob
  */
 export function roadClip(
   centre: readonly CorridorPoint[],
@@ -572,19 +654,53 @@ export function roadClip(
   into: Float32Array,
   offset = 0,
 ): void {
+  search.x = x;
+  search.z = z;
+  search.reach = reach;
+  clipOffRoad(centre, into, offset);
+}
+
+/**
+ * {@link roadClip} for a placed blob, reaching as far as its longer half, into
+ * `into`'s first six floats: what `three-renderer.ts` §`GroundBlobBelt` calls
+ * every blob of every frame. It takes the blob rather than its numbers so that
+ * the call allocates nothing (#1674; {@link search} says why).
+ */
+export function blobRoadClip(
+  centre: readonly CorridorPoint[],
+  blob: GroundBlob,
+  into: Float32Array,
+): void {
+  search.x = blob.x;
+  search.z = blob.z;
+  search.reach = Math.max(blob.halfAlong, blob.halfAcross);
+  clipOffRoad(centre, into, 0);
+}
+
+/** {@link roadClip}, around {@link search}'s point and out to its reach. */
+function clipOffRoad(centre: readonly CorridorPoint[], into: Float32Array, offset: number): void {
+  const x = search.x;
+  const z = search.z;
   const count = centre.length;
-  const limit = reach + ROAD_EDGE_METRES;
+  const limit = search.reach + ROAD_EDGE_METRES;
   let stretches = 0;
   let open = false;
   for (let index = 0; index < count; index += 1) {
     const point = centre[index] as CorridorPoint;
     const before = index > 0 ? (centre[index - 1] as CorridorPoint) : point;
     const after = index + 1 < count ? (centre[index + 1] as CorridorPoint) : point;
-    const chord = Math.max(
-      Math.hypot(point.x - before.x, point.z - before.z),
-      Math.hypot(after.x - point.x, after.z - point.z),
-    );
-    const near = Math.hypot(point.x - x, point.z - z) <= limit + chord;
+    pair[0] = point.x - before.x;
+    pair[1] = point.z - before.z;
+    measurePair();
+    const back = pair[2] as number;
+    pair[0] = after.x - point.x;
+    pair[1] = after.z - point.z;
+    measurePair();
+    const chord = Math.max(back, pair[2] as number);
+    pair[0] = point.x - x;
+    pair[1] = point.z - z;
+    measurePair();
+    const near = (pair[2] as number) <= limit + chord;
     if (near && !open) {
       if (stretches === MAXIMUM_STRETCHES) {
         // More separate stretches than anywhere this program draws: fold the
@@ -629,7 +745,10 @@ export function roadClip(
     }
     let nx = x - nearestX;
     let nz = z - nearestZ;
-    const length = Math.hypot(nx, nz);
+    pair[0] = nx;
+    pair[1] = nz;
+    measurePair();
+    const length = pair[2] as number;
     if (length < 1e-9) {
       // Standing on the centreline, which no caster does: face any way, and
       // let the cut below take the whole blob.
@@ -641,7 +760,8 @@ export function roadClip(
     }
     stretchNormalX[stretch] = nx;
     stretchNormalZ[stretch] = nz;
-    stretchCut[stretch] = furthestAlong(centre, first, last, nx, nz, x, z);
+    stretchCut[stretch] = Number.NEGATIVE_INFINITY;
+    raiseCut(centre, first, last, stretch);
   }
 
   // The two that cut deepest are the planes; the rest fold into the one
@@ -666,39 +786,34 @@ export function roadClip(
     const facingSecond =
       nx * (stretchNormalX[secondPlane] as number) + nz * (stretchNormalZ[secondPlane] as number);
     const kept = facingFirst >= facingSecond ? firstPlane : secondPlane;
-    stretchCut[kept] = Math.max(
-      stretchCut[kept] as number,
-      furthestAlong(
-        centre,
-        stretchFrom[stretch] as number,
-        stretchTo[stretch] as number,
-        stretchNormalX[kept] as number,
-        stretchNormalZ[kept] as number,
-        x,
-        z,
-      ),
-    );
+    raiseCut(centre, stretchFrom[stretch] as number, stretchTo[stretch] as number, kept);
   }
   writePlane(into, offset, firstPlane);
   writePlane(into, offset + 3, secondPlane);
 }
 
-/** The furthest any road point of cross-sections `[first, last]` reaches along `(nx, nz)`, from `(x, z)`. */
-function furthestAlong(
+/**
+ * Raises `plane`'s cut to the furthest any road point of cross-sections
+ * `[first, last]` reaches along its normal, from {@link search}'s point.
+ * Written into {@link stretchCut} rather than returned, for {@link search}'s
+ * reason: a returned double is a new heap number too.
+ */
+function raiseCut(
   centre: readonly CorridorPoint[],
   first: number,
   last: number,
-  nx: number,
-  nz: number,
-  x: number,
-  z: number,
-): number {
+  plane: number,
+): void {
+  const nx = stretchNormalX[plane] as number;
+  const nz = stretchNormalZ[plane] as number;
+  const x = search.x;
+  const z = search.z;
   let furthest = Number.NEGATIVE_INFINITY;
   for (let index = first; index <= last; index += 1) {
     const point = centre[index] as CorridorPoint;
     furthest = Math.max(furthest, nx * (point.x - x) + nz * (point.z - z));
   }
-  return furthest + ROAD_EDGE_METRES;
+  stretchCut[plane] = Math.max(stretchCut[plane] as number, furthest + ROAD_EDGE_METRES);
 }
 
 function writePlane(into: Float32Array, at: number, stretch: number): void {
@@ -750,13 +865,13 @@ export function groundBlobAxes(blob: GroundBlob, ground: GroundPoint, into: Floa
   const hx = Math.sin(blob.yaw);
   const hz = Math.cos(blob.yaw);
   const lean = hx * ground.nx + hz * ground.nz;
-  let ax = hx - ground.nx * lean;
-  let ay = -ground.ny * lean;
-  let az = hz - ground.nz * lean;
-  const length = Math.hypot(ax, ay, az);
-  ax /= length;
-  ay /= length;
-  az /= length;
+  unit[0] = hx - ground.nx * lean;
+  unit[1] = -ground.ny * lean;
+  unit[2] = hz - ground.nz * lean;
+  toUnitLength();
+  const ax = unit[0];
+  const ay = unit[1];
+  const az = unit[2];
   // across = normal × along, which faces the quad up (`three-renderer.ts`
   // winds it for +Y in the local frame).
   const cx = ground.ny * az - ground.nz * ay;

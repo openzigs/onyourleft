@@ -60,6 +60,12 @@ erDiagram
         number  movingTime       "Seconds"
         number  distance         "Metres"
         number  averagePower     "Watts, optional"
+        number  maxPower         "Watts, optional (#1312)"
+        number  averageHeartRate "BeatsPerMinute, optional (#1312)"
+        number  maxHeartRate     "BeatsPerMinute, optional (#1312)"
+        number  averageCadence   "RevolutionsPerMinute, optional (#1312)"
+        number  ascent           "Metres climbed, optional (#1312)"
+        boolean partial          "true only: the rider stopped part-way round (#1312)"
     }
     PRIVACY_ZONE {
         string  id         PK
@@ -97,6 +103,9 @@ erDiagram
         string  state                    "recording | paused | stopped"
         number  updatedAt                "UnixSeconds — what the recovery list orders by"
         string  pauses                   "the intervals that keep a pause apart from a dropout"
+        string  courseLaps               "optional (#1312): the laps of a course completed so far, two marks and the course's distance and climb each"
+        string  openCourseLap            "optional (#1322): the lap in progress at the last flush, as a part lap"
+        string  workoutBlocks            "optional (#1319): each block of the workouts ridden so far, two marks and what became of it"
     }
     RECORDING_CHUNK {
         string  sessionId    PK "with seq: the compound primary key"
@@ -154,9 +163,9 @@ quantity, and a UTC offset cannot be `Seconds`, which is non-negative by constru
 | `[athleteId+activityId+channel]` on `streamBlobs` | `getStreamSet`'s blob fetch and `getStreamChannel`'s single-channel one |
 | `athleteId` on `streamSets`, `activityId`/`athleteId` on `streamBlobs` | the cascades |
 | `[athleteId+id]` on `recordingSessions` | `getRecordingSession` — the athlete-scoped point lookup |
-| `[athleteId+updatedAt]` on `recordingSessions` | `listRecordingSessions`, newest checkpoint first |
+| `[athleteId+updatedAt]` on `recordingSessions` | nothing since #1325: a header with a damaged `updatedAt` is not in it, so `readRecordingSessions` reads on `athleteId` and orders itself |
 | `[athleteId+sessionId+seq]` on `recordingChunks` | `recoverRecording` and `getRecordingFootprint`, walking the append order |
-| `athleteId` on `recordingSessions`, `sessionId`/`athleteId` on `recordingChunks` | the cascades |
+| `athleteId` on `recordingSessions`, `sessionId`/`athleteId` on `recordingChunks` | the cascades; `readRecordingSessions` and `listRecordingSessions` (#1325) |
 
 Every activity and lap index leads with `athleteId`. That is not for speed: it means there is no
 index that answers "the record with this id" without also being told whose it is, so the
@@ -357,6 +366,16 @@ const set     = await store.getStreamSet(owner, activityId);        // every cha
 const power   = await store.getStreamChannel(owner, activityId, 'power');  // one channel
 const summary = await store.getStreamSetSummary(owner, activityId); // no samples decoded
 ```
+
+### A finished ride in one write — #1326
+
+`putFinishedRide({ activity, streams, laps, recordingSession })` writes a recorded ride whole: the
+activity, its stream set and its laps, and `savedAs` on the checkpoint it was recorded into, in **one**
+transaction. A ride is then in the library whole or not at all, and no crash can leave it there while
+its checkpoint still reads as unsaved (which offered the same ride for saving twice). Each part is
+checked by the same code as `putActivity`, `putStreamSet` and `putLap`. A `recordingSession` this
+athlete does not have is left alone, not an error: the ride is still saved. The importer still writes
+its parts separately; `piecewiseRideStoreFactory` is this path's broken-store fake.
 
 ## Recording checkpoints — #46
 
@@ -866,6 +885,71 @@ own device list comes from the server that served the record, so it cannot be wh
 row going. The primary key is `[athleteId+publicKey]`; `listTrustedDeviceKeys(owner)` reads by the
 athlete, and one rule, `trustedDeviceKeyProblem`, holds a row on the way in and out.
 `assertTrustedDeviceKeyRoundTrip` is red against `memoryWriteStoreFactory`.
+
+## Typed workout goals — #1236, ADR 0048 D-10
+
+Schema version 18, additive: a new store, `workoutGoals`, and no existing record changes shape. One
+row per athlete, keyed **by** the athlete (`records.ts` §`WorkoutGoalsRecord`): the rider's own
+choices that **bound** a heart-rate hold or a re-plan during the ride — a session type, a duration,
+a heart-rate range to hold, a heart rate not to go above, a power ceiling as a share of their own
+threshold (at most 0.85, ADR 0048 H3), minutes in range, and effort check-ins. Every field is
+optional and an absent one is no goal, never a default. ⚠️ **They are not #836's free-text goals**
+(a `riderTexts` row of kind `goal`), which never set a bound.
+
+The model and its one check are `@onyourleft/domain` §`readWorkoutGoals` (`workout/goals.ts`), which
+refuses a malformed set **whole** — an unknown key included, ADR 0017 D-4's reasoning — and names
+the field and the constraint. `putWorkoutGoals` runs it on the way in and replaces the row whole;
+`getWorkoutGoals(owner)` runs it again on the way out and answers `none`, `kept`, or `fault` with
+the reason and **no** goals, so a hand-edited row never bounds a ride with part of a goal.
+`deleteWorkoutGoals(owner)` clears them; `deleteAthlete` counts them as `workoutGoals`. Bounds
+against the athlete's own thresholds are checked where a hold is computed, not here, because a
+threshold can change after the goals were saved.
+
+There is no `up`/`down` pair: no record changes shape, so a `down` would be the identity (§
+"Migrations"). The rollback is export → downgrade → re-import, executed with rides in the database by
+`workout-goals-store.test.ts` §"version 18 rolls back". `assertWorkoutGoalsRoundTrip` is red against
+`memoryWriteStoreFactory`.
+
+## A write only over what was read — #1263
+
+`putRiderText`, `putWorkout` and `putWorkoutGoals` take an optional second argument, a
+`WriteCondition`: `onlyIf(held)` is called **inside the write's own transaction** with the row the
+write would replace (`undefined` for none), and when it answers `false` nothing is written and the
+write throws `StoreConflictError`. A sync uses it to pull a copy only over the row it read before
+waiting on the instance, so a rider's edit or delete in that wait is not undone
+(`apps/web/src/instance/sync.ts`). `onlyIf` is synchronous on purpose: awaiting anything but the
+database ends an IndexedDB transaction, and the write would land outside the check. No schema
+change. `write-condition.test.ts` reads each answer back on a fresh connection.
+
+## World corridors: the one ODbL table — #1545, ADR 0054 D-3
+
+Schema version 20, additive: a new store, `worldCorridors`, and no existing record changes shape.
+⚠️ **This package's code is Apache-2.0; the rows of this one table are ODbL 1.0 data.** They are the
+map features in a route's corridor, read once from the basemap archive by #1539: building footprints
+with `kind`, `height` and `min_height`, land-use polygons with `kind`, water polygons, footway lines
+with `kind` and `kind_detail`, street lines with `kind`, `kind_detail` and whether each is a bridge or a
+tunnel, and which tiles were read and when — no OSM identifier, no name, no
+address (ADR 0054 D-3.3). Each record says so, `licence: 'ODbL-1.0'`.
+
+**Why a table of its own.** ADR 0012 D-3 lets OpenStreetMap-derived records be held only in their
+own store, never as fields on a route or any other record, so that nothing else in the database
+becomes a Derivative Database. One row per **(owner, route)**, keyed `[owner+routeId]` and indexed
+`owner`; `getWorldCorridor(owner, routeId)`, `putWorldCorridor(record)` and
+`deleteWorldCorridor(owner, routeId)` all name the owner. `putWorldCorridor` refuses a corridor for
+a route the owner does not have, and refuses a `features` blob over 16 MiB with
+`WorldCorridorTooLargeError`, which names the limit and the size and no coordinate.
+`deleteRoute` deletes the route's corridor in the same transaction, and `deleteAthlete` counts them
+as `worldCorridors`.
+
+**It never leaves the device.** Not in the account export, not in sync, not in any instance call
+(ADR 0054 D-3.5): that is what keeps ODbL §4.4 share-alike from engaging. A change that sends any of
+it anywhere is a change to that ADR. `apps/web/src/transfer/world-corridor-not-exported.test.ts`
+and `apps/web/src/privacy/world-corridor-never-sent.test.ts` hold the line.
+
+**It is a cache that can be dropped.** The route keeps its own geometry, so deleting the table costs
+the rider a re-read, or today's procedural world, and never a ride, a route or a setting. That is
+the rollback too: export → downgrade → re-import keeps every other table and leaves version 20 with
+an empty `worldCorridors`, executed by `migrations.test.ts` §"version 20 rolls back".
 
 ## Not in this package
 

@@ -182,7 +182,7 @@ describe('#942 — the garage: one card per kind of device, its state in words',
     expect(cardWords(card('Smart trainer'))).toContain('KICKR 1F2A: Connected');
     expect(cardWords(card('Heart rate strap'))).toContain('HRM 77: Connecting');
     expect(cardWords(card('Power meter'))).toContain(
-      'Pedals 9: Disconnected — forget it and pair it again to reconnect',
+      'Pedals 9: Link lost — wake it or bring it closer, then forget it and pair it again',
     );
     expect(cardWords(card('Speed or cadence sensor'))).toContain('Not paired');
     expectClean('Devices as a garage, four states at once');
@@ -217,12 +217,17 @@ describe('#942 — the garage: one card per kind of device, its state in words',
         "discardRecovered": [],
         "dismissResult": 0,
         "endWorkout": 0,
+        "keepThePlan": 0,
+        "lockTouch": 0,
+        "markLap": 0,
         "noteGameRideEnded": [],
         "noteResultAnnounced": 0,
+        "noteRoomRace": [],
         "pair": [
           "heart-rate",
         ],
         "pause": 0,
+        "recordForRoom": 0,
         "refreshRecoverable": 0,
         "requestControl": 0,
         "resume": 0,
@@ -231,7 +236,10 @@ describe('#942 — the garage: one card per kind of device, its state in words',
         "start": 0,
         "startNewRide": 0,
         "startWorkout": [],
+        "startWorkoutWith": [],
+        "switchReplansOff": 0,
         "tick": 0,
+        "unlockTouch": 0,
         "unpair": [
           "kickr",
         ],

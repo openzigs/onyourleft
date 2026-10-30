@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { HostedSettings } from './analysis/hosted-settings.ts';
+import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
-import type { ClientInfo, InstanceProbes } from './route-kit.ts';
+import type { ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
 import type { History } from './history/history.ts';
+import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
+import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
+import { SEALED_PATH } from '@onyourleft/domain';
 
 /**
  * The instance, as ONE fetch-style function: `Request → Response` (#767,
@@ -23,15 +28,23 @@ import { ROUTES, type Route } from './routes.ts';
  *
  * ## The order a request is answered in
  *
- * 1. **The body's size**, before anything else reads it. A request that
- *    declares more than the limit is refused on its `content-length`; one that
- *    declares nothing is read up to the limit and refused at the first byte
- *    past it — never buffered whole first. So a stranger cannot make the
- *    instance hold an unbounded upload in memory by leaving the header off.
- * 2. **The route**, by path: none is `not_found`; a path with no route for the
+ * 1. **The route**, by path: none is `not_found`; a path with no route for the
  *    method is `method_not_allowed` with an `Allow` header. A `{name}` segment
  *    matches one segment of letters, digits, `_` and `-`, and nothing else —
- *    so a value the route reads from `params` is never a path or a query.
+ *    so a value the route reads from `params` is never a path or a query. A
+ *    route marked `sealed: 'only'` is reached only inside `POST /v1/sealed`,
+ *    through {@link RouteContext.dispatch} (#1191): on an instance that holds
+ *    keys, a plaintext request to it is `sealed_required` HERE, before its body
+ *    is read, its session looked up or anything run (#1192, ADR 0047 D-7). An
+ *    instance with no keys has no sealed routes and answers it as any other.
+ * 2. **The body's size**, before anything else reads it — the route's own
+ *    limit where it declares one (only `/v1/sealed` does), the instance's
+ *    otherwise. A request that declares more than the limit is refused on its
+ *    `content-length`; one that declares nothing is read up to the limit and
+ *    refused at the first byte past it — never buffered whole first. So a
+ *    stranger cannot make the instance hold an unbounded upload in memory by
+ *    leaving the header off. Matching the route first reads no body: a path
+ *    is all it needs.
  * 3. **What the route declares it needs** (#772): the instance's accounts
  *    (`unavailable` when this instance was given none), a signed-in session
  *    (`unauthenticated`, with `WWW-Authenticate: Bearer`) — one that is not
@@ -122,6 +135,31 @@ export interface HandlerOptions {
    * `unavailable`: an instance with no accounts has no rooms to make.
    */
   readonly rooms?: Rooms;
+  /**
+   * Analysis jobs (#1095, ADR 0046 D-11). Absent, every route that needs them
+   * answers `unavailable`.
+   */
+  readonly analysis?: AnalysisJobs;
+  /**
+   * A rider's own hosted key and consent (#1199). Absent, every route that
+   * needs them answers `unavailable`.
+   */
+  readonly hostedSettings?: HostedSettings;
+  /**
+   * The side camera's pictures (#1106). Absent, the route that needs them
+   * answers `unavailable`.
+   */
+  readonly sidePose?: SidePose;
+  /**
+   * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
+   * /v1/instance/keys` answers `unavailable`.
+   */
+  readonly instanceKeys?: InstanceKeys;
+  /**
+   * Sealed requests (#1191, ADR 0047 D-9): the replay record, the clock and
+   * the HPKE port. Absent, `POST /v1/sealed` answers `unavailable`.
+   */
+  readonly sealed?: Sealed;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -241,6 +279,13 @@ function withHeaders(response: Response): Response {
 
 export function createHandler(options: HandlerOptions): Handler {
   const routes = options.routes ?? ROUTES;
+  // #1192 (ADR 0047 D-7): an instance with keys refuses a plaintext request to
+  // a sealed-only route; one with none has no sealed routes at all.
+  // Asked per request: a test's listener may be handed its keys once it has a port.
+  const sealsRoutes = (): boolean =>
+    options.sealed !== undefined && options.instanceKeys?.configured === true;
+  // An opened sealed request never reaches `/v1/sealed` again.
+  const innerRoutes = routes.filter((candidate) => candidate.path !== SEALED_PATH);
   const now = options.now ?? (() => performance.now());
   const specification = openApiDocument(routes);
 
@@ -267,6 +312,7 @@ export function createHandler(options: HandlerOptions): Handler {
     url: URL,
     body: Uint8Array | null,
     client: ClientInfo,
+    sealedRequest: boolean,
   ): Promise<Response> {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
@@ -275,6 +321,15 @@ export function createHandler(options: HandlerOptions): Handler {
       return errorResponse('unavailable');
     }
     if (matched.rooms === true && options.rooms === undefined) return errorResponse('unavailable');
+    if (matched.analysis === true && options.analysis === undefined) {
+      return errorResponse('unavailable');
+    }
+    if (matched.hostedSettings === true && options.hostedSettings === undefined) {
+      return errorResponse('unavailable');
+    }
+    if (matched.sidePose === true && options.sidePose === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -315,8 +370,40 @@ export function createHandler(options: HandlerOptions): Handler {
       sync: options.sync,
       history: options.history,
       rooms: options.rooms,
+      analysis: options.analysis,
+      hostedSettings: options.hostedSettings,
+      sidePose: options.sidePose,
+      instanceKeys: options.instanceKeys,
       probes: options.probes,
+      sealed: options.sealed,
+      sealedRequest,
+      dispatch: dispatchInner,
     });
+  }
+
+  /**
+   * An opened sealed request's inner request (#1191): matched against the same
+   * table, its body held to the instance's ordinary limit, and answered by
+   * {@link answer} with every check the route declares.
+   */
+  async function dispatchInner(
+    request: Request,
+    body: Uint8Array | null,
+    client: ClientInfo,
+  ): Promise<Response> {
+    const url = new URL(request.url);
+    const atPath = innerRoutes.flatMap((candidate) => {
+      const params = matchPath(candidate.path, url.pathname);
+      return params === undefined ? [] : [{ candidate, params }];
+    });
+    const found = atPath.find(({ candidate }) => candidate.method === request.method);
+    if (found === undefined) {
+      return atPath.length > 0 ? errorResponse('method_not_allowed') : errorResponse('not_found');
+    }
+    if (body !== null && body.byteLength > options.config.bodyLimitBytes) {
+      return errorResponse('payload_too_large');
+    }
+    return answer(found.candidate, found.params, request, url, body, client, true);
   }
 
   return async (request, client = { address: null }) => {
@@ -325,15 +412,21 @@ export function createHandler(options: HandlerOptions): Handler {
     let response: Response;
     try {
       const url = new URL(request.url);
-      const body = await boundedBody(request, options.config.bodyLimitBytes);
-      if (body === TOO_LARGE) {
+      const atPath = routes.flatMap((candidate) => {
+        const params = matchPath(candidate.path, url.pathname);
+        return params === undefined ? [] : [{ candidate, params }];
+      });
+      const found = atPath.find(({ candidate }) => candidate.method === request.method);
+      const limit = found?.candidate.bodyLimit?.(options.config) ?? options.config.bodyLimitBytes;
+      // #1192: refused before a byte of the body is read or anything else asked.
+      const refusedPlaintext = found?.candidate.sealed === 'only' && sealsRoutes();
+      const body = refusedPlaintext ? null : await boundedBody(request, limit);
+      if (refusedPlaintext) {
+        route = found?.candidate;
+        response = errorResponse('sealed_required');
+      } else if (body === TOO_LARGE) {
         response = errorResponse('payload_too_large');
       } else {
-        const atPath = routes.flatMap((candidate) => {
-          const params = matchPath(candidate.path, url.pathname);
-          return params === undefined ? [] : [{ candidate, params }];
-        });
-        const found = atPath.find(({ candidate }) => candidate.method === request.method);
         route = found?.candidate;
         if (found === undefined && request.method === 'OPTIONS' && atPath.length > 0) {
           // #777: a CORS preflight. The header says why this is safe.
@@ -348,7 +441,7 @@ export function createHandler(options: HandlerOptions): Handler {
             },
           });
         } else if (found !== undefined) {
-          response = await answer(found.candidate, found.params, request, url, body, client);
+          response = await answer(found.candidate, found.params, request, url, body, client, false);
         } else if (atPath.length > 0) {
           response = errorResponse('method_not_allowed', {
             headers: {

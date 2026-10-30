@@ -85,7 +85,7 @@ const SHOWN = `!${KEEP_SCREEN_ON_LABEL}: ${RIDE_MAY_STOP_WITH_SCREEN_OFF}`;
 const CHECKPOINTS: RecordingCheckpointStore = {
   putRecordingSession: (record) => Promise.resolve(record.id),
   appendRecordingChunk: () => Promise.resolve(1),
-  listRecordingSessions: () => Promise.resolve([]),
+  readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
   recoverRecording: () => Promise.resolve(undefined),
   deleteRecordingSession: () => Promise.resolve(true),
 };
@@ -405,6 +405,7 @@ describe('the game’s HUD — #647', () => {
       render: () => undefined,
       setQuality: () => undefined,
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),
@@ -628,7 +629,7 @@ describe('the game’s HUD — #647', () => {
 
   it('takes the road notice and its control off the HUD on the narrowest upright phones only — #693’s review', async () => {
     // jsdom lays nothing out, so which window this is comes from `matchMedia`:
-    // `ride.browser.spec.ts` §"#647" measures why, and where the line is.
+    // `ride-notices.browser.spec.ts` §"#647" measures why, and where the line is.
     const narrow = narrowWindow(true);
     const refused = { current: true };
     const port: GameTrainerPort = {

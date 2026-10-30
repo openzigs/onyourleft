@@ -264,3 +264,14 @@ arithmetic without building the array, the way `packages/domain/src/analysis/fit
 
 None of those is unlikely over the life of this project, which is why D-1 declines to adopt rather
 than deciding against.
+
+## Amendments
+
+- **2026-10-09** — **The format has a version 2, for the heart-rate hold block.**
+  [ADR 0048](0048-workouts-that-change-during-the-ride.md) D-3 adds a workout block kind, `heart-rate-hold` (a duration, a heart-rate range
+  the rider chose, a starting share of threshold power and a power ceiling share), which the owner
+  approved on [#1233](https://github.com/openzigs/onyourleft/issues/1233) on 2026-10-09. Under D-3
+  and D-4 that is a format change, so a file carrying it is `onYourLeftWorkout: 2`. A version-1
+  file still reads; a version-2 file is refused whole by a build that knows only version 1, which
+  D-4 intends. D-1 to D-6 otherwise stand as written, and D-6's bound applies to a version-2 file
+  unchanged. (#1233)

@@ -180,22 +180,37 @@ function barsOf(input: readonly BlockChartSegment[]): readonly Bar[] {
 }
 
 /**
+ * A scale handed in rather than read off the segments — #1307. The running
+ * workout's graph (`workout/workout-graph.ts`) draws the part ridden and the
+ * part to come as two calls, and each must be drawn on the WHOLE workout's
+ * scale or the two halves would not meet.
+ */
+export interface BlockChartScale {
+  /** The time the right-hand edge stands for. Default: the last segment's end. */
+  readonly endSeconds?: number | undefined;
+  /** The share of threshold the top stands for. Default: {@link CHART_TOP_SHARE}, or the hardest target if higher. */
+  readonly topShare?: number | undefined;
+}
+
+/**
  * The chart's path data — #1043.
  *
  * A ramp is a slope, and a ramp that crosses a band's boundary is cut there,
  * each piece filled by its own band, so a ramp from 50 % to 120 % reads as the
  * climb through the bands it is.
  */
-export function blockChartPaths(segments: readonly BlockChartSegment[]): BlockChartPaths {
+export function blockChartPaths(
+  segments: readonly BlockChartSegment[],
+  scale: BlockChartScale = {},
+): BlockChartPaths {
   const bars = barsOf(segments);
-  const end = bars.reduce((latest, bar) => Math.max(latest, bar.endsAt), 0);
-  if (bars.length === 0 || end <= 0) {
+  const end = scale.endSeconds ?? bars.reduce((latest, bar) => Math.max(latest, bar.endsAt), 0);
+  if (bars.length === 0 || !(end > 0)) {
     return EMPTY;
   }
-  const hardest = bars.reduce(
-    (most, bar) => Math.max(most, bar.from ?? 0, bar.to ?? 0),
-    CHART_TOP_SHARE,
-  );
+  const hardest =
+    scale.topShare ??
+    bars.reduce((most, bar) => Math.max(most, bar.from ?? 0, bar.to ?? 0), CHART_TOP_SHARE);
   const x = (time: number): number => (time / end) * CHART_WIDTH;
   const y = (share: number): number => CHART_HEIGHT - (share / hardest) * CHART_HEIGHT;
   const ground = coordinate(CHART_HEIGHT);

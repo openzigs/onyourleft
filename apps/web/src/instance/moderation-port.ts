@@ -59,14 +59,29 @@
  *
  * ## A report about yourself — #905
  *
- * The instance refuses a moderator deciding a report about themselves, and
- * logs the attempt. With one moderator nobody else can decide it, so the
- * screen does not offer to: {@link isConflict} is the one rule, and a report it
- * is true of is shown as a conflict, open, with no control on it.
+ * {@link isConflict} is the one rule for a report about the moderator reading
+ * it. While the instance names another moderator, it refuses this one
+ * deciding it and logs the attempt, so the screen shows it as a conflict,
+ * open, with no control on it. When the instance names this moderator ALONE
+ * (`soleModerator`, the project's instance), nobody else could ever decide
+ * it: the owner's procedure (`docs/moderation/notice-and-action.md`) has them
+ * dismiss it themselves, declaring the conflict in the reason, and the
+ * instance logs it as `dismiss_own_report`. An instance that does not say
+ * `soleModerator` is read as naming two, which offers no control.
  */
 
-import { heldInstanceSession, type InstanceStorage } from './instance-port';
-import type { InstanceAnswer, InstanceSend } from './instance-transport';
+import { parseModerationItem } from '@onyourleft/domain';
+
+import {
+  heldAccountSession,
+  heldInstanceSession,
+  heldSealedSession,
+  isSealedRequired,
+  type HeldSealedSession,
+  type SealingDependencies,
+} from './instance-port';
+import type { InstanceAnswer } from './instance-transport';
+import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, sealedRouteGate } from './instance-pin';
 import { readInstanceAccount } from './sign-in';
 
 /** An athlete id as the instance mints and accepts one (`moderation.ts` §`ATHLETE_ID`). */
@@ -77,6 +92,61 @@ export const MAXIMUM_MODERATION_REASON = 1000;
 
 /** The longest display name this screen will show — `@onyourleft/domain`'s bound, with room. */
 const MAXIMUM_SHOWN_NAME = 64;
+
+/**
+ * One notice of illegal content (#907), from the instance's notice page —
+ * sent by anybody, with or without an account, so its notifier is named only
+ * by what they chose to give.
+ */
+export interface ReceivedNotice {
+  readonly noticeId: number;
+  /** Unix seconds. */
+  readonly receivedAt: number;
+  /** A notice of illegal content, or an intimate image content report (OSA s.20A). */
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** The item identifiers it names (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: readonly string[];
+  readonly location: string | null;
+  readonly notifierName: string | null;
+  readonly notifierEmail: string | null;
+  readonly bonaFide: boolean;
+  /** When the moderator recorded confirming receipt (#912), Unix seconds, or `null`. */
+  readonly acknowledgedAt: number | null;
+  /** When the moderator recorded the decision (#912), or `null`. */
+  readonly decidedAt: number | null;
+  /** The decision, in the moderator's words (#912), or `null`. */
+  readonly decision: string | null;
+  /** The moderation log entry of the action the decision took (#912), or `null`. */
+  readonly logId: number | null;
+  /** When the moderator recorded telling the notifier (#912), or `null`. */
+  readonly notifierToldAt: number | null;
+}
+
+/** A step a moderator records on a notice (#912). */
+export type NoticeStep = 'acknowledged' | 'decided' | 'notifier_told';
+
+/** The longest fields the instance keeps on a notice (`apps/instance` §`notices.ts`). */
+const NOTICE_LIMITS = { explanation: 5000, location: 1000, name: 200, email: 254, items: 20 };
+
+/** One appeal in the moderators' queue (#911), with the decision it appeals. */
+export interface OpenAppeal {
+  readonly appealId: number;
+  /** Unix seconds. */
+  readonly filedAt: number;
+  readonly grounds: string;
+  readonly appellantAthleteId: string;
+  readonly statementId: number;
+  /** What was done: `suspend`, `hide_display_name`, `hide_item`. */
+  readonly restriction: string;
+  /** The facts the statement gave. */
+  readonly facts: string;
+  /** The moderator who took the decision appealed: when it is this one, deciding is a declared conflict. */
+  readonly decidedBy: string;
+}
+
+/** The longest grounds and decision an appeal carries (`apps/instance` §`statements.ts`). */
+export const MAXIMUM_APPEAL_DECISION = 2000;
 
 /** One account awaiting a moderator's decision (#775). */
 export interface PendingRegistration {
@@ -90,11 +160,16 @@ export interface PendingRegistration {
 /** One report in the moderators' queue. */
 export interface OpenReport {
   readonly reportId: number;
-  readonly reporterAthleteId: string;
+  /** `null` for a plausibility flag a room filed itself (#789). */
+  readonly reporterAthleteId: string | null;
   readonly targetAthleteId: string;
   readonly reason: string;
   /** Unix seconds. */
   readonly createdAt: number;
+  /** The room it came from, and the room's tick then (#789); absent from outside a room. */
+  readonly room?: { readonly roomId: string; readonly tick: number };
+  /** A flag's breached ceiling (#789). */
+  readonly flag?: { readonly durationSeconds: number; readonly ceilingWattsPerKilogram: number };
 }
 
 /** One line of the moderation log — read-only, oldest first as the instance keeps it. */
@@ -139,12 +214,34 @@ export type ModerationStanding =
 
 export type ModerationRead =
   | { readonly kind: Exclude<ModerationStanding, 'moderator'> }
+  /**
+   * A moderator, on a device that cannot seal now (#1192, ADR 0047 D-7, D-11):
+   * a copy of the app loaded from a website, no card, or keys refused. Every
+   * moderator route is sealed-only, so nothing is read; `text` says why.
+   */
+  | { readonly kind: 'sealed-unavailable'; readonly text: string }
   | {
       readonly kind: 'moderator';
       /** This account's id on the instance: what {@link isConflict} compares against. */
       readonly me: string;
+      /**
+       * The instance names this moderator alone (#905), so a report about them
+       * is theirs to dismiss, declared as their own.
+       */
+      readonly soleModerator: boolean;
       readonly registrations: readonly PendingRegistration[];
       readonly reports: readonly OpenReport[];
+      /**
+       * Every notice the instance's notice page received (#907), oldest
+       * first — or `undefined` when they could not be read while the queues
+       * could, read on their own as the log is.
+       */
+      readonly notices: readonly ReceivedNotice[] | undefined;
+      /**
+       * Every appeal not yet decided (#911), oldest first — or `undefined`
+       * when they could not be read while the queues could.
+       */
+      readonly appeals: readonly OpenAppeal[] | undefined;
       /**
        * The first page of the suspended accounts (#961), or `undefined` when
        * it could not be read while the queues could — read on its own, as the
@@ -162,6 +259,59 @@ export type ModerationRead =
 
 /** What a moderator may do to an account, by the instance's own names. */
 export type AccountAction = 'suspend' | 'unsuspend' | 'hide_display_name';
+
+/** The actions that restrict a rider, and so need a {@link StatementInput} (#910). */
+export const RESTRICTING_ACTIONS: ReadonlySet<AccountAction> = new Set([
+  'suspend',
+  'hide_display_name',
+]);
+
+/**
+ * A restriction's statement of reasons, as the moderator writes it (#910, DSA
+ * Art. 17(3)): the affected rider reads it. A blank ground is none.
+ */
+export interface StatementInput {
+  /** (b) the facts and circumstances. */
+  readonly facts: string;
+  /** (b) what it was decided on. */
+  readonly decidedOn: 'notice' | 'report' | 'own_initiative';
+  /** (d) the law relied on, and why the content is illegal under it. */
+  readonly legalGround: string;
+  /** (e) the terms relied on, and why the content breaks them. */
+  readonly termsGround: string;
+  /** The moderator declares a conflict of interest (the owner's ruling of 2026-09-30). */
+  readonly moderatorConflict: boolean;
+}
+
+/** The longest facts and grounds the instance takes (`apps/instance` §`statements.ts`). */
+export const MAXIMUM_STATEMENT_FACTS = 2000;
+export const MAXIMUM_STATEMENT_GROUND = 1000;
+
+/** A statement the instance would take, as it is sent — or `undefined`. */
+function acceptedStatement(
+  statement: StatementInput | undefined,
+): Record<string, unknown> | undefined {
+  if (statement === undefined) return undefined;
+  const facts = statement.facts.trim();
+  const legal = statement.legalGround.trim();
+  const terms = statement.termsGround.trim();
+  if (
+    facts === '' ||
+    [...facts].length > MAXIMUM_STATEMENT_FACTS ||
+    (legal === '' && terms === '') ||
+    [...legal].length > MAXIMUM_STATEMENT_GROUND ||
+    [...terms].length > MAXIMUM_STATEMENT_GROUND
+  ) {
+    return undefined;
+  }
+  return {
+    facts,
+    decidedOn: statement.decidedOn,
+    legalGround: legal === '' ? null : legal,
+    termsGround: terms === '' ? null : terms,
+    moderatorConflict: statement.moderatorConflict,
+  };
+}
 
 /** A decision on an account awaiting approval. */
 export type RegistrationDecision = 'approve' | 'refuse';
@@ -185,6 +335,21 @@ export const MODERATION_REFUSAL_TEXT = {
     'The instance no longer accepts this device’s sign-in. Connect again from the instance screen.',
   'no-answer': 'The instance did not answer, so nothing was changed.',
   'too-many': 'The instance is refusing requests for a while. Try again in a few minutes.',
+  'notice-decision':
+    'Write the decision, in at most 2,000 characters, with no place or coordinate in it. It is ' +
+    'what you tell the notifier, and it is kept in the record.',
+  'log-entry': 'That is not a moderation log entry’s number.',
+  item:
+    'That is not an item’s reference. Paste it as the app shows it: room:, route: or result:. A ' +
+    'display name is hidden from its account, above.',
+  decision:
+    'Write your answer to the rider, in at most 2,000 characters, with no place or coordinate in ' +
+    'it. They are shown it, and it is written to the moderation log.',
+  statement:
+    'Suspending an account, hiding a name or removing a rider from a room needs a statement of ' +
+    'reasons, which the rider is ' +
+    'shown: the facts, in at most 2,000 characters, and the law or the terms they break, in at ' +
+    'most 1,000 — with no place or coordinate in any of them.',
 } as const;
 
 /** What the Moderation screen may ask. */
@@ -209,27 +374,106 @@ export interface ModerationPort {
   /** Dismiss a report. */
   dismissReport(reportId: number, reason: string): Promise<ModerationOutcome>;
   /**
+   * Hide one item (#913) — a room's listing, the route shown in a room, or a
+   * row of a race's result — by the identifier a notice names it by, with the
+   * statement of reasons its owner is shown. Refused here, sending nothing,
+   * for an identifier that is not one or a statement that is not complete.
+   */
+  hideItem(item: string, reason: string, statement: StatementInput): Promise<ModerationOutcome>;
+  /**
+   * Record a step taken on a notice (#912): receipt confirmed, the decision
+   * (with the log entry of any action it took) or the notifier told — each
+   * done by hand, since the instance sends no email.
+   */
+  recordNoticeStep(
+    noticeId: number,
+    step: NoticeStep,
+    decision?: string,
+    logId?: number,
+  ): Promise<ModerationOutcome>;
+  /**
+   * The record of every notice and appeal (#912), as JSON text to save — or
+   * `undefined` when it could not be read.
+   */
+  exportRecord(): Promise<string | undefined>;
+  /**
+   * Decide an appeal (#911): `upheld` leaves the restriction, `reversed` lifts
+   * it. `decision` is what the rider is told, and is logged.
+   */
+  decideAppeal(
+    appealId: number,
+    outcome: 'upheld' | 'reversed',
+    decision: string,
+  ): Promise<ModerationOutcome>;
+  /**
+   * Remove an athlete from a room, for its life (#789), deciding the report
+   * it came from when `reportId` is given. It needs `statement` (#1384, as a
+   * suspension does, #910): without one it is refused here and nothing is sent.
+   */
+  removeFromRoom(
+    roomId: string,
+    athleteId: string,
+    reason: string,
+    reportId?: number,
+    statement?: StatementInput,
+  ): Promise<ModerationOutcome>;
+  /**
    * Suspend an account, lift a suspension or hide a display name — for a
-   * report when `reportId` is given, which the instance then closes.
+   * report when `reportId` is given, which the instance then closes. A
+   * suspension and a hidden name need `statement` (#910): without one the
+   * action is refused here and nothing is sent.
    */
   actOnAccount(
     athleteId: string,
     action: AccountAction,
     reason: string,
     reportId?: number,
+    statement?: StatementInput,
   ): Promise<ModerationOutcome>;
+  /**
+   * Make an invitation for a new rider (#1190, ADR 0047 D-6 source 3), with
+   * THIS device's card beside the code. The card is composed from this
+   * device's own pin, never taken from the instance's answer; with no pin there
+   * is no invitation (D-14 Q1).
+   */
+  mintInvite(reason: string): Promise<InviteOutcome>;
 }
 
-export interface ModerationPortDependencies {
-  readonly storage: InstanceStorage;
-  /** Injected so a test needs no network. Defaults to the platform's `fetch`. */
-  readonly send?: InstanceSend | undefined;
-}
+/** An invitation as the share sheet shows it (#1190). */
+export type InviteOutcome =
+  | {
+      readonly kind: 'minted';
+      /** The card and the code as one line: what the QR code carries and the rider is sent. */
+      readonly invite: string;
+      /** The card, composed from this device's own pin. */
+      readonly card: string;
+      readonly inviteCode: string;
+      /** Unix seconds. */
+      readonly expiresAt: number;
+    }
+  | { readonly kind: 'refused'; readonly text: string };
+
+/**
+ * Said on the share sheet, where an invitation leaves this device (ADR 0047
+ * D-6): an invitation's card is only as trustworthy as the channel it travels
+ * through. ⚠️ **Placeholder draft**: #1194 owns this sentence's wording.
+ */
+export const INVITE_CARD_CAUTION =
+  'This invitation carries the instance’s card. Whoever carries the invitation to the new rider ' +
+  'could change the card on the way, so send it by a channel you trust, or show it to them in ' +
+  'person.';
+
+/**
+ * Every moderator route is sealed and signed by the moderator's device key
+ * (#1192, ADR 0047 D-7, D-8), so the port needs what a sealed call needs.
+ */
+export type ModerationPortDependencies = SealingDependencies;
 
 /**
  * THE rule for #905: a report whose subject is the moderator reading it is a
- * conflict, which that moderator may not decide. The instance refuses it
- * anyway; the screen does not offer the control.
+ * conflict. With another moderator named, this one may not decide it, and the
+ * screen offers no control; as the only moderator, they may dismiss it,
+ * declaring the conflict.
  */
 export function isConflict(report: OpenReport, me: string): boolean {
   return report.targetAthleteId === me;
@@ -278,25 +522,148 @@ function registrationFrom(value: unknown): PendingRegistration | undefined {
   };
 }
 
+/** A room's id as the instance mints one (`rooms.ts`), or one an operator named. */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A room and its tick, or a flag, as the queue sends them (#789): absent from an older instance. */
+function roomOf(row: Readonly<Record<string, unknown>>) {
+  const { roomId, roomTick } = row;
+  if (roomId === undefined || roomId === null) {
+    return roomTick === undefined || roomTick === null ? null : undefined;
+  }
+  if (typeof roomId !== 'string' || !ROOM_ID.test(roomId)) return undefined;
+  if (!(typeof roomTick === 'number' && Number.isSafeInteger(roomTick) && roomTick >= 0)) {
+    return undefined;
+  }
+  return { roomId, tick: roomTick };
+}
+
+function flagOf(value: unknown) {
+  if (value === undefined || value === null) return null;
+  const flag = record(value);
+  const duration = flag?.durationSeconds;
+  const ceiling = flag?.ceilingWattsPerKilogram;
+  if (
+    typeof duration !== 'number' ||
+    !Number.isSafeInteger(duration) ||
+    duration < 1 ||
+    typeof ceiling !== 'number' ||
+    !Number.isFinite(ceiling) ||
+    ceiling <= 0
+  ) {
+    return undefined;
+  }
+  return { durationSeconds: duration, ceilingWattsPerKilogram: ceiling };
+}
+
 function reportFrom(value: unknown): OpenReport | undefined {
   const row = record(value);
   const reason = text(row?.reason, MAXIMUM_MODERATION_REASON);
   if (
     row === undefined ||
     !isCount(row.reportId) ||
-    !isId(row.reporterAthleteId) ||
+    !(row.reporterAthleteId === null || isId(row.reporterAthleteId)) ||
     !isId(row.targetAthleteId) ||
     reason === undefined ||
     !isTime(row.createdAt)
   ) {
     return undefined;
   }
+  const room = roomOf(row);
+  const flag = flagOf(row.flag);
+  if (room === undefined || flag === undefined) return undefined;
+  // Nobody files a report but a rider or a room's flag.
+  if (row.reporterAthleteId === null && (flag === null || room === null)) return undefined;
   return {
     reportId: row.reportId,
     reporterAthleteId: row.reporterAthleteId,
     targetAthleteId: row.targetAthleteId,
     reason,
     createdAt: row.createdAt,
+    ...(room === null ? {} : { room }),
+    ...(flag === null ? {} : { flag }),
+  };
+}
+
+/** Text a notifier typed, as the instance keeps it, or `null` — `undefined` when it is neither. */
+function optionalText(value: unknown, maximum: number): string | null | undefined {
+  return value === null ? null : text(value, maximum);
+}
+
+function noticeFrom(value: unknown): ReceivedNotice | undefined {
+  const row = record(value);
+  const explanation = text(row?.explanation, NOTICE_LIMITS.explanation);
+  const location = optionalText(row?.location, NOTICE_LIMITS.location);
+  const name = optionalText(row?.notifierName, NOTICE_LIMITS.name);
+  const email = optionalText(row?.notifierEmail, NOTICE_LIMITS.email);
+  const decision = optionalText(row?.decision, MAXIMUM_APPEAL_DECISION);
+  const items = row?.items;
+  if (
+    row === undefined ||
+    !isCount(row.noticeId) ||
+    !isTime(row.receivedAt) ||
+    (row.kind !== 'illegal_content' && row.kind !== 'intimate_image') ||
+    explanation === undefined ||
+    location === undefined ||
+    name === undefined ||
+    email === undefined ||
+    typeof row.bonaFide !== 'boolean' ||
+    !(row.acknowledgedAt === null || isTime(row.acknowledgedAt)) ||
+    !(row.decidedAt === null || isTime(row.decidedAt)) ||
+    decision === undefined ||
+    !(row.logId === null || isCount(row.logId)) ||
+    !(row.notifierToldAt === null || isTime(row.notifierToldAt)) ||
+    !Array.isArray(items) ||
+    items.length > NOTICE_LIMITS.items ||
+    !items.every((item) => typeof item === 'string' && parseModerationItem(item) !== undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    noticeId: row.noticeId,
+    receivedAt: row.receivedAt,
+    kind: row.kind,
+    explanation,
+    items: items as string[],
+    location,
+    notifierName: name,
+    notifierEmail: email,
+    bonaFide: row.bonaFide,
+    acknowledgedAt: row.acknowledgedAt,
+    decidedAt: row.decidedAt,
+    decision,
+    logId: row.logId,
+    notifierToldAt: row.notifierToldAt,
+  };
+}
+
+function appealFrom(value: unknown): OpenAppeal | undefined {
+  const row = record(value);
+  const grounds = text(row?.grounds, MAXIMUM_APPEAL_DECISION);
+  const facts = text(row?.facts, MAXIMUM_STATEMENT_FACTS);
+  if (
+    row === undefined ||
+    !isCount(row.appealId) ||
+    !isTime(row.filedAt) ||
+    grounds === undefined ||
+    !isId(row.appellantAthleteId) ||
+    !isCount(row.statementId) ||
+    typeof row.restriction !== 'string' ||
+    !/^[a-z_]{1,64}$/.test(row.restriction) ||
+    facts === undefined ||
+    !isId(row.decidedBy)
+  ) {
+    return undefined;
+  }
+  return {
+    appealId: row.appealId,
+    filedAt: row.filedAt,
+    grounds,
+    appellantAthleteId: row.appellantAthleteId,
+    statementId: row.statementId,
+    restriction: row.restriction,
+    facts,
+    decidedBy: row.decidedBy,
   };
 }
 
@@ -399,8 +766,20 @@ function outcomeOf(answer: InstanceAnswer): ModerationOutcome {
     return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
   }
   switch (errorCode(answer)) {
-    case 'validation_failed':
-      return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
+    case 'validation_failed': {
+      // #910: a refused statement says so, not that the reason was wrong.
+      const fields = record(record(answer.body)?.error)?.fields;
+      const aboutStatement =
+        Array.isArray(fields) &&
+        fields.some((each) => {
+          const field = record(each)?.field;
+          return typeof field === 'string' && field.startsWith('statement');
+        });
+      return {
+        kind: 'refused',
+        text: aboutStatement ? MODERATION_REFUSAL_TEXT.statement : MODERATION_REFUSAL_TEXT.reason,
+      };
+    }
     case 'rate_limited':
       return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['too-many'] };
     // ⚠️ One outcome, one sentence — see the module header. The last two are
@@ -421,26 +800,73 @@ function acceptedReason(reason: string): string | undefined {
   return trimmed === '' || [...trimmed].length > MAXIMUM_MODERATION_REASON ? undefined : trimmed;
 }
 
+/** An invite code as `apps/instance` mints them: four groups of four. */
+const INVITE_CODE = /^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/;
+
 /** The production {@link ModerationPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createModerationPort(dependencies: ModerationPortDependencies): ModerationPort {
   const held = () => heldInstanceSession(dependencies.storage, dependencies.send);
+  const sealedSession = heldSealedSession(dependencies);
+  const accountSession = heldAccountSession(dependencies);
 
-  /** One moderators' request and its answer, or the standing that stopped it. */
-  async function probe(): Promise<
-    | { readonly kind: 'answer'; readonly answer: InstanceAnswer }
-    | { readonly kind: Exclude<ModerationStanding, 'moderator'> }
+  /** The session sealed, or the refusal the screen says instead (#1192). */
+  async function sealedOr(
+    refusal: (closed: Extract<HeldSealedSession, { kind: 'closed' }>) => {
+      readonly kind: 'refused';
+      readonly text: string;
+    },
+  ): Promise<
+    | Extract<HeldSealedSession, { kind: 'open' }>
+    | { readonly kind: 'refused'; readonly text: string }
   > {
-    const connection = held();
-    if (connection === undefined) return { kind: 'not-connected' };
+    const session = await sealedSession();
+    return session.kind === 'open' ? session : refusal(session);
+  }
+
+  const closedRefusal = (closed: Extract<HeldSealedSession, { kind: 'closed' }>) =>
+    ({
+      kind: 'refused',
+      text: closed.why === 'signed-out' ? MODERATION_REFUSAL_TEXT['signed-out'] : closed.text,
+    }) as const;
+
+  /**
+   * Whether this account moderates its instance, from `GET /v1/auth/account`
+   * (#775's `moderatorRole`) — sealed since #1210 (ADR 0047 D-7 phase 2), or
+   * in plaintext from a device with no pin. A device that cannot read it is
+   * told why, as for every moderator read: `sealed-unavailable`.
+   */
+  async function standingOf(): Promise<
+    ModerationStanding | Extract<ModerationRead, { kind: 'sealed-unavailable' }>
+  > {
+    if (held() === undefined) return 'not-connected';
     try {
-      const answer = await connection.http.call('GET', '/v1/moderation/registrations', {
-        token: connection.token,
+      const session = await accountSession();
+      if (session.kind === 'closed') {
+        return session.why === 'signed-out'
+          ? 'not-connected'
+          : { kind: 'sealed-unavailable', text: session.text };
+      }
+      const answer = await session.sealedOrKeyless.call('GET', '/v1/auth/account', {
+        token: session.token,
       });
-      if (answer.status === 401) return { kind: 'signed-out' };
-      if (answer.status === 200) return { kind: 'answer', answer };
-      return isNotAModerator(answer) ? { kind: 'not-moderator' } : { kind: 'unreachable' };
+      if (answer.status === 401) return 'signed-out';
+      if (isSealedRequired(answer)) {
+        const gate = sealedRouteGate(
+          readInstanceAccount(dependencies.storage),
+          dependencies.loadedFrom,
+        );
+        return {
+          kind: 'sealed-unavailable',
+          text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+        };
+      }
+      if (answer.status === 200) {
+        const role = record(answer.body)?.moderatorRole;
+        return typeof role === 'string' && role !== '' ? 'moderator' : 'not-moderator';
+      }
+      return isNotAModerator(answer) ? 'not-moderator' : 'unreachable';
     } catch {
-      return { kind: 'unreachable' };
+      return 'unreachable';
     }
   }
 
@@ -452,14 +878,13 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
   ): Promise<ModerationOutcome> {
     const accepted = acceptedReason(reason);
     if (accepted === undefined) return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
-    const connection = held();
-    if (connection === undefined) {
-      return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
-    }
     try {
+      // Sealed-only (#1192): every moderator action is signed by this device.
+      const session = await sealedOr(closedRefusal);
+      if (!('sealed' in session)) return session;
       return outcomeOf(
-        await connection.http.call('POST', path, {
-          token: connection.token,
+        await session.sealed.call('POST', path, {
+          token: session.token,
           body: { reason: accepted, ...extra },
         }),
       );
@@ -473,19 +898,18 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     path: string,
     limit: number,
     cursor: string | undefined,
-    field: string,
     each: (value: unknown) => T | undefined,
   ): Promise<ModerationList<T> | undefined> {
     if (cursor !== undefined && !CURSOR.test(cursor)) return undefined;
-    const connection = held();
-    if (connection === undefined) return undefined;
     try {
+      const session = await sealedSession();
+      if (session.kind === 'closed') return undefined;
       return page(
-        await connection.http.call('GET', path, {
-          token: connection.token,
+        await session.sealed.call('GET', path, {
+          token: session.token,
           query: { limit: String(limit), ...(cursor === undefined ? {} : { cursor }) },
         }),
-        field,
+        'items',
         each,
       );
     } catch {
@@ -493,35 +917,79 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     }
   }
 
+  /** The open appeals (#911), read on their own: `undefined` on any answer but every row of them. */
+  async function appealRows(
+    session: Extract<HeldSealedSession, { kind: 'open' }>,
+  ): Promise<readonly OpenAppeal[] | undefined> {
+    try {
+      return rows(
+        await session.sealed.call('GET', '/v1/moderation/appeals', { token: session.token }),
+        'appeals',
+        appealFrom,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The notices (#907), read on their own: `undefined` on any answer but every row of them. */
+  async function noticeRows(
+    session: Extract<HeldSealedSession, { kind: 'open' }>,
+  ): Promise<readonly ReceivedNotice[] | undefined> {
+    try {
+      return rows(
+        await session.sealed.call('GET', '/v1/moderation/notices', { token: session.token }),
+        'notices',
+        noticeFrom,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   const logPage = (cursor?: string) =>
-    readPage('/v1/moderation/log', MODERATION_LOG_PAGE, cursor, 'entries', logEntryFrom);
+    readPage('/v1/moderation/log', MODERATION_LOG_PAGE, cursor, logEntryFrom);
   const suspendedPage = (cursor?: string) =>
-    readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, 'items', suspendedFrom);
+    readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, suspendedFrom);
 
   return {
     standing: async () => {
-      const probed = await probe();
-      return probed.kind === 'answer' ? 'moderator' : probed.kind;
+      const standing = await standingOf();
+      // Not known to moderate: the Instance screen offers no link.
+      return typeof standing === 'string' ? standing : 'unreachable';
     },
 
     read: async () => {
-      const probed = await probe();
-      if (probed.kind !== 'answer') return { kind: probed.kind };
+      const standing = await standingOf();
+      if (typeof standing !== 'string') return standing;
+      if (standing !== 'moderator') return { kind: standing };
       const me = readInstanceAccount(dependencies.storage)?.instanceAthleteId;
-      const connection = held();
-      if (me === undefined || connection === undefined) return { kind: 'not-connected' };
+      if (me === undefined) return { kind: 'not-connected' };
       try {
+        // Every moderator read is sealed-only (#1192, ADR 0047 D-7).
+        const session = await sealedSession();
+        if (session.kind === 'closed') {
+          return session.why === 'signed-out'
+            ? { kind: 'signed-out' }
+            : { kind: 'sealed-unavailable', text: session.text };
+        }
         // The log and the suspended accounts are each read as a section of
         // their own (#957's review): one that cannot be read, or holds a row
         // this client does not accept, is `undefined`, and the queues are
         // still shown.
-        const [reports, suspended, log] = await Promise.all([
-          connection.http.call('GET', '/v1/moderation/reports', { token: connection.token }),
+        const [registrations, reports, suspended, log, notices, appeals] = await Promise.all([
+          session.sealed.call('GET', '/v1/moderation/registrations', { token: session.token }),
+          session.sealed.call('GET', '/v1/moderation/reports', { token: session.token }),
           suspendedPage(),
           logPage(),
+          noticeRows(session),
+          appealRows(session),
         ]);
-        if (reports.status === 401) return { kind: 'signed-out' };
-        const registrationRows = rows(probed.answer, 'registrations', registrationFrom);
+        if (registrations.status === 401 || reports.status === 401) return { kind: 'signed-out' };
+        if (registrations.status !== 200 && isNotAModerator(registrations)) {
+          return { kind: 'not-moderator' };
+        }
+        const registrationRows = rows(registrations, 'registrations', registrationFrom);
         const reportRows = rows(reports, 'reports', reportFrom);
         if (registrationRows === undefined || reportRows === undefined) {
           return { kind: 'unreachable' };
@@ -529,8 +997,11 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         return {
           kind: 'moderator',
           me,
+          soleModerator: record(reports.body)?.soleModerator === true,
           registrations: registrationRows,
           reports: reportRows,
+          notices,
+          appeals,
           suspended,
           log,
         };
@@ -550,6 +1021,103 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       return send(`/v1/moderation/registrations/${typed}/${decision}`, reason);
     },
 
+    hideItem: async (item, reason, statement) => {
+      const typed = item.trim();
+      const parsed = parseModerationItem(typed);
+      if (parsed === undefined || parsed.kind === 'rider') {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.item };
+      }
+      const sentStatement = acceptedStatement(statement);
+      if (sentStatement === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement };
+      }
+      return send('/v1/moderation/items/hide', reason, {
+        item: typed,
+        statement: sentStatement,
+      });
+    },
+
+    recordNoticeStep: async (noticeId, step, decision, logId) => {
+      if (!Number.isSafeInteger(noticeId) || noticeId < 1) {
+        return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
+      }
+      const body: Record<string, unknown> = { step };
+      if (step === 'decided') {
+        const trimmed = (decision ?? '').trim();
+        if (trimmed === '' || [...trimmed].length > MAXIMUM_APPEAL_DECISION) {
+          return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['notice-decision'] };
+        }
+        body.decision = trimmed;
+        if (logId !== undefined) {
+          if (!Number.isSafeInteger(logId) || logId < 1) {
+            return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['log-entry'] };
+          }
+          body.logId = logId;
+        }
+      }
+      try {
+        const session = await sealedOr(closedRefusal);
+        if (!('sealed' in session)) return session;
+        const answer = await session.sealed.call(
+          'POST',
+          `/v1/moderation/notices/${String(noticeId)}/steps`,
+          { token: session.token, body },
+        );
+        const recorded = outcomeOf(answer);
+        return recorded.kind === 'refused' && errorCode(answer) === 'validation_failed'
+          ? { kind: 'refused', text: MODERATION_REFUSAL_TEXT['notice-decision'] }
+          : recorded;
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
+    },
+
+    exportRecord: async () => {
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return undefined;
+        const answer = await session.sealed.call('GET', '/v1/moderation/record', {
+          token: session.token,
+        });
+        const body = record(answer.body);
+        if (
+          answer.status !== 200 ||
+          !Array.isArray(body?.notices) ||
+          !Array.isArray(body.appeals)
+        ) {
+          return undefined;
+        }
+        return `${JSON.stringify(body, null, 2)}\n`;
+      } catch {
+        return undefined;
+      }
+    },
+
+    decideAppeal: async (appealId, outcome, decision) => {
+      if (!Number.isSafeInteger(appealId) || appealId < 1) {
+        return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
+      }
+      const trimmed = decision.trim();
+      if (trimmed === '' || [...trimmed].length > MAXIMUM_APPEAL_DECISION) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision };
+      }
+      try {
+        const session = await sealedOr(closedRefusal);
+        if (!('sealed' in session)) return session;
+        const answer = await session.sealed.call(
+          'POST',
+          `/v1/moderation/appeals/${String(appealId)}/decide`,
+          { token: session.token, body: { outcome, decision: trimmed } },
+        );
+        const decided = outcomeOf(answer);
+        return decided.kind === 'refused' && errorCode(answer) === 'validation_failed'
+          ? { kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision }
+          : decided;
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
+    },
+
     dismissReport: async (reportId, reason) => {
       if (!Number.isSafeInteger(reportId) || reportId < 1) {
         return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
@@ -557,21 +1125,86 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       return send(`/v1/moderation/reports/${String(reportId)}/dismiss`, reason);
     },
 
-    actOnAccount: async (athleteId, action, reason, reportId) => {
+    removeFromRoom: async (roomId, athleteId, reason, reportId, statement) => {
       const typed = athleteId.trim();
       if (!ATHLETE_ID.test(typed)) {
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
+      }
+      if (!ROOM_ID.test(roomId)) return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
+      // #1384: not sent without the statement the removed rider is shown.
+      const sentStatement = acceptedStatement(statement);
+      if (sentStatement === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement };
+      }
+      return send(`/v1/moderation/rooms/${roomId}/athletes/${typed}/remove`, reason, {
+        ...(reportId === undefined ? {} : { reportId }),
+        statement: sentStatement,
+      });
+    },
+
+    actOnAccount: async (athleteId, action, reason, reportId, statement) => {
+      const typed = athleteId.trim();
+      if (!ATHLETE_ID.test(typed)) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
+      }
+      // #910: a restriction is not sent without the statement the rider is shown.
+      const sentStatement = acceptedStatement(statement);
+      if (RESTRICTING_ACTIONS.has(action) && sentStatement === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement };
       }
       const path = {
         suspend: 'suspend',
         unsuspend: 'unsuspend',
         hide_display_name: 'hide-display-name',
       }[action];
-      return send(
-        `/v1/moderation/athletes/${typed}/${path}`,
-        reason,
-        reportId === undefined ? {} : { reportId },
-      );
+      return send(`/v1/moderation/athletes/${typed}/${path}`, reason, {
+        ...(reportId === undefined ? {} : { reportId }),
+        ...(RESTRICTING_ACTIONS.has(action) && sentStatement !== undefined
+          ? { statement: sentStatement }
+          : {}),
+      });
+    },
+
+    mintInvite: async (reason) => {
+      // ⚠️ The card is composed HERE, from this device's own pin (D-6
+      // source 3): never from anything the instance answers below.
+      const account = readInstanceAccount(dependencies.storage);
+      const gate = sealedRouteGate(account, dependencies.loadedFrom);
+      const card = cardFromPin(account);
+      if (gate.kind !== 'open' || card === undefined) {
+        return {
+          kind: 'refused',
+          text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+        };
+      }
+      const accepted = acceptedReason(reason);
+      if (accepted === undefined) return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
+      try {
+        // Sealed-only (#1192): the code is in the reply, as ciphertext.
+        const session = await sealedOr(closedRefusal);
+        if (!('sealed' in session)) return session;
+        const answer = await session.sealed.call('POST', '/v1/moderation/invites', {
+          token: session.token,
+          body: { reason: accepted },
+        });
+        const refused = outcomeOf(answer);
+        if (refused.kind === 'refused') return refused;
+        const body = record(answer.body);
+        const inviteCode =
+          typeof body?.inviteCode === 'string' ? body.inviteCode.toLowerCase() : '';
+        if (!INVITE_CODE.test(inviteCode) || !isTime(body?.expiresAt)) {
+          return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+        }
+        return {
+          kind: 'minted',
+          invite: codeWithCard(card, inviteCode),
+          card,
+          inviteCode,
+          expiresAt: body.expiresAt,
+        };
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
     },
   };
 }

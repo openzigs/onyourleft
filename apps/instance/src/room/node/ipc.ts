@@ -8,7 +8,7 @@
 
 import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
-import type { HostMetrics, RoomResult } from './room-host.ts';
+import type { HostMetrics, RoomFlagRaised, RoomResult, RoomSeat } from './room-host.ts';
 
 /** What a worker is started with, as its one command-line argument (JSON). */
 export interface WorkerSettings {
@@ -53,6 +53,20 @@ export type ToWorker =
       readonly athleteId: string;
     }
   | { readonly type: 'metrics'; readonly id: number }
+  /** Take a rider out of a room for its life (#789). */
+  | {
+      readonly type: 'remove';
+      readonly id: number;
+      readonly roomId: string;
+      readonly athleteId: string;
+    }
+  /** Who sits in a seat of a room, and the room's tick (#789): a report from the room names them. */
+  | {
+      readonly type: 'seat';
+      readonly id: number;
+      readonly roomId: string;
+      readonly riderId: number;
+    }
   | { readonly type: 'shutdown' };
 
 export type FromWorker =
@@ -68,6 +82,13 @@ export type FromWorker =
   | { readonly type: 'race-finished'; readonly roomId: string }
   | { readonly type: 'room-closed'; readonly roomId: string; readonly phase: RoomPhase }
   | { readonly type: 'socket-closed'; readonly socketId: string }
+  /** The room closed a socket for a protocol reason (#1400): counts only. */
+  | {
+      readonly type: 'protocol-close';
+      readonly roomId: string;
+      readonly reason: string;
+      readonly count: number;
+    }
   | {
       readonly type: 'metrics';
       readonly id: number;
@@ -75,4 +96,7 @@ export type FromWorker =
       readonly rssBytes: number;
     }
   | { readonly type: 'started'; readonly id: number; readonly ok: boolean }
+  | { readonly type: 'removed'; readonly id: number; readonly ok: boolean }
+  | { readonly type: 'seated'; readonly id: number; readonly seat: RoomSeat | null }
+  | { readonly type: 'flag'; readonly roomId: string; readonly flag: RoomFlagRaised }
   | { readonly type: 'stopped' };

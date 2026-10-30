@@ -45,7 +45,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,10 +80,16 @@ function repoRuleFloor(): number {
   return Number(match?.[1]);
 }
 
-function workflowFloor(): number {
-  const match = /MINIMUM_TARGET_SDK:\s*'(\d+)'/.exec(WORKFLOW);
-  expect(match, 'release.yml declares no MINIMUM_TARGET_SDK').not.toBeNull();
-  return Number(match?.[1]);
+/**
+ * Every copy in the workflow: one per verification step, the APK's and the
+ * App Bundle's (#958). Reading only the first would let the second drift.
+ */
+function workflowFloors(): number[] {
+  const floors = [...WORKFLOW.matchAll(/MINIMUM_TARGET_SDK:\s*'(\d+)'/g)].map((match) =>
+    Number(match[1]),
+  );
+  expect(floors.length, 'release.yml should state the floor for the APK and the bundle').toBe(2);
+  return floors;
 }
 
 describe('the target API floor', () => {
@@ -92,9 +98,9 @@ describe('the target API floor', () => {
     expect(repoRuleFloor(), 'scripts/check-repo-rules.sh disagrees with variables.gradle').toBe(
       gradle,
     );
-    expect(workflowFloor(), '.github/workflows/release.yml disagrees with variables.gradle').toBe(
-      gradle,
-    );
+    for (const floor of workflowFloors()) {
+      expect(floor, '.github/workflows/release.yml disagrees with variables.gradle').toBe(gradle);
+    }
   });
 
   it('is at least the level Google Play requires of a new app or an update', () => {
@@ -293,5 +299,344 @@ describe('the signing step, run under the shell the runner uses', () => {
     expect(run.keystore, 'the step reported signed=true and wrote no keystore').toBe(
       NOT_A_KEYSTORE,
     );
+  });
+});
+
+/**
+ * Run a step's script from `cwd`, with `bin` ahead of the inherited PATH so a
+ * stub stands in for each Android or JDK tool the step calls.
+ */
+function runStep(
+  stepName: string,
+  cwd: string,
+  bin: string,
+  environment: Readonly<Record<string, string>>,
+): { readonly status: number; readonly log: string } {
+  const script = join(cwd, 'step.sh');
+  writeFileSync(script, stepScript(stepName));
+  const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], {
+    cwd,
+    encoding: 'utf8',
+    // A fixed system PATH behind the stubs rather than the developer's own, so
+    // a real `jarsigner` or `java` installed locally can never answer instead.
+    env: { ...process.env, ...environment, PATH: `${bin}:/usr/bin:/bin` },
+  });
+  return { status: result.status ?? -1, log: `${result.stdout}${result.stderr}` };
+}
+
+function stub(bin: string, name: string, body: string): void {
+  writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+}
+
+describe('the Assemble step builds the App Bundle beside the APK (#958)', () => {
+  /** One `./gradlew` invocation: its arguments, and the channel its web assets were built for. */
+  interface Invocation {
+    readonly args: readonly string[];
+    readonly channel: string;
+  }
+
+  /**
+   * Every `./gradlew` invocation the step made, in order. The synced web
+   * assets carry a `channel` file, the direct build's in place and the Play
+   * build's set aside where the web build steps leave it (#1745), so each
+   * invocation records which one Gradle would have packaged.
+   */
+  function gradleInvocations(signed: boolean): Invocation[] {
+    const directory = mkdtempSync(join(tmpdir(), 'oyl-assemble-'));
+    try {
+      const recorded = join(directory, 'gradle-args');
+      const assets = join(directory, 'app/src/main/assets/public');
+      mkdirSync(assets, { recursive: true });
+      writeFileSync(join(assets, 'channel'), 'direct\n');
+      mkdirSync(join(directory, 'public-play'));
+      writeFileSync(join(directory, 'public-play', 'channel'), 'play\n');
+      stub(
+        directory,
+        'gradlew',
+        `{ printf 'channel=%s\\n' "$(cat app/src/main/assets/public/channel)"; printf '%s\\n' "$@"; printf -- '--\\n'; } >> '${recorded}'`,
+      );
+      const run = runStep('Assemble', directory, directory, {
+        SIGNED: signed ? 'true' : 'false',
+        RUNNER_TEMP: directory,
+        ANDROID_KEYSTORE_PASSWORD: 'store-password',
+        ANDROID_KEY_ALIAS: 'oyl-upload',
+        ANDROID_KEY_PASSWORD: 'key-password',
+      });
+      expect(run.status, run.log).toBe(0);
+      return readFileSync(recorded, 'utf8')
+        .split('--\n')
+        .filter((block) => block.trim() !== '')
+        .map((block) => {
+          const [first = '', ...args] = block.trim().split('\n');
+          return { channel: first.replace(/^channel=/, ''), args };
+        });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  const SIGNING_PROPERTIES = [
+    'android.injected.signing.store.file=',
+    'android.injected.signing.store.password=store-password',
+    'android.injected.signing.key.alias=oyl-upload',
+    'android.injected.signing.key.password=key-password',
+  ];
+
+  it('signs the bundle with the same injected upload key as the APK', () => {
+    const invocations = gradleInvocations(true);
+    expect(invocations.map(({ args }) => args[0])).toEqual(['assembleRelease', 'bundleRelease']);
+    // Two invocations since #1745, so each must carry the injected
+    // properties: a `./gradlew bundleRelease` without them builds an unsigned
+    // bundle with a green exit.
+    for (const { args } of invocations) {
+      for (const property of SIGNING_PROPERTIES) {
+        expect(
+          args.some((arg) => arg.startsWith(`-P${property}`)),
+          `${property} missing from ./gradlew ${args[0] ?? ''}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('packages the direct build into the APK and the Play build into the bundle (#1745)', () => {
+    for (const signed of [true, false]) {
+      expect(
+        gradleInvocations(signed).map(({ args, channel }) => `${args[0] ?? ''} ${channel}`),
+      ).toEqual(
+        signed
+          ? ['assembleRelease direct', 'bundleRelease play']
+          : ['assembleDebug direct', 'bundleDebug play'],
+      );
+    }
+  });
+
+  it('builds a debug bundle after the debug APK when there is no key', () => {
+    expect(gradleInvocations(false).map(({ args }) => args)).toEqual([
+      ['assembleDebug'],
+      ['bundleDebug'],
+    ]);
+  });
+});
+
+describe('the web client is built once per channel (#1745)', () => {
+  /** The channel a step's `env:` block sets, read from the step's own lines. */
+  function stepChannel(stepName: string): string | undefined {
+    const lines = WORKFLOW.split('\n');
+    const start = lines.findIndex((line) => line.trim() === `- name: ${stepName}`);
+    expect(start, `release.yml has no step named ${stepName}`).toBeGreaterThanOrEqual(0);
+    const end = lines.findIndex((line, index) => index > start && /^\s*run: \|/.test(line));
+    const match = lines
+      .slice(start, end)
+      .join('\n')
+      .match(/VITE_OYL_RELEASE_CHANNEL:\s*(.+)/);
+    return match?.[1];
+  }
+
+  it('builds for Google Play first and sets its synced assets aside', () => {
+    expect(stepChannel('Build the web client for Google Play')).toBe(
+      "${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'play' || '' }}",
+    );
+    const script = stepScript('Build the web client for Google Play');
+    expect(script).toContain('pnpm --filter @onyourleft/web run build');
+    expect(script).toContain('cap sync android');
+    expect(script).toContain(
+      'cp -R apps/mobile/android/app/src/main/assets/public "${RUNNER_TEMP}/public-play"',
+    );
+  });
+
+  it('leaves the direct build in place for the APK', () => {
+    expect(stepChannel('Build the web client for the direct download')).toBe(
+      "${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'direct' || '' }}",
+    );
+    const script = stepScript('Build the web client for the direct download');
+    expect(script).toContain('pnpm --filter @onyourleft/web run build');
+    expect(script).toContain('cap sync android');
+  });
+
+  it('finishes both builds before the key is decoded', () => {
+    const at = (name: string): number => WORKFLOW.indexOf(`- name: ${name}`);
+    expect(at('Build the web client for Google Play')).toBeLessThan(
+      at('Build the web client for the direct download'),
+    );
+    expect(at('Build the web client for the direct download')).toBeLessThan(at(SIGNING_STEP));
+  });
+});
+
+/**
+ * #1745: every place a rider meets the app says which channel it is and that
+ * the two do not mix, because switching is an uninstall and an uninstall
+ * deletes the rides on the device. Read as prose, with markdown emphasis and
+ * line breaks taken out.
+ */
+describe('riders are told the two channels do not mix (#1745)', () => {
+  const prose = (text: string): string =>
+    text
+      .replace(/^\s*>\s?/gm, '')
+      .replace(/\*\*/g, '')
+      .replace(/\s+/g, ' ');
+
+  const PLACES = {
+    'the README': prose(read('README.md')),
+    'the GitHub release notes': prose(read('apps', 'mobile', 'release-notes.md')),
+    "the Play listing's full description": prose(
+      /The full description carries this paragraph[\s\S]*?(?=\n- \[ \])/.exec(
+        read('apps', 'mobile', 'RELEASE.md'),
+      )?.[0] ?? '',
+    ),
+  };
+
+  for (const [place, text] of Object.entries(PLACES)) {
+    it(`in ${place}`, () => {
+      expect(text, `${place} does not name Google Play`).toContain('Google Play');
+      expect(text, `${place} does not name the direct download`).toContain('direct download');
+      expect(text).toMatch(/cannot update each other/);
+      expect(text).toContain('uninstalling deletes the rides on the device');
+      expect(text).toMatch(/sync them with an instance, before you switch/);
+    });
+  }
+
+  it('publishes the release notes with every GitHub Release', () => {
+    const match = /^\s+body_path:\s*(\S+)\s*$/m.exec(WORKFLOW);
+    expect(match?.[1]).toBe('apps/mobile/release-notes.md');
+    expect(existsSync(join(ROOT, match?.[1] ?? 'missing'))).toBe(true);
+  });
+});
+
+const BUNDLE_STEP = 'Verify the bundle is signed and targets the required API level';
+
+interface BundleTools {
+  /** What `jarsigner -verify` prints. It exits 0 either way, as the real one does. */
+  readonly verify?: string;
+  /** What `keytool -printcert -jarfile` prints. */
+  readonly certificate?: string;
+  /** What bundletool prints for the targetSdkVersion XPath. */
+  readonly target?: string;
+  /** Whether Assemble left an `.aab` at all. */
+  readonly bundle?: boolean;
+  readonly signed?: boolean;
+}
+
+const UPLOAD_CERTIFICATE =
+  'Owner: CN=On Your Left, O=openzigs\nIssuer: CN=On Your Left, O=openzigs';
+const DEBUG_CERTIFICATE =
+  'Owner: C=US, O=Android, CN=Android Debug\nIssuer: C=US, O=Android, CN=Android Debug';
+
+function verifyBundle(tools: BundleTools): { readonly status: number; readonly log: string } {
+  const directory = mkdtempSync(join(tmpdir(), 'oyl-bundle-'));
+  try {
+    const bin = join(directory, 'bin');
+    mkdirSync(bin);
+    stub(bin, 'jarsigner', `printf '%s\\n' '${tools.verify ?? 'jar verified.'}'`);
+    stub(bin, 'keytool', `printf '%s\\n' '${tools.certificate ?? UPLOAD_CERTIFICATE}'`);
+    // bundletool runs as `java -jar`; the stub answers the one XPath asked of it.
+    stub(
+      bin,
+      'java',
+      `case "$*" in *'--xpath=/manifest/uses-sdk/@android:targetSdkVersion'*) printf '%s\\n' '${tools.target ?? '36'}' ;; *) exit 64 ;; esac`,
+    );
+    if (tools.bundle ?? true) {
+      const release = join(directory, 'apps/mobile/android/app/build/outputs/bundle/release');
+      mkdirSync(release, { recursive: true });
+      writeFileSync(join(release, 'app-release.aab'), 'not a bundle');
+    }
+    return runStep(BUNDLE_STEP, directory, bin, {
+      SIGNED: (tools.signed ?? true) ? 'true' : 'false',
+      MINIMUM_TARGET_SDK: String(gradleTarget()),
+      RUNNER_TEMP: directory,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+describe('the bundle verification step, run against stub tools (#958)', () => {
+  it('passes a bundle signed with the upload key at the required target', () => {
+    const run = verifyBundle({});
+    expect(run.status, run.log).toBe(0);
+    expect(run.log).toContain('targeting API 36');
+  });
+
+  it('refuses an unsigned bundle even though jarsigner exits 0 for one', () => {
+    const run = verifyBundle({ verify: 'jar is unsigned.' });
+    expect(run.status, run.log).toBe(1);
+    expect(run.log).toContain('does not verify as signed');
+  });
+
+  // #1745. Both outputs are what JDK 21's `jarsigner -verify` printed on
+  // 2026-10-27 for a jar signed with a fresh self-signed key, before and after
+  // `jar uf` added an entry to it. It exits 0 for both.
+  const SELF_SIGNED_WARNINGS = [
+    'This jar contains entries whose signer certificate is self-signed.',
+    'This jar contains signatures that do not include a timestamp.',
+  ];
+
+  it('passes the self-signed and no-timestamp warnings the upload key always raises', () => {
+    const run = verifyBundle({
+      verify: ['', 'jar verified.', '', 'Warning: ', ...SELF_SIGNED_WARNINGS].join('\n'),
+    });
+    expect(run.status, run.log).toBe(0);
+  });
+
+  it('refuses a partly signed bundle, which jarsigner still calls verified', () => {
+    const run = verifyBundle({
+      verify: [
+        '',
+        'jar verified.',
+        '',
+        'Warning: ',
+        'This jar contains unsigned entries which have not been integrity-checked. ',
+        ...SELF_SIGNED_WARNINGS,
+      ].join('\n'),
+    });
+    expect(run.status, run.log).toBe(1);
+    expect(run.log).toContain('has entries that are not signed');
+  });
+
+  it('refuses a bundle signed with the Android debug certificate', () => {
+    const run = verifyBundle({ certificate: DEBUG_CERTIFICATE });
+    expect(run.status, run.log).toBe(1);
+    expect(run.log).toContain('debug certificate');
+  });
+
+  it('refuses a bundle below the target API floor', () => {
+    const run = verifyBundle({ target: '35' });
+    expect(run.status, run.log).toBe(1);
+    expect(run.log).toContain('below the required 36');
+  });
+
+  it('refuses a bundle whose manifest declares no target', () => {
+    const run = verifyBundle({ target: '' });
+    expect(run.status, run.log).toBe(1);
+    expect(run.log).toContain('no numeric targetSdkVersion');
+  });
+
+  it('refuses a build that produced no bundle at all', () => {
+    const run = verifyBundle({ bundle: false });
+    expect(run.status, run.log).toBe(1);
+    expect(run.log).toContain('produced no App Bundle');
+  });
+
+  it('checks only the target on an unsigned fork run, as the APK step does', () => {
+    const run = verifyBundle({ signed: false, certificate: DEBUG_CERTIFICATE });
+    expect(run.status, run.log).toBe(0);
+    expect(verifyBundle({ signed: false, target: '35' }).status).toBe(1);
+  });
+});
+
+describe('where the App Bundle goes (#958)', () => {
+  it('is uploaded as a workflow artefact', () => {
+    expect(WORKFLOW).toMatch(
+      /name: android-aab\n\s+path: apps\/mobile\/android\/app\/build\/outputs\/bundle\/\*\*\/\*\.aab\n\s+if-no-files-found: error/,
+    );
+  });
+
+  it('is not a GitHub Release asset, which stays the APK alone', () => {
+    const files = [...WORKFLOW.matchAll(/^\s+files:\s*(\S+)\s*$/gm)].map((match) => match[1]);
+    expect(files).toEqual(['apps/mobile/android/app/build/outputs/apk/**/*.apk']);
+  });
+
+  it('fetches bundletool pinned to a SHA-256 and checks it', () => {
+    expect(WORKFLOW).toMatch(/BUNDLETOOL_SHA256: '[0-9a-f]{64}'/);
+    expect(stepScript('Fetch bundletool')).toContain('sha256sum -c -');
   });
 });

@@ -258,6 +258,42 @@ run_check
 assert_red 'a harness page is not a production entry point'
 assert_says 'and the symbol it alone reaches is still reported' '`stopRide`'
 
+# --- #1645: the demo page is a second entry point -----------------------------
+# The demo is its own build (`vite.demo.config.ts`) and is served to visitors,
+# so an export only it reaches is shipped. Both directions: reached from the
+# demo entry alone is green, and the same tree with that import removed is red.
+demo_fixture() {
+  new_fixture
+  write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+  write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+export function replayRide(): void {}
+TS
+  write apps/web/demo/index.html <<'HTML'
+<!doctype html>
+<html lang="en"><body><script type="module" src="../src/demo/main.tsx"></script></body></html>
+HTML
+}
+demo_fixture
+write apps/web/src/demo/main.tsx <<'TS'
+import { replayRide } from '../ride/controller';
+replayRide();
+TS
+run_check
+assert_green '#1645: an export reached only from the demo entry is wired'
+assert_silent_about '#1645: and is not reported' '`replayRide`'
+
+demo_fixture
+write apps/web/src/demo/main.tsx <<'TS'
+export {};
+TS
+run_check
+assert_red '#1645: the same export with the import in the demo removed is not'
+assert_says '#1645: and is named' 'WIRE002 apps/web/src/ride/controller.ts:2'
+
 # --- WIRE002 green once something production reaches it -----------------------
 new_fixture
 write apps/web/src/main.tsx <<'TS'
@@ -1571,6 +1607,87 @@ TS
     assert_silent_about '#1094: and is not reported' 'model-step-port'
   fi
 done
+
+# --- #1595: an export read only inside a subscript is wired -------------------
+# The shape #1594 met, read from `b80cb2b7c` with `FOOTPRINT_VERTEX_FLOATS` put
+# back to a literal: `STYLE_OFFSET` was read only as
+# `floats[from + STYLE_OFFSET + at4]`, in `MappedBuildingBelt.#append`, and was
+# reported as unwired. The index of an element access was never walked; the
+# `#private` method was not the cause, so the same read in a plain function is
+# here too.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { Belt, firstOf } from './game/belt';
+new Belt().refill([1, 2, 3, 4, 5]);
+firstOf([1, 2, 3]);
+TS
+write apps/web/src/game/offsets.ts <<'TS'
+export const STYLE_OFFSET = 2;
+export const FIRST = 0;
+TS
+write apps/web/src/game/belt.ts <<'TS'
+import { FIRST, STYLE_OFFSET } from './offsets';
+
+export class Belt {
+  refill(floats: readonly number[]): number {
+    return this.#append(floats, 1);
+  }
+
+  #append(floats: readonly number[], from: number): number {
+    return floats[from + STYLE_OFFSET] ?? 0;
+  }
+}
+
+export function firstOf(floats: readonly number[]): number {
+  return floats[FIRST] ?? 0;
+}
+TS
+run_check
+assert_green '#1595: an export read only inside a subscript is wired'
+assert_silent_about '#1595: inside a #private method' '`STYLE_OFFSET`'
+assert_silent_about '#1595: and inside a plain function' '`FIRST`'
+
+# --- #1595: a #private method is a method, reached through this.#name --------
+# #230's shape, one keyword along: a port method called only from a `#private`
+# method that nothing calls. Until #1595 a `#private` method's body was credited
+# to its class, so this was green; called from a reached method, it is wired.
+private_fixture() {
+  new_fixture
+  write apps/web/src/main.tsx <<'TS'
+import { Transport } from './ble/transport';
+await new Transport().discover();
+TS
+  write apps/web/src/ble/plugin-port.ts <<'TS'
+export interface BlePluginPort {
+  initialize(): Promise<void>;
+  requestDevice(): Promise<string>;
+}
+TS
+  write apps/web/src/ble/transport.ts <<TS
+import type { BlePluginPort } from './plugin-port';
+
+declare const plugin: BlePluginPort;
+
+export class Transport {
+  async discover(): Promise<string> {
+    $1
+    return plugin.requestDevice();
+  }
+
+  async #ready(): Promise<void> {
+    await plugin.initialize();
+  }
+}
+TS
+}
+private_fixture 'void 0;'
+run_check
+assert_red '#1595: a port method called only from a #private method nothing calls fails'
+assert_says '#1595: and names the port member' '`BlePluginPort.initialize`'
+
+private_fixture 'await this.#ready();'
+run_check
+assert_green '#1595: the same #private method called from a reached method is wired'
 
 # --- PORT_ROOTS fails closed, as WATCHED_PREFIXES does ------------------------
 # Rename packages/analysis away and its ports would leave the watched set with

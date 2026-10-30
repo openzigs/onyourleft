@@ -87,6 +87,12 @@ export interface HostOptions {
   /** A rider's final result: they finished, or did not and cannot come back. */
   readonly onResult?: (roomId: string, result: RoomResult) => void;
   /**
+   * A rider breached a plausibility ceiling (#789, ADR 0028 D-2 rule 3): a
+   * flag is a report the room files. Once per rider and ceiling, as it is
+   * first breached: a flag is never cleared, so it is never filed twice.
+   */
+  readonly onFlag?: (roomId: string, flag: RoomFlagRaised) => void;
+  /**
    * A race has left its lobby. From here it can never be opened again as a
    * lobby — not after it finishes, and not after the instance restarts in the
    * middle of it (#807: an interrupted race does not resume). The HTTP
@@ -106,6 +112,13 @@ export interface HostOptions {
    * socket opens again (#784: only a room that is over lets its route go).
    */
   readonly onRoomClosed?: (roomId: string, phase: RoomPhase) => void;
+  /**
+   * The room closed a socket for a protocol reason (#1400): `reason` is the
+   * close frame's (`close-codes.ts`) — `hello-expected`, a refusal, `replaced`
+   * or `too-slow` — and `count` how many sockets this room has closed for it
+   * so far, this one included. Counts only: no athlete, no name, no ticket.
+   */
+  readonly onProtocolClose?: (roomId: string, reason: string, count: number) => void;
   /** A socket this host held has closed, however it closed. */
   readonly onSocketClosed?: (socketId: string) => void;
   /** Unsent bytes past which a client is terminated. {@link DEFAULT_MAXIMUM_BUFFERED_BYTES}. */
@@ -137,6 +150,21 @@ export interface RoomResult {
   readonly wattsPerKilogram: number | null;
   /** The durations of every plausibility ceiling breached, shortest first (#785). */
   readonly flaggedDurationsSeconds: readonly number[];
+}
+
+/** A plausibility flag a room raised (#789): whose, which ceiling, and when. Never a power trace. */
+export interface RoomFlagRaised {
+  readonly athleteId: string;
+  readonly durationSeconds: number;
+  readonly ceilingWattsPerKilogram: number;
+  /** The room's tick when the host saw it. */
+  readonly tick: number;
+}
+
+/** Which seat a room's rider is, and the room's tick now (#789): what a report from the room names. */
+export interface RoomSeat {
+  readonly athleteId: string;
+  readonly tick: number;
 }
 
 /**
@@ -210,8 +238,12 @@ interface HostedRoom {
   nextTickAtMs: number | undefined;
   /** Athletes whose result has been handed on. */
   readonly reported: Set<string>;
+  /** `athlete:duration` of every flag handed on (#789). */
+  readonly flagged: Set<string>;
   raceStarted: boolean;
   raceFinished: boolean;
+  /** How many sockets this room has closed, by close reason (#1400). */
+  readonly closes: Map<string, number>;
 }
 
 export interface HostMetrics {
@@ -363,6 +395,26 @@ export class RoomHost {
     return true;
   }
 
+  /**
+   * Takes `athleteId` out of `roomId` for its life (#789): `room.ts`
+   * §`remove`. `false` when this host does not hold the room.
+   */
+  remove(roomId: string, athleteId: string): boolean {
+    const hosted = this.#rooms.get(roomId);
+    if (hosted === undefined) return false;
+    this.#call(hosted, (room) => room.remove(athleteId, this.#options.now()));
+    return true;
+  }
+
+  /** The athlete in seat `riderId` of `roomId`, and the room's tick now (#789). */
+  seatOf(roomId: string, riderId: number): RoomSeat | undefined {
+    const view = this.#rooms.get(roomId)?.room.view();
+    const seat = view?.seats.find((each) => each.riderId === riderId);
+    return view === undefined || seat === undefined
+      ? undefined
+      : { athleteId: seat.athleteId, tick: view.tick };
+  }
+
   /** One tick of `roomId` now — what the timer does, and what a driven test does itself. */
   tick(roomId: string): void {
     const hosted = this.#rooms.get(roomId);
@@ -455,8 +507,10 @@ export class RoomHost {
       timer: undefined,
       nextTickAtMs: undefined,
       reported: new Set(),
+      flagged: new Set(),
       raceStarted: false,
       raceFinished: false,
+      closes: new Map(),
     };
     this.#rooms.set(roomId, hosted);
     return hosted;
@@ -499,6 +553,7 @@ export class RoomHost {
 
   #afterCall(hosted: HostedRoom): void {
     this.#reportResults(hosted);
+    this.#reportFlags(hosted);
     const phase = hosted.room.view().phase;
     if (hosted.settings.kind === 'race' && phase !== 'lobby' && !hosted.raceStarted) {
       hosted.raceStarted = true;
@@ -532,6 +587,11 @@ export class RoomHost {
         connection.closedByRoom = true;
         connection.sent += 1;
         connection.socket.close(frame?.code, frame?.reason);
+        if (frame !== undefined) {
+          // A refusal was counted at its `refuse`; the rest are counted here.
+          if (!Object.values(REFUSAL_CLOSE).includes(frame)) this.#count(frame.reason);
+          this.#protocolClose(hosted, frame.reason);
+        }
       }
     }
     for (const connection of dropped) {
@@ -539,9 +599,16 @@ export class RoomHost {
       // Its bytes cannot drain, so a close frame would not reach it: terminate.
       connection.gone = true;
       this.#count(TOO_SLOW.reason);
+      this.#protocolClose(hosted, TOO_SLOW.reason);
       connection.socket.terminate();
       this.#apply(hosted, hosted.room.disconnect(connection.id, this.#options.now()));
     }
+  }
+
+  #protocolClose(hosted: HostedRoom, reason: string): void {
+    const count = (hosted.closes.get(reason) ?? 0) + 1;
+    hosted.closes.set(reason, count);
+    this.#options.onProtocolClose?.(hosted.roomId, reason, count);
   }
 
   #count(reason: string): void {
@@ -554,6 +621,28 @@ export class RoomHost {
       if (hosted.reported.has(result.athleteId)) continue;
       hosted.reported.add(result.athleteId);
       this.#options.onResult(hosted.roomId, result);
+    }
+  }
+
+  #reportFlags(hosted: HostedRoom): void {
+    if (this.#options.onFlag === undefined) return;
+    const view = hosted.room.view();
+    for (const seat of view.seats) {
+      for (const durationSeconds of seat.flaggedDurationsSeconds) {
+        const key = `${seat.athleteId}:${String(durationSeconds)}`;
+        if (hosted.flagged.has(key)) continue;
+        hosted.flagged.add(key);
+        const ceiling = hosted.settings.limits.ceilings.find(
+          (each) => each.durationSeconds === durationSeconds,
+        );
+        if (ceiling === undefined) continue;
+        this.#options.onFlag(hosted.roomId, {
+          athleteId: seat.athleteId,
+          durationSeconds,
+          ceilingWattsPerKilogram: ceiling.wattsPerKilogram,
+          tick: view.tick,
+        });
+      }
     }
   }
 

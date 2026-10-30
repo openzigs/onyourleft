@@ -1,0 +1,284 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * **What the analysis agent and its tools can reach** — #1098, ADR 0046 D-7,
+ * CLAUDE.md §6.
+ *
+ * Every module under `src/analysis/` is walked through its imports,
+ * transitively, and held to three things, each with a red control that
+ * plants the import it forbids:
+ *
+ * 1. **The tools are read-only and reach no network** (D-7): no module a tool
+ *    reaches imports the SQL store, the sync write path, the rooms, `ws`,
+ *    `node:http` or any other socket, or names `fetch`. A tool reads through
+ *    `tools/reads.ts`' one method and nothing else.
+ * 2. **Nothing reaches a trainer** (§6): no module here reaches
+ *    `@onyourleft/sensors` or anything about a trainer, and the agent itself
+ *    reaches no network either — the model is the connection it is HANDED,
+ *    so what a reply says cannot add a path. The instance has no Bluetooth
+ *    path at all.
+ * 3. **No picture** (#799's walk, on the server path): no module here reaches
+ *    anything about a camera, a frame, an image or a photo.
+ *
+ * Since #1243 the same three hold of the re-plan job (ADR 0048): its agent
+ * (`replan-agent.ts`), input, template and tools are under `src/analysis/`,
+ * so the walks below cover them, and one case names them so that they cannot
+ * leave the walk unnoticed. ⚠️ `@onyourleft/domain`, which the re-plan
+ * modules import for the proposal's decoder, is a bare specifier and is not
+ * followed (below); it is platform-free by its own lint boundary, and the
+ * trainer protocol is `@onyourleft/sensors`, which nothing here names.
+ *
+ * A type-only import (`import type`) is erased before the code runs, so it
+ * reaches nothing and is not followed.
+ *
+ * ## What the walk does not follow (#1187)
+ *
+ * - **A bare specifier is recorded and not followed** — a workspace package
+ *   such as `@onyourleft/analysis` included. What such a package itself
+ *   imports is not walked: a trainer, a socket or a picture reached only
+ *   THROUGH it is not seen here. That holds today because each package carries
+ *   its own boundary (`packages/analysis` names no store, no model SDK and no
+ *   platform API — `eslint.config.js` §`ANALYSIS_IMPORT_PATTERNS` and its
+ *   `tsconfig.platform-free.json`), not because this walk proves it. A new
+ *   workspace dependency of `src/analysis/` needs that argument made again.
+ * - **A computed specifier** (`import(name)`) is not a string, and no static
+ *   walk can read it.
+ */
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SOURCE = resolve(HERE, '..');
+
+type Read = (path: string) => string;
+
+const onDisk: Read = (path) => readFileSync(path, 'utf8');
+
+/** Every value import of a module's source: the specifier, relative or bare. */
+function specifiers(source: string): string[] {
+  const found: string[] = [];
+  for (const match of source.matchAll(
+    /(?:^|\n)\s*(import|export)(\s+type)?[^'"`;]*?from\s*'([^']+)'/g,
+  )) {
+    if (match[2] === undefined) found.push(match[3] ?? '');
+  }
+  // Any quote: `eslint.config.js` refuses the SDK by `import()` too (#1187).
+  for (const match of source.matchAll(/import\(\s*(['"`])([^'"`$]+)\1\s*\)/g)) {
+    found.push(match[2] ?? '');
+  }
+  for (const match of source.matchAll(/(?:^|\n)\s*import\s+'([^']+)'/g)) found.push(match[1] ?? '');
+  return found;
+}
+
+/** Every module and bare specifier `entries` reach through value imports. */
+function reach(entries: readonly string[], read: Read) {
+  const modules = new Set<string>();
+  const bare = new Set<string>();
+  const visit = (path: string): void => {
+    if (modules.has(path)) return;
+    modules.add(path);
+    for (const specifier of specifiers(read(path))) {
+      if (specifier.startsWith('.')) visit(resolve(dirname(path), specifier));
+      else bare.add(specifier);
+    }
+  };
+  for (const entry of entries) visit(entry);
+  return { modules: [...modules], bare: [...bare] };
+}
+
+/** Every shipped module under `directory`, at any depth. */
+function shippedUnder(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return shippedUnder(path);
+    return entry.name.endsWith('.ts') &&
+      !entry.name.endsWith('.test.ts') &&
+      !entry.name.endsWith('-testing.ts')
+      ? [path]
+      : [];
+  });
+}
+
+/** What a module path, relative to `src/`, may not be for a tool. */
+const WRITE_OR_NETWORK_PATH = /^(?:store|sync|room|rooms|blob|auth|moderation|operator)\//;
+
+/** Bare specifiers that open a socket or a model connection. */
+const NETWORK_MODULE =
+  /^(?:node:)?(?:http|https|http2|net|tls|dgram|dns|child_process)$|^ws$|^undici$|^ai$|^@ai-sdk\//;
+
+/** A path or a package through which anything reaches a trainer. */
+const TRAINER = /sensors|trainer|bluetooth|ftms|erg/i;
+
+/** A path that names a picture or a camera. */
+const PICTURE = /camera|picture|frame|image|photo|video/i;
+
+/** What a set of entries reaches that a tool may not. */
+function toolFindings(entries: readonly string[], read: Read, root: string): string[] {
+  const { modules, bare } = reach(entries, read);
+  return [
+    ...modules
+      .map((path) => relative(root, path))
+      .filter((path) => WRITE_OR_NETWORK_PATH.test(path) || path === 'analysis/model.ts'),
+    ...bare.filter((specifier) => NETWORK_MODULE.test(specifier)),
+    ...modules
+      .filter((path) => /\bfetch\s*\(|\bWebSocket\b/.test(read(path)))
+      .map((path) => `fetch in ${relative(root, path)}`),
+  ];
+}
+
+const TOOL_MODULES = shippedUnder(join(HERE, 'tools'));
+const ANALYSIS_MODULES = shippedUnder(HERE);
+
+describe('the tools are read-only and reach no network (ADR 0046 D-7)', () => {
+  it('walks every tool module, and finds nothing they may not reach', () => {
+    expect(TOOL_MODULES.map((path) => relative(HERE, path)).sort()).toStrictEqual([
+      'tools/history-search.ts',
+      'tools/reads.ts',
+      'tools/replan-tools.ts',
+      'tools/tools.ts',
+    ]);
+    expect(toolFindings(TOOL_MODULES, onDisk, SOURCE)).toStrictEqual([]);
+  });
+
+  it('finds a planted import of the store, the sync path, a socket or a fetch — the controls', () => {
+    const root = '/src';
+    const tree: Record<string, string> = {
+      '/src/analysis/tools/tools.ts': [
+        "import { x } from '../../store/sql-store.ts';",
+        "import { y } from '../../sync/sync.ts';",
+        "import { WebSocketServer } from 'ws';",
+        "import { request } from 'node:http';",
+        "import type { Fine } from '../../store/schema.ts';",
+      ].join('\n'),
+      '/src/store/sql-store.ts': '',
+      '/src/sync/sync.ts': 'export const put = () => fetch("http://x");',
+      '/src/store/schema.ts': '',
+    };
+    const findings = toolFindings(
+      ['/src/analysis/tools/tools.ts'],
+      (path) => tree[path] ?? '',
+      root,
+    );
+    expect(findings).toStrictEqual([
+      'store/sql-store.ts',
+      'sync/sync.ts',
+      'ws',
+      'node:http',
+      'fetch in sync/sync.ts',
+    ]);
+  });
+});
+
+describe('nothing the agent is made of reaches a trainer, or a network but the one it is handed (§6)', () => {
+  it('the agent and its tools reach no trainer module and no socket', () => {
+    const entry = join(HERE, 'agent.ts');
+    const { modules, bare } = reach([entry], onDisk);
+    expect(
+      [...modules.map((path) => relative(SOURCE, path)), ...bare].filter((path) =>
+        TRAINER.test(path),
+      ),
+    ).toStrictEqual([]);
+    expect(toolFindings([entry], onDisk, SOURCE)).toStrictEqual([]);
+  });
+
+  it('no trainer reachable from the instance: the re-plan job, its template and its tools (#1243)', () => {
+    // The job's own modules are among those walked, by name — a renamed or
+    // moved one would otherwise drop out of the walk in silence.
+    const walked = ANALYSIS_MODULES.map((path) => relative(HERE, path));
+    const replan = [
+      'replan-agent.ts',
+      'replan-input.ts',
+      'replan-template.ts',
+      'tools/replan-tools.ts',
+    ];
+    expect(walked).toEqual(expect.arrayContaining(replan));
+    // From the agent, from the engine that runs it, and from the job table that queues it.
+    const entries = [...replan, 'engine.ts', 'jobs.ts', 'routes.ts'].map((name) =>
+      join(HERE, name),
+    );
+    const { modules, bare } = reach(entries, onDisk);
+    expect(modules.map((path) => relative(HERE, path))).toEqual(expect.arrayContaining(replan));
+    expect(
+      [...modules.map((path) => relative(SOURCE, path)), ...bare].filter((path) =>
+        TRAINER.test(path),
+      ),
+    ).toStrictEqual([]);
+    // The agent and its tools reach no store, no socket and no network either:
+    // a proposal is returned, and nothing here could send or write one.
+    expect(toolFindings([join(HERE, 'replan-agent.ts')], onDisk, SOURCE)).toStrictEqual([]);
+  });
+
+  it('no module under analysis/ reaches a trainer', () => {
+    const { modules, bare } = reach(ANALYSIS_MODULES, onDisk);
+    expect(
+      [...modules.map((path) => relative(SOURCE, path)), ...bare].filter((path) =>
+        TRAINER.test(path),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('finds a planted trainer import — the control', () => {
+    const tree: Record<string, string> = {
+      '/src/analysis/agent.ts': "import { erg } from '@onyourleft/sensors/protocol';",
+    };
+    const { bare } = reach(['/src/analysis/agent.ts'], (path) => tree[path] ?? '');
+    expect(bare.filter((path) => TRAINER.test(path))).toStrictEqual([
+      '@onyourleft/sensors/protocol',
+    ]);
+  });
+
+  it('reads a dynamic import in any quote — the control (#1187)', () => {
+    const tree: Record<string, string> = {
+      '/src/analysis/agent.ts': [
+        "const a = await import('ai');",
+        'const b = await import("@ai-sdk/openai-compatible");',
+        'const c = await import(`ai/rsc`);',
+      ].join('\n'),
+    };
+    expect(reach(['/src/analysis/agent.ts'], (path) => tree[path] ?? '').bare).toStrictEqual([
+      'ai',
+      '@ai-sdk/openai-compatible',
+      'ai/rsc',
+    ]);
+  });
+
+  it('the model connection is the only module here that reaches the SDK', () => {
+    const reachingSdk = ANALYSIS_MODULES.filter((path) =>
+      reach([path], onDisk).bare.some((specifier) => /^ai$|^@ai-sdk\//.test(specifier)),
+    ).map((path) => relative(HERE, path));
+    // hosted.ts reaches it only THROUGH model.ts: it builds the hosted
+    // connection behind the masking (#1101), and names no SDK itself.
+    expect(reachingSdk).toStrictEqual(['hosted.ts', 'model.ts']);
+    expect(
+      ANALYSIS_MODULES.filter((path) =>
+        specifiers(onDisk(path)).some((specifier) => /^ai$|^@ai-sdk\//.test(specifier)),
+      ).map((path) => relative(HERE, path)),
+    ).toStrictEqual(['model.ts']);
+  });
+});
+
+describe('no picture (#799’s walk, over src/analysis/)', () => {
+  it('reaches nothing about a camera, a frame, an image or a photo', () => {
+    expect(ANALYSIS_MODULES.length).toBeGreaterThanOrEqual(5);
+    const { modules, bare } = reach(ANALYSIS_MODULES, onDisk);
+    expect(
+      [...modules.map((path) => relative(SOURCE, path)), ...bare].filter((path) =>
+        PICTURE.test(path),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('finds such an import when there is one — the control', () => {
+    const tree: Record<string, string> = {
+      '/src/analysis/agent.ts': "import { x } from './tools/tools.ts';",
+      '/src/analysis/tools/tools.ts': "import { frame } from '../../camera/frame.ts';",
+      '/src/camera/frame.ts': '',
+    };
+    const { modules } = reach(['/src/analysis/agent.ts'], (path) => tree[path] ?? '');
+    expect(modules.filter((path) => PICTURE.test(path))).toStrictEqual(['/src/camera/frame.ts']);
+  });
+});

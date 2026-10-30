@@ -26,29 +26,27 @@ const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TRANSPORT = join('camera', 'analysis-transport.ts');
 
 /**
- * #518: the hosted transport, and the body reader both transports share. An
- * exact list, not the `camera/` directory: a file beside them that named a
- * `Response` would still be a finding.
+ * The transport, and the body reader it shares. An exact list, not the
+ * `camera/` directory: a file beside them that named a `Response` would still
+ * be a finding.
  */
 const MAY_NAME_HTTP_TYPES: readonly string[] = [
   TRANSPORT,
-  join('camera', 'hosted-transport.ts'),
   join('camera', 'http-body.ts'),
-  // #802: the ride analysis's step port to the rider's own computer. It builds
-  // the request the one `fetch` in `analysis-transport.ts` sends, and cannot
-  // live in that module, which carries pictures by design
-  // (`no-picture-reachable.test.ts`).
-  join('ride-analysis', 'own-computer-step.ts'),
-  // #804: test support, never shipped — a model server as a `fetch` double,
-  // which has to build the `Response` a server would. Named by path, so a
-  // production module beside it that named one would still be a finding.
-  join('ride-analysis', 'model-server-testing.ts'),
+  // #518's `camera/hosted-transport.ts`, #802's `ride-analysis/own-computer-step.ts`
+  // and #804's `ride-analysis/model-server-testing.ts` were here until #1103
+  // removed them with the device's own write-up paths.
   // #784, #785: test support, never shipped — an instance's rooms routes as a
   // `fetch` double, which has to build the `Response` the instance would.
   join('rooms', 'rooms-testing.ts'),
   // #777: the one transport to an instance (ADR 0036 D-3 (a)). Its port,
   // `instance/instance-port.ts`, names no HTTP type — only what it read.
   join('instance', 'instance-transport.ts'),
+  // #1539, ADR 0054 D-2.5: the one module that asks the basemap archive for a
+  // route's corridor, with its own `fetch` — a `Headers` for its `Range` and
+  // the `Response` it checks. Its port (`world-data/corridor-port.ts`) and the
+  // read (`game/world-data/corridor.ts`) name no HTTP type.
+  join('world-data', 'corridor-source.ts'),
 ];
 
 /**
@@ -77,9 +75,6 @@ const ABOVE_THE_TRANSPORT = [
   join('camera', 'analysis-response.ts'),
   join('camera', 'useAnalysis.ts'),
   join('camera', 'session.ts'),
-  join('camera', 'hosted-port.ts'),
-  join('camera', 'hosted-model.ts'),
-  join('camera', 'useHostedCheck.ts'),
   join('views', 'CameraView.tsx'),
 ];
 

@@ -10,8 +10,8 @@ It has the same authority as the root file. Where the text below says "this file
 
 ---
 
-The toolchain pins and their reasons (TypeScript 6.0.3 not 7.x, Node 24 until 2026-10-28,
-Vitest 4.1.11), pnpm's 24-hour `minimumReleaseAge` (pin an older version; never add a
+The toolchain pins and their reasons (TypeScript 6.0.3 not 7.x, Node 26 since 2026-10-29,
+Vitest 4.1.12), pnpm's 24-hour `minimumReleaseAge` (pin an older version; never add a
 `minimumReleaseAgeExclude`), install scripts and `allowBuilds` in `pnpm-workspace.yaml` (a
 security-relevant file on every fork pull request), and why a recorder fed only power
 auto-pauses are in [`docs/agents/toolchain.md`](toolchain.md).
@@ -24,10 +24,23 @@ not. `typescript-eslint` declares `typescript: ">=4.8.4 <6.1.0"` — its canary 
 Re-check with `npm view typescript-eslint peerDependencies.typescript` and move when the range
 admits 7.x.
 
-**Node 26 is not the answer yet.** It enters Active LTS on **2026-10-28**. Until then Node 24
-"Krypton" is the line. Move on the date, not before.
+**Node 26 is the line, since 2026-10-29** ([#1597](https://github.com/openzigs/onyourleft/issues/1597),
+ADR 0005's amendment of that date). It entered Active LTS on 2026-10-28 with 26.13.0, and the
+instance's image pins that release by digest. Four places name the major and move together:
+`.nvmrc` (every workflow's `setup-node` reads it), `engines.node` in the root `package.json`
+(binding through `engineStrict: true` in `pnpm-workspace.yaml`; pnpm 11 ignores `.npmrc`'s `engine-strict`), both `FROM` lines of
+`apps/instance/Dockerfile`, and `@types/node` in the four `package.json` files that name it.
+⚠️ **Node 26 ships no corepack** (Node dropped it in v25), so every place that runs `corepack
+enable pnpm` — each job in `rules.yml` and `nightly.yml`, `release.yml`, the instance's
+`Dockerfile`, the README — first runs `npm install --global --ignore-scripts corepack@0.36.0`; move
+that pin in all of them at once. The next line is 27: `nodejs/Release/schedule.json`, read 2026-10-29, gives it Active LTS on
+**2027-10-20** (an odd major with an LTS date, unlike 25). Move on that date, not before.
+⚠️ Since [#1200](https://github.com/openzigs/onyourleft/issues/1200) `.github/dependabot.yml` **ignores semver-major updates of `@types/node`**: types ahead of the
+runtime let code typecheck against an API that does not exist when it runs, so the types' major
+moves by hand in the pull request that moves the runtime. Unlike the TypeScript and Vitest
+entries below, that one stays.
 
-**Vitest 5.0.0 is released, and this repository stays on 4.1.11 deliberately.** This line used
+**Vitest 5.0.0 is released, and this repository stays on 4.1.12 deliberately.** This line used
 to read *"Vitest 5 is in release candidate"*; `npm view vitest dist-tags` reported `latest:
 5.0.0` on 2026-09-14, so that reason has expired and the pin now rests on a different one. A
 major version of the test runner moves `vitest`, `@vitest/coverage-v8` and every
@@ -76,7 +89,7 @@ for everyone, `test:workerd` included), each for about 0.2 s of a ~20-minute job
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
 that dependency's install script run on the runner. The controls that keep it acceptable are all
 already in place — `pull_request` rather than its target-context counterpart, `permissions: contents:
-read`, no secrets in the job, `persist-credentials: false`, and the first-time-contributor approval
+read`, no secret at all (since #1231's GHCR mirror the job holds none), `persist-credentials: false`, and the first-time-contributor approval
 gate — and the residual exposure is runner CPU and outbound network, which is inherent to running an
 install in CI at all. Read the block anyway when reviewing a fork's pull request.
 

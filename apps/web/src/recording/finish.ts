@@ -23,12 +23,15 @@
  * The local copy is the only copy in existence — there is no server in this
  * milestone — so the sequence is chosen so that **no step can lose a ride**:
  *
- * 1. Write the activity. `putStreamSet` refuses a set with no activity behind
- *    it, so this has to be first; `import-batch.ts` says the same.
- * 2. Write the streams. If this throws, the activity is deleted again, because
- *    a row with no samples behind it is a ride that shows in the library and
- *    opens to nothing.
- * 3. **Only then** discard the checkpoint — and that step belongs to the
+ * 1. Write the ride **in one store write** (#1326, `putFinishedRide`): the
+ *    activity, its samples, its laps (#1312), and the `savedAs` link on the
+ *    checkpoint it was recorded into, in a single transaction. A ride is then
+ *    in the library whole or not at all, and there is no moment at which it
+ *    is in the library while its checkpoint still reads as unsaved — the
+ *    moment a crash used to turn into the same ride offered for saving again.
+ *    Until #1326 this was three writes and a tidy-up delete on failure, and a
+ *    delete that failed too left part of a ride behind.
+ * 2. **Only then** discard the checkpoint — and that step belongs to the
  *    caller, not here. Until the activity is durable the checkpoint is the only
  *    copy, and a discard that ran first would turn a failed save into a lost
  *    ride rather than a retryable one.
@@ -62,6 +65,7 @@ import {
   watts,
   type Metres,
   type RecordedSeries,
+  type ReplanRecord,
   type Seconds,
   type UnixSeconds,
   type Watts,
@@ -69,19 +73,27 @@ import {
 import type {
   ActivityId,
   AthleteId,
+  LapId,
   NewActivity,
-  NewStreamSet,
+  NewFinishedRide,
+  RecordedCourseLap,
+  RecordedWorkoutBlock,
+  RecordingSessionId,
+  RoomRaceFact,
   StreamChannelValue,
 } from '@onyourleft/store';
 
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
-/** The activity and the samples behind it, ready to write. */
-export interface FinishedRide {
-  readonly activity: NewActivity;
-  readonly streams: NewStreamSet;
-}
+import { lapsToSave } from './laps';
+import { workoutBlocksToSave } from './workout-blocks';
+
+/**
+ * The activity, the samples behind it and its laps, ready to write — and the
+ * checkpoint the store marks saved in the same write (#1326).
+ */
+export type FinishedRide = NewFinishedRide;
 
 export interface RideToSaveInput {
   readonly id: ActivityId;
@@ -104,6 +116,44 @@ export interface RideToSaveInput {
   readonly workoutFinished?: boolean | undefined;
   /** This ride raced the rider's own ghost and the race settled — #947's ghost badge. */
   readonly ghostRaced?: boolean | undefined;
+  /**
+   * The laps of a course the rider completed during this recording, and how
+   * to name each — #1312, `laps.ts`: the two marks and the course's half of
+   * each, as the recording kept them. The rows are worked out here, from
+   * `series`. Absent for a ride with no course under it.
+   */
+  readonly laps?:
+    { readonly ridden: readonly RecordedCourseLap[]; readonly newLapId: () => LapId } | undefined;
+  /**
+   * Every re-plan decision made on this ride — #1244, ADR 0048 D-6 P9. Kept
+   * with the ride on this device (`packages/store` §`RideFacts.replans`).
+   */
+  readonly replans?: readonly ReplanRecord[] | undefined;
+  /**
+   * How many of this ride's re-plan records its checkpoint could not keep or
+   * read back — #1328 (`packages/store` §`RideFacts.replansDropped`). Absent
+   * when none was, and for a ride saved without a recovery.
+   */
+  readonly replansDropped?: number | undefined;
+  /**
+   * The private races this ride was ridden in, as each room said it — #785,
+   * the owner's ruling of 2026-10-14: the result is stored with the ride on
+   * this device (`packages/store` §`RideFacts.races`).
+   */
+  readonly races?: readonly RoomRaceFact[] | undefined;
+  /**
+   * The blocks of the workouts ridden on this ride, as the recording kept
+   * them — #1319, `workout-blocks.ts`. Their figures are worked out here, from
+   * `series`, and kept with the ride (`packages/store`
+   * §`RideFacts.workoutBlocks`). Absent or empty for a ride with no workout.
+   */
+  readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
+  /**
+   * The checkpoint this ride was recorded into — #1326. The store sets its
+   * `savedAs` in the same transaction as the ride, so a crash after the save
+   * cannot leave the ride offered for saving a second time.
+   */
+  readonly recordingSession?: RecordingSessionId | undefined;
 }
 
 /**
@@ -160,13 +210,29 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     // #947: what the badges need, worked out while the samples are in hand —
     // and the two things only the ride itself knew, which nothing can find out
     // later. `progress/ride-facts.ts` says why at save rather than on Home.
-    rideFacts: rideFactsOf({
-      power,
-      altitude: series.channels.altitude,
-      sampleInterval: series.sampleInterval,
-      workoutFinished: input.workoutFinished,
-      ghostRaced: input.ghostRaced,
-    }),
+    rideFacts: {
+      ...rideFactsOf({
+        power,
+        altitude: series.channels.altitude,
+        sampleInterval: series.sampleInterval,
+        workoutFinished: input.workoutFinished,
+        ghostRaced: input.ghostRaced,
+        replans: input.replans,
+        races: input.races,
+      }),
+      // #1328: a count of the records a recovered ride's checkpoint lost, so
+      // the ride says it has a gap in its record rather than none.
+      ...(input.replansDropped === undefined || input.replansDropped <= 0
+        ? {}
+        : { replansDropped: input.replansDropped }),
+      // #1319: known only to the ride that rode them, like the two above, and
+      // worked out from the samples this save writes, by the rule its laps are.
+      ...(input.workoutBlocks === undefined || input.workoutBlocks.length === 0
+        ? {}
+        : {
+            workoutBlocks: workoutBlocksToSave(input.workoutBlocks, series, input.movingTime),
+          }),
+    },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind
     // it, and inventing a name would put a ride in the deduplication index
@@ -176,6 +242,11 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
 
   return {
     activity,
+    ...(input.recordingSession === undefined ? {} : { recordingSession: input.recordingSession }),
+    laps:
+      input.laps === undefined
+        ? []
+        : lapsToSave(input.laps.ridden, series, input.id, input.laps.newLapId, input.movingTime),
     streams: {
       activityId: input.id,
       athleteId: input.athleteId,
@@ -239,24 +310,43 @@ function averagePowerOf(power: readonly (Watts | undefined)[] | undefined): Watt
 
 /** What this module needs from the store, and nothing more. */
 export interface RideSaveStore {
-  putActivity(record: NewActivity): Promise<ActivityId>;
-  putStreamSet(set: NewStreamSet): Promise<ActivityId>;
-  deleteActivity(athleteId: AthleteId, id: ActivityId): Promise<boolean>;
+  putFinishedRide(ride: NewFinishedRide): Promise<ActivityId>;
+  /**
+   * #1431: where a ride the rider discards from the recovery offer goes, so it
+   * can be brought back for 30 days. Left out (a test's port), a discard
+   * removes the recording as it did before.
+   */
+  moveActivityToRecentlyDeleted?(
+    owner: AthleteId,
+    id: ActivityId,
+    deletedAt: UnixSeconds,
+  ): Promise<boolean>;
 }
 
 export type RideSaveOutcome =
   | { readonly status: 'saved'; readonly id: ActivityId }
   /** Nothing was ridden. Not a failure, and the caller says so differently. */
   | { readonly status: 'empty' }
+  /**
+   * Nothing was written: the store's one transaction did not commit (#1326),
+   * so no part of the ride is in the library and the checkpoint is untouched.
+   */
   | { readonly status: 'failed'; readonly error: Error };
 
 /**
- * Write a finished ride, activity first.
+ * Write a finished ride, whole, in one store write.
  *
  * **Never throws.** The caller is `confirmStop`, and a rejection there would
  * leave the ride stopped on screen with no record of why — see the ordering
  * argument in this module's header for what the caller must do next, and must
  * not do before.
+ *
+ * ⚠️ **There is no tidy-up on failure, and no longer anything to tidy.** Until
+ * #1326 a failed lap or stream write was followed by a `deleteActivity`, and
+ * when that failed too the rider was told part of the ride was left behind.
+ * `putFinishedRide` commits every part together or none of them, so a failure
+ * leaves nothing behind and the retry the rider is offered writes the ride
+ * once.
  */
 export async function saveFinishedRide(
   store: RideSaveStore,
@@ -266,23 +356,10 @@ export async function saveFinishedRide(
     return { status: 'empty' };
   }
   try {
-    await store.putActivity(finished.activity);
+    return { status: 'saved', id: await store.putFinishedRide(finished) };
   } catch (error: unknown) {
     return { status: 'failed', error: asError(error) };
   }
-  try {
-    await store.putStreamSet(finished.streams);
-  } catch (error: unknown) {
-    // The activity goes back, for the importer's reason: a row with no samples
-    // behind it shows in the library and opens to nothing. The cleanup's own
-    // failure is swallowed so the rider is told the original cause — a full
-    // disk — rather than whatever the tidy-up hit on the way out.
-    await store
-      .deleteActivity(finished.activity.athleteId, finished.activity.id)
-      .catch(() => false);
-    return { status: 'failed', error: asError(error) };
-  }
-  return { status: 'saved', id: finished.activity.id };
 }
 
 function asError(value: unknown): Error {

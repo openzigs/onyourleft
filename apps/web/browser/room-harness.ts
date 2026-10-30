@@ -22,6 +22,10 @@
  * for #784, `tamper: true`, which alters the room's route on its way in, so
  * the page must then refuse it and draw nothing.
  *
+ * Since #782's last criterion it also reports THIS rider's seat and where the
+ * room's newest frame put them, so the spec can read both across an edge
+ * restart (`room.browser.spec.ts` §"an edge drops every room socket").
+ *
  * ⚠️ **What it does not prove**: anything about the game's drawing (the game
  * gate's §"#783" is that), a phone's WebView, the screen going off, or a
  * Cloudflare Tunnel in the path — those are #733's.
@@ -34,10 +38,12 @@ import {
   geographicPosition,
   routeProfile,
   unixSeconds,
+  type SigningKey,
 } from '@onyourleft/domain';
 import { ensureDeviceSigningKey, openActivityStore } from '@onyourleft/store';
 
 import { planPath, routePlan } from '../src/game/hud/plan';
+import type { LoadedFrom } from '../src/instance/instance-pin';
 import { createInstancePort, type ConnectOutcome } from '../src/instance/instance-port';
 import type { InstanceSend } from '../src/instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
@@ -46,6 +52,10 @@ import { createRoomsPort, type EnteredRoom } from '../src/net/rooms-port';
 
 export interface RoomSample {
   readonly status: string;
+  /** This rider's seat, while joined: the room's `riderId` for them. */
+  readonly seat: number | undefined;
+  /** Where the room's newest frame put THIS rider, in metres; `undefined` before one. */
+  readonly ownDistanceMetres: number | undefined;
   readonly others: readonly { readonly riderId: number; readonly distanceMetres: number }[];
 }
 
@@ -132,10 +142,24 @@ const tampering: InstanceSend = async (url, init) => {
   });
 };
 
+/**
+ * What the room ports need to seal (#1210), for the rider signed in last. The
+ * room gate's instance holds no keys and no card is given, so the ports call
+ * in plaintext and never ask for the key — but they are handed the real one.
+ */
+let sealing: { readonly loadedFrom: LoadedFrom; readonly signingKey: () => Promise<SigningKey> };
+
 async function signIn(address: string, name: string): Promise<ConnectOutcome> {
   const store = openActivityStore(`room-gate-${name}`);
+  sealing = {
+    loadedFrom: { native: false, href: location.href },
+    signingKey: () => ensureDeviceSigningKey(store, LOCAL_ATHLETE),
+  };
   const instance = createInstancePort({
     storage: localStorage,
+    // Served from loopback (ADR 0047 D-11). The room gate's instance holds no
+    // keys, so it registers in plaintext and nothing here seals (#1192).
+    loadedFrom: { native: false, href: location.href },
     ensureLocalAthlete: () => ensureLocalAthlete(store, unixSeconds(Math.floor(Date.now() / 1000))),
     signingKey: () => ensureDeviceSigningKey(store, LOCAL_ATHLETE),
   });
@@ -144,6 +168,7 @@ async function signIn(address: string, name: string): Promise<ConnectOutcome> {
 
 function joinRoom(roomId: string, watts: number, fanOut: boolean): void {
   connection = createRoomPort({
+    ...sealing,
     storage: localStorage,
     ...(fanOut ? {} : { acceptFrame: () => false }),
   }).join({
@@ -163,9 +188,10 @@ window.__oylRoom = {
   signIn,
   make: async () => {
     const answer = await createRoomsPort({
+      ...sealing,
       storage: localStorage,
       zones: () => Promise.resolve([]),
-    }).create({ kind: 'group', ridingPosition: 'hoods', route: ownRoute() });
+    }).create({ kind: 'group', ridingPosition: 'hoods', drafting: true, route: ownRoute() });
     if (answer.kind !== 'created') {
       return {
         kind: 'refused',
@@ -178,6 +204,7 @@ window.__oylRoom = {
   },
   enter: async (code, tamper) => {
     const answer = await createRoomsPort({
+      ...sealing,
       storage: localStorage,
       zones: () => Promise.resolve([]),
       ...(tamper ? { send: tampering } : {}),
@@ -200,13 +227,18 @@ window.__oylRoom = {
     if (entered === undefined) throw new Error('this page is in no room');
     joinRoom(entered.roomId, watts, true);
   },
-  sample: () => ({
-    status: connection?.status().kind ?? 'none',
-    others: (connection?.others(performance.now()) ?? []).map((rider) => ({
-      riderId: rider.riderId,
-      distanceMetres: rider.distanceMetres,
-    })),
-  }),
+  sample: () => {
+    const status = connection?.status();
+    return {
+      status: status?.kind ?? 'none',
+      seat: status?.kind === 'joined' ? status.riderId : undefined,
+      ownDistanceMetres: connection?.own()?.rider.distanceMetres,
+      others: (connection?.others(performance.now()) ?? []).map((rider) => ({
+        riderId: rider.riderId,
+        distanceMetres: rider.distanceMetres,
+      })),
+    };
+  },
   leave: () => {
     connection?.leave();
   },

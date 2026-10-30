@@ -22,10 +22,14 @@ import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft
 
 import { simulatedCrankAngle } from '../../src/game/bicycle';
 import type { SceneFrame } from '../../src/game/port';
+import type { CountrysideLever, LandClassMask } from '../../src/game/land-class';
+import type { MappedBuildings } from '../../src/game/mapped-buildings';
 import type { QualitySettings } from '../../src/game/quality';
+import type { MappedTown } from '../../src/game/settlements';
 import { sceneFrame } from '../../src/game/scene';
 import { atStartLine } from '../../src/game/simulation';
 import type { CorridorOrigin } from '../../src/game/terrain';
+import type { WorldCorridor } from '../../src/game/world-data/corridor';
 
 /** How fast the rider goes: about 32 km/h. */
 export const RIDE_METRES_PER_SECOND = 9;
@@ -39,7 +43,28 @@ export function rideFrame(input: {
   readonly origin: CorridorOrigin;
   readonly distance: number;
   readonly elapsed: number;
-  readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>;
+  readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>;
+  /** #1534's control, `levers=-settlement-clearing`: the settlements' ground left wooded. */
+  readonly settlementsWooded?: boolean;
+  /** #1541's lever, `levers=-people`: nobody on the streets, whatever the rung draws. */
+  readonly peopleOff?: boolean;
+  /** #1542's levers, `levers=-land-planting` and its two siblings: those changes off. */
+  readonly countrysideOff?: readonly CountrysideLever[];
+  /**
+   * #1581's `town=mixed`: the ride's corridor, its land and its planned
+   * buildings, as `GameView` hands a ride's frames them.
+   */
+  readonly town?: {
+    readonly corridor: WorldCorridor;
+    readonly land: LandClassMask;
+    readonly buildings: MappedBuildings;
+    /**
+     * #1588: what the lots read of the plans — their footprints and, since
+     * #1588, their driveways — as `GameView` passes it. Without it the lots
+     * stood where no mapped building was known, over the houses.
+     */
+    readonly lots: MappedTown;
+  };
 }): SceneFrame {
   const start = atStartLine(input.profile);
   return sceneFrame({
@@ -57,5 +82,17 @@ export function rideFrame(input: {
     // ladder places less scenery as well as drawing less of it.
     scatterItems: input.rung.scatterItems,
     structureItems: input.rung.structureItems,
+    // #1541: the rung's people, as `GameView` passes them — or none, the lever's pair.
+    people: input.peopleOff === true ? 0 : input.rung.people,
+    settlementsWooded: input.settlementsWooded,
+    countrysideOff: input.countrysideOff,
+    ...(input.town === undefined
+      ? {}
+      : {
+          worldCorridor: input.town.corridor,
+          landClass: input.town.land,
+          mappedBuildings: input.town.buildings,
+          mappedTown: input.town.lots,
+        }),
   });
 }

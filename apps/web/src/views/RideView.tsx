@@ -44,23 +44,28 @@
  * component rendering the two buttons in the right order.
  */
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
-import type { Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { SensorGlyph } from '../design/illustration';
 import { Reading } from '../design/Reading';
 import { formatDuration } from '../format';
 import { deviceStorage, readAnnouncementPreference } from '../game/hud/announce-preference';
 import { StatusMessage } from '../design/StatusMessage';
+import { useTouchLock } from '../design/touch-lock';
+import { TouchLockButton } from '../design/TouchLockButton';
 import { MetricGrid } from '../ride/MetricGrid';
 import { isReadable } from '../ride/metrics';
+import { readRideReadings, shownReadings, writeRideReadings } from '../ride/reading-choice';
 import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { RecoverableRide } from '../recording/recovery';
+import type { RecordingSessionId } from '@onyourleft/store';
 import {
   canStartNewRide,
   KEEP_SCREEN_ON_LABEL,
@@ -70,11 +75,14 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
+import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
 import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
+import { manualLapSummary } from '../ride/manual-lap-text';
+import { useUnits } from '../units/context';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { hrefFor, routeById } from '../shell/routes';
@@ -153,6 +161,9 @@ export function RideView({
   );
 }
 
+/** #1433: the Ride screen's zoom. ⚠️ Draft wording for the owner. */
+export const RIDE_ZOOM_LABEL = 'Zoom';
+
 function LiveRide({
   controller,
   workouts,
@@ -165,13 +176,53 @@ function LiveRide({
   readonly sidePairing: SidePairingPort | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
-  const thresholdPower = useThresholdPower(analysis);
+  const own = useOwnThresholds(analysis);
+  const thresholdPower = own.power;
   const sideCamera = useSideCamera(sidePairing);
   // #655: which of two voices answers a held *Set* — the ERG form's, or the
   // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
   // both (#740): until then `RideAnnouncer` read it again for itself, and the
   // two agreed only because both read this device's storage in one mount pass.
   const [announcements] = useState(() => readAnnouncementPreference(deviceStorage()));
+  // #1433: which readings, in which order, and whether the zoom is on — the
+  // rider's choice on Settings, read once here; the zoom is pressed here.
+  const [readings, setReadings] = useState(() => readRideReadings(deviceStorage()));
+  const units = useUnits();
+  // #1318: the lap taken by hand that ended last, while the ride it was taken
+  // on is in progress — shown below, and said once by the ride's one region.
+  const lastLap = rideInProgress(snapshot.phase) ? snapshot.manualLap.last : undefined;
+  const lapSummary =
+    lastLap === undefined ? undefined : manualLapSummary(lastLap.number, lastLap.lap, units);
+  // #1432: the touch lock covers the whole screen — all three groups — and
+  // only while a ride is in progress; `design/touch-lock.ts` says what it
+  // stops and what it never does. The state is the controller's, above the
+  // router, so it is still on when the rider comes back to this screen.
+  const screen = useRef<HTMLDivElement>(null);
+  const touchLocked = snapshot.touchLocked && rideInProgress(snapshot.phase);
+  useTouchLock(screen, touchLocked);
+  const touchLockHelp = useId();
+  // #1433: the zoom — the rider's top two readings, larger, or every reading
+  // they chose. Only where there are readings to zoom; `RideControls` places
+  // it beside *Start recording* and beside Pause and Stop, and not on a
+  // stopped ride, whose screen is its result rather than live numbers. Kept
+  // on the device for the next ride, like the choice it zooms; a device that
+  // will not keep it still zooms this screen.
+  const zoom =
+    snapshot.sensors.length === 0 ? undefined : (
+      <Button
+        variant="toggle"
+        pressed={readings.zoomed}
+        size="ride"
+        className="oyl-ride__zoom"
+        onClick={() => {
+          const next = { ...readings, zoomed: !readings.zoomed };
+          setReadings(next);
+          writeRideReadings(deviceStorage(), next);
+        }}
+      >
+        {RIDE_ZOOM_LABEL}
+      </Button>
+    );
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -192,7 +243,7 @@ function LiveRide({
     //
     // The ORDER in the document is unchanged — live, trainer, sensors — so a
     // screen reader and the tab key meet everything in the order they did.
-    <div className="oyl-ride">
+    <div className="oyl-ride" ref={screen}>
       <div className="oyl-ride__group oyl-ride__group--live">
         <div className="oyl-ride__heading">
           <h2>Live</h2>
@@ -241,8 +292,22 @@ function LiveRide({
           Pause / Stop before the numbers, as it met the keep-the-screen-on
           notice before them since #647.
         */}
-        <RideControls controller={controller} snapshot={snapshot} />
+        <RideControls
+          controller={controller}
+          snapshot={snapshot}
+          zoom={zoom}
+          touchLockHelp={touchLocked ? touchLockHelp : undefined}
+        />
         <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
+        {touchLocked ? (
+          // #1432: AFTER every ride control, for #692's rule — nothing whose
+          // height changes during a ride sits above one. Not `live`: the
+          // control's own `aria-pressed` is what a screen reader hears change,
+          // and this is the sentence it is described by.
+          <StatusMessage tone="info" label={TOUCH_LOCK_ON_LABEL} id={touchLockHelp}>
+            {TOUCH_LOCK_ON_TEXT}
+          </StatusMessage>
+        ) : null}
         {snapshot.notificationNotice !== undefined && rideInProgress(snapshot.phase) ? (
           // #526: set once, on the ride where the rider refused the permission,
           // and it stands for the rest of that ride. ⚠️ AFTER every ride
@@ -258,10 +323,29 @@ function LiveRide({
           </StatusMessage>
         ) : null}
         <StorageNotice snapshot={snapshot} />
+        {lapSummary === undefined || lastLap === undefined ? null : (
+          // #1318: the lap just taken, until the next — AFTER every ride
+          // control, for #692's rule (nothing whose height changes during a
+          // ride sits above one). Said by the ride's one region with
+          // announcements on; with them off this notice is itself the status
+          // message, so the lap is said once either way (#1312's rule for the
+          // HUD). Keyed on the lap, so each is a new message.
+          <StatusMessage
+            key={lastLap.number}
+            tone="info"
+            label={lapSummary.label}
+            live={!announcements.enabled}
+          >
+            {lapSummary.text}
+          </StatusMessage>
+        )}
         {snapshot.sensors.length === 0 ? (
           <NoSensorsBanner />
         ) : (
-          <MetricGrid metrics={snapshot.metrics} />
+          <MetricGrid
+            metrics={shownReadings(snapshot.metrics, readings)}
+            zoomed={readings.zoomed}
+          />
         )}
         <RideClock snapshot={snapshot} />
         <RecoveryOffer controller={controller} snapshot={snapshot} />
@@ -301,7 +385,29 @@ function LiveRide({
           keepAliveFailed={snapshot.keepAliveFailed}
           // #740: the choice read above, so the region and the ERG form agree.
           announcementPreference={announcements}
-          onStart={(record) => {
+          // #1244: re-plans are offered only where one could happen — an
+          // instance signed in to, and the rider's OWN two thresholds (H1).
+          replansAvailable={
+            controller.replansAvailable() &&
+            thresholdPower !== undefined &&
+            own.heartRate !== undefined
+          }
+          onKeepPlan={() => {
+            controller.keepThePlan();
+          }}
+          // #1318: the lap taken by hand that ended last, for the ride's one region.
+          lap={
+            lastLap === undefined || lapSummary === undefined
+              ? undefined
+              : { number: lastLap.number, sentence: lapSummary.sentence }
+          }
+          // #1244's review: the mid-workout off control, and the switch going
+          // back to off whenever a ride starts or ends.
+          onReplansOff={() => {
+            controller.switchReplansOff();
+          }}
+          rideInProgress={rideInProgress(snapshot.phase)}
+          onStart={(record, choices) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI
             // — and a `?? watts(0)` here would make every target in the workout
@@ -310,13 +416,48 @@ function LiveRide({
             if (thresholdPower === undefined) {
               return;
             }
-            controller.startWorkout(record, thresholdPower);
+            // #1240: a heart-rate hold runs only on the rider's OWN two
+            // thresholds (ADR 0048 H1). Without their own threshold heart
+            // rate there is no context, and every hold block rides steady.
+            controller.startWorkout(
+              record,
+              thresholdPower,
+              own.heartRate === undefined
+                ? undefined
+                : {
+                    thresholdHeartRate: own.heartRate,
+                    assumed: { power: false, heartRate: false },
+                  },
+              // #1244: the per-ride switch, off unless the rider turned it on.
+              choices,
+            );
           }}
           onEnd={() => {
             controller.endWorkout();
           }}
         />
       </div>
+
+      {/*
+        #1307: the running workout as a picture — the plan, where the rider is
+        in it, and the last few minutes. A group of its own, AFTER the trainer
+        group in the document: every control and every sentence of the workout
+        comes first (#605's order: press, wrong, read), and the picture is
+        read after the sentences it repeats. It holds no control, so it adds
+        nothing to the tab order.
+
+        ⚠️ Where it is DRAWN is `theme.css` §"THE WORKOUT'S GRAPH ON THE RIDE
+        SCREEN": on a landscape tablet under the readings on the left, where
+        it is on screen without scrolling (the owner's ruling on #1307 — at
+        the foot of the trainer column a notice pushed it under the fold);
+        upright, under the trainer group in its column. Shown exactly while
+        `WorkoutPanel` shows a workout as running: loaded and not finished.
+      */}
+      {snapshot.workout !== undefined && snapshot.workout.status !== 'finished' ? (
+        <div className="oyl-ride__group oyl-ride__group--graph">
+          <WorkoutGraph workout={snapshot.workout} />
+        </div>
+      ) : null}
 
       <div className="oyl-ride__group oyl-ride__group--sensors">
         <h2>Sensors</h2>
@@ -328,16 +469,25 @@ function LiveRide({
   );
 }
 
+/** The rider's own thresholds, each `undefined` when they have not set it. */
+interface OwnThresholds {
+  readonly power: Watts | undefined;
+  readonly heartRate: BeatsPerMinute | undefined;
+}
+
+const NO_THRESHOLDS: OwnThresholds = { power: undefined, heartRate: undefined };
+
 /**
- * Read the athlete's threshold once, for the workout panel.
+ * Read the athlete's thresholds once, for the workout panel — threshold
+ * heart rate too since #1240, which a heart-rate hold needs.
  *
  * `undefined` while it is being read and `undefined` when it is not set, and
  * the two are deliberately the same value: the panel's answer to both is the
  * same sentence, and a screen that distinguished "loading" from "not set" would
  * be offering a rider a state they cannot act on.
  */
-function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefined {
-  const [threshold, setThreshold] = useState<Watts | undefined>(undefined);
+function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
+  const [threshold, setThreshold] = useState<OwnThresholds>(NO_THRESHOLDS);
   useEffect(() => {
     if (analysis === undefined) {
       return;
@@ -346,7 +496,14 @@ function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefine
     void analysis.store
       .getAthlete(analysis.athleteId)
       .then((athlete) => {
-        if (live) setThreshold(athlete?.thresholdPower);
+        if (live) {
+          // The rider's own, and nothing substituted: `analysis/thresholds.ts`
+          // is the one place a default is, and it is not for this screen.
+          setThreshold({
+            power: athlete?.thresholdPower,
+            heartRate: athlete?.thresholdHeartRate,
+          });
+        }
       })
       .catch(() => {
         // A store that cannot be read leaves the threshold absent, which the
@@ -381,6 +538,22 @@ function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefine
  * safe so a rider is not talked into rescuing something that needs no rescue.
  */
 function offerText(ride: RecoverableRide): string {
+  const pauses = ride.damaged.includes('pauses') && !ride.alreadySaved ? ` ${PAUSES_LOST}` : '';
+  return `${kindText(ride)}${pauses}`;
+}
+
+/**
+ * #1325: said before the rider saves a ride whose pause list did not read,
+ * because the save counts every pause it had as riding.
+ */
+const PAUSES_LOST =
+  'Its pauses could not be read, so saving it counts them as riding: its moving time will be its elapsed time.';
+
+function kindText(ride: RecoverableRide): string {
+  if (ride.damaged.includes('state') && !ride.alreadySaved) {
+    // #1325: read as stopped, so not "finished" — nothing says it was.
+    return `A ride, up to ${ride.spanned} long, that cannot be continued: whether it was finished could not be read.`;
+  }
   if (ride.kind === 'interrupted') {
     return `An interrupted ride, up to ${ride.spanned} long.`;
   }
@@ -390,6 +563,30 @@ function offerText(ride: RecoverableRide): string {
   return `A finished ride, up to ${ride.spanned} long, that could not be saved.`;
 }
 
+/** The ids a recovered ride's controls are described by — #1419. */
+function rideDescription(describedBy: string, index: number): string {
+  return `${describedBy}-ride-${String(index)} ${describedBy}-ride-${String(index)}-of`;
+}
+
+/** What a Discard press is about to throw away — #1431. */
+interface Discarding {
+  readonly id: RecordingSessionId;
+  /** `ride`: kept in Recently deleted. `copy`: the ride is in the library. `unreadable`: gone for good. */
+  readonly kind: 'ride' | 'copy' | 'unreadable';
+}
+
+/** What each discard does, said inside its confirmation — #1431. */
+export const DISCARD_EXPLAINED: Readonly<Record<Discarding['kind'], string>> = {
+  ride: 'It moves to Recently deleted, at the foot of your Activities, where you can bring it back for 30 days. After that it is removed from this device for good.',
+  copy: 'The ride is already in your activities and stays there. Only this working copy is removed.',
+  unreadable:
+    'It cannot be read, so it cannot be kept anywhere: discarding it removes it from this device for good.',
+};
+
+/** Said inside the confirmation when a discard did not go through — #1431. */
+export const DISCARD_FAILED_TEXT =
+  'It could not be discarded, and it is still on this device. Try again, or keep it.';
+
 function RecoveryOffer({
   controller,
   snapshot,
@@ -397,23 +594,74 @@ function RecoveryOffer({
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
 }): JSX.Element | null {
-  if (snapshot.recoverable.length === 0) {
-    return null;
+  // #1419: every row's controls share one accessible name ("Discard this
+  // ride"), so each is DESCRIBED by its own row — its sentence, and where it
+  // stands in its list — and a screen reader can tell them apart. The visible
+  // text is unchanged; the position is the hidden half.
+  const describedBy = useId();
+  const headingId = useId();
+  /**
+   * The discard a press asked about, while its confirmation is open — #1431:
+   * Discard is small and confirmed, and Save is the easy target.
+   */
+  const [discarding, setDiscarding] = useState<Discarding | undefined>(undefined);
+  /** Set when a discard went through, so focus does not go back to a row that is gone. */
+  const discarded = useRef(false);
+  const confirmation = (
+    <ConfirmDialog
+      open={discarding !== undefined}
+      onOpenChange={(open) => {
+        if (!open) setDiscarding(undefined);
+      }}
+      title={discarding?.kind === 'unreadable' ? 'Discard this recording?' : 'Discard this ride?'}
+      confirmLabel={
+        discarding?.kind === 'unreadable' ? 'Discard the recording' : 'Discard the ride'
+      }
+      cancelLabel={discarding?.kind === 'unreadable' ? 'Keep the recording' : 'Keep the ride'}
+      onConfirm={async () => {
+        if (discarding === undefined) return;
+        const gone = await controller.discardRecovered(discarding.id);
+        if (!gone) throw new Error('not discarded');
+        discarded.current = true;
+      }}
+      failureText={DISCARD_FAILED_TEXT}
+      onClosed={() => {
+        if (!discarded.current) return false;
+        discarded.current = false;
+        const heading = document.getElementById(headingId);
+        heading?.focus();
+        return heading !== null;
+      }}
+    >
+      <p>{discarding === undefined ? '' : DISCARD_EXPLAINED[discarding.kind]}</p>
+    </ConfirmDialog>
+  );
+  if (snapshot.recoverable.length === 0 && snapshot.unreadableRecordings.length === 0) {
+    // The dialog outlives the last row, so a discard that emptied the list can close.
+    return confirmation;
   }
+  const rides = snapshot.recoverable.length;
+  const unreadable = snapshot.unreadableRecordings.length;
   return (
     <section>
-      <h3>Rides still on this device</h3>
+      <h3 id={headingId} tabIndex={-1}>
+        Rides still on this device
+      </h3>
       <p>
         A ride is written to this device as it happens, so a closed tab does not lose it. These are
         the ones that were never added to your activities.
       </p>
       <ul>
-        {snapshot.recoverable.map((ride) => (
+        {snapshot.recoverable.map((ride, index) => (
           <li key={ride.id}>
-            <p>{offerText(ride)}</p>
+            <p id={`${describedBy}-ride-${String(index)}`}>{offerText(ride)}</p>
+            <span id={`${describedBy}-ride-${String(index)}-of`} hidden>
+              {`Ride ${String(index + 1)} of ${String(rides)}.`}
+            </span>
             {ride.canContinue ? (
               <Button
                 variant="secondary"
+                describedBy={rideDescription(describedBy, index)}
                 onClick={() => {
                   void controller.continueRecovered(ride.id);
                 }}
@@ -424,6 +672,7 @@ function RecoveryOffer({
             {ride.alreadySaved ? null : (
               <Button
                 variant="secondary"
+                describedBy={rideDescription(describedBy, index)}
                 onClick={() => {
                   void controller.saveRecovered(ride.id);
                 }}
@@ -431,27 +680,67 @@ function RecoveryOffer({
                 Save this ride
               </Button>
             )}
+            {/* #1431: tertiary and confirmed — the easy target is Save. */}
             <Button
-              variant="secondary"
+              variant="tertiary"
+              describedBy={rideDescription(describedBy, index)}
               onClick={() => {
-                void controller.discardRecovered(ride.id);
+                setDiscarding({ id: ride.id, kind: ride.alreadySaved ? 'copy' : 'ride' });
               }}
             >
               Discard this ride
             </Button>
           </li>
         ))}
+        {/* #1325: on the device and in no other list, so said, and discardable. */}
+        {snapshot.unreadableRecordings.map((id, index) => (
+          <li key={`unreadable-${typeof id}-${String(id)}`}>
+            <p id={`${describedBy}-unreadable-${String(index)}`}>
+              A recording that cannot be read, so it cannot be continued or saved.
+            </p>
+            <span id={`${describedBy}-unreadable-${String(index)}-of`} hidden>
+              {`Recording ${String(index + 1)} of ${String(unreadable)}.`}
+            </span>
+            <Button
+              variant="tertiary"
+              describedBy={`${describedBy}-unreadable-${String(index)} ${describedBy}-unreadable-${String(index)}-of`}
+              onClick={() => {
+                setDiscarding({ id, kind: 'unreadable' });
+              }}
+            >
+              Discard this recording
+            </Button>
+          </li>
+        ))}
       </ul>
+      {confirmation}
     </section>
   );
 }
 
+/** #1432: what the ride screen says while its touch lock is on. ⚠️ Draft wording for the owner. */
+export const TOUCH_LOCK_ON_LABEL = 'Locked';
+export const TOUCH_LOCK_ON_TEXT =
+  'Taps on this screen do nothing. Hold Lock for a second to unlock. End ERG and End workout still work.';
+
 function RideControls({
   controller,
   snapshot,
+  zoom,
+  touchLockHelp,
 }: {
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
+  /**
+   * #1433: the zoom, set at the END of the row the ride's own controls stand
+   * in — beside them where the row has room, which on a landscape tablet it
+   * has, so it costs the screen no height there, and on a line of its own
+   * under them on a phone. ⚠️ A SIBLING of `.oyl-ride__actions`, not in it:
+   * that row is Lap, Pause and Stop and nothing else (#1430).
+   */
+  readonly zoom: JSX.Element | undefined;
+  /** #1432: the id of the sentence that describes the touch lock while it is on. */
+  readonly touchLockHelp: string | undefined;
 }): JSX.Element {
   // #548, WCAG 2.2 SC 2.4.3: pressing *Start a new ride* unmounts it, and
   // without somewhere to go focus falls to `<body>` — a keyboard or TalkBack
@@ -481,19 +770,39 @@ function RideControls({
       startRecording.current?.focus();
     }
   }, [snapshot.phase]);
+  // #1430, WCAG 2.2 SC 2.4.3: *Stop* and the confirmation replace each other,
+  // so each press unmounts the control it was made on. Focus goes to the
+  // control that replaced it: *Keep riding* after *Stop* — the step that does
+  // NOT end the ride, so a key held down or pressed twice cannot carry a
+  // keyboard rider through the confirmation — and *Stop* again after *Keep
+  // riding*. Only after a press on this screen: a screen mounted with a stop
+  // already armed leaves focus where it is.
+  const keepRiding = useRef<HTMLButtonElement>(null);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const focusAfterStopChange = useRef(false);
+  useEffect(() => {
+    if (!focusAfterStopChange.current) {
+      return;
+    }
+    focusAfterStopChange.current = false;
+    (snapshot.stopArmed ? keepRiding : stopButton).current?.focus();
+  }, [snapshot.stopArmed]);
 
   if (snapshot.phase === 'idle') {
     return (
       <>
-        <Button
-          ref={startRecording}
-          size="ride"
-          onClick={() => {
-            void controller.start();
-          }}
-        >
-          Start recording
-        </Button>
+        <div className="oyl-ride__action-row">
+          <Button
+            ref={startRecording}
+            size="ride"
+            onClick={() => {
+              void controller.start();
+            }}
+          >
+            Start recording
+          </Button>
+          {zoom}
+        </div>
         {/* #1012: with nothing paired, the "No sensors" sentence that stood
             here is the banner where the readings go — one banner rather than
             this notice and four tiles each saying "no sensor paired". */}
@@ -580,43 +889,92 @@ function RideControls({
         margin, so a row that wraps on a narrow phone keeps the gap between
         its lines too. The document order is unchanged.
       */}
-      <div className="oyl-ride__actions">
-        {snapshot.phase === 'recording' ? (
-          <Button
-            variant="secondary"
-            size="ride"
-            onClick={() => {
-              void controller.pause();
-            }}
-          >
-            Pause
-          </Button>
-        ) : (
-          // #668: the ride screen's one primary is the step that moves the
-          // ride on. While a stop is armed that is the confirmation, so a
-          // paused rider's Resume steps down beside it rather than being a
-          // second heaviest control.
-          <Button
-            variant={snapshot.stopArmed ? 'secondary' : 'primary'}
-            size="ride"
-            onClick={() => {
-              void controller.resume();
-            }}
-          >
-            Resume
-          </Button>
-        )}
-        {snapshot.stopArmed ? null : (
-          <Button
-            variant="secondary"
-            size="ride"
-            onClick={() => {
-              controller.armStop();
-            }}
-          >
-            Stop
-          </Button>
-        )}
+      <div className="oyl-ride__action-row">
+        <div className="oyl-ride__actions">
+          {/*
+          #1318: *Lap*, on a ride with no course under it (with one, the laps
+          are the course's: the owner's ruling). In the same row as Pause and
+          Stop and at the same size, so it is a 48 px target 8 px from its
+          neighbour (#669). Not while a stop is armed: the row is then the
+          confirmation's.
+
+          ⚠️ FIRST in the row, with Pause / Resume between it and Stop —
+          #1430. Lap is the control pressed most often mid-ride, and until
+          #1430 it stood between Pause and Stop, so a lap tap that landed a
+          few millimetres right was on Stop. A tap that misses Lap now lands
+          on Pause, which a press of Resume undoes; and Stop itself only asks.
+          `browser/rideview.browser.spec.ts` §"#1430" measures that the two
+          are never neighbours at any width this screen is laid out at.
+        */}
+          {snapshot.manualLap.available && !snapshot.stopArmed ? (
+            <Button
+              variant="secondary"
+              size="ride"
+              onClick={() => {
+                controller.markLap();
+              }}
+            >
+              Lap
+            </Button>
+          ) : null}
+          {snapshot.phase === 'recording' ? (
+            <Button
+              variant="secondary"
+              size="ride"
+              onClick={() => {
+                void controller.pause();
+              }}
+            >
+              Pause
+            </Button>
+          ) : (
+            // #668: the ride screen's one primary is the step that moves the
+            // ride on. While a stop is armed that is the confirmation, so a
+            // paused rider's Resume steps down beside it rather than being a
+            // second heaviest control.
+            <Button
+              variant={snapshot.stopArmed ? 'secondary' : 'primary'}
+              size="ride"
+              onClick={() => {
+                void controller.resume();
+              }}
+            >
+              Resume
+            </Button>
+          )}
+          {snapshot.stopArmed ? null : (
+            <Button
+              variant="secondary"
+              size="ride"
+              ref={stopButton}
+              onClick={() => {
+                focusAfterStopChange.current = true;
+                controller.armStop();
+              }}
+            >
+              Stop
+            </Button>
+          )}
+        </div>
+        {zoom}
+        {/*
+          #1432: the touch lock, LAST in the row and, like the zoom, a sibling
+          of `.oyl-ride__actions` rather than in it (that row is Lap, Pause and
+          Stop, #1430). Its neighbour is the zoom, so a tap that misses it
+          changes how the readings are shown and nothing else. Here while a
+          ride is in progress, the confirmation included: a rider in the rain
+          may want it on before answering that with a key.
+        */}
+        <TouchLockButton
+          locked={snapshot.touchLocked}
+          onLock={() => {
+            controller.lockTouch();
+          }}
+          onUnlock={() => {
+            controller.unlockTouch();
+          }}
+          describedBy={touchLockHelp}
+        />
       </div>
 
       {snapshot.stopArmed ? (
@@ -636,7 +994,9 @@ function RideControls({
             <Button
               variant="secondary"
               size="ride"
+              ref={keepRiding}
               onClick={() => {
+                focusAfterStopChange.current = true;
                 controller.cancelStop();
               }}
             >
@@ -812,9 +1172,11 @@ function NoSensorsBanner(): JSX.Element {
       </p>
       {/* #1021: named for what it pairs. "Pair" alone, beside the sentence
           rather than inside it, was announced as "Pair, link" in a link list
-          or on Tab (WCAG 2.4.4). */}
+          or on Tab (WCAG 2.4.4). #1442: and the screen's ONE way to Devices
+          while nothing is paired — the Trainer card and the Sensors group no
+          longer carry their own — so it names the trainer too. */}
       <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
-        Pair a sensor
+        Pair a trainer or a sensor
       </ButtonLink>
     </div>
   );

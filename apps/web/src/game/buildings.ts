@@ -43,6 +43,11 @@
  *   eaves and the door steps included, so no shape here moves where anything
  *   may stand: `arrangement-unchanged.test.ts`' digest is untouched, and
  *   `buildings.test.ts` holds every vertex of every variant to the footprint.
+ *   ⚠️ **But a lot's front porch** (#1589, {@link LOT_PORCH}): the farmhouse's
+ *   `porch` and `porch-roof` reach past it, to `settlements.ts`
+ *   §`LOT_PORCH_FOOTPRINT`, and are drawn only on a lot whose wider footprint
+ *   `settlements.ts` §`lotsAt` found clear; on every other house the renderer
+ *   folds them away (`three-renderer.ts` §`withLotPorch`).
  * - **Every triangle is wound to face outwards**, counter-clockwise seen from
  *   the side it is meant to be seen from, because the materials that draw it
  *   cull back faces. {@link Soup.tri} orders the corners from the direction a
@@ -60,6 +65,16 @@
  * the stylised world's scenery already made (#367).
  */
 
+import {
+  FRONT_PORCH,
+  porchPieces,
+  porchPitchOf,
+  porchReachOf,
+  porchSpanOf,
+  porchStepsOf,
+  type PorchPoint,
+  type PorchSpec,
+} from './porch';
 import type { StructureKind } from './scatter';
 
 /** The structures with walls, a roof and a way in: the ones #500 details. */
@@ -88,9 +103,21 @@ export function isBuiltKind(kind: string): kind is BuiltKind {
  * - `joinery` — every frame, sill, fascia, barge board, shop sign and step.
  * - `door` — a door leaf.
  * - `glass` — a pane.
+ * - `porch` — #1589: a lot's front porch, all but its roof: deck, ceiling,
+ *   posts, railing, steps and fascia, in the joinery's timber.
+ * - `porch-roof` — its roof, which wears the roof.
  */
 export type BuildingRole =
-  'wall' | 'plinth' | 'roof' | 'ridge' | 'chimney' | 'joinery' | 'door' | 'glass';
+  | 'wall'
+  | 'plinth'
+  | 'roof'
+  | 'ridge'
+  | 'chimney'
+  | 'joinery'
+  | 'door'
+  | 'glass'
+  | 'porch'
+  | 'porch-roof';
 
 /** Every {@link BuildingRole}, in a fixed order. */
 export const BUILDING_ROLES: readonly BuildingRole[] = [
@@ -102,6 +129,8 @@ export const BUILDING_ROLES: readonly BuildingRole[] = [
   'joinery',
   'door',
   'glass',
+  'porch',
+  'porch-roof',
 ];
 
 /**
@@ -156,6 +185,12 @@ export const WINDOW = { width: 1, height: 1.3 } as const;
 
 /** A house's and a shop's door: **1.0 wide by 2.0 high**, its threshold on the plinth. */
 export const DOOR = { width: 1, height: 2 } as const;
+
+/** How far a door's step runs past the door on each side, in metres: **0.15**. */
+export const DOOR_STEP_OVERRUN_METRES = 0.15;
+
+/** How far a door's step stands out from its wall — its tread's depth — in metres: **0.35**. */
+export const DOOR_STEP_DEPTH_METRES = 0.35;
 
 /** The first floor's line on the outside of a house, in metres: **2.7**. */
 export const FIRST_FLOOR_METRES = 2.7;
@@ -281,6 +316,8 @@ class Soup {
     joinery: [],
     door: [],
     glass: [],
+    porch: [],
+    'porch-roof': [],
   };
 
   readonly openings: PlannedOpening[] = [];
@@ -643,11 +680,11 @@ function buildOpening(
     });
   } else {
     sillOrStep(soup, face, {
-      u0: hole.u0 - 0.15,
-      u1: hole.u1 + 0.15,
+      u0: hole.u0 - DOOR_STEP_OVERRUN_METRES,
+      u1: hole.u1 + DOOR_STEP_OVERRUN_METRES,
       v0: 0,
       v1: hole.v0,
-      w: 0.35,
+      w: DOOR_STEP_DEPTH_METRES,
     });
   }
 }
@@ -934,6 +971,54 @@ function buildCanopy(soup: Soup, u: number, wallZ: number, springY: number): voi
   );
 }
 
+/**
+ * A lot's front porch — #1589, on the farmhouse's front round its door: four
+ * posts, a hip roof tied under the first floor's windows, a railing and two
+ * steps, `porch.ts` §`porchPieces`' layout with these numbers. The house's
+ * floor is its threshold, {@link PLINTH_TOP_METRES} up, on ground at 0.
+ */
+export const LOT_PORCH: PorchSpec = (() => {
+  const floor = PLINTH_TOP_METRES;
+  const depth = 2;
+  const wallY = SILL_HEIGHTS[1] - 0.35;
+  const span = porchSpanOf({ left: 3.5, right: 3.5 }, 5.4, true, 1);
+  if (span === undefined) throw new Error('a lot’s porch does not fit its farmhouse');
+  return {
+    ...span,
+    depth,
+    floor,
+    ground: 0,
+    footing: -FOUNDATION_METRES / 2,
+    wallY,
+    roof: 'hip',
+    pitchDegrees: porchPitchOf(floor, wallY, depth, FRONT_PORCH.pitchDegrees.hip) ?? 0,
+    steps: porchStepsOf(floor) ?? 2,
+  };
+})();
+
+/** Where the farmhouse's front wall stands, along +z, which a lot's porch stands against. */
+const LOT_PORCH_WALL_Z = 3.3;
+
+/**
+ * How far along +z a lot's porch reaches, roof and steps together: the front
+ * of `settlements.ts` §`LOT_PORCH_FOOTPRINT`, which a lot must keep clear for it.
+ */
+export const LOT_PORCH_FRONT_METRES = LOT_PORCH_WALL_Z + porchReachOf(LOT_PORCH);
+
+/**
+ * A lot's front porch's pieces into `soup`, on a front wall `wallZ` out along
+ * +z — #1589: its roof `porch-roof`, everything else `porch`.
+ */
+function buildLotPorch(soup: Soup, wallZ: number): void {
+  const at = (p: PorchPoint): Point => [p[0], p[2], wallZ + p[1]];
+  const towards = (p: PorchPoint): Point => [p[0], p[2], p[1]];
+  for (const piece of porchPieces(LOT_PORCH)) {
+    const role: BuildingRole = piece.part === 'roof' ? 'porch-roof' : 'porch';
+    const corners = piece.corners.map(at);
+    soup.polygon(role, corners, towards(piece.normal));
+  }
+}
+
 /** A window on a storey: its centre along the wall and which storey. */
 function window(u: number, storey: 0 | 1): OpeningSpec {
   return { kind: 'window', u, v: SILL_HEIGHTS[storey], ...WINDOW };
@@ -972,6 +1057,8 @@ function house(soup: Soup, variant: number, withOpenings: boolean): void {
       },
       withOpenings,
     );
+    // #1589: on a lot, a front porch; on every other farmhouse it is folded away.
+    buildLotPorch(soup, LOT_PORCH_WALL_Z);
     return;
   }
   buildBody(
@@ -1201,6 +1288,64 @@ export function buildingPlan(
   else if (kind === 'shop-row') shopRow(soup, which, withOpenings);
   else shed(soup, which);
   return { kind, variant: which, triangles: soup.triangles, openings: soup.openings };
+}
+
+/** A building's front door, building-local (`+z` faces the road). @see frontDoorOf */
+export interface FrontDoor {
+  /** The middle of its sill on the wall's face. */
+  readonly x: number;
+  readonly z: number;
+  /**
+   * The top of the step {@link buildingPlan} lays before it — #1625: its
+   * height, and its tread's half-width across the door and its depth out from
+   * the wall ({@link DOOR_STEP_DEPTH_METRES}).
+   */
+  readonly step: {
+    readonly top: number;
+    readonly halfWidth: number;
+    readonly depth: number;
+  };
+}
+
+/** Each built kind's front door in each variant, as its plan cuts it. */
+const frontDoors = new Map<string, FrontDoor | null>();
+
+/**
+ * Where a building's front door is, building-local: of the doors its plan
+ * ({@link buildingPlan}) cuts in a wall facing `+z`, the one nearest the
+ * middle, at the middle of its sill on the wall's face, with the step laid
+ * before it. `null` where it has none. `streets.ts` lays a front path to it
+ * (#1564) and `decorations.ts` stands Halloween's pumpkins on its step (#1625).
+ */
+export function frontDoorOf(kind: BuiltKind, variant: number): FrontDoor | null {
+  const key = `${kind}:${String(variant)}`;
+  const known = frontDoors.get(key);
+  if (known !== undefined) return known;
+  let best: FrontDoor | null = null;
+  for (const opening of buildingPlan(kind, variant).openings) {
+    if (opening.kind !== 'door' || opening.face.normal[2] < 0.99) continue;
+    const us = opening.outline.map((point) => point[0]);
+    const vs = opening.outline.map((point) => point[1]);
+    const u0 = Math.min(...us);
+    const u1 = Math.max(...us);
+    const u = (u0 + u1) / 2;
+    const x = opening.face.origin[0] + opening.face.right[0] * u;
+    const z = opening.face.origin[2] + opening.face.right[2] * u;
+    if (best !== null && Math.abs(x) >= Math.abs(best.x)) continue;
+    best = {
+      x,
+      z,
+      step: {
+        // The step's top is the door's threshold: `buildOpening` lays it from
+        // the face's foot up to the hole's bottom.
+        top: opening.face.origin[1] + Math.min(...vs),
+        halfWidth: (u1 - u0) / 2 + DOOR_STEP_OVERRUN_METRES,
+        depth: DOOR_STEP_DEPTH_METRES,
+      },
+    };
+  }
+  frontDoors.set(key, best);
+  return best;
 }
 
 /**

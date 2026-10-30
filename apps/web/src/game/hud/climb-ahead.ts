@@ -43,12 +43,16 @@
  * `aria-hidden`, and a climb ahead is a fact about the route.
  */
 
-import type { RouteProfile } from '@onyourleft/domain';
+import { FEET_PER_MILE, type RouteProfile } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { formatSmallDistance, spokenSmallDistanceUnit } from '../../units/format';
+import {
+  formatSmallDistance,
+  spokenDistanceUnit,
+  spokenSmallDistanceUnit,
+} from '../../units/format';
 
-import type { AnnouncementEvent } from './announce';
+import { spokenNumber, type AnnouncementEvent } from './announce';
 import type { Every } from './announce-preference';
 import { planProgress } from './plan';
 
@@ -211,6 +215,13 @@ export function slopeAhead(
   return best;
 }
 
+/**
+ * From how many feet an imperial rider hears miles — a quarter of a mile
+ * (#1440's review). The 0.25 mi and 0.5 mi steps were heard as "Climb in 1320
+ * feet" and "Climb in 2640 feet"; a rider who chose miles hears miles.
+ */
+const MILES_FROM_FEET = FEET_PER_MILE / 4;
+
 /** The sentence. A climb and a descent are different WORDS, not a sign. */
 export function slopeSentence(ahead: SlopeAhead, units: UnitSystem): string {
   const noun = ahead.slope.kind === 'climb' ? 'Climb' : 'Descent';
@@ -218,7 +229,15 @@ export function slopeSentence(ahead: SlopeAhead, units: UnitSystem): string {
   const measured = formatSmallDistance(ahead.metresAhead, units);
   const tens = Math.max(10, Math.round(Number(measured.value) / 10) * 10);
   const percent = Math.round(Math.abs(ahead.slope.grade));
-  return `${noun} in ${String(tens)} ${spokenSmallDistanceUnit(units)}, ${String(percent)} percent`;
+  // #1440's review: a quarter of a mile or more is said in miles, to one
+  // decimal as the distance to go is ("0.5 miles to go"), from the same tens
+  // of feet — so a climb first seen at the 0.25 mi step (1320 ft) is "0.3
+  // miles" and at the 0.5 mi step (2640 ft) "0.5 miles".
+  const distance =
+    units === 'imperial' && tens >= MILES_FROM_FEET
+      ? `${spokenNumber(Math.round((tens / FEET_PER_MILE) * 10) / 10)} ${spokenDistanceUnit(units)}`
+      : `${String(tens)} ${spokenSmallDistanceUnit(units)}`;
+  return `${noun} in ${distance}, ${String(percent)} percent`;
 }
 
 /** What the caller threads back in: the approach last announced. */

@@ -30,6 +30,7 @@ import {
   type Report,
 } from './messages';
 import {
+  MAXIMUM_GAP_DECISECONDS,
   MAXIMUM_MESSAGE_BYTES,
   MAXIMUM_NESTING_DEPTH,
   MAXIMUM_REPORTED_POWER_WATTS,
@@ -53,6 +54,7 @@ const MESSAGES: readonly ProtocolMessage[] = [
       ridingPosition: 'hoods',
       reportIntervalMs: REPORT_INTERVAL_MS,
       frameIntervalMs: FRAME_INTERVAL_MS,
+      drafting: 'on',
     },
   },
   { type: 'refuse', reason: 'physics-mismatch' },
@@ -73,6 +75,17 @@ const MESSAGES: readonly ProtocolMessage[] = [
     ],
   },
   { type: 'countdown', startsInMs: 10_000 },
+  { type: 'name', riderId: 9, displayName: 'Åsa 🚲 Ng' },
+  { type: 'standings', tick: 0, riders: [] },
+  {
+    type: 'standings',
+    tick: 1_200,
+    riders: [
+      { riderId: 9, gapDeciseconds: -123, wattsPerKilogramTenths: 41, flags: FLAG_PLAUSIBILITY },
+      { riderId: 3, gapDeciseconds: 0, wattsPerKilogramTenths: 0, flags: FLAG_COASTING },
+      { riderId: 12, gapDeciseconds: 87, wattsPerKilogramTenths: 1_000, flags: 0 },
+    ],
+  },
   { type: 'finish', order: [9, 3, 12] },
 ];
 
@@ -98,7 +111,17 @@ describe('decode(encode(m)) ≡ m', () => {
 
   it('covers every message type', () => {
     expect(new Set(MESSAGES.map((message) => message.type))).toEqual(
-      new Set(['hello', 'report', 'welcome', 'refuse', 'frame', 'countdown', 'finish']),
+      new Set([
+        'hello',
+        'report',
+        'welcome',
+        'refuse',
+        'frame',
+        'countdown',
+        'name',
+        'standings',
+        'finish',
+      ]),
     );
   });
 
@@ -157,7 +180,13 @@ describe('the numeric edge cases of a report, property-style', () => {
 
 describe('what the decoder refuses — one check, one reason', () => {
   const hello = (overrides: Record<string, unknown> = {}): string =>
-    JSON.stringify({ type: 'hello', protocol: 1, physicsVersion: 1, ticket: 't', ...overrides });
+    JSON.stringify({
+      type: 'hello',
+      protocol: PROTOCOL_VERSION,
+      physicsVersion: 1,
+      ticket: 't',
+      ...overrides,
+    });
 
   it('accepts the unaltered message each case below alters', () => {
     expect(refusalOf(decodeClientMessage(hello(), PHYSICS))).toBe('accepted');
@@ -214,14 +243,26 @@ describe('what the decoder refuses — one check, one reason', () => {
   });
 
   it('refuses another protocol version, read before anything else in the hello', () => {
-    expect(refusalOf(decodeClientMessage(hello({ protocol: 2 }), PHYSICS))).toBe(
+    expect(refusalOf(decodeClientMessage(hello({ protocol: PROTOCOL_VERSION + 1 }), PHYSICS))).toBe(
       'protocol-mismatch',
     );
     // A newer client's hello with a field this build has never heard of is a
     // version mismatch, not an unknown key.
     expect(
-      refusalOf(decodeClientMessage(hello({ protocol: 2, somethingNew: true }), PHYSICS)),
+      refusalOf(
+        decodeClientMessage(hello({ protocol: PROTOCOL_VERSION + 1, somethingNew: true }), PHYSICS),
+      ),
     ).toBe('protocol-mismatch');
+  });
+
+  it('refuses a version-1 build cleanly, as a version and nothing else — #1347', () => {
+    // Version 2 added the race's names and standings (ADR 0051). A build from
+    // before them is told it is a different version, which the client says as
+    // "update the app", rather than being seated in a race it cannot list.
+    expect(PROTOCOL_VERSION).toBe(2);
+    expect(refusalOf(decodeClientMessage(hello({ protocol: 1 }), PHYSICS))).toBe(
+      'protocol-mismatch',
+    );
   });
 
   it('refuses another physics version — ADR 0028 D-2 rule 5', () => {
@@ -238,7 +279,7 @@ describe('what the decoder refuses — one check, one reason', () => {
     expect(
       refusalOf(
         decodeClientMessage(
-          '{"type":"hello","protocol":1,"physicsVersion":1,"ticket":"t","__proto__":{}}',
+          `{"type":"hello","protocol":${String(PROTOCOL_VERSION)},"physicsVersion":1,"ticket":"t","__proto__":{}}`,
           PHYSICS,
         ),
       ),
@@ -251,7 +292,11 @@ describe('what the decoder refuses — one check, one reason', () => {
   });
 
   it('refuses a missing required key', () => {
-    const noTicket = JSON.stringify({ type: 'hello', protocol: 1, physicsVersion: 1 });
+    const noTicket = JSON.stringify({
+      type: 'hello',
+      protocol: PROTOCOL_VERSION,
+      physicsVersion: 1,
+    });
     expect(refusalOf(decodeClientMessage(noTicket, PHYSICS))).toBe('missing-key');
   });
 
@@ -282,6 +327,74 @@ describe('what the decoder refuses — one check, one reason', () => {
     });
     expect(refusalOf(decodeRoomMessage(twice))).toBe('bad-value');
     expect(refusalOf(decodeRoomMessage('{"type":"finish","order":[4,4]}'))).toBe('bad-value');
+    expect(
+      refusalOf(
+        decodeRoomMessage(
+          JSON.stringify({
+            type: 'standings',
+            tick: 1,
+            riders: [
+              [4, 0, 1, 0],
+              [4, 10, 1, 0],
+            ],
+          }),
+        ),
+      ),
+    ).toBe('bad-value');
+  });
+
+  it('refuses a welcome that does not say whether the room drafts, or says it otherwise — #787', () => {
+    const welcome = JSON.parse(encodeMessage(MESSAGES[3] as ProtocolMessage)) as {
+      roomConfig: Record<string, unknown>;
+    };
+    expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome)))).toBe('accepted');
+    for (const drafting of [true, 'yes', 1]) {
+      welcome.roomConfig['drafting'] = drafting;
+      expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome))), String(drafting)).toBe(
+        'bad-value',
+      );
+    }
+    delete welcome.roomConfig['drafting'];
+    expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome)))).toBe('missing-key');
+  });
+
+  it('refuses a name a real instance would never have stored — #1347', () => {
+    const name = (displayName: unknown) =>
+      decodeRoomMessage(JSON.stringify({ type: 'name', riderId: 1, displayName }));
+    // What `checkDisplayName` admits is admitted: 32 scalars, an emoji each.
+    expect(refusalOf(name('🚲'.repeat(32)))).toBe('accepted');
+    expect(refusalOf(name('Rider'))).toBe('accepted');
+    for (const hostile of [
+      '',
+      'Ann\u202Eoof', // a right-to-left override, which reverses the list after it
+      'Ann\u2066x', // an isolate
+      'An\u200Bn', // a zero-width space
+      'Ann\u0600', // a format character that is not default-ignorable
+      'Ann\u3164', // a default-ignorable that is not a format character (a Hangul filler)
+      'Ann\nBea', // a control
+      '🚲'.repeat(33),
+      7,
+    ]) {
+      expect(refusalOf(name(hostile)), JSON.stringify(hostile)).toBe('bad-value');
+    }
+  });
+
+  it('refuses a standings row past its bounds — #1347', () => {
+    const row = (slots: readonly unknown[]) =>
+      decodeRoomMessage(JSON.stringify({ type: 'standings', tick: 1, riders: [slots] }));
+    expect(refusalOf(row([1, -MAXIMUM_GAP_DECISECONDS, 1_000, 7]))).toBe('accepted');
+    for (const slots of [
+      [1, MAXIMUM_GAP_DECISECONDS + 1, 0, 0],
+      [1, -MAXIMUM_GAP_DECISECONDS - 1, 0, 0],
+      [1, 1.5, 0, 0],
+      [1, 0, 1_001, 0],
+      [1, 0, -1, 0],
+      [1, 0, 0, 8],
+      [1, 0, 0],
+      [1, 0, 0, 0, 0],
+    ]) {
+      expect(refusalOf(row(slots)), JSON.stringify(slots)).toBe('bad-value');
+    }
   });
 
   it('refuses a malformed value of every other kind', () => {

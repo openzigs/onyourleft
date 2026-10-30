@@ -33,6 +33,8 @@ import type {
   GradePercent,
   Kilograms,
   Metres,
+  ReplanRecord,
+  RevolutionsPerMinute,
   Seconds,
   SegmentSport,
   SegmentVisibility,
@@ -40,6 +42,8 @@ import type {
   Watts,
   GeographicPosition,
   Workout,
+  WorkoutBlock,
+  WorkoutGoals,
 } from '@onyourleft/domain';
 
 import type {
@@ -48,12 +52,14 @@ import type {
   CameraFrameId,
   LapId,
   PrivacyZoneId,
+  RecordingSessionId,
   SegmentEffortId,
   SegmentId,
   RouteId,
   WorkoutId,
 } from './ids';
 import type { KitColour } from './kit-colour';
+import type { NewStreamSet } from './streams';
 import type { UnitSystem } from './unit-system';
 import type { Visibility } from './visibility';
 
@@ -424,6 +430,163 @@ export interface RideFacts {
   readonly workoutFinished?: boolean;
   /** `true` when this ride raced the rider's own ghost and the race settled. */
   readonly ghostRaced?: boolean;
+  /**
+   * Every re-plan decision made during this ride, oldest first — #1244,
+   * ADR 0048 D-6 P9 (the owner's Q8: *"accepted and refused moves kept with
+   * the ride"*): the move, the rule that decided, and the time, and a move
+   * that was accepted and then not ridden. Known only while riding, like
+   * {@link workoutFinished}. Absent for a ride with none.
+   *
+   * Each is one of `@onyourleft/domain` §`ReplanRecord`'s shapes and is read
+   * back through `readReplanRecord`, which reads a record whole or not at
+   * all. It holds a move and a reason from two closed lists, and no text.
+   *
+   * ⚠️ **A record that does not read is dropped, never the ride.** On the way
+   * in and on the way out the store keeps each record that reads, skips one
+   * that does not, and counts it in {@link replansDropped}. A ride is never
+   * refused, and never unreadable, for its audit trail (#1244's review).
+   */
+  readonly replans?: readonly ReplanRecord[];
+  /**
+   * How many of this ride's re-plan records could not be kept or read back:
+   * written by a build that knew a move this one does not, or edited by
+   * hand. Absent when none was. A count and nothing of the records.
+   */
+  readonly replansDropped?: number;
+  /**
+   * The private races this ride was ridden in, in the order they ended, each
+   * as its room told this device — #785, the owner's ruling of 2026-10-14:
+   * *"a ride in a room always records, and the race result is stored with
+   * that ride on the device"*. Known only while riding, like
+   * {@link workoutFinished}. Absent for a ride in no race.
+   *
+   * A LIST because one recording can carry two game rides, each in a race
+   * (#1360's review, N3): the second is kept beside the first, never in its
+   * place.
+   *
+   * ⚠️ **A race that does not read is dropped, never the ride**, on the way in
+   * and on the way out, as for {@link replans}. @see RoomRaceFact
+   */
+  readonly races?: readonly RoomRaceFact[];
+  /**
+   * The blocks of each structured workout ridden on this ride, in the order
+   * they came up — #1319. One entry per block of the plan, including the ones
+   * never reached, so the ride's page can say what was ridden of each.
+   * Known only while riding, like {@link workoutFinished}. Absent for a ride
+   * with no workout under a recording.
+   *
+   * ⚠️ **A list that does not read is dropped whole, never the ride**, as a
+   * recording's laps are: a block is numbered by where it stands, so a list
+   * with one entry taken out would call the third block the second.
+   * @see WorkoutBlockFact
+   */
+  readonly workoutBlocks?: readonly WorkoutBlockFact[];
+}
+
+/**
+ * What became of one block of a structured workout on a ride — #1319.
+ *
+ * - `ridden`: the block was ridden from its start to its end.
+ * - `cut-short`: the block was begun and not finished — the workout was ended
+ *   in it, the recording ended or died in it, or the recording began after it
+ *   had started. Its figures are over what was ridden of it.
+ * - `skipped`: the workout ended before this block came up.
+ */
+export type WorkoutBlockOutcome = 'ridden' | 'cut-short' | 'skipped';
+
+/** The outcomes, in one list for a reader that checks one. */
+export const WORKOUT_BLOCK_OUTCOMES: readonly WorkoutBlockOutcome[] = [
+  'ridden',
+  'cut-short',
+  'skipped',
+];
+
+/**
+ * One block of a workout as the ride's page lists it — #1319.
+ *
+ * The block itself is kept as the plan said it when it came up (a re-plan
+ * changes the blocks after the one being ridden, never that one), so its
+ * target is said by `@onyourleft/domain` §`workoutBlockText` from the block,
+ * a share of threshold and never watts.
+ *
+ * ⚠️ **The figures are worked out once, when the ride is saved**, from the
+ * samples the save writes and by the rule a lap's are (`apps/web`
+ * §`recording/laps.ts`): the mean and the highest of the readings that exist
+ * between the block's two marks. Each is absent where nothing measured it.
+ */
+export type WorkoutBlockFact =
+  | {
+      readonly outcome: 'ridden' | 'cut-short';
+      readonly block: WorkoutBlock;
+      /**
+       * The stall rescue eased the trainer at some point in the block (#441).
+       * Present only as `true`: such a block is not a block ridden badly.
+       */
+      readonly eased?: true;
+      readonly startedAt: UnixSeconds;
+      readonly elapsedTime: Seconds;
+      readonly movingTime: Seconds;
+      readonly averagePower?: Watts;
+      readonly maxPower?: Watts;
+      readonly averageHeartRate?: BeatsPerMinute;
+      readonly maxHeartRate?: BeatsPerMinute;
+      readonly averageCadence?: RevolutionsPerMinute;
+    }
+  | { readonly outcome: 'skipped'; readonly block: WorkoutBlock };
+
+/**
+ * A race, as its room told the device that rode it — #785. The room's own
+ * word (its `finish` message, ADR 0028 D-2: the room's order is the one that
+ * counts), never a place this device worked out.
+ *
+ * ⚠️ **No other rider is in it.** A place and a count, and nothing of anybody
+ * else — not a name, not a time, not a power — so the device copy holds this
+ * rider's result and only theirs; every rider's result, with names and
+ * flags, is the instance's, shown to the race's riders only (#785, Q2).
+ *
+ * What it can say, and nothing else reads:
+ *
+ * - `place` and `finishers`: the room's order was heard, and this rider is in it.
+ * - `finishers` alone (`place: null`): the order was heard, and this rider is
+ *   not in it — they did not finish, in the room's word.
+ * - neither, with `crossedTheLine: true`: the rider crossed the line on this
+ *   device and ended their ride before the room's order came (#1360's review,
+ *   N2). The room sends no place before its `finish`; but its standings
+ *   (#1347) say who is across, so — #1364 — `placeAcross` and `across` say
+ *   where this rider was among the riders already across, when the room's
+ *   standings had them across. Never a place in the room's order.
+ * - neither, and no `crossedTheLine`: the rider left while the race ran.
+ */
+export interface RoomRaceFact {
+  /** The room's id on the instance, as the client takes one (1–128 of `A–Z a–z 0–9 _ -`). */
+  readonly roomId: string;
+  /**
+   * This rider's place in the room's finish order, 1 for the winner — or
+   * `null` when they are not in it: they did not finish, or the device never
+   * heard the order because the rider left before the room said it was over.
+   */
+  readonly place: number | null;
+  /**
+   * How many riders the room's finish order holds — or `null` when the
+   * device never heard it (the rider left the race before it was over).
+   */
+  readonly finishers: number | null;
+  /**
+   * `true` only when the order was NOT heard (`finishers: null`) and the rider
+   * crossed the line on this device before ending their ride. Absent otherwise:
+   * once the order is heard, it is the room's word on who finished.
+   */
+  readonly crossedTheLine?: true;
+  /**
+   * This rider's place among the riders the room's standings had across the
+   * line when the ride ended, 1 for the first across — #1364. Only with
+   * `crossedTheLine`, and only with {@link across}; absent where the room's
+   * standings did not have this rider across. The ROOM's word (its
+   * `FLAG_FINISHED` and its order, ADR 0028 D-2), never this device's own.
+   */
+  readonly placeAcross?: number;
+  /** How many riders the room's standings had across the line then, this rider among them (#1364). */
+  readonly across?: number;
 }
 
 /** @see {@link ActivityRecord.originalFile} */
@@ -555,6 +718,29 @@ export interface LapRecord {
   readonly movingTime: Seconds;
   readonly distance: Metres;
   readonly averagePower?: Watts;
+  /**
+   * #1312: the rest of what a lap states, each absent where nothing measured
+   * it — a ride with no strap has no heart rate, and nought would say the
+   * rider's heart stopped. All optional, so a lap written before #1312 (and a
+   * lap a later lap button writes with fewer figures) is already valid.
+   *
+   * Average speed is not here: it is {@link distance} over {@link movingTime},
+   * and a stored copy could disagree with the two it is made of.
+   */
+  /** The highest power reading of the lap. */
+  readonly maxPower?: Watts;
+  readonly averageHeartRate?: BeatsPerMinute;
+  /** The highest heart-rate reading of the lap. */
+  readonly maxHeartRate?: BeatsPerMinute;
+  readonly averageCadence?: RevolutionsPerMinute;
+  /** Metres climbed in the lap. */
+  readonly ascent?: Metres;
+  /**
+   * The rider stopped part-way through this lap — #1312. Present only as
+   * `true`: a part lap is shown as one and is never compared with a whole lap,
+   * which would read as a slow lap. Absent on every whole lap.
+   */
+  readonly partial?: true;
 }
 
 /**
@@ -602,6 +788,34 @@ export type NewActivity = Omit<ActivityRecord, 'visibility' | 'mayBeRaced'> & {
 export type NewLap = Omit<LapRecord, 'athleteId'>;
 
 /**
+ * What `putFinishedRide` accepts (#1326): a ride the rider has just finished,
+ * whole — the activity, the samples behind it and its laps, written in **one**
+ * transaction so that a ride is in the library whole or not at all.
+ *
+ * The stream set and every lap must name `activity` — its id, and for the
+ * streams its athlete too. The store refuses a ride whose parts disagree
+ * rather than filing a part under some other ride.
+ */
+export interface NewFinishedRide {
+  readonly activity: NewActivity;
+  readonly streams: NewStreamSet;
+  /** In the order they were ridden. Usually none. */
+  readonly laps: readonly NewLap[];
+  /**
+   * The checkpoint this ride was recorded into, when there is one. Its
+   * `savedAs` is set to `activity.id` **in the same transaction**, so there is
+   * no moment at which the ride is in the library and its checkpoint still
+   * reads as a finished ride nobody saved — the moment a crash used to turn
+   * into the same ride offered for saving a second time.
+   *
+   * A checkpoint this athlete does not have is not an error: a ride whose
+   * checkpoint never reached the disk is still a ride, and refusing it would
+   * lose the only copy left, the one in memory.
+   */
+  readonly recordingSession?: RecordingSessionId | undefined;
+}
+
+/**
  * The projection `listActivitySummaries` returns — #26's revision block and
  * #62 both require a "summaries-only read that never loads stream data for a
  * list row".
@@ -615,6 +829,39 @@ export type NewLap = Omit<LapRecord, 'athleteId'>;
  * and the one screen that does — the ride's own page — reads the whole ride.
  */
 export type ActivitySummary = Omit<ActivityRecord, 'originalFile' | 'mayBeRaced'>;
+
+/**
+ * A ride in Recently deleted — #1431.
+ *
+ * Deleting a ride moves it here rather than destroying it, and it is held for
+ * thirty days (`schema.ts` §`RECENTLY_DELETED_SECONDS`) so a ride deleted by
+ * mistake can be brought back with its samples, laps and note. While it is
+ * here it is in no other read: not the library, not a total, not the export,
+ * not a sync, not a race and not a segment board.
+ */
+export interface RecentlyDeletedRide {
+  readonly id: ActivityId;
+  readonly athleteId: AthleteId;
+  /** When the rider deleted it. */
+  readonly deletedAt: UnixSeconds;
+  /** When it is removed for good, unless it is brought back first. */
+  readonly removedAt: UnixSeconds;
+  /** The ride as the library showed it — a summary, never its streams. */
+  readonly summary: ActivitySummary;
+}
+
+/**
+ * What bringing a ride back did — #1431.
+ *
+ * - `restored`: it is in the library again.
+ * - `missing`: there is no such ride in this athlete's Recently deleted — it
+ *   was removed for good, its thirty days ran out, or it is not theirs (the
+ *   three are deliberately one answer).
+ * - `already-there`: the library already holds this ride — the same id, or
+ *   the same original file imported again since — so bringing it back would
+ *   make a second copy. Nothing changed.
+ */
+export type RestoreOutcome = 'restored' | 'missing' | 'already-there';
 
 // --- #66: efforts, and the sweep that finds them ----------------------------
 
@@ -1205,11 +1452,21 @@ export interface SideSessionSummaryRecord {
   readonly source: SideSessionSourceRecord;
 }
 
-/** Where a ride's write-up was written: the rider's own computer, or a model on the rider's key. */
-export type RideWriteUpSourceRecord = 'computer' | 'hosted';
+/**
+ * Where a ride's write-up was written: the rider's own computer, a model on
+ * the rider's key, or — since #1102 (ADR 0046 D-1) — the rider's instance,
+ * with the model on its own machine (`instance-local`) or a hosted service it
+ * sends to (`instance-hosted`). The values are the job's `source` (#1095).
+ */
+export type RideWriteUpSourceRecord = 'computer' | 'hosted' | 'instance-local' | 'instance-hosted';
 
 /** Every {@link RideWriteUpSourceRecord}, for a decoder that refuses anything else. */
-export const RIDE_WRITE_UP_SOURCES: readonly RideWriteUpSourceRecord[] = ['computer', 'hosted'];
+export const RIDE_WRITE_UP_SOURCES: readonly RideWriteUpSourceRecord[] = [
+  'computer',
+  'hosted',
+  'instance-local',
+  'instance-hosted',
+];
 
 /**
  * A model's write-up of one ride, as it passed the runtime screen — #800,
@@ -1273,7 +1530,19 @@ export interface RideWriteUpRecord {
  * after another device revoked it.
  */
 export type SyncBaseKind =
-  'activity' | 'write-up' | 'side-camera-report' | 'race-consent' | 'goal' | 'note' | 'document';
+  | 'activity'
+  | 'write-up'
+  | 'side-camera-report'
+  | 'race-consent'
+  | 'goal'
+  | 'note'
+  | 'document'
+  /** A saved workout (#1100), keyed by its own id. */
+  | 'workout'
+  /** The rider's typed workout goals (#1237), keyed `goals`: one per athlete. */
+  | 'workout-goal'
+  /** A ride's re-plan record (#1315), keyed by the ride's own id, like a write-up. */
+  | 'replan-record';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
@@ -1284,13 +1553,22 @@ export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'goal',
   'note',
   'document',
+  'workout',
+  'workout-goal',
+  'replan-record',
 ];
 
 /**
  * The kinds that belong to no ride (#836): the rider's goals and their
- * documents. Their sync base row names no ride — `activityId` is `null`.
+ * documents, since #1100 their saved workouts, and since #1237 their typed
+ * workout goals. Their sync base row names no ride — `activityId` is `null`.
  */
-export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = ['goal', 'document'];
+export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
+  'goal',
+  'document',
+  'workout',
+  'workout-goal',
+];
 
 /**
  * The **sync base**: what this device and its instance agreed on at the last
@@ -1416,3 +1694,98 @@ export interface TrustedDeviceKeyRecord {
   /** When it was admitted on this device. */
   readonly admittedAt: UnixSeconds;
 }
+
+/**
+ * The rider's typed workout goals — #1236, ADR 0048 D-10 (the owner's Q9). One
+ * row per athlete, replaced whole on every save.
+ *
+ * ⚠️ **Not #836's free-text goals** (`RiderTextRecord`, kind `goal`), which
+ * the analysis agent reads and which never set a bound. These do: a
+ * heart-rate hold or a re-plan during the ride stays inside them. So they are
+ * checked by `@onyourleft/domain` §`readWorkoutGoals` on the way in **and** on
+ * the way out, and a row that fails reads back as no goals with a fault —
+ * never as part of a goal.
+ */
+export interface WorkoutGoalsRecord {
+  /** Whose. **Every read of this record names it** — it is the primary key. */
+  readonly athleteId: AthleteId;
+  /** What the rider chose. Every field optional; an absent one is no goal. */
+  readonly goals: WorkoutGoals;
+  /** When they were last saved on this device. */
+  readonly savedAt: UnixSeconds;
+}
+
+/**
+ * What a read of the athlete's workout goals found: nothing saved, the goals,
+ * or a row that is not goals and the one reason why. A fault holds **no**
+ * goals, so nothing downstream can bound a ride with half of one.
+ */
+export type WorkoutGoalsRead =
+  | { readonly status: 'none' }
+  | { readonly status: 'kept'; readonly record: WorkoutGoalsRecord }
+  | { readonly status: 'fault'; readonly fault: string };
+
+/** Why a tile of a world corridor holds what it holds — #1545, ADR 0054 D-2, D-6. */
+export type WorldCorridorTileState =
+  'covered' | 'refused' | 'privacy-zone' | 'outside-archive' | 'over-cap';
+
+/**
+ * The map features in one route's corridor, read once from the basemap archive
+ * — #1545, ADR 0054 D-3. One row per **(owner, route)**, keyed by both.
+ *
+ * ⚠️ **ODbL 1.0, not Apache-2.0.** This package's *code* is Apache-2.0; the
+ * *data* in this record is a Derivative Database of OpenStreetMap (ADR 0054
+ * D-3.2), which is why it is its own store and never fields on
+ * {@link RouteRecord} (ADR 0012 D-3.1). What it holds, in ADR 0054 D-3.3's one
+ * sentence: building footprint polygons with `kind`, `height` and
+ * `min_height`; land-use polygons with `kind`; water polygons; footway lines
+ * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and
+ * whether each is a bridge or a tunnel; place points with `kind`, `kind_detail`
+ * and `population_rank` (ADR 0055 D-6.1, #1632); and which tiles were read and
+ * when — no OSM identifier, no name, no address.
+ *
+ * ⚠️ **It never leaves the device** (ADR 0054 D-3.5): no account export, no
+ * sync, no instance call. That is the only thing keeping ODbL §4.4
+ * share-alike from engaging, so a change that sends any of it anywhere is a
+ * change to that ADR. It is a cache: the route keeps its own geometry, so the
+ * row can be dropped and read again with nothing of the rider's lost.
+ *
+ * ⚠️ **Location data** (ADR 0054 D-6.6): no error, log or message may carry a
+ * feature, a coordinate or a tile's x/y.
+ */
+export interface WorldCorridorRecord {
+  /** Whose. **Every read of this record names it** — it leads the key. */
+  readonly owner: AthleteId;
+  /** The route the corridor is around. Deleting the route deletes this row. */
+  readonly routeId: RouteId;
+  /** SHA-256 of the route's positions as stored, so an edited route is read again. */
+  readonly routeDigest: string;
+  /** The archive URL and its header etag (or the header's own digest when there is no etag). */
+  readonly archive: { readonly url: string; readonly identity: string };
+  /** Bumped when #1539's decode, or the fields it keeps, change. */
+  readonly readerVersion: number;
+  /** How far either side of the route's line the corridor reaches. */
+  readonly halfWidthMetres: number;
+  /** ISO-8601, the device's clock, when it was read. */
+  readonly readAt: string;
+  /** The tiles asked for, and per tile: covered, or why not. */
+  readonly tiles: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly state: WorldCorridorTileState;
+  }[];
+  /**
+   * The decoded features in the corridor frame, packed by #1539. Opaque here;
+   * at most {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}, and a larger one is
+   * refused at the write rather than truncated.
+   */
+  readonly features: Blob;
+  /** What the data is licensed under. The only value there is. */
+  readonly licence: 'ODbL-1.0';
+}
+
+/**
+ * The largest `features` blob a world corridor may hold: **16 MiB** (#1545),
+ * the issue's bound for a 600-tile corridor.
+ */
+export const WORLD_CORRIDOR_FEATURES_LIMIT_BYTES = 16 * 1024 * 1024;

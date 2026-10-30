@@ -39,9 +39,14 @@ import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
+import type { MappedBuildingsInView } from './mapped-buildings';
+import type { PeopleInView } from './people';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
+import type { Season } from './season';
+import type { SideRoad } from './cross-streets';
+import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
 import type { WorldStyle } from './world';
@@ -212,6 +217,24 @@ export interface RiderMarker {
    * browser harness want.
    */
   readonly crankAngle?: number | undefined;
+  /**
+   * What is written over this rider on the road — #783, and only ever on a
+   * `remote` rider: the room's public name for them (#774), which only a
+   * race's room sends (ADR 0051 D-3), or the seat label of the one rider
+   * *Follow* chose (`room-ride.ts` §`seatLabel`). The same words the HUD gives
+   * them, and nothing else about them.
+   *
+   * ⚠️ **The renderer draws no text.** `name-tags.ts` lays the name over the
+   * world as DOM, so it costs the scene no draw call and no triangle in either
+   * world; `room-wiring.test.tsx` reads it back off the page.
+   */
+  readonly label?: string | undefined;
+  /**
+   * Whether this is the one rider *Follow* chose — #783: where two names on
+   * the road would meet, theirs is the one kept, because it is the one the
+   * HUD's gap is to. Only ever on a `remote` rider; never an order.
+   */
+  readonly followed?: boolean | undefined;
 }
 
 /** One frame's worth of scene. */
@@ -292,6 +315,54 @@ export interface SceneFrame {
    * gate's wordmark board, by one instanced mesh.
    */
   readonly billboards: readonly Billboard[];
+  /**
+   * The village streets in view — #1535 (`streets.ts`): each village's kerbed
+   * pavements, the same objects every frame while the same villages are in
+   * view, drawn in both worlds by one mesh (`three-renderer.ts`
+   * §`PavementBelt`). Empty away from a village. NOT counted against the
+   * rung's `structureItems`: a street is one mesh, not items.
+   */
+  readonly streets: readonly VillageStreet[];
+  /**
+   * The people in view — #1541 (`people.ts`): on the village streets'
+   * pavements and front paths and the corridor's mapped footways, never on
+   * the carriageway; the nearest as bodies (`three-renderer.ts`
+   * §`PeopleBelt`, one draw), the farther as impostors (one more). Drawn in
+   * the realistic world only. Absent, or empty, where the rung draws nobody.
+   */
+  readonly people?: PeopleInView | undefined;
+  /**
+   * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
+   * short way off the route at each junction, mapped where the corridor has
+   * streets and one crossroads at each procedural village, the same objects
+   * every frame while the same junctions are in view, drawn in both worlds in
+   * the road's own material by one mesh (`three-renderer.ts`
+   * §`SideRoadBelt`). Empty away from a junction.
+   */
+  readonly sideRoads: readonly SideRoad[];
+  /**
+   * The ride's mapped buildings and where the rider is among them — #1549.
+   * Absent on a ride with no corridor. Drawn only on the realistic rungs
+   * (`three-renderer.ts` §`MappedBuildingBelt`), refilled only when
+   * `chunk` changes; the stylised world draws none (ADR 0026 D-3's rule is
+   * the arrangement, and a ride is given a corridor only in the realistic
+   * world, ADR 0054 D-6).
+   */
+  readonly mappedBuildings?: MappedBuildingsInView;
+  /**
+   * A Delivery round's parcels in flight, the markers on the houses still on
+   * the round, and its obstacles — #1814 (`delivery/in-view.ts`
+   * §`deliveryInView`). Drawn in both worlds in at most three calls
+   * (`three-renderer.ts` §`DeliveryBelt`), and the view builds nothing of it
+   * until a frame carries one. **Absent on every ordinary ride.**
+   *
+   * ⚠️ **An optional field**, which is the hole `check-wiring.mjs` §Limits
+   * says no gate here can see. `GameView` fills it on every frame of a ride
+   * running a round (#1816), and `delivery-wiring.test.tsx` reads it back off
+   * the frames a renderer was handed; the browser gate's
+   * `delivery-harness.ts` hands a view one too.
+   */
+  readonly delivery?: DeliveryInView | undefined;
 }
 
 /** What {@link SceneFrame.water} carries. */
@@ -300,6 +371,38 @@ export interface WaterFrame {
   readonly bridges: readonly BridgePart[];
   /** Seconds, for the ripples. */
   readonly seconds: number;
+}
+
+/**
+ * Which of Delivery's obstacles — `delivery/obstacles.ts` §`ObstacleKind`,
+ * restated so that nothing the view reaches imports Delivery's modules.
+ * `delivery/in-view.ts` builds {@link DeliveryInView} from
+ * the roster, so a kind added there and not here does not typecheck.
+ */
+export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone';
+
+/** One Delivery piece, in the corridor's local metres, and its yaw: three's, so its own `+z` faces `yaw`. */
+export interface DeliveryPiece {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+}
+
+/** An obstacle, and which of the roster it is. */
+export interface DeliveryObstaclePiece extends DeliveryPiece {
+  readonly kind: DeliveryObstacleKind;
+}
+
+/**
+ * What {@link SceneFrame.delivery} carries — #1814: one Delivery frame's
+ * pieces, placed by `delivery/in-view.ts` §`deliveryInView`. Placements and
+ * kinds, never meshes, on {@link SceneFrame.scatter}'s argument.
+ */
+export interface DeliveryInView {
+  readonly parcels: readonly DeliveryPiece[];
+  readonly markers: readonly DeliveryPiece[];
+  readonly obstacles: readonly DeliveryObstaclePiece[];
 }
 
 /** What {@link SceneFrame.terrain} carries. */
@@ -347,6 +450,15 @@ export interface GameView {
    * reasoning; `GameView.test.tsx` §"#623" reads what a view was handed.
    */
   setRiderKit(chosen: KitColour | undefined): void;
+  /**
+   * The ride's season — #1622: the holiday on the RIDER's local day at ride
+   * start, and the ROUTE's seasonal nature (`season.ts`). Told once when a live
+   * ride starts and held for the ride; a view built later in the ride is told
+   * the same answer, never a fresh read of the clock. #1623 to #1627 draw from
+   * what the view holds. Required, on {@link RiderMarker.crankAngle}'s
+   * reasoning.
+   */
+  setSeason(season: Season): void;
   /** Tell the renderer the canvas changed size. */
   resize(widthCssPixels: number, heightCssPixels: number): void;
   /** Release the GL context and every buffer. */

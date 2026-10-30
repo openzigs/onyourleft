@@ -101,13 +101,26 @@ const activityProperties = { contentSha256: string, receivedAt: integer, claims:
 
 const kindSchema: Schema = {
   type: 'string',
-  enum: ['activity', 'write-up', 'ride-summary', 'side-camera-report', 'goal', 'note', 'document'],
+  enum: [
+    'activity',
+    'write-up',
+    'ride-summary',
+    'side-camera-report',
+    'goal',
+    'note',
+    'document',
+    'masking',
+    'workout',
+    'workout-goal',
+    'replan-record',
+  ],
 };
 
 export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/account/export',
+    sealed: 'only',
     operationId: 'exportAccount',
     reaches: 'own',
     // A rider awaiting approval (#775), or suspended (#898), may still take
@@ -123,7 +136,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),
@@ -131,6 +144,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'DELETE',
     path: '/v1/account',
+    sealed: 'only',
     operationId: 'eraseAccount',
     reaches: 'own',
     // A rider awaiting approval (#775), or suspended (#898), may still take
@@ -187,6 +201,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/manifest',
+    sealed: 'only',
     operationId: 'getSyncManifest',
     reaches: 'own',
     summary:
@@ -206,6 +221,7 @@ export const SYNC_ROUTES: readonly Route[] = [
             deleted: { type: 'boolean' },
             activityId: { type: ['string', 'null'] },
             mayBeRaced: { type: ['boolean', 'null'] },
+            raceRouteSha256: { type: ['string', 'null'] },
           }),
         },
         next: { type: ['string', 'null'] },
@@ -217,6 +233,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/records/{content}',
+    sealed: 'only',
     operationId: 'getSignedRecord',
     reaches: 'own',
     summary:
@@ -233,6 +250,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/sync/records/{content}/race-consent',
+    sealed: 'only',
     operationId: 'setRaceConsent',
     reaches: 'own',
     summary:
@@ -255,7 +273,63 @@ export const SYNC_ROUTES: readonly Route[] = [
   },
   {
     method: 'POST',
+    path: '/v1/sync/records/{content}/race-route',
+    sealed: 'only',
+    operationId: 'setRaceRoute',
+    reaches: 'own',
+    summary:
+      'Offer one of your consented rides to be raced on a route, by the SHA-256 of the route’s canonical GPX, or withdraw the offer with null (#331). Your device sends it only when none of your privacy zones touches the route; a revoked consent withdraws it here.',
+    ...SESSION,
+    request: object({ routeSha256: { type: ['string', 'null'] } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ routeSha256: { type: ['string', 'null'] } }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).setRaceRoute(
+          callerOf(context),
+          context.params.content ?? '',
+          context.json,
+        ),
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/v1/ghosts/{route}',
+    sealed: 'only',
+    operationId: 'getRiderGhost',
+    reaches: {
+      exempt:
+        'ADR 0039 D-2: another rider’s consented ride, by a route the caller already holds; the choke point is asked for each candidate inside the read (`sync.ts` §`ghost`), so a rider the caller may not see is passed over rather than refused',
+    },
+    summary:
+      'ONE other rider’s ghost on a route you hold, by the SHA-256 of its canonical GPX, or null (#331, ADR 0039): the most recently arrived ride whose rider agreed to its being raced and whom you may see. Their display name and their speed on a uniform clock — never a position, a date, a list or an order.',
+    ...SESSION,
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        ghost: {
+          type: ['object', 'null'],
+          properties: {
+            rider: string,
+            sampleInterval: integer,
+            speed: series,
+          },
+          required: ['rider', 'sampleInterval', 'speed'],
+          additionalProperties: false,
+        },
+      }),
+    },
+    handle: async (context) =>
+      answer(await syncOf(context).ghost(callerOf(context), context.params.route ?? '')),
+  },
+  {
+    method: 'POST',
     path: '/v1/sync/items/{kind}/{key}',
+    sealed: 'only',
     operationId: 'putSyncItem',
     reaches: 'own',
     summary:
@@ -280,6 +354,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/items/{kind}/{key}',
+    sealed: 'only',
     operationId: 'getSyncItem',
     reaches: 'own',
     summary: 'One of your items, byte for byte as it was sent.',
@@ -301,6 +376,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'DELETE',
     path: '/v1/sync/items/{kind}/{key}',
+    sealed: 'only',
     operationId: 'deleteSyncItem',
     reaches: 'own',
     summary:
@@ -320,6 +396,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/sync/records',
+    sealed: 'only',
     operationId: 'ingestRecord',
     reaches: 'own',
     summary:
@@ -353,6 +430,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/files/{content}',
+    sealed: 'only',
     operationId: 'getOriginalFile',
     reaches: 'own',
     summary:
@@ -371,6 +449,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/activities',
+    sealed: 'only',
     operationId: 'listActivities',
     reaches: 'own',
     summary:
@@ -390,6 +469,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/activities/{content}',
+    sealed: 'only',
     operationId: 'getActivity',
     reaches: 'own',
     summary:
@@ -406,6 +486,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/activities/{content}/streams',
+    sealed: 'only',
     operationId: 'getActivityStreams',
     reaches: 'own',
     summary:

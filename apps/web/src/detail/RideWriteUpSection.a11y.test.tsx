@@ -6,6 +6,12 @@
  * — #805. The whole page is audited, so the section is audited where it sits:
  * under the ride's `h2`, below the side camera's report.
  *
+ * Since #1103 the ask is the instance's alone, and its states — the press,
+ * a job streaming, a withdrawal — are audited in
+ * `ride-analysis/InstanceWriteUpControl.a11y.test.tsx`. This file audits what
+ * the section renders around it: the two sentences with nothing to ask, and a
+ * saved write-up in every way it can be shown or withheld.
+ *
  * ⚠️ Named `*.a11y.test.tsx` because that is what `test:a11y` selects on
  * (#142).
  */
@@ -14,14 +20,12 @@ import { unixSeconds } from '@onyourleft/domain';
 import { activityId, athleteId, type RideWriteUpRecord } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
-import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
-import { ASK_LABEL, CANCEL_LABEL, WRITE_UP_SENDS_ID } from '../ride-analysis/RideWriteUpControl';
-import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
+import { auditAccessibility, formatViolations } from '../a11y/audit';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
+import { mount, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
 
 import { stubActivity, stubDetail, type StubRide } from './testing';
-import { COMPUTER_SENDS_LEAD } from './write-up';
 
 const ATHLETE = athleteId('athlete-a');
 const RIDE = activityId('ride-1');
@@ -39,26 +43,26 @@ const WRITE_UP: RideWriteUpRecord = {
 };
 
 let mounted: Mounted | undefined;
-let settleAsk: ((outcome: AskOutcome) => void) | undefined;
 
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
 });
 
-const PORT: RideAnalysisPort = {
-  availableSources: () => ['computer', 'hosted'],
-  previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
-  hostedPreviewSeen: () => true,
-  askForRideWriteUp: async () =>
-    new Promise<AskOutcome>((resolve) => {
-      settleAsk = resolve;
-    }),
+/** An instance this device holds no sign-in to: the section's one sentence and its link. */
+const NOT_SIGNED_IN: InstanceAnalysisPort = {
+  connected: () => false,
+  availableSources: () => [],
+  hostedEndpoint: () => undefined,
+  pendingJob: () => false,
+  ask: async () => Promise.resolve({ kind: 'detached' }),
+  followAgain: async () => Promise.resolve({ kind: 'detached' }),
+  cancel: async () => Promise.resolve(),
 };
 
 async function open(
   writeUp: StubRide['writeUp'],
-  port: RideAnalysisPort | undefined = PORT,
+  instance: InstanceAnalysisPort | undefined,
 ): Promise<void> {
   document.documentElement.lang = 'en';
   mounted = await mount(
@@ -72,22 +76,12 @@ async function open(
           ...(writeUp === undefined ? {} : { writeUp }),
         })}
         activityId={RIDE}
-        writeUp={port}
+        instanceWriteUp={instance}
       />
     </main>,
   );
   await settle();
   await settle();
-}
-
-function button(label: string): HTMLButtonElement {
-  const found = [...document.querySelectorAll('button')].find(
-    (candidate) => candidate.textContent === label,
-  );
-  if (found === undefined) {
-    throw new Error(`no button "${label}"`);
-  }
-  return found;
 }
 
 function expectClean(where: string): void {
@@ -97,36 +91,18 @@ function expectClean(where: string): void {
 
 describe('every state of the write-up passes the audit', () => {
   it.each([
-    ['the fallback, no model set up', undefined, undefined],
-    ['nothing asked yet', undefined, PORT],
-    ['a write-up saved', WRITE_UP, PORT],
-    ['a saved write-up the screen withholds', { ...WRITE_UP, text: 'At 142° the knee.' }, PORT],
-    ['a saved row that will not decode', 'unreadable' as const, PORT],
-  ])('%s', async (what, writeUp, port) => {
-    await open(writeUp, port);
+    ['the fallback, a browser that cannot hold a sign-in', undefined, undefined],
+    ['signed in to no instance', undefined, NOT_SIGNED_IN],
+    ['a write-up saved, with the fallback', WRITE_UP, undefined],
+    ['a write-up saved, signed in to no instance', WRITE_UP, NOT_SIGNED_IN],
+    [
+      'a saved write-up the screen withholds',
+      { ...WRITE_UP, text: 'At 142° the knee.' },
+      undefined,
+    ],
+    ['a saved row that will not decode', 'unreadable' as const, NOT_SIGNED_IN],
+  ])('%s', async (what, writeUp, instance) => {
+    await open(writeUp, instance);
     expectClean(what);
-  });
-
-  it('while a run goes, and after it fails with the earlier write-up standing', async () => {
-    await open(WRITE_UP);
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    expectClean('running');
-    // Every control is still in the tab order, and named.
-    const tabbable = tabbableElements(document).map((element) => element.textContent);
-    expect(tabbable).toEqual(
-      expect.arrayContaining([ASK_LABEL.computer.first, ASK_LABEL.hosted.other, CANCEL_LABEL]),
-    );
-    settleAsk?.({ kind: 'failed', text: 'The model took too long, so nothing was kept.' });
-    await settle();
-    expectClean('failed, the earlier write-up standing');
-  });
-
-  it('describes each ask control by the lead of what it would send, the rest beside it', async () => {
-    await open(undefined);
-    const control = button(ASK_LABEL.computer.first);
-    const described = document.getElementById(control.getAttribute('aria-describedby') ?? '');
-    // #816: the lead alone, not the ninety-word block read on every focus.
-    expect(described?.textContent).toBe(COMPUTER_SENDS_LEAD);
-    expect(document.getElementById(WRITE_UP_SENDS_ID)?.textContent).toContain('Never a picture.');
   });
 });

@@ -26,6 +26,7 @@ import {
   signedRecordFor,
   streamSetFor,
   workoutFor,
+  workoutGoalsFor,
 } from '@onyourleft/store/testing';
 import type { ActivityId, PrivacyZoneRecord } from '@onyourleft/store';
 import { activityId, privacyZoneId, TABLE, webCryptoVerifier } from '@onyourleft/store';
@@ -40,13 +41,8 @@ import {
   verifyRecordSignature,
   watts,
 } from '@onyourleft/domain';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  HOSTED_MODEL_STORAGE_KEY,
-  readHostedModel,
-  writeHostedModel,
-} from '../camera/hosted-model';
 import { coordinatesIn, insideZone } from '../privacy/boundaries';
 
 import {
@@ -62,6 +58,7 @@ import {
   RIDER_TEXTS_UNREADABLE,
   SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
+  WORKOUT_GOALS_UNREADABLE,
   type AccountExportCursor,
 } from './export-everything';
 import type { DownloadableFile } from './store-port';
@@ -162,39 +159,6 @@ function manifestOf(files: readonly DownloadableFile[]): Record<string, unknown>
   >;
 }
 
-describe('the hosted model’s key is in no file the export writes — #518', () => {
-  const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('exports a whole account from a device holding a key, and the key is not in it', async () => {
-    const rows = new Map<string, string>();
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => rows.get(key) ?? null,
-      setItem: (key: string, value: string) => void rows.set(key, value),
-      removeItem: (key: string) => void rows.delete(key),
-    });
-    expect(
-      writeHostedModel({ address: 'https://models.example.invalid', model: 'm', key: KEY }),
-    ).toBe(true);
-    // The device really holds it, through the path the Camera screen reads —
-    // or this would pass over an empty `localStorage`.
-    expect(rows.has(HOSTED_MODEL_STORAGE_KEY)).toBe(true);
-    expect(readHostedModel()?.key).toBe(KEY);
-
-    await seedLibrary(2);
-    const { files } = await runExport();
-    expect(files.length).toBeGreaterThan(2);
-    for (const file of files) {
-      const text = new TextDecoder().decode(file.bytes);
-      expect(text, file.fileName).not.toContain(KEY);
-      expect(text, file.fileName).not.toContain('models.example.invalid');
-    }
-  });
-});
-
 describe('exporting everything', () => {
   it('produces one file per ride plus a manifest', async () => {
     await seedLibrary(3);
@@ -204,6 +168,23 @@ describe('exporting everything', () => {
     expect(report.failed).toBe(0);
     expect(files).toHaveLength(4);
     expect(files.at(-1)?.fileName).toBe(MANIFEST_FILE_NAME);
+  });
+
+  it('leaves out a ride in Recently deleted, and its note — #1431', async () => {
+    const { written } = await seedLibrary(2);
+    const kept = written[0]!.ride;
+    const deleted = written[1]!.ride;
+    await harness.write(async (store) => {
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'note', deleted.id));
+      await store.moveActivityToRecentlyDeleted(ATHLETE_A, deleted.id, unixSeconds(1_800_000_000));
+    });
+    const { files, report } = await runExport();
+
+    expect(report.exported).toBe(1);
+    expect(report.outcomes.map((outcome) => outcome.activityId)).toStrictEqual([kept.id]);
+    const manifest = manifestOf(files);
+    expect((manifest['riderTexts'] as { rideNotes: unknown[] }).rideNotes).toStrictEqual([]);
+    expect(JSON.stringify(manifest)).not.toContain(deleted.id);
   });
 
   it('exports this athlete and nobody else', async () => {
@@ -551,6 +532,73 @@ describe('the rider’s goals, ride notes and documents — #836, ADR 0040 D-10'
     ]);
     expect((texts['goals'] as { text: string }).text).toBe(riderTextFor(ATHLETE_A, 'goal').text);
     expect(JSON.stringify(texts)).not.toContain('zzzz');
+    expect(report.exported).toBe(1);
+  });
+});
+
+describe('the rider’s typed workout goals — #1236, ADR 0048 D-10', () => {
+  it('carries them, every field, read through the real store, and nobody else’s', async () => {
+    await seedLibrary(1);
+    const mine = workoutGoalsFor(ATHLETE_A);
+    await harness.write(async (store) => {
+      await store.putWorkoutGoals(mine);
+      await store.putWorkoutGoals(workoutGoalsFor(ATHLETE_B));
+    });
+
+    const manifest = manifestOf((await runExport()).files);
+
+    // Through JSON, so a brand is a number here, exactly as a reader sees it.
+    expect(manifest['workoutGoals']).toStrictEqual(
+      JSON.parse(JSON.stringify({ goals: mine.goals, savedAt: mine.savedAt })),
+    );
+    // Fields, not the row: the athlete is the manifest's own, not repeated.
+    expect(Object.keys(manifest['workoutGoals'] as object).sort()).toStrictEqual([
+      'goals',
+      'savedAt',
+    ]);
+    const theirs = workoutGoalsFor(ATHLETE_B).goals;
+    expect(JSON.stringify(manifest['workoutGoals'])).not.toContain(
+      `"durationMinutes":${String(theirs.durationMinutes)}`,
+    );
+  });
+
+  it('says there are none rather than omitting the key', async () => {
+    await seedLibrary(1);
+    expect(manifestOf((await runExport()).files)).toHaveProperty('workoutGoals', null);
+  });
+
+  it('says a row could not be read and carries nothing of it', async () => {
+    await seedLibrary(1);
+    await harness.discard();
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const opening = indexedDB.open(harness.databaseName);
+      opening.onsuccess = () => {
+        resolve(opening.result);
+      };
+      opening.onerror = () => {
+        reject(new Error('could not open the database'));
+      };
+    });
+    // A hand-edited row: a range 2 bpm wide, which the store's re-check refuses.
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(TABLE.workoutGoals, 'readwrite');
+      transaction.objectStore(TABLE.workoutGoals).put({
+        ...workoutGoalsFor(ATHLETE_A),
+        goals: { holdRange: { low: 131, high: 133 } },
+      });
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = () => {
+        reject(new Error('could not write the row'));
+      };
+    });
+    database.close();
+
+    const { files, report } = await runExport();
+    expect(manifestOf(files)['workoutGoals']).toStrictEqual({
+      unreadable: WORKOUT_GOALS_UNREADABLE,
+    });
     expect(report.exported).toBe(1);
   });
 });
@@ -1283,6 +1331,83 @@ describe('exporting the side camera’s reports (#388)', () => {
       });
       const other = all.find((each) => each['activityId'] !== ridden.id);
       expect(other).toHaveProperty('rideFacts', null);
+    });
+
+    it('carries a ride’s re-plan decisions, each with its own keys and no other — #1244', async () => {
+      const { written } = await seedLibrary(1);
+      const ridden = written[0]?.ride;
+      if (ridden === undefined) throw new Error('no ride');
+      const replans = [
+        {
+          decision: 'accepted',
+          move: { kind: 'shorten-block', block: 2, minutes: 2 },
+          reason: 'heart-rate-high',
+          revision: 1,
+          at: seconds(1_700_000_300),
+        },
+        { decision: 'not-applied', why: 'kept', revision: 1, at: seconds(1_700_000_320) },
+        { decision: 'refused', rule: 'P1', at: seconds(1_700_000_900) },
+      ] as const;
+      await harness.write(async (store) =>
+        store.setActivityRideFacts(ATHLETE_A, ridden.id, { replans }),
+      );
+      const { files } = await runExport();
+      expect(
+        entries(files).find((each) => each['activityId'] === ridden.id)?.['rideFacts'],
+      ).toStrictEqual({ replans });
+    });
+
+    it('carries a ride’s races, each field named and nothing of any other rider — #785 (#1360’s review, B1)', async () => {
+      const { written } = await seedLibrary(1);
+      const ridden = written[0]?.ride;
+      if (ridden === undefined) throw new Error('no ride');
+      const races = [
+        { roomId: 'ab'.repeat(16), place: 2, finishers: 5 },
+        { roomId: 'room-2', place: null, finishers: null, crossedTheLine: true as const },
+        // #1364: a place among the riders already across, field by field.
+        {
+          roomId: 'room-3',
+          place: null,
+          finishers: null,
+          crossedTheLine: true as const,
+          placeAcross: 2,
+          across: 4,
+        },
+      ];
+      // Written through the store's own path and read back by the export
+      // through the store, as a rider's export reads it.
+      await harness.write(async (store) =>
+        store.setActivityRideFacts(ATHLETE_A, ridden.id, { workoutFinished: true, races }),
+      );
+      const { files } = await runExport();
+      expect(
+        entries(files).find((each) => each['activityId'] === ridden.id)?.['rideFacts'],
+      ).toStrictEqual({ workoutFinished: true, races });
+    });
+
+    it('carries a ride’s workout blocks, each with its own keys — #1319', async () => {
+      const { written } = await seedLibrary(1);
+      const ridden = written[0]?.ride;
+      if (ridden === undefined) throw new Error('no ride');
+      const workoutBlocks = [
+        {
+          outcome: 'cut-short',
+          eased: true,
+          block: { kind: 'steady', seconds: seconds(600), target: 0.6 },
+          startedAt: 1_700_000_000,
+          elapsedTime: 300,
+          movingTime: 290,
+          averagePower: 150,
+        },
+        { outcome: 'skipped', block: { kind: 'free-ride', seconds: seconds(300) } },
+      ] as const;
+      await harness.write(async (store) =>
+        store.setActivityRideFacts(ATHLETE_A, ridden.id, { workoutBlocks } as never),
+      );
+      const { files } = await runExport();
+      expect(
+        entries(files).find((each) => each['activityId'] === ridden.id)?.['rideFacts'],
+      ).toStrictEqual({ workoutBlocks });
     });
   });
 

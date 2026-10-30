@@ -190,11 +190,12 @@ Capacitor does (§4k), `check:cost-model` when `docs/cost-model.md` does (§4l).
 process never belongs in a gate. `pnpm run test` is already the run-once form; `pnpm exec vitest` is
 not.
 
-> ⚠️ **The workflow's `name:` and its job's `name:` are both `Repository rules`, and `main` requires
-> a status check whose context is exactly that string.** Rename either and the required check never
-> reports, which makes every subsequent pull request unmergeable — including the one doing the
-> renaming. Extend the existing job; do not add a second job for a new gate, because a second job
-> reports under a different context and its failure would not block a merge.
+> ⚠️ **The workflow's `name:` and its last job's `name:` are both `Repository rules`, and `main`
+> requires a status check whose context is exactly that string.** Rename either and the required
+> check never reports, which makes every subsequent pull request unmergeable — including the one
+> doing the renaming. Since #1285 that job only fails unless every shard (`checks`, `tests`,
+> `browser`) succeeded. Put a new gate inside a shard; a job it does not `needs` reports under a
+> different context and its failure would not block a merge (§4c).
 
 ---
 
@@ -229,6 +230,7 @@ not.
 - [scope-and-ip.md](docs/agents/scope-and-ip.md) §6: metric names, prior art, Garmin, `SCOPE001`
 - [workout-format.md](docs/agents/workout-format.md) §6: the workout file format
 - [conventions.md](docs/agents/conventions.md) §7: branches, ADRs and the next free number, spikes, protected paths
+- [filing-issues.md](docs/agents/filing-issues.md) §7: opening an issue: area, tier, epic link, the board
 - [adr-numbering.md](docs/agents/adr-numbering.md) §7: which ADR numbers were taken
 - [toolchain.md](docs/agents/toolchain.md) §8: toolchain pins, pnpm, install scripts, auto-pause
 - [web-bluetooth.md](docs/agents/web-bluetooth.md) §8: what Web Bluetooth cannot do

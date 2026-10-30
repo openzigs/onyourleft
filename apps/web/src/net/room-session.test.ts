@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { PROTOCOL_VERSION } from '@onyourleft/protocol';
+import { FLAG_COASTING, FLAG_FINISHED, PROTOCOL_VERSION } from '@onyourleft/protocol';
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 import { describe, expect, it } from 'vitest';
 
@@ -13,7 +13,7 @@ import {
   RoomSession,
   type RoomSample,
 } from './room-session';
-import { flush, frameRider, ManualClock, ScriptedRoom } from './testing';
+import { flush, frameRider, ManualClock, ScriptedRoom, standingsRider } from './testing';
 
 function session(
   room: ScriptedRoom,
@@ -326,7 +326,7 @@ describe('a race, as the room says it — #785', () => {
     room.frame(1, [frameRider(3, 4)]);
     expect(s.race()).toEqual({ kind: 'running' });
     room.send({ type: 'finish', order: [5, 3] });
-    expect(s.race()).toEqual({ kind: 'finished', order: [5, 3] });
+    expect(s.race()).toEqual({ kind: 'finished', order: [5, 3], place: 2 });
     expect(s.finish).toEqual({ type: 'finish', order: [5, 3] });
   });
 
@@ -337,5 +337,91 @@ describe('a race, as the room says it — #785', () => {
     room.send({ type: 'countdown', startsInMs: 5_000 });
     room.frame(1, [frameRider(3, 4)]);
     expect(s.race()).toEqual({ kind: 'not-a-race' });
+  });
+});
+
+describe('a race’s standings, as the room sends them — #1347', () => {
+  it('joins the room’s rows to the names it sent, marks this rider’s own, and invents nothing', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = session(room, clock);
+    await flush();
+    room.accept();
+    room.welcome(3, 'race');
+    room.name(3, 'Me');
+    room.name(5, 'Ann');
+    expect(s.standings()).toBeUndefined();
+    room.frame(1, [frameRider(5, 40), frameRider(3, 30), frameRider(7, 20)]);
+    room.standings(1, [
+      standingsRider(5, -8.4, 3.9),
+      standingsRider(3, 0, 3.5),
+      standingsRider(7, 12, 0, FLAG_COASTING),
+    ]);
+    expect(s.standings()).toEqual({
+      tick: 1,
+      rows: [
+        {
+          riderId: 5,
+          displayName: 'Ann',
+          you: false,
+          gapSeconds: -8.4,
+          wattsPerKilogram: 3.9,
+          flags: 0,
+        },
+        {
+          riderId: 3,
+          displayName: 'Me',
+          you: true,
+          gapSeconds: 0,
+          wattsPerKilogram: 3.5,
+          flags: 0,
+        },
+        // Not named yet: no name is made up for a seat.
+        {
+          riderId: 7,
+          displayName: undefined,
+          you: false,
+          gapSeconds: 12,
+          wattsPerKilogram: 0,
+          flags: FLAG_COASTING,
+        },
+      ],
+    });
+    // The newest standings replace the last, in the room's new order.
+    room.standings(2, [standingsRider(3, 0, 3.6, FLAG_FINISHED), standingsRider(5, 2, 0)]);
+    expect(s.standings()?.rows.map((row) => [row.riderId, row.gapSeconds])).toEqual([
+      [3, 0],
+      [5, 2],
+    ]);
+  });
+
+  it('keeps none when fan-out is switched off — the browser gate’s control', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = new RoomSession({
+      roomId: 'room-1',
+      link: room.link(),
+      timers: clock,
+      now: clock.now,
+      physicsVersion: PHYSICS_VERSION,
+      sample: () => ({ powerWatts: 200 }),
+      random: () => 0,
+      acceptFrame: () => false,
+    });
+    await flush();
+    room.accept();
+    room.welcome(3, 'race');
+    room.standings(1, [standingsRider(3, 0, 3)]);
+    expect(s.standings()).toBeUndefined();
+  });
+
+  it('says hello as version 2, the version that carries them', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    session(room, clock);
+    await flush();
+    room.accept();
+    expect(PROTOCOL_VERSION).toBe(2);
+    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 2 });
   });
 });

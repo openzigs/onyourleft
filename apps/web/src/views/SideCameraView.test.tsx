@@ -20,6 +20,7 @@ import { CameraController } from '../camera/session';
 import { LINK_LOSS_LIMIT_MILLISECONDS, LINK_LOSS_SENTENCE } from '../camera/side-camera';
 import {
   CONNECT_LIMIT_MILLISECONDS,
+  OFFER_LIFETIME_MILLISECONDS,
   sidePairingPort,
   TABLET_READ_LIMIT_MILLISECONDS,
 } from '../camera/side-link';
@@ -309,9 +310,11 @@ describe('pairing the phone with the tablet — #529', () => {
   ) {
     const network = sidePeerNetwork(options.connects === false ? { connects: false } : {});
     const time = virtualTime();
+    // #1110: how far the wall clock has moved from the timers' time.
+    const wallClock = { moved: 0 };
     const port = sidePairingPort({
       peer: network.peer,
-      clock: time.clock,
+      clock: () => time.clock() + wallClock.moved,
       after: time.after,
       every: time.every,
     });
@@ -359,7 +362,7 @@ describe('pairing the phone with the tablet — #529', () => {
       <SideCameraView controller={controller} pairing={phonePort} timers={time} />,
     );
     await settle();
-    return { tablet, camera, answers, links, time, readerLoads: () => readerLoads };
+    return { tablet, camera, answers, links, time, wallClock, readerLoads: () => readerLoads };
   }
 
   it('reads the tablet’s code, shows its own, and is paired once the tablet reads it', async () => {
@@ -431,6 +434,31 @@ describe('pairing the phone with the tablet — #529', () => {
     expect(document.body.textContent).toContain(TABLET_READ_TIMED_OUT);
     expect(document.body.textContent).not.toContain(TABLET_DID_NOT_CONNECT);
     await press('Scan the tablet’s code again');
+    expect(document.body.textContent).toContain('Looking for the tablet’s code');
+  });
+
+  it('says the code was not read in time even when the clock moved back under the countdown (#1110)', async () => {
+    const { answers, time, wallClock } = await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    expect(answers).toHaveLength(1);
+    // The phone's clock is set back ten minutes while its code is up.
+    wallClock.moved = -10 * 60 * 1000;
+    time.advance(TABLET_READ_LIMIT_MILLISECONDS);
+    await settle();
+    expect(document.body.textContent).toContain(TABLET_READ_TIMED_OUT);
+    expect(document.body.textContent).not.toContain(TABLET_DID_NOT_CONNECT);
+  });
+
+  it('says in words that a code scanned after the tablet’s offer ran out has run out (#1110)', async () => {
+    const { answers, time } = await pairingPhone();
+    time.advance(OFFER_LIFETIME_MILLISECONDS);
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    expect(answers).toHaveLength(0);
+    expect(document.body.textContent).toContain(PAIRING_REFUSAL_TEXT.expired);
     expect(document.body.textContent).toContain('Looking for the tablet’s code');
   });
 

@@ -1,0 +1,14 @@
+{
+  "event": "result",
+  "proposed": {
+    "status": "succeeded",
+    "proposal": {
+      "revision": 2,
+      "summarySeq": 7,
+      "move": { "kind": "shorten-block", "block": 3, "minutes": 2 },
+      "reason": "heart-rate-high"
+    }
+  },
+  "kept": { "status": "succeeded", "proposal": null },
+  "failed": { "status": "failed", "failure": "not-a-proposal" }
+}

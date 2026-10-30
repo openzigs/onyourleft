@@ -10,6 +10,8 @@ import {
   type Ref,
 } from 'react';
 
+import { TOUCH_LOCK_EXEMPT } from './touch-lock';
+
 /**
  * The kinds of button — #668, and #992's tertiary. A rider tells the action
  * from the setting by weight, so each kind has one job:
@@ -121,6 +123,12 @@ interface ButtonCommonProps {
    * does not get this size — the list, not a caller's taste, is the ruling.
    */
   readonly size?: 'ride';
+  /**
+   * A control the touch lock must never stop — #1432: a release of the
+   * trainer's resistance (*End ERG*, *End workout*). Renders
+   * `touch-lock.ts` §`TOUCH_LOCK_EXEMPT`, which that file's filter reads.
+   */
+  readonly touchLockExempt?: boolean;
 }
 
 export type ButtonProps = ButtonCommonProps & ButtonKind;
@@ -161,6 +169,7 @@ export function Button({
   ref,
   className,
   size,
+  touchLockExempt = false,
 }: ButtonProps): JSX.Element {
   const element = useRef<HTMLButtonElement>(null);
   // Both #557's `focusOnMount` (which needs the element here) and #548's `ref`
@@ -201,6 +210,7 @@ export function Button({
       // Only a toggle says which way it stands. `undefined` renders nothing,
       // so a primary or secondary is never announced as "not pressed".
       aria-pressed={variant === 'toggle' ? pressed : undefined}
+      {...(touchLockExempt ? { [TOUCH_LOCK_EXEMPT]: '' } : {})}
     >
       {children}
     </button>

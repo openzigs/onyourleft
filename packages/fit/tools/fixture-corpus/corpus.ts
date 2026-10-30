@@ -38,6 +38,7 @@ import {
   billionLaughsGpx,
   deepNestingGpx,
   deepNestingTcx,
+  lapFiguresTcx,
   nominalGpx,
   nominalTcx,
   truncatedGpx,
@@ -292,6 +293,17 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'format where "no position" is an absent child rather than an undeclared field — a ' +
         'reader that dereferences Position unconditionally throws on the first point.',
       nominalTcx(undefined, 30),
+    ),
+    xml(
+      'lap-figures.tcx',
+      'tcx',
+      'Two laps carrying the figures and the kind TCX has elements for (#1321): average and ' +
+        'highest heart rate, the lap cadence, the LX extension’s average and highest watts, ' +
+        'Intensity and TriggerMethod — a whole lap ended by distance and a resting one ended by ' +
+        'hand with no power. Among them sit elements a head unit also writes and this package does ' +
+        'not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the ' +
+        'last Value it saw reads the wrong figure.',
+      lapFiguresTcx(NULL_ISLAND_TRACK, 30),
     ),
     xml(
       'xxe-external-entity.tcx',

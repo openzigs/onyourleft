@@ -629,3 +629,50 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   again on the device before display, from one set of matchers in `@onyourleft/analysis`, and the
   input is still built on the device under #809's exclusions (the owner's Q1 ruling). The body above
   is not edited.
+
+- **2026-10-09** — **D-9 B is replaced by #1104's B3, the instance paragraph, which the owner
+  approved on 2026-10-09** ([#1104](https://github.com/openzigs/onyourleft/issues/1104), with
+  *summaries of older rides* added to its list). It lands with
+  [#1102](https://github.com/openzigs/onyourleft/issues/1102): a write-up asked of the rider's
+  instance shows it beside the press (`apps/web/src/detail/write-up.ts` §`INSTANCE_SENDS`), and the
+  privacy policy's *A ride analysed on your instance* carries it. As approved:
+
+  > **A ride analysed on your instance, when you ask for an analysis.** When you press the button
+  > on a ride's page, that ride's numbers go to your instance: heart rate, cadence and power, your
+  > weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted,
+  > its distance, and each section's gradient and total climb, and how it went section by section.
+  > If the side camera filmed the ride, and you agreed to the camera, it also gets how a few
+  > measurements of your riding position changed between the start and the end of filming. Never a
+  > picture. Your instance writes the analysis with a model on its own machine, and the model may
+  > look up what is already on your instance: short summaries of your recent rides, summaries of
+  > older rides, what you wrote about your goals, your notes and documents, your saved workouts, and
+  > earlier write-ups. Nothing is sent until you press the button. Once you have pressed it, the
+  > analysis can finish while the app is closed.
+
+  D-9 B's own-computer wording stays on that path until
+  [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes it, as the 2026-10-07 entry
+  above records. **D-9 C is not replaced yet**: #1104's B1, the hosted consent, is not approved,
+  and its entry here lands with the pull request that ships it. The body above is not edited.
+- **2026-10-26** — **D-9 C is replaced, for the instance's hosted path, by [#1104](https://github.com/openzigs/onyourleft/issues/1104)'s B1; and
+  B3 says "its own machine or its own private network".** The 2026-10-09 entry above said D-9 C was
+  not replaced yet. B1 shipped in [#1303](https://github.com/openzigs/onyourleft/pull/1303), approved
+  by the owner on 2026-10-12, and ADR 0029's 2026-10-26 entry quotes it. D-9 C's device wording stays
+  on the device-held path until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes
+  it, as D-9 B's does. The owner ruled on 2026-10-26 that *"a model on its own machine"* in B3 becomes
+  *"a model on its own machine or its own private network"*, because the instance's model address
+  may be any host on its private network (`apps/instance` §`history/address.ts`), never a public
+  one. So B3, as `apps/web/src/detail/write-up.ts` §`INSTANCE_SENDS` and the privacy policy now say
+  it, reads *"Your instance writes the analysis with a model on its own machine or its own private
+  network, and the model may look up what is already on your instance"*, and is otherwise the text
+  the 2026-10-09 entry quotes. The body above is not edited. (#1104)
+- **2026-10-27** — **D-9 B is withdrawn, and D-9 C is withdrawn on this device, with the paths
+  they described.** [#1103](https://github.com/openzigs/onyourleft/issues/1103) removed the
+  on-device runner, the write-up asked of the rider's own computer, and the hosted model on a key
+  kept on the device (ADR 0046 D-1; owner ruling 1 of 2026-10-04). A write-up is now asked of the
+  rider's instance only, and what the press says it sends is #1104's B3, as the 2026-10-09 and
+  2026-10-26 entries above record. A hosted model is agreed to on the instance in #1104's B1, as the
+  2026-10-26 entry above records, and nowhere else. So D-9 B's paragraph and D-9 C's device wording
+  are shown nowhere in the app: `apps/web/src/detail/write-up.test.ts` walks every production module
+  for a phrase of each and fails on one. A write-up saved by either path before this version still
+  renders, screened, and still says where it was asked (D-9 A is unchanged). D-8's *"Nothing is sent
+  in the background"* is narrowed as ADR 0046 D-7 says. The body above is not edited. (#1103)

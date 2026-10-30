@@ -30,6 +30,10 @@
  * The newest ride of the fixture was ridden on a saved route, so *Next up* is
  * the route kind — the one that draws a profile and makes the one route read.
  *
+ * `home.html?rides=none` is a first open instead (#1429): the same shell with
+ * no ride at all, ready once the empty state is drawn. It is a STATE, not a
+ * control, and combines with the controls below (`?rides=none&hero=tall`).
+ *
  * The controls, each the defect its assertion exists for:
  *
  * - `home.html?hero=tall` — Next up's picture at 90 vh, which must push its
@@ -422,9 +426,13 @@ async function run(): Promise<void> {
   }
   window.location.hash = '#/';
   const query = new URLSearchParams(window.location.search);
+  // #1429: `?rides=none` is a first open — no ride on this device at all.
+  const firstOpen = query.get('rides') === 'none';
   for (const [key, value] of query) {
     const css = STYLE_CONTROLS.get(`${key}=${value}`);
-    if (css !== undefined) {
+    if (key === 'rides' && value === 'none') {
+      continue;
+    } else if (css !== undefined) {
       const style = document.createElement('style');
       style.textContent = css;
       document.head.append(style);
@@ -437,7 +445,7 @@ async function run(): Promise<void> {
     }
   }
   const now = Math.floor(Date.now() / 1000);
-  const rides = Array.from({ length: 60 }, (_unused, index) => ({
+  const rides = Array.from({ length: firstOpen ? 0 : 60 }, (_unused, index) => ({
     activity: stubActivity({
       id: activityId(`ride-${String(index)}`),
       name: `An evening ride ${String(index)}`,
@@ -465,15 +473,20 @@ async function run(): Promise<void> {
       </StrictMode>,
     );
   });
-  // The fitness card is the last to fill: its sentences need the read back.
-  await until('the fitness sentences', () =>
-    [...document.querySelectorAll('.oyl-home li')].find((each) =>
-      (each.textContent ?? '').startsWith('Fitness'),
-    ),
-  );
-  await until('Next up on the route', () =>
-    document.querySelector('.oyl-next-up__profile') === null ? undefined : true,
-  );
+  if (firstOpen) {
+    // The empty state is drawn once the read has come back with nothing.
+    await until('the first-open state', () => document.querySelector('#oyl-home-empty'));
+  } else {
+    // The fitness card is the last to fill: its sentences need the read back.
+    await until('the fitness sentences', () =>
+      [...document.querySelectorAll('.oyl-home li')].find((each) =>
+        (each.textContent ?? '').startsWith('Fitness'),
+      ),
+    );
+    await until('Next up on the route', () =>
+      document.querySelector('.oyl-next-up__profile') === null ? undefined : true,
+    );
+  }
   await document.fonts.ready;
   window.__oylHome = { ready: true, errors, measure, constrain };
 }

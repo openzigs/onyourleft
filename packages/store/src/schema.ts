@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **17** since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **20** since #1545; 19 since #1431; 18 since #1236; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -115,10 +115,27 @@
  * record's key against rather than trusting the instance's device list.
  * Additive: a new store, and no existing record's shape changes.
  *
+ * ⚠️ **Version 18 is #1236's `workoutGoals`** — the rider's typed workout
+ * goals, one row per athlete, which bound a heart-rate hold or a re-plan during
+ * the ride (ADR 0048 D-10). Additive: a new store, and no existing record's
+ * shape changes.
+ *
+ * ⚠️ **Version 19 is #1431's `recentlyDeleted`** — rides the rider deleted,
+ * held thirty days so one deleted by mistake can be brought back. Additive: a
+ * new store, and no existing record's shape changes.
+ *
+ * ⚠️ **Version 20 is #1545's `worldCorridors`** — the map features in a
+ * route's corridor, read once from the basemap archive (ADR 0054 D-3), one row
+ * per owner and route. Additive: a new store, and no existing record's shape
+ * changes. ⚠️ **Its rows are ODbL 1.0 data, not Apache-2.0**, which is why
+ * they are a store of their own and never fields on a route (ADR 0012 D-3.1);
+ * they never leave the device, and they are a cache, so the rollback below
+ * drops them and loses nothing of the rider's.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 20;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -211,7 +228,33 @@ export const TABLE = {
    * together, so no row can be named without naming whose it is.
    */
   trustedDeviceKeys: 'trustedDeviceKeys',
+  /**
+   * #1236: the rider's typed workout goals (`records.ts`
+   * §`WorkoutGoalsRecord`). One row per athlete, keyed BY the athlete, so no
+   * row can be named without naming whose it is.
+   */
+  workoutGoals: 'workoutGoals',
+  /**
+   * #1431: rides the rider deleted, held for {@link RECENTLY_DELETED_SECONDS}
+   * so one deleted by mistake can be brought back (`records.ts`
+   * §`RecentlyDeletedRide`). Keyed on the ride's id; every read leads with the
+   * athlete.
+   */
+  recentlyDeleted: 'recentlyDeleted',
+  /**
+   * #1545: the map features in a route's corridor (`records.ts`
+   * §`WorldCorridorRecord`), one row per owner and route, keyed by both so no
+   * row can be named without naming whose it is. ⚠️ **ODbL 1.0 data** (ADR
+   * 0054 D-3): never exported, synced or sent.
+   */
+  worldCorridors: 'worldCorridors',
 } as const;
+
+/**
+ * How long a deleted ride is held in Recently deleted before it is removed for
+ * good — #1431, the owner's ruling of 2026-10-19: thirty days.
+ */
+export const RECENTLY_DELETED_SECONDS = 30 * 24 * 60 * 60;
 
 /**
  * The index names, spelled once.
@@ -268,9 +311,14 @@ export const INDEX = {
   streamBlobByAthlete: 'athleteId',
   /** `getRecordingSession` — the athlete-scoped point lookup. */
   recordingSessionByAthleteAndId: '[athleteId+id]',
-  /** `listRecordingSessions`, newest checkpoint first — what #46's recovery prompt reads. */
+  /**
+   * Newest checkpoint first. Read by nothing since #1325: a header with a
+   * damaged `updatedAt` is not in it. Kept, because dropping an index is a
+   * schema version: drop it at the next one (#1419).
+   * @see ActivityStore.readRecordingSessions
+   */
   recordingSessionByAthleteAndUpdatedAt: '[athleteId+updatedAt]',
-  /** `deleteAthlete`'s cascade over recordings. */
+  /** `deleteAthlete`'s cascade over recordings, and `readRecordingSessions`. */
   recordingSessionByAthlete: 'athleteId',
   /**
    * `readRecordingChunks` and `getRecordingFootprint` — the athlete-scoped
@@ -383,6 +431,17 @@ export const INDEX = {
   riderTextByAthleteAndKind: '[athleteId+kind]',
   /** #898: `listTrustedDeviceKeys` and `deleteAthlete`'s cascade. */
   trustedDeviceKeyByAthlete: 'athleteId',
+  /** #1431: `deleteAthlete`'s cascade. */
+  recentlyDeletedByAthlete: 'athleteId',
+  /** #1431: one athlete's Recently deleted, newest first, as one index range. */
+  recentlyDeletedByAthleteAndDeletedAt: '[athleteId+deletedAt]',
+  /**
+   * #1545: `deleteAthlete`'s cascade. ⚠️ **`owner`, not `athleteId`**: that is
+   * what the record calls its owning column, and an index names a key path
+   * literally — `segmentByCreatorAndId` records the same point. The point
+   * lookup needs no index: the primary key is `[owner+routeId]`.
+   */
+  worldCorridorByOwner: 'owner',
 } as const;
 
 /**
@@ -855,6 +914,68 @@ export const STORES_V17: Readonly<Record<string, string>> = {
   [TABLE.trustedDeviceKeys]: ['[athleteId+publicKey]', INDEX.trustedDeviceKeyByAthlete].join(', '),
 };
 
+/**
+ * Version 18 — #1236's typed workout goals, added beside the twenty-one stores
+ * that exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing — there is no record to transform, and a
+ * `down` over one would be the identity (`migrations.ts` §"The registry").
+ * Its rollback is export → downgrade → re-import, executed by
+ * `workout-goals-store.test.ts` §"rolls back": what a downgrade loses is the
+ * goals themselves, which the rider's own read gives back to be saved again.
+ *
+ * The primary key IS the athlete: one row each, and no row can be named
+ * without naming whose it is.
+ */
+export const STORES_V18: Readonly<Record<string, string>> = {
+  // The twenty-one stores of versions 1 to 17 are inherited unchanged.
+  [TABLE.workoutGoals]: 'athleteId',
+};
+
+/**
+ * Version 19 — #1431's Recently deleted, added beside the twenty-two stores
+ * that exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
+ * re-import like every additive version's; what a downgrade loses is the
+ * rides held in Recently deleted, which the account export does not carry
+ * either (they are rides the rider deleted).
+ *
+ * A row holds the ride's activity row, its signed record, its segment efforts
+ * and its note — the parts of a ride that a list read, a sync or the export
+ * reaches by the athlete — so moving a ride here takes it out of every one of
+ * those reads at once. Its laps, streams, write-up and side-camera report stay
+ * in their own stores, where every read is by the ride's id and the ride's id
+ * no longer names a live activity.
+ */
+export const STORES_V19: Readonly<Record<string, string>> = {
+  // The twenty-two stores of versions 1 to 18 are inherited unchanged.
+  [TABLE.recentlyDeleted]: [
+    'activityId',
+    INDEX.recentlyDeletedByAthlete,
+    INDEX.recentlyDeletedByAthleteAndDeletedAt,
+  ].join(', '),
+};
+
+/**
+ * Version 20 — #1545's world corridors, added beside the twenty-three stores
+ * that exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
+ * re-import, executed by `migrations.test.ts` §"version 20 rolls back": what a
+ * downgrade loses is the corridors, which are a cache of the basemap archive —
+ * the route keeps its own geometry, and #1539 reads the corridor again.
+ *
+ * ⚠️ **ODbL 1.0 data in an Apache-2.0 package**, kept apart for exactly that
+ * reason (ADR 0012 D-3, ADR 0054 D-3): its own store, never a field on
+ * `routes`, and nothing in it ever leaves the device.
+ *
+ * The primary key is compound and leads with the owner, for
+ * {@link STORES_V14}'s reason: no row can be read, replaced or deleted without
+ * naming whose it is.
+ */
+export const STORES_V20: Readonly<Record<string, string>> = {
+  // The twenty-three stores of versions 1 to 19 are inherited unchanged.
+  [TABLE.worldCorridors]: ['[owner+routeId]', INDEX.worldCorridorByOwner].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -873,4 +994,7 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V15,
   STORES_V16,
   STORES_V17,
+  STORES_V18,
+  STORES_V19,
+  STORES_V20,
 ];

@@ -20,6 +20,21 @@
  * the two frames are the same frame bar the one layer: the rung, the camera
  * and the scenery's placement do not move between them.
  *
+ * And since #1623, **the route's own season**: the same held frame on a
+ * July day and on an autumn or a winter one draws a different picture in the
+ * same draw calls and triangles, from the same files.
+ *
+ * The default URL's road is read back too, by its fingerprint, on the #616
+ * load (#1559): the same road every validation 0002 row was taken on.
+ *
+ * ⚠️ **The page's other describes are in two more files since #1698**: the
+ * tree levers (#1283, #1294, #1523) in `realistic-trees.browser.spec.ts`, and
+ * the village road (#1559), the mapped-blobs lever (#1657) and the holiday
+ * decorations (#1624) in `realistic-town.browser.spec.ts`. One file was one
+ * nightly job, and its loads outgrew that job's 840 s stop; each file is a
+ * job of its own now (docs/agents/ci.md §4c §"Four nightly browser shards —
+ * #1698"), and `realistic-ride.ts` is the load they share.
+ *
  * ⚠️ **What it does not prove**: anything about the tablet's GPU clock, which
  * is what the switch is FOR — that is validation 0002's Part for #616, run by
  * the owner. And it holds only the vegetation to a number; the other six
@@ -32,50 +47,64 @@ import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
-import type { RealisticSample } from './realistic-harness';
-
-/** A realistic load's budget: the same 31 MiB `game.browser.spec.ts` §#607 pays for. */
-const REALISTIC_LOAD_BUDGET_MS = 150_000;
-
-/** The route's default start, held still: a stretch with trees on it. */
-const HELD = '?ladder=0&panel=0&seconds=1&at=2550';
+import { realisticRoute, routeDigest } from '../src/demo/synthetic-road';
+import { HELD, REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
 
 /** How far the draw-call count and three's may differ on one frame (#616). */
 const AGREEMENT = 0.01;
 
-/** The least #616's control must remove: a counter that reports a constant removes none. */
-const VEGETATION_AT_LEAST = 100_000;
+/**
+ * The least #616's control must remove: a counter that reports a constant
+ * removes none.
+ *
+ * ⚠️ **It was 100 000 until #1294, and a reviewer who remembers that is
+ * reading the scanned firs' figure.** The vegetation on this frame was about
+ * 156 700 triangles while its firs were scans of 24 000 each; with the
+ * generated firs it is 92 666 (131 684 against 39 018, 2026-10-12), which is
+ * the point of generating them. 60 000 is still two thirds of the layer.
+ */
+const VEGETATION_AT_LEAST = 60_000;
 
-type Published = NonNullable<Window['__oylRealistic']>;
+/*
+ * #1623's two helpers, at the top of the file rather than inside its describe
+ * (#1698): `nightly-split.test.ts` counts a describe's loads by its
+ * `ride(page` and `ridden(page` calls, and `ridden`'s own `ride` inside the
+ * describe would count one load too many.
+ */
 
-async function ride(
-  page: Page,
-  query: string,
-): Promise<{ result: RealisticSample; page: Published }> {
-  const response = await page.goto(`/realistic.html${query}`);
-  expect(
-    response?.status(),
-    'realistic.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
-  ).toBe(200);
-  await page.waitForFunction(
-    () =>
-      window.__oylRealistic?.result !== undefined ||
-      (window.__oylRealistic?.errors.length ?? 0) > 0,
-    undefined,
-    { timeout: REALISTIC_LOAD_BUDGET_MS },
-  );
-  const published = await page.evaluate(() => window.__oylRealistic);
-  expect(published?.errors, `realistic.html${query} reported an error`).toEqual([]);
-  const result = published?.result;
-  if (published === undefined || result === undefined) {
-    throw new Error(`realistic.html${query} published no result`);
-  }
-  // Not vacuous: the realistic world itself, not the stylised fallback.
-  expect(published.outcome?.loaded, JSON.stringify(published.outcome)).toBe(true);
-  expect(result.world).toBe('realistic');
-  return { result, page: published };
-}
+type Ridden = Awaited<ReturnType<typeof ride>> & {
+  readonly files: readonly string[];
+  readonly shot: Buffer;
+};
 
+/** Rides `query` on `date`: the run, the realistic files its load fetched, and its held frame. */
+const ridden = async (page: Page, query: string, date: string): Promise<Ridden> => {
+  const fetched: string[] = [];
+  const listen = (request: { url: () => string }): void => {
+    const file = /\/realistic\/([^/?]+)$/.exec(new URL(request.url()).pathname)?.[1];
+    if (file !== undefined) fetched.push(file);
+  };
+  page.on('request', listen);
+  const run = await ride(page, `${query}&date=${date}`);
+  page.off('request', listen);
+  const shot = await page.screenshot();
+  await test.info().attach(`${query}&date=${date}`, { body: shot, contentType: 'image/png' });
+  return { ...run, files: [...new Set(fetched)].sort(), shot };
+};
+
+/** The same frame in the same calls, from the same files, as `july`. */
+const costsNothing = (run: Ridden, july: Ridden): void => {
+  // Not vacuous: the page fetched the world it draws.
+  expect(july.files.length).toBeGreaterThan(10);
+  // A season is uniforms on materials already drawn, and no call of its own.
+  expect(run.result.lastFrame.calls).toBe(july.result.lastFrame.calls);
+  expect(run.result.lastFrame.triangles).toBe(july.result.lastFrame.triangles);
+  expect(run.result.drawCalls).toBe(july.result.drawCalls);
+  // No texture, no sky and no model is added: the same files, the same bytes held.
+  expect(run.files).toEqual(july.files);
+  expect(run.page.textures?.bytes).toBe(july.page.textures?.bytes);
+  expect(run.result.rung).toBe(july.result.rung);
+};
 test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, () => {
   test('counts triangles as three does, and switching the vegetation off removes them', async ({
     page,
@@ -90,6 +119,10 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
         `layers ${JSON.stringify(all.page.layers)}`,
     );
     expect(all.result.layersOff).toEqual([]);
+    // #1559: the default URL rides the road every Part Z and AH row was taken
+    // on (`route.test.ts` pins it), with no village in this frame.
+    expect(all.page.routeDigest).toBe(routeDigest(realisticRoute()));
+    expect(all.page.census?.structures.church.carried).toBe(0);
     // #639's own criterion, on the page it names and the load this already
     // pays for: the wooded view at `at=2550`, counted at the draw calls, is at
     // or under the budget. The rider and the ladder are held, so the window's
@@ -123,5 +156,37 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
     expect(triangles - without.result.lastFrame.triangles).toBeGreaterThanOrEqual(
       VEGETATION_AT_LEAST,
     );
+  });
+});
+
+test.describe('the route’s own season, in the realistic world — #1623', { tag: NIGHTLY }, () => {
+  // ⚠️ Two loads a test, and no more: the nightly run stops at 840 s
+  // (`playwright.config.ts` §`GATE_BUDGET_MS`), and this describe's first
+  // version, at seven loads, ran it out on the runner. The same date loaded
+  // twice drew the same frame to the pixel on a Mac (2026-10-24), which is
+  // what makes each "differs" below the season rather than noise; the
+  // hemisphere is held in `seasonal-nature.test.ts`.
+  test('turns the broadleaves on 20 October at 51.5° N, at no cost', async ({ page }) => {
+    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+    const july = await ridden(page, HELD, '2026-07-15');
+    const october = await ridden(page, HELD, '2026-10-20');
+    console.log(
+      `#1623 at=2550, held: ${String(july.result.lastFrame.calls)} draw calls in July, ` +
+        `${String(october.result.lastFrame.calls)} on 20 October; ` +
+        `${String(july.files.length)} realistic files fetched each`,
+    );
+    costsNothing(october, july);
+    // Deep in this route's autumn: its broadleaves turn.
+    expect(october.shot.equals(july.shot)).toBe(false);
+  });
+
+  test('lays a winter’s snow on a nordic town’s ground and roofs, at no cost', async ({ page }) => {
+    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+    const town = '?town=mixed&place=nordic&ladder=0&panel=0&seconds=1&at=1100';
+    const july = await ridden(page, town, '2026-07-15');
+    const january = await ridden(page, town, '2026-01-15');
+    costsNothing(january, july);
+    // The ground and the roofs are drawn under the route's own winter.
+    expect(january.shot.equals(july.shot)).toBe(false);
   });
 });

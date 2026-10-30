@@ -65,6 +65,7 @@
  * native renderer, if #434 adopts one, has its own.
  */
 
+import type { SceneFrame } from './port';
 import type { RealisticVegetationKind } from './realistic-assets';
 import type { TreeLevels } from './tree-levels';
 
@@ -102,6 +103,12 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  *   under 2 mm a texel, which is finer than the chase camera shows; 1024 is
  *   what #618's compression makes affordable inside the 6 MiB #623 allows,
  *   where RGBA8 would have been 16 MiB for the three.
+ * - `town` 1024 — #1548: a mapped town's render, concrete and flat roof
+ *   (`realistic-assets.ts` §`TOWN_STRUCTURE_SURFACES`), colour and normal,
+ *   at the 1K ambientCG publishes them. The owner ruled on #1548 to keep them
+ *   at 1K and raise {@link REALISTIC_BUILD_BYTES} rather than take them to
+ *   `structure`'s 512. A town's wall fills more of the screen than a
+ *   farmstead's, for longer, and is seen from the road at a few metres.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -115,6 +122,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   structure: 512,
   bicycle: 256,
   rider: 1024,
+  town: 1024,
 } as const;
 
 /**
@@ -126,9 +134,122 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * is visible up close at that budget, which is why these are a little higher
  * and the near band is capped by count instead (below).
  *
- * @test-facing held by `realistic-budget.test.ts`, which reads every committed
- * realistic file back off disk against it; the renderer spends it only on the
- * realistic path, which a ride takes only for a rider who chose it (#475)
+ * ## The generated trees, measured — #1283
+ *
+ * Since #1283 a ride's broadleaf trees are GENERATED to their size (ADR 0049
+ * D-1) rather than scans cut down to these ceilings: 6 692 and 5 800
+ * triangles at full detail against 28 000, and 2 208 and 2 004 at the middle
+ * level against 6 000. **No ceiling here moved**: what is spent fell, and the
+ * scans — still committed, still loadable on the owner's page — are held to
+ * the same figures. Same route position, same camera, pinned Chromium on
+ * 2026-10-12, the scans first:
+ *
+ * | | Scanned broadleaves | Generated broadleaves |
+ * |---|--:|--:|
+ * | The gate's wooded view (`game-harness.ts` §`treeLevelRun`, 900 m of the valley route), triangles a frame | 181 232 | **169 482** |
+ * | The same view, draw calls | 27 | **29** |
+ * | The owner's page held at `at=2550`, triangles a frame | 199 676 | **195 692** |
+ * | The same page, draw calls | 31, and 32 in one run of seven | **33** in seven runs of seven |
+ * | The same page, bytes of texture the load holds | 31 393 488 | **26 173 344** |
+ * | Texture memory estimated on the tablet's formats, the whole set | 70.56 MiB | **65.58 MiB** |
+ * | The worst vegetation the caps allow, triangles | 168 692 | **160 684** |
+ * | A broadleaf wood's tree slots, every one filled | 91 940 | **26 632** |
+ *
+ * ⚠️ **The draw calls ROSE by two, and that is why there are two seeds a
+ * species and not three.** A tree is a call a level a shape, and there are
+ * four generated shapes where there were two scans. Both views are inside
+ * {@link REALISTIC_WOODED_DRAW_CALLS} — which was not raised — with 6 and 2
+ * to spare. As first written #1283 made SIX shapes, three seeds a species:
+ * the gate's view then made 32 calls and the owner's page 35 in every run on
+ * a Mac and 34 on the CI runner (38256459141) — the ceiling itself, on a
+ * frame whose count is known to move by one between runs — so a seed of each
+ * species was taken out again (#1289's review;
+ * `tools/realistic/generated-trees.ts` §`GENERATED_TREES` says which, and
+ * how they were chosen). The triangles did not move with the seeds: every
+ * tree of a species is the same count. What the calls cost the tablet is
+ * validation 0002's #1283 row, which is the owner's.
+ *
+ * ⚠️ **The ceiling is held at the two views the gate names, not by
+ * construction, and it was not before #1283 either.** Elsewhere on the
+ * owner's route a frame is over it with both sets: held at `at=700` the page
+ * made 37 to 39 calls with the scans and 40 to 42 with the generated trees,
+ * four runs each on 2026-10-12, and the count moved between runs of the one
+ * held frame while its triangles did not. Why it moves was not looked for.
+ *
+ * ⚠️ **The build GREW, because both sets ship**: the realistic set is
+ * 39 252 137 bytes where it was 36 440 765 — 2 811 372 for four trees at three
+ * levels — and with the transcoder 39 836 999 of {@link REALISTIC_BUILD_BYTES}'
+ * 41 943 040, 2 106 041 under it. The scanned broadleaves are
+ * 10 616 301 of those bytes and go when the owner has judged the generated
+ * ones on the tablet (ADR 0049 D-1, #1293), at which point the set is smaller
+ * than it was before #1283.
+ *
+ * ## The generated firs, measured — #1294
+ *
+ * Since #1294 a ride's conifers are generated too: two firs, the pinned
+ * generator's evergreen, each bough carrying cards of Poly Haven's
+ * photographed fir sprigs — **4 792** triangles at full detail against the
+ * scanned fir's 23 996, and **878** at the middle level against 5 998. **No
+ * ceiling here moved.** Same route positions, same camera, pinned Chromium
+ * on a Mac on 2026-10-12; the middle column is the world #1283 left:
+ *
+ * | | Every tree a scan | Generated broadleaves, scanned firs | Every tree generated |
+ * |---|--:|--:|--:|
+ * | The gate's wooded view, triangles a frame | 181 232 | 169 482 | **115 718** |
+ * | The same view, draw calls | 27 | 29 | **29** |
+ * | The owner's page held at `at=2550`, triangles a frame | 199 676 | 195 692 | **131 684** |
+ * | The same frame, draw calls | 29 | 31 | **31** |
+ * | The owner's page held at `at=700`, triangles a frame | 207 587 | 161 227 | **135 627** |
+ * | The same frame, draw calls | 35 | 38 | **38** |
+ * | The page, bytes of texture the load holds | 31 393 488 | 26 173 344 | **19 838 224** |
+ * | Texture memory estimated on the tablet's formats, the whole set | 70.56 MiB | 65.58 MiB | **59.54 MiB** |
+ * | The worst vegetation the caps allow, triangles | 168 692 | 160 684 | **103 336** |
+ * | A conifer wood's tree slots, every one filled | 83 980 | 83 980 | **14 852** |
+ *
+ * ⚠️ **The draw calls in this table are one frame's, and the 33 and the 31
+ * of the table above are the same frame.** The owner's page reports a mean
+ * over its window, and until #1294 that window also held the warm-up and the
+ * page's very first render, which makes about twice the calls of every later
+ * frame — 60 and then 31 at `at=2550`, read frame by frame — so the page said
+ * 33 where the frame made 31, and 32 to 35 as a busier machine fit fewer
+ * frames into its four seconds
+ * (`browser/realistic-harness.ts` §`RealisticSample.drawCalls`). The page now
+ * counts from the end of the warm-up and reports each of this table's figures
+ * as its own: 29, 31 and 31 at `at=2550`, 35, 38 and 38 at `at=700`. That is why
+ * #1283's count "moved between runs of the one held frame while its triangles
+ * did not". The frame's own count did not move in any run, and it is the same
+ * with the generated firs as with the scanned ones at each of the seven
+ * positions looked at: two shapes stand where two stood. Held at `at=700` the
+ * frame is over {@link REALISTIC_WOODED_DRAW_CALLS} with every set, by three
+ * with both of the last two, as it was before #1294.
+ *
+ * ⚠️ **What this does not measure is the cut-out.** A fir is drawn as 1 100
+ * sprig cards of about 0.42 m, under a quarter of each covered by needles:
+ * 196 m² of card to a tree, where a generated oak's leaf cards are 104 m²,
+ * and every fragment of a card is run as far as the cut before it is
+ * discarded. The middle level keeps one card in three, enlarged, for 129 m²
+ * against the oak's 99. The triangles fell by a third on the owner's page;
+ * whether the frame got cheaper on a tablet's GPU is not something a
+ * triangle count says. In the software rasteriser the held frame at
+ * `at=2550` was drawn 54 to 62 times in four seconds with the scanned firs
+ * and 54 to 57 with the generated ones, on a machine busy with other work:
+ * runs of one set differed by as much as the two sets did, so nothing was
+ * learnt there either. Validation 0002's #1294 rows are the measurement, and
+ * they are the owner's.
+ *
+ * ⚠️ **The build grew again, because every set ships**: the generated firs
+ * are 1 307 982 bytes, and the realistic set with the transcoder is
+ * 41 144 981 of {@link REALISTIC_BUILD_BYTES}' 41 943 040 — **798 059 under
+ * it**, where it was 2 106 041 under. The scanned firs are 8 681 763 of those
+ * bytes and the scanned broadleaves 10 616 301; which go is the owner's to
+ * say after the tablet rows (ADR 0049 D-1, #1293).
+ *
+ * Held by `realistic-budget.test.ts`, which reads every committed realistic
+ * file back off disk against it. Since #1549 the renderer reads its
+ * `structure` figure too, to share the structure term between the procedural
+ * structures and the mapped buildings (`three-renderer.ts`
+ * §`RealisticDrawing.updateMapped`), and since #1550 `footprint-buildings.ts`
+ * §`FOOTPRINT_MAX_TRIANGLES` reads it, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
   Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>
@@ -293,6 +414,32 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * So the wooded view is 6 under #617's 33 + 2, and 2 under the 33 it made
  * before #617 at all.
  *
+ * ⚠️ **Since #1283 some of that room is spent**, and a reviewer who remembers
+ * 27 and 31 is reading the scans' figures: with the four generated
+ * broadleaves the gate's wooded view makes **29** calls and the owner's page
+ * at `at=2550` **33** — 6 and 2 under this ceiling — because a tree is a call
+ * a level a SHAPE and there are four shapes where there were two.
+ * {@link REALISTIC_TRIANGLES} has the table, and says why it is four shapes
+ * and not the six #1283 first made, which put the page AT 35. The scans,
+ * loaded on the same views, still make 27 and 31 (32 in one run of seven:
+ * the page's count moves by one between runs of the same held frame).
+ *
+ * ⚠️ **#1294 found what moves, and the page's 33 and 31 were a mean, not a
+ * frame's count**: the page counted its very first render, which makes about
+ * twice the calls of every later frame, so the held frame at `at=2550` makes
+ * 31 with the generated broadleaves and 29 with the scans, and the page
+ * added one to three to each by how few frames it drew before its sample.
+ * It now counts from the end of its warm-up and says 31 and 29 itself. The
+ * generated firs add no call to either view. {@link REALISTIC_TRIANGLES},
+ * "The generated firs, measured".
+ *
+ * ⚠️ **#1523 spends three more, on purpose**: each fir mesh a frame draws at
+ * its full or middle level is drawn after a depth pre-pass of its own
+ * (`three-renderer.ts` §`withDepthPrepass`), a depth-only call that lets the
+ * lit pass skip about four fragments in five of a fir's cut cards. The gate's
+ * wooded view makes **32** calls with it and 29 without; at most four are
+ * added (two shapes, two levels). This ceiling was not raised.
+ *
  * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
  * not depend on the GPU, so SwiftShader counts what the tablet would; what the
  * calls COST there is validation 0002 Part AH's row, which is the owner's.
@@ -303,6 +450,102 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * `realistic.browser.spec.ts`, which holds the owner's page at `at=2550` to it
  */
 export const REALISTIC_WOODED_DRAW_CALLS = 35;
+
+/**
+ * The most draw calls the owner's page may make on its village frame —
+ * `route=village` held at `synthetic-road.ts` §`VILLAGE_HOLD_METRES`, the top
+ * rung, on Halloween with #1624's probe on every anchor in reach: **50**.
+ *
+ * ⚠️ **A freeze, not a budget** — owner ruling on #1689, 2026-10-25. That
+ * frame made 58 calls on `main` with no decoration, against the page's
+ * {@link REALISTIC_WOODED_DRAW_CALLS} of 35, and no gate saw it: every village
+ * feature since #1534 had added calls there. The ruling froze it at its count
+ * plus one for the decoration belt (59), and has each merge lower it in the
+ * same pull request: #1689's own merged the street furniture's lamp posts,
+ * bollards and bins, three materials made from the same numbers, into one
+ * mesh, and the bench into another (`three-renderer.ts` §`FurnitureBelt`),
+ * 58 to 56 calls with the same triangles, so 57. From here a feature that
+ * adds a village call removes one, or asks the owner.
+ *
+ * ⚠️ **57 → 50 with #1566**, which added a call and took eight: the houses in
+ * view are #1585's house models, all in ONE call (`three-renderer.ts`
+ * §`VillageHouseBelt`), where the procedural houses had been a mesh a shape
+ * and surface — two shapes in four surfaces; and a village's rows of shops
+ * share one shape (`settlements.ts` §`everyVillagePlot`), so its four
+ * commercial plots cost the one row of shops' four. Measured 2026-10-26 in
+ * the pinned Chromium: 50 on the hold, and 57 with `levers=-village-models`
+ * (`realistic-town.browser.spec.ts` §"#1566"), which is `main`'s figure
+ * before #1566. The ruling has the number follow a saving down in the same
+ * pull request. The call count is not the tablet's cost: the models'
+ * triangles are (about 9 700 more on the hold, inside the structure term),
+ * and that is validation 0002 Part AH's row.
+ *
+ * ⚠️ **Not the village's real ceiling.** The tablet pair (#733 / #1537)
+ * decides that when the device checks resume; the call count does not depend
+ * on the GPU, so the pinned Chromium counts what the tablet would.
+ *
+ * @test-facing held by `realistic-town.browser.spec.ts` §"#1689", which counts the
+ * frame at the WebGL entry points
+ */
+export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
+
+/**
+ * The most draw calls the owner's page may make on its village frame **while
+ * a Delivery round runs** — the same hold as {@link REALISTIC_VILLAGE_DRAW_CALLS}'
+ * (`route=village` at `VILLAGE_HOLD_METRES`, the top rung, on Halloween),
+ * carrying #1814's worst case: **53**, approved by the owner on 2026-10-29
+ * on #1815's pull request (#1851), on the desktop measurements; the tablet's
+ * reading is still owed under #1815.
+ *
+ * ⚠️ **It applies only while Delivery runs** — owner ruling DL6b of
+ * 2026-10-27 on the epic #1803, recorded as ADR 0059 D-3. A frame carrying no
+ * round (`port.ts` §`SceneFrame.delivery` absent, every ordinary ride) is held
+ * to the frozen 50, which this does not raise and does not replace:
+ * {@link villageDrawCallCeiling} is the one place the choice is made. The
+ * owner accepts the cost in dropped frames on the tablet for Delivery only,
+ * while #1523 holds its GPU at its ceiling; that is why this is a second
+ * constant and not a raise of the first.
+ *
+ * ## Where 53 comes from — #1815
+ *
+ * The frozen frame's 50, plus the three calls `three-renderer.ts`
+ * §`DeliveryBelt` adds: one instanced call each for the parcels, the house
+ * markers and the obstacles, whatever their count (#1814, held by
+ * `delivery.browser.spec.ts`). Nothing is rounded up past it: the belt's
+ * count does not move with the pieces' number or place (it is not
+ * frustum-culled), and the held frame's count did not move between runs, so
+ * a margin would be room for a fourth call nobody has asked the owner for.
+ * Measured on the frozen frame with 20 of each piece (`?delivery=20`,
+ * `realistic-delivery.browser.spec.ts`) in the pinned Chromium on 2026-10-29:
+ * 53 calls and 171 874 triangles, against 50 and 164 474 on the same frame
+ * with no round, in every one of five loads of each — three in SwiftShader
+ * and two on a Mac's own GPU.
+ *
+ * ⚠️ **The call count is the desktop half.** It does not depend on the GPU,
+ * so the pinned Chromium counts what the tablet would; what the three calls
+ * COST there — frames over 20 ms, the GPU's frequency — is #1815's tablet
+ * step for #733, which the owner reads against this number.
+ *
+ * @test-facing held by `realistic-delivery.browser.spec.ts`, which counts
+ * the Delivery village frame at the WebGL entry points, and by
+ * `realistic-budget-village.test.ts`; nothing in the product applies a
+ * draw-call ceiling at run time
+ */
+export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
+
+/**
+ * Which village ceiling a frame is held to — #1815, DL6b: the Delivery
+ * ceiling while the frame carries a round, and the frozen one on every
+ * other frame. A round with nothing in view is still a round running.
+ *
+ * @test-facing the owner's page publishes it for the frame it drew
+ * (`realistic-harness.ts`), and `realistic-delivery.browser.spec.ts` holds
+ * that frame to it; `realistic-budget-village.test.ts` holds an ordinary
+ * frame one call over 50 to be over it
+ */
+export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery'>): number {
+  return frame.delivery === undefined ? REALISTIC_VILLAGE_DRAW_CALLS : DELIVERY_VILLAGE_DRAW_CALLS;
+}
 
 /**
  * The trees as they were drawn before #617 — the nearest six as full meshes,
@@ -382,36 +625,6 @@ export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
 export const REALISTIC_STRUCTURE_ITEMS = 36;
 
 /**
- * How many ground blobs a realistic frame may draw — #620: **62**, one under
- * every item the realistic world draws as a MESH and every structure it may
- * carry. `three-renderer.ts` §`GroundBlobBelt` is built with exactly this
- * capacity.
- *
- * | Casters | Blobs |
- * |---|--:|
- * | Trees at the full or middle level ({@link REALISTIC_TREE_LEVELS}: 1 full, 4 middle, the full-to-middle band) | 6 |
- * | Shrubs and rocks drawn as meshes ({@link REALISTIC_NEAR_MESHES}) | 8 + 12 |
- * | Structures ({@link REALISTIC_STRUCTURE_ITEMS}) | 36 |
- *
- * ⚠️ **A tree in the middle-to-impostor band, or drawn as its impostor, has
- * none**: an impostor is 40 m and more away, where a blob is a few pixels the
- * fog is already taking, and #620's ceiling of 124 triangles is these 62 at
- * two each.
- *
- * ⚠️ **They are counted in the frame's triangles**:
- * `realistic-budget.test.ts` adds `REALISTIC_GROUND_BLOBS × 2` to the worst
- * frame, which the structures had left 1 350 triangles of room under
- * {@link REALISTIC_FRAME_TRIANGLES} — 124 of it spent, 1 226 left.
- */
-export const REALISTIC_GROUND_BLOBS =
-  REALISTIC_TREE_LEVELS.near +
-  REALISTIC_TREE_LEVELS.middle +
-  (REALISTIC_TREE_LEVELS.dithered ? 1 : 0) +
-  REALISTIC_NEAR_MESHES.shrub +
-  REALISTIC_NEAR_MESHES.rock +
-  REALISTIC_STRUCTURE_ITEMS;
-
-/**
  * The most instanced meshes the realistic STRUCTURES may cost: **35** — #482,
  * from #481's review (finding 6), which found the figure bounded and stated
  * nowhere; and since #500, which gave every building two shapes and dressed
@@ -455,6 +668,114 @@ export const REALISTIC_GROUND_BLOBS =
  * meshes `RealisticStructureBelts` actually builds against it
  */
 export const REALISTIC_STRUCTURE_MESHES = 35;
+
+/**
+ * The triangles the realistic structures may spend in a frame, procedural and
+ * mapped together — #1549, #1538's P-12: **23 040**,
+ * {@link REALISTIC_STRUCTURE_ITEMS} at {@link REALISTIC_TRIANGLES}' `structure`.
+ * It is the structure term `realistic-budget.test.ts` has summed since #506,
+ * and it is NOT raised for mapped buildings: they share it with the frame's
+ * procedural structures, the two ranked together by distance from the rider,
+ * nearest first (#1586, `three-renderer.ts` §`refillMappedBuildings`). It is also the capacity, in
+ * triangles, of the one buffer the belt preallocates, so no plan list,
+ * however long, can grow it.
+ *
+ * **Each drawn mapped building carries a ground blob** — #1657, the
+ * follow-up #1553's by-eye pass asked for: the minimum-area rectangle of its
+ * footprint, worked out once a refill (`three-renderer.ts`
+ * §`MappedBuildingBelt.grounded`). They are two triangles each, counted in
+ * {@link REALISTIC_GROUND_BLOBS} (which rose by {@link MAPPED_BUILDING_MAX},
+ * the owner's ruling (d) of 2026-10-24) and not in this term.
+ */
+export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_TRIANGLES.structure;
+
+/**
+ * The most mapped buildings the realistic world draws at once — #1549:
+ * **36**, ADR 0054 D-5.6's cap, {@link REALISTIC_STRUCTURE_ITEMS}' figure:
+ * the nearest 36 footprints, and no more until #1523's fix and a measured
+ * number raise it (owner ruling, 2026-10-22, on #1549's pull request). Most
+ * are boxes of a few dozen triangles, so 36 of them fit well inside
+ * {@link MAPPED_BUILDING_TRIANGLES}, and this count is the cap that bites
+ * first. Written as the number, not as {@link REALISTIC_STRUCTURE_ITEMS}, so
+ * that raising the procedural structures' count does not raise this one.
+ *
+ * ⚠️ **It was 240 in #1549's first draft**, read from the stylised world's
+ * `scatter.ts` §`STRUCTURE_MAX_ITEMS`; the owner did not approve that reading
+ * of D-5.6. A reviewer who remembers 240 is reading that draft.
+ */
+export const MAPPED_BUILDING_MAX = 36;
+
+/**
+ * How many ground blobs a realistic frame may draw — #620: **98**, one under
+ * every item the realistic world draws as a MESH, every structure it may
+ * carry and, since #1657, every mapped building it draws. `three-renderer.ts`
+ * §`GroundBlobBelt` is built with exactly this capacity.
+ *
+ * | Casters | Blobs |
+ * |---|--:|
+ * | Trees at the full or middle level ({@link REALISTIC_TREE_LEVELS}: 1 full, 4 middle, the full-to-middle band) | 6 |
+ * | Shrubs and rocks drawn as meshes ({@link REALISTIC_NEAR_MESHES}) | 8 + 12 |
+ * | Structures ({@link REALISTIC_STRUCTURE_ITEMS}) | 36 |
+ * | Mapped buildings ({@link MAPPED_BUILDING_MAX}) — #1657 | 36 |
+ *
+ * ⚠️ **A tree in the middle-to-impostor band, or drawn as its impostor, has
+ * none**: an impostor is 40 m and more away, where a blob is a few pixels the
+ * fog is already taking. #620's ceiling was 124 triangles, the first 62 at two
+ * each; the owner's ruling (d) of 2026-10-24 on #1657 let it rise by up to 36
+ * blobs for the mapped buildings, so it is 196.
+ *
+ * ⚠️ **The mapped buildings have their own 36**, not a share of the
+ * structures'. The refill holds the two to one structure term, but #1657's
+ * research could not confirm that their blobs never pass 36 between them in
+ * one frame, and the belt reads the mapped list last, so a shared cap would
+ * drop the town's blobs first. A list of their own removes the question.
+ * Written as the sum, so lowering {@link MAPPED_BUILDING_MAX} lowers it.
+ *
+ * ⚠️ **They are counted in the frame's triangles**:
+ * `realistic-budget.test.ts` adds `REALISTIC_GROUND_BLOBS × 2` to the worst
+ * frame, and holds the sum under {@link REALISTIC_FRAME_TRIANGLES}.
+ */
+export const REALISTIC_GROUND_BLOBS =
+  REALISTIC_TREE_LEVELS.near +
+  REALISTIC_TREE_LEVELS.middle +
+  (REALISTIC_TREE_LEVELS.dithered ? 1 : 0) +
+  REALISTIC_NEAR_MESHES.shrub +
+  REALISTIC_NEAR_MESHES.rock +
+  REALISTIC_STRUCTURE_ITEMS +
+  MAPPED_BUILDING_MAX;
+
+/**
+ * Nearer than this a mapped building is drawn whole; further, at its far
+ * level, its walls and roof only — #1549: **150 m**.
+ */
+export const MAPPED_BUILDING_NEAR_METRES = 150;
+
+/**
+ * How far from the rider a mapped building is drawn at all — #1549: **400 m**,
+ * `terrain.ts` §`VIEW_AHEAD_METRES`, the road's own reach.
+ */
+export const MAPPED_BUILDING_REACH_METRES = 400;
+
+/**
+ * How far along the route the rider rides between two refills of the mapped
+ * buildings — #1549: **100 m**, about ten seconds at 36 km/h. The set is
+ * rebuilt only when the rider's chunk changes, never per frame.
+ */
+export const MAPPED_CHUNK_METRES = 100;
+
+/**
+ * The most draw calls the mapped buildings may spend — #1549: **6**, whatever
+ * their count. The belt is one mesh with at most this many groups, one a
+ * surface; a building whose surfaces would open a seventh waits for a refill
+ * nearer it (`mapped-buildings.ts` §`selectMappedBuildings`).
+ *
+ * ⚠️ **Since #1585 the house models are counted INSIDE it, not added to it**:
+ * every model drawn is one more mesh in one material, one call whatever their
+ * count, and a refill that draws any opens at most five surfaces. So a town
+ * with models in reach is still at most six calls, and the frame's other
+ * ceilings are unchanged.
+ */
+export const MAPPED_BUILDING_DRAW_CALLS = 6;
 
 /**
  * How many OTHER real riders in a room wear the realistic body — #783: **2**,
@@ -521,6 +842,114 @@ export const REALISTIC_REMOTE_TRIANGLES = 64_226;
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
 export const REALISTIC_FRAME_TRIANGLES = 300_000;
+
+/**
+ * The most triangles a frame's village streets may add — #1535's pavements,
+ * #1564's paths to the front doors and #1536's street furniture: **25 024**,
+ * in either world.
+ *
+ * | | triangles |
+ * |---|--:|
+ * | Pavements: two villages in view at most, each at `streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE` | 2 × 1 184 = 2 368 |
+ * | Front paths: the same two villages, each at `streets.ts` §`DOOR_PATH_TRIANGLES_PER_VILLAGE` | 2 × 960 = 1 920 |
+ * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (lamp post 88, bollard 64, bench 108, bin 64) | 64 × 324 = 20 736 |
+ *
+ * The furniture's row is the CAPACITY, a hard bound the belt cannot pass; a
+ * village at its fullest has 16 lamp posts, 8 bollards, 2 benches and 2 bins
+ * (2 264), and only what is within `streets.ts` §`FURNITURE_DRAW_METRES` of
+ * the camera is drawn at all.
+ *
+ * Since #1637 a city centre's street is laid in pieces instead
+ * (`streets.ts` §`CITY_PAVEMENT_TRIANGLES_PER_PIECE`, 584 each), six at most
+ * in a frame: 3 504, inside the two rows above. Not raised.
+ *
+ * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
+ * rule**: a street is the SAME triangles in both worlds, as the corridor, the
+ * terrain and the water are, so it does not change with the world. It adds
+ * no texture: the pavement's 512 px paving pair (0.5 MiB estimated) is
+ * #1535's, counted with the rest of the set, the front paths wear the same
+ * paving in the pavements' own draw call, and the bench wears `planks`,
+ * already loaded for the barns.
+ *
+ * @test-facing held by `realistic-renderer.test.ts` §"the street furniture",
+ * which counts the belt's own meshes, and by `streets.test.ts` §"a path to
+ * each front door"
+ */
+export const REALISTIC_STREET_TRIANGLES = 25_024;
+
+/**
+ * The most triangles a frame's holiday decorations may add — #1624:
+ * **12 000**, in either world, in ONE draw call (`three-renderer.ts`
+ * §`DecorationBelt`).
+ *
+ * | | anchors |
+ * |---|--:|
+ * | Lamp posts: a village at its fullest (`streets.ts` §`furnish`) | 16 |
+ * | Doorsteps: every plot but the two at its crossroads built, less the church (`settlements.ts` §`everyVillagePlot`) | 19 |
+ * | Eaves: one over each of those doors | 19 |
+ * | The green: two either side of the crossroads' mouth, on both sides | 4 |
+ * | A village | 58 |
+ * | Two villages in reach at most (`streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE`'s reason) | 116 |
+ *
+ * At most one item an anchor (`decorations.ts` §`decorationsFor`), so the
+ * frame's worst is 116 items; 12 000 is about a hundred triangles each — eight
+ * boxes — rounded up. ⚠️ **A hard bound, not an estimate**: the belt places
+ * no item that would take it past this, whatever #1625 to #1627 register, so
+ * an item set that would not fit shows up as items missing at the far end of
+ * the frame's villages, and `decorations.test.ts` holds the product's own
+ * table to fitting whole.
+ *
+ * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, unlike the streets: the
+ * items are the same triangles in both worlds, which by that constant's own
+ * rule would leave them out, but they are new triangles on frames that
+ * already carry the village's buildings, so `realistic-budget.test.ts` adds
+ * this to the worst frame the caps allow and holds the sum. No texture and
+ * no file: every item is boxes from numbers, coloured by vertex, so the
+ * realistic set's bytes do not change (ruling (c), 2026-10-24).
+ *
+ * The belt spends it (`three-renderer.ts` §`decorationGeometry`);
+ * `realistic-budget.test.ts` holds it inside the frame, and
+ * `realistic-town.browser.spec.ts` reads the belt's triangles off its mesh on the
+ * owner's page against it.
+ */
+export const REALISTIC_DECORATION_TRIANGLES = 12_000;
+
+/**
+ * The winter lights' share of {@link REALISTIC_DECORATION_TRIANGLES} — #1626:
+ * **8 000**. Every lamp post wound (96 triangles), every eave strung (72) and
+ * every house and shop door wreathed (92) in TWO villages in reach — the most
+ * the belt draws at once — measured on the fixtures at 3 844 a village at
+ * most (7 264 for the corner fixture's pair), rounded up. The rest, **4 000**,
+ * is headroom left for #1627's village-square tree, which shows in the same
+ * holiday and the same call: it takes 272 triangles a village, one tree each,
+ * so 544 for the pair (`decoration-belt.test.ts` §"#1627").
+ *
+ * @test-facing held by `decoration-belt.test.ts` §"#1626", which sums the
+ * winter set at its heaviest on the densest fixture against it; the belt
+ * spends {@link REALISTIC_DECORATION_TRIANGLES} whole
+ */
+export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
+
+/**
+ * The most triangles the people may add to a realistic frame — #1541:
+ * **32 000**, sixteen bodies (`people.ts` §`PEOPLE_NEAR_MAX`) of at most
+ * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call;
+ * the impostors beyond add two triangles each, at most 64, in one more.
+ *
+ * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, and NOT by that
+ * constant's own rule**: people are drawn in the realistic world only. It is
+ * the owner's ruling of 2026-10-24 — "build now, before #1553's tablet room
+ * row, within this issue's stated budget" — and validation 0002 Part AJ is
+ * the tablet's measurement of whether the frame has room for it. If it has
+ * not, `quality.ts` §`QualitySettings.people` goes to 0 on the top rung until
+ * it has. Their animation texture is 1 MiB at most, made at load and in no
+ * committed file (`people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`), and
+ * `realistic-budget.test.ts` adds it to the texture estimate.
+ *
+ * @test-facing held by `people-body.test.ts`, which cuts the committed body
+ * sixteen times inside it, and by `game.browser.spec.ts` §"#1541"
+ */
+export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
 /**
  * The most triangles the start and finish gantries may add to a frame:
@@ -649,6 +1078,59 @@ export const REALISTIC_RIDER_SURFACES = {
 } as const;
 
 /**
+ * What a mapped town's three surfaces may add — #1548's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **5 MiB** of texture memory as the tablet is handed it, and **3.5 MiB** of
+ * build. What the six maps spend is exactly 5 MiB estimated — ETC1S colour
+ * maps at half a byte a texel and UASTC normal maps at a byte, each a third
+ * again for its mipmaps, two pairs at 1024² and the plaster's at 1024 × 512 —
+ * and 3 587 223 bytes of KTX2 in the build; `realistic-budget.test.ts` reads
+ * both off the committed files and prints them.
+ *
+ * ⚠️ **More texture memory than #1548 budgeted, and that is the owner's
+ * ruling's consequence, not an overrun.** #1548's table asked for at most
+ * +3 MiB, written for its recommended answer — 512² maps, and no normal map
+ * on the flat roof. The owner ruled on #1548 (2026-10-21) to raise the build
+ * ceiling rather than shrink them to 512², so they are 1K with normals, and
+ * the set's estimate stays far inside the 160 MiB ceiling.
+ *
+ * ⚠️ **No triangles and no draw calls today**: nothing procedural wears them
+ * (`realistic-assets.ts` §`TOWN_STRUCTURE_SURFACES`), so each is a belt with
+ * no mesh in it; the mapped buildings that will wear them (#1549) spend
+ * their own calls.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, which reads the committed
+ * town maps back off disk against it; the renderer spends it only on the
+ * realistic path
+ */
+export const REALISTIC_TOWN_SURFACES = {
+  textureBytes: 5 * MEBIBYTE,
+  buildBytes: 3.5 * MEBIBYTE,
+} as const;
+
+/**
+ * What the house models may add — #1585's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **11 MiB** of texture memory as the tablet is handed it, and **3 MiB** of
+ * build. The one atlas is 4096² ETC1S, half a byte a texel and a third again
+ * for its mipmaps, 10.7 MiB estimated; the thirteen GLBs and the atlas are
+ * 2 636 337 bytes. `house-models.test.ts` reads both off the committed files.
+ *
+ * ⚠️ **One draw call, and triangles from the shared term**: the models are
+ * one mesh in one material, counted inside {@link MAPPED_BUILDING_DRAW_CALLS},
+ * and their triangles are ranked inside {@link MAPPED_BUILDING_TRIANGLES} with
+ * every other structure (the owner's ruling: they pool the 23 040, and need
+ * not be decimated to {@link REALISTIC_TRIANGLES}' 640 each).
+ *
+ * @test-facing held by `house-models.test.ts`, which reads the committed house
+ * files back off disk against it; the renderer spends it only on the realistic path
+ */
+export const REALISTIC_HOUSE_MODEL_SURFACES = {
+  textureBytes: 11 * MEBIBYTE,
+  buildBytes: 3 * MEBIBYTE,
+} as const;
+
+/**
  * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
  * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
  * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
@@ -678,11 +1160,44 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * `tools/basis/transcoder-plugin.ts` — because they are in the build only for
  * the realistic world. `realistic-budget.test.ts` adds them.
  *
+ * ## Raised to 43 MiB for the mapped towns — #1548
+ *
+ * **Old ceiling 40 MiB (41 943 040 bytes), new 43 MiB (45 088 768).** The
+ * owner ruled on #1548 (2026-10-21) to raise it for the render, concrete and
+ * flat-roof materials rather than shrink them to 512². Measured on the
+ * committed files: the realistic set with its transcoder was 41 144 981
+ * bytes, 798 059 under the old ceiling; the six maps add **3 587 223**
+ * ({@link REALISTIC_TOWN_SURFACES}), so it is **44 732 204**, 356 564 under
+ * the new one. 43 MiB is the smallest whole figure the set fits under, so the
+ * next addition is again a decision rather than a margin.
+ *
+ * What that does to a download: the **APK** carries the same 3 587 223 bytes
+ * more, since every file in `dist` ships in it (ADR 0026 D-7). The KTX2
+ * payloads are BasisLZ and Zstandard already, so the APK's own zip is not
+ * expected to win much back — expected, not measured: no APK was built for
+ * #1548. A **browser's first download** of
+ * the app does not move: the realistic files are outside the service worker's
+ * precache by their location (`realistic-assets.ts` §`REALISTIC_DIRECTORY`),
+ * and are fetched only when a rider picks the realistic world, which then
+ * fetches the 3.4 MiB more.
+ *
+ * ## Raised to 46 MiB for the house models — #1585
+ *
+ * **Old ceiling 43 MiB (45 088 768 bytes), new 46 MiB (48 234 496).** The
+ * owner ruled on #1585 (2026-10-22) that it may rise by up to about 5 MB for
+ * the house models' atlas. Measured on the committed files: the realistic set
+ * with its transcoder was 44 944 660 bytes, 144 108 under the old ceiling;
+ * the thirteen house models' GLBs and their one atlas add **2 636 337**
+ * ({@link REALISTIC_HOUSE_MODEL_SURFACES}), so it is **47 580 997**, 653 499
+ * under the new one — a rise of 3 MiB, inside the 5 MB the ruling allows.
+ * As for #1548, the APK carries the same bytes more, and a browser's first
+ * download does not move: the files are outside the precache.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 40 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 46 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.

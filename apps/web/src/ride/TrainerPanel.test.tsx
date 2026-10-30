@@ -221,7 +221,7 @@ describe('control is its own step, and ERG is one thing to do with it — #503',
 
   it('does not frame pairing as being for ERG', async () => {
     const text = await render(snapshot({ paired: false }));
-    expect(text).toContain('Pair a smart trainer to control it');
+    expect(text).toContain('Pair a smart trainer on Devices to control it');
     // The sentence the owner read on 2026-09-23.
     expect(text).not.toContain('ERG');
   });

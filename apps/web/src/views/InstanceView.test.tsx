@@ -10,25 +10,51 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { InstancePort } from '../instance/instance-port';
-import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import {
+  AFTER_REVOKE_TEXT,
+  formatDay,
+  noticeText,
+  REVOKE_MARK_TEXT,
+  revokeKeyName,
+} from '../instance/account-change-notices';
+import {
+  ACCOUNT_CHANGES_UNAVAILABLE_TEXT,
+  RENAME_REFUSAL_TEXT,
+  type InstancePort,
+} from '../instance/instance-port';
+import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
+import {
+  SCRIPTED_ACCOUNT_CHANGES,
+  SCRIPTED_FINGERPRINT,
+  scriptedInstance,
+  scriptedModeration,
+} from '../instance/testing';
 import {
   activateWithKeyboard,
   mount,
   settle,
   submitForm,
   typeInto,
+  typeIntoTextArea,
   type Mounted,
 } from '../testing/mount';
+import { CHANGE_NAME_TEXT } from './InstanceName';
 import {
   DISCONNECT_KEEPS_RIDES,
+  INSTANCE_CONNECTED_KEPT_VISIBLE,
   INSTANCE_KEPT_VISIBLE,
   INSTANCE_NO_PORT,
   INSTANCE_RECEIVES,
   InstanceView,
   MODERATE_LINK_TEXT,
   RECOVERY_CODES_LEAD,
+  TERMS_CHANGED_TEXT,
 } from './InstanceView';
+import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
+import { ERASE_ACCOUNT_TEXT } from './EraseAccount';
+import { ERASE_REFUSAL_TEXT, type StatementsPort } from '../instance/statements-port';
+import type { BlocksPort } from '../instance/blocks-port';
+import { BLOCKS_TEXT } from './BlocksPanel';
 
 let mounted: Mounted | undefined;
 
@@ -90,11 +116,55 @@ describe('the Connect screen — #777, #778', () => {
     expect(said).toContain('sent each time you press Connect with a name typed');
     expect(said).toContain('keeps it only if it has not seen this device before');
     expect(said).toContain('earlier names');
-    expect(said).toContain('Nothing else of yours');
+    expect(said).toContain('Connecting itself sends no ride, route, position or heart rate');
     expect(said).not.toContain('Nothing else from this version of the app');
-    // No screen removes what the instance holds: the sentence says whom to ask.
+    // #906: what the instance holds is deleted from this screen, or by its operator.
+    expect(DISCONNECT_KEEPS_RIDES).toContain(
+      'delete your account on the instance from this screen',
+    );
     expect(DISCONNECT_KEEPS_RIDES).toContain('ask whoever runs the instance');
-    expect(DISCONNECT_KEEPS_RIDES).not.toContain('erased on the instance');
+    expect(DISCONNECT_KEEPS_RIDES).not.toContain('this app cannot remove it');
+  });
+
+  it('lists what a private room and a sync send, before Connect and kept visible — #778, #1195', async () => {
+    // Rooms shipped (#784, #785): a list that ended "nothing else" with no
+    // room in it told a rider less than the app sends. Sync's line comes
+    // before sync does (#1195 is blocked by #778).
+    const room = INSTANCE_RECEIVES.find((line) => line.includes('private room'));
+    const sync = INSTANCE_RECEIVES.find((line) => line.includes('Only if you sync'));
+    expect(room).toContain('the route of a room you make');
+    expect(room).toContain('your power and cadence while you ride in it');
+    expect(room).toContain('the weight you declare once as you join');
+    expect(sync).toContain('which needs the instance’s card');
+    expect(sync).toContain('with their positions and heart rate');
+    expect(sync).toContain('sealed on this device for the instance alone');
+    expect(sync).toContain('Nothing is synced until you press Sync now');
+    expect(sync).not.toContain('does not offer Sync yet');
+    // #1104 (F-3): what a sync also sends since #1100 and #1237.
+    expect(sync).toContain('your saved workouts and your workout goals');
+    // #1104 (F-3): what the instance receives without a sync.
+    const ask = INSTANCE_RECEIVES.find((line) => line.includes('Only if you ask it for one'));
+    expect(ask).toContain('a ride’s numbers for a write-up, sealed');
+    expect(ask).toContain(
+      'your list of words to mask, and your privacy zones: their names, where they are and how large',
+    );
+    expect(ask).not.toContain('to mask with your privacy zones');
+    // #1104 (review): the two other things that go to the instance without a sync.
+    expect(ask).toContain('a summary of each block you have ridden, for a re-plan during the ride');
+    expect(ask).toContain('the side camera’s pictures');
+    expect(INSTANCE_KEPT_VISIBLE).toContain(ask);
+    expect(INSTANCE_KEPT_VISIBLE).toContain(room);
+    expect(INSTANCE_KEPT_VISIBLE).toContain(sync);
+    const scripted = scriptedInstance();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const list = mounted.container.querySelector('[data-oyl-kept-visible] ul');
+    expect(list?.textContent).toContain(room ?? 'no room line');
+    expect(list?.textContent).toContain(sync ?? 'no sync line');
+    expect(
+      (list as Element).compareDocumentPosition(button('Connect')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('shows the names the instance holds after connecting, not the ones typed', async () => {
@@ -162,6 +232,32 @@ describe('the Connect screen — #777, #778', () => {
     expect(button('Connect')).toBeDefined();
   });
 
+  it('says why a sign-in cannot be read, offers the card box, and reads it again once pinned (#1210)', async () => {
+    const scripted = scriptedInstance({
+      connected: true,
+      state: {
+        kind: 'unreadable',
+        origin: 'https://ride.example',
+        text: INSTANCE_KEY_TEXT['needs-card'],
+      },
+    });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(INSTANCE_KEY_TEXT['needs-card']);
+    expect(text()).not.toContain('did not answer');
+    expect(button('Disconnect')).toBeDefined();
+    expect(scripted.calls).not.toContain('devices');
+    // The card, given here, opens it: the screen reads the sign-in again.
+    const box = mounted.container.querySelector('textarea');
+    if (box === null) throw new Error('no card box');
+    await typeIntoTextArea(box, `oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`);
+    await activateWithKeyboard(button('Use this card'));
+    await settle();
+    expect(scripted.calls.filter((call) => call === 'current')).toHaveLength(2);
+    expect(text()).toContain('Connected');
+    expect(scripted.calls).toContain('devices');
+  });
+
   it('says so when the instance no longer accepts this device, and still offers Disconnect', async () => {
     const scripted = scriptedInstance({
       connected: true,
@@ -210,5 +306,542 @@ describe('the link to Moderation, for the instance’s moderator only — #955',
     await settle();
     expect(moderateLink()).toBeUndefined();
     expect(moderation.calls).toEqual([]);
+  });
+});
+
+describe('the riders this rider blocked — #1529', () => {
+  function blocksPort() {
+    const calls: string[] = [];
+    const port: BlocksPort = {
+      read: () => {
+        calls.push('read');
+        return Promise.resolve({
+          kind: 'blocks',
+          blocks: [{ handle: 'a'.repeat(32), name: 'Ann', blockedAt: 1_790_000_000 }],
+        });
+      },
+      unblock: () => Promise.resolve({ kind: 'unblocked' }),
+    };
+    return { port, calls };
+  }
+
+  it('lists them once this device is signed in', async () => {
+    const blocks = blocksPort();
+    mounted = await mount(
+      <InstanceView port={scriptedInstance({ connected: true }).port} blocks={blocks.port} />,
+    );
+    await settle();
+    expect(text()).toContain(BLOCKS_TEXT.heading);
+    expect(text()).toContain('Ann, blocked 2026-09-21');
+  });
+
+  it('is not asked for, or drawn, before this device connects', async () => {
+    const blocks = blocksPort();
+    mounted = await mount(
+      <InstanceView port={scriptedInstance({ connected: false }).port} blocks={blocks.port} />,
+    );
+    await settle();
+    expect(text()).not.toContain(BLOCKS_TEXT.heading);
+    expect(blocks.calls).toEqual([]);
+  });
+});
+
+describe('terms of service the rider has not read — #909', () => {
+  it('says so, links the instance’s terms, and stops saying so once they are marked read', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    scripted.held.termsVersion = '2026-11-01';
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(TERMS_CHANGED_TEXT.lead('2026-11-01'));
+    const link = [...(mounted.container.querySelectorAll('a') ?? [])].find(
+      (each) => each.textContent === TERMS_CHANGED_TEXT.read,
+    );
+    expect(link?.getAttribute('href')).toBe('https://ride.example/terms');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    await activateWithKeyboard(button(TERMS_CHANGED_TEXT.done));
+    await settle();
+    expect(scripted.calls).toContain('markTermsRead 2026-11-01');
+    expect(text()).not.toContain(TERMS_CHANGED_TEXT.lead('2026-11-01'));
+  });
+
+  it('says nothing for an instance that publishes no terms, or terms already read', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain('terms of service took effect');
+    mounted.unmount();
+    scripted.held.termsVersion = '2026-11-01';
+    scripted.held.termsRead = '2026-11-01';
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain('terms of service took effect');
+  });
+});
+
+describe('the account-change notices and a revoke, on the device list — #1208', () => {
+  const key = (pair: string): string => pair.repeat(32);
+  const THIS = key('a1');
+  const REVOKED = key('b2');
+  const SINCE = key('c3');
+  const LINKED = key('d4');
+  const OLDER = key('e5');
+  const ORDER = [OLDER, THIS, REVOKED, SINCE, LINKED];
+
+  /** This device, the key to revoke, one added after it, one it linked, and one older. */
+  function fiveKeys(): ReturnType<typeof scriptedInstance> {
+    const scripted = scriptedInstance({ connected: true });
+    const device = (publicKey: string, addedAt: number, thisDevice = false) => ({
+      publicKey,
+      addedAt,
+      lastUsedAt: null,
+      revokedAt: null,
+      thisDevice,
+    });
+    scripted.held.devices = [
+      device(OLDER, 1_780_000_000),
+      // Added after the key it revokes, so `revokeMarks` alone would mark it.
+      device(THIS, 1_790_120_000, true),
+      device(REVOKED, 1_790_100_000),
+      device(SINCE, 1_790_150_000),
+      device(LINKED, 1_789_000_000),
+    ];
+    scripted.held.changes = [
+      ...SCRIPTED_ACCOUNT_CHANGES,
+      {
+        id: 5,
+        at: 1_790_400_000,
+        kind: 'key_added',
+        actorKey: REVOKED,
+        subjectKey: LINKED,
+        subjectAddedAt: 1_789_000_000,
+        via: 'link_code',
+        address: null,
+      },
+    ];
+    return scripted;
+  }
+
+  const day = formatDay;
+  // Named against the five keys, so it carries a time only where the zone the
+  // test runs in puts another of them on the same day.
+  const REVOKED_NAME = revokeKeyName(
+    { publicKey: REVOKED, addedAt: 1_790_100_000 },
+    fiveKeys().held.devices,
+  );
+
+  /** The device list's line for a key, in {@link ORDER}. */
+  function item(publicKey: string): string {
+    const found = [...(mounted?.container.querySelectorAll('.oyl-instance__devices li') ?? [])][
+      ORDER.indexOf(publicKey)
+    ];
+    return (found?.textContent ?? '').replace(/\s+/g, ' ');
+  }
+
+  it('shows every notice in its sentence, and keeps it until the rider acknowledges', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const keys = scripted.held.devices;
+    const notices = SCRIPTED_ACCOUNT_CHANGES.filter((entry) => entry.actorKey !== THIS);
+    expect(notices).toHaveLength(2);
+    for (const notice of notices) expect(text()).toContain(noticeText(notice, keys, THIS));
+    // Not this device's own changes, and nothing tucked in a disclosure.
+    expect(text()).not.toContain('this device made a link code');
+    const list = mounted.container.querySelector('.oyl-instance__notices');
+    expect(list?.closest('details')).toBeNull();
+    scripted.calls.length = 0;
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.acknowledge));
+    await settle();
+    // Through the newest notice, and the log read again through the port.
+    expect(scripted.calls).toEqual(['acknowledgeAccountChanges 4', 'accountChanges']);
+    expect(scripted.held.acknowledgedThrough).toBe(4);
+    expect(mounted.container.querySelector('.oyl-instance__notices')).toBeNull();
+    for (const notice of notices) expect(text()).not.toContain(noticeText(notice, keys, THIS));
+  });
+
+  it('keeps the notices, and says why, when the mark could not be moved', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const port: InstancePort = {
+      ...scripted.port,
+      acknowledgeAccountChanges: () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged'],
+        }),
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.acknowledge));
+    await settle();
+    expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged']);
+    expect(mounted.container.querySelector('.oyl-instance__notices')).not.toBeNull();
+  });
+
+  it('says the log cannot be shown, and still lists the devices', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const port: InstancePort = {
+      ...scripted.port,
+      accountChanges: () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['no-answer'],
+        }),
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['no-answer']);
+    expect(text()).toContain('Another device');
+  });
+
+  it('revokes a key only once asked twice, then marks the list and says what a revoke did', async () => {
+    const scripted = fiveKeys();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain(AFTER_REVOKE_TEXT);
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(REVOKED_NAME)));
+    await settle();
+    expect(scripted.calls.some((call) => call.startsWith('revokeDevice'))).toBe(false);
+    expect(text()).toContain(ACCOUNT_NOTICES_TEXT.confirm(REVOKED_NAME));
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(scripted.calls).toContain(`revokeDevice ${REVOKED}`);
+    // Read back: the list again, from the port, with the revoke in it.
+    expect(scripted.calls.filter((call) => call === 'devices')).toHaveLength(2);
+    expect(item(REVOKED)).toContain('removed');
+    const above = [...mounted.container.querySelectorAll('p')].find(
+      (each) => each.textContent === AFTER_REVOKE_TEXT,
+    );
+    const list = mounted.container.querySelector('.oyl-instance__devices');
+    expect(above).toBeDefined();
+    expect(
+      (above as Element).compareDocumentPosition(list as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(item(SINCE)).toContain(REVOKE_MARK_TEXT['added-since']);
+    expect(item(LINKED)).toContain(REVOKE_MARK_TEXT['linked-by-revoked']);
+    // Neither mark on this device, the revoked key itself, or a key older than it.
+    for (const unmarked of [THIS, REVOKED, OLDER]) {
+      expect(item(unmarked)).not.toContain(REVOKE_MARK_TEXT['added-since']);
+      expect(item(unmarked)).not.toContain(REVOKE_MARK_TEXT['linked-by-revoked']);
+    }
+  });
+
+  it('keeps a key the rider thought better of, and sends nothing', async () => {
+    const scripted = fiveKeys();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(REVOKED_NAME)));
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.keep));
+    await settle();
+    expect(scripted.calls.some((call) => call.startsWith('revokeDevice'))).toBe(false);
+    expect(text()).not.toContain(ACCOUNT_NOTICES_TEXT.confirm(REVOKED_NAME));
+  });
+
+  it('offers no revoke of this device, of a key already revoked, or of the last key', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const revokes = (): (string | null)[] =>
+      [...(mounted?.container.querySelectorAll('button') ?? [])]
+        .map((each) => each.textContent)
+        .filter((name) => (name ?? '').startsWith('Revoke the key'));
+    // Two live keys: only the other one is offered.
+    const other = `the key added on ${day(scripted.held.devices[1]?.addedAt ?? 0)}`;
+    expect(revokes()).toEqual([ACCOUNT_NOTICES_TEXT.revoke(other)]);
+    mounted.unmount();
+    // The other one revoked: this device is the last live key, and nothing is offered.
+    await scripted.port.revokeDevice(REVOKED);
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(revokes()).toEqual([]);
+  });
+
+  it('tells two keys added the same day apart by their time, on the button and when asked', async () => {
+    const scripted = fiveKeys();
+    // Local times, so the two share a day in whatever zone the test runs in.
+    const at = (hour: number, minute: number): number =>
+      new Date(2026, 8, 22, hour, minute).getTime() / 1000;
+    scripted.held.devices = scripted.held.devices.map((device) =>
+      device.publicKey === REVOKED
+        ? { ...device, addedAt: at(9, 30) }
+        : device.publicKey === SINCE
+          ? { ...device, addedAt: at(14, 5) }
+          : device,
+    );
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const later = 'the key added on 22 September at 14:05';
+    const earlier = 'the key added on 22 September at 09:30';
+    // Each is found by its accessible name, and no two revoke buttons share one.
+    const names = [...mounted.container.querySelectorAll('button')]
+      .map((each) => each.textContent ?? '')
+      .filter((name) => name.startsWith('Revoke the key'));
+    expect(names).toContain(ACCOUNT_NOTICES_TEXT.revoke(later));
+    expect(names).toContain(ACCOUNT_NOTICES_TEXT.revoke(earlier));
+    expect(new Set(names).size).toBe(names.length);
+    // A key alone on its day keeps the day alone.
+    expect(
+      button(ACCOUNT_NOTICES_TEXT.revoke(`the key added on ${day(1_780_000_000)}`)),
+    ).toBeDefined();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(later)));
+    await settle();
+    expect(text()).toContain(ACCOUNT_NOTICES_TEXT.confirm(later));
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(scripted.calls).toContain(`revokeDevice ${SINCE}`);
+  });
+
+  it('says why a key was not revoked, and marks nothing', async () => {
+    const scripted = fiveKeys();
+    const port: InstancePort = {
+      ...scripted.port,
+      revokeDevice: () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked'],
+        }),
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(REVOKED_NAME)));
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked']);
+    expect(text()).not.toContain(AFTER_REVOKE_TEXT);
+    expect(text()).not.toContain(REVOKE_MARK_TEXT['added-since']);
+  });
+});
+
+describe('deleting the account on the instance from the Instance screen — #906', () => {
+  /**
+   * A statements port with no statements, whose deletion does what the real
+   * one does to this device (`statements-port.test.ts` holds that against a
+   * real instance): on `erased`, the sign-in is forgotten — here, the scripted
+   * instance stops being connected — and nothing else.
+   */
+  function erasing(
+    scripted: ReturnType<typeof scriptedInstance>,
+    outcome: Awaited<ReturnType<StatementsPort['eraseAccount']>>,
+  ): { readonly port: StatementsPort; readonly asked: () => number } {
+    let asked = 0;
+    return {
+      asked: () => asked,
+      port: {
+        read: () => Promise.resolve({ kind: 'statements', statements: [] }),
+        appeal: () => Promise.reject(new Error('no appeal in this test')),
+        exportAccount: () => Promise.reject(new Error('no export in this test')),
+        eraseAccount: () => {
+          asked += 1;
+          if (outcome.kind === 'erased') scripted.held.connected = false;
+          return Promise.resolve(outcome);
+        },
+      },
+    };
+  }
+
+  it('asks first, says nothing on this device is deleted, and sends nothing until confirmed', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const statements = erasing(scripted, { kind: 'erased' });
+    mounted = await mount(<InstanceView port={scripted.port} statements={statements.port} />);
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.heading);
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.confirm);
+    expect(ERASE_ACCOUNT_TEXT.confirm).toContain('Nothing on this device is deleted');
+    expect(ERASE_ACCOUNT_TEXT.confirm).toContain('everything this instance holds about you');
+    expect(statements.asked()).toBe(0);
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.keep));
+    await settle();
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.confirm);
+    expect(statements.asked()).toBe(0);
+    expect(text()).toContain('Lanes of the Weald');
+  });
+
+  it('deletes it on confirmation, and the screen READ BACK shows this device disconnected', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const statements = erasing(scripted, { kind: 'erased' });
+    mounted = await mount(<InstanceView port={scripted.port} statements={statements.port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(statements.asked()).toBe(1);
+    // What shows is what the port reads now, not what the press assumed.
+    expect(scripted.calls.filter((call) => call === 'current').length).toBeGreaterThan(1);
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
+    expect(text()).not.toContain('Lanes of the Weald');
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
+    expect(button('Connect')).toBeDefined();
+  });
+
+  it('says why when the instance does not delete it, and stays signed in', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const statements = erasing(scripted, { kind: 'refused', text: ERASE_REFUSAL_TEXT });
+    mounted = await mount(<InstanceView port={scripted.port} statements={statements.port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(statements.asked()).toBe(1);
+    expect(text()).toContain(ERASE_REFUSAL_TEXT);
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.erased);
+    expect(text()).toContain('Lanes of the Weald');
+  });
+
+  it('cannot be kept once the deletion is sent: the confirmation stays until the answer', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    let answer: (outcome: Awaited<ReturnType<StatementsPort['eraseAccount']>>) => void = () => {};
+    const port: StatementsPort = {
+      ...erasing(scripted, { kind: 'erased' }).port,
+      eraseAccount: () =>
+        new Promise((resolve) => {
+          answer = (outcome) => {
+            scripted.held.connected = false;
+            resolve(outcome);
+          };
+        }),
+    };
+    mounted = await mount(<InstanceView port={scripted.port} statements={port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(button(ERASE_ACCOUNT_TEXT.keep).getAttribute('aria-disabled')).toBe('true');
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.keep));
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.confirm);
+    answer({ kind: 'erased' });
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
+  });
+
+  it('is not offered to a device that is not signed in', async () => {
+    const signedOut = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    mounted = await mount(
+      <InstanceView
+        port={signedOut.port}
+        statements={erasing(signedOut, { kind: 'erased' }).port}
+      />,
+    );
+    await settle();
+    expect(text()).toContain('Not signed in');
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
+    mounted.unmount();
+    const notConnected = scriptedInstance({ connected: false });
+    mounted = await mount(
+      <InstanceView
+        port={notConnected.port}
+        statements={erasing(notConnected, { kind: 'erased' }).port}
+      />,
+    );
+    await settle();
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
+  });
+});
+
+describe('changing the name other riders see, from the Instance screen — #906 item 2', () => {
+  /** The rename section's field, found by its label. */
+  function renameField(): HTMLInputElement {
+    const label = [...(mounted?.container.querySelectorAll('label') ?? [])].find(
+      (each) => each.textContent === CHANGE_NAME_TEXT.label,
+    );
+    const field = mounted?.container.querySelector(`[id="${label?.htmlFor ?? ''}"]`);
+    if (!(field instanceof HTMLInputElement)) throw new Error('no rename field');
+    return field;
+  }
+
+  async function renameTo(name: string): Promise<void> {
+    const field = renameField();
+    await typeInto(field, name);
+    const form = field.closest('form');
+    if (form === null) throw new Error('no rename form');
+    await submitForm(form);
+    await settle();
+  }
+
+  /** The name the Connected panel shows, beside "Your name there". */
+  function shownName(): string | null | undefined {
+    const term = [...(mounted?.container.querySelectorAll('dt') ?? [])].find(
+      (each) => each.textContent === 'Your name there',
+    );
+    return term?.nextElementSibling?.textContent;
+  }
+
+  it('says the earlier names are kept before the press, and sends nothing until it', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(CHANGE_NAME_TEXT.heading);
+    expect(INSTANCE_CONNECTED_KEPT_VISIBLE).toContain(CHANGE_NAME_TEXT.earlierNames);
+    const note = [...mounted.container.querySelectorAll('p')].find(
+      (each) => each.textContent === CHANGE_NAME_TEXT.earlierNames,
+    );
+    expect(note).toBeDefined();
+    expect(
+      (note as Element).compareDocumentPosition(button(CHANGE_NAME_TEXT.change)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(scripted.calls.some((call) => call.startsWith('rename'))).toBe(false);
+  });
+
+  it('changes it, and shows the name READ BACK from the instance, not the one typed', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    // The instance keeps its own idea of the name: whatever it says is what shows.
+    const port: InstancePort = {
+      ...scripted.port,
+      rename: async (name) => {
+        const outcome = await scripted.port.rename(name);
+        scripted.held.displayName = 'Name from the instance';
+        return outcome;
+      },
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    expect(shownName()).toBe('Rider');
+    const reads = scripted.calls.filter((call) => call === 'current').length;
+    await renameTo('Anna B');
+    expect(scripted.calls).toContain('rename Anna B');
+    expect(scripted.calls.filter((call) => call === 'current').length).toBeGreaterThan(reads);
+    expect(shownName()).toBe('Name from the instance');
+    expect(text()).toContain(CHANGE_NAME_TEXT.changed);
+    expect(renameField().value).toBe('');
+  });
+
+  it('says why a name was not changed, and keeps the name shown and the one typed', async () => {
+    const scripted = scriptedInstance({
+      connected: true,
+      renameAnswer: { kind: 'refused', text: RENAME_REFUSAL_TEXT.rate_limited },
+    });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    await renameTo('Anna B');
+    expect(text()).toContain(RENAME_REFUSAL_TEXT.rate_limited);
+    expect(text()).not.toContain(CHANGE_NAME_TEXT.changed);
+    expect(shownName()).toBe('Rider');
+    expect(renameField().value).toBe('Anna B');
+  });
+
+  it('is not offered to a device that is not signed in', async () => {
+    const signedOut = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    mounted = await mount(<InstanceView port={signedOut.port} />);
+    await settle();
+    expect(text()).toContain('Not signed in');
+    expect(text()).not.toContain(CHANGE_NAME_TEXT.heading);
+    mounted.unmount();
+    mounted = await mount(<InstanceView port={scriptedInstance({ connected: false }).port} />);
+    await settle();
+    expect(text()).not.toContain(CHANGE_NAME_TEXT.heading);
   });
 });

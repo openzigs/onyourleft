@@ -41,9 +41,11 @@ It has the same authority as the root file. Where the text below says "this file
   a race is decided by the owner (2026-09-30) — the room's creator, seated and connected in it. Nothing is deployed: the home
   deployment (#807) is the owner's to run. The Durable Object adapter
   ([#781](https://github.com/openzigs/onyourleft/issues/781)) is still **deployed nowhere**.
-  ⚠️ **Sync is BUILT and unreachable** (#881: #37, #38, #776, #35): `src/sync/` and the client half
-  in `apps/web/src/instance/sync.ts` exist, but `src/instance.ts` hands the handler no sync, so every
-  sync route answers `unavailable` on a running instance, and no client calls one until #777.
+  ⚠️ **Sync is served and called, sealed only, since #1195** — a reviewer who remembers "Sync is
+  BUILT and unreachable" is reading the old file. `src/instance.ts` hands the handler a sync when
+  the instance holds keys (every sync route is sealed-only, ADR 0047 D-7; with no keys every sync
+  route still answers `unavailable`), and the Instance screen's *Sync now* calls it through
+  `apps/web/src/instance/sync-port.ts`, only with the instance's card.
   ⚠️ **`GET /instance` answers the operator's `OYL_INSTANCE_NAME` or `null` since #777**, never a
   made-up default, and **every answer carries `Access-Control-Allow-Origin: *`**, with a preflight
   to a routed path answering `204`, because the rider's app is always on another origin; it is safe
@@ -237,7 +239,11 @@ packages, `react-remove-scroll` and its helpers, `aria-hidden`, `get-nonce`, `de
 since #1072 — `motion` 13.5.1 (MIT, with `framer-motion`, `motion-dom` and `motion-utils`, all MIT; a
 runtime dependency of `apps/web` reached only from the list–detail layout's lazily loaded chunk, and
 `tools/bundle/entry-graph.ts` fails the build if any of it is in the entry —
-[ADR 0041](../adr/0041-motion-for-menu-animation.md)), are
+[ADR 0041](../adr/0041-motion-for-menu-animation.md)), and — since #1283 — `@dgreenheck/ez-tree`
+**1.1.0** exactly (MIT, **zero dependencies**, `three` its peer; a devDependency of `apps/web` and a
+pinned TOOL like Blender, not a library: one module loads it, `tools/realistic/ez-tree.ts`, and
+`generated-trees.test.ts` fails if any file under `src/` or `browser/` so much as names the package,
+or anything else in `tools/` imports it — [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1), are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489

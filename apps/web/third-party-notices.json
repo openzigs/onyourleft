@@ -13,7 +13,7 @@
     "committedFonts (#991, ADR 0043): fonts this repository COMMITS and the app serves, which are files rather than packages and so in no closure. Each names the files the app serves and the licence file committed beside the upstream input, whose text Part 5 reproduces verbatim; apps/web/tools/fonts/fonts.test.ts holds the list to the files the subsetting step writes."
   ],
   "noLicenceFile": {
-    "@mediapipe/tasks-vision@1.0.1": {
+    "@mediapipe/tasks-vision@1.1.1": {
       "why": "The tarball holds its bundles, its types and its WebAssembly and no LICENSE. Its manifest says Apache-2.0, and its type declarations open with the project's Apache-2.0 header, which is the notice it does ship.",
       "excerpt": {
         "file": "vision.d.ts",
@@ -147,7 +147,7 @@
     }
   ],
   "writtenByTheBundler": {
-    "rolldown@1.2.12": {
+    "rolldown@1.2.13": {
       "what": "its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk",
       "files": [
         {

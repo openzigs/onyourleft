@@ -718,7 +718,7 @@ describe('a camera that has stopped delivering pictures — #516', () => {
       clock: () => now,
       wait: async () => Promise.resolve(),
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     controller.watchPresence(true);
     // Live and watching, so an `unknown` below is the guard and not a camera

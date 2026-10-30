@@ -39,6 +39,7 @@ import type {
   SqlStore,
   SyncItemWrite,
   HistoryIndexWrite,
+  ModerationLogEntry,
 } from '../sql-store.ts';
 
 /** Opens a store over a database file. The real one is {@link openSqlStore}. */
@@ -276,6 +277,12 @@ export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
     'goal',
     'note',
     'document',
+    // #1100: a saved workout, so the scoped reads and the erasure cover it.
+    'workout',
+    // #1237: the typed workout goals, for the same reason.
+    'workout-goal',
+    // #1315: a ride's re-plan record, for the same reason.
+    'replan-record',
   ] as const;
   return kinds.map((kind) => ({
     athleteId,
@@ -313,13 +320,47 @@ export function historyIndexFixture(athleteId: string): HistoryIndexWrite {
   };
 }
 
+/** The id of a fixture athlete's analysis job (#1095). */
+export function analysisJobIdFixture(athleteId: string): string {
+  return `analysis-job-of-${athleteId}`;
+}
+
+/** A job for `athleteId` that ran and ended `succeeded`, with a progress event and its result. */
+export async function seedAnalysisJob(store: SqlStore, athleteId: string): Promise<void> {
+  const id = analysisJobIdFixture(athleteId);
+  await store.createAnalysisJob({
+    id,
+    athleteId,
+    source: 'instance-local',
+    templateVersion: '1',
+    inputJson: '{}',
+    createdAt: 1_790_000_800_000,
+  });
+  const claimed = await store.claimAnalysisJob();
+  if (claimed?.id !== id) throw new Error('another job was queued before this fixture’s');
+  await store.appendAnalysisEvent(athleteId, id, 'progress', '{"step":1}', 1_790_000_801_000);
+  await store.endAnalysisJob(athleteId, id, {
+    status: 'succeeded',
+    failure: null,
+    candidate: `Write-up of ${athleteId}`,
+    data: '{"status":"succeeded"}',
+    at: 1_790_000_802_000,
+  });
+}
+
 /** Every athlete-scoped row the schema has, for all three athletes. */
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
   for (const athlete of ATHLETES) {
     await store.registerAthlete(registrationFixture(athlete));
     // Bound only by following the mailed link (#865).
-    await store.confirmRecoveryEmail(athlete, confirmationTokenFixture(athlete), 1_790_000_050);
+    await store.confirmRecoveryEmail(
+      athlete,
+      confirmationTokenFixture(athlete),
+      1_790_000_050,
+      deviceKeyFixture(athlete).publicKey,
+      2,
+    );
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete, 'second-ride'));
@@ -344,17 +385,29 @@ export async function seedWorld(store: SqlStore): Promise<void> {
     await store.putHistoryIndex(historyIndexFixture(athlete));
     await store.putResult(resultFixture(athlete));
     // Migration 0004's athlete-scoped tables (#772, #773, #774), one row each.
-    await store.putLinkCode({
-      codeSha256: hexOf(`link-${athlete}`),
-      athleteId: athlete,
-      mintedByKey: deviceKeyFixture(athlete).publicKey,
-      expiresAt: 1_790_000_600,
-    });
+    await store.putLinkCode(
+      {
+        codeSha256: hexOf(`link-${athlete}`),
+        athleteId: athlete,
+        mintedByKey: deviceKeyFixture(athlete).publicKey,
+        expiresAt: 1_790_000_600,
+      },
+      1_790_000_350,
+    );
+    // Migration 0018's (#1193): the confirmation and the code above each
+    // logged an entry, and the athlete's key has acknowledged the first.
+    await store.acknowledgeAccountChanges(
+      athlete,
+      deviceKeyFixture(athlete).publicKey,
+      (await store.listAccountChanges(athlete))[0]?.id ?? 0,
+      1_790_000_360,
+    );
     await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300, FIXTURE_RENAME_LIMIT);
     await store.putEmailRecoveryToken({
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,
       expiresAt: 1_790_000_900,
+      address: `${athlete}@example.org`,
     });
     // Migration 0007's (#83): each blocks both others, and reports the one after
     // them. Both, so erasing one athlete — which also removes the blocks OF
@@ -373,6 +426,31 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       targetAthleteId: next,
       reason: `Report by ${athlete}`,
       createdAt: 1_790_000_500,
+    });
+    // Migration 0031's (#789): each removed from a room by the athlete after them.
+    await store.moderate({
+      action: 'remove_from_room',
+      actorAthleteId: next,
+      targetAthleteId: athlete,
+      reportId: null,
+      reason: 'Seeded',
+      at: 1_790_000_550,
+      roomId: `room-of-${athlete}`,
+    });
+    // Migration 0020's (#1095): a job that ran, with a progress event and its result.
+    await seedAnalysisJob(store, athlete);
+    // Migration 0021's (#1199): the rider's own hosted key, and their consent naming its origin.
+    await store.putAthleteHostedKey(athlete, {
+      url: `https://models-of-${athlete}.example/v1`,
+      model: `model-of-${athlete}`,
+      iv: new Uint8Array(12),
+      ciphertext: new TextEncoder().encode(`sealed-of-${athlete}`),
+      setAt: 1_790_000_550,
+    });
+    await store.putHostedConsent({
+      athleteId: athlete,
+      origin: `https://models-of-${athlete}.example`,
+      recordedAt: 1_790_000_560,
     });
   }
   // Migration 0013's (#784): ATHLETE_A made a room, and the other two joined it.
@@ -398,9 +476,53 @@ export async function seedWorld(store: SqlStore): Promise<void> {
   }
 }
 
+/**
+ * Migration 0027's rows (#910): a statement of reasons about each athlete,
+ * for a display name the athlete after them hid. Not in {@link seedWorld},
+ * whose log and names every other test counts on; the scoping test adds them.
+ */
+export async function seedStatements(store: SqlStore): Promise<void> {
+  for (const athlete of ATHLETES) {
+    const next = ATHLETES[(ATHLETES.indexOf(athlete) + 1) % ATHLETES.length] as string;
+    await store.moderate({
+      action: 'hide_display_name',
+      actorAthleteId: next,
+      targetAthleteId: athlete,
+      reportId: null,
+      reason: `Seeded statement about ${athlete}`,
+      at: 1_790_000_800,
+      statement: {
+        facts: `The display name of ${athlete}`,
+        decidedOn: 'own_initiative',
+        legalGround: null,
+        termsGround: 'Seeded terms',
+        notifierNamed: null,
+        moderatorConflict: false,
+        endsAt: null,
+      },
+    });
+  }
+  // Migration 0028's (#911): each athlete appeals the statement about them.
+  for (const athlete of ATHLETES) {
+    const [statement] = await store.listStatements(athlete);
+    if (statement === undefined) throw new Error(`no statement about ${athlete}`);
+    await store.putAppeal({
+      statementLogId: statement.logId,
+      appellantAthleteId: athlete,
+      grounds: `Appeal by ${athlete}`,
+      filedAt: 1_790_000_900,
+    });
+  }
+}
+
 /** The SHA-256 of the token confirming a fixture athlete's address (#865). */
 export function confirmationTokenFixture(athleteId: string): string {
   return hexOf(`confirm-${athleteId}`);
+}
+
+/** The SHA-256 of a fixture athlete's one recovery code, as `registrationFixture` registers it. */
+export function recoveryCodeFixture(athleteId: string): string {
+  return hexOf(`recovery-${athleteId}`);
 }
 
 /**
@@ -411,7 +533,7 @@ export function registrationFixture(athleteId: string): Registration {
   return {
     athlete: athleteFixture(athleteId),
     key: deviceKeyFixture(athleteId),
-    recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
+    recoveryCodeSha256s: [recoveryCodeFixture(athleteId)],
     recoveryEmailConfirmation: {
       tokenSha256: confirmationTokenFixture(athleteId),
       address: `${athleteId}@example.org`,
@@ -439,5 +561,22 @@ export async function migrateAllBut(path: string, leaveOut: number): Promise<voi
     );
   } finally {
     await db.destroy();
+  }
+}
+
+/**
+ * The whole moderation log, oldest first, read a page at a time through
+ * `listModerationLogPage` — the read the log route makes (#1166). The store
+ * has no unbounded read of the log, so a test that wants all of it pages.
+ */
+export async function wholeModerationLog(store: SqlStore): Promise<ModerationLogEntry[]> {
+  const newestFirst: ModerationLogEntry[] = [];
+  let beforeId: number | undefined;
+  for (;;) {
+    const page = await store.listModerationLogPage(beforeId, 200);
+    newestFirst.push(...page);
+    const last = page.at(-1);
+    if (page.length < 200 || last === undefined) return newestFirst.reverse();
+    beforeId = last.id;
   }
 }

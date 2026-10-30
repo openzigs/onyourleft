@@ -17,10 +17,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { MASK_PLACEHOLDER } from '@onyourleft/analysis';
+import { PLANTED_DETAILS, PLANTED_GUARD, personalDetailFaults } from '@onyourleft/analysis/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
-import { readHistorySettings, type Config } from './config.ts';
+import { readAnalysisModelSettings, readHistorySettings, type Config } from './config.ts';
+import { startFakeModelServer } from './analysis/fake-model-server-testing.ts';
 import type { Resolver } from './history/address.ts';
 import { RETRY_PERIOD_MS } from './history/history.ts';
 import { startInstance, type InstanceOptions, type StartedInstance } from './instance.ts';
@@ -30,9 +33,23 @@ import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
 import { readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
-import { migrateAllBut } from './store/testing/index.ts';
+import type { SyncItemWrite } from './store/sql-store.ts';
+import { deviceKeyFixture, migrateAllBut, registrationFixture } from './store/testing/index.ts';
+import type { Caller } from './auth/identity.ts';
+import { RIDE_INPUT } from './analysis/agent-testing.ts';
+import { MASKING_ITEM_KEY, type MaskingItemBody } from './analysis/hosted.ts';
+import { importSecretKey, sealHostedKey } from './analysis/hosted-key.ts';
+import { secretText } from './analysis/hosted-key-testing.ts';
+import { HOSTED_TEST_QUESTION, HOSTED_TEST_SYSTEM } from './analysis/hosted-test.ts';
+import { modelKeySet } from './operator/commands.ts';
+import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
+import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
 import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
+import { PHASE_ONE_SEALED_ROUTES, SEALED_FAMILIES } from './sealed/phase-one.ts';
+import { sealedAt } from './sealed/sealed-testing.ts';
+import { openDatabase } from './store/node-sqlite.ts';
+import { corpusFile, uploadBody } from './sync/sync-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -71,11 +88,13 @@ async function start(
     config?: Partial<Config>;
     resolve?: Resolver;
     timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
+    hosted?: Pick<InstanceOptions, 'hostedFetch'>;
   } = {},
 ) {
   const lines: string[] = [];
   running = await startInstance({
     ...extra.timing,
+    ...extra.hosted,
     config: testConfig({ bodyLimitBytes: 16_384, registration: 'open', ...extra.config }),
     ...(extra.resolve === undefined ? {} : { resolve: extra.resolve }),
     server: serverConfig(databasePath, overrides),
@@ -174,10 +193,16 @@ describe('the running instance forgets every rate-limited address when its windo
     // #784: the rooms' sweep is armed beside it, on the next ten-minute
     // boundary, through the same timers. Held apart here, so what follows
     // reads the rate limits' alone.
-    expect(pending).toHaveLength(2);
+    expect(pending).toHaveLength(3);
     const roomsSweep = pending.find((entry) => entry.at % ROOM_SWEEP_PERIOD_MS === 0);
     expect(roomsSweep?.at).toBe(Math.ceil(clock.ms / ROOM_SWEEP_PERIOD_MS) * ROOM_SWEEP_PERIOD_MS);
     pending.splice(pending.indexOf(roomsSweep!), 1);
+    // #1095: and the analysis jobs' hourly sweep, on the next hour.
+    const jobsSweep = pending.find((entry) => entry.at % ANALYSIS_SWEEP_PERIOD_MS === 0);
+    expect(jobsSweep?.at).toBe(
+      Math.ceil(clock.ms / ANALYSIS_SWEEP_PERIOD_MS) * ANALYSIS_SWEEP_PERIOD_MS,
+    );
+    pending.splice(pending.indexOf(jobsSweep!), 1);
     await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
@@ -200,8 +225,8 @@ describe('the running instance forgets every rate-limited address when its windo
     expect(pending).toHaveLength(1);
     await instance.stop();
     running = undefined;
-    // Both sweeps are stopped: the rate limits' and the rooms'.
-    expect(cleared).toBe(2);
+    // Every sweep is stopped: the rate limits', the rooms' and the jobs'.
+    expect(cleared).toBe(3);
     expect(pending).toHaveLength(0);
   }, 30_000);
 });
@@ -329,6 +354,29 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       timeout: 20_000,
     });
     expect(run.status).toBe(1);
+    expect(run.stderr).toContain('node src/operator/cli.ts migrate');
+  }, 60_000);
+
+  it('says in its startup log that analysis is off, and why, for a refused model address (#1096)', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    const run = spawnSync(process.execPath, [MAIN], {
+      cwd: INSTANCE,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        OYL_INSTANCE_COMMIT: COMMIT,
+        OYL_INSTANCE_PORT: '0',
+        OYL_INSTANCE_DATABASE: path,
+        OYL_INSTANCE_ANALYSIS_MODEL_URL: 'http://ollama.local:11434/v1',
+        OYL_INSTANCE_ANALYSIS_MODEL: 'scripted',
+      },
+      timeout: 20_000,
+    });
+    // It goes on to refuse the un-migrated database; the refused model
+    // address was not a reason to stop, and was said first.
+    expect(run.stderr).toContain(
+      'instance: analysis is off: OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because',
+    );
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
   }, 60_000);
 
@@ -769,6 +817,249 @@ describe('the history index on the running instance — #835', () => {
   }, 30_000);
 });
 
+describe('the analysis model on the running instance — #1096', () => {
+  it('builds the model connection when one is configured at a local address, and a turn reaches it', async () => {
+    const model = await startFakeModelServer([{ kind: 'text', text: 'A steady ride.' }]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const port = model.baseUrl.port;
+      const { instance, lines } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${port}/v1`,
+              analysisModel: 'scripted',
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.opened;
+      const said = lines.find((line) => line.includes('"event":"analysis-model"'));
+      expect(said).toContain('"state":"on"');
+      // No model name is logged.
+      expect(said).not.toContain('scripted');
+      const connection = instance.analysisModel();
+      expect(connection).toBeDefined();
+      const turn = await connection?.turn({
+        system: 's',
+        messages: [{ role: 'user', text: 'u' }],
+        tools: [],
+        maxOutputTokens: 16,
+        timeoutMilliseconds: 10_000,
+        signal: new AbortController().signal,
+      });
+      expect(turn).toMatchObject({ ok: true, text: 'A steady ride.' });
+      expect(model.paths).toStrictEqual(['/v1/chat/completions']);
+    } finally {
+      await model.close();
+    }
+  });
+
+  it('has no model connection, and says why, when the address is refused', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(
+      path,
+      {},
+      {
+        config: {
+          analysis: readAnalysisModelSettings({
+            analysisModelUrl: 'https://models.example.com/v1',
+            analysisModel: 'scripted',
+          }),
+        },
+      },
+    );
+    await instance.opened;
+    const said = lines.find((line) => line.includes('"event":"analysis-model"'));
+    expect(said).toContain('"state":"off"');
+    expect(said).toContain('"code":"not-local"');
+    expect(instance.analysisModel()).toBeUndefined();
+  });
+});
+
+describe('analysis jobs on the running instance — #1095', () => {
+  async function postJob(url: string, token: string): Promise<Response> {
+    return fetch(`${url}/v1/analysis/jobs`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(jobBody()),
+    });
+  }
+
+  it('starts normally with no model, and answers every start analysis_off', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path);
+    await instance.opened;
+    await instance.jobsRecovered;
+    expect((await fetch(`${instance.url}/ready`)).status).toBe(200);
+    const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+    const answer = await postJob(instance.url, sessionToken);
+    expect(answer.status).toBe(503);
+    expect(((await answer.json()) as { error: { code: string } }).error.code).toBe('analysis_off');
+  });
+
+  it('fails a job a stopped instance left running as interrupted at the next start, and never runs it', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const left = openServingStore(path);
+    await left.registerAthlete(registrationFixture('athlete-a'));
+    await left.createAnalysisJob({
+      id: 'left-running',
+      athleteId: 'athlete-a',
+      source: 'instance-local',
+      templateVersion: '1',
+      inputJson: JSON.stringify(RIDE_INPUT),
+      createdAt: 1,
+    });
+    await left.claimAnalysisJob();
+    await left.close();
+    const model = await startFakeModelServer([{ kind: 'text', text: 'A steady ride.' }]);
+    try {
+      const { instance } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.jobsRecovered;
+      await instance.analysisJobs()?.idle();
+      const read = openServingStore(path);
+      try {
+        const job = await read.getAnalysisJob('athlete-a', 'left-running');
+        expect([job?.status, job?.failure]).toEqual(['failed', 'interrupted']);
+      } finally {
+        await read.close();
+      }
+      expect(model.paths).toEqual([]);
+    } finally {
+      await model.close();
+    }
+  });
+
+  it('runs a job through the agent on the configured model, to a screened result on the stream', async () => {
+    const model = await startFakeModelServer([{ kind: 'text', text: 'A steady ride.' }]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const { instance, lines } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.jobsRecovered;
+      const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+      const answer = await postJob(instance.url, sessionToken);
+      expect(answer.status).toBe(202);
+      const { jobId } = (await answer.json()) as { jobId: string };
+      const stream = await fetch(`${instance.url}/v1/analysis/jobs/${jobId}/events`, {
+        headers: { authorization: `Bearer ${sessionToken}` },
+      });
+      const events = parseStream(await stream.text()).events;
+      expect(events.at(-1)).toEqual({
+        id: events.length,
+        kind: 'result',
+        data: { status: 'succeeded', writeUp: 'A steady ride.' },
+      });
+      expect(model.paths).toStrictEqual(['/v1/chat/completions']);
+      expect(
+        lines.some((line) => line.includes('"event":"analysis-job","state":"succeeded"')),
+      ).toBe(true);
+    } finally {
+      await model.close();
+    }
+  });
+});
+
+describe('the agent’s history tool on the running instance — #1229', () => {
+  let embeddings: Server | undefined;
+  afterEach(async () => {
+    await new Promise<void>((done) =>
+      embeddings === undefined ? done() : embeddings.close(() => done()),
+    );
+    embeddings = undefined;
+  });
+
+  it('searches the history index this instance keeps, through its embedding model', async () => {
+    // Until #1229 the engine was handed no index, and `history_search`
+    // answered "unavailable" on every job without asking the model a thing.
+    const asked: string[] = [];
+    embeddings = createServer((request, response) => {
+      let text = '';
+      request.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      request.on('end', () => {
+        const { input } = JSON.parse(text) as { input: string[] };
+        asked.push(...input);
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ embeddings: input.map(() => [1, 0, 0]) }));
+      });
+    });
+    await new Promise<void>((done) => embeddings?.listen(0, '127.0.0.1', done));
+    const embeddingPort = (embeddings.address() as AddressInfo).port;
+    const model = await startFakeModelServer([
+      {
+        kind: 'tool-calls',
+        calls: [{ name: 'history_search', arguments: JSON.stringify({ query: 'hill repeats' }) }],
+      },
+      { kind: 'text', text: 'A steady ride.' },
+    ]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const { instance } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+            history: readHistorySettings({
+              embeddingUrl: `http://ollama:${String(embeddingPort)}`,
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.opened;
+      await instance.jobsRecovered;
+      const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+      const answer = await fetch(`${instance.url}/v1/analysis/jobs`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify(jobBody()),
+      });
+      expect(answer.status).toBe(202);
+      await instance.analysisJobs()?.idle();
+      expect(asked).toContain('search_query: hill repeats');
+      expect(model.paths).toStrictEqual(['/v1/chat/completions', '/v1/chat/completions']);
+    } finally {
+      await model.close();
+    }
+  });
+});
+
 describe('a rider’s race on the running instance — #784, #785', () => {
   it('is made and joined by code over HTTP, started by its creator alone, and lets its route go when it is over', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -959,11 +1250,359 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', 10_000);
     const fresh = openServingStore(path);
     try {
-      expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull();
+      // #948 N-b: the route goes first, and the close that commits follows it.
+      await vi.waitFor(
+        async () =>
+          expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull(),
+        { timeout: 10_000 },
+      );
       expect((await fresh.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
     } finally {
       await fresh.close();
     }
     expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
   }, 30_000);
+});
+
+/** A secret, so the running instance makes its keys and seals its sealed-only routes (#1189). */
+const KEYED = { secretKey: new Uint8Array(32).fill(7) };
+
+/** The synced history's rows, read on a connection the instance never used (#1195). */
+function syncRows(path: string): string {
+  const database = openDatabase(path);
+  try {
+    return JSON.stringify(
+      ['athlete', 'device_key', 'activity_record', 'sync_item', 'history_source'].map((table) => [
+        table,
+        database.prepare(`SELECT * FROM "${table}"`).all(),
+      ]),
+      (_, value: unknown) =>
+        value instanceof Uint8Array ? Buffer.from(value).toString('hex') : value,
+    );
+  } finally {
+    database.close();
+  }
+}
+
+/** Every route of the synced history on the committed sealed-only list (ADR 0047 D-7). */
+const SYNC_FAMILY = PHASE_ONE_SEALED_ROUTES.filter(
+  (route) =>
+    SEALED_FAMILIES.find((family) => family.row === 'The synced history')?.covers({
+      ...route,
+      reaches: 'own',
+    }) === true,
+);
+
+describe('sync on the running instance — #1195', () => {
+  it('serves sync sealed, and refuses every sync route in plaintext with a good token, writing nothing', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, KEYED, { config: { bodyLimitBytes: 256 * 1024 } });
+    await instance.opened;
+    await instance.keysMaintained;
+    const device = await testDevice();
+    const challenge = (await (
+      await fetch(`${instance.url}/v1/auth/challenge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ publicKey: device.publicKey }),
+      })
+    ).json()) as { nonce: string };
+    // A new key registers only sealed on an instance holding keys (#1192).
+    const registered = await sealedAt(instance.url, TEST_ORIGIN, {
+      method: 'POST',
+      path: '/v1/auth/session',
+      body: await device.statement(challenge.nonce),
+      signer: device.signingKey,
+    });
+    expect(registered.status, registered.text).toBe(200);
+    const token = (JSON.parse(registered.text) as { sessionToken: string }).sessionToken;
+    const sealed = (method: string, route: string, body?: unknown) =>
+      sealedAt(instance.url, TEST_ORIGIN, {
+        method,
+        path: route,
+        token,
+        signer: device.signingKey,
+        ...(body === undefined ? {} : { body }),
+      });
+
+    // Served, sealed: a ride and a note go in, and the manifest reads them back.
+    const ride = await sealed(
+      'POST',
+      '/v1/sync/records',
+      await uploadBody(device, corpusFile('nominal-ride.gpx')),
+    );
+    expect(ride.status, ride.text).toBe(200);
+    const content = (JSON.parse(ride.text) as { contentSha256: string }).contentSha256;
+    expect((await sealed('POST', '/v1/sync/items/note/n1', { body: 'a note' })).status).toBe(200);
+    const manifest = await sealed('GET', '/v1/sync/manifest');
+    expect(manifest.status, manifest.text).toBe(200);
+    expect(
+      (JSON.parse(manifest.text) as { items: { kind: string }[] }).items.map((item) => item.kind),
+    ).toEqual(expect.arrayContaining(['activity', 'note']));
+
+    expect(SYNC_FAMILY.length).toBeGreaterThanOrEqual(13);
+    const before = syncRows(path);
+    const another = await uploadBody(device, corpusFile('paused-laps.fit'), 'ride-2');
+    for (const route of SYNC_FAMILY) {
+      const name = `${route.method} ${route.path}`;
+      const target = route.path
+        .replace('{content}', content)
+        .replace('{kind}', 'note')
+        .replace('{key}', 'n1')
+        .replace('{route}', 'a'.repeat(64));
+      const bodies: Record<string, unknown> = {
+        'POST /v1/sync/records': another,
+        'POST /v1/sync/records/{content}/race-route': { routeSha256: 'a'.repeat(64) },
+        'POST /v1/sync/items/{kind}/{key}': { body: 'an edge’s note' },
+        'POST /v1/sync/records/{content}/race-consent': { mayBeRaced: true },
+        'DELETE /v1/account': { recoveryCode: 'not-needed-to-be-refused' },
+      };
+      const body = bodies[name];
+      const answer = await fetch(`${instance.url}${target}`, {
+        method: route.method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      const text = await answer.text();
+      expect(answer.status, `${name}: ${text}`).toBe(403);
+      expect((JSON.parse(text) as { error: { code: string } }).error.code, name).toBe(
+        'sealed_required',
+      );
+      expect(syncRows(path) === before, name).toBe(true);
+    }
+  });
+
+  it('serves no sync at all — not even in plaintext — on an instance with no keys', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path);
+    await instance.opened;
+    const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+    const before = syncRows(path);
+    const answer = await fetch(`${instance.url}/v1/sync/items/note/n1`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: 'a note' }),
+    });
+    expect(answer.status).toBe(503);
+    expect(((await answer.json()) as { error: { code: string } }).error.code).toBe('unavailable');
+    expect(syncRows(path)).toBe(before);
+  });
+});
+
+describe('a hosted analysis job on the running instance — #1223', () => {
+  const HOSTED = new URL('https://models.example/v1');
+  const SECRET_FILL = 7;
+  const PLANTED_TEXT = `Remember ${PLANTED_DETAILS.map((detail) => detail.text).join(' and ')} next time.`;
+
+  /** The guard as the device syncs it (`hosted.ts` §`MaskingItemBody`). */
+  const GUARD_BODY = JSON.stringify({
+    words: PLANTED_GUARD.words,
+    zones: PLANTED_GUARD.zones.map((zone) => ({
+      label: zone.label,
+      latitude: zone.centre.latitude,
+      longitude: zone.centre.longitude,
+      radius: zone.radius,
+    })),
+  } satisfies MaskingItemBody);
+
+  /** A fetch standing in for the internet: requests under the hosted base go to the fake server. */
+  function internet(baseUrl: URL) {
+    const bodies: string[] = [];
+    const base = HOSTED.href.replace(/\/+$/, '');
+    const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      bodies.push(typeof init?.body === 'string' ? init.body : '');
+      if (!url.startsWith(`${base}/`)) return Promise.reject(new Error('another host'));
+      return globalThis.fetch(`${baseUrl.href}${url.slice(base.length)}`, init);
+    }) as typeof globalThis.fetch;
+    return { bodies, fetch };
+  }
+
+  /**
+   * An instance holding the operator's hosted key, the operator's goal
+   * carrying every planted detail and — unless `masking` is `null` — their
+   * masking item; then one `instance-hosted` job run to its end through the
+   * instance's own job engine. (Driven through `analysisJobs()` rather than
+   * HTTP: an instance with `OYL_INSTANCE_SECRET_KEY` — which opening a hosted
+   * key needs — serves the job routes sealed only, #1192, and sealing is not
+   * what this tests.)
+   */
+  /** The operator: the athlete `operator model-key set` holds the instance's one key for. */
+  const OPERATOR = 'athlete-a';
+  /** Another rider on the same instance (#1199). */
+  const RIDER = 'athlete-b';
+
+  async function hostedJob(options: {
+    readonly consent: boolean;
+    readonly masking: string | null;
+    /**
+     * Whose key is held: the operator's one key, set by `operator model-key
+     * set` (the default), or a key the job's own athlete stored (#1199).
+     */
+    readonly key?: 'operator' | 'own';
+    /** Whose job it is: the operator's unless said. */
+    readonly athleteId?: string;
+  }) {
+    const model = await startFakeModelServer([
+      { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
+      { kind: 'text', text: 'A steady ride.' },
+      // #1251: the test question's answer, asked after the job.
+      { kind: 'text', text: 'ready' },
+    ]);
+    const { bodies, fetch: hostedFetch } = internet(model.baseUrl);
+    const athleteId = options.athleteId ?? OPERATOR;
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const write = openServingStore(path);
+      try {
+        await write.registerAthlete(registrationFixture(OPERATOR));
+        if (athleteId !== OPERATOR) await write.registerAthlete(registrationFixture(athleteId));
+        const items: [SyncItemWrite['kind'], string, string][] = [
+          ['goal', 'goal-1', JSON.stringify({ text: `Goal: ${PLANTED_TEXT}` })],
+        ];
+        if (options.masking !== null) items.push(['masking', MASKING_ITEM_KEY, options.masking]);
+        for (const [index, [kind, key, body]] of items.entries()) {
+          await write.putSyncItem({
+            athleteId,
+            kind,
+            key,
+            body: new TextEncoder().encode(body),
+            digest: String(index + 1).padStart(64, '0'),
+            now: 1_790_000_000 + index,
+          });
+        }
+        // Q10 (#1199): the job's athlete's own consent, recorded in the store,
+        // naming the key's endpoint's origin.
+        if (options.consent) {
+          await write.putHostedConsent({ athleteId, origin: HOSTED.origin, recordedAt: 1 });
+        }
+        if (options.key === 'own') {
+          const secret = await importSecretKey(new Uint8Array(32).fill(SECRET_FILL));
+          await write.putAthleteHostedKey(athleteId, {
+            url: HOSTED.href,
+            model: 'hosted-model',
+            ...(await sealHostedKey(secret, {
+              athleteId,
+              url: HOSTED.href,
+              model: 'hosted-model',
+              key: 'sk-own-0123456789abcdef',
+            })),
+            setAt: 1,
+          });
+        }
+      } finally {
+        await write.close();
+      }
+      if (options.key !== 'own') {
+        await modelKeySet(
+          { database: path, blobs: join(path, '..', 'blobs') },
+          {
+            url: HOSTED.href,
+            model: 'hosted-model',
+            input: 'sk-hosted-0123456789abcdef\n',
+            secret: secretText(SECRET_FILL),
+            ownerKey: deviceKeyFixture(OPERATOR).publicKey,
+          },
+        );
+      }
+      const { instance } = await start(
+        path,
+        { secretKey: new Uint8Array(32).fill(SECRET_FILL) },
+        { hosted: { hostedFetch } },
+      );
+      await instance.jobsRecovered;
+      expect((await instance.hostedModelKey()).kind).toBe(options.key === 'own' ? 'none' : 'held');
+      const jobs = instance.analysisJobs();
+      if (jobs === undefined) throw new Error('no analysis jobs');
+      const caller = { athleteId } as Caller;
+      const started = await jobs.start(caller, { ...jobBody(), source: 'instance-hosted' });
+      if (!started.ok) throw new Error(`not started: ${JSON.stringify(started)}`);
+      await jobs.idle();
+      const stream = await jobs.events(caller, started.value.jobId, null);
+      const events = parseStream((await stream?.text()) ?? '').events;
+      const sent = { bodies: [...bodies], requests: [...model.requests] };
+      // #1251: then the test question, through the running instance's own
+      // settings — which must pass the gate that job just did.
+      const tested = await instance.hostedSettings()?.testQuestion(caller);
+      return { events, ...sent, tested, testRequests: model.requests.slice(sent.requests.length) };
+    } finally {
+      await model.close();
+    }
+  }
+
+  it('runs end to end with a guard and recorded consent, and every request it sends is masked', async () => {
+    const { events, bodies, requests } = await hostedJob({ consent: true, masking: GUARD_BODY });
+    expect(events.at(-1)?.data).toEqual({ status: 'succeeded', writeUp: 'A steady ride.' });
+    // The tools' request and the write-up's: both through the hosted fetch, both masked.
+    expect(requests).toHaveLength(2);
+    expect(bodies).toHaveLength(2);
+    for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
+      expect(personalDetailFaults(body)).toStrictEqual([]);
+    }
+    // The goal did reach the model, masked rather than dropped.
+    const last = JSON.stringify(requests.at(-1));
+    for (const placeholder of Object.values(MASK_PLACEHOLDER)) expect(last).toContain(placeholder);
+  });
+
+  it('sends the test question through the same sources as the job, and only its two sentences (#1251)', async () => {
+    const { tested, testRequests } = await hostedJob({
+      consent: true,
+      masking: GUARD_BODY,
+      key: 'own',
+      athleteId: RIDER,
+    });
+    expect(tested).toEqual({ result: 'answered', reasoned: false });
+    expect(testRequests).toHaveLength(1);
+    expect((testRequests[0] as { messages: unknown }).messages).toEqual([
+      { role: 'system', content: HOSTED_TEST_SYSTEM },
+      { role: 'user', content: HOSTED_TEST_QUESTION },
+    ]);
+    expect(JSON.stringify(testRequests[0])).not.toContain(PLANTED_TEXT);
+  });
+
+  it('runs a rider’s job on the key THEY stored, with their own consent, masked (#1199)', async () => {
+    const { events, bodies, requests } = await hostedJob({
+      consent: true,
+      masking: GUARD_BODY,
+      key: 'own',
+      athleteId: RIDER,
+    });
+    expect(events.at(-1)?.data).toEqual({ status: 'succeeded', writeUp: 'A steady ride.' });
+    expect(requests).toHaveLength(2);
+    for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
+      expect(personalDetailFaults(body)).toStrictEqual([]);
+    }
+  });
+
+  it.each([
+    ['no masking item synced', { consent: true, masking: null }],
+    ['a masking item that cannot be read', { consent: true, masking: '{"words":' }],
+    ['no recorded consent', { consent: false, masking: GUARD_BODY }],
+    [
+      // The owner, 2026-10-09: "Operator key is not shared with riders. If it
+      // is hosted they need to bring their own key."
+      'a rider with no key of their own, while the operator holds one (#1199)',
+      { consent: true, masking: GUARD_BODY, athleteId: RIDER },
+    ],
+  ])(
+    '%s: refused hosted_unavailable, and the hosted server is sent nothing',
+    async (_case, options) => {
+      const { events, bodies, requests, tested, testRequests } = await hostedJob(options);
+      expect(events.at(-1)?.data).toMatchObject({
+        status: 'failed',
+        failure: 'hosted_unavailable',
+      });
+      expect(bodies).toStrictEqual([]);
+      expect(requests).toStrictEqual([]);
+      // #1251: and the test question is refused for the same reason, with nothing sent.
+      expect(tested).toEqual({ result: 'not-ready', reasoned: false });
+      expect(testRequests).toStrictEqual([]);
+    },
+  );
 });

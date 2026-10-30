@@ -3,7 +3,8 @@
 /**
  * **What the game may ask about a rider's rooms** — #784's private group ride
  * and #785's private race: make one on your own route, join one by its code,
- * start a race, and read a race's result.
+ * start a race, and read a race's result — and #788's public rooms: make one
+ * listed, read the listing, and join one from it.
  *
  * A `*-port.ts` on purpose, as `room-port.ts` is: `check:wiring` watches every
  * method here, and `main.tsx` is the only production code that names
@@ -12,9 +13,11 @@
  * ## Through the one instance module — ADR 0036 D-3 (a)
  *
  * Every request goes through `instance/instance-transport.ts`'s one `fetch`,
- * with the session `instance/instance-port.ts` keeps. A rider with no
- * instance has no session, and every method answers `not-signed-in` without
- * sending a byte.
+ * with the session `instance/instance-port.ts` keeps — SEALED since #1210
+ * (ADR 0047 D-7 phase 2), or in plaintext from a device with no card, which
+ * an instance holding keys refuses (`cannot-seal`). A rider with no instance
+ * has no session, and every method answers `not-signed-in` without sending a
+ * byte.
  *
  * ## What leaves the device, and what does not
  *
@@ -24,18 +27,33 @@
  *   anywhere inside one of the rider's privacy zones is refused
  *   (`rooms/share.ts`) BEFORE any request is made: `rooms-port.test.ts`
  *   counts the requests.
+ * - **Making a PUBLIC room** (#788) sends the same, and the start the rider
+ *   chose; the route goes through the same privacy-zone refusal first.
  * - **Joining** sends the code the rider typed, in a POST body — never in a
  *   path — and the code is kept nowhere on this device but the screen that
  *   shows it (`rooms/RoomPanel.tsx`), and never written to the console.
+ * - **The listing** sends nothing but the session; joining from it sends the
+ *   room's id. The listing answers each room's length and climb, never its
+ *   route: the route is fetched, as for a code, only once the rider joined.
  * - **Starting** and **a result** send nothing but the room's id.
+ * - **Blocking a rider from a result** (#1516) sends the room's id and the
+ *   ROW the result names them on — never a name, and never an athlete id,
+ *   which this device does not hold.
  * - **Never** the rider's weight here: that goes once, with a room's ticket
  *   (`room-port.ts`), and only when the rider has declared one.
  */
 
-import type { RouteProfile } from '@onyourleft/domain';
+import type { RouteProfile, SigningKey } from '@onyourleft/domain';
 import type { PrivacyZoneRecord } from '@onyourleft/store';
 
-import { heldInstanceSession, type InstanceStorage } from '../instance/instance-port';
+import {
+  heldAccountSession,
+  heldInstanceSession,
+  isSealedRequired,
+  type HeldAccountSession,
+  type InstanceStorage,
+} from '../instance/instance-port';
+import type { LoadedFrom } from '../instance/instance-pin';
 import {
   isRoomId,
   roomPath,
@@ -49,6 +67,7 @@ import {
   type RoomRouteRefusal,
   type RoomRouteSource,
 } from '../rooms/share';
+import { instancePageUrl, NOTICE_PAGE_PATH } from '../views/InstancePages';
 
 /** Where a rider's hands are, fixed by the room for everybody in it (ADR 0028 D-1). */
 export type RoomRidingPosition = 'upright' | 'hoods' | 'drops';
@@ -58,8 +77,26 @@ export interface EnteredRoom {
   readonly roomId: string;
   readonly kind: 'group' | 'race';
   readonly ridingPosition: RoomRidingPosition;
-  /** The code, for the rider who made the room to share. Absent for one who joined. */
+  /**
+   * Whether the room drafts its riders — #787, the owner's ruling of
+   * 2026-09-30: its maker's choice, fixed for the room, and said to every
+   * rider before the start.
+   */
+  readonly drafting: boolean;
+  /** The code, for the rider who made the room to share. Absent for one who joined, and for a public room. */
   readonly code?: string | undefined;
+  /**
+   * Whether this rider made the room — on this device, or as the instance
+   * answers a join (#948, #929's N1): a maker who joins their own room by its
+   * code after a reload, or from another device, is still the one offered
+   * *Start the race*. An instance that does not say is read as "not".
+   */
+  readonly madeIt: boolean;
+  /**
+   * #788: a PUBLIC room — listed on the instance for eligible riders, with no
+   * code — and its start. Absent for a room shared by its code.
+   */
+  readonly listed?: { readonly startsAt: number } | undefined;
   /** The road everybody in the room rides — read back from the room's own route. */
   readonly profile: RouteProfile;
   /**
@@ -71,7 +108,25 @@ export interface EnteredRoom {
 
 /** Why a request about a room will not be answered as asked, however often it is asked. */
 export type RoomsRefusal =
-  'not-signed-in' | 'no-such-room' | 'rate-limited' | 'not-the-rooms-route' | 'instance-refused';
+  | 'not-signed-in'
+  | 'no-such-room'
+  | 'rate-limited'
+  | 'not-the-rooms-route'
+  | 'instance-refused'
+  /**
+   * #788: the account may not make, see or join a public room yet — not
+   * confirmed 18 or over, or another of #775's requirements. The instance's
+   * account page says which.
+   */
+  | 'not-eligible'
+  /** #788: this instance offers no public rooms: its operator has not turned them on. */
+  | 'no-public-rooms'
+  /**
+   * #1210: the room routes are sealed-only (ADR 0047 D-7 phase 2) and this
+   * device cannot seal to its instance now — no card, a copy a website
+   * served, or keys refused. Nothing was sent about the room.
+   */
+  | 'cannot-seal';
 
 export type CreateRoomAnswer =
   | { readonly kind: 'created'; readonly room: EnteredRoom }
@@ -85,6 +140,27 @@ export type JoinRoomAnswer =
 
 export type StartRaceAnswer =
   | { readonly kind: 'started' }
+  | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
+  | { readonly kind: 'unreachable' };
+
+/**
+ * A public room as the listing tells of it (#788): never its route, and in
+ * the instance's one order — the start its maker gave, then when it was made.
+ */
+export interface ListedRoom {
+  readonly roomId: string;
+  readonly kind: 'group' | 'race';
+  readonly ridingPosition: RoomRidingPosition;
+  readonly drafting: boolean;
+  readonly loop: boolean;
+  /** Unix seconds. */
+  readonly startsAt: number;
+  readonly lengthMetres: number;
+  readonly climbMetres: number;
+}
+
+export type PublicRoomsAnswer =
+  | { readonly kind: 'listed'; readonly rooms: readonly ListedRoom[] }
   | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
   | { readonly kind: 'unreachable' };
 
@@ -107,6 +183,21 @@ export interface RaceResultRow {
 
 export type RaceResultAnswer =
   | { readonly kind: 'result'; readonly rows: readonly RaceResultRow[] }
+  /**
+   * The room is over and its race was never decided — a restart interrupted
+   * it (#948 N-d): there is no result, and asking again will not make one.
+   */
+  | { readonly kind: 'no-result' }
+  | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
+  | { readonly kind: 'unreachable' };
+
+/**
+ * What became of a block made from a race's result — #1516: `blocked` (204),
+ * a refusal — `no-such-room` is a result this rider may no longer read — or
+ * `unreachable`.
+ */
+export type RaceBlockAnswer =
+  | { readonly kind: 'blocked' }
   | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
   | { readonly kind: 'unreachable' };
 
@@ -116,27 +207,63 @@ export interface RoomsPort {
   create(request: {
     readonly kind: 'group' | 'race';
     readonly ridingPosition: RoomRidingPosition;
+    /** On unless the rider making the room turns it off (#787). */
+    readonly drafting: boolean;
     readonly route: RoomRouteSource;
+    /** #788: list it as a PUBLIC room starting then, in Unix seconds. Absent: a private room, by its code. */
+    readonly startsAt?: number | undefined;
   }): Promise<CreateRoomAnswer>;
   /** Join a room by the code a friend shared, and fetch and check its route. */
   join(code: string): Promise<JoinRoomAnswer>;
+  /** #788: the public rooms this rider may join, in the instance's one order. */
+  listPublic(): Promise<PublicRoomsAnswer>;
+  /** #788: join a public room from the listing, and fetch and check its route. */
+  joinPublic(room: ListedRoom): Promise<JoinRoomAnswer>;
   /** Start a race's countdown — only the rider who made the room may (the owner's ruling of 2026-09-30). */
   start(roomId: string): Promise<StartRaceAnswer>;
   /** A race's result, for its riders only. */
   results(roomId: string): Promise<RaceResultAnswer>;
+  /**
+   * #1516: block the rider on `row` of the race's result, counted from 1 —
+   * the instance's `POST /v1/rooms/{roomId}/blocks`. By ROW: the result says
+   * who is on it, and blocks only a rider it names to this rider.
+   */
+  blockRider(roomId: string, row: number): Promise<RaceBlockAnswer>;
+  /**
+   * #1381: the address of the notice page on the instance these rooms are on
+   * — where anybody reports content they think is illegal (`apps/instance`
+   * §`notices.ts`), the same page About links to. Only an address: asking for
+   * it sends nothing. `undefined` on a device holding no instance session.
+   */
+  noticePage(): string | undefined;
 }
 
 export interface RoomsPortOptions {
   /** This device's `localStorage`: where `instance-port.ts` keeps the session. */
   readonly storage: InstanceStorage;
+  /** Where this copy of the app was loaded from: a website's copy seals nothing (ADR 0047 D-11). */
+  readonly loadedFrom: LoadedFrom;
+  /** `ensureDeviceSigningKey`, bound: the session's key, which signs every sealed request. */
+  readonly signingKey: () => Promise<SigningKey>;
   /** The rider's privacy zones, read from this device's store. */
   readonly zones: () => Promise<readonly PrivacyZoneRecord[]>;
   /** Injected so a test needs no network. */
   readonly send?: InstanceSend | undefined;
 }
 
-/** What a status says, when it says "never". 429 is a refusal here: a limit on tries. */
-function refusalOf(status: number): RoomsRefusal | undefined {
+/** What an answer says, when it says "never". 429 is a refusal here: a limit on tries. */
+function refusalOf(answer: {
+  readonly status: number;
+  readonly body: unknown;
+}): RoomsRefusal | undefined {
+  if (isSealedRequired(answer)) return 'cannot-seal';
+  if ((answer.body as { error?: { code?: unknown } } | null)?.error?.code === 'not_eligible') {
+    return 'not-eligible';
+  }
+  return refusalOfStatus(answer.status);
+}
+
+function refusalOfStatus(status: number): RoomsRefusal | undefined {
   if (status === 401) return 'not-signed-in';
   if (status === 404) return 'no-such-room';
   if (status === 429) return 'rate-limited';
@@ -145,6 +272,26 @@ function refusalOf(status: number): RoomsRefusal | undefined {
 }
 
 const POSITIONS: readonly RoomRidingPosition[] = ['upright', 'hoods', 'drops'];
+
+const finite = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+function isListedRoom(value: unknown): value is ListedRoom {
+  const room = value as Partial<ListedRoom> | null;
+  return (
+    typeof room === 'object' &&
+    room !== null &&
+    typeof room.roomId === 'string' &&
+    isRoomId(room.roomId) &&
+    (room.kind === 'group' || room.kind === 'race') &&
+    POSITIONS.includes(room.ridingPosition as RoomRidingPosition) &&
+    typeof room.drafting === 'boolean' &&
+    typeof room.loop === 'boolean' &&
+    finite(room.startsAt) &&
+    finite(room.lengthMetres) &&
+    finite(room.climbMetres)
+  );
+}
 
 function isFlag(value: unknown): value is RaceFlag {
   const flag = value as Partial<RaceFlag> | null;
@@ -176,7 +323,21 @@ function isRow(value: unknown): value is RaceResultRow {
 
 /** The production {@link RoomsPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
-  const held = () => heldInstanceSession(options.storage, options.send);
+  const accountSession = heldAccountSession({
+    storage: options.storage,
+    loadedFrom: options.loadedFrom,
+    signingKey: options.signingKey,
+    send: options.send,
+  });
+
+  /** The session, or the refusal for one this device holds none of, or cannot seal (#1210). */
+  async function held(): Promise<
+    Extract<HeldAccountSession, { kind: 'open' }> | { readonly refused: RoomsRefusal }
+  > {
+    const session = await accountSession();
+    if (session.kind === 'open') return session;
+    return { refused: session.why === 'signed-out' ? 'not-signed-in' : 'cannot-seal' };
+  }
 
   /** A room's route, fetched and checked against the room's own `routeRef`. */
   async function routeOf(
@@ -184,16 +345,83 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
     routeSha256: string,
     loop: boolean,
   ): Promise<RouteProfile | RoomsRefusal | 'unreachable'> {
-    const session = held();
-    if (session === undefined) return 'not-signed-in';
-    const answer = await session.http.call('GET', roomPath(roomId, 'route'), {
+    const session = await held();
+    if ('refused' in session) return session.refused;
+    const answer = await session.sealedOrKeyless.call('GET', roomPath(roomId, 'route'), {
       token: session.token,
       maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
     });
-    if (answer.status !== 200) return refusalOf(answer.status) ?? 'unreachable';
+    if (answer.status !== 200) return refusalOf(answer) ?? 'unreachable';
     const gpx = (answer.body as { gpx?: unknown } | null)?.gpx;
     if (typeof gpx !== 'string') return 'not-the-rooms-route';
     return (await roomRouteFrom(gpx, routeSha256, loop)) ?? 'not-the-rooms-route';
+  }
+
+  /**
+   * Join a room — by a code (`/v1/rooms/join`) or from the listing (#788,
+   * `/v1/rooms/{roomId}/join`) — then fetch its route and check it against
+   * the room's own digest. One path, so a room joined either way is entered
+   * the same.
+   */
+  async function entered(
+    path: string,
+    body: { readonly code: string } | undefined,
+    listed: EnteredRoom['listed'],
+  ): Promise<JoinRoomAnswer> {
+    try {
+      const session = await held();
+      if ('refused' in session) return { kind: 'refused', reason: session.refused };
+      const answer = await session.sealedOrKeyless.call('POST', path, {
+        token: session.token,
+        ...(body === undefined ? {} : { body }),
+      });
+      const room = answer.body as {
+        roomId?: unknown;
+        kind?: unknown;
+        ridingPosition?: unknown;
+        drafting?: unknown;
+        loop?: unknown;
+        routeSha256?: unknown;
+        creator?: unknown;
+      } | null;
+      if (answer.status !== 200) {
+        const reason = refusalOf(answer);
+        return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
+      }
+      if (
+        typeof room?.roomId !== 'string' ||
+        !isRoomId(room.roomId) ||
+        (room.kind !== 'group' && room.kind !== 'race') ||
+        !POSITIONS.includes(room.ridingPosition as RoomRidingPosition) ||
+        typeof room.drafting !== 'boolean' ||
+        typeof room.loop !== 'boolean' ||
+        typeof room.routeSha256 !== 'string'
+      ) {
+        return { kind: 'refused', reason: 'instance-refused' };
+      }
+      const profile = await routeOf(room.roomId, room.routeSha256, room.loop);
+      if (typeof profile === 'string') {
+        return profile === 'unreachable'
+          ? { kind: 'unreachable' }
+          : { kind: 'refused', reason: profile };
+      }
+      return {
+        kind: 'joined',
+        room: {
+          roomId: room.roomId,
+          kind: room.kind,
+          ridingPosition: room.ridingPosition as RoomRidingPosition,
+          drafting: room.drafting,
+          madeIt: room.creator === true,
+          profile,
+          // The route's bytes were just checked against this digest (`routeOf`).
+          routeSha256: room.routeSha256,
+          ...(listed === undefined ? {} : { listed }),
+        },
+      };
+    } catch {
+      return { kind: 'unreachable' };
+    }
   }
 
   return {
@@ -201,28 +429,34 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
       // First, before anything is sent: a route in a privacy zone never leaves.
       const shared = sharedRoomRoute(request.route, await options.zones());
       if (shared.kind === 'refused') return shared;
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('POST', '/v1/rooms', {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', '/v1/rooms', {
           token: session.token,
           body: {
             kind: request.kind,
             ridingPosition: request.ridingPosition,
+            drafting: request.drafting,
             loop: shared.loop,
             lengthMetres: shared.course.lengthMetres,
             grades: shared.course.grades,
             gpx: shared.gpx,
+            ...(request.startsAt === undefined
+              ? {}
+              : { visibility: 'public', startsAt: request.startsAt }),
           },
         });
         const made = answer.body as { roomId?: unknown; code?: unknown } | null;
+        const listed = request.startsAt !== undefined;
         if (
           answer.status !== 200 ||
           typeof made?.roomId !== 'string' ||
           !isRoomId(made.roomId) ||
-          typeof made.code !== 'string'
+          // A private room answers its code; a public one has none to share.
+          (listed ? made.code !== undefined : typeof made.code !== 'string')
         ) {
-          const reason = refusalOf(answer.status);
+          const reason = refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
         }
         return {
@@ -231,7 +465,11 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             roomId: made.roomId,
             kind: request.kind,
             ridingPosition: request.ridingPosition,
-            code: made.code,
+            drafting: request.drafting,
+            madeIt: true,
+            ...(request.startsAt === undefined
+              ? { code: made.code as string }
+              : { listed: { startsAt: request.startsAt } }),
             profile: shared.profile,
             // The bytes this device sent, digested here rather than taken from the answer.
             routeSha256: await routeDigest(shared.gpx),
@@ -242,66 +480,45 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
       }
     },
 
-    async join(code) {
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
+    join: (code) => entered('/v1/rooms/join', { code }, undefined),
+
+    async listPublic() {
       try {
-        const answer = await session.http.call('POST', '/v1/rooms/join', {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('GET', '/v1/rooms/public', {
           token: session.token,
-          body: { code },
         });
-        const room = answer.body as {
-          roomId?: unknown;
-          kind?: unknown;
-          ridingPosition?: unknown;
-          loop?: unknown;
-          routeSha256?: unknown;
-        } | null;
         if (answer.status !== 200) {
-          const reason = refusalOf(answer.status);
+          // Not found is the instance saying it lists none: its operator has
+          // not turned public rooms on.
+          const reason = answer.status === 404 ? 'no-public-rooms' : refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
         }
-        if (
-          typeof room?.roomId !== 'string' ||
-          !isRoomId(room.roomId) ||
-          (room.kind !== 'group' && room.kind !== 'race') ||
-          !POSITIONS.includes(room.ridingPosition as RoomRidingPosition) ||
-          typeof room.loop !== 'boolean' ||
-          typeof room.routeSha256 !== 'string'
-        ) {
+        const rooms = (answer.body as { rooms?: unknown } | null)?.rooms;
+        if (!Array.isArray(rooms) || !rooms.every(isListedRoom)) {
           return { kind: 'refused', reason: 'instance-refused' };
         }
-        const profile = await routeOf(room.roomId, room.routeSha256, room.loop);
-        if (typeof profile === 'string') {
-          return profile === 'unreachable'
-            ? { kind: 'unreachable' }
-            : { kind: 'refused', reason: profile };
-        }
-        return {
-          kind: 'joined',
-          room: {
-            roomId: room.roomId,
-            kind: room.kind,
-            ridingPosition: room.ridingPosition as RoomRidingPosition,
-            profile,
-            // The route's bytes were just checked against this digest (`routeOf`).
-            routeSha256: room.routeSha256,
-          },
-        };
+        return { kind: 'listed', rooms };
       } catch {
         return { kind: 'unreachable' };
       }
     },
 
+    joinPublic: (room) =>
+      isRoomId(room.roomId)
+        ? entered(roomPath(room.roomId, 'join'), undefined, { startsAt: room.startsAt })
+        : Promise.resolve({ kind: 'refused', reason: 'instance-refused' }),
+
     async start(roomId) {
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('POST', roomPath(roomId, 'start'), {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'start'), {
           token: session.token,
         });
         if (answer.status === 200) return { kind: 'started' };
-        const reason = refusalOf(answer.status);
+        const reason = refusalOf(answer);
         return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
       } catch {
         return { kind: 'unreachable' };
@@ -309,14 +526,18 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
     },
 
     async results(roomId) {
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('GET', roomPath(roomId, 'results'), {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('GET', roomPath(roomId, 'results'), {
           token: session.token,
         });
+        const error = (answer.body as { error?: { code?: unknown } } | null)?.error;
+        if (answer.status === 409 && error?.code === 'race_without_result') {
+          return { kind: 'no-result' };
+        }
         if (answer.status !== 200) {
-          const reason = refusalOf(answer.status);
+          const reason = refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
         }
         const rows = (answer.body as { rows?: unknown } | null)?.rows;
@@ -327,6 +548,29 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
       } catch {
         return { kind: 'unreachable' };
       }
+    },
+
+    async blockRider(roomId, row) {
+      try {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'blocks'), {
+          token: session.token,
+          body: { row },
+        });
+        if (answer.status === 204) return { kind: 'blocked' };
+        const reason = refusalOf(answer);
+        return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
+      } catch {
+        return { kind: 'unreachable' };
+      }
+    },
+
+    // #1381: the origin About reads (`instance-port.ts` §`current`), and the
+    // notice page's path there.
+    noticePage() {
+      const origin = heldInstanceSession(options.storage, options.send)?.http.origin;
+      return origin === undefined ? undefined : instancePageUrl(origin, NOTICE_PAGE_PATH);
     },
   };
 }

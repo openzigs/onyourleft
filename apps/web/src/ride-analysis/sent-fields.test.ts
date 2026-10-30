@@ -2,36 +2,32 @@
 
 /**
  * **Every figure a ride analysis sends is named by what the rider is told is
- * sent** — #845.
+ * sent** — #845, and since #1103 for the instance's job alone.
  *
- * #843's review found `template-v1.ts` sending `distanceKilometres`,
- * `meanGradientPercent` and `elevationGainMetres` under wordings (ADR 0035
- * D-9 B and C) that named none of them. So this builds every prompt every
- * template in `template.ts` §`ANALYSIS_TEMPLATES` makes, from an input with
- * every optional figure present, collects every key of the JSON those prompts
- * carry, and requires each key to be named — by the phrase {@link NAMED_BY}
- * gives it — in BOTH the own-computer words (`detail/write-up.ts`
- * §`COMPUTER_SENDS`) and the hosted consent (`camera/hosted-model.ts`
- * §`HOSTED_CONSENT`). A key this table does not know is a red build: a figure
- * added to a template without a change of wording cannot ship quietly.
+ * #843's review found a template sending `distanceKilometres`,
+ * `meanGradientPercent` and `elevationGainMetres` under wordings that named
+ * none of them. So this builds a write-up job's input from a ride with every
+ * optional figure present, collects every key of the JSON it carries, and
+ * requires each key to be named — by the phrase {@link NAMED_BY} gives it — in
+ * the instance paragraph (`detail/write-up.ts` §`INSTANCE_SENDS`) and the
+ * hosted consent (`hosted-consent.ts`). A key this table does not know is a
+ * red build: a figure added without a change of wording cannot ship quietly.
+ *
+ * ⚠️ Until #1103 this also walked every prompt the device's own runner built,
+ * against ADR 0035 D-9 B and C. #1103 removed that runner and those wordings
+ * (ADR 0046 D-1); a reviewer who remembers that half is reading the old file.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { HOSTED_CONSENT } from '../camera/hosted-model';
-import { COMPUTER_SENDS } from '../detail/write-up';
+import { INSTANCE_SENDS } from '../detail/write-up';
+import { hostedInstanceConsent } from './hosted-consent';
+import { analysisJobRequest } from './instance-job';
 
 import {
   MAXIMUM_SECTIONS,
   type RideAnalysisInput,
   type SectionSummary,
-} from '@onyourleft/analysis';
-import {
-  acceptPositionNote,
-  acceptSectionNote,
-  ANALYSIS_TEMPLATES,
-  type AnalysisTemplate,
-  type EarlierNotes,
 } from '@onyourleft/analysis';
 
 /**
@@ -120,18 +116,6 @@ const FULL: RideAnalysisInput = {
   },
 };
 
-/** One accepted note of each kind, through the real acceptors. */
-function earlierNotes(): EarlierNotes {
-  const section = acceptSectionNote(JSON.stringify({ section: 1, notes: 'Steady.' }), 1);
-  const position = acceptPositionNote(JSON.stringify({ notes: 'Little changed.' }));
-  if (section === undefined || position === undefined) {
-    throw new Error('the notes should be accepted');
-  }
-  return { sections: [section], position, failedSections: [2] };
-}
-
-const EARLIER = earlierNotes();
-
 /** Every key, at any depth, of every JSON object a line of `text` carries after its first `{`. */
 function sentKeys(text: string): Set<string> {
   const keys = new Set<string>();
@@ -160,59 +144,55 @@ function sentKeys(text: string): Set<string> {
   return keys;
 }
 
-/**
- * Both halves — system and user — of every prompt a template builds from
- * {@link FULL}. The system half is walked too (#847, from #848's review): a
- * figure moved into it is sent all the same.
- */
-function promptsOf(template: AnalysisTemplate): string[] {
-  const [section, position, summary, rewrite] = template.steps;
-  const prompts = [
-    ...FULL.sections.map((s) => section.prompt(FULL, s.index)),
-    position.prompt(FULL),
-    summary.prompt(FULL, EARLIER),
-    rewrite.prompt(FULL, EARLIER, ['angle-sign']),
-  ];
-  return prompts.flatMap((prompt) => (prompt === undefined ? [] : [prompt.system, prompt.user]));
-}
-
-const DISCLOSURES = {
-  'own computer (ADR 0035 D-9 B)': COMPUTER_SENDS,
-  'hosted (ADR 0035 D-9 C)': HOSTED_CONSENT.paragraphs[0] ?? '',
-} as const;
-
-describe.each(
-  ANALYSIS_TEMPLATES.map((template) => [`${template.id} v${template.version}`, template]),
-)('what %s sends is what the rider is told is sent (#845)', (_label, template) => {
-  const keys = sentKeys(promptsOf(template).join('\n'));
+describe('what a write-up job sends to the instance is what the rider is told is sent (#1102)', () => {
+  /**
+   * The input's own keys, which a job sends as they are (ADR 0046 D-6) — but
+   * three that are not figures: the template's version; `sections`, the list
+   * each section is in, which "section by section" names; and `pose`, the
+   * side camera's comparison, which its own phrase names.
+   */
+  const keys = sentKeys(JSON.stringify(analysisJobRequest(FULL, '1', 'instance-local').input));
+  const STRUCTURE: Readonly<Record<string, string>> = {
+    templateVersion: 'not a figure: which template the instance runs',
+    sections: 'section by section',
+    pose: 'how a few measurements of your riding position changed',
+  };
 
   it('reads the figures at all', () => {
-    // The vacuous pass: no keys would be a table that names every one of them.
     expect(keys.size).toBeGreaterThan(20);
-    expect(keys).toContain('distanceKilometres');
     expect(keys).toContain('meanGradientPercent');
-    expect(keys).toContain('elevationGainMetres');
   });
 
-  it('sends no figure the disclosure table does not name', () => {
-    const unnamed = [...keys].filter((key) => !(key in NAMED_BY));
-    expect(
-      unnamed,
-      'a template sends a figure no wording names: add it to ADR 0035 D-9 B and C by amendment, then here',
-    ).toStrictEqual([]);
+  it('is named, figure by figure, in the instance paragraph (#1104 B3)', () => {
+    expect(INSTANCE_SENDS.length).toBeGreaterThan(300);
+    const missing = [...keys].filter((key) => {
+      if (key === 'templateVersion') return false;
+      const phrase = NAMED_BY[key] ?? STRUCTURE[key];
+      return phrase === undefined || !INSTANCE_SENDS.includes(phrase);
+    });
+    expect(missing, 'a job sends a figure the instance paragraph does not name').toStrictEqual([]);
   });
 
-  it.each(Object.entries(DISCLOSURES))(
-    'is named, figure by figure, in the %s words',
-    (_which, words) => {
-      expect(words.length).toBeGreaterThan(300);
-      const missing = [...keys].filter((key) => {
-        const phrase = NAMED_BY[key];
-        return phrase === undefined || !words.includes(phrase);
-      });
-      expect(missing, 'a figure is sent that these words do not name').toStrictEqual([]);
-    },
-  );
+  // #1251: the same job, sent on by the instance to a hosted service the
+  // rider agreed to — every figure of it named in that consent (#1104 B1).
+  it('is named, figure by figure, in the hosted consent (#1104 B1)', () => {
+    const sends = hostedInstanceConsent('https://models.example').paragraphs[0] ?? '';
+    expect(sends.length).toBeGreaterThan(300);
+    const hosted = sentKeys(JSON.stringify(analysisJobRequest(FULL, '1', 'instance-hosted').input));
+    expect(hosted.size).toBeGreaterThan(20);
+    const missing = [...hosted].filter((key) => {
+      if (key === 'templateVersion') return false;
+      const phrase = NAMED_BY[key] ?? STRUCTURE[key];
+      return phrase === undefined || !sends.includes(phrase);
+    });
+    expect(missing, 'a hosted job sends a figure the hosted consent does not name').toStrictEqual(
+      [],
+    );
+    // The control: a consent that drops the gradient is caught.
+    expect(sends.replace("each section's gradient", '')).not.toContain(
+      NAMED_BY.meanGradientPercent,
+    );
+  });
 });
 
 describe('the check can fail (#845)', () => {
@@ -221,14 +201,7 @@ describe('the check can fail (#845)', () => {
     expect(single, 'a one-word phrase is found in any long text').toStrictEqual([]);
   });
 
-  it('walks the system half of every prompt as well as the user half — #847', () => {
-    for (const template of ANALYSIS_TEMPLATES) {
-      const walked = promptsOf(template);
-      const system = template.steps[0].prompt(FULL, 1)?.system;
-      expect(system?.length).toBeGreaterThan(0);
-      expect(walked, `${template.id} v${template.version}`).toContain(system);
-    }
-    // And a figure there is read like one in the user half.
+  it('reads a figure after prose on the same line — #847', () => {
     expect(sentKeys('Rules.\nFigures: {"hiddenFigure":1}')).toStrictEqual(
       new Set(['hiddenFigure']),
     );
@@ -241,11 +214,11 @@ describe('the check can fail (#845)', () => {
   });
 
   it('would have failed the wording #843 shipped, which named no distance, gradient or climb', () => {
-    const shipped = COMPUTER_SENDS.replace(
+    const shipped = INSTANCE_SENDS.replace(
       "its distance, and each section's gradient and total climb, ",
       '',
     );
-    expect(shipped).not.toBe(COMPUTER_SENDS);
+    expect(shipped).not.toBe(INSTANCE_SENDS);
     for (const key of ['distanceKilometres', 'meanGradientPercent', 'elevationGainMetres']) {
       expect(shipped).not.toContain(NAMED_BY[key]);
     }

@@ -58,18 +58,23 @@ import type { RoutingProvider } from '@onyourleft/domain';
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
+import type { SyncPort } from '../instance/sync-port';
+import type { StatementsPort } from '../instance/statements-port';
+import type { BlocksPort } from '../instance/blocks-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
-import type { RideController } from '../ride/controller';
+import { rideInProgress, type RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
-import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
@@ -85,8 +90,12 @@ import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
+import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
+import type { SignalStrengthPort } from '../ride/signal-port';
+import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
+import type { SystemSettingsPort } from '../support/system-settings-port';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
@@ -101,6 +110,7 @@ import {
   type RouteMatch,
 } from './routes';
 import type { MenuSounds } from './menu-sounds';
+import { useAndroidBack } from './android-back';
 import { mayAnimateBetween, RideHasTheScreen } from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
@@ -148,6 +158,7 @@ const AboutView = lazyView(MORE_GROUP, (group) => group.AboutView);
 const CreditsView = lazyView(MORE_GROUP, (group) => group.CreditsView);
 const InstanceView = lazyView(MORE_GROUP, (group) => group.InstanceView);
 const ModerationView = lazyView(MORE_GROUP, (group) => group.ModerationView);
+const MoreView = lazyView(MORE_GROUP, (group) => group.MoreView);
 
 /** The id `main` carries, and the only place it is written. */
 const MAIN_ID = 'oyl-main';
@@ -197,6 +208,24 @@ export interface AppShellProps {
    */
   readonly shell?: ShellSupportPort | undefined;
   /**
+   * Each connected device's signal strength on the Devices screen — #1435.
+   * Present only inside the Android shell, built beside {@link shell}.
+   */
+  readonly signal?: SignalStrengthPort | undefined;
+  /**
+   * Inside the shell: whether the rider has been told why Android asks for
+   * Bluetooth, and the way to Android's settings — #1436. Built beside
+   * {@link shell}; absent in every browser.
+   */
+  readonly bluetoothAsk?: BluetoothAskPort | undefined;
+  readonly systemSettings?: SystemSettingsPort | undefined;
+  /**
+   * Running inside the Android shell — `support/capacitor.ts` §`isNativeShell`,
+   * read by `main.tsx`. #1438: History's footer says what deletes the rides on
+   * this platform. `undefined` reads as a browser.
+   */
+  readonly nativeShell?: boolean | undefined;
+  /**
    * The camera, its consent and whether it is running (#382).
    *
    * Optional like every other port here, and `undefined` is an ordinary state:
@@ -231,6 +260,12 @@ export interface AppShellProps {
    * `undefined` where this platform has no WebRTC; both screens then say so.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * The rider's instance, as the Camera page asks about it to offer it the
+   * side camera's pictures (#1106). `undefined` where `main.tsx` built none,
+   * and the page then has no such section.
+   */
+  readonly sidePictures?: SideInstancePicturesPort | undefined;
   /**
    * Other real riders — #782, #783: the room port `main.tsx` builds over the
    * instance this device is connected to. Handed to the game, which joins a
@@ -348,13 +383,18 @@ export interface AppShellProps {
    */
   readonly detail?: DetailPort | undefined;
   /**
-   * The post-ride ask (#804): one press on a ride's page runs the analysis
-   * agent on the model the rider set up and saves the write-up with the ride.
-   * `undefined` offers no control. ⚠️ Optional, so a `main.tsx` that left it
-   * out would be green in `check:wiring` (§4j §Limits);
-   * `ride-analysis/ride-analysis-wiring.test.tsx` is what goes red for that.
+   * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): started,
+   * streamed, cancelled and resumed on a ride's page, then screened and saved
+   * on this device. ⚠️ Optional, so a `main.tsx` that left it out would be
+   * green in `check:wiring`; `ride-analysis/instance-analysis-wiring.test.tsx`
+   * is what goes red for that.
    */
-  readonly rideAnalysis?: RideAnalysisPort | undefined;
+  readonly instanceAnalysis?: InstanceAnalysisPort | undefined;
+  /**
+   * A hosted model service on the rider's own key, held by their instance
+   * (#1251): the Instance screen's section. Absent, the section is not drawn.
+   */
+  readonly hostedSettings?: HostedSettingsPort | undefined;
   /**
    * The analysis screen's store (#78).
    *
@@ -461,17 +501,40 @@ export interface AppShellProps {
    */
   readonly riderText?: RiderTextPort | undefined;
   /**
+   * The rider's typed workout goals (#1237) — `workout-goals/workout-goals-port.ts`.
+   * Optional like every other port here; without one the panel says there is
+   * no store to keep them in.
+   */
+  readonly workoutGoals?: WorkoutGoalsPort | undefined;
+  /**
    * The Connect screen's port (#777) — `instance/instance-port.ts`
    * §`createInstancePort`, built in `main.tsx` and nowhere else. Without one
    * the screen says this platform cannot connect.
    */
   readonly instance?: InstancePort | undefined;
   /**
+   * The statements of reasons about this rider's account (#910) —
+   * `instance/statements-port.ts` §`createStatementsPort`, built in
+   * `main.tsx` and nowhere else.
+   */
+  readonly statements?: StatementsPort | undefined;
+  /**
+   * The riders this rider blocked (#1529) — `instance/blocks-port.ts`
+   * §`createBlocksPort`, built in `main.tsx` and nowhere else.
+   */
+  readonly blocks?: BlocksPort | undefined;
+  /**
    * The Moderation screen's port (#955) — `instance/moderation-port.ts`
    * §`createModerationPort`, built in `main.tsx` and nowhere else. The
    * Instance screen asks it whether to link to Moderation at all.
    */
   readonly moderation?: ModerationPort | undefined;
+  /**
+   * Sync with the instance (#1195) — `instance/sync-port.ts`
+   * §`createSyncPort`, built in `main.tsx` and nowhere else. The Instance
+   * screen draws its panel only once connected, and offers it only with a card.
+   */
+  readonly sync?: SyncPort | undefined;
   /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
@@ -539,7 +602,21 @@ function viewFor(
         />
       );
     case 'activities':
-      return <ActivitiesView library={props.library} selected={match.parameter} />;
+      return (
+        <ActivitiesView
+          library={props.library}
+          selected={match.parameter}
+          nativeShell={props.nativeShell}
+          instance={props.instance}
+          // #1439: the chosen ride's page is drawn in the detail pane, so it
+          // reads what `#/activities/<id>` reads.
+          detail={props.detail}
+          map={props.map}
+          basemap={props.basemap}
+          instanceWriteUp={props.instanceAnalysis}
+          riderText={props.riderText}
+        />
+      );
     case 'activity-detail':
       return (
         <ActivityDetailView
@@ -547,7 +624,7 @@ function viewFor(
           activityId={match.parameter}
           map={props.map}
           basemap={props.basemap}
-          writeUp={props.rideAnalysis}
+          instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
         />
       );
@@ -607,6 +684,8 @@ function viewFor(
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1106: the rider's instance, for the side camera's pictures.
+          {...(props.sidePictures === undefined ? {} : { sidePictures: props.sidePictures })}
         />
       );
     case 'side-camera':
@@ -626,6 +705,9 @@ function viewFor(
         <DevicesView
           capabilities={props.capabilities}
           {...(props.shell === undefined ? {} : { shell: props.shell })}
+          {...(props.signal === undefined ? {} : { signal: props.signal })}
+          {...(props.bluetoothAsk === undefined ? {} : { bluetoothAsk: props.bluetoothAsk })}
+          {...(props.systemSettings === undefined ? {} : { settings: props.systemSettings })}
           // #659: pairing lives on Devices, through the controller the Ride
           // screen reads — mounted above this router, so what is paired here is
           // what Ride shows.
@@ -675,14 +757,26 @@ function viewFor(
           basemap={props.basemap}
           maskedWords={props.maskedWords}
           riderText={props.riderText}
+          workoutGoals={props.workoutGoals}
         />
       );
     case 'about':
-      return <AboutView />;
+      return <AboutView instance={props.instance} nativeShell={props.nativeShell} />;
     case 'instance':
-      return <InstanceView port={props.instance} moderation={props.moderation} />;
+      return (
+        <InstanceView
+          port={props.instance}
+          moderation={props.moderation}
+          sync={props.sync}
+          hostedSettings={props.hostedSettings}
+          statements={props.statements}
+          blocks={props.blocks}
+        />
+      );
     case 'moderation':
       return <ModerationView port={props.moderation} />;
+    case 'more':
+      return <MoreView />;
     case 'credits':
       // No props: the manifest is built into the bundle, so this is the one
       // view in the shell that needs nothing passed down. `CreditsView.tsx`
@@ -741,6 +835,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
    */
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
+
+  // #1512: Android's back, inside the shell. Read at each press: a ride on —
+  // recording, paused, or the game's stage with the screen — consumes it.
+  useAndroidBack(props.nativeShell === true, () => {
+    const phase = props.rideController?.getSnapshot().phase;
+    return {
+      routeId: route.id,
+      rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
+    };
+  });
 
   /*
    * ⚠️ LAYOUT effects, the focus move and the title both, since #945's
@@ -953,11 +1057,13 @@ export function AppShell(props: AppShellProps): JSX.Element {
         </main>
 
         {immersive ? null : (
+          // #1442: "Your rides are kept on this device." was said here under
+          // every screen, and several screens said their own version just
+          // above it. Where rides are is said once, where it matters: the
+          // Ride screen's note, History's line under its list and About
+          // (`views/where-rides-are.ts`), and Instance's note.
           <footer className="oyl-footer">
-            <p>
-              On Your Left — free and open source. No account, no server: everything here stays on
-              this device.
-            </p>
+            <p>On Your Left — free and open source.</p>
           </footer>
         )}
       </div>
@@ -997,9 +1103,11 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
           const destination = groupDestination(group.id);
           const pages = routesInGroup(group.id);
           const here = route.group === group.id;
+          // `page` where no section row will say which page this is: a group
+          // of one, or the group's own menu page (#1429), which has none.
           const current = !here
             ? undefined
-            : pages.length === 1 && route.id === destination.id
+            : route.id === destination.id && (pages.length === 1 || !pages.includes(destination))
               ? 'page'
               : 'true';
           return (
@@ -1031,7 +1139,10 @@ function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element
   }
   const group = NAV_GROUPS.find((each) => each.id === route.group);
   const pages = routesInGroup(route.group);
-  if (group === undefined || pages.length < 2) {
+  // #1429: the group's menu page lists the same pages itself, with a line
+  // each, so a row of them above it would be the list twice.
+  const menu = route.id === groupDestination(route.group).id && !pages.includes(route);
+  if (group === undefined || pages.length < 2 || menu) {
     return null;
   }
   return (

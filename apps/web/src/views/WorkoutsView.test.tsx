@@ -16,7 +16,13 @@
  */
 
 import { athleteId as toAthleteId, workoutId, type WorkoutRecord } from '@onyourleft/store';
-import { seconds, thresholdShare, unixSeconds, type WorkoutBlock } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  seconds,
+  thresholdShare,
+  unixSeconds,
+  type WorkoutBlock,
+} from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -218,6 +224,128 @@ describe('building a workout', () => {
     expect(view.container.textContent).toContain('20% to 300%');
     expect(view.container.textContent).not.toContain('10 min at 900%');
     expect(stub.rows()).toEqual([]);
+  });
+
+  it('shows an Add block refusal inside its own form, beside the button, and a save refusal above the list — #1165', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    const addForm = (): Element | null =>
+      view.container.querySelector('form[aria-label="Add a block"]');
+    const warnings = (): string[] =>
+      queryAll(view.container, '.oyl-status').map((each) => each.textContent ?? '');
+
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '900');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    const refused = queryAll(view.container, '.oyl-status').find((each) =>
+      (each.textContent ?? '').includes('20% to 300%'),
+    );
+    expect(refused?.closest('form')).toBe(addForm());
+    // Right before the button pressed, and announced (it is the press's answer).
+    expect(refused?.nextElementSibling?.textContent).toBe('Add block');
+    expect(refused?.getAttribute('role')).toBe('status');
+    expect(warnings()).toHaveLength(1);
+
+    // A save refused next replaces it, above the list, as one message.
+    await typeInto(field(view.container, 'workout-name'), 'Empty');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    const saveRefused = queryAll(view.container, '.oyl-status').find((each) =>
+      (each.textContent ?? '').includes('Add at least one block'),
+    );
+    expect(saveRefused).toBeDefined();
+    expect(saveRefused?.closest('form')).toBeNull();
+    expect(warnings()).toHaveLength(1);
+
+    // And a block added clears every refusal.
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toEqual([]);
+  });
+
+  it('a refused Add block followed by a valid one leaves no warning — #1165', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    const warnings = (): string[] =>
+      queryAll(view.container, '.oyl-status').map((each) => each.textContent ?? '');
+
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '900');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toHaveLength(1);
+
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toEqual([]);
+  });
+
+  it('a refused Add block replaces a refused save, so one warning shows, inside the form — #1165', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    const warnings = (): Element[] => queryAll(view.container, '.oyl-status');
+
+    await typeInto(field(view.container, 'workout-name'), 'Empty');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]?.closest('form')).toBeNull();
+
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '900');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]?.closest('form')?.getAttribute('aria-label')).toBe('Add a block');
+  });
+
+  it('refuses a heart-rate hold whose range is under 6 bpm, and keeps what was typed — #1241', async () => {
+    const stub = workoutStub(ATHLETE);
+    const view = await render(stub);
+    const kind = view.container.querySelector<HTMLSelectElement>('#block-kind');
+    if (kind === null) throw new Error('no kind picker');
+    await chooseOption(kind, 'heart-rate-hold');
+    await typeInto(field(view.container, 'block-minutes'), '30');
+    await typeInto(field(view.container, 'block-percent'), '55');
+    await typeInto(field(view.container, 'block-ceiling-percent'), '80');
+    await typeInto(field(view.container, 'block-low-bpm'), '130');
+    await typeInto(field(view.container, 'block-high-bpm'), '134');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+
+    expect(view.container.textContent).toContain('at least 6 bpm above its bottom');
+    expect(view.container.textContent).not.toContain('holding 130–134 bpm');
+    expect(field(view.container, 'block-low-bpm').value).toBe('130');
+    expect(field(view.container, 'block-high-bpm').value).toBe('134');
+    expect(field(view.container, 'block-ceiling-percent').value).toBe('80');
+
+    // A ceiling over the ruled 85 % is refused the same way.
+    await typeInto(field(view.container, 'block-high-bpm'), '140');
+    await typeInto(field(view.container, 'block-ceiling-percent'), '90');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(view.container.textContent).toContain('at most 85% of your threshold');
+    expect(field(view.container, 'block-ceiling-percent').value).toBe('90');
+    expect(stub.rows()).toEqual([]);
+  });
+
+  it('lists a saved heart-rate hold by its range, and quotes no watts — #1241', async () => {
+    const view = await render(
+      workoutStub(ATHLETE, [
+        workout({
+          name: 'Endurance hold',
+          workout: {
+            name: 'Endurance hold',
+            blocks: [
+              {
+                kind: 'heart-rate-hold',
+                seconds: seconds(1800),
+                range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+                startShare: thresholdShare(0.55),
+                ceilingShare: thresholdShare(0.8),
+              },
+            ],
+          },
+        }),
+      ]),
+      undefined,
+      'workout-1',
+    );
+    expect(view.container.textContent).toContain('30 min holding 130–140 bpm');
+    expect(view.container.textContent).not.toMatch(/\d\s?W\b/);
   });
 
   it('refuses to save a workout with no blocks', async () => {
@@ -443,6 +571,12 @@ describe('#670 — a selected workout', () => {
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
       'Workout not found',
     );
+    // #1104 (F-1): saved workouts sync both ways since #1253, so the page no
+    // longer says they are never copied between devices.
+    expect(view.container.textContent).not.toContain('never copied');
+    expect(view.container.textContent).toContain(
+      'not yet brought here by a sync with your instance',
+    );
     // #670's review (N1): the builder is not drawn under a chosen workout;
     // the list's *Build a workout* is the way back to it, and the primary.
     expect(view.container.querySelector('#workout-name')).toBeNull();
@@ -569,6 +703,27 @@ describe('#670 — a selected workout', () => {
     expect(field(view.container, 'workout-name').value).toBe('');
     expect(view.container.textContent).toContain('No blocks yet.');
     expect(view.container.textContent).toContain('Saved “Tempo”.');
+  });
+
+  it('gives two workouts saved in the same second ids that cannot collide on another device — #1100', async () => {
+    // Saved workouts sync both ways (#1100), so an id is a key on the
+    // instance: one minted from the clock collides across devices.
+    const stub = workoutStub(ATHLETE);
+    const view = await render(stub, 1_700_000_500);
+    for (const name of ['Tempo', 'Tempo again']) {
+      await typeInto(field(view.container, 'block-minutes'), '10');
+      await typeInto(field(view.container, 'block-percent'), '65');
+      await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+      await typeInto(field(view.container, 'workout-name'), name);
+      await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+      await settle();
+    }
+    const ids = stub.rows().map((row) => row.id as string);
+    expect(ids).toHaveLength(2);
+    for (const id of ids) {
+      expect(id).toMatch(/^workout-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    }
+    expect(new Set(ids).size).toBe(2);
   });
 
   it('keeps the name when a save is refused, so the rider can fix what was wrong — #723', async () => {

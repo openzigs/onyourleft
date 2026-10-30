@@ -21,6 +21,7 @@ export type {
   AthleteDeletionCounts,
   ListActivitiesOptions,
   SortDirection,
+  WriteCondition,
 } from './activity-store';
 
 // --- Records ----------------------------------------------------------------
@@ -29,6 +30,9 @@ export type {
   ActivityRecord,
   ActivitySummary,
   RideFacts,
+  RoomRaceFact,
+  WorkoutBlockFact,
+  WorkoutBlockOutcome,
   AthleteRecord,
   CameraFrameRecord,
   FramingCheckRecord,
@@ -44,12 +48,17 @@ export type {
   SyncBaseKind,
   SyncBaseRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRead,
+  WorkoutGoalsRecord,
   RideWriteUpSourceRecord,
   LapRecord,
   NewActivity,
+  NewFinishedRide,
   NewLap,
   OriginalFileReference,
   PrivacyZoneRecord,
+  RecentlyDeletedRide,
+  RestoreOutcome,
   SegmentEndpointRecord,
   FrozenEffortAttributes,
   MatchCheckpointRecord,
@@ -58,6 +67,8 @@ export type {
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
+  WorldCorridorRecord,
+  WorldCorridorTileState,
 } from './records';
 export {
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
@@ -67,6 +78,7 @@ export {
   SYNC_BASE_KINDS,
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
+  WORLD_CORRIDOR_FEATURES_LIMIT_BYTES,
 } from './records';
 
 // --- Identifiers ------------------------------------------------------------
@@ -127,17 +139,20 @@ export {
 
 export type { UnitSystem } from './unit-system';
 export { DEFAULT_UNIT_SYSTEM, isUnitSystem, parseUnitSystem, UNIT_SYSTEMS } from './unit-system';
+export { workoutBlockFactsOf } from './workout-block-persisted';
 export type { Visibility } from './visibility';
 export { DEFAULT_VISIBILITY, parseVisibility, VISIBILITIES } from './visibility';
 
 // --- Errors -----------------------------------------------------------------
 
 export {
+  StoreConflictError,
   StoreDecodeError,
   StoreError,
   StoreReferentialError,
   StoreValidationError,
   StoreVersionError,
+  WorldCorridorTooLargeError,
 } from './errors';
 
 // --- Schema and migrations --------------------------------------------------
@@ -145,6 +160,7 @@ export {
 export {
   DEXIE_IDB_VERSION_MULTIPLIER,
   INDEX,
+  RECENTLY_DELETED_SECONDS,
   SCHEMA_VERSION,
   SCHEMA_VERSIONS,
   STORES_V1,
@@ -179,13 +195,19 @@ export {
 export type {
   NewRecordingChunk,
   NewRecordingSession,
+  RecordedCourseLap,
+  RecordedLapMark,
+  RecordedWorkoutBlock,
   RecordingChunkRecord,
   RecordingFootprint,
+  RecordingHeaderDamage,
+  RecordingSessionListing,
   RecordingSessionRecord,
   RecordingStoredState,
   RecoveredRecording,
+  UnreadableRecordingSession,
 } from './recording';
-export { RECORDING_STORED_STATES } from './recording';
+export { RECORDING_REPLAN_RECORDS_LIMIT, RECORDING_STORED_STATES } from './recording';
 
 export type { ChannelEncoding, EncodedChannel } from './stream-codec';
 export { channelBytesPerSample, decodeChannel, encodeChannel } from './stream-codec';
@@ -262,6 +284,7 @@ export {
   ensureDeviceSigningKey,
   generateDeviceKey,
   signingKeyFor,
+  webCryptoHpkePrimitives,
   webCryptoSha256,
   webCryptoVerifier,
 } from './web-crypto';

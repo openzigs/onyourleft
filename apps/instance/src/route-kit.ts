@@ -7,17 +7,23 @@
  */
 
 import type { Readiness } from './readiness.ts';
+import type { HostedSettings } from './analysis/hosted-settings.ts';
+import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
+import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
+import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
-import { JSON_TYPE, type ErrorCode } from './errors.ts';
+import { JSON_TYPE, type ErrorCode, type FieldProblem } from './errors.ts';
 
 /** The subset of JSON Schema the specification uses, and the contract test checks. */
 export type Schema =
   | {
-      readonly type: 'object';
+      /** `['object', 'null']` for an object that may be absent (#1199's settings). */
+      readonly type: 'object' | ['object', 'null'];
+      readonly description?: string;
       readonly properties: Readonly<Record<string, Schema>>;
       readonly required: readonly string[];
       readonly additionalProperties: false;
@@ -36,6 +42,34 @@ export type Schema =
     }
   | { readonly type: 'string'; readonly enum: readonly string[] }
   | { readonly $ref: string };
+
+/** What a look at a side-camera picture answers (#1106): the model's own words, for the device to read. */
+export interface SidePoseAnswer {
+  readonly answer: string;
+}
+
+export type SidePoseOutcome =
+  | { readonly ok: true; readonly value: SidePoseAnswer }
+  | { readonly ok: false; readonly code: ErrorCode; readonly fields?: readonly FieldProblem[] };
+
+/**
+ * What the side camera's route asks for (#1106) — `camera/side-pose.ts` is
+ * what answers it.
+ *
+ * ⚠️ **Declared here rather than imported from there, on purpose.** Every
+ * route module imports this file, the history index's among them, and
+ * `history/no-picture.test.ts` holds that the index reaches no module about a
+ * picture, however indirectly. A type imported from `camera/` would put every
+ * picture module one step from all of them.
+ */
+export interface SidePose {
+  /** Show the caller's picture to the model they named, and answer what it said. */
+  look(
+    caller: Caller,
+    body: Readonly<Record<string, unknown>>,
+    signal: AbortSignal,
+  ): Promise<SidePoseOutcome>;
+}
 
 /** Who sent a request, as far as the adapter in front of the handler knows. */
 export interface ClientInfo {
@@ -61,6 +95,13 @@ export interface InstanceProbes {
    * rule #785 decided (`room/node/room-host.ts` §`start`).
    */
   readonly startRoom?: (roomId: string, athleteId: string) => Promise<'started' | 'not_found'>;
+  /** Who sits in a seat of a room a worker holds, and its tick (#789), or `undefined`. */
+  readonly seatOf?: (
+    roomId: string,
+    riderId: number,
+  ) => Promise<{ readonly athleteId: string; readonly tick: number } | undefined>;
+  /** Take a rider out of a room a worker holds, for its life (#789). `false` when none holds it. */
+  readonly removeFromRoom?: (roomId: string, athleteId: string) => Promise<boolean>;
 }
 
 /** What a route is handed. */
@@ -95,7 +136,35 @@ export interface RouteContext {
   readonly history: History | undefined;
   /** Riders' rooms (#784, #785). Present for every route that declares `rooms`; the handler sees to it. */
   readonly rooms: Rooms | undefined;
+  /** Analysis jobs (#1095). Present for every route that declares `analysis`; the handler sees to it. */
+  readonly analysis: AnalysisJobs | undefined;
+  /** A rider's own hosted key and consent (#1199). Present for every route that declares `hostedSettings`. */
+  readonly hostedSettings: HostedSettings | undefined;
+  /** The side camera's pictures (#1106). Present for every route that declares `sidePose`. */
+  readonly sidePose: SidePose | undefined;
+  /**
+   * The instance's own keys (#1189). Absent until the store is open, and on
+   * a test's handler that was handed none.
+   */
+  readonly instanceKeys: InstanceKeys | undefined;
   readonly probes: InstanceProbes | undefined;
+  /** Sealed requests' replay record, clock and HPKE port (#1191). Absent on a handler handed none. */
+  readonly sealed: Sealed | undefined;
+  /** This request arrived inside `POST /v1/sealed`, opened and its signature checked (#1192). */
+  readonly sealedRequest: boolean;
+  /**
+   * Dispatch an opened sealed request's INNER request through the same route
+   * table (#1191, ADR 0047 D-9): the path matched, the method checked, the
+   * inner body held to `config.bodyLimitBytes`, and then every check the
+   * route declares, exactly as a plaintext request — except that a route
+   * marked {@link Route.sealed} `'only'` is reachable here and nowhere else.
+   * `/v1/sealed` itself is never an inner route.
+   */
+  readonly dispatch: (
+    request: Request,
+    body: Uint8Array | null,
+    client: ClientInfo,
+  ) => Promise<Response>;
 }
 
 /**
@@ -142,6 +211,21 @@ export interface Route {
    * route blobs. An instance handed none answers `unavailable` without calling it.
    */
   readonly rooms?: true;
+  /**
+   * The route needs analysis jobs (#1095). An instance handed none answers
+   * `unavailable` without calling it.
+   */
+  readonly analysis?: true;
+  /**
+   * The route needs a rider's hosted settings (#1199). An instance handed
+   * none answers `unavailable` without calling it.
+   */
+  readonly hostedSettings?: true;
+  /**
+   * The route shows a side-camera picture to a model (#1106). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly sidePose?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**
@@ -152,29 +236,78 @@ export interface Route {
   /**
    * A SUSPENDED athlete may call this route, through the way-out session
    * `POST /v1/auth/leave-session` opens (#898). Every other session route
-   * answers such a caller `account_suspended`. ⚠️ Declared on exactly two
-   * routes — the account export and the account deletion — and
+   * answers such a caller `account_suspended`. ⚠️ Declared on exactly four
+   * routes — the account export, the account deletion, since #910 the rider's
+   * own statements of reasons (a suspended rider must be able to read why),
+   * and since #911 appealing one of them — and
    * `moderation/choke-point.test.ts` walks the table and fails if any other
    * route declares it. ⚠️ **Signing out is not one of them, on purpose**: a
    * way-out session cannot end itself (`DELETE /v1/auth/session` answers it
    * `account_suspended`). It lasts an hour, and erasing the account removes
-   * it; a third route would widen the one flag that lets a suspended rider
+   * it; a fifth route would widen the one flag that lets a suspended rider
    * past the choke point, for a session that ends on its own (#926's review).
    */
   readonly admitsSuspended?: true;
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
+  /**
+   * Whether the route is reached sealed (#1191, #1192, ADR 0047 D-7, D-9).
+   *
+   * - `'only'`: ONLY inside a sealed request — `POST /v1/sealed` dispatches to
+   *   it, and a plaintext request to its path is refused `sealed_required`
+   *   before anything else is looked at: no session is read, no body parsed,
+   *   nothing run.
+   *
+   * It holds only on an instance that holds keys
+   * ({@link RouteContext.sealsRoutes}): one with no `OYL_INSTANCE_SECRET_KEY`
+   * has no sealed routes and answers these in plaintext as before (D-7).
+   * `openapi.json` documents the mark as `x-oyl-sealed`, and
+   * `sealed/phase-one.ts` and `sealed/phase-two.ts` are the committed lists
+   * the table is held to. (#1192's `'new-key'` mark — a key the instance held
+   * signing in in plaintext — went with phase 2, #1210.)
+   */
+  readonly sealed?: 'only';
+  /**
+   * The largest body this route reads, from the instance's configuration —
+   * `config.bodyLimitBytes` unless a route declares its own. Only
+   * `/v1/sealed` does: its envelope carries an inner body of the ordinary
+   * limit, padded, tagged and base64url-encoded.
+   */
+  readonly bodyLimit?: (config: Config) => number;
   /** The JSON body the route reads, for the specification. */
   readonly request?: Schema;
+  /**
+   * The form the route reads, `application/x-www-form-urlencoded`, for the
+   * specification: a page's form posted by a browser with no script (#907).
+   * The route reads it from {@link RouteContext.body} itself.
+   */
+  readonly form?: Schema;
   /** The error codes this route answers with beyond every route's. */
   readonly errors?: readonly ErrorCode[];
+  /**
+   * `202 Accepted` in place of `200`, for a route that starts work it does
+   * not wait for (#1095). The specification documents the status it names.
+   */
+  readonly accepted?: true;
   readonly response:
     | { readonly contentType: 'application/json'; readonly schema: Schema }
     | { readonly contentType: 'text/plain' }
+    /** A page for a person to read in a browser (#907): `html.ts`. */
+    | { readonly contentType: 'text/html' }
     /** Bytes, exactly as they were stored: an original activity file (#35, #776). */
     | { readonly contentType: 'application/octet-stream' }
     /** 204, no body. */
-    | { readonly contentType: 'none' };
+    | { readonly contentType: 'none' }
+    /**
+     * Server-Sent Events (#1095): `id:`, `event:` and one `data:` line of JSON
+     * per event, and a `: hb` comment when the stream is quiet.
+     */
+    | { readonly contentType: 'text/event-stream'; readonly description: string }
+    /**
+     * A sealed reply (#1191): a JSON envelope `{ v, nonce, ct }`, or — when the
+     * inner route streams — `text/event-stream` whose frames carry `data:` alone.
+     */
+    | { readonly contentType: 'sealed'; readonly schema: Schema };
   readonly handle: (context: RouteContext) => Response | Promise<Response>;
 }
 

@@ -63,6 +63,10 @@ export function capacitorBlePort(): CapacitorBlePort {
 
     isEnabled: async (): Promise<boolean> => BleClient.isEnabled(),
 
+    openAppSettings: async (): Promise<void> => BleClient.openAppSettings(),
+
+    openBluetoothSettings: async (): Promise<void> => BleClient.openBluetoothSettings(),
+
     requestDevice: async (request: PluginDeviceRequest): Promise<PluginDevice> => {
       const device = await BleClient.requestDevice({
         services: [...request.services],
@@ -98,6 +102,8 @@ export function capacitorBlePort(): CapacitorBlePort {
         })),
       }));
     },
+
+    readRssi: async (deviceId: string): Promise<number> => BleClient.readRssi(deviceId),
 
     read: async (deviceId: string, service: string, characteristic: string): Promise<DataView> =>
       BleClient.read(deviceId, service, characteristic),

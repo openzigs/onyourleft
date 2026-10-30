@@ -29,6 +29,28 @@ import * as historyIndex from './0010-history-index.ts';
 import * as raceConsent from './0011-race-consent.ts';
 import * as sessionScope from './0012-session-scope.ts';
 import * as privateRooms from './0013-private-rooms.ts';
+import * as hostedModelKey from './0014-hosted-model-key.ts';
+import * as instanceKeys from './0015-instance-keys.ts';
+import * as instanceKeyLease from './0016-instance-key-lease.ts';
+import * as sealedReplay from './0017-sealed-replay.ts';
+import * as accountChanges from './0018-account-changes.ts';
+import * as recoveryAddresses from './0019-recovery-addresses.ts';
+import * as analysisJobs from './0020-analysis-jobs.ts';
+import * as riderHostedKeys from './0021-rider-hosted-keys.ts';
+import * as analysisJobRide from './0022-analysis-job-ride.ts';
+import * as hostedKeyReasoning from './0023-hosted-key-reasoning.ts';
+import * as roomDrafting from './0024-room-drafting.ts';
+import * as raceRoute from './0025-race-route.ts';
+import * as notices from './0026-notices.ts';
+import * as statements from './0027-statements.ts';
+import * as appeals from './0028-appeals.ts';
+import * as noticeSteps from './0029-notice-steps.ts';
+import * as hiddenItems from './0030-hidden-items.ts';
+import * as roomModeration from './0031-room-moderation.ts';
+import * as loadAccounts from './0032-load-accounts.ts';
+import * as publicRooms from './0033-public-rooms.ts';
+import * as suspendedIndex from './0034-suspended-index.ts';
+import * as blockHandles from './0035-block-handles.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -50,4 +72,26 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0011-race-consent': raceConsent,
   '0012-session-scope': sessionScope,
   '0013-private-rooms': privateRooms,
+  '0014-hosted-model-key': hostedModelKey,
+  '0015-instance-keys': instanceKeys,
+  '0016-instance-key-lease': instanceKeyLease,
+  '0017-sealed-replay': sealedReplay,
+  '0018-account-changes': accountChanges,
+  '0019-recovery-addresses': recoveryAddresses,
+  '0020-analysis-jobs': analysisJobs,
+  '0021-rider-hosted-keys': riderHostedKeys,
+  '0022-analysis-job-ride': analysisJobRide,
+  '0023-hosted-key-reasoning': hostedKeyReasoning,
+  '0024-room-drafting': roomDrafting,
+  '0025-race-route': raceRoute,
+  '0026-notices': notices,
+  '0027-statements': statements,
+  '0028-appeals': appeals,
+  '0029-notice-steps': noticeSteps,
+  '0030-hidden-items': hiddenItems,
+  '0031-room-moderation': roomModeration,
+  '0032-load-accounts': loadAccounts,
+  '0033-public-rooms': publicRooms,
+  '0034-suspended-index': suspendedIndex,
+  '0035-block-handles': blockHandles,
 };

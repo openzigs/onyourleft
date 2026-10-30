@@ -45,7 +45,7 @@
  */
 
 import type { Quantity } from '../quantity';
-import type { Seconds } from '../quantities';
+import type { BeatsPerMinute, Seconds } from '../quantities';
 
 import { WorkoutError } from './errors';
 
@@ -231,7 +231,72 @@ export interface FreeRideBlock {
   readonly label?: string | undefined;
 }
 
-export type WorkoutBlock = SteadyBlock | RampBlock | IntervalsBlock | FreeRideBlock;
+/**
+ * A heart-rate hold (#1239, ADR 0048 D-3): a stretch whose power target the
+ * player moves, in small bounded steps, to keep the rider's heart rate inside
+ * a range they chose.
+ *
+ * ⚠️ **It is still a block with a target.** Anything that does not know about
+ * the hold — a timeline reader, a screen, a rider with no strap — sees a
+ * steady block at {@link startShare}, which is exactly what it rides whenever
+ * the hold cannot run (`heart-rate-hold.ts` §eligibility). The hold may only
+ * ever move the target between the floor and {@link ceilingShare}.
+ *
+ * The range is a training range the rider chose, never a limit for health or
+ * safety (ADR 0048 D-12).
+ */
+export interface HeartRateHoldBlock {
+  readonly kind: 'heart-rate-hold';
+  readonly seconds: Seconds;
+  readonly range: HeartRateRange;
+  /** Where the block starts, and what it rides when the hold cannot run. */
+  readonly startShare: ThresholdShare;
+  /** The most the hold may raise the target to, before any other ceiling. */
+  readonly ceilingShare: ThresholdShare;
+  readonly label?: string | undefined;
+}
+
+/** A heart-rate range, in beats per minute, the rider chose. */
+export interface HeartRateRange {
+  readonly low: BeatsPerMinute;
+  readonly high: BeatsPerMinute;
+}
+
+/**
+ * The narrowest range a hold may keep a heart rate inside: H2's **6 bpm**.
+ *
+ * Heart rate answers to a change in power over a minute or more, and moves a
+ * beat or two on its own; a narrower range is one the hold would chase rather
+ * than hold. ADR 0048 D-3, approved by the owner on 2026-10-09 (Q6).
+ */
+export const MINIMUM_HOLD_RANGE_BPM = 6;
+
+/**
+ * The highest ceiling a hold may carry: H3's **0.85** of the rider's own
+ * threshold power. The hold is for endurance work; a ceiling above this is
+ * refused in the block, and the player lowers any other to it as well.
+ * ADR 0048 D-3 (Q6).
+ */
+export const MAXIMUM_HOLD_CEILING_SHARE = 0.85;
+
+/**
+ * The lowest a hold may take the target, as a share: the floor of H3, before
+ * the machine's own reported minimum is applied on top of it. An engineering
+ * choice — it is {@link MINIMUM_SHARE}, the lowest share any target here may
+ * carry — and the floor H6's overshoot writes.
+ */
+export const HOLD_FLOOR_SHARE = MINIMUM_SHARE;
+
+/**
+ * The heart-rate readings a range may be written in: the same plausibility
+ * band H8 applies to a reading (`heart-rate-hold.ts`), so a range the hold
+ * could never see a reading inside is refused where it is typed.
+ */
+export const MINIMUM_HOLD_BPM = 30;
+export const MAXIMUM_HOLD_BPM = 230;
+
+export type WorkoutBlock =
+  SteadyBlock | RampBlock | IntervalsBlock | FreeRideBlock | HeartRateHoldBlock;
 
 /** A workout, as this program holds one. */
 export interface Workout {
@@ -307,6 +372,9 @@ function validateBlock(block: WorkoutBlock, index: number): void {
         );
       }
       return;
+    case 'heart-rate-hold':
+      validateHold(block, where);
+      return;
     default: {
       // ⚠️ The `never` is the guarantee, and it is written out rather than
       // described: adding a kind to `WorkoutBlock` without a case above makes
@@ -322,6 +390,61 @@ function validateBlock(block: WorkoutBlock, index: number): void {
           `${JSON.stringify(unhandled)}`,
       );
     }
+  }
+}
+
+/**
+ * A hold is rideable when its range is one a heart can be held inside and its
+ * targets are in order: floor ≤ start ≤ ceiling ≤ 0.85.
+ *
+ * What is NOT checked here is the range against the rider's own threshold heart
+ * rate (H2's other half): a threshold can change after a workout is saved, so
+ * that is decided where the hold runs, and a range above it makes the block a
+ * steady one rather than an unrideable one.
+ */
+function validateHold(block: HeartRateHoldBlock, where: string): void {
+  assertDuration(block.seconds, where);
+  assertShare(block.startShare, `${where}'s starting target`);
+  assertShare(block.ceilingShare, `${where}'s ceiling`);
+  // `typeof` first: a range decoded from a hand-edited row is past the types.
+  const range = block.range as Partial<HeartRateRange> | undefined;
+  const low = range?.low;
+  const high = range?.high;
+  if (
+    typeof low !== 'number' ||
+    typeof high !== 'number' ||
+    !Number.isInteger(low) ||
+    !Number.isInteger(high) ||
+    low < MINIMUM_HOLD_BPM ||
+    high > MAXIMUM_HOLD_BPM
+  ) {
+    throw new WorkoutError(
+      'invalid-heart-rate-range',
+      `${where}'s heart-rate range must be two whole numbers of beats per minute between ` +
+        `${String(MINIMUM_HOLD_BPM)} and ${String(MAXIMUM_HOLD_BPM)}; received ` +
+        `${JSON.stringify(block.range)}`,
+    );
+  }
+  if (high - low < MINIMUM_HOLD_RANGE_BPM) {
+    throw new WorkoutError(
+      'invalid-heart-rate-range',
+      `${where}'s heart-rate range runs from ${String(low)} to ${String(high)} bpm; its top must ` +
+        `be at least ${String(MINIMUM_HOLD_RANGE_BPM)} bpm above its bottom`,
+    );
+  }
+  if (block.ceilingShare > MAXIMUM_HOLD_CEILING_SHARE) {
+    throw new WorkoutError(
+      'target-out-of-range',
+      `${where}'s ceiling is ${String(block.ceilingShare)} of threshold; a heart-rate hold's ` +
+        `ceiling may be at most ${String(MAXIMUM_HOLD_CEILING_SHARE)}`,
+    );
+  }
+  if (block.startShare > block.ceilingShare) {
+    throw new WorkoutError(
+      'target-out-of-range',
+      `${where} starts at ${String(block.startShare)} of threshold, above its own ceiling of ` +
+        `${String(block.ceilingShare)}`,
+    );
   }
 }
 

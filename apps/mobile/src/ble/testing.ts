@@ -76,6 +76,9 @@ export interface ScriptedStack {
    */
   readonly services?: readonly PluginService[];
   readonly servicesRejectWith?: unknown;
+  /** #1435: what `readRssi` answers, in dBm — or rejects with. */
+  readonly rssi?: number;
+  readonly rssiRejectsWith?: unknown;
 }
 
 export interface ScriptedPort extends CapacitorBlePort {
@@ -167,6 +170,17 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
       started = true;
     },
 
+    /** #1436. Recorded, and answered before `initialize()` as the plugin does. */
+    openAppSettings() {
+      calls.push('openAppSettings');
+      return Promise.resolve();
+    },
+
+    openBluetoothSettings() {
+      calls.push('openBluetoothSettings');
+      return Promise.resolve();
+    },
+
     async isEnabled() {
       calls.push('isEnabled');
       if (!started) {
@@ -237,6 +251,17 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
         return reject(stack.servicesRejectWith);
       }
       return stack.services ?? [];
+    },
+
+    async readRssi(deviceId) {
+      calls.push(`readRssi:${deviceId}`);
+      if (!started) {
+        return notInitialized();
+      }
+      if (stack.rssiRejectsWith !== undefined) {
+        return reject(stack.rssiRejectsWith);
+      }
+      return stack.rssi ?? -60;
     },
 
     async read(_deviceId, service, characteristic) {

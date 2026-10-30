@@ -53,6 +53,8 @@
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
  * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
  * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
+ * | `piecewiseRideStoreFactory` | *wrong time* — a finished ride written as three writes rather than one transaction (#1326) | a lap that fails leaves the activity and its samples in the library, and the checkpoint still reads as unsaved |
+ * | `replanlessCheckpointStoreFactory` | *wrong layer* — a layer above copied a checkpoint's header and dropped its re-plan record (#1328) | the recording is listed, recovers and saves with every sample — **and no record of the moves ridden in it** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -89,6 +91,8 @@ import type {
   SyncBaseRecord,
   RiderTextRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRecord,
+  WorldCorridorRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -138,6 +142,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     getAthlete: async (id) => real.getAthlete(id),
     deleteAthlete: async (id) => real.deleteAthlete(id),
     putActivity: async (record) => real.putActivity(record),
+    putFinishedRide: async (ride) => real.putFinishedRide(ride),
     getActivity: async (owner, id) => real.getActivity(owner, id),
     listActivitySummaries: async (owner, options) => real.listActivitySummaries(owner, options),
     findActivityByOriginalFileHash: async (owner, sha256) =>
@@ -147,6 +152,13 @@ function bindStore(real: ActivityStore): PersistentStore {
     setActivityMayBeRaced: async (owner, activity, mayBeRaced) =>
       real.setActivityMayBeRaced(owner, activity, mayBeRaced),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
+    moveActivityToRecentlyDeleted: async (owner, id, deletedAt) =>
+      real.moveActivityToRecentlyDeleted(owner, id, deletedAt),
+    listRecentlyDeleted: async (owner, now) => real.listRecentlyDeleted(owner, now),
+    restoreRecentlyDeleted: async (owner, id, now) => real.restoreRecentlyDeleted(owner, id, now),
+    deleteRecentlyDeletedForGood: async (owner, id) => real.deleteRecentlyDeletedForGood(owner, id),
+    emptyRecentlyDeleted: async (owner) => real.emptyRecentlyDeleted(owner),
+    purgeRecentlyDeleted: async (owner, now) => real.purgeRecentlyDeleted(owner, now),
     putLap: async (record) => real.putLap(record),
     listLaps: async (owner, activity) => real.listLaps(owner, activity),
     putPrivacyZone: async (record) => real.putPrivacyZone(record),
@@ -160,6 +172,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     putRecordingSession: async (record) => real.putRecordingSession(record),
     getRecordingSession: async (owner, id) => real.getRecordingSession(owner, id),
     listRecordingSessions: async (owner) => real.listRecordingSessions(owner),
+    readRecordingSessions: async (owner) => real.readRecordingSessions(owner),
     appendRecordingChunk: async (chunk) => real.appendRecordingChunk(chunk),
     recoverRecording: async (owner, id) => real.recoverRecording(owner, id),
     getRecordingFootprint: async (owner, id) => real.getRecordingFootprint(owner, id),
@@ -185,7 +198,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     getRoute: async (owner, id) => real.getRoute(owner, id),
     listRoutes: async (owner, limit) => real.listRoutes(owner, limit),
     deleteRoute: async (owner, id) => real.deleteRoute(owner, id),
-    putWorkout: async (record) => real.putWorkout(record),
+    putWorkout: async (record, condition) => real.putWorkout(record, condition),
     getWorkout: async (owner, id) => real.getWorkout(owner, id),
     listWorkouts: async (owner, limit) => real.listWorkouts(owner, limit),
     deleteWorkout: async (owner, id) => real.deleteWorkout(owner, id),
@@ -203,13 +216,19 @@ function bindStore(real: ActivityStore): PersistentStore {
     putSyncBase: async (record) => real.putSyncBase(record),
     listSyncBase: async (owner) => real.listSyncBase(owner),
     deleteSyncBase: async (owner, kind, key) => real.deleteSyncBase(owner, kind, key),
-    putRiderText: async (record) => real.putRiderText(record),
+    putRiderText: async (record, condition) => real.putRiderText(record, condition),
     getRiderText: async (owner, kind, key) => real.getRiderText(owner, kind, key),
     listRiderTexts: async (owner, kind) => real.listRiderTexts(owner, kind),
     listRiderTextKeys: async (owner, kind) => real.listRiderTextKeys(owner, kind),
     deleteRiderText: async (owner, kind, key) => real.deleteRiderText(owner, kind, key),
     putTrustedDeviceKey: async (record) => real.putTrustedDeviceKey(record),
     listTrustedDeviceKeys: async (owner) => real.listTrustedDeviceKeys(owner),
+    putWorkoutGoals: async (record, condition) => real.putWorkoutGoals(record, condition),
+    getWorkoutGoals: async (owner) => real.getWorkoutGoals(owner),
+    deleteWorkoutGoals: async (owner) => real.deleteWorkoutGoals(owner),
+    putWorldCorridor: async (record) => real.putWorldCorridor(record),
+    getWorldCorridor: async (owner, route) => real.getWorldCorridor(owner, route),
+    deleteWorldCorridor: async (owner, route) => real.deleteWorldCorridor(owner, route),
   };
 }
 
@@ -272,6 +291,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
           memory.set(`lap:${record.id}`, record);
           return Promise.resolve(record.id);
         },
+        putFinishedRide: (ride) => {
+          memory.set(`ride:${ride.activity.id}`, ride);
+          return Promise.resolve(ride.activity.id);
+        },
         putPrivacyZone: (record) => {
           memory.set(`zone:${record.id}`, record);
           return Promise.resolve(record.id);
@@ -328,6 +351,16 @@ export function memoryWriteStoreFactory(): StoreFactory {
         },
         putTrustedDeviceKey: (record: TrustedDeviceKeyRecord) => {
           memory.set(`trusted-key:${record.publicKey}`, record);
+          return Promise.resolve();
+        },
+        putWorkoutGoals: (record: WorkoutGoalsRecord) => {
+          memory.set(`workout-goals:${record.athleteId}`, record);
+          return Promise.resolve(record);
+        },
+        // #1545. A corridor that was "kept" and is not there is a cache miss
+        // to #1539, which reads the archive again on every ride.
+        putWorldCorridor: (record: WorldCorridorRecord) => {
+          memory.set(`world-corridor:${record.owner}:${record.routeId}`, record);
           return Promise.resolve();
         },
       };
@@ -1295,6 +1328,82 @@ export function cascadingSyncBaseStoreFactory(): StoreFactory {
             if (row.activityId === id) await real.deleteSyncBase(owner, row.kind, row.key);
           }
           return real.deleteActivity(owner, id);
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that writes a finished ride **as separate writes** — the
+ * activity, then its samples, then each lap, then the checkpoint's link —
+ * rather than in one transaction.
+ *
+ * The fake for #1326's write path, and the shape that path replaced: every
+ * part goes through the real store and really commits, and when every part
+ * succeeds the ride reads back perfectly. Only a failure part-way tells the
+ * two apart — a lap the store refuses leaves the activity and its samples in
+ * the library, and the checkpoint unmarked, so the ride is offered for saving
+ * a second time. `activity-store.finished-ride.test.ts` is the red/green pair.
+ */
+export function piecewiseRideStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putFinishedRide: async (ride) => {
+          await real.putActivity(ride.activity);
+          await real.putStreamSet(ride.streams);
+          for (const lap of ride.laps) {
+            await real.putLap(lap);
+          }
+          if (ride.recordingSession !== undefined) {
+            const session = await real.getRecordingSession(
+              ride.activity.athleteId,
+              ride.recordingSession,
+            );
+            if (session !== undefined) {
+              await real.putRecordingSession({ ...session, savedAs: ride.activity.id });
+            }
+          }
+          return ride.activity.id;
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose checkpoint write **drops the header's re-plan record**.
+ *
+ * The fake for #1328's field: the header is rewritten on every flush, and a
+ * layer that copies it field by field and forgets the newest one loses
+ * nothing anything else checks. The recording is listed, recovers whole and
+ * saves; only a round trip that reads the recovered recording's `replans`
+ * notices that the moves ridden in it are gone.
+ * `activity-store.recording-replans.test.ts` is the red/green pair.
+ */
+export function replanlessCheckpointStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putRecordingSession: async (record) => {
+          // Copied field by field, as a layer that predates the field would.
+          const copy: NewRecordingSession = {
+            ...record,
+            replans: undefined,
+            replansDropped: undefined,
+          };
+          return real.putRecordingSession(copy);
         },
       };
     },

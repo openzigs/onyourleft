@@ -7,12 +7,13 @@
  * middle.
  */
 
-import { webcrypto } from 'node:crypto';
+import type { webcrypto } from 'node:crypto';
 
-import { AUTH_PURPOSE, deviceStatementBytes, toHex, type DevicePurpose } from '@onyourleft/domain';
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 import { decodeRoomMessage, encodeMessage, PROTOCOL_VERSION } from '@onyourleft/protocol';
 import { WebSocket } from 'ws';
+
+import { signedInDevice, type Device } from './replan-round-trip-run.ts';
 
 export interface SoakOptions {
   /** The instance's origin: `https://rides.example.org`, or `http://127.0.0.1:8787`. */
@@ -40,62 +41,47 @@ export interface SoakReport {
   readonly longestSilenceMs: number;
 }
 
-/** A throwaway device that signs a statement the way the app's own device key does. */
-async function signIn(origin: string, instance: string, displayName: string): Promise<string> {
-  const pair = (await webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, [
-    'sign',
-    'verify',
-  ])) as unknown as webcrypto.CryptoKeyPair;
-  const publicKey = toHex(new Uint8Array(await webcrypto.subtle.exportKey('raw', pair.publicKey)));
-  const post = async (path: string, body: unknown): Promise<Record<string, unknown>> => {
-    const response = await fetch(`${instance}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const parsed = (await response.json()) as Record<string, unknown>;
-    if (!response.ok) {
-      const code = (parsed.error as { code?: string } | undefined)?.code ?? String(response.status);
-      throw new Error(`${path} was refused: ${code}`);
-    }
-    return parsed;
+/**
+ * A throwaway device, signed in. Sealed on an instance that serves keys:
+ * since #1210 (phase 2 of ADR 0047 D-7) signing in and a room's ticket are
+ * sealed-only there, so a plaintext soak would be refused `sealed_required`.
+ * In plaintext on one that serves none, which has no sealed routes. The
+ * sealed device is `replan-round-trip-run.ts`'s, and what its header says
+ * sealing is worth from a tool that pins no card holds here too. A new key
+ * each time, or `given` (#464's load run brings its own).
+ */
+export async function signIn(
+  instance: string,
+  displayName: string,
+  given?: webcrypto.CryptoKeyPair,
+): Promise<Device> {
+  const served = (await (await fetch(`${instance}/v1/instance/keys`)).json().catch(() => ({}))) as {
+    statements?: unknown[];
   };
-  const { nonce } = (await post('/v1/auth/challenge', { publicKey })) as { nonce: string };
-  const statement = {
-    purpose: AUTH_PURPOSE as DevicePurpose,
-    instanceOrigin: origin,
-    nonce,
-    publicKey,
-    issuedAt: Math.floor(Date.now() / 1000),
-  };
-  const signature = toHex(
-    new Uint8Array(
-      await webcrypto.subtle.sign(
-        { name: 'Ed25519' },
-        pair.privateKey,
-        new Uint8Array(deviceStatementBytes(statement)),
-      ),
-    ),
-  );
-  const session = await post('/v1/auth/session', { ...statement, signature, displayName });
-  return session.sessionToken as string;
+  const transport = (served.statements?.length ?? 0) > 0 ? 'sealed' : 'plaintext';
+  return signedInDevice(instance, instance, transport, displayName, given);
 }
 
-async function ticketFor(instance: string, token: string, roomId: string): Promise<string> {
-  const response = await fetch(`${instance}/v1/rooms/${roomId}/ticket`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ declaredMassKilograms: 75 }),
+export async function ticketFor(
+  device: Device,
+  roomId: string,
+  declaredMassKilograms = 75,
+): Promise<string> {
+  const answer = await device.call('POST', `/v1/rooms/${roomId}/ticket`, {
+    declaredMassKilograms,
   });
-  if (!response.ok) throw new Error(`a ticket was refused: ${String(response.status)}`);
-  return ((await response.json()) as { ticket: string }).ticket;
+  const ticket = (answer.body as { ticket?: unknown } | null)?.ticket;
+  if (answer.status !== 200 || typeof ticket !== 'string') {
+    throw new Error(`a ticket was refused: ${String(answer.status)}`);
+  }
+  return ticket;
 }
 
-function socketUrl(instance: string, roomId: string): string {
+export function socketUrl(instance: string, roomId: string): string {
   return `${instance.replace(/^http/, 'ws')}/v1/rooms/${roomId}/socket`;
 }
 
-function hello(ticket: string): string {
+export function hello(ticket: string): string {
   return JSON.stringify({
     type: 'hello',
     protocol: PROTOCOL_VERSION,
@@ -105,7 +91,7 @@ function hello(ticket: string): string {
 }
 
 /** The origin the instance's devices sign: the URL given, which is its public hostname. */
-function originOf(url: string): string {
+export function originOf(url: string): string {
   return new URL(url).origin;
 }
 
@@ -120,7 +106,7 @@ export async function soak(options: SoakOptions): Promise<SoakReport> {
   const open = new Set<WebSocket>();
 
   async function ride(rider: number): Promise<void> {
-    const token = await signIn(instance, instance, `Soak ${String(rider + 1)}`);
+    const device = await signIn(instance, `Soak ${String(rider + 1)}`);
     frames[rider] = 0;
     let closedAt: number | undefined;
     let sequence = 0;
@@ -137,7 +123,7 @@ export async function soak(options: SoakOptions): Promise<SoakReport> {
       });
       socket.on('open', () => {
         options.onSocket?.(rider, socket);
-        void ticketFor(instance, token, options.roomId).then(
+        void ticketFor(device, options.roomId).then(
           (ticket) => socket.send(hello(ticket)),
           () => socket.close(),
         );
@@ -214,7 +200,7 @@ export async function idleProbe(options: {
   readonly maximumMs: number;
 }): Promise<IdleReport> {
   const instance = originOf(options.url);
-  const token = await signIn(instance, instance, 'Idle probe');
+  const device = await signIn(instance, 'Idle probe');
   const started = Date.now();
   const socket = new WebSocket(socketUrl(instance, options.roomId), {
     perMessageDeflate: false,
@@ -226,7 +212,7 @@ export async function idleProbe(options: {
   });
   socket.on('error', () => undefined);
   socket.on('open', () => {
-    void ticketFor(instance, token, options.roomId).then((ticket) => socket.send(hello(ticket)));
+    void ticketFor(device, options.roomId).then((ticket) => socket.send(hello(ticket)));
   });
   const closed = await Promise.race([
     new Promise<number>((resolve) => socket.on('close', (code) => resolve(code))),

@@ -1,0 +1,417 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * **What a moderator decided about this rider's account, and why** (#910):
+ * the statements of reasons the instance keeps (DSA Art. 17), read back on
+ * the Instance screen — by a rider who can sign in, AND by one who cannot
+ * because they were suspended.
+ *
+ * A suspended rider's sessions end at once, so the token this device holds
+ * answers `401`, and signing in again is refused `account_suspended`. So
+ * {@link StatementsPort.read} asks with the held session first and, when it is
+ * refused, opens the rider's way-out session (`POST /v1/auth/leave-session`,
+ * signed with this device's key, #898, and sealed since #1210) and asks with
+ * that. That session reaches the export, the deletion, these statements and
+ * an appeal against one of them (#911) and nothing else (`apps/instance`
+ * §`choke-point.test.ts`), and this module never keeps it.
+ *
+ * {@link StatementsPort.appeal} asks the instance to look at a decision again
+ * (#911, OSA s.21(4)(d)) by the same two sessions, so a suspended rider can
+ * appeal without being able to sign in to anything else.
+ *
+ * {@link StatementsPort.exportAccount} and {@link StatementsPort.eraseAccount}
+ * take the rider's data out of the instance and delete their account there
+ * (#1517) by the same two sessions: suspension never stops a rider getting or
+ * erasing their own data. The deletion's step-up is a statement signed just
+ * now by this device's key (`oyl-erase-account-v1`, #898). ⚠️ It deletes
+ * nothing on this device (ADR 0036 D-3 (b)): once the instance has deleted the
+ * account, this device forgets only its sign-in there, as a disconnect does.
+ *
+ * Every route here is sealed-only on an instance holding keys (#1382, ADR 0047's
+ * amendment of 2026-10-16), so both sessions call them through the sealed
+ * path: the held one through `heldAccountSession` (#1210), the way-out one
+ * through the sealed instance its opening judged. ⚠️ A device that holds a pin
+ * never falls back to plaintext; one with no pin calls them in plaintext only
+ * on an instance that serves no keys.
+ *
+ * Every request goes through `instance-transport.ts`, the ONE module this
+ * client sends instance traffic through (#777, ADR 0036 D-3 (a)), and only to
+ * the instance this device connected to. A `*-port.ts`: `check:wiring`
+ * watches {@link StatementsPort} and {@link createStatementsPort}.
+ */
+
+import {
+  deviceStatementBytes,
+  ERASE_ACCOUNT_PURPOSE,
+  toHex,
+  unixSeconds,
+} from '@onyourleft/domain';
+
+import {
+  heldAccountSession,
+  instanceEraser,
+  sessionlessSealed,
+  type SealingDependencies,
+} from './instance-port';
+import {
+  instanceHttp,
+  MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+  type InstanceHttp,
+} from './instance-transport';
+import { openLeaveSession, readInstanceAccount } from './sign-in';
+
+/** One statement of reasons, as the rider reads it. */
+export interface RiderStatement {
+  readonly statementId: number;
+  /** Unix seconds. */
+  readonly at: number;
+  /** The instance's name for what was done: `suspend`, `hide_display_name`, `hide_item`. */
+  readonly restriction: string;
+  /** Unix seconds, or `null` for no end date. */
+  readonly endsAt: number | null;
+  readonly facts: string;
+  readonly decidedOn: 'notice' | 'report' | 'own_initiative';
+  readonly legalGround: string | null;
+  readonly termsGround: string | null;
+  readonly notifierNamed: string | null;
+  readonly moderatorConflict: boolean;
+  /** Where to write to ask the instance to look again, or `null` when it published none. */
+  readonly contactEmail: string | null;
+  /** The rider's appeal against it (#911), or `null` when they have not appealed. */
+  readonly appeal: RiderAppeal | null;
+}
+
+/** An appeal, as the rider reads it with the decision it appeals (#911). */
+export interface RiderAppeal {
+  /** Unix seconds. */
+  readonly filedAt: number;
+  readonly grounds: string;
+  /** `null` until a moderator decides it. */
+  readonly outcome: 'upheld' | 'reversed' | null;
+  /** What the moderator told the rider, once decided. */
+  readonly decision: string | null;
+  /** The moderator who decided it took the decision appealed, and declared it. */
+  readonly moderatorConflict: boolean;
+  readonly decidedAt: number | null;
+}
+
+/** What appealing did (#911). */
+export type AppealOutcome =
+  { readonly kind: 'filed' } | { readonly kind: 'refused'; readonly text: string };
+
+/** The longest grounds the instance takes (`apps/instance` §`statements.ts`). */
+export const MAXIMUM_APPEAL_GROUNDS = 2000;
+
+/** What the rider is told when an appeal is not filed. ⚠️ Draft wording awaiting the owner's approval. */
+export const APPEAL_REFUSAL_TEXT = {
+  grounds: `Say why the decision is wrong, in at most ${String(MAXIMUM_APPEAL_GROUNDS)} characters, with no place or coordinate in it.`,
+  already: 'You have already appealed this decision. The moderator decides each appeal once.',
+  'no-answer': 'The instance did not answer, so the appeal was not sent. Try again later.',
+} as const;
+
+/** What deleting the account did (#1517). */
+export type EraseOutcome =
+  { readonly kind: 'erased' } | { readonly kind: 'refused'; readonly text: string };
+
+/** What the rider is told when the account is not deleted. The owner's approved wording (2026-10-21, on #1528). */
+export const ERASE_REFUSAL_TEXT =
+  'Your account was not deleted: the instance did not answer, or refused. Try again later.';
+
+export type StatementsRead =
+  | { readonly kind: 'statements'; readonly statements: readonly RiderStatement[] }
+  | { readonly kind: 'not-connected' }
+  | { readonly kind: 'unreachable' };
+
+export interface StatementsPort {
+  /** The statements about this rider's account, newest first — suspended or not. */
+  read(): Promise<StatementsRead>;
+  /** Appeal the decision `statementId` explains, with the rider's grounds (#911). */
+  appeal(statementId: number, grounds: string): Promise<AppealOutcome>;
+  /**
+   * Everything the instance holds about this rider (`GET /v1/account/export`,
+   * #1517), as the JSON text to save, or `undefined` when it was not read.
+   */
+  exportAccount(): Promise<string | undefined>;
+  /** Delete this rider's account on the instance (`DELETE /v1/account`, #1517). Never this device's copy. */
+  eraseAccount(): Promise<EraseOutcome>;
+}
+
+/**
+ * What the port needs: a sealed call's dependencies (#1210 — the way-out
+ * session is a phase-2 sealed route, signed by this device's key, which
+ * `signingKey` gives), and the local athlete.
+ */
+export interface StatementsPortDependencies extends SealingDependencies {
+  /** `ensureLocalAthlete`, bound: asked before the key, as a sign-in asks. */
+  readonly ensureLocalAthlete: () => Promise<unknown>;
+}
+
+/** The longest fields the instance keeps (`apps/instance` §`statements.ts`). */
+const LIMITS = { facts: 2000, ground: 1000, notifier: 200, email: 254 };
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+const isTime = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+/** Text as the instance keeps it, `null` where it may be, or `undefined` when it is neither. */
+function textOf(value: unknown, maximum: number, nullable: boolean): string | null | undefined {
+  if (value === null) return nullable ? null : undefined;
+  if (typeof value !== 'string' || [...value].length > maximum) return undefined;
+  return value;
+}
+
+function statementFrom(value: unknown): RiderStatement | undefined {
+  const row = record(value);
+  const redress = record(row?.redress);
+  const facts = textOf(row?.facts, LIMITS.facts, false);
+  const legalGround = textOf(row?.legalGround, LIMITS.ground, true);
+  const termsGround = textOf(row?.termsGround, LIMITS.ground, true);
+  const notifierNamed = textOf(row?.notifierNamed, LIMITS.notifier, true);
+  const contactEmail = textOf(redress?.contactEmail, LIMITS.email, true);
+  const appeal = row?.appeal === null ? null : appealFrom(row?.appeal);
+  if (
+    row === undefined ||
+    !(typeof row.statementId === 'number' && Number.isSafeInteger(row.statementId)) ||
+    !isTime(row.at) ||
+    typeof row.restriction !== 'string' ||
+    !/^[a-z_]{1,64}$/.test(row.restriction) ||
+    !(row.endsAt === null || isTime(row.endsAt)) ||
+    typeof facts !== 'string' ||
+    (row.decidedOn !== 'notice' &&
+      row.decidedOn !== 'report' &&
+      row.decidedOn !== 'own_initiative') ||
+    legalGround === undefined ||
+    termsGround === undefined ||
+    notifierNamed === undefined ||
+    contactEmail === undefined ||
+    appeal === undefined ||
+    typeof row.moderatorConflict !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return {
+    statementId: row.statementId,
+    at: row.at,
+    restriction: row.restriction,
+    endsAt: row.endsAt,
+    facts,
+    decidedOn: row.decidedOn,
+    legalGround,
+    termsGround,
+    notifierNamed,
+    moderatorConflict: row.moderatorConflict,
+    contactEmail,
+    appeal,
+  };
+}
+
+function appealFrom(value: unknown): RiderAppeal | undefined {
+  const row = record(value);
+  const grounds = textOf(row?.grounds, MAXIMUM_APPEAL_GROUNDS, false);
+  const decision = textOf(row?.decision, MAXIMUM_APPEAL_GROUNDS, true);
+  const outcome = row?.outcome;
+  if (
+    row === undefined ||
+    !isTime(row.filedAt) ||
+    typeof grounds !== 'string' ||
+    decision === undefined ||
+    !(outcome === null || outcome === 'upheld' || outcome === 'reversed') ||
+    !(row.moderatorConflict === null || typeof row.moderatorConflict === 'boolean') ||
+    !(row.decidedAt === null || isTime(row.decidedAt))
+  ) {
+    return undefined;
+  }
+  return {
+    filedAt: row.filedAt,
+    grounds,
+    outcome,
+    decision,
+    moderatorConflict: row.moderatorConflict === true,
+    decidedAt: row.decidedAt,
+  };
+}
+
+/** The statements in an answer, or `undefined` when it is not every one of them. */
+function statementsIn(body: unknown): readonly RiderStatement[] | undefined {
+  const list = record(body)?.statements;
+  if (!Array.isArray(list)) return undefined;
+  const read = list.map(statementFrom);
+  return read.some((each) => each === undefined) ? undefined : (read as RiderStatement[]);
+}
+
+/** The instance's own error code in an answer, or `undefined`. */
+function codeOf(body: unknown): unknown {
+  return record(record(body)?.error)?.code;
+}
+
+/** The production {@link StatementsPort}: `main.tsx` builds it, and nothing else in the client. */
+export function createStatementsPort(dependencies: StatementsPortDependencies): StatementsPort {
+  const accountSession = heldAccountSession(dependencies);
+  const wayOut = sessionlessSealed(dependencies);
+  /**
+   * One request with the session this device holds, and — when the instance
+   * refuses that session — once more with a way-out session it opens. Answers
+   * `undefined` when there is no instance; throws when there is no answer,
+   * and when the device may not seal now (#1382): nothing goes in plaintext.
+   */
+  async function withSession(
+    request: (
+      sealedOrKeyless: Pick<InstanceHttp, 'call'>,
+      token: string,
+    ) => Promise<{ readonly status: number; readonly body: unknown }>,
+  ): Promise<{ readonly status: number; readonly body: unknown } | undefined> {
+    const account = readInstanceAccount(dependencies.storage);
+    if (account === undefined) return undefined;
+    const session = await accountSession();
+    if (session.kind === 'open') {
+      const answer = await request(session.sealedOrKeyless, session.token);
+      // Anything but the rider's own session being refused is the answer.
+      if (answer.status !== 401 && answer.status !== 403) return answer;
+      if (answer.status === 403 && codeOf(answer.body) !== 'account_suspended') return answer;
+    } else if (session.why !== 'signed-out') {
+      // A copy a website served, a card needed or awaited, keys refused:
+      // the way out could not seal either, so nothing more is sent.
+      throw new Error(session.text);
+    }
+    // The held session is gone or refused: a suspended rider's way out,
+    // sealed when this device can seal (#1210), and not sent at all when it
+    // holds a pin but may not seal now: that is no answer.
+    const way = await wayOut();
+    if (way.kind === 'closed') throw new Error(way.text);
+    const http = instanceHttp(account.origin, dependencies.send);
+    const token = await openLeaveSession({
+      origin: account.origin,
+      transport: { post: async (path, body) => http.call('POST', path, { body }) },
+      ...(way.kind === 'sealed' ? { sealed: way.sealed } : {}),
+      storage: dependencies.storage,
+      ensureLocalAthlete: dependencies.ensureLocalAthlete,
+      signingKey: dependencies.signingKey,
+      ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+    });
+    // The way-out session's own request goes as the session did: sealed from
+    // a device holding a pin, plaintext only from one with none (#1382).
+    return request(way.kind === 'sealed' ? way.instance : http, token);
+  }
+
+  /**
+   * The deletion's step-up (#898): a challenge from the instance, signed now
+   * for `oyl-erase-account-v1` by this device's key. The challenge is
+   * plaintext, as signing in's is; the statement goes in the sealed request.
+   */
+  async function eraseStatement(origin: string): Promise<Record<string, string | number>> {
+    const key = await dependencies.signingKey();
+    const publicKey = toHex(key.publicKey);
+    const challenge = await instanceHttp(origin, dependencies.send).call(
+      'POST',
+      '/v1/auth/challenge',
+      { body: { publicKey } },
+    );
+    const nonce = record(challenge.body)?.nonce;
+    if (challenge.status !== 200 || typeof nonce !== 'string') throw new Error('no challenge');
+    const now = dependencies.now ?? (() => Date.now());
+    const statement = {
+      purpose: ERASE_ACCOUNT_PURPOSE,
+      instanceOrigin: origin,
+      nonce,
+      publicKey,
+      issuedAt: unixSeconds(Math.floor(now() / 1000)),
+    } as const;
+    return { ...statement, signature: toHex(await key.sign(deviceStatementBytes(statement))) };
+  }
+
+  return {
+    read: async () => {
+      try {
+        const answer = await withSession((sealedOrKeyless, token) =>
+          sealedOrKeyless.call('GET', '/v1/statements', { token }),
+        );
+        if (answer === undefined) return { kind: 'not-connected' };
+        const statements = answer.status === 200 ? statementsIn(answer.body) : undefined;
+        return statements === undefined
+          ? { kind: 'unreachable' }
+          : { kind: 'statements', statements };
+      } catch {
+        // Not suspended after all (the session simply lapsed), refused, or no
+        // answer: there is nothing this screen can read.
+        return { kind: 'unreachable' };
+      }
+    },
+
+    appeal: async (statementId, grounds) => {
+      const trimmed = grounds.trim();
+      if (
+        !Number.isSafeInteger(statementId) ||
+        statementId < 1 ||
+        trimmed === '' ||
+        [...trimmed].length > MAXIMUM_APPEAL_GROUNDS
+      ) {
+        return { kind: 'refused', text: APPEAL_REFUSAL_TEXT.grounds };
+      }
+      try {
+        const answer = await withSession((sealedOrKeyless, token) =>
+          sealedOrKeyless.call('POST', `/v1/statements/${String(statementId)}/appeal`, {
+            token,
+            body: { grounds: trimmed },
+          }),
+        );
+        if (answer?.status === 200) return { kind: 'filed' };
+        switch (codeOf(answer?.body)) {
+          case 'validation_failed':
+            return { kind: 'refused', text: APPEAL_REFUSAL_TEXT.grounds };
+          case 'already_appealed':
+            return { kind: 'refused', text: APPEAL_REFUSAL_TEXT.already };
+          default:
+            return { kind: 'refused', text: APPEAL_REFUSAL_TEXT['no-answer'] };
+        }
+      } catch {
+        return { kind: 'refused', text: APPEAL_REFUSAL_TEXT['no-answer'] };
+      }
+    },
+
+    exportAccount: async () => {
+      try {
+        const answer = await withSession((sealedOrKeyless, token) =>
+          // The largest answer one call may read (#784's bound): an export is
+          // every record the instance holds, and far past the usual 256 KiB.
+          sealedOrKeyless.call('GET', '/v1/account/export', {
+            token,
+            maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+          }),
+        );
+        return answer?.status === 200 && record(answer.body) !== undefined
+          ? JSON.stringify(answer.body, null, 2)
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+
+    eraseAccount: async () => {
+      const account = readInstanceAccount(dependencies.storage);
+      if (account === undefined) return { kind: 'refused', text: ERASE_REFUSAL_TEXT };
+      try {
+        const answer = await withSession(async (sealedOrKeyless, token) =>
+          // A fresh statement for each session asked: a challenge is spent once.
+          sealedOrKeyless.call('DELETE', '/v1/account', {
+            token,
+            body: { statement: await eraseStatement(account.origin) },
+          }),
+        );
+        if (answer?.status === 204) {
+          // The account is gone, so the sign-in to it is forgotten — and
+          // nothing else: every ride stays on this device (ADR 0036 D-3 (b)).
+          instanceEraser(dependencies.storage).forget();
+          return { kind: 'erased' };
+        }
+        return { kind: 'refused', text: ERASE_REFUSAL_TEXT };
+      } catch {
+        return { kind: 'refused', text: ERASE_REFUSAL_TEXT };
+      }
+    },
+  };
+}

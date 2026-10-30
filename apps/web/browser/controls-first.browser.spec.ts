@@ -220,6 +220,35 @@ const READ_BEFORE_ACTING: Partial<Record<RouteId, string>> = {
 };
 
 /**
+ * A safety notice a route may stand above its first control — #1133 — by the
+ * opening of its text, with the reason it stands there. Unlike
+ * {@link READ_BEFORE_ACTING} it is ALLOWED and never REQUIRED: the notice is
+ * drawn only in the state it describes, so a route without it is as right as
+ * one with it. It lifts #993's "kept-visible text below the controls" for the
+ * text named and nothing else; any other marked text above the first control
+ * on the same route is still a fault (`?kept=unrelated`, below).
+ */
+const SAFETY_NOTICE_ABOVE_CONTROL: Partial<
+  Record<RouteId, { readonly opening: string; readonly reason: string }>
+> = {
+  game: {
+    opening: 'Not released',
+    reason:
+      '#940, #372: the trainer may still hold the last ride’s target, and a rider must ' +
+      'see that before starting another, so the notice stands above Ride',
+  },
+};
+
+/**
+ * A kept sentence's text as it is read aloud: without a status message's
+ * glyph (`design/StatusMessage.tsx` §`GLYPH`), which is `aria-hidden` and
+ * laid out straight against the label — "✕Not released: …".
+ */
+function spoken(text: string): string {
+  return text.replace(/^[i✓!✕](?=\p{Lu})/u, '');
+}
+
+/**
  * The sections that tuck their explanation, by heading, route by route —
  * #699's review, B2. The harness measures a section only where it finds the
  * ⓘ beside its heading (a "More about" disclosure until #1031), so a section
@@ -239,8 +268,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   camera: ['Filming a ride: the side camera', 'A side camera on a tripod'],
   game: ['Ride with others'],
   'route-builder': ['Waypoints'],
-  // #1030 (PR #1032): the share note went behind its own ⓘ.
-  routes: ['Saved routes', 'Import a route', 'Before you share a route'],
+  // #1030 (PR #1032): the share note went behind its own ⓘ. #1442: and that
+  // section is said beside a chosen route only, which this walk does not choose.
+  routes: ['Saved routes', 'Import a route'],
   // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
   // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
   // with it the ⓘ that explained the choice.
@@ -251,13 +281,23 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   settings: [
     'Units',
     'Your weight',
+    // #1813: what Delivery is and what each of its assists changes.
+    'Delivery',
     'Menu sounds',
     'Appearance',
     'Announcements',
     'Sounds',
+    // #1433: what the order is for — the zoom keeps the top two.
+    'Ride screen readings',
     'Game world',
+    // #787: what the draft indicator shows and says, and that it is not the
+    // room's own switch.
+    'Draft',
     'Words to mask',
     'Documents for the analysis',
+    // #1237: what the typed goals are not, and why thresholds are checked
+    // later; where they are kept stays above the form.
+    'Workout goals',
   ],
   segments: ['Make a segment', 'Find your efforts'],
   transfer: ['Import', 'Erase this device', 'Why this is a file and not a connection'],
@@ -271,6 +311,14 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
  */
 const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   home: ['This week'],
+  // #912: what the record holds is behind the ⓘ; the screen is a moderator's
+  // only over the populated ports. Notices and Appeals tuck nothing: each item
+  // is read before it is acted on, so each has one short line and no ⓘ.
+  moderation: ['The record'],
+  // #1439: what a new write-up does to the ride's saved one is behind the
+  // section's ⓘ; the section has a heading only once an instance is
+  // connected or a write-up is saved (#1103), which the populated ports are.
+  'activity-detail': ['A write-up by your model'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {
@@ -364,7 +412,8 @@ const SECTION_PROSE_BUDGET_PIXELS = 130;
  *   `data-oyl-kept-visible` before the first control, except on a consent
  *   route ({@link CONSENT_BEFORE_CONTROL}), whose box says the text was read,
  *   or the text a route names in {@link READ_BEFORE_ACTING} (#1009) — which
- *   must stand above the first control there;
+ *   must stand above the first control there — or the safety notice a route
+ *   names in {@link SAFETY_NOTICE_ABOVE_CONTROL} (#1133), which may;
  * - **a help control a thumb and a screen reader can use** — where the route
  *   declares help, the ⓘ is a 44 × 44 target named "Help with …" whose panel
  *   holds the route's words while it is closed (in the page, so offline).
@@ -380,8 +429,11 @@ function lineFaults(route: RouteDefinition, seen: ReflowMeasurement, viewport: V
     );
   }
   const readFirst = READ_BEFORE_ACTING[route.id];
+  const safety = SAFETY_NOTICE_ABOVE_CONTROL[route.id];
   const keptAbove = seen.keptBeforeFirstControl.filter(
-    (text) => readFirst === undefined || !text.startsWith(readFirst),
+    (text) =>
+      (readFirst === undefined || !text.startsWith(readFirst)) &&
+      (safety === undefined || !spoken(text).startsWith(safety.opening)),
   );
   if (keptAbove.length > 0 && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
     faults.push(
@@ -708,6 +760,45 @@ test.describe('#666 — the first control is above the fold on every route', () 
       expect(empty.faults).toEqual([]);
     });
   }
+
+  // #1133. A refused release puts the chooser's *Not released* notice — kept,
+  // and above Ride on purpose (#940, #372) — in front of the game's first
+  // control. SAFETY_NOTICE_ABOVE_CONTROL is what lets it stand there.
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`the game with a refused release, on a ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport, 'data=populated&release=refused');
+      const seen = await visit(page, routeById('game'));
+      const verdict = judge(routeById('game'), seen, viewport, true);
+      console.log(
+        `controls first, a refused release, ${viewport.name}\n  ${verdict.line}\n` +
+          `  kept above the first control: ${JSON.stringify(seen.keptBeforeFirstControl)}`,
+      );
+      // The state is the one with the notice above the first control, or this
+      // measured the chooser without it and the allowance went unexercised.
+      expect(
+        seen.keptBeforeFirstControl.map(spoken).filter((text) => text.startsWith('Not released')),
+      ).toHaveLength(1);
+      expect(verdict.faults).toEqual([]);
+      expect(verdict.exempted).toBe(false);
+    });
+  }
+
+  test('#1133’s control: with an unrelated sentence marked above the chooser’s first control, the game fails', async ({
+    page,
+  }) => {
+    await open(page, PHONE, 'data=populated&release=refused&kept=unrelated');
+    const seen = await visit(page, routeById('game'));
+    const verdict = judge(routeById('game'), seen, PHONE, true);
+    console.log(
+      `controls first, CONTROL (kept=unrelated), ${PHONE.name}\n  ${verdict.faults.join('\n  ')}`,
+    );
+    const kept = verdict.faults.filter((fault) => fault.includes('kept-visible text stands above'));
+    // Red for the marked sentence, and for it alone: the safety notice beside
+    // it is still allowed.
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toContain('Your trainer');
+    expect(kept[0]).not.toContain('Not released');
+  });
 
   test('#943’s control: with the drawing at half the viewport, Activities’ action falls below the fold', async ({
     page,

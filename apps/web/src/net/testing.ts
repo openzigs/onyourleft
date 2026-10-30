@@ -21,11 +21,18 @@ import {
   type ClientMessage,
   type FrameRider,
   type RoomMessage,
+  type StandingsRider,
 } from '@onyourleft/protocol';
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 
 import type { InstanceSocketEvents } from '../instance/instance-transport';
-import type { RoomLink, RoomTimers, TicketAnswer } from './room-session';
+import type {
+  RoomLink,
+  RoomReportAnswer,
+  RoomReportReason,
+  RoomTimers,
+  TicketAnswer,
+} from './room-session';
 
 /** Timers that fire only when the test says time has passed. */
 export class ManualClock implements RoomTimers {
@@ -92,6 +99,14 @@ export class ScriptedRoom {
   });
   /** The masses tickets were asked with. */
   readonly masses: number[] = [];
+  /** Every in-ride report filed through this room's link (#789), in order. */
+  readonly reports: {
+    readonly roomId: string;
+    readonly riderId: number;
+    readonly reason: RoomReportReason;
+  }[] = [];
+  /** What a report answers. */
+  reportAnswer: () => RoomReportAnswer = () => ({ kind: 'reported' });
 
   /** The link a session reaches this room through. */
   link(declaredMassKilograms = 72): RoomLink {
@@ -126,6 +141,10 @@ export class ScriptedRoom {
           },
         };
       },
+      report: (roomId, riderId, reason) => {
+        this.reports.push({ roomId, riderId, reason });
+        return Promise.resolve(this.reportAnswer());
+      },
     };
   }
 
@@ -146,7 +165,7 @@ export class ScriptedRoom {
     this.socket.events.onText(encodeMessage(message));
   }
 
-  welcome(riderId: number, kind: 'ride' | 'race' = 'ride'): void {
+  welcome(riderId: number, kind: 'ride' | 'race' = 'ride', drafting: 'on' | 'off' = 'on'): void {
     this.send({
       type: 'welcome',
       riderId,
@@ -156,12 +175,23 @@ export class ScriptedRoom {
         ridingPosition: 'hoods',
         reportIntervalMs: REPORT_INTERVAL_MS,
         frameIntervalMs: FRAME_INTERVAL_MS,
+        drafting,
       },
     });
   }
 
   frame(tick: number, riders: readonly FrameRider[]): void {
     this.send({ type: 'frame', tick, riders });
+  }
+
+  /** A race names a rider (#1347). */
+  name(riderId: number, displayName: string): void {
+    this.send({ type: 'name', riderId, displayName });
+  }
+
+  /** A race's standings, in the room's order, gaps to this socket's rider (#1347). */
+  standings(tick: number, riders: readonly StandingsRider[]): void {
+    this.send({ type: 'standings', tick, riders });
   }
 
   /** The room (or the tunnel in front of it) closes the newest socket. */
@@ -173,13 +203,33 @@ export class ScriptedRoom {
   }
 }
 
-/** A frame rider at `metres` and `metresPerSecond`. */
-export function frameRider(riderId: number, metres: number, metresPerSecond = 10): FrameRider {
+/** A frame rider at `metres` and `metresPerSecond`, the room's draft on them `draftPercent`. */
+export function frameRider(
+  riderId: number,
+  metres: number,
+  metresPerSecond = 10,
+  draftPercent = 0,
+): FrameRider {
   return {
     riderId,
     decimetres: Math.floor(metres * 10),
     centimetresPerSecond: Math.round(metresPerSecond * 100),
-    draftPercent: 0,
+    draftPercent,
     flags: 0,
+  };
+}
+
+/** A standings row: `gapSeconds` behind the recipient (negative ahead), at `wattsPerKilogram`. */
+export function standingsRider(
+  riderId: number,
+  gapSeconds: number,
+  wattsPerKilogram: number,
+  flags = 0,
+): StandingsRider {
+  return {
+    riderId,
+    gapDeciseconds: Math.round(gapSeconds * 10),
+    wattsPerKilogramTenths: Math.round(wattsPerKilogram * 10),
+    flags,
   };
 }

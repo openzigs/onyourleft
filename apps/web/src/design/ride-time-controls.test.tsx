@@ -90,6 +90,27 @@ function states(): readonly RideSnapshot[] {
         timeline: expandWorkout(WORKOUT.workout),
       },
     },
+    // #1244: an accepted re-plan waiting for the next block, which is the
+    // only state that puts *Keep the plan* on the screen.
+    {
+      ...riding,
+      workout: {
+        name: WORKOUT.name,
+        status: 'running',
+        elapsedSeconds: 10,
+        totalSeconds: 720,
+        holdingWatts: 225,
+        nowRiding: '12 min at 90%',
+        fault: undefined,
+        rescue: undefined,
+        timeline: expandWorkout(WORKOUT.workout),
+        replan: {
+          waiting: { revision: 1, sentence: 'Main set ended early, so the cool-down is next.' },
+          kept: false,
+          notice: undefined,
+        },
+      },
+    },
   ];
 }
 

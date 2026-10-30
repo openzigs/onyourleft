@@ -76,25 +76,46 @@ export function samplePoint(index: number): TrackPoint {
   };
 }
 
-/** A lap of `count` samples, starting from sample `from`. */
+/**
+ * A lap of `count` samples, starting from sample `from`, with the figures
+ * #1321 carries: its points' mean and highest, in the whole units TCX writes.
+ */
 export function sampleLap(from: number, count: number): TrackLap {
   const points = Array.from({ length: count }, (_, index) => samplePoint(from + index));
+  const mean = (values: readonly number[]) =>
+    Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  const heartRates = points.map((point) => point.heartRate ?? 0);
+  const powers = points.map((point) => point.power ?? 0);
   return {
     startTime: unixSeconds(RIDE_START_UNIX_SECONDS + from),
     totalElapsedTime: seconds(count - 1),
     totalDistance: metres((from + count - 1) * 7),
     points,
+    averageHeartRate: beatsPerMinute(mean(heartRates)),
+    maxHeartRate: beatsPerMinute(Math.max(...heartRates)),
+    averageCadence: revolutionsPerMinute(mean(points.map((point) => point.cadence ?? 0))),
+    averagePower: watts(mean(powers)),
+    maxPower: watts(Math.max(...powers)),
+    intensity: 'Active',
+    triggerMethod: 'Manual',
   };
 }
 
-/** A whole synthetic activity: two laps, every channel populated. */
+/**
+ * A whole synthetic activity: two laps, every channel populated. The first is a
+ * lead-in marked `Resting`, the second a lap ended at a place — so neither of a
+ * lap's two kind fields is the value the encoder writes when it is absent.
+ */
 export function sampleActivity(): TrackActivity {
   return {
     startTime: unixSeconds(RIDE_START_UNIX_SECONDS),
     name: 'Synthetic fixture ride',
     sport: 'cycling',
     creator: 'On Your Left',
-    laps: [sampleLap(0, 10), sampleLap(10, 8)],
+    laps: [
+      { ...sampleLap(0, 10), intensity: 'Resting' },
+      { ...sampleLap(10, 8), triggerMethod: 'Location' },
+    ],
   };
 }
 

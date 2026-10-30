@@ -34,11 +34,13 @@
 
 import {
   AUTH_PURPOSE,
+  base32UnpaddedDecode,
   deviceStatementBytes,
   LINK_PURPOSE,
   toHex,
   unixSeconds,
   type DevicePurpose,
+  type InstanceKeyTrust,
   type SigningKey,
 } from '@onyourleft/domain';
 
@@ -55,6 +57,80 @@ export interface InstanceAccount {
   readonly origin: string;
   /** The athlete id the INSTANCE gave, which is not the local athlete's. */
   readonly instanceAthleteId: string;
+  /**
+   * The instance identity key's whole fingerprint, 52 base32 characters, as
+   * the card the rider scanned or pasted wrote it (#1190, ADR 0047 D-6) — or
+   * absent: a device that signed in with only an address holds no pin and uses
+   * no sealed route (D-14 Q1). Changed only by the rider confirming a new card.
+   */
+  readonly pin?: string;
+  /** The highest key serial and its id this device has verified, when it first saw each statement, and each key's newest re-signing (D-5, #1216). */
+  readonly keyTrust?: InstanceKeyTrust;
+  /**
+   * The fingerprint the pinned key ENDORSED for its successor (D-5, D-14 Q8):
+   * the app stops sealing and asks for a card carrying exactly this one.
+   */
+  readonly expectedFingerprint?: string;
+}
+
+/** A 52-character base32 fingerprint that decodes to 32 bytes, or `undefined`. */
+function fingerprintField(value: unknown): string | undefined {
+  return typeof value === 'string' && base32UnpaddedDecode(value, 32) !== undefined
+    ? value
+    : undefined;
+}
+
+const isWholeSeconds = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+/** The stored trust, or `undefined` when it is not one this build wrote. */
+function trustField(value: unknown): InstanceKeyTrust | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { highestSerial, highestKeyId, firstVerified, newestIssued } = value as Record<
+    string,
+    unknown
+  >;
+  if (!(highestSerial === null || isWholeSeconds(highestSerial))) return undefined;
+  if (!(highestKeyId === null || typeof highestKeyId === 'string')) return undefined;
+  if (typeof firstVerified !== 'object' || firstVerified === null) return undefined;
+  const seen: Record<string, { at: number; notAfter: number }> = {};
+  for (const [id, entry] of Object.entries(firstVerified)) {
+    const { at, notAfter } = (entry ?? {}) as Record<string, unknown>;
+    if (!isWholeSeconds(at) || !isWholeSeconds(notAfter)) return undefined;
+    seen[id] = { at, notAfter };
+  }
+  const newest: Record<string, { issuedAt: number; notAfter: number }> = {};
+  if (newestIssued === undefined) {
+    // Trust a build before #1216 wrote: every statement it verified is still
+    // in `firstVerified`, named `keyId@issuedAt`, so the newest of each key is
+    // read back from there rather than forgotten.
+    for (const [id, entry] of Object.entries(seen)) {
+      const at = id.lastIndexOf('@');
+      const keyId = id.slice(0, at);
+      const issuedAt = Number(id.slice(at + 1));
+      if (at <= 0 || !isWholeSeconds(issuedAt)) return undefined;
+      const held = newest[keyId];
+      if (held === undefined || issuedAt > held.issuedAt) {
+        newest[keyId] = { issuedAt, notAfter: entry.notAfter };
+      }
+    }
+  } else {
+    if (typeof newestIssued !== 'object' || newestIssued === null) return undefined;
+    for (const [keyId, entry] of Object.entries(newestIssued)) {
+      const { issuedAt, notAfter } = (entry ?? {}) as Record<string, unknown>;
+      if (!isWholeSeconds(issuedAt) || !isWholeSeconds(notAfter)) return undefined;
+      newest[keyId] = { issuedAt, notAfter };
+    }
+  }
+  return { highestSerial, highestKeyId, firstVerified: seen, newestIssued: newest };
+}
+
+/** Keep `account` on this device, in place of whatever was kept before. */
+export function writeInstanceAccount(
+  storage: InstanceAccountStorage,
+  account: InstanceAccount,
+): void {
+  storage.setItem(INSTANCE_ACCOUNT_STORAGE_KEY, JSON.stringify(account));
 }
 
 /** What this module needs of `localStorage`. */
@@ -75,10 +151,21 @@ export function readInstanceAccount(storage: InstanceAccountStorage): InstanceAc
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
-  const { origin, instanceAthleteId } = parsed as Record<string, unknown>;
-  return typeof origin === 'string' && typeof instanceAthleteId === 'string'
-    ? { origin, instanceAthleteId }
-    : undefined;
+  const { origin, instanceAthleteId, pin, keyTrust, expectedFingerprint } = parsed as Record<
+    string,
+    unknown
+  >;
+  if (typeof origin !== 'string' || typeof instanceAthleteId !== 'string') return undefined;
+  const heldPin = fingerprintField(pin);
+  const trust = trustField(keyTrust);
+  const expected = fingerprintField(expectedFingerprint);
+  return {
+    origin,
+    instanceAthleteId,
+    ...(heldPin === undefined ? {} : { pin: heldPin }),
+    ...(heldPin === undefined || trust === undefined ? {} : { keyTrust: trust }),
+    ...(heldPin === undefined || expected === undefined ? {} : { expectedFingerprint: expected }),
+  };
 }
 
 /** Why signing in did not work: the instance's own error code, or a transport failure. */
@@ -92,7 +179,19 @@ export class InstanceSignInError extends Error {
 export interface SignInDependencies {
   /** The instance's origin, exactly as the instance states it. */
   readonly origin: string;
+  /**
+   * Plaintext: the challenge; and signing in from a device with no card,
+   * which only an instance with no keys answers (#1210).
+   */
   readonly transport: InstanceTransport;
+  /**
+   * SEALED to the instance's key and signed by this device's (#1192, #1210,
+   * ADR 0047 D-7): signing in — a key the instance holds as well as a new one
+   * — and linking go here and nowhere else. Absent — no card, or a copy of the
+   * app loaded from a website (D-11) — an instance holding keys refuses the
+   * sign-in `sealed_required`, and a link is not attempted.
+   */
+  readonly sealed?: InstanceTransport;
   readonly storage: InstanceAccountStorage;
   /** Makes sure the local athlete row exists — `ensureLocalAthlete`, bound. */
   readonly ensureLocalAthlete: () => Promise<unknown>;
@@ -100,6 +199,14 @@ export interface SignInDependencies {
   readonly signingKey: () => Promise<SigningKey>;
   /** Unix milliseconds. */
   readonly now?: () => number;
+  /**
+   * The pin to keep with the account, from a card this sign-in was verified
+   * against (#1190). Without it a same-origin pin already held is kept; a new
+   * origin's account holds none. ⚠️ It never REPLACES a different pin held for
+   * the same origin (#1207): that is refused `pin_differs` before anything is
+   * sent, because only the rider confirming a new card replaces a pin (D-6).
+   */
+  readonly pin?: { readonly fingerprint: string; readonly keyTrust: InstanceKeyTrust };
 }
 
 export interface SignedIn {
@@ -138,15 +245,38 @@ async function signedStatement(
   return { ...statement, signature: toHex(await key.sign(deviceStatementBytes(statement))) };
 }
 
+/** The code {@link refuseUnconfirmedPin} refuses with. Not an instance's: the device's own. */
+export const PIN_DIFFERS = 'pin_differs';
+
+/**
+ * Refuse a sign-in or a link whose card would replace a DIFFERENT pin this
+ * device holds for the same origin (#1207, ADR 0047 D-6): the confirm-new-card
+ * step is the only way a pin changes. Checked before anything is sent.
+ */
+function refuseUnconfirmedPin(dependencies: SignInDependencies): void {
+  const offered = dependencies.pin?.fingerprint;
+  if (offered === undefined) return;
+  const held = readInstanceAccount(dependencies.storage);
+  if (held?.origin === dependencies.origin && held.pin !== undefined && held.pin !== offered) {
+    throw new InstanceSignInError(PIN_DIFFERS);
+  }
+}
+
 /** Sign this device in to an instance, registering it there if the instance has never seen its key. */
 export async function signInToInstance(
   dependencies: SignInDependencies,
   registration: { readonly displayName?: string } = {},
 ): Promise<SignedIn> {
+  refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
-  const answer = await dependencies.transport.post('/v1/auth/session', {
+  // Sealed whenever this device can seal, so the session token and a
+  // registration's recovery codes cross the edge only as ciphertext. In
+  // plaintext only an instance with no keys signs anybody in (ADR 0047 D-7
+  // phase 2, #1210): one holding keys refuses it `sealed_required`.
+  const sealedOrKeyless = dependencies.sealed ?? dependencies.transport;
+  const answer = await sealedOrKeyless.post('/v1/auth/session', {
     ...statement,
     ...(registration.displayName === undefined ? {} : { displayName: registration.displayName }),
   });
@@ -158,11 +288,24 @@ export async function signInToInstance(
   ) {
     throw new InstanceSignInError(codeOf(answer.body));
   }
-  const account: InstanceAccount = {
+  const held = readInstanceAccount(dependencies.storage);
+  const kept =
+    dependencies.pin !== undefined
+      ? { pin: dependencies.pin.fingerprint, keyTrust: dependencies.pin.keyTrust }
+      : held?.origin === dependencies.origin && held.pin !== undefined
+        ? {
+            pin: held.pin,
+            ...(held.keyTrust === undefined ? {} : { keyTrust: held.keyTrust }),
+            ...(held.expectedFingerprint === undefined
+              ? {}
+              : { expectedFingerprint: held.expectedFingerprint }),
+          }
+        : {};
+  writeInstanceAccount(dependencies.storage, {
     origin: dependencies.origin,
     instanceAthleteId: body.athleteId,
-  };
-  dependencies.storage.setItem(INSTANCE_ACCOUNT_STORAGE_KEY, JSON.stringify(account));
+    ...kept,
+  });
   return {
     sessionToken: body.sessionToken,
     instanceAthleteId: body.athleteId,
@@ -174,17 +317,44 @@ export async function signInToInstance(
 }
 
 /**
+ * A SUSPENDED rider's way-out session (#898, #910): signed with this device's
+ * key as a sign-in is, and good for an hour on exactly the routes that admit
+ * it — the account export, the deletion and the rider's own statements of
+ * reasons. Sealed through `dependencies.sealed` when the device can seal, as
+ * signing in is (ADR 0047 D-7 phase 2, #1210); the challenge stays plaintext.
+ * Answers the session token; throws
+ * {@link InstanceSignInError} with the instance's code — `not_suspended` for an
+ * account that may simply sign in.
+ */
+export async function openLeaveSession(dependencies: SignInDependencies): Promise<string> {
+  await dependencies.ensureLocalAthlete();
+  const key = await dependencies.signingKey();
+  const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
+  // Sealed whenever this device can seal (ADR 0047 D-7 phase 2, #1210), as a
+  // sign-in is: in plaintext only an instance with no keys answers it.
+  const sealedOrKeyless = dependencies.sealed ?? dependencies.transport;
+  const answer = await sealedOrKeyless.post('/v1/auth/leave-session', statement);
+  const token = (answer.body as { sessionToken?: unknown } | null)?.sessionToken;
+  if (answer.status !== 200 || typeof token !== 'string') {
+    throw new InstanceSignInError(codeOf(answer.body));
+  }
+  return token;
+}
+
+/**
  * Add THIS device to the athlete whose other device showed `linkCode` (#773),
  * then sign in. The key that signs is this device's own; nothing is copied.
  */
 export async function linkThisDevice(
-  dependencies: SignInDependencies,
+  dependencies: SignInDependencies & { readonly sealed: InstanceTransport },
   linkCode: string,
 ): Promise<SignedIn> {
+  refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, LINK_PURPOSE);
-  const answer = await dependencies.transport.post('/v1/auth/link', { ...statement, linkCode });
+  // Sealed-only (#1192): the code crosses the edge only as ciphertext.
+  const answer = await dependencies.sealed.post('/v1/auth/link', { ...statement, linkCode });
   if (answer.status !== 200) throw new InstanceSignInError(codeOf(answer.body));
   return signInToInstance(dependencies);
 }

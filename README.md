@@ -33,6 +33,16 @@ an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-
 No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
 the answer to all of that, and they come later.
 
+### Installing the Android app: Google Play or the direct download
+
+The Android app is meant to come two ways: from **Google Play** once it is listed there, and as a
+**direct download**, the APK attached to a [GitHub release](https://github.com/openzigs/onyourleft/releases)
+once one is published. Neither exists yet. The two copies cannot update each other, because each is signed with a different key: Google Play signs its copy with
+Google's key. **Moving from one to the other means uninstalling the app first, and uninstalling
+deletes the rides on the device.** Export them, or sync them with an instance, before you switch.
+The app's About page says which copy you have. Why, and how each is built:
+[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §11.
+
 ### Planning a route
 
 The **Routes** page imports a route from a GPX file, and **Draw a route** builds one here: place
@@ -189,11 +199,12 @@ The choices, and what was rejected: [`docs/adr/0005-tech-stack.md`](docs/adr/000
 
 ## Getting started
 
-Needs Node 24 and pnpm 11. Both are pinned by the repository — `.nvmrc` for Node, the
+Needs Node 26 and pnpm 11. Both are pinned by the repository — `.nvmrc` for Node, the
 `packageManager` field for pnpm — so neither is a choice you have to make.
 
 ```bash
-nvm install && nvm use        # or any version manager; `node --version` must report v24
+nvm install && nvm use        # or any version manager; `node --version` must report v26
+npm install --global --ignore-scripts corepack@0.36.0   # Node 26 ships no corepack
 corepack enable pnpm
 pnpm install --frozen-lockfile
 

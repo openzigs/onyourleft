@@ -16,9 +16,11 @@ import {
   activityId,
   cameraFrameId,
   ensureDeviceSigningKey,
+  lapId,
   openActivityStore,
   recordingSessionId,
   routeId,
+  webCryptoSha256,
   type AthleteRecord,
 } from '@onyourleft/store';
 
@@ -33,6 +35,11 @@ import {
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
+import {
+  createTrainerTargetMemory,
+  trainerTargetStorage,
+  type TrainerTargetMemory,
+} from './ride/trainer-target-memory';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
@@ -49,7 +56,7 @@ import { sharedCueOutput } from './game/web-audio';
 import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
-import type { GamePort, RidableRoute } from './game/GameView';
+import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
 import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
@@ -61,29 +68,51 @@ import {
   platformMediaDevices,
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
+import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
 import {
-  riderAnalysisPort,
-  riderAnalysisSource,
-  riderModelStepSource,
-} from './camera/analysis-transport';
-import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
-import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
-import { hostedStepPort } from './ride-analysis/hosted-step';
-import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
-import { hostedModelPort } from './camera/hosted-transport';
+  createInstanceAnalysis,
+  instanceAnalysisEraser,
+  pendingJobForgetter,
+} from './ride-analysis/instance-analysis';
+import type { InstanceAnalysisPort } from './ride-analysis/instance-analysis-port';
+import {
+  createHostedSettingsPort,
+  readHostedOffer,
+  sendMaskingGuard,
+} from './ride-analysis/hosted-settings';
+import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
+import { jobSessionOf } from './ride-analysis/instance-job';
+import { createReplanPort, type ReplanPort } from './workout/replan-port';
 import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
+import {
+  deviceRetiredKeyStorage,
+  retireDeviceHostedKey,
+  retiredHostedKeyEraser,
+} from './camera/retired-hosted-key';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
 import { documentForeground, SecureWindow } from './camera/secure-window';
 import { NO_SECURE_WINDOW } from './camera/secure-window-port';
 import { workerPoseEstimator } from './camera/pose-estimator';
 import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
+import {
+  instancePoseEstimator,
+  readSideInstanceChoice,
+  sidePictureSessionOf,
+} from './camera/instance-pose';
+import type { SideInstancePicturesPort } from './camera/side-instance-port';
+import type { SidePoseEstimator } from './camera/side-analysis-port';
+import { hostedKeyServiceReader } from './instance/hosted-service';
 import { SideAnalysis } from './camera/side-analysis';
 import { sideReportKeeper } from './camera/side-report-keeper';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
+import type { SignalStrengthPort } from './ride/signal-port';
+import { deviceBluetoothAsk } from './support/bluetooth-ask';
+import type { BluetoothAskPort } from './support/bluetooth-ask-port';
+import type { SystemSettingsPort } from './support/system-settings-port';
 import { THERMAL_FORECAST_SECONDS } from './game/thermal';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
@@ -101,17 +130,36 @@ import type { MatchPort } from './segments/match-port';
 import type { SegmentPort } from './segments/store-port';
 import type { RoutePort } from './routes/store-port';
 import type { WorkoutPort } from './workouts/store-port';
+import { raceRouteOf } from './detail/race-consent';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
+import { readMapTilesChoice } from './map/tiles-preference';
+import { readRealisticWorldChoice } from './game/world-preference';
+import { lazyWorldCorridorPort, readingCorridorOnSave } from './world-data/corridor-lazy';
+import type { WorldCorridorPort } from './world-data/corridor-port';
 import type { MapPort } from './map/port';
-import type { LibraryPort } from './library/store-port';
+import { forgettingOnDelete, type LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import type { WorkoutGoalsPort } from './workout-goals/workout-goals-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
-import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
+import {
+  createInstancePort,
+  heldInstanceSession,
+  heldSealedSession,
+  instanceEraser,
+  type InstancePort,
+} from './instance/instance-port';
+import type { LoadedFrom } from './instance/instance-pin';
+import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
+import { createStatementsPort, type StatementsPort } from './instance/statements-port';
+import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
+import { createSyncPort, type SyncPort } from './instance/sync-port';
+import { createGhostPort, type GhostPort } from './instance/ghost-port';
+import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
 import type { AthleteMassPort } from './athlete/store-port';
@@ -223,6 +271,17 @@ interface ClientPlatform {
    * `undefined`.
    */
   readonly thermal: ThermalPort | undefined;
+  /**
+   * Each connected device's signal strength, for the Devices screen (#1435).
+   * `undefined` in a browser: Web Bluetooth gives none for a connected device.
+   */
+  readonly signal: SignalStrengthPort | undefined;
+  /**
+   * #1436, inside the shell only: whether the rider has been told why Android
+   * asks for Bluetooth, and the way to Android's settings after a denial.
+   */
+  readonly bluetoothAsk: BluetoothAskPort | undefined;
+  readonly systemSettings: SystemSettingsPort | undefined;
 }
 
 /**
@@ -253,6 +312,7 @@ async function buildPlatform(
   probe: CapabilityProbe,
   camera: CameraController | undefined,
 ): Promise<ClientPlatform> {
+  const replan = buildReplanPort();
   const shared = {
     // #390. The camera answers "is anybody on the bike" for every recorder the
     // ride controller builds — advisory to its auto-pause and nothing else,
@@ -262,6 +322,17 @@ async function buildPlatform(
     // is GREEN in `check:wiring` (§Limits, "an optional parameter nobody
     // supplies") and in every test — `ride/presence-port.ts` records the gap.
     ...(camera === undefined ? {} : { presence: camera }),
+    // #1244. Re-plans during the ride: the rider's instance, goals and saved
+    // workouts behind one port. ⚠️ An optional option, as `presence` above
+    // is, so dropping this line is green in `check:wiring`; what holds the
+    // port's four methods is `WIRE003`, and `ride/controller.test.ts` §"#1244"
+    // drives the controller with one. Absent, no workout is ever re-planned.
+    ...(replan === undefined ? {} : { replan }),
+    // #1305. The last target each trainer acknowledged, kept on the device
+    // with its time, so a reload does not refuse a workout's first block over
+    // a hard target the trainer may still hold. ⚠️ An optional option, as
+    // `presence` is: dropping this line is green in `check:wiring`.
+    trainerTargets: deviceTrainerTargets(),
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
@@ -275,6 +346,8 @@ async function buildPlatform(
     rideSave: {
       store: localStore(),
       newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+      // #1312: one for each lap of a course a game ride completed.
+      newLapId: () => lapId(globalThis.crypto.randomUUID()),
       // #232: a file the rider decides was a course after all. A separate
       // generator rather than a cast, for the reason `store-port.ts` gives.
       newRouteId: () => routeId(globalThis.crypto.randomUUID()),
@@ -335,11 +408,35 @@ async function buildPlatform(
       readThermalHeadroom: async () =>
         mobile.readCapacitorThermalHeadroom(thermalPlugin, THERMAL_FORECAST_SECONDS),
     };
-    return { rideController, shell, thermal };
+    // #1435. The same `plugin`, for the reason `openTrainer` above gives: the
+    // link whose signal is read is the one this object holds.
+    const signal: SignalStrengthPort = {
+      readSignal: async (id) => mobile.readCapacitorSignal(plugin, id),
+    };
+    // #1436. The same `plugin`: opening a settings page is the plugin's own
+    // Intent, and it needs no initialised stack.
+    const systemSettings: SystemSettingsPort = {
+      openSystemSettings: async (page) => mobile.openCapacitorSettings(plugin, page),
+    };
+    return {
+      rideController,
+      shell,
+      thermal,
+      signal,
+      bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
+      systemSettings,
+    };
   }
 
   if (probe.bluetooth === undefined || !probe.secureContext) {
-    return { rideController: undefined, shell: undefined, thermal: undefined };
+    return {
+      rideController: undefined,
+      shell: undefined,
+      thermal: undefined,
+      signal: undefined,
+      bluetoothAsk: undefined,
+      systemSettings: undefined,
+    };
   }
   const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
@@ -356,6 +453,9 @@ async function buildPlatform(
     // global.
     shell: undefined,
     thermal: undefined,
+    signal: undefined,
+    bluetoothAsk: undefined,
+    systemSettings: undefined,
   };
 }
 
@@ -372,7 +472,14 @@ async function buildPlatform(
  * the transfer port and the recorder rather than opening a second.
  */
 function buildLibraryPort(): LibraryPort {
-  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+  // #1102: a ride deleted here takes its entry in the pending-job note with it,
+  // so a job asked about it is never followed again.
+  return {
+    store: forgettingOnDelete(localStore(), [
+      pendingJobForgetter(typeof localStorage === 'undefined' ? undefined : localStorage),
+    ]),
+    athleteId: LOCAL_ATHLETE,
+  };
 }
 
 /**
@@ -456,8 +563,41 @@ function buildMatchPort(): MatchPort {
  * another athlete's anything. `ActivityStore` satisfies it structurally, like
  * the five ports above.
  */
-function buildRoutePort(): RoutePort {
-  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+function buildRoutePort(corridors: WorldCorridorPort): RoutePort {
+  // #1539: a saved route's corridor is read after the save, never before it.
+  return { store: readingCorridorOnSave(localStore(), corridors), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * The corridor of map features around a route — #1539, ADR 0054 D-2.4: read
+ * when a route is chosen for a ride and when one is saved, from the archive
+ * `readBasemapConfig` names, through `world-data/corridor-source.ts` and
+ * nothing else, into the store's ODbL table.
+ *
+ * ⚠️ **One for the tab**, so the game and the two screens that save a route
+ * share what this device last saw the archive answer with. Every gate is
+ * read at each call: the realistic world, the map-tiles switch, the archive,
+ * and whether a ride is recording (`rideInProgress`), which stops a read.
+ * Nothing is logged: the read's failures are in `describeCorridorFailure`'s
+ * words if a caller ever passes `log`, and none does yet.
+ */
+let worldCorridors: WorldCorridorPort | undefined;
+
+function buildWorldCorridorPort(rideController: RideController | undefined): WorldCorridorPort {
+  // Lazily loaded (`world-data/corridor-lazy.ts`), so the reader and the
+  // decoder are not in the entry chunk; the archive is always the one
+  // `world-data/corridor-source.ts` reads.
+  worldCorridors ??= lazyWorldCorridorPort({
+    store: localStore(),
+    owner: LOCAL_ATHLETE,
+    basemap: browserBasemapConfig,
+    mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+    realisticOn: () => readRealisticWorldChoice(deviceStorage()),
+    recording: () =>
+      rideController !== undefined && rideInProgress(rideController.getSnapshot().phase),
+    now: () => new Date(),
+  });
+  return worldCorridors;
 }
 
 /**
@@ -551,9 +691,41 @@ async function loadGameRenderer(): Promise<GameRenderer> {
  * `activity-store.ghost-scope.test.ts` is the test that guards the patent line
  * rather than anything in the replay code.
  */
-function buildGamePort(rideController: RideController | undefined): GamePort {
+function buildGamePort(
+  rideController: RideController | undefined,
+  ghosts: GhostPort | undefined,
+  corridors: WorldCorridorPort,
+): GamePort {
   const store = localStore();
   return {
+    // #1539: the chosen route's corridor, from the store or read once. ⚠️ An
+    // optional member, so dropping this line is green in `check:wiring`;
+    // `world-data/corridor-wiring.test.tsx` is what goes red.
+    loadWorldCorridor: (route, signal, progress) => corridors.load(route, signal, progress),
+    // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
+    // No instance, no choice: `ghosts` is undefined or says it is not offered.
+    riderGhostOffered: () => ghosts?.offered() === true,
+    loadRiderGhost: async (route: string): Promise<RiderGhostLoad> => {
+      if (ghosts === undefined) return { kind: 'unavailable' };
+      const saved = await store.getRoute(LOCAL_ATHLETE, routeId(route));
+      if (saved === undefined) return { kind: 'none' };
+      const answer = await ghosts.riderGhost(saved.profile);
+      if (answer.kind !== 'ghost') return answer;
+      try {
+        // The same integrator, and the same refusal of a holed ride, as the
+        // rider's own ghost below: a replay of what was recorded, never a guess.
+        return {
+          kind: 'ghost',
+          rider: answer.ghost.rider,
+          track: ghostFromSpeed({
+            sampleIntervalSeconds: answer.ghost.sampleIntervalSeconds,
+            speed: answer.ghost.speed,
+          }),
+        };
+      } catch {
+        return { kind: 'none' };
+      }
+    },
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
       const saved = await store.listRoutes(LOCAL_ATHLETE);
       const rows: RidableRoute[] = [];
@@ -656,12 +828,25 @@ function buildGameTrainerPort(controller: RideController | undefined): GameTrain
   return gameTrainerPortOver(controller);
 }
 
-function buildTransferPort(): TransferPort | undefined {
+let trainerTargetMemory: TrainerTargetMemory | undefined;
+
+/**
+ * #1305. ONE memory for the page: the ride controller writes it and *Erase
+ * everything* forgets it, and a second copy would put the erased trainers back
+ * on the device at the next acknowledgement.
+ */
+function deviceTrainerTargets(): TrainerTargetMemory {
+  trainerTargetMemory ??= createTrainerTargetMemory(trainerTargetStorage());
+  return trainerTargetMemory;
+}
+
+function buildTransferPort(corridors: WorldCorridorPort): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
   }
   return {
-    store: localStore(),
+    // #1539: a file kept as a course has its corridor read after the save.
+    store: readingCorridorOnSave(localStore(), corridors),
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(globalThis.crypto.randomUUID()),
     // #232: a file the rider decides was a course after all. A separate
@@ -673,8 +858,12 @@ function buildTransferPort(): TransferPort | undefined {
     save: saveWithAnchor,
     drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
     theme: themeEraser(window),
-    hostedModel: hostedModelEraser(),
+    retiredHostedKey: retiredHostedKeyEraser(deviceRetiredKeyStorage()),
     instance: instanceEraser(typeof localStorage === 'undefined' ? undefined : localStorage),
+    instanceAnalysis: instanceAnalysisEraser(
+      typeof localStorage === 'undefined' ? undefined : localStorage,
+    ),
+    trainerTargets: deviceTrainerTargets(),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }
@@ -719,8 +908,8 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
- * The rider's words to mask (#839), over the same connection. The hosted
- * transport reads the same row for every request (`buildCameraController`).
+ * The rider's words to mask (#839), over the same connection. A hosted
+ * write-up sends the instance the same row before every job (#1251).
  */
 function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
@@ -741,6 +930,43 @@ function buildRiderTextPort(): RiderTextPort {
 }
 
 /**
+ * Re-plans during the ride (#1244, ADR 0048 D-10): the ONE production place
+ * the port is built, so `check:wiring` reports `createReplanPort` if this
+ * goes. Over the sealed session the Connect screen keeps (#1192) and the one
+ * instance module (ADR 0036 D-3 (a)): the re-plan routes are sealed-only, so
+ * a device with no sealed session sends nothing.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port. A rider there rides the workout they loaded.
+ */
+function buildReplanPort(): ReplanPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createReplanPort({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    connected: () => heldInstanceSession(storage) !== undefined,
+    session: async () => jobSessionOf(await sealed()),
+  });
+}
+
+/** The workout goals panel's port (#1237): the local store, scoped to the local athlete. */
+function buildWorkoutGoalsPort(): WorkoutGoalsPort {
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+  };
+}
+
+/**
  * The Connect screen's port (#777): the ONE production place an instance port
  * is built, so `check:wiring` reports `createInstancePort` if this goes.
  *
@@ -754,8 +980,65 @@ function buildInstancePort(): InstancePort | undefined {
   }
   return createInstancePort({
     storage: localStorage,
+    loadedFrom: loadedFrom(),
     ensureLocalAthlete: () =>
       ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * Where this copy of the app was loaded from (#1192, ADR 0047 D-11): sealed
+ * features are offered in the Android shell and in a copy opened from this
+ * device, and in no copy a website served.
+ */
+function loadedFrom(): LoadedFrom {
+  return { native: isNativeShell(platformCapacitor()), href: globalThis.location.href };
+}
+
+/**
+ * The Instance screen's sync port (#1195): the ONE production place a sync
+ * port is built, so `check:wiring` reports `createSyncPort` — and through it
+ * `syncWithInstance` and `admitDeviceKey` — if this goes. Over the sealed
+ * session the Connect screen keeps, through the one instance module (ADR 0036
+ * D-3 (a)); a device with no instance sees no sync and sends nothing, and one
+ * with no card sends nothing either (ADR 0047 D-14 Q1, Q7).
+ *
+ * The ride summary is bound ONCE here, so its cache outlives a sync (#928's
+ * review). `undefined` where there is no `localStorage` or no WebCrypto.
+ */
+function buildSyncPort(): SyncPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createSyncPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    store: localStore,
+    athleteId: LOCAL_ATHLETE,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    rideSummary: rideSummaryOf(localStore(), LOCAL_ATHLETE),
+    newDocumentId: () => globalThis.crypto.randomUUID(),
+    // #331: the race offer is decided here, against this device's zones.
+    raceRoute: raceRouteOf(localStore(), LOCAL_ATHLETE, webCryptoSha256),
+  });
+}
+
+/**
+ * The trainer game's way to another rider's ghost (#331): the ONE production
+ * place a ghost port is built, so `check:wiring` reports `createGhostPort` if
+ * this goes. Over the sealed session the Connect screen keeps, through the one
+ * instance module (ADR 0036 D-3 (a)); a device with no instance is offered no
+ * such ghost and sends nothing.
+ */
+function buildGhostPort(): GhostPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createGhostPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
 }
@@ -769,8 +1052,58 @@ function buildInstancePort(): InstancePort | undefined {
  * `undefined` where there is no `localStorage` to read a sign-in from.
  */
 function buildModerationPort(): ModerationPort | undefined {
-  if (typeof localStorage === 'undefined') return undefined;
-  return createModerationPort({ storage: localStorage });
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  // Every moderator route is sealed and signed by this device's key (#1192).
+  return createModerationPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * The statements of reasons about this rider's account (#910): the ONE
+ * production place a statements port is built, so `check:wiring` reports
+ * `createStatementsPort` if this goes. Over the instance this device
+ * connected to, through the one instance module (ADR 0036 D-3 (a)); a device
+ * connected to none sends nothing. It signs a suspended rider's way-out
+ * session with this device's key, as signing in does.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildStatementsPort(): StatementsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createStatementsPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    ensureLocalAthlete: () =>
+      ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * The riders this rider blocked (#1529): the ONE production place a blocks
+ * port is built, so `check:wiring` reports `createBlocksPort` if this goes.
+ * Over the session the Connect screen keeps, sealed and signed by this
+ * device's key, through the one instance module (ADR 0036 D-3 (a)); a device
+ * signed in to nothing sends nothing.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildBlocksPort(): BlocksPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createBlocksPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
 }
 
 /**
@@ -788,6 +1121,9 @@ function buildRoomPort(rideController: RideController | undefined): RoomPort | u
   if (typeof localStorage === 'undefined') return undefined;
   return createRoomPort({
     storage: localStorage,
+    // #1210: the ticket is sealed, signed by this device's key (ADR 0047 D-7 phase 2).
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
     ...(rideController === undefined ? {} : { keepAlive: () => rideController.keepAliveForRoom() }),
   });
 }
@@ -806,6 +1142,9 @@ function buildRoomsPort(): RoomsPort | undefined {
   if (typeof localStorage === 'undefined') return undefined;
   return createRoomsPort({
     storage: localStorage,
+    // #1210: every room route is sealed, signed by this device's key (ADR 0047 D-7 phase 2).
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
     zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
   });
 }
@@ -871,44 +1210,139 @@ async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalys
 }
 
 /**
- * The post-ride ask (#804): one press on a ride's page runs the analysis agent
- * on the rider's own computer and saves the screened write-up with the ride.
+ * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): the ONE
+ * production place it is built, so `check:wiring` reports
+ * `createInstanceAnalysis` if this goes. Over the sealed session the Connect
+ * screen keeps (#1192), through the one instance module (ADR 0036 D-3 (a)); a
+ * device signed in to nothing is told so and sends nothing.
  *
- * ⚠️ **The step port is built by `riderModelStepSource`, not here**, for the
- * reason `buildRiderAnalysis` gives: inside the Android shell it must be the
- * native request, and that choice has to be somewhere a test can see it.
- * The hosted model (#803) is the second source, and the rider's own computer
- * is offered first when both are set up (ruling 7). It is offered only while
- * the rider has turned it on since the app was opened and a service is saved,
- * and every step goes through `CameraController.askHostedModel`, which checks
- * the hosted consent again — `ride-analysis/hosted-step.ts`. With no camera
- * there is no controller to hold that consent, so there is no hosted source.
+ * The camera's consent is read at the press, as `buildRideAnalysis` reads it.
+ * The recording is watched so the page lets go of a job while a ride is
+ * recorded (ADR 0035 D-8), and the job carries on on the instance.
  *
- * The camera's consent is read at the press, not now: it is held in memory
- * and turned on on the Camera screen, and the pose summary goes into the
- * input only while it covers the camera (the owner's ruling 5 on #795).
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
  */
-async function buildRideAnalysis(camera: CameraController | undefined): Promise<RideAnalysisPort> {
-  const nativeShell = isNativeShell(platformCapacitor());
-  const computer = await riderModelStepSource(
-    nativeShell,
-    async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
-    readAnalysisEndpoint,
-  );
-  return createRideAnalysis({
+function buildInstanceAnalysis(
+  camera: CameraController | undefined,
+  rideController: RideController | undefined,
+): InstanceAnalysisPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createInstanceAnalysis({
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
-    computer,
-    ...(camera === undefined
-      ? {}
-      : { hosted: () => hostedStepPort(camera, () => readHostedModel() !== undefined) }),
-    // #839: the preview masks with the same guard the transport reads.
-    hostedGuard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
-    nativeShell,
+    connected: () => heldInstanceSession(storage) !== undefined,
+    session: async () => jobSessionOf(await sealed()),
     cameraConsented: () => camera?.state().consent.local ?? false,
-    clock: platformRunnerClock(),
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+    pending: storage,
+    syncBase: localStore(),
+    // #1251: hosted is offered only where the instance last said it holds the
+    // rider's own key and their consent naming it, and its masking list is
+    // made current before every hosted job.
+    hosted: {
+      endpoint: () => readHostedOffer(storage, readInstanceAccount(storage)?.origin),
+      sendGuard: (session) =>
+        sendMaskingGuard(session.channel, session.token, () =>
+          readMaskingGuard(localStore(), LOCAL_ATHLETE),
+        ),
+    },
+    ...(rideController === undefined
+      ? {}
+      : {
+          ride: {
+            inProgress: () => rideInProgress(rideController.getSnapshot().phase),
+            subscribe: (listener) => rideController.subscribe(listener),
+          },
+        }),
   });
+}
+
+/**
+ * A hosted model service on the rider's own key, held by their instance
+ * (#1251): the ONE production place its port is built, so `check:wiring`
+ * reports `createHostedSettingsPort` if this goes. Over the sealed session the
+ * Connect screen keeps (#1192) and the one instance module (ADR 0036 D-3 (a)):
+ * every route it calls is sealed-only, so a device with no sealed session
+ * sends nothing and the section says why.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildHostedSettings(): HostedSettingsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  return createHostedSettingsPort({
+    session: heldSealedSession({
+      storage,
+      loadedFrom: loadedFrom(),
+      signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    }),
+    storage,
+    guard: () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * The rider's instance, for the side camera's pictures (#1106): what the
+ * Camera page asks about it, and the estimator that sends it a picture. The
+ * ONE production place either is built.
+ *
+ * ⚠️ **What holds each hand-off, and the one nothing does.** The port's two
+ * methods are watched by `check:wiring` (`side-instance-port.ts`), so a view
+ * that stops calling one is a red run. The estimator reaches a pairing through
+ * `chooseSideAnalyser`'s REQUIRED `instance` key, so leaving it out does not
+ * compile. `shell/AppShell.test.tsx` holds the shell handing the port on to
+ * the Camera page. **This file handing the port to the shell is held by
+ * nothing but a reader**: `sidePictures` is an optional prop, as
+ * `sidePairing` beside it is.
+ *
+ * ⚠️ **Sealed, or nothing.** Both go through the sealed session the Connect
+ * screen keeps (`heldSealedSession`, #1192) and the one instance module (ADR
+ * 0036 D-3 (a)): there is no plaintext call here to fall back to, so a device
+ * with no sealed session sends no picture and the screen says so.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildSidePictures():
+  | { readonly port: SideInstancePicturesPort; readonly estimator: () => SidePoseEstimator }
+  | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  // The instance signed in to NOW: what the rider agreed to is stored against
+  // its address, so it does not carry over to another instance.
+  const origin = (): string | undefined =>
+    heldInstanceSession(storage) === undefined ? undefined : readInstanceAccount(storage)?.origin;
+  return {
+    port: {
+      sideInstanceOrigin: origin,
+      askHostedPictureService: hostedKeyServiceReader(sealed),
+    },
+    estimator: () =>
+      instancePoseEstimator({
+        // Read for every picture: switching it off stops the next one.
+        choice: () => readSideInstanceChoice(origin()),
+        session: async () => sidePictureSessionOf(await sealed()),
+      }),
+  };
 }
 
 /**
@@ -976,23 +1410,11 @@ async function buildCameraController(
   // #387. The rider's own computer — `analysis` is looked up on every press
   // rather than once, so switching it off on the Camera screen stops the next
   // request. With nothing saved it answers `undefined` and nothing can be sent.
-  // #518. The rider's hosted service, looked up on every press as well, and
-  // reached only after the rider has turned it on since the app was opened —
-  // `CameraController.askHostedModel` checks that first. It is sent a
-  // question, never a picture, and it is an `https:` origin, so the WebView's
-  // own `fetch` carries it on both platforms.
-  // #839. Every hosted request is masked with the rider's own guard — their
-  // word list and privacy zones, read afresh for each request — and a
-  // request whose guard cannot be read is not sent.
-  const hosted = (): ReturnType<typeof hostedModelPort> =>
-    hostedModelPort(readHostedModel(), {
-      guard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
-    });
   if (!isNativeShell(platformCapacitor())) {
     // #1061, ADR 0044 D-12: a browser cannot stop a screenshot, so the flag's
     // owner is built over nothing — and the consent says so.
     const secureWindow = new SecureWindow(NO_SECURE_WINDOW, documentForeground());
-    return new CameraController({ port, keep, analysis, hosted, secureWindow });
+    return new CameraController({ port, keep, analysis, secureWindow });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -1018,18 +1440,19 @@ async function buildCameraController(
     port,
     keep,
     analysis,
-    hosted,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
     secureWindow,
   });
 }
 
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
+  // #1103: a hosted key this device still holds from before is deleted before
+  // anything is drawn, and the Camera page says so once.
+  retireDeviceHostedKey(deviceRetiredKeyStorage());
   // Built once per tab, for the reason `buildCameraController` gives — and
   // before the platform, because the ride controller reads its presence (#390).
   const riderAnalysis = await buildRiderAnalysis();
   const camera = await buildCameraController(riderAnalysis);
-  const rideAnalysis = await buildRideAnalysis(camera);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
@@ -1044,6 +1467,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // line is what supplies it.
   const platform = await buildPlatform(capabilities, camera);
   const rideController = platform.rideController;
+  // #1539: after the ride controller, whose recording stops a corridor read.
+  const worldCorridorPort = buildWorldCorridorPort(rideController);
+  // #1102: built once, after the ride controller it watches.
+  const instanceAnalysis = buildInstanceAnalysis(camera, rideController);
   // #388. Each pairing's post-ride report, saved with the ride it filmed —
   // the ride controller is what says which ride that is, which is why the
   // pairing is built after it. ⚠️ `reports` is optional too, so leaving it out
@@ -1056,6 +1483,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #1106: built once, so every pairing asks the same sealed session.
+  const sidePictures = buildSidePictures();
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
         // #557: the tablet stays awake while it pairs and while it is paired.
@@ -1065,10 +1494,15 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // model, only when the rider switched the side camera over to it AND
           // their computer is saved and switched on. Chosen once per pairing,
           // and re-read for every picture so switching off stops the next one.
+          // #1106: or the rider's instance, sealed, when they switched the
+          // side camera over to it and this device is signed in to one.
           const analyser = chooseSideAnalyser({
             onComputer: () => readSideAnalyserOnComputer(),
             computer: riderAnalysis,
             tablet: () => workerPoseEstimator(),
+            onInstance: () =>
+              readSideInstanceChoice(sidePictures?.port.sideInstanceOrigin()) !== undefined,
+            instance: sidePictures?.estimator,
           });
           return new SideAnalysis({
             control,
@@ -1086,6 +1520,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const instance = buildInstancePort();
   // #955: built once, for the Connect screen's reason above.
   const moderation = buildModerationPort();
+  // #910: what a moderator decided about this rider's account, and why.
+  const statements = buildStatementsPort();
+  // #1529: the riders this rider blocked, to undo a block by.
+  const blocks = buildBlocksPort();
+  // #1195: built once, so a second press joins the sync already running.
+  const sync = buildSyncPort();
+  // #1251: built once, for the Connect screen's reason above.
+  const hostedSettings = buildHostedSettings();
   // #782: built once, for the Connect screen's reason above.
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
@@ -1105,8 +1547,15 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(update === undefined ? {} : { update })}
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
+          {...(platform.signal === undefined ? {} : { signal: platform.signal })}
+          {...(platform.bluetoothAsk === undefined ? {} : { bluetoothAsk: platform.bluetoothAsk })}
+          {...(platform.systemSettings === undefined
+            ? {}
+            : { systemSettings: platform.systemSettings })}
+          nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
+          {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
@@ -1117,8 +1566,13 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
           riderText={buildRiderTextPort()}
+          workoutGoals={buildWorkoutGoalsPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
+          {...(statements === undefined ? {} : { statements })}
+          {...(blocks === undefined ? {} : { blocks })}
+          {...(sync === undefined ? {} : { sync })}
+          {...(hostedSettings === undefined ? {} : { hostedSettings })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
@@ -1131,17 +1585,17 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.units === undefined ? {} : { units: athlete.units })}
           rideController={rideController}
           menuSounds={menuSounds}
-          transfer={buildTransferPort()}
+          transfer={buildTransferPort(worldCorridorPort)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
-          rideAnalysis={rideAnalysis}
+          {...(instanceAnalysis === undefined ? {} : { instanceAnalysis })}
           analysis={buildAnalysisPort()}
           segments={buildSegmentPort()}
           match={buildMatchPort()}
-          routes={buildRoutePort()}
+          routes={buildRoutePort(worldCorridorPort)}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
-          game={buildGamePort(rideController)}
+          game={buildGamePort(rideController, buildGhostPort(), worldCorridorPort)}
           gameTrainer={buildGameTrainerPort(rideController)}
           gameRenderer={loadGameRenderer}
           screenLock={browserScreenLockSource(platformWakeLock())}
@@ -1177,6 +1631,15 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // rebuilt").
   afterFirstPaint(() => {
     preloadViewGroups(VIEW_GROUPS);
+  });
+  // #1431: what has been in Recently deleted for 30 days is removed for good
+  // each time the app opens. Nothing runs while it is closed; the list leaves
+  // an expired ride out on its own until this has run. A failure is not the
+  // rider's problem — the next open tries again.
+  afterFirstPaint(() => {
+    void localStore()
+      .purgeRecentlyDeleted(LOCAL_ATHLETE, unixSeconds(Math.floor(Date.now() / 1000)))
+      .catch(() => 0);
   });
   const registered = await workerRegistration;
   const update = buildUpdateWatcher(registered, rideController);

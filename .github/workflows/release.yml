@@ -40,25 +40,54 @@ jobs:
         with:
           persist-credentials: false
 
-      #   gh api repos/actions/setup-node/commits/v7.0.0 --jq .sha
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      #   gh api repos/actions/setup-node/commits/v7.1.0 --jq .sha
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version-file: .nvmrc
 
-      #   gh api repos/actions/setup-java/commits/v6.0.1 --jq .sha
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+      #   gh api repos/actions/setup-java/commits/v6.1.0 --jq .sha
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
         with:
           distribution: temurin
           java-version: '21'
 
+      # Node 26 ships no corepack (#1597): rules.yml's setup says why it is
+      # installed from npm, at this pinned version.
+      - run: npm install --global --ignore-scripts corepack@0.36.0
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
 
       # The shell wraps apps/web's build — capacitor.config.ts sets
       # `webDir: '../web/dist'` — so this has to run before `cap sync` has
       # anything to copy. `cap sync` says so when it has not.
-      - run: pnpm --filter @onyourleft/web run build
-      - run: pnpm --filter @onyourleft/mobile exec cap sync android
+      #
+      # ⚠️ Built TWICE since #1745, once per channel. The About page in the
+      # app names the channel it came from, read from VITE_OYL_RELEASE_CHANNEL
+      # (apps/web/src/support/release-channel.ts), because a Play install and
+      # a direct-download install cannot update each other (RELEASE.md §11).
+      # The Play build's synced assets are set aside here, and Assemble puts
+      # them in place for the App Bundle after the APK is built from the
+      # direct one. Both builds finish before the key is decoded, so nothing
+      # but Gradle and a file copy runs while it is on disk.
+      - name: Build the web client for Google Play
+        env:
+          # Only a build holding the upload key is a release; a fork's or a
+          # keyless manual run's debug build claims no channel.
+          VITE_OYL_RELEASE_CHANNEL: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'play' || '' }}
+        run: |
+          set -euo pipefail
+          pnpm --filter @onyourleft/web run build
+          pnpm --filter @onyourleft/mobile exec cap sync android
+          rm -rf "${RUNNER_TEMP}/public-play"
+          cp -R apps/mobile/android/app/src/main/assets/public "${RUNNER_TEMP}/public-play"
+
+      - name: Build the web client for the direct download
+        env:
+          VITE_OYL_RELEASE_CHANNEL: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'direct' || '' }}
+        run: |
+          set -euo pipefail
+          pnpm --filter @onyourleft/web run build
+          pnpm --filter @onyourleft/mobile exec cap sync android
 
       # ⚠️ Signing is conditional on the secret being present, so a fork can run
       # this workflow and get an installable unsigned artefact without holding
@@ -136,16 +165,36 @@ jobs:
           # A variable rather than a secret — the signing step above says why.
           ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # The App Bundle (#958) is built beside the APK. Google Play accepts a
+        # new app only as an `.aab`; the APK stays the direct-download artefact
+        # and the GitHub Release asset. Both are signed with the UPLOAD key —
+        # under Play App Signing Google re-signs what it serves, which is why a
+        # Play install and a direct-download install cannot update each other
+        # (apps/mobile/RELEASE.md §11).
+        #
+        # ⚠️ Two Gradle invocations since #1745, because the two carry
+        # different web assets: the APK the direct build, the bundle the Play
+        # build set aside above. Both go through `run_gradle` below, so a bundle
+        # built without the injected signing properties cannot be written by
+        # forgetting to repeat them; the bundle step would refuse it anyway.
         run: |
           if [ "${SIGNED}" = "true" ]; then
-            ./gradlew assembleRelease \
-              -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/upload.jks" \
-              -Pandroid.injected.signing.store.password="${ANDROID_KEYSTORE_PASSWORD}" \
-              -Pandroid.injected.signing.key.alias="${ANDROID_KEY_ALIAS}" \
-              -Pandroid.injected.signing.key.password="${ANDROID_KEY_PASSWORD}"
+            variant=Release
+            run_gradle() {
+              ./gradlew "$@" \
+                -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/upload.jks" \
+                -Pandroid.injected.signing.store.password="${ANDROID_KEYSTORE_PASSWORD}" \
+                -Pandroid.injected.signing.key.alias="${ANDROID_KEY_ALIAS}" \
+                -Pandroid.injected.signing.key.password="${ANDROID_KEY_PASSWORD}"
+            }
           else
-            ./gradlew assembleDebug
+            variant=Debug
+            run_gradle() { ./gradlew "$@"; }
           fi
+          run_gradle "assemble${variant}"
+          rm -rf app/src/main/assets/public
+          cp -R "${RUNNER_TEMP}/public-play" app/src/main/assets/public
+          run_gradle "bundle${variant}"
 
       - name: Remove the key before anything else runs
         if: always()
@@ -228,6 +277,89 @@ jobs:
           fi
           echo "Signed as required, targeting API ${target}."
 
+      # bundletool reads the manifest out of an `.aab`; `aapt2 dump badging`
+      # reads only an APK, and the bundle's manifest is in protobuf form.
+      # Fetched from Google's GitHub release, pinned by version AND by SHA-256,
+      # the same reason an action is pinned to a commit: a release asset can be
+      # replaced. The digest is GitHub's own for the asset:
+      #   gh release view -R google/bundletool 1.18.3 --json assets --jq '.assets[].digest'
+      - name: Fetch bundletool
+        env:
+          BUNDLETOOL_VERSION: '1.18.3'
+          BUNDLETOOL_SHA256: 'a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/bundletool.jar" \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          echo "${BUNDLETOOL_SHA256}  ${RUNNER_TEMP}/bundletool.jar" | sha256sum -c -
+
+      # ⚠️ The bundle's half of the step above, and for the same reason: a green
+      # `bundleRelease` is not a signed bundle. An `.aab` is signed with the JAR
+      # scheme, so this is `jarsigner` rather than `apksigner`, and ⚠️
+      # `jarsigner -verify` EXITS 0 ON AN UNSIGNED FILE — it prints "jar is
+      # unsigned." — so the verdict is read from what it prints, never from its
+      # status. Executed by apps/mobile/src/android/release-pipeline.test.ts
+      # against stub tools, so each refusal is seen to fire.
+      - name: Verify the bundle is signed and targets the required API level
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          # The same floor as the APK step; release-pipeline.test.ts asserts
+          # every copy of it agrees with variables.gradle.
+          MINIMUM_TARGET_SDK: '36'
+        run: |
+          set -euo pipefail
+          # The directory test first: under `pipefail` a `find` over a missing
+          # directory kills the step before the annotation below can say why.
+          bundles=apps/mobile/android/app/build/outputs/bundle
+          aab=""
+          if [ -d "${bundles}" ]; then
+            aab="$(find "${bundles}" -name '*.aab' -type f | sort | head -1)"
+          fi
+          if [ -z "${aab}" ]; then
+            echo "::error::Assemble produced no App Bundle."
+            exit 1
+          fi
+          echo "Verifying ${aab}"
+
+          if [ "${SIGNED}" = "true" ]; then
+            jarsigner -verify "${aab}" > "${RUNNER_TEMP}/bundle-verify.txt" 2>&1 || true
+            cat "${RUNNER_TEMP}/bundle-verify.txt"
+            if ! grep -qx 'jar verified.' "${RUNNER_TEMP}/bundle-verify.txt"; then
+              echo "::error::The release App Bundle does not verify as signed."
+              exit 1
+            fi
+            # ⚠️ #1745: a jar with UNSIGNED ENTRIES still prints `jar
+            # verified.` and exits 0; the only sign is a warning further down,
+            # "This jar contains unsigned entries which have not been
+            # integrity-checked." `-strict` would catch it and would also fail
+            # every run on the self-signed and no-timestamp warnings, which
+            # the upload key always raises, so the warning is read instead.
+            if grep -q 'unsigned entries' "${RUNNER_TEMP}/bundle-verify.txt"; then
+              echo "::error::The release App Bundle has entries that are not signed."
+              exit 1
+            fi
+            keytool -printcert -jarfile "${aab}" > "${RUNNER_TEMP}/bundle-certs.txt"
+            cat "${RUNNER_TEMP}/bundle-certs.txt"
+            if grep -q 'CN=Android Debug' "${RUNNER_TEMP}/bundle-certs.txt"; then
+              echo "::error::The release App Bundle is signed with the Android debug certificate."
+              exit 1
+            fi
+          fi
+
+          target="$(java -jar "${RUNNER_TEMP}/bundletool.jar" dump manifest --bundle="${aab}" \
+            --xpath=/manifest/uses-sdk/@android:targetSdkVersion | tr -d '[:space:]')"
+          case "${target}" in
+            '' | *[!0-9]*)
+              echo "::error::The bundle's manifest declares no numeric targetSdkVersion."
+              exit 1
+              ;;
+          esac
+          if [ "${target}" -lt "${MINIMUM_TARGET_SDK}" ]; then
+            echo "::error::The App Bundle targets API ${target}, below the required ${MINIMUM_TARGET_SDK}."
+            exit 1
+          fi
+          echo "Bundle signed as required, targeting API ${target}."
+
       # ⚠️ Not the same thing as the release below, and not redundant with it.
       # The release step only runs on a tag, so before #95 a `workflow_dispatch`
       # run built an APK and threw it away — which made #95's definition of done
@@ -235,11 +367,22 @@ jobs:
       # reachable only by cutting a tag. An artefact is downloadable from the
       # run page, so the pipeline can be exercised and the result installed
       # before anything is tagged.
-      #   gh api repos/actions/upload-artifact/commits/v7.0.1 --jq .sha
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      #   gh api repos/actions/upload-artifact/commits/v7.0.2 --jq .sha
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: android-apk
           path: apps/mobile/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      # The App Bundle, as a workflow artefact ONLY (#958). It is what goes to
+      # Play Console's internal testing track, by hand: uploading it from here
+      # would need a Play service-account credential, which is a separate
+      # decision, and it is not a GitHub Release asset because nobody can
+      # install an `.aab` directly.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android-aab
+          path: apps/mobile/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
 
       # The AGPL-native distribution path, independent of any store — #95's sixth
@@ -251,3 +394,6 @@ jobs:
         with:
           files: apps/mobile/android/app/build/outputs/apk/**/*.apk
           fail_on_unmatched_files: true
+          # #1745: every release says it is the direct download and that it
+          # and the Play copy do not mix. ⚠️ Never run: no tag has been pushed.
+          body_path: apps/mobile/release-notes.md

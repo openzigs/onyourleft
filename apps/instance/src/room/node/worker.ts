@@ -44,10 +44,13 @@ const host = new RoomHost({
       send({ type: 'admit', id: nextRequest, roomId, ticket });
     }),
   onResult: (roomId, result) => send({ type: 'result', roomId, result }),
+  onFlag: (roomId, flag) => send({ type: 'flag', roomId, flag }),
   onRaceStarted: (roomId) => send({ type: 'race-started', roomId }),
   onRaceFinished: (roomId) => send({ type: 'race-finished', roomId }),
   onRoomClosed: (roomId, phase) => send({ type: 'room-closed', roomId, phase }),
   onSocketClosed: (socketId) => send({ type: 'socket-closed', socketId }),
+  onProtocolClose: (roomId, reason, count) =>
+    send({ type: 'protocol-close', roomId, reason, count }),
   maxBufferedBytes: settings.maxBufferedBytes,
   pingIntervalMs: settings.pingIntervalMs,
 });
@@ -113,6 +116,16 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
     }
     case 'start':
       send({ type: 'started', id: message.id, ok: host.start(message.roomId, message.athleteId) });
+      return;
+    case 'remove':
+      send({ type: 'removed', id: message.id, ok: host.remove(message.roomId, message.athleteId) });
+      return;
+    case 'seat':
+      send({
+        type: 'seated',
+        id: message.id,
+        seat: host.seatOf(message.roomId, message.riderId) ?? null,
+      });
       return;
     case 'metrics':
       send({

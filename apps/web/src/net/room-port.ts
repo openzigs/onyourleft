@@ -14,11 +14,13 @@
  *
  * Not here. This client has ONE module for instance traffic,
  * `instance/instance-transport.ts`, and a room's socket is opened through it
- * ({@link instanceRoomSocket}); the ticket is minted through the same module's
- * HTTP call, with the session token `instance/instance-port.ts` keeps. So a
- * rider with no instance has no session, {@link RoomLink.ticket} answers
- * `refused` without sending a byte, and the game rides exactly as it did
- * before rooms existed.
+ * ({@link instanceRoomSocket}); the ticket is minted through the same module,
+ * with the session `instance/instance-port.ts` keeps — SEALED since #1210
+ * (ADR 0047 D-7 phase 2: the room routes' HTTP side is sealed, the socket is
+ * not, D-14 Q5), or in plaintext from a device with no card, which an
+ * instance holding keys refuses (`cannot-seal`). So a rider with no instance
+ * has no session, {@link RoomLink.ticket} answers `refused` without sending a
+ * byte, and the game rides exactly as it did before rooms existed.
  *
  * ## What leaves the device, and what does not
  *
@@ -28,6 +30,9 @@
  *   to nothing the renderer reads: `GameView.test.tsx` §"#783" walks every
  *   frame the renderer was given for it.
  * - On the socket, the hello and the power reports `room-session.ts` lists.
+ * - When the rider reports another from the HUD (#789),
+ *   `POST /v1/rooms/{roomId}/reports` with the other rider's SEAT and one
+ *   reason from a fixed list — never a screenshot, a position or a number.
  *
  * ## The screen off — #782, #524
  *
@@ -40,7 +45,15 @@
 
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 
-import { heldInstanceSession, type InstanceStorage } from '../instance/instance-port';
+import type { SigningKey } from '@onyourleft/domain';
+
+import {
+  heldAccountSession,
+  heldInstanceSession,
+  isSealedRequired,
+  type InstanceStorage,
+} from '../instance/instance-port';
+import type { LoadedFrom } from '../instance/instance-pin';
 import {
   instanceRoomSocket,
   roomPath,
@@ -51,8 +64,11 @@ import {
   RoomSession,
   type RoomLink,
   type RoomRace,
+  type RoomReportAnswer,
+  type RoomReportReason,
   type RoomSample,
   type RoomSessionStatus,
+  type RoomStandings,
   type RoomTimers,
   type TicketAnswer,
 } from './room-session';
@@ -92,6 +108,24 @@ export interface RoomConnection {
   race(): RoomRace;
   /** The room's newest word on THIS rider, for `correction.ts`. */
   own(): { readonly rider: DrawnRemoteRider; readonly atLocalMs: number } | undefined;
+  /**
+   * A race's newest standings, as the room sent them — #1347, ADR 0051: the
+   * field in the room's order, each with the room's gap to this rider and
+   * their live W/kg. `undefined` in a group ride and before the first.
+   */
+  standings(): RoomStandings | undefined;
+  /**
+   * The draft multiplier this rider is predicted to ride at — #787: from the
+   * room's newest frame, `1` alone or with drafting off. The room corrects it.
+   */
+  draftFactor(): number;
+  /**
+   * Report the rider in seat `riderId` to the instance's moderators, with one
+   * of the short fixed reasons — #789. By seat, never by athlete: the room
+   * says who sits there and stamps its own tick. Nothing else is sent — no
+   * screenshot, no position, no power.
+   */
+  report(riderId: number, reason: RoomReportReason): Promise<RoomReportAnswer>;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
   leave(): void;
 }
@@ -104,6 +138,10 @@ export interface RoomPort {
 export interface RoomPortOptions {
   /** This device's `localStorage`: where `instance-port.ts` keeps the session. */
   readonly storage: InstanceStorage;
+  /** Where this copy of the app was loaded from: a website's copy seals nothing (ADR 0047 D-11). */
+  readonly loadedFrom: LoadedFrom;
+  /** `ensureDeviceSigningKey`, bound: the session's key, which signs the sealed ticket request. */
+  readonly signingKey: () => Promise<SigningKey>;
   /**
    * Hold the ride controller's foreground service while joined; returns its
    * release (`ride/controller.ts` §`keepAliveForRoom`). Absent in a browser.
@@ -126,23 +164,44 @@ const PLATFORM_TIMERS: RoomTimers = {
 };
 
 /** The production link: tickets and the socket, both through the one instance module. */
-function instanceRoomLink(options: RoomPortOptions, declaredMassKilograms: number): RoomLink {
+function instanceRoomLink(
+  options: RoomPortOptions,
+  accountSession: ReturnType<typeof heldAccountSession>,
+  declaredMassKilograms: number,
+): RoomLink {
   return {
     ticket: async (roomId): Promise<TicketAnswer> => {
-      const session = heldInstanceSession(options.storage, options.send);
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
+      const session = await accountSession();
+      if (session.kind === 'closed') {
+        return {
+          kind: 'refused',
+          reason: session.why === 'signed-out' ? 'not-signed-in' : 'cannot-seal',
+        };
+      }
       // `roomPath` refuses an id the router could not route, so the rider's
-      // session token can only ever reach the room's own ticket (#782's
-      // review, B1). `RoomSession` refuses such an id before this is reached.
-      const answer = await session.http.call('POST', roomPath(roomId, 'ticket'), {
+      // session can only ever reach the room's own ticket (#782's review, B1).
+      // `RoomSession` refuses such an id before this is reached.
+      const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'ticket'), {
         token: session.token,
         body: { declaredMassKilograms },
       });
+      if (isSealedRequired(answer)) return { kind: 'refused', reason: 'cannot-seal' };
       const ticket = (answer.body as { ticket?: unknown } | null)?.ticket;
       if (answer.status === 200 && typeof ticket === 'string' && ticket !== '') {
         return { kind: 'ticket', ticket };
       }
       return refusalFor(answer.status) ?? { kind: 'unreachable' };
+    },
+    report: async (roomId, riderId, reason): Promise<RoomReportAnswer> => {
+      const session = await accountSession();
+      if (session.kind === 'closed') return { kind: 'refused' };
+      // #789: the room's own report route, built by the one room-path builder.
+      const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'reports'), {
+        token: session.token,
+        body: { riderId, reason },
+      });
+      if (isSealedRequired(answer)) return { kind: 'refused' };
+      return reportAnswerFor(answer.status);
     },
     open: (roomId, events) => {
       const session = heldInstanceSession(options.storage, options.send);
@@ -168,6 +227,15 @@ function refusalFor(status: number): TicketAnswer | undefined {
   return undefined;
 }
 
+/** What the report route's status means (`apps/instance/src/errors.ts`). */
+function reportAnswerFor(status: number): RoomReportAnswer {
+  if (status === 204) return { kind: 'reported' };
+  if (status === 429) return { kind: 'rate-limited' };
+  if (status === 404) return { kind: 'gone' };
+  if (status >= 400 && status < 500) return { kind: 'refused' };
+  return { kind: 'unreachable' };
+}
+
 /**
  * The link a join with no declared mass gets: it asks for no ticket and opens
  * nothing, so no weight — default or otherwise — reaches any instance, and
@@ -178,23 +246,26 @@ const NO_DECLARED_MASS: RoomLink = {
   open: () => {
     throw new Error('no ticket was asked for');
   },
+  // Never joined, so there is no seat to report from.
+  report: () => Promise.resolve({ kind: 'refused' }),
 };
 
 /** A port over a {@link RoomLink} — the production one, or a test's scripted room. */
 export function roomPortOver(
   link: (declaredMassKilograms: number) => RoomLink,
-  options: Omit<RoomPortOptions, 'storage' | 'send' | 'openSocket'>,
+  options: Omit<RoomPortOptions, 'storage' | 'send' | 'openSocket' | 'loadedFrom' | 'signingKey'>,
 ): RoomPort {
   return {
     join: (request) => {
       const release = options.keepAlive?.();
       let released = false;
+      const joined =
+        request.declaredMassKilograms === undefined
+          ? NO_DECLARED_MASS
+          : link(request.declaredMassKilograms);
       const session = new RoomSession({
         roomId: request.roomId,
-        link:
-          request.declaredMassKilograms === undefined
-            ? NO_DECLARED_MASS
-            : link(request.declaredMassKilograms),
+        link: joined,
         timers: options.timers ?? PLATFORM_TIMERS,
         now: options.now ?? (() => performance.now()),
         physicsVersion: PHYSICS_VERSION,
@@ -215,6 +286,16 @@ export function roomPortOver(
         others: (localMs) => session.others(localMs),
         race: () => session.race(),
         own: () => session.own(),
+        standings: () => session.standings(),
+        draftFactor: () => session.draftFactor(),
+        report: async (riderId, reason) => {
+          try {
+            return await joined.report(request.roomId, riderId, reason);
+          } catch {
+            // A refused path or a failed fetch: nothing was filed.
+            return { kind: 'unreachable' };
+          }
+        },
         leave: () => {
           session.leave();
         },
@@ -225,5 +306,12 @@ export function roomPortOver(
 
 /** The production {@link RoomPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createRoomPort(options: RoomPortOptions): RoomPort {
-  return roomPortOver((mass) => instanceRoomLink(options, mass), options);
+  // One clock for the port's life (ADR 0047 D-9), whichever room it joins.
+  const accountSession = heldAccountSession({
+    storage: options.storage,
+    loadedFrom: options.loadedFrom,
+    signingKey: options.signingKey,
+    send: options.send,
+  });
+  return roomPortOver((mass) => instanceRoomLink(options, accountSession, mass), options);
 }

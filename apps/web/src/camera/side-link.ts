@@ -589,7 +589,10 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
     return 'unavailable';
   }
   const secret = timers.randomBytes(PAIRING_SECRET_BYTES);
-  const made = pairingCodeText('offer', parameters, secret);
+  // #1110: read before the link starts its own expiry, so the time the code
+  // names is never after the moment this tablet stops accepting an answer.
+  const expiresAt = timers.clock() + OFFER_LIFETIME_MILLISECONDS;
+  const made = pairingCodeText('offer', parameters, secret, expiresAt);
   if ('refusal' in made) {
     peer.close();
     return made.refusal;
@@ -1049,6 +1052,11 @@ async function answerFrom(
     return read.refusal;
   }
   const { code } = read;
+  // #1110: an offer that has already run out is said so here, before a
+  // connection is made for a tablet that will not accept the answer.
+  if (code.expiresAt <= timers.clock()) {
+    return 'expired';
+  }
   const peer = timers.peer();
   if (peer === undefined) {
     return 'unavailable';
@@ -1074,13 +1082,15 @@ async function answerFrom(
     link.endSideLink();
     return made.refusal;
   }
-  // The code goes on the screen now: from here the wait is a person's (#1108).
-  link.waitForTabletRead();
+  // The code goes on the screen now: from here the wait is a person's (#1108),
+  // and never longer than the offer it answers (#1110).
+  link.waitForTabletRead(code.expiresAt);
   return {
     answerCode: made.text,
     link,
     secondsForTabletToRead: () => link.secondsForTabletToRead(),
     onTabletReadCountdown: (listener) => link.onTabletReadCountdown(listener),
+    tabletReadTimedOut: () => link.tabletReadTimedOut(),
   };
 }
 
@@ -1107,6 +1117,12 @@ export class PhoneSideLink implements SideCameraLinkPort {
   /** When the tablet's time to read the answer runs out, on the timers' clock. */
   #readDeadline: number | undefined;
   #cancelReadTick: () => void = () => undefined;
+  /**
+   * Whether the tablet's time to read the answer ran out — set by the read
+   * wait's own timer as it fires (#1110), so that a wall clock moved under the
+   * countdown cannot make the screen say the wrong one of its two failures.
+   */
+  #readTimedOut = false;
 
   /** `control`, made by this phone itself (§"Why each end makes its own channels"). */
   readonly #channel: SideChannel;
@@ -1184,15 +1200,28 @@ export class PhoneSideLink implements SideCameraLinkPort {
 
   /**
    * The answer is on the screen: wait {@link TABLET_READ_LIMIT_MILLISECONDS}
-   * for the tablet to read it, and count it down (#1108). Called once, by
-   * {@link answerFrom}.
+   * for the tablet to read it, and count it down (#1108) — or, since #1110,
+   * only until `offerExpiresAt`, the time the tablet's offer named, when that
+   * is sooner: a phone that scanned at 4:30 of the offer's five minutes has
+   * thirty seconds, not two minutes. Called once, by {@link answerFrom}.
+   *
+   * ⚠️ `offerExpiresAt` is on the tablet's clock and is read against this
+   * phone's. Two devices that set their time automatically agree to within a
+   * second or so. A phone whose clock is behind the tablet's waits at most
+   * {@link TABLET_READ_LIMIT_MILLISECONDS}, as before #1110; one whose clock
+   * is ahead counts down short, and one ahead by more than the offer has left
+   * is refused at the scan as `expired`, whose words name the date and time.
    */
-  waitForTabletRead(): void {
+  waitForTabletRead(offerExpiresAt: number): void {
     if (this.#condition !== 'connecting' || this.#opened) {
       return;
     }
-    this.#readDeadline = this.#timers.clock() + TABLET_READ_LIMIT_MILLISECONDS;
-    this.#waitFor(TABLET_READ_LIMIT_MILLISECONDS);
+    const limit = Math.max(
+      0,
+      Math.min(TABLET_READ_LIMIT_MILLISECONDS, offerExpiresAt - this.#timers.clock()),
+    );
+    this.#readDeadline = this.#timers.clock() + limit;
+    this.#waitFor(limit, true);
     this.#cancelReadTick = this.#timers.every(() => {
       this.#countdownChanged();
     }, 1000);
@@ -1220,11 +1249,24 @@ export class PhoneSideLink implements SideCameraLinkPort {
     };
   }
 
-  /** Replace the one bound on a phone still `connecting` with one of `milliseconds`. */
-  #waitFor(milliseconds: number): void {
+  /**
+   * Whether the link ended because the tablet's time to read the answer ran
+   * out, as that wait's own timer recorded it (#1110).
+   */
+  tabletReadTimedOut(): boolean {
+    return this.#readTimedOut;
+  }
+
+  /**
+   * Replace the one bound on a phone still `connecting` with one of
+   * `milliseconds`. `reading`: it is the tablet's time to read the answer,
+   * and its running out is recorded as {@link tabletReadTimedOut}.
+   */
+  #waitFor(milliseconds: number, reading = false): void {
     this.#cancelWait();
     this.#cancelWait = this.#timers.after(() => {
       if (this.#condition === 'connecting') {
+        this.#readTimedOut = reading;
         this.endSideLink();
       }
     }, milliseconds);
@@ -1274,6 +1316,10 @@ export class PhoneSideLink implements SideCameraLinkPort {
     } catch {
       return 'no-link';
     }
+  }
+
+  picturesWaiting(): number {
+    return this.#frames.bufferedAmount;
   }
 
   /**

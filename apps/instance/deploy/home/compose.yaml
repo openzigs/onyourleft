@@ -42,15 +42,42 @@ services:
     restart: unless-stopped
     environment:
       OYL_INSTANCE_ORIGIN: ${OYL_INSTANCE_ORIGIN:?set OYL_INSTANCE_ORIGIN to the tunnel's public hostname, https://…}
-      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-closed}
+      # The name the app shows, and where a MODIFIED build's source is (the
+      # repository's .env.example says what each means). Empty: no name, and
+      # the source is this build's commit.
+      OYL_INSTANCE_NAME: ${OYL_INSTANCE_NAME:-}
+      OYL_INSTANCE_SOURCE_URL: ${OYL_INSTANCE_SOURCE_URL:-}
+      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-approval}
       OYL_INSTANCE_ROOM_WORKERS: ${OYL_INSTANCE_ROOM_WORKERS:-}
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
       OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      # The room's WebSocket ping (25 s when empty). `0` turns it off, for
+      # measuring the tunnel's idle timeout only (home-machine.md, "Measuring
+      # the tunnel"); remove it again afterwards.
+      OYL_INSTANCE_PING_INTERVAL_MS: ${OYL_INSTANCE_PING_INTERVAL_MS:-}
+      # A quiet analysis stream's heartbeat (25 s when empty). `0` is ONLY for
+      # #1105's control measurement, never to run with (.env.example).
+      OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS: ${OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS:-}
+      # The moderator's device key. The deputy's is optional and usually
+      # empty: an instance has one moderator (#905, docs/moderation.md).
       OYL_INSTANCE_OWNER_KEY: ${OYL_INSTANCE_OWNER_KEY:-}
       OYL_INSTANCE_DEPUTY_KEY: ${OYL_INSTANCE_DEPUTY_KEY:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES:-}
+      # The legal and contact page, /legal (#908) — .env.example says what each
+      # names. Public rooms stay off unless .env turns them on, and on refuses
+      # to start without a contact address and an accountable person.
+      OYL_INSTANCE_CONTACT_EMAIL: ${OYL_INSTANCE_CONTACT_EMAIL:-}
+      OYL_INSTANCE_CONTACT_LANGUAGES: ${OYL_INSTANCE_CONTACT_LANGUAGES:-}
+      OYL_INSTANCE_ACCOUNTABLE_PERSON: ${OYL_INSTANCE_ACCOUNTABLE_PERSON:-}
+      OYL_INSTANCE_LEGAL_REPRESENTATIVE: ${OYL_INSTANCE_LEGAL_REPRESENTATIVE:-}
+      OYL_INSTANCE_PRIVACY_POLICY_URL: ${OYL_INSTANCE_PRIVACY_POLICY_URL:-}
+      # The terms of service (#909): a path INSIDE the container, so mount the
+      # file there; empty publishes none.
+      OYL_INSTANCE_TERMS_FILE: ${OYL_INSTANCE_TERMS_FILE:-}
+      OYL_INSTANCE_TERMS_VERSION: ${OYL_INSTANCE_TERMS_VERSION:-}
+      OYL_INSTANCE_PUBLIC_ROOMS: ${OYL_INSTANCE_PUBLIC_ROOMS:-off}
       # Every connection's peer is cloudflared, so the rate limits read the
       # rider's own address from the header Cloudflare writes (#895, B3) —
       # and believe it ONLY from cloudflared's own address below (#891, #903
@@ -64,6 +91,18 @@ services:
       OYL_INSTANCE_EMBEDDING_MODEL: ${OYL_INSTANCE_EMBEDDING_MODEL:-}
       OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX: ${OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX:-}
       OYL_INSTANCE_EMBEDDING_QUERY_PREFIX: ${OYL_INSTANCE_EMBEDDING_QUERY_PREFIX:-}
+      # The analysis model (#1096, ADR 0046 D-9): http://ollama:11434/v1 with
+      # the `ollama` service below running and a model pulled into it; empty,
+      # and analysis is off. No model is named here, or anywhere (ADR 0031 D-4).
+      OYL_INSTANCE_ANALYSIS_MODEL_URL: ${OYL_INSTANCE_ANALYSIS_MODEL_URL:-}
+      OYL_INSTANCE_ANALYSIS_MODEL: ${OYL_INSTANCE_ANALYSIS_MODEL:-}
+      OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS: ${OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS:-}
+      OYL_INSTANCE_PICTURE_MODEL: ${OYL_INSTANCE_PICTURE_MODEL:-}
+      # The secret a hosted model key (#1097) and the instance's own keys
+      # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
+      # it, so nothing that writes a snapshot holds the secret that opens the
+      # key in it (docs/operating-an-instance.md, "A hosted model key").
+      OYL_INSTANCE_SECRET_KEY: ${OYL_INSTANCE_SECRET_KEY:-}
     volumes:
       - data:/data
     # Docker waits this long after SIGTERM before it kills the instance: the
@@ -74,9 +113,11 @@ services:
 
   # Cloudflare Tunnel (ADR 0037 D-8). Outbound only. Pinned by digest, as
   # every image here is: `docker buildx imagetools inspect
-  # cloudflare/cloudflared:2026.9.3`, read 2026-09-29. Apache-2.0.
+  # cloudflare/cloudflared:2026.10.3`, read 2026-10-26. Apache-2.0. 2026.10.2 is
+  # the first release that no longer trusts the eight weak-keyed eMudhra
+  # (emSign) intermediates (Cloudflare's notice of 2026-10-20): stay at or above it.
   tunnel:
-    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
     command: ['tunnel', '--no-autoupdate', 'run']
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env beside this file}
@@ -110,7 +151,9 @@ services:
   # `driver: nvidia` and `capabilities: [gpu]` (docs/self-hosting/home-machine.md).
   ollama:
     image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
-    profiles: ['history']
+    # `history` for the index (#835), `analysis` for the agent's model (#1096):
+    # one Ollama serves both.
+    profiles: ['history', 'analysis']
     restart: unless-stopped
     volumes:
       - models:/root/.ollama

@@ -17,8 +17,13 @@
  * are built in those two modules and nowhere else, and
  * `privacy/boundaries.test.ts` walks each for a coordinate — this module is a
  * `departing` boundary (ADR 0036 D-3 (d)). No module here can name a camera
- * type (`instance-transport.test.ts` reads the imports), so a picture cannot
- * reach this path.
+ * type (`instance-transport.test.ts` reads the imports). ⚠️ **Since #1106 one
+ * picture path DOES end here**: `camera/instance-pose.ts` hands
+ * {@link sealedInstance} a side-camera picture as one field of a sealed body,
+ * when the rider switched that on. It is the only module that may
+ * (`camera/no-picture-reachable.test.ts` §"a picture reaches an instance by
+ * one path"), it can only be handed a SEALED channel, and this module still
+ * imports nothing of the camera's.
  *
  * ## The request, and what it refuses
  *
@@ -67,7 +72,49 @@
  *   power in watts, a cadence and the client's own clock; never a position
  *   (`@onyourleft/protocol` has no field for one, and
  *   `net/room-session.test.ts` walks every sent message for a coordinate).
+ *
+ * ## A sealed call — #1191
+ *
+ * {@link sealedInstance} seals a request to the instance's encryption key
+ * (ADR 0047 D-8, D-9) and sends it as `POST /v1/sealed` through the SAME
+ * `fetch` as every other call here — `no-network.test.ts` is unchanged, and
+ * the bytes leave through this module and nowhere else. What it holds:
+ *
+ * - **The ephemeral key and the HPKE context live in memory for one request or
+ *   one stream** (D-2), inside `@onyourleft/domain`'s `sealRequest`, and are
+ *   dropped with the call. Nothing here writes to IndexedDB or `localStorage`,
+ *   logs, or calls `exportKey` on a private key.
+ * - **The clock offset**, per instance ({@link InstanceClock}). On a sealed
+ *   `stale_request` the call re-signs ONCE with the instance's time, keeps the
+ *   offset for the next request, and says so above five minutes; a second
+ *   `stale_request` says the instance's clock looks wrong. The offset is taken
+ *   ONLY from a sealed answer — a plaintext one, which the edge could write, is
+ *   never read for it.
+ * - **A stream ends `finished` only on its sealed `end` event.** One that
+ *   stops without it, or whose next event does not open in order, is `cut`;
+ *   resuming is a NEW sealed request naming the last event id opened.
+ *
+ * The instance key is the caller's: from a statement verified under the
+ * identity key the device pinned (#1190). Which routes are called sealed is
+ * #1192's.
  */
+
+import {
+  PASTED_KEY_PAD_BYTES,
+  SEALED_CLOCK_NOTICE_SECONDS,
+  SEALED_END_KIND,
+  SEALED_PATH,
+  sealedEnvelopeLimit,
+  sealRequest,
+  utf8Decode,
+  utf8Encode,
+  type HpkePrimitives,
+  type SealedEvent,
+  type SealedInstanceKey,
+  type SealedRequest,
+  type Sha256,
+  type SigningKey,
+} from '@onyourleft/domain';
 
 import { instanceAddress } from './address';
 
@@ -130,8 +177,8 @@ export class InstanceUnreachableError extends Error {
   }
 }
 
-async function boundedText(response: Response, limit: number): Promise<string> {
-  if (response.body === null) return '';
+async function boundedBytes(response: Response, limit: number): Promise<Uint8Array> {
+  if (response.body === null) return new Uint8Array(0);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let read = 0;
@@ -152,7 +199,11 @@ async function boundedText(response: Response, limit: number): Promise<string> {
     bytes.set(chunk, at);
     at += chunk.byteLength;
   }
-  return new TextDecoder().decode(bytes);
+  return bytes;
+}
+
+async function boundedText(response: Response, limit: number): Promise<string> {
+  return new TextDecoder().decode(await boundedBytes(response, limit));
 }
 
 function parsed(text: string): unknown {
@@ -188,6 +239,9 @@ function isPlainPath(path: string): boolean {
     .every((segment) => segment !== '.' && segment !== '..');
 }
 
+/** The platform's own `fetch`: the ONE this client calls an instance with. */
+const platformSend: InstanceSend = async (url, init) => fetch(url, init);
+
 /**
  * The transport to one instance. Throws {@link InstanceUnreachableError} at
  * once, having sent nothing, for an origin `address.ts` refuses.
@@ -197,7 +251,7 @@ export function instanceHttp(origin: string, send?: InstanceSend): InstanceHttp 
   if (decision.kind !== 'accepted' || decision.origin !== origin) {
     throw new InstanceUnreachableError('refused-address');
   }
-  const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));
+  const sender: InstanceSend = send ?? platformSend;
   return {
     origin,
     call: async (method, path, options = {}) => {
@@ -270,13 +324,15 @@ export function isRoomId(roomId: string): boolean {
 /**
  * The ONE builder of a room's paths on an instance — the ticket's
  * (`POST /v1/rooms/{roomId}/ticket`), the socket's, and since #784 and #785 the
- * route's, the result's and the start's — so that every one applies
- * {@link isRoomId}. Throws {@link InstanceUnreachableError} `refused-path`,
- * having built nothing, for any other id (#782's review, B1).
+ * route's, the result's and the start's, since #789 the in-ride report's, and
+ * since #788 a public room's join —
+ * so that every one applies {@link isRoomId}. Throws
+ * {@link InstanceUnreachableError} `refused-path`, having built nothing, for
+ * any other id (#782's review, B1).
  */
 export function roomPath(
   roomId: string,
-  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start',
+  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start' | 'reports' | 'blocks' | 'join',
 ): string {
   if (!isRoomId(roomId)) throw new InstanceUnreachableError('refused-path');
   return `/v1/rooms/${roomId}/${kind}`;
@@ -336,4 +392,447 @@ export function instanceRoomSocket(
     throw new InstanceUnreachableError('refused-address');
   }
   return (open ?? platformSocket)(`${decision.socketOrigin}${roomPath(roomId, 'socket')}`, events);
+}
+
+// --- Sealed calls — #1191, ADR 0047 D-8, D-9 --------------------------------
+
+/** The longest {@link SealedCallOptions.timeoutMilliseconds} a call may ask for. */
+export const MAXIMUM_SEALED_CALL_MILLISECONDS = 60_000;
+
+/** How long a sealed stream may run before the app stops reading it. */
+export const SEALED_STREAM_TIMEOUT_MILLISECONDS = 10 * 60_000;
+
+/**
+ * How long a sealed stream may be silent before it is read as dropped
+ * (#1102): past the longest heartbeat interval an instance may be set to
+ * (60 s), so a healthy stream is never cut for being quiet, and a tunnel that
+ * stopped forwarding without closing is noticed in well under a minute and a
+ * half rather than at {@link SEALED_STREAM_TIMEOUT_MILLISECONDS}.
+ */
+export const SEALED_STREAM_IDLE_MILLISECONDS = 75_000;
+
+/**
+ * The offset between this device's clock and each instance's, in seconds,
+ * kept in memory and replaced only by a later SEALED `stale_request` (D-9).
+ */
+export interface InstanceClock {
+  offsetSeconds(origin: string): number;
+  setOffset(origin: string, seconds: number): void;
+}
+
+export function createInstanceClock(): InstanceClock {
+  const offsets = new Map<string, number>();
+  return {
+    offsetSeconds: (origin) => offsets.get(origin) ?? 0,
+    setOffset: (origin, seconds) => {
+      offsets.set(origin, seconds);
+    },
+  };
+}
+
+/**
+ * The two things a rider is told about clocks (D-9). ⚠️ **Draft wording**,
+ * for the owner's approval in #1191's pull request (D-14 Q6).
+ */
+export function clockOffsetNotice(minutes: number): string {
+  return `This phone’s clock is off by about ${String(minutes)} minutes from your instance’s. Sealed requests may fail until the date and time are set automatically.`;
+}
+
+/** Said on a second `stale_request`: the box's clock is the one moving. Draft, as above. */
+export const INSTANCE_CLOCK_WRONG_NOTICE =
+  'Your instance’s clock looks wrong; ask its operator to check it.';
+
+export type SealedNotice =
+  | { readonly kind: 'clock-offset'; readonly minutes: number; readonly text: string }
+  | { readonly kind: 'instance-clock-wrong'; readonly text: string };
+
+/** What a sealed call needs beyond the address. */
+export interface SealedCallDependencies {
+  /** The instance's encryption key, from its statement verified under the pinned identity key. */
+  readonly instanceKey: SealedInstanceKey;
+  /**
+   * The key that signs: the session's device key, or for a sessionless call
+   * the key its inner statement adds. `null` only for `recover/email` (D-8).
+   */
+  readonly signingKey: SigningKey | null;
+  /** HPKE's six primitives — `@onyourleft/store`'s `webCryptoHpkePrimitives`. */
+  readonly primitives: HpkePrimitives<unknown>;
+  readonly sha256: Sha256;
+  readonly clock: InstanceClock;
+  /** Unix milliseconds. */
+  readonly now?: () => number;
+}
+
+export interface SealedCallOptions {
+  readonly body?: Readonly<Record<string, unknown>>;
+  readonly token?: string;
+  /** A pasted key travels in this request: pad it to at least 1 KiB (D-9). */
+  readonly pastedKey?: boolean;
+  readonly maximumAnswerBytes?: number;
+  /**
+   * How long this ONE call may take, in place of
+   * {@link INSTANCE_TIMEOUT_MILLISECONDS} (#1106): a side-camera picture waits
+   * for a model to look at it, which a box at home takes longer over than an
+   * instance takes to answer anything else. Never more than
+   * {@link MAXIMUM_SEALED_CALL_MILLISECONDS}.
+   */
+  readonly timeoutMilliseconds?: number;
+  /**
+   * A query string, as names and values (#1192: a moderators' list's `limit`
+   * and `cursor`), encoded with `URLSearchParams` and appended to the INNER
+   * path after it has passed {@link isPlainPath}, as {@link instanceHttp} does.
+   */
+  readonly query?: Readonly<Record<string, string>>;
+}
+
+/** A sealed call's answer: the INNER status and body, and anything the rider must be told. */
+export interface SealedInstanceAnswer extends InstanceAnswer {
+  readonly notice?: SealedNotice;
+}
+
+export interface SealedStreamOptions {
+  readonly token?: string;
+  readonly method?: 'GET' | 'POST';
+  readonly body?: Readonly<Record<string, unknown>>;
+  /** Resume after this event id: a NEW sealed request (D-9). */
+  readonly lastEventId?: string;
+  /**
+   * Stop reading (#1102): the page went away, or the rider cancelled. The
+   * stream ends `cut`, so a later request can resume it after its last id.
+   */
+  readonly signal?: AbortSignal;
+  /**
+   * How long the stream may be silent — no event and no heartbeat — before it
+   * is read as dropped and ends `cut` (#1102). An instance sends a heartbeat
+   * at most every 60 s (`apps/instance` §`MAXIMUM_HEARTBEAT_MS`), so the
+   * default, {@link SEALED_STREAM_IDLE_MILLISECONDS}, is past that.
+   */
+  readonly idleMilliseconds?: number;
+  /** Each event as it opens, in order. Never the `end` event. */
+  onEvent(event: { readonly id: string; readonly kind: string; readonly data: string }): void;
+}
+
+/** How a stream ended. */
+export interface SealedStreamResult {
+  /** `finished` only on the sealed `end` event; anything else is `cut`. */
+  readonly outcome: 'finished' | 'cut';
+  /** The last event id opened — what a resume names. */
+  readonly lastEventId?: string;
+  /** When the instance refused instead of streaming: its status and body. */
+  readonly refused?: InstanceAnswer;
+  readonly notice?: SealedNotice;
+}
+
+export interface SealedInstance {
+  readonly origin: string;
+  call(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    options?: SealedCallOptions,
+  ): Promise<SealedInstanceAnswer>;
+  /**
+   * A call answered with BYTES (#1192: an original activity file, #776): the
+   * inner status and the opened body exactly as the route wrote it.
+   */
+  bytes(
+    path: string,
+    options?: SealedCallOptions,
+  ): Promise<{ readonly status: number; readonly bytes: Uint8Array }>;
+  stream(path: string, options: SealedStreamOptions): Promise<SealedStreamResult>;
+}
+
+function isSealedReply(body: unknown): boolean {
+  return typeof body === 'object' && body !== null && 'nonce' in body && 'ct' in body;
+}
+
+function staleTime(body: unknown): number | undefined {
+  const record = body as { error?: { code?: unknown }; instanceTime?: unknown } | null;
+  return record?.error?.code === 'stale_request' && typeof record.instanceTime === 'number'
+    ? record.instanceTime
+    : undefined;
+}
+
+/**
+ * Sealed calls to the instance at `origin` (#1191). Throws
+ * {@link InstanceUnreachableError} at once, having sent nothing, for an
+ * origin `address.ts` refuses or a path {@link isPlainPath} refuses.
+ */
+export function sealedInstance(
+  origin: string,
+  sealing: SealedCallDependencies,
+  send?: InstanceSend,
+): SealedInstance {
+  const decision = instanceAddress(origin);
+  if (decision.kind !== 'accepted' || decision.origin !== origin) {
+    throw new InstanceUnreachableError('refused-address');
+  }
+  const sender: InstanceSend = send ?? platformSend;
+  const now = sealing.now ?? (() => Date.now());
+
+  async function seal(
+    method: string,
+    path: string,
+    body: Readonly<Record<string, unknown>> | undefined,
+    token: string | undefined,
+    extra: { pastedKey?: boolean; lastEventId?: string },
+  ): Promise<SealedRequest> {
+    return sealRequest({
+      primitives: sealing.primitives,
+      sha256: sealing.sha256,
+      instanceOrigin: origin,
+      instanceKey: sealing.instanceKey,
+      sessionToken: token ?? null,
+      method,
+      path,
+      body: body === undefined ? null : utf8Encode(JSON.stringify(body)),
+      issuedAt: Math.floor(now() / 1000) + sealing.clock.offsetSeconds(origin),
+      ...(sealing.signingKey === null ? {} : { signer: sealing.signingKey }),
+      ...(extra.lastEventId === undefined ? {} : { lastEventId: extra.lastEventId }),
+      ...(extra.pastedKey === true ? { minimumPadding: PASTED_KEY_PAD_BYTES } : {}),
+    });
+  }
+
+  async function post(
+    sealed: SealedRequest,
+    token: string | undefined,
+    timeout: number,
+    stop?: AbortSignal,
+  ) {
+    const headers: Record<string, string> = {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+    };
+    if (token !== undefined) headers.authorization = `Bearer ${token}`;
+    try {
+      return await sender(`${origin}${SEALED_PATH}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(sealed.envelope),
+        redirect: 'error',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+        signal:
+          stop === undefined
+            ? AbortSignal.timeout(timeout)
+            : AbortSignal.any([AbortSignal.timeout(timeout), stop]),
+      });
+    } catch {
+      throw new InstanceUnreachableError('no-answer');
+    }
+  }
+
+  /**
+   * A whole answer: a plaintext refusal as it is (only a non-200 can be one —
+   * the instance answers a sealed 200 or a plaintext refusal before Open), or
+   * the sealed reply opened. A 200 that is not a sealed reply, or a reply that
+   * does not open, can only be the edge's, so it is no answer. ⚠️ The OPENED
+   * body is held to `innerLimit` too (#1192): the envelope's own bound allows
+   * for padding, so an answer a plaintext call would refuse as too large must
+   * not pass because it came sealed.
+   */
+  async function whole(sealed: SealedRequest, response: Response, innerLimit: number) {
+    const raw = await boundedBytes(response, sealedEnvelopeLimit(innerLimit));
+    const body = parsed(new TextDecoder().decode(raw));
+    if (response.status !== 200)
+      return { status: response.status, body, bytes: raw, sealed: false };
+    if (!isSealedReply(body)) throw new InstanceUnreachableError('no-answer');
+    try {
+      const reply = await sealed.openReply(body);
+      if (reply.body.byteLength > innerLimit) throw new InstanceUnreachableError('too-large');
+      return {
+        status: reply.status,
+        body: parsed(utf8Decode(reply.body) ?? ''),
+        bytes: reply.body,
+        sealed: true,
+      };
+    } catch (error) {
+      if (error instanceof InstanceUnreachableError) throw error;
+      throw new InstanceUnreachableError('no-answer');
+    }
+  }
+
+  /**
+   * The offset from a SEALED `stale_request`, kept; and whether to tell the
+   * rider. Never from a plaintext answer, which the edge could write.
+   */
+  function learnOffset(instanceTime: number): SealedNotice | undefined {
+    const offset = instanceTime - Math.floor(now() / 1000);
+    sealing.clock.setOffset(origin, offset);
+    if (Math.abs(offset) <= SEALED_CLOCK_NOTICE_SECONDS) return undefined;
+    const minutes = Math.round(Math.abs(offset) / 60);
+    return { kind: 'clock-offset', minutes, text: clockOffsetNotice(minutes) };
+  }
+
+  const WRONG: SealedNotice = { kind: 'instance-clock-wrong', text: INSTANCE_CLOCK_WRONG_NOTICE };
+
+  /** One whole sealed call, re-signed once on a sealed `stale_request` (D-9). */
+  async function wholeCall(
+    method: string,
+    path: string,
+    options: SealedCallOptions,
+  ): Promise<{ status: number; body: unknown; bytes: Uint8Array; notice?: SealedNotice }> {
+    if (!isPlainPath(path)) throw new InstanceUnreachableError('refused-path');
+    const query = options.query === undefined ? '' : new URLSearchParams(options.query).toString();
+    const inner = query === '' ? path : `${path}?${query}`;
+    const limit = Math.min(
+      options.maximumAnswerBytes ?? MAXIMUM_INSTANCE_ANSWER_BYTES,
+      MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+    );
+    const timeout = Math.min(
+      options.timeoutMilliseconds ?? INSTANCE_TIMEOUT_MILLISECONDS,
+      MAXIMUM_SEALED_CALL_MILLISECONDS,
+    );
+    const attempt = async () => {
+      const sealed = await seal(method, inner, options.body, options.token, options);
+      return whole(sealed, await post(sealed, options.token, timeout), limit);
+    };
+    const first = await attempt();
+    const instanceTime = first.sealed ? staleTime(first.body) : undefined;
+    if (instanceTime === undefined) return first;
+    const notice = learnOffset(instanceTime);
+    const second = await attempt();
+    if (second.sealed && staleTime(second.body) !== undefined) return { ...second, notice: WRONG };
+    return { ...second, ...(notice === undefined ? {} : { notice }) };
+  }
+
+  return {
+    origin,
+
+    async call(method, path, options = {}) {
+      const answer = await wholeCall(method, path, options);
+      return {
+        status: answer.status,
+        body: answer.body,
+        ...(answer.notice === undefined ? {} : { notice: answer.notice }),
+      };
+    },
+
+    async bytes(path, options = {}) {
+      const answer = await wholeCall('GET', path, options);
+      return { status: answer.status, bytes: answer.bytes };
+    },
+
+    async stream(path, options) {
+      if (!isPlainPath(path)) throw new InstanceUnreachableError('refused-path');
+      let notice: SealedNotice | undefined;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const sealed = await seal(options.method ?? 'GET', path, options.body, options.token, {
+          ...(options.lastEventId === undefined ? {} : { lastEventId: options.lastEventId }),
+        });
+        const response = await post(
+          sealed,
+          options.token,
+          SEALED_STREAM_TIMEOUT_MILLISECONDS,
+          options.signal,
+        );
+        if (!(response.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
+          const answer = await whole(sealed, response, MAXIMUM_INSTANCE_ANSWER_BYTES);
+          const instanceTime = answer.sealed ? staleTime(answer.body) : undefined;
+          if (instanceTime !== undefined && attempt === 0) {
+            notice = learnOffset(instanceTime);
+            continue;
+          }
+          if (instanceTime !== undefined) notice = WRONG;
+          return {
+            outcome: 'cut',
+            refused: { status: answer.status, body: answer.body },
+            ...(options.lastEventId === undefined ? {} : { lastEventId: options.lastEventId }),
+            ...(notice === undefined ? {} : { notice }),
+          };
+        }
+        const read = await readStream(sealed, response, options);
+        return { ...read, ...(notice === undefined ? {} : { notice }) };
+      }
+      throw new InstanceUnreachableError('no-answer');
+    },
+  };
+}
+
+/** A stream's frames, each opened in order; `finished` only on its sealed `end`. */
+async function readStream(
+  sealed: SealedRequest,
+  response: Response,
+  options: SealedStreamOptions,
+): Promise<Pick<SealedStreamResult, 'outcome' | 'lastEventId'>> {
+  const opener = sealed.streamOpener();
+  let lastEventId = options.lastEventId;
+  const result = (outcome: 'finished' | 'cut') => ({
+    outcome,
+    ...(lastEventId === undefined ? {} : { lastEventId }),
+  });
+  if (response.body === null) return result('cut');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  try {
+    for (;;) {
+      let chunk: ReadableStreamReadResult<Uint8Array> | undefined;
+      try {
+        chunk = await readWithin(
+          reader,
+          options.idleMilliseconds ?? SEALED_STREAM_IDLE_MILLISECONDS,
+          options.signal,
+        );
+      } catch {
+        return result('cut');
+      }
+      // Silent past the idle bound, or told to stop: dropped, and resumable.
+      if (chunk === undefined) return result('cut');
+      buffered += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
+      if (buffered.length > sealedEnvelopeLimit(MAXIMUM_INSTANCE_ANSWER_BYTES)) {
+        return result('cut');
+      }
+      const blocks = buffered.split('\n\n');
+      buffered = chunk.done ? '' : (blocks.pop() ?? '');
+      for (const block of blocks) {
+        const data = block
+          .split('\n')
+          .filter((line) => line.startsWith('data: '))
+          .map((line) => line.slice('data: '.length));
+        if (data.length !== 1) continue;
+        let event: SealedEvent;
+        try {
+          event = await opener.open(data[0] as string);
+        } catch {
+          return result('cut');
+        }
+        if (event.kind === SEALED_END_KIND) return result('finished');
+        lastEventId = event.id;
+        options.onEvent({ id: event.id, kind: event.kind, data: utf8Decode(event.data) ?? '' });
+      }
+      if (chunk.done) return result('cut');
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * The next chunk, or `undefined` when nothing — not even a heartbeat — came
+ * within `idle` milliseconds, or `stop` was aborted first (#1102).
+ */
+async function readWithin(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idle: number,
+  stop: AbortSignal | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array> | undefined> {
+  if (stop?.aborted === true) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onStop: (() => void) | undefined;
+  const quiet = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(undefined);
+    }, idle);
+    onStop = () => {
+      resolve(undefined);
+    };
+    stop?.addEventListener('abort', onStop, { once: true });
+  });
+  try {
+    return await Promise.race([reader.read(), quiet]);
+  } finally {
+    clearTimeout(timer);
+    if (onStop !== undefined) stop?.removeEventListener('abort', onStop);
+  }
 }

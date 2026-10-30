@@ -231,8 +231,12 @@ describe('the licence a credit names', () => {
     expect(licenceLink('MIT')).toBeUndefined();
   });
 
-  it('links Apache-2.0 to the copy this app ships, relative to the page — #597', () => {
-    expect(licenceLink('Apache-2.0')).toBe('./licences/Apache-2.0.txt');
+  it('links no licence this app ships a copy of — the screen shows it instead, #1744', () => {
+    // A link to the shipped `.txt` opened over the app inside the Android
+    // shell, and back left the app.
+    for (const licence of Object.keys(SHIPPED_LICENCE_TEXTS)) {
+      expect(licenceLink(licence), `${licence} is linked`).toBeUndefined();
+    }
   });
 
   it('has a link for every licence that requires attribution', () => {

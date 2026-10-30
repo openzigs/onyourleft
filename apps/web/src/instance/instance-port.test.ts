@@ -13,7 +13,7 @@
  * those; the shape it is used through is written down here.
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { checkDisplayName, unixSeconds } from '@onyourleft/domain';
 import { ensureDeviceSigningKey } from '@onyourleft/store';
 import { createStoreHarness, seedRide, type StoreHarness } from '@onyourleft/store/testing';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -21,23 +21,42 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { ADDRESS_REFUSAL_TEXT } from './address';
 import {
+  ACCOUNT_CHANGES_UNAVAILABLE_TEXT,
+  accountChangesFrom,
   CONNECT_REFUSAL_TEXT,
   createInstancePort,
+  INSTANCE_AGREEMENT_STORAGE_KEYS,
+  instanceEraser,
+  TERMS_READ_STORAGE_KEY,
   INSTANCE_SESSION_STORAGE_KEY,
+  RENAME_REFUSAL_TEXT,
   type InstancePortDependencies,
   type InstanceStorage,
 } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from './sign-in';
+import { LOADED_LOCALLY } from './testing';
+
+// Delegates to the real rule; a test makes this app's rule differ from the
+// instance's for one call, which is what a version skew between them looks like.
+const actualCheck = vi.hoisted(() => ({ run: undefined as unknown as typeof checkDisplayName }));
+
+vi.mock('@onyourleft/domain', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@onyourleft/domain')>();
+  actualCheck.run = actual.checkDisplayName;
+  return { ...actual, checkDisplayName: vi.fn(actual.checkDisplayName) };
+});
 
 interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
+  /** The instance's keys (#1189): its card, which a new rider registers with (#1192). */
+  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   /** The listener's own `http://127.0.0.1:<port>`. */
   readonly url: string;
   call(
     method: string,
     path: string,
-    options?: { body?: unknown; token?: string },
+    options?: { body?: unknown; token?: string; signer?: { readonly signingKey: unknown } },
   ): Promise<{ status: number; body: unknown }>;
   close(): Promise<void>;
 }
@@ -45,9 +64,14 @@ interface IdentityInstance {
 interface IdentityTesting {
   readonly TEST_ORIGIN: string;
   startIdentityInstance(options?: {
-    config?: { name?: string | null };
+    config?: {
+      name?: string | null;
+      /** The terms the instance publishes (#909). */
+      terms?: { readonly text: string; readonly version: string } | null;
+    };
     registration?: 'open' | 'closed';
     originIsTheListener?: boolean;
+    keyless?: boolean;
   }): Promise<IdentityInstance>;
 }
 
@@ -74,6 +98,14 @@ async function instance(options: Parameters<IdentityTesting['startIdentityInstan
   const world = await testing.startIdentityInstance({ config: { name: NAME }, ...options });
   worlds.push(world);
   return world;
+}
+
+/**
+ * The instance's card, as its operator hands it over (#1190): a new key
+ * registers only sealed (#1192), and a device seals only with a card.
+ */
+async function cardOf(world: IdentityInstance): Promise<string> {
+  return (await world.instanceKeys.show()).card;
 }
 
 /** `localStorage` as a map that outlives the port reading it: a reload keeps it. */
@@ -106,6 +138,7 @@ function device(send: InstanceSend, storage = deviceStorage()) {
   const log: string[] = [];
   const dependencies: InstancePortDependencies = {
     storage,
+    loadedFrom: LOADED_LOCALLY,
     ensureLocalAthlete: () =>
       store.write(async (open) => {
         log.push('ensureLocalAthlete');
@@ -146,8 +179,8 @@ describe('signing in, and what is shown after a reload — #777', () => {
     const world = await instance();
     const send = wire(world);
     const first = device(send);
-    const outcome = await first.port.connect(testing.TEST_ORIGIN, 'Anna');
-    expect(outcome.kind).toBe('connected');
+    const outcome = await first.port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    expect(outcome.kind, JSON.stringify(outcome)).toBe('connected');
     expect(outcome.kind === 'connected' ? outcome.recoveryCodes : []).toHaveLength(10);
 
     // The reload: a new port over nothing but what the device kept.
@@ -158,30 +191,61 @@ describe('signing in, and what is shown after a reload — #777', () => {
       instanceName: NAME,
       displayName: 'Anna',
       sourceUrl: expect.stringContaining('https://github.com/openzigs/onyourleft/tree/') as unknown,
+      termsVersion: null,
+      termsUnread: false,
     });
 
     // Renamed on the instance, and the screen says so: it reads the instance,
     // not what the form was given.
+    // Sealed and signed by the device's own key (#1210): the token alone renames nobody.
     const token = heldToken(first.storage);
     const renamed = await world.call('POST', '/v1/auth/display-name', {
       body: { displayName: 'Brigid' },
       token,
+      signer: { signingKey: await first.dependencies.signingKey() },
     });
     expect(renamed.status).toBe(200);
     expect(await reloaded.current()).toMatchObject({ displayName: 'Brigid' });
   });
 
+  it('says the instance’s terms are unread until this device marks that version read (#909)', async () => {
+    const world = await instance({
+      config: { terms: { text: '# Terms\n\nRide kindly.', version: '2026-11-01' } },
+    });
+    const { port, storage } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    expect(await port.current()).toMatchObject({
+      termsVersion: '2026-11-01',
+      termsUnread: true,
+    });
+    port.markTermsRead('2026-11-01');
+    expect(await port.current()).toMatchObject({ termsUnread: false });
+    // An older version marked read is not this one: the screen says they changed.
+    port.markTermsRead('2026-01-01');
+    expect(await port.current()).toMatchObject({ termsUnread: true });
+    // Nor is this version read for ANOTHER instance: what was read is read per instance.
+    storage.map.set(
+      TERMS_READ_STORAGE_KEY,
+      JSON.stringify({ origin: 'https://elsewhere.example', version: '2026-11-01' }),
+    );
+    expect(await port.current()).toMatchObject({ termsUnread: true });
+    // Kept with the instance's address, so forgetting the instance forgets it.
+    expect(storage.map.has(TERMS_READ_STORAGE_KEY)).toBe(true);
+    instanceEraser(storage).forget();
+    expect(storage.map.has(TERMS_READ_STORAGE_KEY)).toBe(false);
+  });
+
   it('says the instance has no name rather than inventing one', async () => {
     const world = await instance({ config: { name: null } });
     const { port } = device(wire(world));
-    await port.connect(testing.TEST_ORIGIN, '');
+    await port.connect(testing.TEST_ORIGIN, '', await cardOf(world));
     expect(await port.current()).toMatchObject({ kind: 'connected', instanceName: null });
   });
 
   it('lists this athlete’s devices, this one among them (#773)', async () => {
     const world = await instance();
     const { port } = device(wire(world));
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const listed = await port.devices();
     expect(listed.kind).toBe('listed');
     expect(listed.kind === 'listed' ? listed.devices : []).toEqual([
@@ -195,7 +259,9 @@ describe('signing in, and what is shown after a reload — #777', () => {
     // Three devices, each its own key and so its own athlete on the instance.
     const riders = [device(send), device(send), device(send)];
     for (const rider of riders) {
-      expect((await rider.port.connect(testing.TEST_ORIGIN, '')).kind).toBe('connected');
+      expect((await rider.port.connect(testing.TEST_ORIGIN, '', await cardOf(world))).kind).toBe(
+        'connected',
+      );
     }
     const keys = await Promise.all(
       riders.map(async (rider) => {
@@ -211,17 +277,39 @@ describe('signing in, and what is shown after a reload — #777', () => {
 
   it('says so when the instance no longer accepts the session', async () => {
     const world = await instance();
-    const { port, storage } = device(wire(world));
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    const { port, storage, dependencies } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const token = heldToken(storage);
-    expect((await world.call('DELETE', '/v1/auth/session', { token })).status).toBe(204);
+    // Signed out by the device's own key, sealed (#1210), as another of its screens could.
+    const signer = { signingKey: await dependencies.signingKey() };
+    expect((await world.call('DELETE', '/v1/auth/session', { token, signer })).status).toBe(204);
     expect(await port.current()).toEqual({ kind: 'signed-out', origin: testing.TEST_ORIGIN });
+  });
+
+  it('says it cannot read the session when a keyless-looking instance demands a seal — #1210', async () => {
+    // A device with no pin, connected to a keyless instance, which then
+    // answers the plaintext session read `sealed_required`.
+    const world = await instance({ keyless: true });
+    const base = wire(world);
+    const { port, storage } = device(base);
+    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    const demanding: InstanceSend = (url, init) =>
+      new URL(url).pathname === '/v1/auth/session'
+        ? Promise.resolve(
+            new Response(JSON.stringify({ error: { code: 'sealed_required' } }), {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        : base(url, init);
+    const { port: reading } = device(demanding, storage);
+    expect(await reading.current()).toMatchObject({ kind: 'unreadable' });
   });
 
   it('names the refusal of an instance that is not taking new riders', async () => {
     const world = await instance({ registration: 'closed' });
     const { port, storage } = device(wire(world));
-    expect(await port.connect(testing.TEST_ORIGIN, 'Anna')).toEqual({
+    expect(await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world))).toEqual({
       kind: 'refused',
       text: CONNECT_REFUSAL_TEXT.registration_closed,
     });
@@ -229,7 +317,9 @@ describe('signing in, and what is shown after a reload — #777', () => {
   });
 
   it('names the refusal of an instance that answers to another address', async () => {
-    const world = await instance();
+    // With no keys, so with no card (#1210): an instance holding keys refuses
+    // a plaintext sign-in before it reads the statement's address.
+    const world = await instance({ keyless: true });
     const { port } = device(wire(world));
     expect(await port.connect('https://other.example', 'Anna')).toEqual({
       kind: 'refused',
@@ -244,7 +334,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
     const send: InstanceSend = (url, init) =>
       up ? real(url, init) : Promise.reject(new TypeError('offline'));
     const { port } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     up = false;
     expect(await port.current()).toEqual({ kind: 'unreachable', origin: testing.TEST_ORIGIN });
     expect(await port.devices()).toMatchObject({ kind: 'unavailable' });
@@ -264,7 +354,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
       return real(url, init);
     };
     const { port } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     expect(await port.current()).toMatchObject({ sourceUrl: null, instanceName: null });
   });
 });
@@ -274,7 +364,9 @@ describe('what is sent, and what is kept — #892 review', () => {
     // The policy, the Connect screen and the Data Safety Name row say this
     // exactly: sent whenever one is typed, kept only by an instance that has
     // not seen this device before. They used to say it was SENT only then.
-    const world = await instance();
+    // An instance with no keys, so the body it was sent is readable here: on
+    // one holding keys every sign-in is sealed (#1210).
+    const world = await instance({ keyless: true });
     const send = wire(world);
     const { port } = device(send);
     await port.connect(testing.TEST_ORIGIN, 'Anna');
@@ -302,7 +394,9 @@ describe('what is sent, and what is kept — #892 review', () => {
       url.startsWith(second.url) ? toSecond(url, init) : toFirst(url, init);
     const storage = deviceStorage();
     const { port } = device(send, storage);
-    expect((await port.connect(testing.TEST_ORIGIN, 'Anna')).kind).toBe('connected');
+    expect((await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(first))).kind).toBe(
+      'connected',
+    );
     const firstToken = heldToken(storage);
     expect(firstToken).not.toBe('');
 
@@ -314,7 +408,7 @@ describe('what is sent, and what is kept — #892 review', () => {
         throw new DOMException('full', 'QuotaExceededError');
       setItem(key, value);
     };
-    expect((await port.connect(second.url, 'Anna')).kind).toBe('refused');
+    expect((await port.connect(second.url, 'Anna', await cardOf(second))).kind).toBe('refused');
     expect(JSON.parse(storage.map.get(INSTANCE_ACCOUNT_STORAGE_KEY) ?? '{}')).toMatchObject({
       origin: second.url,
     });
@@ -340,7 +434,7 @@ describe('disconnecting — #777', () => {
     const before = await count();
     expect(before).toBe(3);
 
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const token = heldToken(storage);
     expect(token).not.toBe('');
     expect(storage.map.has(INSTANCE_ACCOUNT_STORAGE_KEY)).toBe(true);
@@ -356,6 +450,15 @@ describe('disconnecting — #777', () => {
     expect(await count()).toBe(before);
   });
 
+  it('forgets what the rider agreed to send this instance, so the next account starts with none (#1106)', async () => {
+    const world = await instance();
+    const { port, storage } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage.map.set(key, testing.TEST_ORIGIN);
+    await port.disconnect();
+    for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) expect(storage.map.has(key)).toBe(false);
+  });
+
   it('forgets the instance even when it does not answer', async () => {
     const world = await instance();
     let up = true;
@@ -363,9 +466,298 @@ describe('disconnecting — #777', () => {
     const send: InstanceSend = (url, init) =>
       up ? real(url, init) : Promise.reject(new TypeError('offline'));
     const { port, storage } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     up = false;
     await port.disconnect();
     expect(storage.map.size).toBe(0);
+  });
+});
+
+describe('changing the name other riders see, sealed — #906 item 2', () => {
+  async function signedIn() {
+    const world = await instance();
+    const send = wire(world);
+    const first = device(send);
+    await first.port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    return { world, send, first };
+  }
+
+  it('changes it, and every device then reads the new name back from the instance', async () => {
+    const { send, first } = await signedIn();
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const second = device(send);
+    expect(await second.port.link(shown.offer)).toEqual({ kind: 'connected' });
+    expect(await first.port.rename('  Anna B  ')).toEqual({
+      kind: 'renamed',
+      displayName: 'Anna B',
+    });
+    // Read back through the call the screen makes, on both devices.
+    expect(await first.port.current()).toMatchObject({ kind: 'connected', displayName: 'Anna B' });
+    expect(await second.port.current()).toMatchObject({ kind: 'connected', displayName: 'Anna B' });
+    // Only ever sealed: no plaintext request carried the name.
+    const plaintext = send.mock.calls.filter(
+      ([url]) => new URL(url as string).pathname === '/v1/auth/display-name',
+    );
+    expect(plaintext).toEqual([]);
+  });
+
+  it('sends no name the instance would refuse, and says what a name must be', async () => {
+    const { send, first } = await signedIn();
+    send.mockClear();
+    for (const bad of ['', '   ', 'x'.repeat(33), 'Ann‮a', 'An\u0007na']) {
+      expect(await first.port.rename(bad)).toEqual({
+        kind: 'refused',
+        text: RENAME_REFUSAL_TEXT['bad-name'],
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+
+  it('says so when the instance limits renames, and keeps the last name it took', async () => {
+    const { first } = await signedIn();
+    for (const name of ['Anna B', 'Anna C', 'Anna D']) {
+      expect(await first.port.rename(name)).toMatchObject({ kind: 'renamed' });
+    }
+    expect(await first.port.rename('Anna E')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT.rate_limited,
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna D' });
+  });
+
+  it('names the bad name, not a silence, when the instance refuses one this app accepted', async () => {
+    const { first } = await signedIn();
+    // This app's rule lets a 40-character name through once; the instance's does not.
+    vi.mocked(checkDisplayName).mockImplementationOnce(() => ({ ok: true, name: 'x'.repeat(40) }));
+    expect(await first.port.rename('whatever')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT['bad-name'],
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+
+  it('says renamed when the instance committed it, though its echo fails this app rule', async () => {
+    const { first } = await signedIn();
+    const seen: string[] = [];
+    vi.mocked(checkDisplayName).mockImplementation((input) => {
+      seen.push(input);
+      // Only the echo, the last check of the call, is refused: the name was sent and kept.
+      return seen.length >= 3 ? { ok: false, problem: 'empty' } : actualCheck.run(input);
+    });
+    try {
+      expect(await first.port.rename('Anna B')).toEqual({ kind: 'renamed', displayName: 'Anna B' });
+    } finally {
+      vi.mocked(checkDisplayName).mockImplementation(actualCheck.run);
+    }
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna B' });
+  });
+
+  it('says this device is signed out when the instance no longer takes its sign-in', async () => {
+    const { send, first } = await signedIn();
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const second = device(send);
+    await second.port.link(shown.offer);
+    const listed = await first.port.devices();
+    const other =
+      listed.kind === 'listed'
+        ? (listed.devices.find((each) => !each.thisDevice)?.publicKey ?? '')
+        : '';
+    expect(await first.port.revokeDevice(other)).toEqual({ kind: 'revoked' });
+    expect(await second.port.rename('Not Anna')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT['signed-out'],
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+
+  it('says the name is not changed when the instance does not answer', async () => {
+    const { world, first } = await signedIn();
+    const real = wire(world);
+    const port = createInstancePort({
+      ...first.dependencies,
+      send: (url, init) =>
+        new URL(url).pathname !== '/v1/sealed'
+          ? real(url, init)
+          : Promise.reject(new TypeError('offline')),
+    });
+    expect(await port.rename('Anna B')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT['no-answer'],
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+});
+
+describe('the account-change notices and a revoke, sealed — #1208', () => {
+  /** A rider with two devices: `first` signed in with the card and linked `second`. */
+  async function twoDevices() {
+    const world = await instance();
+    const send = wire(world);
+    const first = device(send);
+    await first.port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const second = device(send);
+    expect(await second.port.link(shown.offer)).toEqual({ kind: 'connected' });
+    const listed = await first.port.devices();
+    if (listed.kind !== 'listed') throw new Error('no devices');
+    const other = listed.devices.find((each) => !each.thisDevice)?.publicKey ?? '';
+    return { world, send, first, second, other };
+  }
+
+  it('shows a device the changes another key made, and not its own', async () => {
+    const { first, second } = await twoDevices();
+    // The first device minted the code that added the second: on the SECOND
+    // those are another key's changes, so notices; on the first, its own.
+    const seen = await second.port.accountChanges();
+    expect(seen.kind).toBe('read');
+    if (seen.kind !== 'read') return;
+    expect(seen.notices.map((entry) => entry.kind)).toEqual(['link_code_minted', 'key_added']);
+    expect(seen.acknowledgedThrough).toBe(0);
+    const own = await first.port.accountChanges();
+    expect(own).toMatchObject({ kind: 'read', notices: [] });
+    expect(own.kind === 'read' ? own.changes.length : 0).toBe(2);
+  });
+
+  it('moves only this device’s mark when it acknowledges, read back on both devices', async () => {
+    const { first, second } = await twoDevices();
+    // A change by the second key, so the FIRST device has a notice too.
+    expect((await second.port.linkCode()).kind).toBe('shown');
+    const before = await first.port.accountChanges();
+    expect(before.kind === 'read' ? before.notices.map((entry) => entry.kind) : []).toEqual([
+      'link_code_minted',
+    ]);
+    const seen = await second.port.accountChanges();
+    const newest = seen.kind === 'read' ? Math.max(...seen.notices.map((entry) => entry.id)) : 0;
+    expect(await second.port.acknowledgeAccountChanges(newest)).toEqual({
+      kind: 'acknowledged',
+      acknowledgedThrough: newest,
+    });
+    // Read back through the same call the screen makes: gone on the second…
+    expect(await second.port.accountChanges()).toMatchObject({
+      kind: 'read',
+      notices: [],
+      acknowledgedThrough: newest,
+    });
+    // …and still there, unmoved, on the first.
+    expect(await first.port.accountChanges()).toMatchObject({
+      kind: 'read',
+      acknowledgedThrough: 0,
+      notices: [expect.objectContaining({ kind: 'link_code_minted' })],
+    });
+  });
+
+  it('revokes another key, which the list and the log then say', async () => {
+    const { first, second, other } = await twoDevices();
+    expect(await first.port.revokeDevice(other)).toEqual({ kind: 'revoked' });
+    const listed = await first.port.devices();
+    expect(
+      listed.kind === 'listed'
+        ? listed.devices.find((each) => each.publicKey === other)?.revokedAt
+        : null,
+    ).toEqual(expect.any(Number));
+    const log = await first.port.accountChanges();
+    const last = log.kind === 'read' ? log.changes.at(-1) : undefined;
+    expect(last).toMatchObject({ kind: 'key_revoked', subjectKey: other });
+    expect(typeof last?.subjectAddedAt).toBe('number');
+    // The revoked key's own session ended with it.
+    expect(await second.port.accountChanges()).toMatchObject({ kind: 'unavailable' });
+  });
+
+  it('refuses to revoke the last key without a recovery code, and says why', async () => {
+    const world = await instance();
+    const { port } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    const listed = await port.devices();
+    const mine = listed.kind === 'listed' ? (listed.devices[0]?.publicKey ?? '') : '';
+    expect(await port.revokeDevice(mine)).toEqual({
+      kind: 'unavailable',
+      text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['last-device'],
+    });
+    expect((await port.devices()).kind).toBe('listed');
+  });
+
+  it('sends no revoke for anything but a device key, so no path can be steered', async () => {
+    const { send, first } = await twoDevices();
+    send.mockClear();
+    for (const bad of ['../session', 'a1'.repeat(31), `${'a1'.repeat(32)}?x`, 'A1'.repeat(32)]) {
+      expect(await first.port.revokeDevice(bad)).toEqual({
+        kind: 'unavailable',
+        text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked'],
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('reads no log it cannot trust: one entry of the wrong shape is no answer', () => {
+    const good = {
+      id: 3,
+      at: 1_790_000_000,
+      kind: 'address_added',
+      actorKey: 'b2'.repeat(32),
+      subjectKey: null,
+      subjectAddedAt: null,
+      via: null,
+      address: 'rider@example.org',
+    };
+    expect(accountChangesFrom([good])).toEqual([good]);
+    for (const bad of [
+      { kind: 'key_stolen' },
+      { id: -1 },
+      { id: 1.5 },
+      { at: '1790000000' },
+      { actorKey: 'not a key' },
+      { subjectKey: '../session' },
+      { subjectAddedAt: Number.NaN },
+      { via: 'carrier_pigeon' },
+      { address: 7 },
+    ]) {
+      expect(accountChangesFrom([good, { ...good, ...bad }])).toBeUndefined();
+    }
+    expect(accountChangesFrom({ 0: good })).toBeUndefined();
+    // An address no screen may be handed is read as none, not shown.
+    expect(accountChangesFrom([{ ...good, address: 'a\u202Eb@example.org' }])).toEqual([
+      { ...good, address: null },
+    ]);
+  });
+
+  it('marks no notice read through a mark the instance would refuse, and sends nothing', async () => {
+    const { send, first } = await twoDevices();
+    send.mockClear();
+    for (const bad of [-1, 1.5, Number.NaN]) {
+      expect(await first.port.acknowledgeAccountChanges(bad)).toEqual({
+        kind: 'unavailable',
+        text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged'],
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('says the log cannot be shown when the instance does not answer', async () => {
+    const { world, first } = await twoDevices();
+    const real = wire(world);
+    let up = true;
+    // The same device — its storage and its key — over a line that drops
+    // the sealed call itself, after the instance's keys were read.
+    const port = createInstancePort({
+      ...first.dependencies,
+      send: (url, init) =>
+        up || new URL(url).pathname !== '/v1/sealed'
+          ? real(url, init)
+          : Promise.reject(new TypeError('offline')),
+    });
+    expect((await port.accountChanges()).kind).toBe('read');
+    up = false;
+    expect(await port.accountChanges()).toEqual({
+      kind: 'unavailable',
+      text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['no-answer'],
+    });
+    expect(await port.acknowledgeAccountChanges(1)).toEqual({
+      kind: 'unavailable',
+      text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged'],
+    });
   });
 });

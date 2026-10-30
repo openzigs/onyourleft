@@ -10,7 +10,7 @@
  * **answer** and the tablet reads it. Each is the text of one QR code:
  *
  * ```text
- * OYLSIDE1{"r":"o","u":"…","p":"…","f":"…","s":"actpass","c":["192.168.1.20:50123"],"k":"…"}
+ * OYLSIDE1{"r":"o","u":"…","p":"…","f":"…","s":"actpass","c":["192.168.1.20:50123"],"k":"…","e":1792512345}
  * ```
  *
  * - `r` — `o` for an offer, `a` for an answer. A phone that reads an answer,
@@ -25,6 +25,11 @@
  * - `c` — the host candidates, `address:port`, an IPv6 address in brackets.
  * - `k` — **the offer only**: D-4's one-time secret, 32 random bytes in
  *   base64url, which the phone sends back as its first message.
+ * - `e` — **the offer only**, since #1110: when the tablet stops accepting an
+ *   answer to it, in whole seconds since 1970 on the tablet's clock, rounded
+ *   down. The phone bounds its wait for the tablet to read its answer by it
+ *   (`side-link.ts` §`PhoneSideLink.waitForTabletRead`), so a phone that
+ *   scanned late does not count down past an offer that is already gone.
  *
  * ## ⚠️ An unknown field is refused, not ignored
  *
@@ -84,6 +89,12 @@ export const MAXIMUM_PAIRING_CANDIDATES = 8;
 /** The one-time secret's length in bytes (D-4). */
 export const PAIRING_SECRET_BYTES = 32;
 
+/**
+ * The latest expiry an offer may name, in seconds since 1970: the year 5138.
+ * A bound on what a hostile code can hand the phone's timers, not a tuning.
+ */
+export const MAXIMUM_OFFER_EXPIRY_SECONDS = 99_999_999_999;
+
 /** Which of the two codes. */
 export type PairingRole = 'offer' | 'answer';
 
@@ -101,6 +112,11 @@ export interface OfferPairingCode {
   readonly parameters: SidePeerParameters;
   /** The one-time secret — D-4. */
   readonly secret: Uint8Array;
+  /**
+   * When the tablet stops accepting an answer to this offer, in milliseconds
+   * since 1970 on the TABLET's clock, rounded down to the second (#1110).
+   */
+  readonly expiresAt: number;
 }
 
 /** An answer, as the tablet reads it off the phone. */
@@ -129,6 +145,8 @@ export type PairingRefusal =
   | 'no-candidate'
   /** The tablet's offer has already been answered, or its pairing is over (D-4: single use). */
   | 'used'
+  /** The tablet's offer had run out when the phone read it, by the phone's clock (#1110). */
+  | 'expired'
   /** This browser or WebView offers no way to make a direct link at all. */
   | 'unavailable';
 
@@ -152,6 +170,10 @@ export const PAIRING_REFUSAL_TEXT: Readonly<Record<PairingRefusal, string>> = {
   used:
     'That pairing has already been used. Press "Pair a phone" on the tablet to show a fresh code, ' +
     'and scan that one.',
+  expired:
+    'That pairing code has run out. Press "Pair a phone" on the tablet to show a fresh code, and ' +
+    'scan that one. If a fresh code says this too, check that both devices set their date and ' +
+    'time automatically.',
   unavailable:
     'This browser cannot make a direct link to another device, so it cannot be paired. Use the ' +
     'On Your Left app, or a recent version of Chrome.',
@@ -203,12 +225,16 @@ function addressAccepted(address: string): boolean {
  * The code one end shows, or the refusal when it has nothing to show.
  *
  * Every candidate {@link candidateAccepted} refuses is left out here, before
- * the code is built — D-4's *"the encoder omits"*.
+ * the code is built — D-4's *"the encoder omits"*. An offer carries its
+ * `secret` and, since #1110, `expiresAt`: when the tablet stops accepting an
+ * answer to it, in milliseconds since 1970, written rounded down to the second
+ * so that the phone never counts past it.
  */
 export function pairingCodeText(
   role: PairingRole,
   parameters: SidePeerParameters,
   secret?: Uint8Array,
+  expiresAt?: number,
 ): { readonly text: string } | { readonly refusal: PairingRefusal } {
   const candidates = parameters.candidates
     .filter(candidateAccepted)
@@ -229,6 +255,11 @@ export function pairingCodeText(
       throw new RangeError('an offer carries a one-time secret of the fixed length');
     }
     body['k'] = base64Url(secret);
+    const seconds = expiresAt === undefined ? Number.NaN : Math.floor(expiresAt / 1000);
+    if (!expiryFits(seconds)) {
+      throw new RangeError('an offer carries the time it expires');
+    }
+    body['e'] = seconds;
   }
   return { text: `${PAIRING_CODE_PREFIX}${JSON.stringify(body)}` };
 }
@@ -241,7 +272,7 @@ function candidateText(candidate: SideCandidate): string {
 }
 
 /** The fields an offer may carry, and an answer. Anything else is refused. */
-const OFFER_FIELDS: ReadonlySet<string> = new Set(['r', 'u', 'p', 'f', 's', 'c', 'k']);
+const OFFER_FIELDS: ReadonlySet<string> = new Set(['r', 'u', 'p', 'f', 's', 'c', 'k', 'e']);
 const ANSWER_FIELDS: ReadonlySet<string> = new Set(['r', 'u', 'p', 'f', 's', 'c']);
 
 /** RFC 8839 §5.4: `ice-char = ALPHA / DIGIT / "+" / "/"`, with its lengths. */
@@ -285,7 +316,7 @@ export function readPairingCode(text: string, expected: PairingRole): PairingCod
   if (Object.keys(fields).some((key) => !allowed.has(key))) {
     return { refusal: 'malformed' };
   }
-  const { u: ufrag, p: password, f, s: setup, c, k } = fields;
+  const { u: ufrag, p: password, f, s: setup, c, k, e } = fields;
   if (typeof ufrag !== 'string' || !UFRAG_PATTERN.test(ufrag)) {
     return { refusal: 'malformed' };
   }
@@ -325,7 +356,20 @@ export function readPairingCode(text: string, expected: PairingRole): PairingCod
   // the place its type is narrowed — #550's review found a second check of it
   // downstream that could never fire.
   const secret = typeof k === 'string' ? fromBase64Url(k, PAIRING_SECRET_BYTES) : undefined;
-  return secret === undefined ? { refusal: 'malformed' } : { code: { role, parameters, secret } };
+  if (secret === undefined || !expiryFits(e)) {
+    return { refusal: 'malformed' };
+  }
+  return { code: { role, parameters, secret, expiresAt: e * 1000 } };
+}
+
+/** Whether `seconds` is an offer's expiry as {@link pairingCodeText} writes one. */
+function expiryFits(seconds: unknown): seconds is number {
+  return (
+    typeof seconds === 'number' &&
+    Number.isInteger(seconds) &&
+    seconds > 0 &&
+    seconds <= MAXIMUM_OFFER_EXPIRY_SECONDS
+  );
 }
 
 function setupFits(setup: unknown, role: PairingRole): setup is SideSetup {

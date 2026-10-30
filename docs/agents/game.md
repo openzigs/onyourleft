@@ -141,7 +141,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ The camera pitches with the ROAD — both the eye and
                         the look-at ride the corridor's own heights — so a
                         pacer 50 m ahead stays put on a 20 % hill where a level
-                        gaze put it behind the rider's back
+                        gaze put it behind the rider's back. Since #783
+                        `projectToFrame` restates the renderer's camera
+                        without `three`, for the names below
+    src/game/name-tags.ts
+                        other riders' names on the road (#783): DOM laid over
+                        the world, so no draw call and no triangle in either
+                        world. Only `RiderMarker.label` — a race room's public
+                        name, or the followed rider's seat — and no figure.
+                        ⚠️ Only over riders the realistic world draws too
+                        (`realisticRemoteSplit`'s rule), within 60 m, at most
+                        8, the followed rider's first and a name that would
+                        cover another left out. `game.browser.spec.ts` §"#783"
+                        holds a name over the rider the renderer drew
     src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
                         parts as numbers rather than an asset, the two-bone knee
                         that puts each foot on its own pedal, and the one rule
@@ -489,6 +501,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         since ADR 0026 (#431)**, and a reviewer who remembers it
                         as the rule for every model is reading the old file: a
                         realistic asset comes from ADR 0026 D-4's source list
+                        (⚠️ **since #1275 that list is ADR 0049 D-10's**, which
+                        supersedes it and is held in code as `tools/realistic/
+                        sources.ts` §`ADMITTED_SOURCES` and §`BARRED_SOURCES`;
+                        the pipeline refuses a URL no admitted source owns,
+                        a new source is still a superseding ADR, and
+                        "AI-generated" means the output of a trained
+                        generative model — ADR 0049 D-2)
                         and is DERIVED — reproducible from a recorded input by a
                         committed headless-Blender script (#430), never
                         committed verbatim at source resolution, and none may be
@@ -640,6 +659,140 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that had stopped listening while every target reported
                         success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
+    src/game/delivery/
+                        Delivery (epic #1803, ADR 0059), in the order a ride
+                        runs it. **The chooser** (#1818): `StageChooser.tsx`
+                        §`DeliveryControl` offers *Ride a Delivery round* only
+                        with the realistic world chosen (DL6), the week's day
+                        and houses from `delivery-progress.ts` beside it, worded
+                        "up to N houses" (#1878); it
+                        cannot know the town's houses (no map in its graph),
+                        so the press decides and the HUD's *Houses* may be fewer. **The press**, in `GameView`:
+                        `ride-round.ts` §`startDeliveryRide` reads the week
+                        and `assist-preference.ts` (#1813), draws ONE seed,
+                        and `targets.ts` picks the houses (#1808, #1856) and
+                        `obstacles.ts` places the obstacles (#1811). A short
+                        pick rides a shorter round standing for the day's
+                        count (`round.ts` §`Round.dayHouses`), and one of
+                        fewer than §`FEWEST_DELIVERY_HOUSES` is no round: an
+                        ordinary ride, `hud/delivery-announce.ts`
+                        §`TOO_FEW_HOUSES_TEXT` (or §`HOUSES_NOT_READY_TEXT`
+                        with no houses read) on the HUD and said once, and
+                        the week kept as it was. **Each simulation step that
+                        ran**: the throw (`throw-input.ts`, #1810), lane
+                        (`steer.ts`, #1820) and gamepad (`gamepad-input.ts`,
+                        #1821) intents come in through their ports, and
+                        §`stepDeliveryRide` runs `throw.ts` (#1809), the
+                        misses, `obstacles.ts` and `round.ts` (#1806); the
+                        HUD says it (`hud/delivery-announce.ts`, #1812) and
+                        the frame draws it (`in-view.ts`, #1814). **The
+                        round's end or the ride's**: §`endDeliveryRide`, and
+                        §`keepDeliveryWeek` writes the three counts. Two
+                        guarantees hold it, each a red test: DL5, nothing
+                        reaches the trainer (#1807, the next entry, and
+                        `delivery-wiring.test.tsx`), and DL11, no target
+                        leaves the ride (#1817, the entry after it)
+    src/game/delivery/delivery-cannot-reach-trainer.test.ts
+                        DL5 (ADR 0059 D-2, #1807): no module under
+                        `delivery/` reaches, by any static import chain,
+                        the trainer-command seam, `trainer-port.ts`,
+                        `gradient.ts`, `ride/trainer.ts` or any module
+                        that writes to a trainer (found by rule, ADR 0059
+                        §Amendments). Fails closed on `import.meta.glob`
+                        and on a worker it cannot name
+    src/transfer/delivery-targets-not-exported.test.tsx
+    src/privacy/delivery-targets-never-sent.test.ts
+                        DL11 (ADR 0059 D-4, #1817): a real recorded round
+                        over `delivery-town-testing.ts`
+                        §`DISTINCTIVE_TOWN_LAYOUT` leaves no target point,
+                        seed or Delivery word in the stored ride, any table,
+                        the device's `localStorage` (the week is its three
+                        counts), any FIT/GPX/TCX export or the sync payload;
+                        and, in source, nothing under `instance/`,
+                        `transfer/`, `recording/` or `apps/instance/`
+                        imports `delivery/` (through relative chains),
+                        `delivery/` calls no `console`, and every throw in
+                        it has a case whose message is held free of the
+                        fixture's digits, counted against the throw sites
+    src/game/delivery/ride-round.ts
+                        a Delivery round inside a game ride (#1816, ADR
+                        0059): started at the press (the week and the assist
+                        read from the device, the houses picked and the
+                        obstacles placed from ONE seed nothing keeps), stepped
+                        on exactly the simulation steps that ran (none while
+                        paused: `obstacles.ts` warns why), a house missed once
+                        its window has closed behind the rider with no parcel
+                        still coming, the round's score kept change by change
+                        through `obstacles.ts` §`roundScore` (crashes in it,
+                        never below nought), and the week's counts kept at the
+                        round's end or the ride's. `GameView` holds one per
+                        ride, solo only (DL9), asked for by the chooser since
+                        #1818 (or the developer route `#/game?delivery=on`),
+                        and none where the pick is under 3 houses. ⚠️ **Nothing
+                        of it reaches the trainer** (DL5): it reads the
+                        simulation and writes to itself, the HUD and the frame;
+                        `game/delivery-wiring.test.tsx` rides one power trace
+                        with and without a round and holds the trainer's
+                        writes, each grade and its time, equal, and the same
+                        pair saved by the real ride controller reads back the
+                        same channels
+    src/game/delivery/in-view.ts
+                        what a Delivery frame draws (#1814): a marker on each
+                        house still EXPECTING a parcel, a parcel only while it
+                        flies, every obstacle where `obstacles.ts` has it,
+                        placed on the frame's corridor as `scene.ts` places a
+                        rider and dropped off its ends. It reaches the view on
+                        `port.ts` §`SceneFrame.delivery`, which `GameView`
+                        fills on every frame of a ride running a round
+                        (#1816). ⚠️ The frame's types are `port.ts`' and the
+                        obstacles' footprints are restated in the renderer
+                        (pinned by `delivery-belt.test.ts`), so the view
+                        reaches no `delivery/` module. `three-renderer.ts`
+                        §`DeliveryBelt` draws it in THREE instanced calls
+                        whatever the count, the obstacles' three shapes sharing
+                        one by a vertex-kind collapse, and a view builds the
+                        belt only on the first frame that carries a round, so
+                        an ordinary ride's village frame stays at 50.
+                        ⚠️ **Since #1815 the village frame has TWO ceilings**
+                        (`realistic-budget.ts`, owner ruling DL6b, ADR 0059
+                        D-3): `REALISTIC_VILLAGE_DRAW_CALLS`, frozen at 50, for
+                        every frame with no round, and
+                        `DELIVERY_VILLAGE_DRAW_CALLS`, 53 (the 50 and the
+                        belt's three), only while a frame carries one;
+                        `villageDrawCallCeiling` is the one place that choice
+                        is made. A second constant and not a raise of the
+                        first, because the owner accepts the tablet's extra
+                        dropped frames (#1523) for Delivery only. The owner's
+                        page's `?delivery=20` draws the worst case
+                        (`browser/realistic/delivery.ts`), held by
+                        `realistic-delivery.browser.spec.ts` (nightly); that an
+                        ordinary frame is never held to 53 is
+                        `realistic-budget-village.test.ts`
+    src/game/delivery/steer.ts
+                        lane steering in a Delivery round (#1820): three
+                        lanes, a steady 0.4 s move between them, keys A and
+                        D through `hud/SteerKeys.tsx` and `steer-port.ts`. A
+                        DRAWING: it reaches `scene.ts` §`lateralOf` through
+                        `SceneInput.steeredLateral` (the rider only) and the
+                        obstacles through their rider offset, never
+                        `simulation.ts`. A room ride ignores it (DL9). With
+                        steering, `obstacles.ts` may place an obstacle that
+                        STANDS in one lane, one per stretch, so a lane is
+                        always clear. Wired into the ride by #1853: the
+                        round holds the steer state and steps it, and the
+                        rider is drawn exactly where the obstacles meet them,
+                        a level bot or ghost making the room. One just behind
+                        is held aside until its front wheel is behind the
+                        camera's eye, then eases to its line (#1863)
+    src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
+                        a gamepad's throws and lane changes (#1821), through
+                        the W3C Gamepad API: polled once a frame by
+                        `hud/GamepadIntents.tsx`, only while a pad is there,
+                        to the same two ports the keys reach. Only a
+                        `standard`-mapping pad is read, at the W3C indices;
+                        one press is one intent; an axis outside −1..1 or not
+                        finite asks for nothing. ⚠️ Whether the Android
+                        shell delivers pads is spike 0027 (#1819), unmeasured
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -720,6 +873,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/delivery-announce.ts
+                        a Delivery round through the HUD's one region (#1812,
+                        ADR 0059): a delivery, a miss, a crash and the round's
+                        end, ranked 5g in `announce.ts` and OWED until said, at
+                        most one sentence per kind, so none is dropped and none
+                        is said twice. A house is its place on the round ("the
+                        3rd house"), never a name or an address (DL11). The
+                        round's two HUD fields are `fields.ts`
+                        §`deliveryReadings`, last and absent on any other ride.
+                        Since #1816 *Score* and the round's-end sentence take
+                        the round's score WITH its crashes
+                        (`ride-round.ts` §`DeliveryRide.score`), never
+                        `round.ts` §`RoundTally.score`, which counts
+                        deliveries only
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost
@@ -741,7 +908,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         harness that holds two frames takes
                         `frame-testing.ts` §`retainedFrame` first. Comparing
                         two frames' arrays without it compares one array
-                        with itself and passes
+                        with itself and passes. ⚠️ Since #1547 the relief is
+                        held to `RELIEF_SLOPE` × the distance to mapped
+                        built-up land (`land-class.ts` §`builtUpDistances`),
+                        so a mapped town is level with the road; the mask is
+                        a REQUIRED argument of `terrainCorridor` and
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
@@ -765,7 +937,264 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reviewer who remembers six `SCATTER_KINDS` is reading
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
-                        on a budget of their own (`QualitySettings.structureItems`)
+                        on a budget of their own (`QualitySettings.structureItems`).
+                        Since #1550, `lotsAt`: houses (shops every fifth plot on
+                        commercial land) along the route's road where the land
+                        is mapped built-up and no mapped footprint stands —
+                        every corner on built-up land, never on wood, water or
+                        park, nothing where no tile was read. Since #1637 none
+                        where the urban class is `city-centre`: there
+                        `footprint-buildings.ts` §`terracePlans` plans 3–4
+                        storey terraced shops at the press, edge to edge,
+                        drawn with the mapped buildings. Since #1566 a
+                        village is laid out by plot — a row of shops and a
+                        main-street block either side of the crossroads,
+                        houses toward the ends, no neighbour alike in shape,
+                        model or paint (`everyVillagePlot`), a lot's shape by
+                        the same rule — and each house and block carries the
+                        #1585 model (`ScatterItem.house`) the realistic world
+                        draws it as (`three-renderer.ts` §`VillageHouseBelt`:
+                        one call, in view, nearest first, inside the 23 040
+                        term after every structure no model stands for;
+                        `levers=-village-models` is its pair)
+    src/game/land-class.ts
+                        what the ground is where map data was read (#1546) — a
+                        sparse 5 m mask built ONCE at the press from the ride's
+                        corridor, `SceneInput.landClass`. ⚠️ **Every placement
+                        rule reads it**: no procedural site touching covered
+                        land (`settlements.ts` §`siteOnMappedLand`, and its
+                        street), no tree, shrub or rock on built-up land or
+                        water, no field boundary off field ground. Absent is
+                        `NO_LAND_CLASS`, today's world, item for item. Since
+                        #1547 it also carries each cell's distance to
+                        built-up land, which `landform.ts` levels by.
+                        Since #1542 the countryside is read off it: a wood
+                        planted throughout with a broadleaf edge, hedgerow
+                        trees and open pasture on farmland, specimen trees
+                        in a park (`scatter.ts` §`landPlanting`); field
+                        boundaries along farmland's EDGES, not the field
+                        grid (`settlements.ts` §`landEdgesAt`); stones on
+                        pasture and a wood's floor. No new kind or shape.
+                        The roadside hedge on mapped farmland is low and
+                        broken (`settlements.ts` §`roadsidePiece`), rocks
+                        small and set back (`scatter.ts` §`STONE_SCALE`).
+                        ⚠️ `unknown` and `other` are the procedural world,
+                        item for item, and each change has a lever
+                        (`SceneInput.countrysideOff`, the realistic page's
+                        `-land-planting`, `-land-boundaries`,
+                        `-ground-clutter`, `-hedge-breaks`,
+                        `-small-stones`, shown on `town=countryside`)
+    src/game/footprint-buildings.ts
+                        each mapped footprint planned as a building (#1540):
+                        P-9's placement rules, in order and counted as
+                        `FootprintVerdicts`; storeys, a roof and surfaces by
+                        `land-class.ts` §`kindAt`; since #1581 a seeded gable
+                        or hip at a seeded pitch, overhanging, a chimney, a
+                        door canopy and four seeded paints no neighbour within
+                        30 m shares (`paintTown`); since #1588 a US house —
+                        clapboard, shingles, sash windows, a foundation band,
+                        a garage and its driveway, gutters, a downpipe and
+                        dormers — each vertex's style in `STYLE_FLOATS`;
+                        since #1590 a commercial one a main-street shop — a
+                        shop front, a plain sign band (no text), an awning on
+                        some, a cornice and taller windows;
+                        since #1589 a front porch on about half its houses
+                        (`porch.ts`, shared with a lot's farmhouse), kept
+                        off the road's clearance, shortened or dropped, its
+                        triangles written when first read, not at the press;
+                        since #1635 a terrace in a `town` or `city-centre`:
+                        party walls (`partyWallsOf`, an edge grid, never all
+                        pairs) drawn only above a lower neighbour, plain, and
+                        a flat roof under a cornice (`town=terrace`);
+                        since #1660 an L, T, U or Z pitched over its 2–3
+                        rectangles (`rectilinear-roofs.ts`), flat where a
+                        split would pass the caps (`-split-roofs`);
+                        since #1782 a house's US archetype — ranch, Cape,
+                        Colonial, Foursquare, bungalow or gable-front
+                        farmhouse (`house-archetypes.ts`) — setting its roof,
+                        pitch, porch, shutters, picture window, dormers,
+                        garage and cladding together, `unknown` planned as
+                        before (`-house-archetypes`, `town=houses`);
+                        ≤ 640 triangles
+                        by role, built ONCE at ride start by `GameView`, and
+                        drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
+                        ride also reads their footprints (`mappedTown`, once a
+                        corridor): a procedural lot keeps clear of every kept one
+    src/game/mapped-buildings.ts
+                        which plans are drawn (#1549): indexed ONCE at the
+                        press (`SceneInput.mappedBuildings`), the nearest in
+                        400 m first, ≤ 36 (ADR 0054 D-5.6's cap, the owner's
+                        ruling), ranked by distance with the frame's procedural
+                        structures inside the 23 040-triangle term (#1586), the far
+                        level past 150 m, in ≤ 6 surfaces; no tree,
+                        shrub or rock on a plan's ground. ⚠️ **One mesh, a
+                        group a surface** (`three-renderer.ts`
+                        §`MappedBuildingBelt`), refilled only when the rider's
+                        100 m chunk or the rung changes, realistic rungs only;
+                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+    src/game/house-models.ts
+                        which mapped plans are drawn as a house MODEL (#1585):
+                        GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
+                        owner's download (Sketchfab needs an account; the lock
+                        pins each archive, `sources.ts` §`HOUSE_MODEL_SOURCES`).
+                        A plan fits when its minimum-area rectangle's sides are
+                        0.8 to 1.25 of a model's, rectangularity ≥ 0.85, storeys
+                        ±1, the same use and the door on the same end or side
+                        (`HOUSE_FIT`); #1581's mixed town fits none, a Richmond
+                        street's narrow lots. Near level only; one more mesh in ONE
+                        material (the atlas), counted INSIDE the belt's 6 calls,
+                        its triangles pooled in the 23 040. ⚠️ Textures are
+                        admitted on the model's grant (ADR 0049's 2026-10-23
+                        amendment); the shop's interior photo and door sign are
+                        painted over in `blender/process_house_models.py`
+    src/game/facade.ts  a mapped building's windows and front door, laid out in
+                        a bay and a storey (#1581), and since #1588 its US sash
+                        windows, shutters, reveal and cladding — drawn by the shader
+                        (`three-renderer.ts` §`withFacade`) from each wall
+                        vertex's `FACADE_FLOATS`, so no triangle, texture or
+                        draw call; `facadePartAt` and `claddingPartAt` are the
+                        TypeScript twins the tests hold the layout with.
+                        `setMappedFacadeShown` is the browser gate's control.
+                        Since #1659 every window kind's reveal moves with the
+                        view and the sun (`revealOf`, the shader's
+                        `oylRevealOf`, reading the face frame `oylFaceN`,
+                        `oylFaceU`, `oylFaceUp`, `oylToSunV`, `oylToEyeV`);
+                        the realistic page's `-window-reveals` builds it out.
+                        Since #1658 a sunlit wall under eaves has the sun's own
+                        shadow from the eaves' edge (`eavesShadeAt`, the
+                        shader's `oylOverhangShadow`); `-overhang-shadows`
+                        builds it out. Since #1679 a cornice's too, on the
+                        walls flagged `STYLE_CORNICE` and the parapet face
+                        whose `skip` is its edge (`corniceShadeAt`), and an
+                        awning's on the shop front whose `skip` is its depth
+                        (`awningShadeAt`). Since #1661 every mapped face is
+                        weathered (`WEATHERING`, `weatheringAt`, the shader's
+                        `oylWeather*`; the photograph laid per building by
+                        `photographShiftOf`); `-weathering` builds it out.
+                        Since #1663 the trims (`TRIM`, `trimPartAt`, the
+                        shader's `trimsGlsl`): a lintel over each window's
+                        head on brick (stone) and render (the trim's paint),
+                        quoins up a brick wall's corners unless it is
+                        `STYLE_TERRACED`, and a string course on each storey
+                        line with windows above it (`windowStoreysOf`, never
+                        `DEFAULT_STOREYS`); `-facade-trims` builds them out.
+                        Since #1636 a `city-centre` front wall
+                        has a shop front whatever its use, and a tower of
+                        `GLAZED_MIN_STOREYS` a curtain wall (`STYLE_GLAZED`,
+                        `curtainWallPartAt`); the realistic page's `town=city`
+    src/game/building-paint.ts
+                        what a realistic building is painted (#1581): each wall
+                        and roof surface's multipliers, the trim's and the
+                        door's paints. A mapped plan carries four entries
+                        (vertex colour, `oylTrim`); a #1550 lot carries a wall
+                        and a roof (`lotPaint`, unlike its five neighbours) in
+                        the instance colour's first two channels, read by the
+                        structure materials (`withLotPaint`); since #1588 a house
+                        lot's channel also says it is clad (`LOT_CLAD_STEP`),
+                        and the shader draws clapboard and shingles, keeping its
+                        chimney's brick by each vertex's `oylPart`; since #1589
+                        a lot's porch (`LOT_PORCH_STEP`), without which every
+                        structure material folds the farmhouse's porch away
+                        (`withLotPorch`). Since #1566 a village's houses and
+                        shops are painted as a lot is, a model wears its wall
+                        entry as a hue (`lotModelPaint`), and the joinery's
+                        timber (`planks`) is stained by its `trim` entry, the
+                        wall's and roof's summed
+    src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
+                        BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
+                        the houses' own decision), on the road's edge, never on
+                        any stretch's carriageway or on water; none for a
+                        farmstead. ⚠️ **A mesh, not structure items**: one
+                        `WeakMap`-cached street a village, `SceneFrame.streets`,
+                        drawn in both worlds in ONE call by `three-renderer.ts`
+                        §`PavementBelt` (ambientCG's paving in the realistic
+                        world), outside `structureItems` and outside
+                        `REALISTIC_FRAME_TRIANGLES` by that constant's own rule
+                        (`REALISTIC_STREET_TRIANGLES` is theirs). Since #1536
+                        each unbroken run carries lamp posts, bollards, a
+                        bench and a bin by rule (`furnish`), built from numbers
+                        (`three-renderer.ts` §`FURNITURE_STYLE` says why not
+                        Poly Haven's) and drawn one instanced call a kind by
+                        §`FurnitureBelt`, only within `FURNITURE_DRAW_METRES`.
+                        Since #1551 a covered stretch takes its sides from
+                        `footways.ts` instead. Since #1564 each built plot
+                        whose pavement is laid has one path to its building's
+                        front door (read off `buildingPlan`), merged into the
+                        pavements' one call, one geometry group a path.
+                        Since #1624 a street also carries its holiday
+                        decoration ANCHORS (`decorations.ts` §`villageAnchors`:
+                        lamp posts, doorsteps, eaves, the crossroads green;
+                        never the church plot, never within an item's radius
+                        of the carriageway or, since #1690, of the village's
+                        crossroads side road; since #1627 one village-square
+                        tree a village on its green, in the winter lights),
+                        drawn by `three-renderer.ts`
+                        §`DecorationBelt` in ONE call for every village within
+                        `FURNITURE_DRAW_METRES`, glow and all
+                        (`withDecorationGlow`, no lamp, no uniform), inside
+                        `REALISTIC_DECORATION_TRIANGLES`. Since #1637 a
+                        `city-centre` stretch (`MappedTown.urban`) has a
+                        city's street, which no village is: 3.5 m pavements
+                        both sides in 96 m pieces, lamps every 16 m, a bench
+                        every 48 m, bollards only at mapped side roads'
+                        mouths — inside `FURNITURE_CAPACITY` and
+                        `REALISTIC_STREET_TRIANGLES`, neither raised. Since
+                        #1625 Halloween's pumpkins stand on a HOUSE door's step
+                        (`buildings.ts` §`frontDoorOf`, a doorstep anchor's
+                        `step`), as lathe shapes (`DecorationShape`). Since
+                        #1626 the winter lights wind lamp posts, string eaves
+                        and wreathe village doors in the belt; a MAPPED door's
+                        wreath is the facade's `WREATH_GLSL` (`oylWreath`, 0
+                        calls), its gate control the `facade-wreath` lever
+    src/game/footways.ts
+                        footways from the corridor's map data (#1551) —
+                        `pavementSides`, the side of the drawn road's NORMAL a
+                        sidewalk is mapped on (3–12 m out, within 20°), which
+                        `streets.ts` lays a village's pavement on where read
+                        (`unknown`, and #1535's own rule, where not); and
+                        `footwayNetwork`, 2 m polylines off the carriageway
+                        and inside the corridor, which #1541's people walk
+                        (`people.ts`). No crossing is either
+    src/game/people.ts  people walking and running (#1541) — on a village's
+                        pavements and front paths (`streets.ts`'s `walks`
+                        and `DoorPath.walk`) and the mapped footways, never
+                        on the carriageway: every line is broken, and every
+                        person dropped, within `PERSON_CLEARANCE_METRES`
+                        (3.8) of ANY stretch of the drawn road. Where each is
+                        is a function of the ride's clock, seeded per line and
+                        slot; density by village size and land use; runners
+                        only on paths and in parks. ≤ 16 bodies within 60 m,
+                        ≤ 32 impostors to 150 m. ⚠️ `SceneInput.people` is
+                        optional the UNSAFE way round (absent places nobody):
+                        `realistic-choice.test.tsx` §"#1541" reads what
+                        `GameView` asks for. `peopleOnTheRoad` is the browser
+                        gate's control. `gait.ts` is the parametric walk and
+                        run (the owner's ruling of 2026-10-24: no animation
+                        source); `people-body.ts` cuts the rider's MakeHuman
+                        body to ≤ 2 000 triangles at load and sizes the
+                        animation texture (≤ 1 MiB); `three-renderer.ts`
+                        §`PeopleBelt` bakes and draws them, realistic top rung
+                        only (`QualitySettings.people`), in two calls.
+                        `levers=-people` on the owner's page is the tablet's
+                        cost pair (validation 0002 Part AJ). ⚠️ The bodies'
+                        geometry carries a `normal` attribute the shader never
+                        reads: without one, three compiles a standard material
+                        FLAT_SHADED and every triangle is lit as a facet
+                        (the owner's look of PR #1615)
+    src/game/cross-streets.ts
+                        cross streets (#1565) — a side road 60 m off the
+                        route at each junction where a mapped street
+                        (`WorldCorridor.streets`, #1544's decoder keeps them
+                        since #1565) leaves the route at grade — never a
+                        bridge, a tunnel or a `highway` — and one crossroads at
+                        every procedural village's centre, whose middle plots
+                        are empty for it (`settlements.ts`). ⚠️ **Drawn in the
+                        ROAD's material** by one mesh in both worlds
+                        (`three-renderer.ts` §`SideRoadBelt`), and it fades by
+                        sinking under the ground, not by transparency. Every
+                        scatter item, structure and billboard in view is kept
+                        off it (`clearOfSideRoads`), and a village's pavement
+                        is broken at its crossroads with dropped kerbs
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

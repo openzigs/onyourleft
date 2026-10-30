@@ -37,7 +37,7 @@ afterEach(() => {
   mounted = undefined;
 });
 
-const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
+const AGREED = { acknowledgedBystanders: true, allowLocal: true } as const;
 
 function indicator(): Element | null {
   return document.querySelector('[data-oyl-camera-indicator]');

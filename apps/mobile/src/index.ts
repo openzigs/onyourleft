@@ -31,6 +31,7 @@ export { createCapacitorFitnessMachineChannel } from './ble/fitness-machine-chan
 export { readCapacitorFitnessMachine } from './ble/fitness-machine';
 export type { CapacitorFitnessMachine } from './ble/fitness-machine';
 export { readCapacitorResolvedUuids } from './ble/resolved-uuids';
+export { readCapacitorSignal } from './ble/signal';
 export type {
   CapacitorBlePort,
   PluginDevice,
@@ -44,6 +45,8 @@ export {
 } from './camera/camera';
 export type { CameraPermissionNotice } from './camera/camera';
 export { mayShowDeviceList, permissionNotice } from './permission/notice';
+export { openCapacitorSettings } from './permission/settings';
+export type { SettingsPage } from './permission/settings';
 export { ANALYSIS_READ_TIMEOUT_MILLISECONDS, capacitorAnalysisPost } from './http/analysis-http';
 export type { AnalysisPostReply, AnalysisPostRequest } from './http/analysis-http';
 export { capacitorThermalPlugin, readCapacitorThermalHeadroom } from './thermal/thermal';

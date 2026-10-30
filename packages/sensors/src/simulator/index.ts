@@ -21,9 +21,21 @@ export type {
   DeviceInspection,
   SimulatedDevice,
   Simulator,
+  SimulatedHeartRate,
   SimulatorBench,
   SimulatorOptions,
 } from './simulator';
+
+// --- A heart rate that answers to load (#1238) --------------------------------
+
+export type { HeartRateResponse, HeartRateResponseOptions } from './heart-rate-response';
+
+export {
+  createHeartRateResponse,
+  DEFAULT_RESTING_HEART_RATE,
+  HUNT_HURNI_BPM_PER_WATT,
+  HUNT_HURNI_TIME_CONSTANT,
+} from './heart-rate-response';
 
 export { createSimulator } from './simulator';
 
@@ -98,7 +110,12 @@ export {
 
 // --- The measurement-only profiles ------------------------------------------
 
-export type { CscFrame, CyclingPowerFrame, HeartRateFrame } from './profiles';
+export type {
+  CscFrame,
+  CyclingPowerFrame,
+  HeartRateFrame,
+  SimulatedSensorContact,
+} from './profiles';
 
 export { CSC_CRANK, CSC_WHEEL, CYCLING_POWER_CRANK } from './profiles';
 

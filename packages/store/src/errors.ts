@@ -46,6 +46,16 @@ export class StoreReferentialError extends StoreError {}
 export class StoreDecodeError extends StoreError {}
 
 /**
+ * A conditional write found the row it would replace changed since its caller
+ * read it (#1263), so it wrote nothing.
+ *
+ * Not a fault: the caller read the row, waited on something else (a sync on
+ * its network request), and meanwhile the rider changed or deleted the row
+ * here. The rider's change stands, and the caller decides what that means.
+ */
+export class StoreConflictError extends StoreError {}
+
+/**
  * The database on this device was written by a **newer** build than this one.
  *
  * IndexedDB itself refuses a downgrade — `indexedDB.open(name, olderVersion)`
@@ -63,3 +73,25 @@ export class StoreDecodeError extends StoreError {}
  * The supported way back is ADR 0005 section F's: export, downgrade, re-import.
  */
 export class StoreVersionError extends StoreError {}
+
+/**
+ * A world corridor's `features` blob is larger than the store holds (#1545):
+ * refused whole at the write, never truncated, so a corridor is either all of
+ * what was read or not kept at all.
+ *
+ * The message names the limit and the size in bytes and nothing else. The
+ * blob is features near the rider's route, which is location data (ADR 0054
+ * D-6.6), so no coordinate and no tile's x/y may appear in it (ADR 0004 D).
+ */
+export class WorldCorridorTooLargeError extends StoreValidationError {
+  readonly limitBytes: number;
+  readonly sizeBytes: number;
+
+  constructor(limitBytes: number, sizeBytes: number) {
+    super(
+      `worldCorridors.features: ${String(sizeBytes)} bytes is over the limit of ${String(limitBytes)} bytes`,
+    );
+    this.limitBytes = limitBytes;
+    this.sizeBytes = sizeBytes;
+  }
+}

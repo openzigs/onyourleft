@@ -20,6 +20,7 @@ import {
   metres,
   revolutionsPerMinute,
   seconds,
+  thresholdShare,
   unixSeconds,
   watts,
 } from '@onyourleft/domain';
@@ -80,6 +81,13 @@ afterEach(() => {
  * settle resolves the store reads and the second resolves the dynamic import
  * and the render it unblocks. One settle leaves every `<svg>` assertion reading
  * the pre-chart render, which looks exactly like a chart that does not work.
+ *
+ * ⚠️ **And the chart's module is loaded first** (#1311). The second settle is
+ * one macrotask, and the file's first chart is a module transform away: on a
+ * slow runner the transform outlasted it and #1054's case read no trace (run
+ * 38347793411, attempt 1). Imported here, the view's own `import()` finds it
+ * already evaluated, so what the settles wait for no longer depends on the
+ * runner.
  */
 interface MapOptions {
   /** The engine the view is given, or `undefined` for none. */
@@ -96,6 +104,7 @@ async function open(
   id: string = RIDE,
   options: MapOptions = {},
 ): Promise<Mounted> {
+  await import('../detail/TraceChart');
   const loader: (() => Promise<MapPort>) | undefined =
     options.map === undefined
       ? undefined
@@ -233,8 +242,66 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
     const terms = queryAll(summary as Element, 'dt').map((term) => term.textContent);
     expect(terms).not.toContain('Distance');
     // The rest of the summary is still there.
-    expect(terms).toContain('Moving');
+    expect(terms).toContain('Moving time');
     expect(summary?.textContent).not.toMatch(/\b0\.0\b/);
+  });
+
+  it('states the private race the ride was ridden in, as its room said it, and nothing for a ride in none — #785', async () => {
+    const terms = () =>
+      queryAll(document.querySelector('.oyl-ride-summary') as Element, 'dt').map(
+        (term) => term.textContent,
+      );
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({
+          hasPosition: false,
+          rideFacts: { races: [{ roomId: 'room-race', place: 2, finishers: 5 }] },
+        }),
+        channels: { power: powerSeries(600) },
+        laps: [],
+      }),
+    );
+    const row = [...document.querySelectorAll('.oyl-ride-summary > div')].find(
+      (each) => each.querySelector('dt')?.textContent === 'Race',
+    );
+    expect(row?.querySelector('dd')?.textContent).toBe('2nd of 5 in a private race');
+    mounted.unmount();
+    // #1360's review (N3): two races in one ride are both said, in order.
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({
+          hasPosition: false,
+          rideFacts: {
+            races: [
+              { roomId: 'room-race', place: 2, finishers: 5 },
+              { roomId: 'room-2', place: null, finishers: null, crossedTheLine: true },
+              // #1364: and a place among the riders already across.
+              {
+                roomId: 'room-3',
+                place: null,
+                finishers: null,
+                crossedTheLine: true,
+                placeAcross: 1,
+                across: 5,
+              },
+            ],
+          },
+        }),
+        channels: { power: powerSeries(600) },
+        laps: [],
+      }),
+    );
+    const both = [...document.querySelectorAll('.oyl-ride-summary > div')].find(
+      (each) => each.querySelector('dt')?.textContent === 'Races',
+    );
+    expect([...(both?.querySelectorAll('dd') ?? [])].map((each) => each.textContent)).toEqual([
+      '2nd of 5 in a private race',
+      'A private race, finished: you left before the room gave places',
+      '1st across of 5 in a private race, before the room gave places',
+    ]);
+    mounted.unmount();
+    mounted = await open(indoorRide());
+    expect(terms()).not.toContain('Race');
   });
 
   it('offers no shared view at all, because there is no track to share', async () => {
@@ -536,6 +603,33 @@ describe('criterion 6 — every chart has a non-visual equivalent', () => {
     expect(tables[0]?.querySelector('caption')?.textContent).toBe('Power (W)');
   });
 
+  it('puts each table behind a closed disclosure under its chart, named for its readings — #1439', async () => {
+    mounted = await open(indoorRide());
+    const disclosures = queryAll<HTMLDetailsElement>(document, 'details.oyl-chart-table');
+    expect(disclosures).toHaveLength(2);
+    for (const disclosure of disclosures) {
+      expect(disclosure.open).toBe(false);
+      expect(disclosure.querySelector('table.oyl-data-table')).not.toBeNull();
+      // Right after its own chart.
+      expect(disclosure.previousElementSibling?.classList.contains('oyl-trace-chart')).toBe(true);
+    }
+    expect(disclosures[0]?.querySelector('summary')?.textContent).toBe(
+      'Power (W): the readings as a table',
+    );
+  });
+
+  it('labels each chart’s value axis and time axis — #1439', async () => {
+    mounted = await open(indoorRide());
+    const chart = document.querySelector('.oyl-trace-chart');
+    expect(chart?.querySelector('.oyl-trace-chart__value-title')?.textContent).toBe('Power (W)');
+    expect(queryAll(chart as Element, '.oyl-trace-chart__values > div')).toHaveLength(3);
+    expect(
+      queryAll(chart as Element, '.oyl-trace-chart__times > div').map(
+        (each) => each.textContent,
+      )[0],
+    ).toBe('0:00');
+  });
+
   it('describes the shape of the trace in words, for a reader who cannot see it', async () => {
     mounted = await open(indoorRide(powerSeries(1200, 400, 300)));
     const svg = document.querySelector('svg.oyl-trace');
@@ -603,7 +697,10 @@ describe('the lap table', () => {
     mounted = await open(indoorRide());
     const rows = queryAll(document, 'table.oyl-table tbody tr');
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.querySelector('th')?.textContent).toBe('1');
+    // #1312: the page marks the best lap in the row's own header. The stub's
+    // two laps took the same time, and the earlier of two equal laps is it
+    // (`detail/LapsTable.test.tsx` holds the rule's other cases).
+    expect(rows[0]?.querySelector('th')?.textContent).toBe('1 · Best lap');
     expect(rows[1]?.querySelector('th')?.textContent).toBe('2');
   });
 
@@ -616,6 +713,45 @@ describe('the lap table', () => {
     mounted = await open(port);
     expect(document.body.textContent).toContain('no laps recorded');
     expect(queryAll(document, 'table.oyl-table')).toHaveLength(0);
+  });
+});
+
+describe('the workout-block table — #1319', () => {
+  const headings = () =>
+    queryAll<HTMLElement>(document, 'h3').map((heading) => heading.textContent ?? '');
+
+  it('lists a ride’s workout blocks under their own heading, after the laps', async () => {
+    const port = stubDetail(ATHLETE, {
+      activity: stubActivity({
+        rideFacts: {
+          workoutBlocks: [
+            {
+              outcome: 'cut-short',
+              block: { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) },
+              startedAt: unixSeconds(1_760_000_000),
+              elapsedTime: seconds(300),
+              movingTime: seconds(300),
+            },
+            { outcome: 'skipped', block: { kind: 'free-ride', seconds: seconds(300) } },
+          ],
+        },
+      }),
+      channels: { power: powerSeries(60) },
+      laps: [stubLap(0)],
+    });
+    mounted = await open(port);
+    const shown = headings();
+    expect(shown.indexOf('Workout blocks')).toBeGreaterThan(shown.indexOf('Laps'));
+    const table = queryAll<HTMLElement>(document, 'table').find((each) =>
+      each.querySelector('caption')?.textContent?.startsWith('Workout blocks'),
+    );
+    const rows = queryAll<HTMLElement>(table!, 'tbody th').map((cell) => cell.textContent);
+    expect(rows).toEqual(['1 · Cut short', '2 · Skipped']);
+  });
+
+  it('shows nothing of it for a ride with no workout', async () => {
+    mounted = await open(indoorRide());
+    expect(headings()).not.toContain('Workout blocks');
   });
 });
 

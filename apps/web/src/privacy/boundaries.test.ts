@@ -42,6 +42,7 @@ import { decodeGpx, decodeGpxRoute } from '@onyourleft/fit';
 import {
   ATHLETE_A,
   createStoreHarness,
+  indexedDbStoreFactory,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -51,18 +52,21 @@ import {
 import type { PrivacyZoneRecord } from '@onyourleft/store';
 import { ensureDeviceSigningKey, privacyZoneId } from '@onyourleft/store';
 import {
+  beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
   distanceBetween,
   geographicPosition,
   metres,
+  seconds,
+  thresholdShare,
   unixSeconds,
 } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { analysisRequestBody } from '../camera/analysis-transport';
+import { sidePoseRequest } from '../camera/instance-pose';
 import { capturedFrame } from '../camera/frame';
-import { hostedRequestBody } from '../camera/hosted-transport';
 import { controlMessageText, phoneMessageFrom } from '../camera/side-link-messages';
 import { cleanFrameBytes } from '../camera/testing';
 import { sharedTrack } from '../detail/privacy';
@@ -72,9 +76,13 @@ import { exportActivity } from '../transfer/export-activity';
 import { createInstancePort } from '../instance/instance-port';
 import type { InstanceSend } from '../instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
+import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
+import { scriptedJobs, startedWith, succeeded } from '../ride-analysis/instance-job-testing';
+import { replanInput, replanRequest } from '../workout/replan-job';
+import { planCorridor } from '../game/world-data/corridor';
+import { tileBounds } from '@onyourleft/map-features';
 
 import { coordinatesIn, insideZone } from './boundaries';
-import { PATTERNS_ONLY } from '@onyourleft/analysis';
 
 /** Small enough to be quick, long enough to enter a zone and leave it again. */
 const SAMPLE_COUNT = 400;
@@ -140,16 +148,6 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
-    module: 'camera/hosted-transport.ts',
-    what: 'a fixed question, never a picture, sent to a service the rider chose on their own key (#518)',
-    // ⚠️ Departing, and to a THIRD PARTY — the first boundary here whose
-    // other end is neither the rider's nor ours. ADR 0029's 2026-09-28
-    // amendment: numbers only, never a picture. The walk below finds no
-    // coordinate in the body, and `camera/hosted-transport.test.ts` pins its
-    // key set and that no image part is in it.
-    direction: 'departing',
-  },
-  {
     module: 'camera/side-link-transport.ts',
     what: 'commands and state words between the tablet and its side-camera phone (#529)',
     // ⚠️ Departing: it leaves this device for another, even one the same rider
@@ -169,12 +167,61 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'ride-analysis/instance-job.ts',
+    what: 'a ride’s numbers, section by section, sent to the rider’s instance for a write-up when they ask (#1102)',
+    // ⚠️ Departing: the rider's own instance is still somebody's server (ADR
+    // 0036 D-3 (d)), and a hosted job goes on from there to a third party (ADR
+    // 0046 D-9). #809's builder puts no coordinate, no altitude and no date in
+    // the input at all, so the walk below finds none over a ride that crosses a
+    // zone — stronger than a trim, and asserted on the body that is sent.
+    direction: 'departing',
+  },
+  {
+    module: 'workout/replan-job.ts',
+    what: 'one summary of each block of a workout being ridden, sent to the rider’s instance while they have switched re-plans on for that ride (#1244)',
+    // ⚠️ Departing: the rider's own instance is still somebody's server (ADR
+    // 0036 D-3 (d)). What the builder writes is a block's duration, its mean
+    // and highest heart rate, seconds in range, mean power as a share, cadence
+    // and a count of rescues, with the plan's blocks and the rider's typed
+    // goals (ADR 0048 D-10): there is no key a position could travel under,
+    // and nothing that reaches the builder holds one — the session that fills
+    // it is handed power, heart rate and cadence and nothing else. The case
+    // below reads the body that is sent.
+    direction: 'departing',
+  },
+  {
+    module: 'camera/instance-pose.ts',
+    what: 'one side-camera picture, sealed, sent to the rider’s instance while they have switched that on (#1106)',
+    // ⚠️ Departing, and the first PICTURE that leaves the room for a server.
+    // ADR 0029 D-9's table again: a frame for analysis is `departing`. The
+    // rider's instance is somebody's server (ADR 0036 D-3 (d)), and with the
+    // rider's second consent it sends the picture on to a hosted service by
+    // name. The walk below finds no coordinate in any field around the
+    // picture — the body has three keys and none can hold one — and cannot
+    // look inside it, which is why `instance-pose.ts` refuses to send a
+    // picture that still carries metadata (`instance-pose.test.ts`).
+    direction: 'departing',
+  },
+  {
     module: 'rooms/share.ts',
     what: 'the route a room is made on, relayed to the riders its maker shares its code with (#784)',
     // ⚠️ Departing: the maker's own route, leaving their device for an
     // instance and the people they invite. It is REFUSED — not trimmed — when
     // any of it is inside one of their zones (a route missing a stretch is a
     // different route), and the case below reads the GPX that does leave.
+    direction: 'departing',
+  },
+  {
+    module: 'world-data/corridor-source.ts',
+    what: 'byte ranges of the basemap archive around a route, asked for when the rider chooses or saves the route for the realistic world (#1539)',
+    // ⚠️ Departing, and the first boundary whose payload carries NO
+    // coordinate and is still a location. ADR 0054 D-6.2: a tile range is a
+    // coarse location — the host can tell which z15 tiles were read, about
+    // 0.8–1.1 km across — and it travels as byte offsets in a `Range` header,
+    // not as a pair, so the walk below cannot fire on it. What protects the
+    // rider is that no tile touching a privacy zone is asked for at all
+    // (D-6.3); the case below maps each requested tile back to its bounds and
+    // checks every corner and edge point against the zone.
     direction: 'departing',
   },
   {
@@ -214,7 +261,19 @@ function boundaryModulesOnDisk(): readonly string[] {
       // the only signal this walk has. `privacy/no-network.test.ts` is the
       // stronger check — it pins WHICH module may send at all — and this one
       // makes that module declare which way it faces.
+      // ⚠️ And `instance-job.ts` since #1102: the one builder of a write-up
+      // job's request to the rider's instance, named for what it builds.
+      // ⚠️ And `instance-pose.ts` since #1106: the one builder of a picture's
+      // request to the rider's instance.
+      // ⚠️ And `replan-job.ts` since #1244: the one builder of a re-plan's
+      // request to the rider's instance, sent while a ride is in progress.
+      // ⚠️ And `corridor-source.ts` since #1539: the one module that asks the
+      // basemap archive for a route's corridor.
       if (
+        entry === 'corridor-source.ts' ||
+        entry === 'instance-pose.ts' ||
+        entry === 'instance-job.ts' ||
+        entry === 'replan-job.ts' ||
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
         entry === 'export.ts' ||
@@ -367,6 +426,51 @@ describe('a departing payload carries no coordinate inside a privacy zone', () =
   });
 });
 
+describe('a corridor read asks for no tile touching a zone — #1539', () => {
+  /** A tile's corners and nine points along each edge, as found positions. */
+  const edgePoints = (tile: { x: number; y: number }) => {
+    const b = tileBounds({ z: 15, x: tile.x, y: tile.y });
+    const points = [];
+    for (let i = 0; i <= 10; i++) {
+      const lon = b.west + ((b.east - b.west) * i) / 10;
+      const lat = b.south + ((b.north - b.south) * i) / 10;
+      for (const [latitude, longitude] of [
+        [b.north, lon],
+        [b.south, lon],
+        [lat, b.west],
+        [lat, b.east],
+      ] as const) {
+        points.push(geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude)));
+      }
+    }
+    return coordinatesIn(points);
+  };
+
+  it('plans no request whose tile has a point in the zone, over a route that starts in one', () => {
+    const route = routeFor(ATHLETE_A, { sideMetres: 1_200, spacingMetres: 10 });
+    const start = route.profile.positions[0];
+    if (start === undefined) throw new Error('no start');
+    const zone = { ...zoneOver(route.profile.positions), centre: start };
+    const plan = planCorridor(route.profile.positions, [zone]);
+    expect(plan?.requestable.length).toBeGreaterThan(0);
+    for (const tile of plan?.requestable ?? []) {
+      expect(insideZone(edgePoints(tile), zone, route.id)).toStrictEqual([]);
+    }
+    // Not vacuous: the tile the zone sits in was in the cover, and was held back.
+    const zoned = plan?.tiles.filter((tile) => tile.state === 'privacy-zone') ?? [];
+    const holding = zoned.filter((tile) => {
+      const b = tileBounds({ z: 15, x: tile.x, y: tile.y });
+      return (
+        start.latitude <= b.north &&
+        start.latitude >= b.south &&
+        start.longitude >= b.west &&
+        start.longitude <= b.east
+      );
+    });
+    expect(holding).toHaveLength(1);
+  });
+});
+
 describe('a room’s route leaves only when none of it is in a zone — #784', () => {
   it('refuses a route that crosses a zone, and what does depart has no point in any', () => {
     const route = routeFor(ATHLETE_A, { loop: false, spacingMetres: 10, sideMetres: 400 });
@@ -416,16 +520,21 @@ describe('the picture sent to the rider’s own computer carries no coordinate b
   });
 });
 
-describe('the hosted question carries no coordinate at all — #518', () => {
-  it('has none in any field of the body', () => {
-    expect(
-      coordinatesIn(hostedRequestBody('a-model', { question: 'connection-check' }, PATTERNS_ONLY)),
-    ).toStrictEqual([]);
+describe('the picture sent to the rider’s instance carries no coordinate beside it — #1106', () => {
+  const picture = cleanFrameBytes(2048);
+
+  it('has none in any field, for either model', () => {
+    for (const choice of [
+      { source: 'instance-local' } as const,
+      { source: 'instance-hosted', endpoint: 'https://models.example' } as const,
+    ]) {
+      expect(coordinatesIn(sidePoseRequest(picture, choice))).toStrictEqual([]);
+    }
   });
 
-  it('would find one if a field carried it', () => {
+  it('would find one if a field carried it — the walk is not blind to this payload', () => {
     const body = {
-      ...hostedRequestBody('a-model', { question: 'connection-check' }, PATTERNS_ONLY),
+      ...sidePoseRequest(picture, { source: 'instance-local' }),
       where: { latitude: 51.5, longitude: -0.12 },
     };
     expect(coordinatesIn(body)).toHaveLength(1);
@@ -452,6 +561,7 @@ describe('an instance is sent no coordinate at all — #777', () => {
       return Promise.resolve(Response.json(answer));
     };
     const port = createInstancePort({
+      loadedFrom: { native: false, href: 'http://localhost:5173/' },
       storage: {
         getItem: (key) => map.get(key) ?? null,
         setItem: (key, value) => void map.set(key, value),
@@ -472,8 +582,10 @@ describe('an instance is sent no coordinate at all — #777', () => {
 
   it('has none in any body a connection sends', async () => {
     const bodies = await everyBody();
-    // Challenge, sign-in, three reads, the device list and the sign-out.
-    expect(bodies.length).toBeGreaterThanOrEqual(7);
+    // Challenge, sign-in, three reads and the sign-out. The device list is
+    // sealed-only since #1192 and this device holds no card, so it is not
+    // asked for; a sealed body is ciphertext, and carries nothing to walk.
+    expect(bodies.length).toBeGreaterThanOrEqual(6);
     for (const body of bodies) expect(coordinatesIn(body)).toStrictEqual([]);
   });
 
@@ -481,6 +593,143 @@ describe('an instance is sent no coordinate at all — #777', () => {
     expect(
       coordinatesIn({ publicKey: 'ab', where: { latitude: 51.5, longitude: -0.12 } }),
     ).toHaveLength(1);
+  });
+});
+
+describe('a re-plan request is sent no coordinate at all — #1244', () => {
+  /** Every key in a value, at any depth. */
+  const keysIn = (value: unknown, found = new Set<string>()): Set<string> => {
+    if (Array.isArray(value)) {
+      for (const each of value) keysIn(each, found);
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, inner] of Object.entries(value)) {
+        found.add(key);
+        keysIn(inner, found);
+      }
+    }
+    return found;
+  };
+
+  const body = () =>
+    replanRequest(
+      replanInput({
+        revision: 0,
+        summarySeq: 1,
+        currentBlock: 1,
+        goals: { sessionType: 'endurance', durationMinutes: 60, timeInRangeMinutes: 30 },
+        blocks: [
+          { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.5), label: 'Home' },
+          {
+            kind: 'heart-rate-hold',
+            seconds: seconds(1200),
+            range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+            startShare: thresholdShare(0.5),
+            ceilingShare: thresholdShare(0.8),
+          },
+          { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.4) },
+        ],
+        summaries: [
+          {
+            block: 0,
+            seconds: 300,
+            meanHeartRate: 121,
+            highestHeartRate: 133,
+            secondsInRange: 0,
+            meanPowerShare: 0.5,
+            meanCadence: 88,
+            rescues: 0,
+          },
+        ],
+      }),
+    );
+
+  it('has none in the request, and no key one could travel under', () => {
+    const sent = body();
+    // Something is sent, or "no coordinate" is true of nothing.
+    expect(sent.input.summaries).toHaveLength(1);
+    expect(coordinatesIn(sent)).toStrictEqual([]);
+    // The whole vocabulary of the body: a new key is a change to this list.
+    expect([...keysIn(sent)].sort()).toStrictEqual(
+      [
+        'block',
+        'blocks',
+        'ceilingShare',
+        'currentBlock',
+        'durationMinutes',
+        'goals',
+        'high',
+        'highestHeartRate',
+        'input',
+        'kind',
+        'low',
+        'meanCadence',
+        'meanHeartRate',
+        'meanPowerShare',
+        'range',
+        'rescues',
+        'revision',
+        'seconds',
+        'secondsInRange',
+        'sessionType',
+        'source',
+        'startShare',
+        'summaries',
+        'summarySeq',
+        'target',
+        'templateVersion',
+      ].sort(),
+    );
+  });
+
+  it('carries no date, and no text the rider typed', () => {
+    const sent = JSON.stringify(body());
+    expect(sent).not.toContain('Home');
+    expect(sent).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+});
+
+describe('a write-up job is sent no coordinate at all — #1102', () => {
+  it('has none in the request, for a ride whose track crosses a privacy zone', async () => {
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    await seedAthletes(harness);
+    const ride = rideFor(ATHLETE_A, { hasPosition: true });
+    const streams = streamSetFor(ride, { sampleCount: SAMPLE_COUNT });
+    const positions = (streams.channels.latitude ?? []).map((each, index) => ({
+      latitude: each ?? 0,
+      longitude: streams.channels.longitude?.[index] ?? 0,
+    }));
+    const zone = zoneOver(positions);
+    // The fixture is one the zone matters to: the ride's own track enters it.
+    expect(insideZone(coordinatesIn(positions), zone, ride.id).length).toBeGreaterThan(0);
+    await harness.write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streams);
+      await store.putPrivacyZone(zone);
+    });
+    const scripted = scriptedJobs([succeeded('A steady ride.')]);
+    const reader = indexedDbStoreFactory.open(harness.databaseName);
+    await createInstanceAnalysis({
+      store: reader,
+      athleteId: ATHLETE_A,
+      connected: () => true,
+      session: async () => Promise.resolve(scripted.session),
+      cameraConsented: () => true,
+      now: () => unixSeconds(1_800_000_000),
+    }).ask(ride.id, 'instance-local', () => undefined, new AbortController().signal);
+    const body = startedWith(scripted);
+    // Something was sent, or "no coordinate" is true of nothing.
+    expect(body?.input.sections.length).toBeGreaterThan(0);
+    expect(coordinatesIn(body)).toStrictEqual([]);
+    expect(insideZone(coordinatesIn(body), zone, ride.id)).toStrictEqual([]);
+    reader.close();
+    await harness.destroy();
+  });
+
+  it('would find one if the request carried it', () => {
+    expect(coordinatesIn({ input: { start: { latitude: 51.5, longitude: -0.12 } } })).toHaveLength(
+      1,
+    );
   });
 });
 

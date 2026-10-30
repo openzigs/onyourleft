@@ -189,6 +189,27 @@ const ANALYSIS_IMPORT_PATTERNS = [
 ];
 
 /**
+ * What `packages/map-features` may not name on top of the shared list (#1544):
+ * a renderer, a map library or a tile fetcher. It turns tile bytes it is handed
+ * into numbers and names no rendering library — `apps/web/src/game/` draws
+ * them, and #1539's one module outside `game/` fetches the bytes with its own
+ * `fetch`, where `no-network.test.ts` can see it (ADR 0054 D-2.5). `pmtiles`
+ * is listed because its built-in source fetches.
+ */
+const MAP_FEATURES_IMPORT_PATTERNS = [
+  {
+    group: ['three', 'three/*', 'maplibre-gl', 'maplibre-gl/*', 'pmtiles', 'pmtiles/*'],
+    message:
+      "packages/map-features is platform-free and names no rendering or map library (#1544): it decodes bytes it is handed. Drawing is apps/web/src/game/; the archive read is #1539's one module.",
+  },
+  {
+    group: ['@onyourleft/store', '@onyourleft/store/*'],
+    message:
+      "packages/map-features holds no map data (#1544): the ODbL corridor store is packages/store's, and it imports this package, never the reverse.",
+  },
+];
+
+/**
  * Globals a platform-isolated package may not name.
  *
  * The package's own `tsconfig.json` is the closure here — `lib: ["ES2024"]` with
@@ -217,7 +238,7 @@ const PLATFORM_GLOBALS = [
   'global',
   'require',
   // Network I/O. `fetch` is the one that matters most: it is a global in both
-  // Node 24 and every browser, so it is the shortest path from "pure leaf
+  // Node 26 and every browser, so it is the shortest path from "pure leaf
   // package" to an outbound request.
   'fetch',
   'XMLHttpRequest',
@@ -253,6 +274,60 @@ const platformIsolation = (extraPatterns = []) => ({
 });
 
 /**
+ * The AI SDK, by name (#1096, ADR 0046 D-8): `apps/instance/src/analysis/model.ts`
+ * is the ONE module in the repository that may import it — and its own test,
+ * which can show the gateway guard holds only by calling the SDK. See the
+ * block that uses this.
+ */
+const AI_SDK_IMPORT_PATTERNS = [
+  {
+    group: ['ai', 'ai/*', '@ai-sdk/*'],
+    message:
+      'Only apps/instance/src/analysis/model.ts may import the AI SDK (#1096, ADR 0046 D-8). Write against the ModelConnection port in model-turn.ts.',
+  },
+];
+
+/**
+ * HPKE's test support, by name (#1188, ADR 0047 D-3). `hpke-testing.ts` is
+ * the one module that lets a caller choose an HPKE ephemeral key — RFC 9180's
+ * vectors need it, and a production sender that reused one would give every
+ * request to an instance key one shared secret. So no module may import it
+ * but a test or test support (the block after the AI SDK's lifts it for
+ * those). `src/index.ts` does not export it either, which
+ * `packages/domain/src/hpke/hpke-surface.test.ts` holds with
+ * `@ts-expect-error`.
+ */
+const HPKE_TESTING_IMPORT_PATTERNS = [
+  {
+    group: [
+      '@onyourleft/domain/hpke-testing',
+      'hpke-testing',
+      'hpke-testing.ts',
+      '**/hpke-testing',
+    ],
+    message:
+      'HPKE test support (an injectable ephemeral key) is for tests only (#1188, ADR 0047 D-3). Use setupBaseSender from @onyourleft/domain.',
+  },
+  {
+    // `hpke.ts` exports `setupSender` and `encap`, which take an ephemeral
+    // key. Only `src/index.ts` (which re-exports the safe names),
+    // `hpke-testing.ts` and tests may name the module (#1196 review).
+    group: ['**/hpke/hpke', '**/hpke/hpke.ts', './hpke', './hpke.ts'],
+    message:
+      'hpke.ts exports the ephemeral-key-taking core (setupSender, encap). Import setupBaseSender from @onyourleft/domain instead (#1188, ADR 0047 D-3).',
+  },
+];
+
+/** Where a test or test support lives, for the rules such files are exempt from. */
+const TEST_AND_TEST_SUPPORT_FILES = [
+  '**/*.test.{ts,tsx}',
+  '**/*.spec.ts',
+  '**/*-testing.ts',
+  '**/testing/**/*.{ts,tsx}',
+  '**/testing.ts',
+];
+
+/**
  * The instance's SQL driver and query builder, by name (#769). Only
  * `apps/instance/src/store/` may import them — see the block that uses this.
  */
@@ -272,6 +347,8 @@ const SQL_DRIVER_IMPORT_PATTERNS = [
  */
 const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/main.ts',
+  // The AI SDK's one module (#1096, ADR 0046 D-8): the SDK is a Node package.
+  'apps/instance/src/analysis/model.ts',
   'apps/instance/src/serve.ts',
   'apps/instance/src/node-listener.ts',
   'apps/instance/src/operator/cli.ts',
@@ -459,6 +536,82 @@ export default tseslint.config(
     },
   },
 
+  // --- The AI SDK is named in ONE module (#1096, ADR 0046 D-8) --------------
+  // The core `no-restricted-imports`, not typescript-eslint's, because the
+  // blocks below set that one per directory and flat config keeps the last
+  // setting of a rule: on the core rule this block is the only setting except
+  // `packages/sensors/protocol`'s, which carries these patterns in its own list.
+  // Everywhere — `packages/`, `apps/web`, `apps/mobile`, the rest of
+  // `apps/instance`, the scripts — but the one module and its test. Probed: an
+  // `import { generateText } from 'ai'` in `analysis/agent.ts` is an error.
+  //
+  // ⚠️ Since #1188 the same rule also carries HPKE_TESTING_IMPORT_PATTERNS, so
+  // three blocks set it: this one (both lists), the next (tests and test
+  // support: the AI SDK's list alone) and `model.ts`'s (HPKE's alone).
+  // Probed: `import … from '@onyourleft/domain/hpke-testing'` in
+  // `apps/instance/src/auth/crypto.ts` is an error, in `hpke.test.ts` it is not.
+  {
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [...AI_SDK_IMPORT_PATTERNS, ...HPKE_TESTING_IMPORT_PATTERNS] },
+      ],
+    },
+  },
+  // `no-restricted-imports` reads static imports only, so `import('ai')` and
+  // `import('@ai-sdk/openai-compatible')` linted clean (#1187). This is the
+  // dynamic half, by `no-restricted-syntax`, which no other block sets. A
+  // string or a template with no substitution is matched; a COMPUTED
+  // specifier (`import(name)`) cannot be, by lint or by anything static.
+  // Probed: `await import('ai')` and `` import(`@ai-sdk/x`) `` in
+  // `analysis/agent.ts` are errors, in `model.ts` they are not.
+  {
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...[
+          'ImportExpression[source.value=/^(?:ai|ai\\x2F.*|@ai-sdk\\x2F.*)$/]',
+          'ImportExpression[source.quasis.0.value.cooked=/^(?:ai|ai\\x2F.*|@ai-sdk\\x2F.*)$/]',
+        ].map((selector) => ({
+          selector,
+          message:
+            'Only apps/instance/src/analysis/model.ts may import the AI SDK, dynamically or not (#1096, #1187, ADR 0046 D-8).',
+        })),
+      ],
+    },
+  },
+  {
+    files: TEST_AND_TEST_SUPPORT_FILES,
+    ignores: ['apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  // The three non-test modules allowed to name `hpke/hpke` (#1196 review, #1191).
+  {
+    // `sealed/sealed.ts` (#1191) composes the public `setupBaseSender`,
+    // `setupBaseRecipient`, `sealReply` and `openReply`, and names neither
+    // `setupSender` nor `encap`.
+    files: [
+      'packages/domain/src/index.ts',
+      'packages/domain/src/hpke/hpke-testing.ts',
+      'packages/domain/src/sealed/sealed.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  {
+    files: ['apps/instance/src/analysis/model.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: HPKE_TESTING_IMPORT_PATTERNS }],
+    },
+  },
+
   // --- packages/domain depends on no platform API at all ---------------------
   // `.tsx` is included even though a package that renders is already a design
   // error: the header block above already covers `packages/**/*.{ts,tsx}`, and
@@ -473,6 +626,41 @@ export default tseslint.config(
     // Passing it everywhere costs nothing and removes the question of why
     // packages/sensors was special.
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
+  // --- The re-plan validator reads no clock and rolls no dice ----------------
+  // #1242, ADR 0048 D-5. `replan.ts` decides whether a model's proposal may
+  // change what a trainer is asked for, and its rate limits (P4) and freshness
+  // (P5) are only what its tests say they are while `now` is a parameter.
+  // `Date` and `Math.random` are ECMAScript built-ins, so the `lib` narrowing
+  // cannot see either — packages/physics' note below. This block replaces the
+  // domain block's `no-restricted-globals` for this file, so it repeats it.
+  {
+    files: ['packages/domain/src/workout/replan.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'This package depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
+        })),
+        {
+          name: 'Date',
+          message:
+            'replan.ts is pure (#1242, ADR 0048 D-5): `now` arrives as a parameter. A clock here makes P4 and P5 untestable.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'replan.ts is deterministic (#1242): the same proposal against the same plan gives the same answer.',
+        },
+      ],
+    },
   },
 
   // --- packages/sensors/src depends on no platform API either ----------------
@@ -538,6 +726,10 @@ export default tseslint.config(
         'error',
         {
           patterns: [
+            // #1096: this block replaces the AI SDK block above for these
+            // files, so it carries its patterns — and #1188's.
+            ...AI_SDK_IMPORT_PATTERNS,
+            ...HPKE_TESTING_IMPORT_PATTERNS,
             {
               group: ['**/web-bluetooth/**', '../web-bluetooth/*', '../../web-bluetooth/*'],
               message:
@@ -614,6 +806,28 @@ export default tseslint.config(
     files: ['packages/analysis/**/*.test.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': ['error', { patterns: ANALYSIS_IMPORT_PATTERNS }],
+    },
+  },
+
+  // --- packages/map-features decodes untrusted tiles, and is platform-free ----
+  // #1544, ADR 0054. A tile is decoded the same way in a browser, in the
+  // Android WebView and on an instance, so the package takes packages/domain's
+  // isolation; `packages/map-features/tsconfig.platform-free.json` is the
+  // closure and this is the fast duplicate. On top of it: no renderer, no map
+  // library, no tile fetcher and no store. The tests run under Node (they hash
+  // the fixtures and read the clock), so they take only the second half.
+  {
+    files: ['packages/map-features/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts'],
+    rules: platformIsolation([...BLE_LIBRARY_IMPORT_PATTERNS, ...MAP_FEATURES_IMPORT_PATTERNS]),
+  },
+  {
+    files: ['packages/map-features/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: MAP_FEATURES_IMPORT_PATTERNS },
+      ],
     },
   },
 
@@ -865,6 +1079,35 @@ export default tseslint.config(
           'The Durable Object adapter uses the platform’s WebSocket, never `ws` (ADR 0037 D-2).',
       },
     ]),
+  },
+
+  // --- The demo riders are deterministic: time arrives as a parameter --------
+  // #1646. `apps/web/src/demo/` rides authored scripts through the physics
+  // tick, and `runner.test.ts` pins a SHA-256 digest of each preset's series:
+  // the video export (#1655) and the browser gate (#1648) need a preset to be
+  // the same ride every time. A clock or a random number here breaks that, so
+  // both are refused, as `packages/physics` refuses `Date`.
+  {
+    files: ['apps/web/src/demo/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...['Date', 'performance'].map((name) => ({
+          name,
+          message:
+            'src/demo/ reads no clock (#1646): ride time arrives as a parameter, so a preset is the same ride every time.',
+        })),
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'src/demo/ is deterministic (#1646): every number in a demo ride is authored, never drawn.',
+        },
+      ],
+    },
   },
 
   // --- The announcer's core is pure: time arrives as a parameter -------------

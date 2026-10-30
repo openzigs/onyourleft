@@ -66,7 +66,10 @@ import type { SidePairingPort } from '../camera/side-pairing-port';
 import { scriptedSidePairing } from '../camera/testing';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from '../camera/side-report-wording';
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
-import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type {
+  InstanceAnalysisPort,
+  InstanceAskOutcome,
+} from '../ride-analysis/instance-analysis-port';
 import { stubEffortPort } from '../efforts/testing';
 import { stubLibrary } from '../library/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
@@ -76,6 +79,10 @@ import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
 import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import {
+  SCRIPTED_HOSTED_KEY,
+  scriptedHostedSettings,
+} from '../ride-analysis/hosted-settings-testing';
 import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -83,6 +90,8 @@ import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
+import type { WorkoutGoalsRecord } from '@onyourleft/store';
 import { workoutStub } from '../workouts/testing';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 
@@ -95,6 +104,24 @@ const ORIGIN = { latitude: 51.5, longitude: -0.12 };
 
 /** The ride and the segment the populated fixtures hold. */
 const RIDE_ID = 'ride-0';
+
+/** Moving s, elapsed s, metres, average W, best W, average bpm, highest bpm, metres climbed. */
+const POPULATED_LAPS: readonly (readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+])[] = [
+  [612, 640, 7_000, 201, 412, 148, 166, 96],
+  [590, 598, 7_000, 214, 455, 153, 171, 96],
+  [571, 571, 7_000, 226, 498, 158, 176, 96],
+  [604, 604, 7_000, 208, 430, 156, 172, 96],
+  [187, 187, 2_150, 195, 388, 154, 165, 31],
+];
 const SEGMENT_ID = 'the-drag';
 
 /**
@@ -198,9 +225,13 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
   },
   // #777/#773: connected, the instance's devices are listed; not, the form.
-  instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__devices li' },
+  // #1208: the marker is the account-change notices, which are drawn only
+  // beside a listed device list — so every walk over this fixture (axe, the
+  // sentence record, the reflow walk) is proven to reach the notices too.
+  instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__notices li' },
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
+  more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
@@ -261,6 +292,7 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'side-camera': { kind: 'none', reason: 'a pairing flow, not a list' },
   'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
+  more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
   'not-found': { kind: 'none', reason: 'a heading and the route list' },
 };
 
@@ -416,17 +448,20 @@ const POPULATED_WRITE_UP: RideWriteUpRecord = {
 };
 
 /**
- * The post-ride ask, set up with the rider's own computer (#805, carried from
- * #831's review): without it every route gate built the shell with no port,
- * so the ask control and what it says is sent were never laid out. It never
- * answers — a walk never presses it.
+ * A write-up asked of the rider's instance (#1102): connected on the
+ * populated walk, so its press and what it says is sent are laid out, and not
+ * on the empty one, so its one no-instance sentence is. It never answers — a
+ * walk never presses it.
  */
-function rideAnalysisPort(): RideAnalysisPort {
+function instanceAnalysisPort(populated: boolean): InstanceAnalysisPort {
   return {
-    availableSources: () => ['computer'],
-    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
-    hostedPreviewSeen: () => true,
-    askForRideWriteUp: async () => new Promise<AskOutcome>(() => undefined),
+    connected: () => populated,
+    availableSources: () => (populated ? ['instance-local'] : []),
+    hostedEndpoint: () => undefined,
+    pendingJob: () => false,
+    ask: async () => new Promise<InstanceAskOutcome>(() => undefined),
+    followAgain: async () => Promise.resolve({ kind: 'detached' }),
+    cancel: async () => Promise.resolve(),
   };
 }
 
@@ -450,8 +485,25 @@ function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
       latitude: track.map((position) => position.latitude),
       longitude: track.map((position) => position.longitude),
     },
-    laps: Array.from({ length: 12 }, (_unused, index) =>
-      stubLap(index, { activityId: activityId(RIDE_ID), athleteId: ATHLETE }),
+    // #1312: laps of a course with every figure a lap can state, the third
+    // the best and the last a part lap — the widest lap table there is, so
+    // the reflow walk and `list-detail.browser.spec.ts` §"#1312" lay it out.
+    laps: POPULATED_LAPS.map(
+      ([moving, elapsed, distance, power, best, heart, highest, climb], index) =>
+        stubLap(index, {
+          activityId: activityId(RIDE_ID),
+          athleteId: ATHLETE,
+          movingTime: seconds(moving),
+          elapsedTime: seconds(elapsed),
+          distance: metres(distance),
+          averagePower: watts(power),
+          maxPower: watts(best),
+          averageHeartRate: beatsPerMinute(heart),
+          maxHeartRate: beatsPerMinute(highest),
+          averageCadence: revolutionsPerMinute(88 + (index % 4)),
+          ascent: metres(climb),
+          ...(index === POPULATED_LAPS.length - 1 ? { partial: true as const } : {}),
+        }),
     ),
     // #805: a long write-up, with paragraphs and one unbreakable string, so
     // the reflow walk lays it out at 320 px — and a pose summary and two
@@ -598,6 +650,46 @@ function riderTextPort(populated: boolean): RiderTextPort {
   ).port;
 }
 
+/**
+ * The rider's typed workout goals (#1237) — every goal set in the populated
+ * walk, so the reflow walk lays out every box filled; none in the empty one.
+ * Kept in memory, read afresh on each read as the store's would be.
+ */
+function workoutGoalsPort(populated: boolean): WorkoutGoalsPort {
+  let kept: WorkoutGoalsRecord | undefined = populated
+    ? {
+        athleteId: ATHLETE,
+        goals: {
+          sessionType: 'endurance',
+          durationMinutes: 120,
+          holdRange: { low: beatsPerMinute(128), high: beatsPerMinute(138) },
+          heartRateAbove: beatsPerMinute(150),
+          powerCeiling: thresholdShare(0.75),
+          timeInRangeMinutes: 90,
+          effortCheckIns: true,
+        },
+        savedAt: unixSeconds(NOW),
+      }
+    : undefined;
+  return {
+    athleteId: ATHLETE,
+    now: () => unixSeconds(NOW),
+    store: {
+      getWorkoutGoals: () =>
+        Promise.resolve(kept === undefined ? { status: 'none' } : { status: 'kept', record: kept }),
+      putWorkoutGoals: (record) => {
+        kept = record;
+        return Promise.resolve(record);
+      },
+      deleteWorkoutGoals: () => {
+        const had = kept !== undefined;
+        kept = undefined;
+        return Promise.resolve(had);
+      },
+    },
+  };
+}
+
 function athleteMassPort(): AthleteMassPort {
   return {
     athleteId: ATHLETE,
@@ -680,13 +772,16 @@ function gamePort(populated: boolean): GamePort {
  * review (N4) that includes `capabilities`: the fixture's browser has no
  * Bluetooth, which leaves the Devices screen's pairing rows — the state where
  * its controls are — out of every walk, so the controls-first gate hands it a
- * Bluetooth that answers "available" to measure that state's fold too.
+ * Bluetooth that answers "available" to measure that state's fold too. And
+ * since #1133 `gameTrainer`: the fixture hands the game no trainer, so the
+ * chooser's *Not released* notice is in no walk unless a caller supplies one
+ * whose last release was refused.
  */
 export type PopulatedShellExtras = Pick<
   AppShellProps,
   'map' | 'basemap' | 'rideController' | 'transfer'
 > &
-  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates'>>;
+  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates' | 'gameTrainer' | 'nativeShell'>>;
 
 /** The real `AppShell` over the empty or the populated fixture. */
 export function PopulatedShell({
@@ -715,7 +810,11 @@ export function PopulatedShell({
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
       riderText={riderTextPort(populated)}
+      workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
+      // #1251: a key held and not yet agreed to, so the key form, who could
+      // read the key and the whole consent beside its switch are laid out.
+      hostedSettings={scriptedHostedSettings({ key: SCRIPTED_HOSTED_KEY, consent: null }).port}
       moderation={
         scriptedModeration({
           standing: populated ? 'moderator' : 'not-moderator',
@@ -725,7 +824,7 @@ export function PopulatedShell({
       }
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
-      rideAnalysis={rideAnalysisPort()}
+      instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,
         rides.map((activity) => ({

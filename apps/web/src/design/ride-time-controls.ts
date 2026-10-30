@@ -65,23 +65,45 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   { surface: 'ride-screen', name: 'Start recording', match: 'exact' },
   { surface: 'ride-screen', name: 'Pause', match: 'exact' },
   { surface: 'ride-screen', name: 'Resume', match: 'exact' },
+  // #1318: a lap taken by hand, pressed at the bars on a ride with no course.
+  { surface: 'ride-screen', name: 'Lap', match: 'exact' },
   { surface: 'ride-screen', name: 'Stop', match: 'exact' },
   { surface: 'ride-screen', name: 'Yes, stop the ride', match: 'exact' },
   { surface: 'ride-screen', name: 'Keep riding', match: 'exact' },
+  // #1433: the zoom between the top two readings, larger, and every one chosen.
+  { surface: 'ride-screen', name: 'Zoom', match: 'exact' },
+  // #1432: the touch lock, pressed at the bars before the rain.
+  { surface: 'ride-screen', name: 'Lock', match: 'exact' },
   // `ride/TrainerPanel.tsx`: the take-control step is pressed at the bars.
   { surface: 'trainer-panel', name: 'Ask the trainer for control', match: 'exact' },
   { surface: 'trainer-panel', name: 'Set target', match: 'exact' },
   // `ride/WorkoutPanel.tsx`.
   { surface: 'workout-panel', name: 'Ride ', match: 'prefix' },
   { surface: 'workout-panel', name: 'End workout', match: 'exact' },
+  // #1244, ADR 0048 D-7: the one control over a re-plan, shown while an
+  // accepted move waits for the next block. Pressed at the bars, mid-block.
+  { surface: 'workout-panel', name: 'Keep the plan', match: 'exact' },
+  // #1244's review, ADR 0048 D-7: the mid-workout switch-off, beside *End
+  // workout* while a workout runs with re-plans on.
+  { surface: 'workout-panel', name: 'Switch re-plans off', match: 'exact' },
   // `game/hud/HudPanel.tsx` and `game/SoundControls.tsx`.
   { surface: 'game-hud', name: 'Pause', match: 'exact' },
   // The same HUD control while the ride is paused (#710's review).
   { surface: 'game-hud', name: 'Resume', match: 'exact' },
   { surface: 'game-hud', name: 'End ride', match: 'exact' },
+  // #1482: the touch lock on the HUD, pressed at the bars before the rain.
+  { surface: 'game-hud', name: 'Lock', match: 'exact' },
   // #785: a private race waiting on its line — the rider who made it starts it.
   { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
+  // #788: *Report* on the HUD in a room — #789's control, pressed at the bars
+  // to report the rider followed. A PREFIX: it is named for them ("Report Bea").
+  // Its three reasons are not on the list: on a phone on its side they share
+  // one row at the row's own height (`theme.css` §"#789").
+  { surface: 'game-hud', name: 'Report ', match: 'prefix' },
+  // #1244: *Keep the plan* in the game too, while an accepted re-plan waits,
+  // so a rider does not leave the game to refuse a change.
+  { surface: 'game-hud', name: 'Keep the plan', match: 'exact' },
   // #940: the trainer game's pre-ride chooser, `game/StageChooser.tsx`. Its
   // *Ride* starts the ride, so it is *Start* in the ruling's four. A PREFIX,
   // because it is named after the route ("Ride Box Hill").

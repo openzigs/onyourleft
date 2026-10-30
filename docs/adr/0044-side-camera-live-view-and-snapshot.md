@@ -685,3 +685,18 @@ All on 2026-10-04, from `main` at `a9c7f3ff`:
   their conflicts with ADR 0033), which is not committed. Its unconfirmed points (hardware H.264 in
   the WebView, `VideoFrame` support in tasks-vision 1.0.1, a video m-line in the QR code) are spike
   0021's to settle, and this ADR rests on none of them.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-16** — **This ADR is accepted; its Status line above still reads *Proposed* because an
+  amendment cannot change it (ADR 0013 D-2).**
+  [ADR 0052](0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md) D-5 records the
+  acceptance, on the owner's approval of this wording on 2026-10-04 (*"go ahead and do 1058 now I
+  approve the wording"*) and the owner's ruling of the same day, *"One small ADR for both"*. Read
+  this ADR's Status from there. D-2 stays conditional on spike 0021, as the Status says. ADR 0052
+  D-1 also adds the phone's tilt message to ADR 0033 D-3's list, which this ADR left to the capture
+  work; #1064 still builds it. (#1122)

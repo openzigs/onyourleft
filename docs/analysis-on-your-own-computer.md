@@ -109,40 +109,16 @@ this ride". On your computer, what happens to it is up to the software you insta
 **Anyone else in the room is in the picture.** The Camera page says so before the camera is ever
 turned on.
 
-## A ride's numbers, when you ask for a write-up
+## A ride's numbers: no longer sent here
 
-The same computer can write about a ride. When you press the button on a ride's page that asks for
-an analysis, the app sends that ride's numbers — heart rate, cadence and power, your weight and
-watts per kilogram, your threshold power if you set one, how long the ride lasted, its distance, and
-each section's gradient and total climb, and how it went section by section — and, only if the side camera filmed that ride and you agreed to the camera, how
-a few measurements of your riding position changed between the start and the end of filming. **Never
-a picture**, and not your name, where you rode or when. Nothing is sent until you press the button.
-The [privacy policy](privacy-policy.md) says the same, under **A ride sent to your own computer**.
-
-It is not one question but several in a row, each short and each carrying only the numbers it
-needs: one for each section of the ride (at most eight), one about your position when there is a
-side-camera summary, and one for the whole write-up. The model you named is asked all of them; it
-does not need to read pictures for this, and any model your server runs will be asked.
-
-- **The model needs a context of at least 4 096 tokens.** The largest question the app sends is
-  about 9 000 characters — the whole-ride write-up, with a note from each section — and it asks for
-  up to 1 024 tokens back. At about three characters a token that is just under 4 096 tokens
-  together, so a server that gives the model a smaller context cuts the question without saying so.
-  8 192 leaves room. If your server lets you set the context length, set it at least that high.
-- **A model too weak for the steps** is handled by the app rather than trusted. Each section's answer
-  has to be in the exact form asked for; one that is not is asked again once, and a section that
-  still fails is left out of the write-up, which then says which. If more than half the sections
-  fail, or the write-up itself does not come back, or an answer is cut off at its length limit,
-  nothing is kept and you are told why. A write-up that breaks this app's rules about what may be
-  said about a body is asked for once more, and not shown if it breaks them again. A larger model
-  does better; a slow one may run out of the app's ten minutes.
-- **If you cancel**, the app stops waiting at once and keeps nothing. Your computer **may still be
-  working** on the question it was last asked for a while: in a browser the app closes the
-  connection, which stops most model servers; in the Android app it cannot stop a question once it
-  has been sent, and whatever the computer answers afterwards is ignored.
-- ⚠️ **This has not been tried with any particular model server.** It sends the same kind of request
-  as the picture check, to the same address, with a hint about the form each answer should take
-  that a server may or may not follow. No server and no model is recommended or set up for you.
+Until [#1103](https://github.com/openzigs/onyourleft/issues/1103), the same computer could also be
+asked to write about a ride: the app sent it that ride's numbers when you pressed the button on the
+ride's page. **That has gone.** A write-up is now asked of your instance, which writes it with a
+model on its own machine or its own private network
+([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-1); the
+[privacy policy](privacy-policy.md) describes it under **A ride analysed on your instance**. This
+computer is sent pictures only. A ride's numbers it was sent before then are a copy it holds, and
+erasing this device does not reach them — the app says so before you erase.
 
 ## The side camera's pictures, if you switch that on
 

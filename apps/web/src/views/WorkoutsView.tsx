@@ -89,11 +89,13 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
  */
 
 /** The words for a block kind, in the order the picker offers them. */
-const BLOCK_KINDS: readonly { readonly kind: WorkoutBlock['kind']; readonly label: string }[] = [
+const BLOCK_KINDS: readonly { readonly kind: BlockDraft['kind']; readonly label: string }[] = [
   { kind: 'steady', label: 'Steady' },
   { kind: 'intervals', label: 'Intervals' },
   { kind: 'ramp', label: 'Ramp' },
   { kind: 'free-ride', label: 'Free ride' },
+  // #1241: ADR 0048 D-12's name for it, and none of the names it rules out.
+  { kind: 'heart-rate-hold', label: 'Heart-rate hold' },
 ];
 
 export interface WorkoutsViewProps {
@@ -194,10 +196,28 @@ const WorkoutBlockChart = memo(function WorkoutBlockChart({
   return timeline === undefined ? null : <BlockChart segments={timeline.segments} />;
 });
 
+/**
+ * A new workout's id: `workout-` and a random UUID, never the clock (#1100).
+ * Since saved workouts sync both ways across a rider's devices, an id is a
+ * key on the instance, and one minted from a device's clock in milliseconds
+ * — as it was until then — collides when two devices save in the same
+ * millisecond, and the instance would then hold whichever synced last.
+ * `crypto.randomUUID`, as a ride's and a route's id are (`main.tsx`).
+ */
+const newWorkoutId = (): WorkoutId => `workout-${globalThis.crypto.randomUUID()}` as WorkoutId;
+
 export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<BuildRefusal | undefined>(undefined);
+  /**
+   * #1165: a refused *Add block*, shown inside its own form beside the
+   * button pressed. It shared {@link refusal}'s line until then, which #1161
+   * moved above the block list (#1087), so on a phone the warning was above
+   * the list, the chart and the whole form and a sighted rider saw nothing
+   * happen.
+   */
+  const [blockRefusal, setBlockRefusal] = useState<BuildRefusal | undefined>(undefined);
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<BlockDraft>(EMPTY_DRAFT);
   const [blocks, setBlocks] = useState<readonly WorkoutBlock[]>([]);
@@ -264,6 +284,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
     if (selected === undefined) return;
     setSaved(undefined);
     setRefusal(undefined);
+    setBlockRefusal(undefined);
     setFileNote(undefined);
     setFileFault(undefined);
   }, [selected]);
@@ -319,7 +340,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       event.preventDefault();
       const outcome = blockFromDraft(draft);
       if (outcome.status === 'refused') {
-        setRefusal(outcome.refusal);
+        setBlockRefusal(outcome.refusal);
+        setRefusal(undefined);
         setSaved(undefined);
         return;
       }
@@ -328,6 +350,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       // intervals blocks should not re-pick "Intervals" six times, and a rider
       // who wanted a different kind is one click from it.
       setDraft({ ...EMPTY_DRAFT, kind: draft.kind });
+      setBlockRefusal(undefined);
       setRefusal(undefined);
       setSaved(undefined);
     },
@@ -344,12 +367,14 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       event.preventDefault();
       if (port === undefined) return;
       const outcome = workoutToSave({
-        id: `workout-${String(Math.round(clock() * 1000))}` as WorkoutId,
+        id: newWorkoutId(),
         owner: port.athleteId,
         name,
         blocks,
         now: clock(),
       });
+      // One builder message at a time, as when the two shared a line.
+      setBlockRefusal(undefined);
       if (outcome.status === 'refused') {
         setRefusal(outcome.refusal);
         setSaved(undefined);
@@ -406,7 +431,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         return;
       }
       const outcome = workoutFromFile(await chosen.text(), {
-        id: `workout-${String(Math.round(clock() * 1000))}` as WorkoutId,
+        id: newWorkoutId(),
         owner: port.athleteId,
         now: clock(),
       });
@@ -455,7 +480,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
   }
 
   const needsTarget =
-    draft.kind === 'steady' || draft.kind === 'ramp' || draft.kind === 'intervals';
+    draft.kind === 'steady' ||
+    draft.kind === 'ramp' ||
+    draft.kind === 'intervals' ||
+    draft.kind === 'heart-rate-hold';
 
   const shown: Fetched | { readonly kind: 'found'; readonly entry: WorkoutEntry } | undefined =
     inList !== undefined
@@ -478,7 +506,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             heading="Your first workout"
             level={3}
             action={
-              <CreateLink route={routeById('workouts')} selection={selected}>
+              <CreateLink route={routeById('workouts')} selection={selected} emptyState>
                 Build a workout
               </CreateLink>
             }
@@ -611,8 +639,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         <p>
           {shown.kind === 'missing'
             ? 'No workout with that address is saved on this device. It may have been deleted, ' +
-              'or the link may have come from another device — workouts are never copied ' +
-              'between them.'
+              'or it may be saved only on another of your devices, and not yet brought here by ' +
+              'a sync with your instance.'
             : 'It is stored on this device and could not be read back. Reload the page to try ' +
               'again.'}
         </p>
@@ -645,7 +673,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             under the fold on a phone with four blocks, and 66 px above it on
             the owner's tablet in landscape, 16 px over the 50 px floor, which a
             fifth block would have spent (`controls-first.browser.spec.ts`
-            §"#1050"). A rider names and saves what the list below holds.
+            §"#1050, #1087"). A rider names and saves what the list below holds.
           */}
               <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
                 <p>
@@ -667,7 +695,9 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             Live since #670's review: each appears because the rider pressed
             *Save workout*, *Add block* or confirmed a delete, which is what
             `StatusMessage` §`live` is for — and without it the one sentence
-            saying a save happened was never announced.
+            saying a save happened was never announced. ⚠️ Since #1165 a
+            refused *Add block* is NOT here but in its own form, beside the
+            button (`blockRefusal`).
           */}
               {refusal === undefined ? null : (
                 <StatusMessage tone="warning" live>
@@ -731,7 +761,9 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   help={
                     <p>
                       Targets are a percentage of your own threshold power, so the same workout
-                      works whatever shape you are in.
+                      works whatever shape you are in. A heart-rate hold starts at its starting
+                      target and moves it, never above its ceiling, to keep your heart rate in the
+                      range you choose.
                     </p>
                   }
                 >
@@ -745,7 +777,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                     name="kind"
                     value={draft.kind}
                     onChange={(event) =>
-                      setDraft({ ...draft, kind: event.target.value as WorkoutBlock['kind'] })
+                      setDraft({ ...draft, kind: event.target.value as BlockDraft['kind'] })
                     }
                   >
                     {BLOCK_KINDS.map((entry) => (
@@ -773,7 +805,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                 {needsTarget ? (
                   <p>
                     <label htmlFor="block-percent">
-                      {draft.kind === 'ramp'
+                      {draft.kind === 'ramp' || draft.kind === 'heart-rate-hold'
                         ? 'Starting target, % of threshold'
                         : draft.kind === 'intervals'
                           ? 'Hard target, % of threshold'
@@ -853,6 +885,51 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                     </p>
                   </>
                 ) : null}
+                {draft.kind === 'heart-rate-hold' ? (
+                  <>
+                    <p>
+                      <label htmlFor="block-ceiling-percent">Ceiling, % of threshold</label>
+                      <Stepper name="ceiling percentage" step={5} min={0}>
+                        <input
+                          id="block-ceiling-percent"
+                          name="ceilingPercent"
+                          type="text"
+                          inputMode="decimal"
+                          value={draft.ceilingPercent}
+                          onChange={(event) =>
+                            setDraft({ ...draft, ceilingPercent: event.target.value })
+                          }
+                        />
+                      </Stepper>
+                    </p>
+                    <p>
+                      <label htmlFor="block-low-bpm">Heart rate from, bpm</label>
+                      <Stepper name="bottom of the heart-rate range" step={1} min={0}>
+                        <input
+                          id="block-low-bpm"
+                          name="lowBpm"
+                          type="text"
+                          inputMode="numeric"
+                          value={draft.lowBpm}
+                          onChange={(event) => setDraft({ ...draft, lowBpm: event.target.value })}
+                        />
+                      </Stepper>
+                    </p>
+                    <p>
+                      <label htmlFor="block-high-bpm">Heart rate to, bpm</label>
+                      <Stepper name="top of the heart-rate range" step={1} min={0}>
+                        <input
+                          id="block-high-bpm"
+                          name="highBpm"
+                          type="text"
+                          inputMode="numeric"
+                          value={draft.highBpm}
+                          onChange={(event) => setDraft({ ...draft, highBpm: event.target.value })}
+                        />
+                      </Stepper>
+                    </p>
+                  </>
+                ) : null}
                 <p>
                   <label htmlFor="block-label">Label, optional</label>
                   <input
@@ -863,6 +940,12 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                     onChange={(event) => setDraft({ ...draft, label: event.target.value })}
                   />
                 </p>
+                {/* #1165: the refusal beside the button that was pressed. */}
+                {blockRefusal === undefined ? null : (
+                  <StatusMessage tone="warning" live>
+                    {blockRefusal.message}
+                  </StatusMessage>
+                )}
                 <Button variant="secondary" type="submit">
                   Add block
                 </Button>

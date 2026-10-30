@@ -124,6 +124,8 @@ import { describe, expect, it } from 'vitest';
 
 import { basemapOrigin, readBasemapConfig } from '../map/basemap';
 import { stripComments } from '../units/no-inline-units';
+import { ERASE_ACCOUNT_TEXT } from '../views/erase-account-text';
+import { CHANGE_NAME_TEXT } from '../views/instance-name-text';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -369,9 +371,9 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   readonly primitive: string;
   readonly count: number;
 }[] = [
-  // ⚠️ Still ONE since #802: the ride analysis's text steps to the rider's own
-  // computer (`ride-analysis/own-computer-step.ts`) are handed this same call
-  // by `analysis-transport.ts` §`riderModelStepPort`, rather than a second.
+  // The picture to the rider's own computer (#387). From #802 to #1103 the
+  // ride analysis's text steps were handed this same call; #1103 removed them
+  // (ADR 0046 D-1), and this entry is for pictures only.
   { module: join('camera', 'analysis-transport.ts'), primitive: 'fetch', count: 1 },
   // #529, ADR 0033 D-9 step 2: the side-camera link, and exactly one naming of
   // the constructor. What it is pointed at — no ICE server of any kind — is
@@ -386,11 +388,11 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // dependency needs fencing at all. An exact count, so deleting the fence
   // is a red run here as well as in `browser/pose.browser.spec.ts`.
   { module: join('camera', 'pose-fence.ts'), primitive: 'XMLHttpRequest', count: 1 },
-  // #518, ADR 0029's 2026-09-28 amendment: the hosted model on the rider's own
-  // key — a question and never a picture — which the privacy policy names as
-  // its second exception. Its own module, so that `camera/hosted-transport.test.ts`
-  // can read off the imports that it cannot name a picture.
-  { module: join('camera', 'hosted-transport.ts'), primitive: 'fetch', count: 1 },
+  // ⚠️ No entry for `camera/hosted-transport.ts` since #1103: the hosted model
+  // on a key kept on the device (#518) is gone, with its `fetch` (ADR 0046
+  // D-1). A hosted model is reached by the rider's INSTANCE now, through the
+  // one instance module below. §"the device's own write-up paths stay gone"
+  // goes red for a `fetch` put back there or anywhere in `ride-analysis/`.
   // #777, ADR 0036 D-3 (a): the ONE module permitted for instance traffic —
   // signing in, reading the session, the instance's name and source, the
   // device list, and signing out. A room's socket (#782) is opened through
@@ -405,6 +407,15 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // `WebSocket` to it: a WebSocket anywhere else in the client, a second one
   // here, or this one gone, is a red run (the fixtures below, "#782").
   { module: join('instance', 'instance-transport.ts'), primitive: 'WebSocket', count: 1 },
+  // #1539, ADR 0054 D-2.5: a route's corridor, read once from the configured
+  // basemap archive — byte ranges of the one file the ride map already reads,
+  // on the same host. Its OWN `fetch`, never `pmtiles`' `FetchSource`, because
+  // a request made inside a dependency is one this scan cannot see. Not
+  // instance traffic: ADR 0036 D-3 (a)'s one instance module is untouched.
+  // `privacy/boundaries.test.ts` declares it departing, and
+  // `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` say
+  // what it sends.
+  { module: join('world-data', 'corridor-source.ts'), primitive: 'fetch', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -480,11 +491,6 @@ describe('the narrowed gate itself — #387', () => {
     path: FENCE,
     source: 'const scope = globalThis as unknown as { readonly XMLHttpRequest?: unknown };',
   };
-  const HOSTED = join('camera', 'hosted-transport.ts');
-  const hosted: ScannedFile = {
-    path: HOSTED,
-    source: 'const send: HostedSend = options.send ?? (async (url, init) => fetch(url, init));',
-  };
   const INSTANCE = join('instance', 'instance-transport.ts');
   const instance: ScannedFile = {
     path: INSTANCE,
@@ -492,12 +498,19 @@ describe('the narrowed gate itself — #387', () => {
       'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));\n' +
       'const platformSocket = (url, events) => { const socket = new WebSocket(url); return socket; };',
   };
+  // #1539, ADR 0054 D-2.5: the corridor read's range requests, made by the
+  // module's own `fetch` so this scan sees them.
+  const CORRIDOR = join('world-data', 'corridor-source.ts');
+  const corridor: ScannedFile = {
+    path: CORRIDOR,
+    source: 'response = await fetch(url, { headers, credentials: "omit" });',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
     expect(
       networkFindingsOutside(
-        [instance, hosted, transport, link, quiet, fence],
+        [corridor, instance, transport, link, quiet, fence],
         PERMITTED_NETWORK_CALLS,
       ),
     ).toEqual([]);
@@ -511,7 +524,7 @@ describe('the narrowed gate itself — #387', () => {
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link, elsewhere, fence],
+      [corridor, instance, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -526,7 +539,7 @@ describe('the narrowed gate itself — #387', () => {
     };
     expect(
       networkFindingsOutside(
-        [instance, hosted, transport, link, sibling, fence],
+        [corridor, instance, transport, link, sibling, fence],
         PERMITTED_NETWORK_CALLS,
       ),
     ).toHaveLength(1);
@@ -538,7 +551,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     expect(
-      networkFindingsOutside([instance, hosted, twice, link, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside([corridor, instance, twice, link, fence], PERMITTED_NETWORK_CALLS),
     ).toHaveLength(1);
   });
 
@@ -548,7 +561,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, socket, link, fence],
+      [corridor, instance, socket, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -558,7 +571,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
     const findings = networkFindingsOutside(
-      [instance, hosted, emptied, link, fence],
+      [corridor, instance, emptied, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -573,7 +586,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, twice, fence],
+      [corridor, instance, transport, twice, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -586,7 +599,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, fetched, fence],
+      [corridor, instance, transport, fetched, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -599,7 +612,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const peer = new webkitRTCPeerConnection({});',
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link, elsewhere, fence],
+      [corridor, instance, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -610,7 +623,7 @@ describe('the narrowed gate itself — #387', () => {
   // a red run.
   it('goes red when the pose worker’s fence is gone', () => {
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link],
+      [corridor, instance, transport, link],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -623,55 +636,49 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const request = new XMLHttpRequest();',
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link, fence, elsewhere],
+      [corridor, instance, transport, link, fence, elsewhere],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain(join('camera', 'pose-worker.ts'));
   });
 
-  // #518: the hosted transport's three, as #387's.
-  it('goes red for a second fetch inside the hosted transport', () => {
-    const twice: ScannedFile = {
-      path: HOSTED,
-      source: `${hosted.source}\nvoid fetch('https://example.invalid/telemetry');`,
+  // #1103: the device's own write-up paths stay gone. A `fetch` put back in a
+  // hosted transport on the device, or anywhere in `ride-analysis/`, is not
+  // on the list, so it is a finding — the two places #518 and #802 sent from.
+  it.each([
+    [join('camera', 'hosted-transport.ts')],
+    [join('ride-analysis', 'own-computer-step.ts')],
+    [join('ride-analysis', 'instance-analysis.ts')],
+  ])('goes red for a fetch put back in %s (#1103)', (path) => {
+    const back: ScannedFile = {
+      path,
+      source: 'const send = options.send ?? (async (url, init) => fetch(url, init));',
     };
     const findings = networkFindingsOutside(
-      [instance, transport, link, fence, twice],
+      [corridor, instance, transport, link, fence, back],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toContain('2 fetch');
+    expect(findings[0]).toContain(path);
   });
 
-  it('goes red for a different primitive inside the hosted transport', () => {
-    const socket: ScannedFile = {
-      path: HOSTED,
-      source: `${hosted.source}\nconst s = new WebSocket(url);`,
-    };
-    const findings = networkFindingsOutside(
-      [instance, transport, link, fence, socket],
-      PERMITTED_NETWORK_CALLS,
+  it('permits exactly the modules #1103 leaves, and no hosted transport on the device', () => {
+    expect([...new Set(PERMITTED_NETWORK_CALLS.map(({ module }) => module))].sort()).toStrictEqual(
+      [
+        join('camera', 'analysis-transport.ts'),
+        join('camera', 'pose-fence.ts'),
+        join('camera', 'side-link-transport.ts'),
+        join('instance', 'instance-transport.ts'),
+        join('world-data', 'corridor-source.ts'),
+      ].sort(),
     );
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toContain('WebSocket');
-  });
-
-  it('goes red when the hosted transport’s fetch is gone', () => {
-    const emptied: ScannedFile = { path: HOSTED, source: 'const send = options.send;' };
-    const findings = networkFindingsOutside(
-      [instance, transport, link, fence, emptied],
-      PERMITTED_NETWORK_CALLS,
-    );
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toContain(HOSTED);
-    expect(findings[0]).toContain('0 fetch');
   });
 
   it('goes red when the side link’s peer connection is gone', () => {
     const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, emptied, fence],
+      [corridor, instance, transport, emptied, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -686,7 +693,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     const findings = networkFindingsOutside(
-      [twice, hosted, transport, link, fence],
+      [corridor, twice, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -699,7 +706,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nconst s = new EventSource('https://ride.example/v1/events');`,
     };
     const findings = networkFindingsOutside(
-      [source, hosted, transport, link, fence],
+      [corridor, source, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -714,7 +721,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nconst s = new WebSocket('wss://ride.example/elsewhere');`,
     };
     const findings = networkFindingsOutside(
-      [twice, hosted, transport, link, fence],
+      [corridor, twice, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toEqual([expect.stringContaining('2 WebSocket')]);
@@ -729,7 +736,7 @@ describe('the narrowed gate itself — #387', () => {
     ]) {
       const elsewhere: ScannedFile = { path, source: 'const socket = new WebSocket(url);' };
       const findings = networkFindingsOutside(
-        [instance, elsewhere, hosted, transport, link, fence],
+        [corridor, instance, elsewhere, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, path).toEqual([expect.stringContaining(path)]);
@@ -745,7 +752,7 @@ describe('the narrowed gate itself — #387', () => {
       const path = join('net', 'room-port.ts');
       const elsewhere: ScannedFile = { path, source };
       const findings = networkFindingsOutside(
-        [instance, elsewhere, hosted, transport, link, fence],
+        [corridor, instance, elsewhere, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, source).toEqual([expect.stringContaining(path)]);
@@ -758,7 +765,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
     };
     const findings = networkFindingsOutside(
-      [emptied, hosted, transport, link, fence],
+      [corridor, emptied, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toEqual([expect.stringContaining('0 WebSocket')]);
@@ -770,7 +777,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const sender = send;\nconst socket = new WebSocket(url);',
     };
     const findings = networkFindingsOutside(
-      [emptied, hosted, transport, link, fence],
+      [corridor, emptied, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -784,11 +791,123 @@ describe('the narrowed gate itself — #387', () => {
       source: "void fetch('https://ride.example/v1/auth/session');",
     };
     const findings = networkFindingsOutside(
-      [instance, sibling, hosted, transport, link, fence],
+      [corridor, instance, sibling, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain(join('instance', 'instance-port.ts'));
+  });
+  // #1539: the corridor read's three, as #387's.
+  it('goes red for a second fetch inside the corridor read', () => {
+    const twice: ScannedFile = {
+      path: CORRIDOR,
+      source: `${corridor.source}\nvoid fetch('https://example.invalid/telemetry');`,
+    };
+    const findings = networkFindingsOutside(
+      [twice, instance, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('2 fetch');
+  });
+
+  it('goes red for a different primitive inside the corridor read', () => {
+    const socket: ScannedFile = {
+      path: CORRIDOR,
+      source: `${corridor.source}\nconst s = new WebSocket(url);`,
+    };
+    const findings = networkFindingsOutside(
+      [socket, instance, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('WebSocket');
+  });
+
+  it('goes red when the corridor read’s fetch is gone', () => {
+    const emptied: ScannedFile = { path: CORRIDOR, source: 'const source = new FetchSource(url);' };
+    const findings = networkFindingsOutside(
+      [emptied, instance, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(CORRIDOR);
+    expect(findings[0]).toContain('0 fetch');
+  });
+
+  it('goes red for a fetch beside the corridor read, and under game/', () => {
+    for (const path of [
+      join('world-data', 'corridor-port.ts'),
+      join('game', 'world-data', 'corridor.ts'),
+    ]) {
+      const beside: ScannedFile = { path, source: 'void fetch(url);' };
+      const findings = networkFindingsOutside(
+        [corridor, beside, instance, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, path).toHaveLength(1);
+      expect(findings[0]).toContain(path);
+    }
+  });
+});
+
+/**
+ * **Pictures reach an instance only through the one instance module — #1106.**
+ *
+ * The side camera's pictures may now go to the rider's instance. They were
+ * given NO permit of their own: `camera/instance-pose.ts` builds the body and
+ * is handed a sealed channel, and the bytes leave through
+ * `instance/instance-transport.ts`'s one `fetch` — the entry that was already
+ * here. So the list above is unchanged by #1106, and this pins that it stays
+ * so: the two modules #1106 added name no network primitive, no entry was
+ * added for them, and a primitive in either is a red run.
+ * `camera/no-picture-reachable.test.ts` §"a picture reaches an instance by one
+ * path" is the other half: which module may put a picture in that request.
+ */
+describe('a side-camera picture goes to an instance through the one instance module — #1106', () => {
+  const PICTURE_PATH = join('camera', 'instance-pose.ts');
+  const SERVICE_READER = join('instance', 'hosted-service.ts');
+  const INSTANCE = join('instance', 'instance-transport.ts');
+  const read = (path: string): ScannedFile => ({
+    path,
+    source: readFileSync(join(SOURCE_ROOT, path), 'utf8'),
+  });
+
+  it('gave the picture path no permit: the list is the six entries it is (#1539 added the corridor read, #1103 took the device’s hosted transport away), one module for instance traffic', () => {
+    expect(PERMITTED_NETWORK_CALLS).toHaveLength(6);
+    const modules = PERMITTED_NETWORK_CALLS.map((entry) => entry.module);
+    expect(modules).not.toContain(PICTURE_PATH);
+    expect(modules).not.toContain(SERVICE_READER);
+    // Everything for an instance is still pinned to the one module.
+    expect(modules.filter((module) => module.startsWith('instance'))).toStrictEqual([
+      INSTANCE,
+      INSTANCE,
+    ]);
+  });
+
+  it('names no network primitive in the module that builds a picture’s request, or the one that reads the service’s name', () => {
+    for (const path of [PICTURE_PATH, SERVICE_READER]) {
+      const file = read(path);
+      expect(file.source.length, path).toBeGreaterThan(500);
+      expect(networkCallsIn(file.source), path).toStrictEqual([]);
+    }
+  });
+
+  it('goes red for a fetch in the picture path, however the rest of the tree stands', () => {
+    const files = scannable().map((file) => read(relative(SOURCE_ROOT, file)));
+    const sending = files.map((file) =>
+      file.path === PICTURE_PATH
+        ? {
+            ...file,
+            source: `${file.source}\nexport const send = (url: string) => fetch(url, { method: 'POST' });\n`,
+          }
+        : file,
+    );
+    // The control: the real tree is clean, so the finding below is the planted one.
+    expect(networkFindingsOutside(files, PERMITTED_NETWORK_CALLS)).toStrictEqual([]);
+    const found = networkFindingsOutside(sending, PERMITTED_NETWORK_CALLS);
+    expect(found).toHaveLength(1);
+    expect(JSON.stringify(found)).toContain('instance-pose.ts');
   });
 });
 
@@ -807,12 +926,12 @@ describe('the client', () => {
     }));
     expect(
       networkFindingsOutside(files, PERMITTED_NETWORK_CALLS),
-      'docs/privacy-policy.md says this client sends nothing except one picture, or a ride’s ' +
-        'numbers when the rider asks for an analysis (#802), to a computer the ' +
-        'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
-        'paired by scanning, a question — never a picture — to a hosted service on the ' +
-        'rider’s own key, a sign-in to an instance the rider chose (#777), and a room’s ' +
-        'power reports to that instance (#782); that is now ' +
+      'docs/privacy-policy.md says this client sends nothing except one picture to a computer ' +
+        'the rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
+        'paired by scanning, a sign-in to an instance the rider chose (#777), a room’s ' +
+        'power reports to that instance (#782), and the side camera’s pictures, sealed, to ' +
+        'that instance when the rider switched that on (#1106), and a route’s map tiles from the ' +
+        'basemap archive for the realistic world (#1539); that is now ' +
         'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);
@@ -1136,6 +1255,34 @@ describe('the default basemap is disclosed — #534', () => {
     expect(why).toContain('not which part of the map');
   });
 
+  /**
+   * #1539, ADR 0054 D-6.5: the corridor read is a second kind of tile request
+   * to the same host — made by this app's code, for a route rather than for a
+   * map on screen — and the policy and the Play answer say so in the same
+   * pull request as the read. Each place, on its own.
+   */
+  it('says a route read for the realistic world requests its tiles from the same host, once — #1539', () => {
+    const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+    const leaving = normalised(policySection(policy, 'What leaves the device'));
+    expect(leaving, 'the policy does not describe the realistic world’s tile read').toContain(
+      'if you choose the realistic world in settings, then when you choose a route for a game ride, or save a route, your device requests the map tiles along that route',
+    );
+    expect(leaving).toContain('from the same file on the same host, once for that route');
+    expect(leaving).toContain('it never requests a tile near one of your privacy zones');
+    expect(normalised(policySection(policy, 'The short version'))).toContain(
+      'it also asks once for the map along a route you choose or save',
+    );
+    const why = locationWhy(
+      readFileSync(
+        join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
+        'utf8',
+      ),
+    );
+    expect(why).toContain(
+      'With the realistic world chosen, choosing or saving a route also requests that route’s tiles from the same host, once for that route, as byte ranges of the same file',
+    );
+  });
+
   it('is not satisfied by a comment — the parse sees the `why` string and nothing else', () => {
     // The review's finding, as a fixture: the host in a comment above the row,
     // and a `why` that does not name it. A whole-file search passes this.
@@ -1357,8 +1504,10 @@ function policySection(markdown: string, heading: string): string {
 /**
  * Deleting instructions the policy may not give, because nothing in this build
  * carries them out (#892's review): no in-app screen removes a device or
- * changes the name, and no instance route erases an account. If one is built,
- * its phrase comes off this list in the same change that ships it.
+ * changes the name. If one is built, its phrase comes off this list in the
+ * same change that ships it — as erasing the account's did with #906, whose
+ * press on the Instance screen (`views/EraseAccount.tsx`) calls
+ * `DELETE /v1/account`, and which `InstanceView.test.tsx` holds is built.
  *
  * ⚠️ A denylist is a TRIPWIRE, not a proof (#892's second review): a synonym —
  * "delete your account on the instance" — is on no list and passes it. What
@@ -1370,16 +1519,19 @@ function policySection(markdown: string, heading: string): string {
 const UNBUILT_DELETION_PATHS: readonly string[] = [
   'remove the device from your account on the instance',
   'change it on the instance',
-  'erase your account on the instance',
-  'until you erase your account',
-  'until it is erased on the instance',
-  'erase it on the instance',
 ];
 
 /**
  * Every "How to delete it" cell of the instance section's table that names no
  * route this build has: *Disconnect*, the instance's operator, Discord, or a
  * dash (#892's second review). Answers the offending cells, normalised.
+ *
+ * Since #1251 the build has two more, both on the Instance screen: the press
+ * that removes a hosted model key the rider stored, by its label
+ * (`ride-analysis/hosted-consent.ts` §`HOSTED_REMOVE_BUTTON`), and unticking
+ * the hosted consent. `HostedServicePanel.test.tsx` is what holds that they
+ * are built. #906's press that erases the account is named beside the
+ * operator in each cell, never in place of it, so it needs no exemption here.
  */
 function deletionRouteFaults(section: string): readonly string[] {
   const rows = section
@@ -1397,7 +1549,9 @@ function deletionRouteFaults(section: string): readonly string[] {
       cell !== '—' &&
       !cell.includes('disconnect') &&
       !cell.includes('operator') &&
-      !cell.includes('discord'),
+      !cell.includes('discord') &&
+      !cell.includes('remove my key from my instance') &&
+      !cell.includes('when you untick it'),
   );
 }
 
@@ -1438,9 +1592,9 @@ describe('the instance is disclosed, class by class — #778', () => {
       "this device's public key",
       'the name other riders see',
       'your internet address',
-      // What it does not send yet, each named rather than left out.
-      'your rides, including their positions',
-      'not sent by this version of the app',
+      // #1195's sync, named before a version offered it (#778's second pass), and the control.
+      'what you sync: your rides, and what goes with them',
+      'which needs its card: sync now on the instance screen',
       'power, cadence, the weight you declare, and your display name',
       // #784: a room's route — refused in a privacy zone, deleted when the room is over.
       'the route of a room you make',
@@ -1474,6 +1628,65 @@ describe('the instance is disclosed, class by class — #778', () => {
     }
   });
 
+  it('says what a sync sends, sealed, untrimmed, and how it is deleted — before Sync ships (#1195)', () => {
+    // #1195 is blocked by #778: the policy names every class a sync sends
+    // (`instance/sync.ts` §"The rules, thing by thing") before the first
+    // build that sends one. The `normalised` text is lower-cased.
+    for (const phrase of [
+      'only if you sync with the instance, which needs its card',
+      'its positions and heart rate included, not trimmed by your privacy zones',
+      "signed with this device's key",
+      "each ride's write-up and side-camera report",
+      'with no position, date or name in it',
+      'your notes on your rides, your goals and the documents you added for the analysis',
+      'your answer to may be raced for each ride',
+      'all of it is sealed for that instance alone',
+      'shows none of it to another rider',
+      'delete a ride, note, goal, document or saved workout on this device, or clear your workout goals, and then sync: the instance deletes it too',
+      // #1100: saved workouts are synced both ways (`instance/sync.ts` rule 9).
+      "your saved workouts, each one's name, description and blocks",
+      'what another of your devices synced there, your saved workouts included',
+      // #1237: the typed workout goals, one item, synced both ways (rule 10).
+      // The owner's wording of 2026-10-10.
+      'your workout goals, the numbers you chose on the workout goals screen',
+      // ADR 0047 D-7 and D-11: what is sealed, and what Cloudflare still sees.
+      'everything you sync is sealed',
+      'what cloudflare still sees, even then',
+      // ADR 0036 D-3: the device stays canonical.
+      'syncing copies them to the instance; it never moves them',
+    ]) {
+      expect(section, phrase).toContain(phrase);
+    }
+    // #1215's review: what a sync sends is a FIT file re-encoded from the
+    // stored streams plus a signed record whose claims carry the ride's name
+    // and date (`instance/sync.ts` §`pushRide`, §`claimsOf`), and a deletion
+    // leaves a fingerprint of the file with when it was received.
+    for (const phrase of [
+      'a file this device writes from the ride',
+      "a signed record that carries the ride's name, when it started and its time zone",
+      'its elapsed and moving time, its distance and its average power',
+      'a fingerprint of the file and when the instance received it',
+    ]) {
+      expect(section, phrase).toContain(phrase);
+    }
+    // The owner's ruling of 2026-10-09 on #1215: an imported GPX or TCX ride
+    // is sent as a FIT file as well, matching Data Safety and `sync.ts`.
+    expect(section).toContain(
+      'a ride imported from a gpx or tcx file is sent as a fit file too, not as the original',
+    );
+    expect(section).not.toContain('sent as that kind of file too');
+    expect(section).not.toContain('as the file it was recorded or imported as');
+    expect(section).not.toContain('nothing of it in the mark');
+    // The old "not sent" row is gone, and the Location section no longer
+    // says a ride's positions are never transmitted, flat.
+    expect(section).not.toContain('not sent by this version of the app');
+    const location = normalised(policySection(policy, 'Location'));
+    expect(location).toContain(
+      "a ride's positions leave the device only if you sync your rides with an instance you",
+    );
+    expect(location).not.toContain("a ride's positions are never transmitted");
+  });
+
   it('says when the name is sent and when it is kept, and that earlier names are kept — #892 review', () => {
     // `sign-in.ts` sends a typed name on EVERY Connect; the instance keeps it
     // only when it registers the key (`instance-port.test.ts` measures both).
@@ -1482,6 +1695,8 @@ describe('the instance is disclosed, class by class — #778', () => {
     expect(section).toContain('each time you press connect with a name typed');
     expect(section).toContain('keeps it with your account only the first time it sees this device');
     expect(section).not.toContain('when it has not seen this device before');
+    // #906 item 2: the rename the Instance screen offers sends it too.
+    expect(section).toContain(normalised(`each time you press *${CHANGE_NAME_TEXT.change}*`));
     // Migration 0004's `display_name_change`.
     expect(section).toContain('also keeps each earlier name, and when it changed');
     expect(section).toContain('for moderation');
@@ -1501,19 +1716,22 @@ describe('the instance is disclosed, class by class — #778', () => {
   });
 
   it('offers only ways of deleting that this build has — #892 review', () => {
-    // No screen removes a device or changes the name, and nothing a rider can
-    // reach erases an account: `DELETE /v1/account` (#893) is a sync route,
-    // which a running instance answers `unavailable` because `instance.ts`
-    // hands the handler no sync, and no screen calls it. A policy
-    // telling a rider to do those "on the instance" names paths that do not
-    // exist, so each such instruction is refused, here and across the policy.
+    // A policy telling a rider to remove a device or change the name "on the
+    // instance" names paths that do not exist — the app does both, on its
+    // Instance screen (#1208, #906 item 2) — so each such instruction is
+    // refused, here and across the policy. Erasing the account IS built since
+    // #906, by the press the policy names.
     const whole = normalised(policy);
     for (const claim of UNBUILT_DELETION_PATHS) {
       expect(whole, claim).not.toContain(claim);
     }
-    // What IS true: disconnecting, and asking the operator — the maintainer,
-    // for the project's own instance, through the policy's contact route.
-    expect(section).toContain('disconnecting is all this version of the app can do');
+    // What IS true: erasing the account from the app (#906), and asking the
+    // operator — the maintainer, for the project's own instance, through the
+    // policy's contact route — for that and for what the app cannot do.
+    expect(section).not.toContain('disconnecting is all this version of the app can do');
+    expect(section).toContain('you can erase your account on an instance from the app');
+    expect(section).toContain(normalised(`press *${ERASE_ACCOUNT_TEXT.erase}*`));
+    expect(section).toContain('nothing on this device is deleted');
     expect(section).toContain("ask the instance's operator");
     expect(section).toContain("for the project's own instance, that is this project's maintainer");
     expect(section).toContain('as described under contact below');
@@ -1526,10 +1744,16 @@ describe('the instance is disclosed, class by class — #778', () => {
     expect(section).toContain('ask privately by email');
   });
 
-  it('names only Disconnect, the operator or Discord in every "how to delete it" cell — #892 second review', () => {
+  it('names only Disconnect, the operator, Discord or a built press in every "how to delete it" cell — #892 second review', () => {
     expect(deletionRouteFaults(policySection(policy, 'An instance you connect to'))).toEqual([]);
-    // The prose paragraph under the table says the same.
-    expect(section).toContain('disconnecting is all this version of the app can do');
+    // The prose paragraph under the table says what this build does since
+    // #906 items 1 and 2 — revoke another device (#1208), change the name by
+    // the press the screen draws — and leaves the operator what it cannot.
+    expect(section).not.toContain('this version of the app cannot remove a device');
+    expect(section).not.toContain('cannot change or remove it');
+    expect(section).toContain('you can also revoke another of your devices');
+    expect(section).toContain(normalised(`with *${CHANGE_NAME_TEXT.change}*`));
+    expect(section).toContain('the app cannot remove the device you are using from your account');
     expect(section).toContain("ask the instance's operator to do them");
   });
 
@@ -1568,4 +1792,141 @@ describe('the instance is disclosed, class by class — #778', () => {
       ),
     ).not.toContain('your internet address');
   });
+});
+
+/**
+ * **Re-plans during a ride, disclosed — #1245** (ADR 0048 D-10 and D-11; the
+ * #558 shape: each place a rider reads is checked on its own, because a search
+ * of the whole file is satisfied by any one of them).
+ *
+ * A re-plan sends per-block summaries to the rider's instance DURING a ride,
+ * through the one instance module this gate admits, so no permit changes. What
+ * changes is what that module carries, and the policy has to say, in each of
+ * the four places a rider would look: **what** is sent, **when**, **to whom**,
+ * and that it is **off unless switched on for the ride**. The section's exact
+ * sentences are pinned against the screen's own constant by
+ * `workout/replan-disclosure.test.ts`; this holds the four places together.
+ *
+ * ⚠️ It checks that the words are there, not that they are true of the build.
+ */
+const REPLAN_SECTION = 'Block summaries sent to your instance during a ride';
+const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
+  'The short version': [
+    // What, and what never.
+    'a summary of each block you have ridden so far',
+    'never a second-by-second recording',
+    'your workout goals, the heart rates you chose included',
+    // When.
+    'as each block begins, and never more often than every 3 minutes',
+    // To whom, and how; and to nobody else.
+    'sealed so that only your instance can open it',
+    "a model on your instance's own machine",
+    'it is not sent on to a hosted service: this app never asks one for a re-plan',
+    // When, and that it is off.
+    'it is off at the start of every ride, and nothing is sent until you switch it on for that ride',
+    // The hold, because riders will ask.
+    'a heart-rate hold on its own sends nothing anywhere',
+    // The sentence that used to say only a sync sends a heart rate.
+    'if you switch on re-plans during a ride, a summary of each block you ride is sent, heart rate included, with the heart rates you chose for the workout and in your workout goals',
+    `described under ${REPLAN_SECTION.toLowerCase()} below`,
+  ],
+  'What leaves the device': [
+    'a summary of each block you ride, sent to your instance during the ride',
+    'if you switch on re-plan during the ride for that ride',
+    'sealed on this device for that instance alone',
+    "a heart-rate hold's range in beats per minute included",
+    'the heart rates you chose included and the time you want in your range left out',
+    'never a second-by-second recording or a position, and never sent on to a hosted service',
+  ],
+  'An instance you connect to': [
+    '| block summaries, for a re-plan during the ride | only if you switch on re-plan during the ride for a ride',
+    'your mean and highest heart rate',
+    'your mean power as a share of your threshold power',
+    'your mean cadence',
+    "with the blocks of the workout as it stands, a heart-rate hold's range in beats per minute included, and your workout goals, the heart rates you chose included and the time you want to spend in your range left out",
+    'this app never asks a hosted service for a re-plan',
+    'never a second-by-second recording, a position, a date or a name',
+    'your instance keeps each request and its answer for 7 days',
+    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on',
+    'switch it off and nothing more is sent',
+  ],
+  [REPLAN_SECTION]: [
+    'a heart-rate hold on its own sends nothing anywhere: it runs on this device',
+    'off unless you switch them on for that ride',
+    'it is off at the start of every ride',
+    'what is sent: one request each time, and this is the whole of it',
+    'for a heart-rate hold the lowest and highest heart rate of the range you chose, in beats per minute',
+    'the heart rate you chose not to go above',
+    'and not the time you want to spend in your range, which this app leaves out',
+    'no effort check-in is sent',
+    'when: during the ride, and only while the switch is on for that ride: as a block begins, and never less than 3 minutes after the last time',
+    'to whom: the instance you connected',
+    'it is never sent in plain text',
+    'what your instance keeps: each request',
+    'what this device keeps: each change it accepted or refused',
+    // #1315: synced with its ride, sealed, and deleted there with it.
+    'when you sync, it goes with the ride to your instance, sealed for that instance alone',
+    'delete the ride here and sync, and the instance deletes it too',
+    // No hosted source: #1244 asks only the instance's own model.
+    "no hosted service: this app asks only for the model on your instance's own machine",
+    'it never asks a hosted service for a re-plan, and a key you stored on your instance is not used for one',
+  ],
+};
+
+/** Each phrase a place does not carry, as `heading: phrase`; an absent section is one fault. */
+function replanDisclosureFaults(policy: string): readonly string[] {
+  return Object.entries(REPLAN_DISCLOSED_IN).flatMap(([heading, phrases]) => {
+    const section = normalised(policySection(policy, heading));
+    if (section === '') return [`${heading}: no such section`];
+    return phrases
+      .filter((phrase) => !section.includes(phrase))
+      .map((phrase) => `${heading}: ${phrase}`);
+  });
+}
+
+describe('re-plans during a ride are disclosed, in each place a rider reads — #1245', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+
+  it('goes through the one module admitted for instance traffic, so no permit moved', () => {
+    const instanceTransport = join('instance', 'instance-transport.ts');
+    expect(
+      PERMITTED_NETWORK_CALLS.map((rule) => rule.module).filter(
+        (module) => module.startsWith('instance') || module.startsWith('workout'),
+      ),
+    ).toStrictEqual([instanceTransport, instanceTransport]);
+  });
+
+  it('says what is sent, when, to whom, and that it is off unless switched on per ride', () => {
+    expect(replanDisclosureFaults(policy)).toStrictEqual([]);
+  });
+
+  it('would find the section gone — the rule is not vacuous', () => {
+    const start = policy.indexOf(`\n## ${REPLAN_SECTION}\n`);
+    expect(start).toBeGreaterThan(0);
+    const end = policy.indexOf('\n## ', start + 1);
+    const without = policy.slice(0, start) + policy.slice(end);
+    expect(replanDisclosureFaults(without)).toContain(`${REPLAN_SECTION}: no such section`);
+  });
+
+  it.each(Object.keys(REPLAN_DISCLOSED_IN))(
+    'would find "%s" silent about it, though the other places still say so',
+    (heading) => {
+      // Each place on its own: take every line about a block summary, a
+      // re-plan, the hold or the switch out of ONE section, and only that
+      // section is red.
+      const marker = `\n## ${heading}\n`;
+      const start = policy.indexOf(marker) + marker.length;
+      const next = policy.indexOf('\n## ', start);
+      const end = next === -1 ? policy.length : next;
+      const silenced = policy
+        .slice(start, end)
+        .split('\n')
+        .filter((line) => !/block|re-plan|heart-rate hold|switch|request/i.test(line))
+        .join('\n');
+      const faults = replanDisclosureFaults(policy.slice(0, start) + silenced + policy.slice(end));
+      expect(faults.length).toBeGreaterThan(0);
+      expect(faults.every((fault) => fault.startsWith(`${heading}: `))).toBe(true);
+    },
+  );
 });

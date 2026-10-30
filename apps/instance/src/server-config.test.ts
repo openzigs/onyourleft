@@ -56,6 +56,26 @@ describe('readServerConfig (#780, #791)', () => {
     expect(readServerConfig({ pingIntervalMs: '50' }, 1).ok).toBe(false);
   });
 
+  it('beats an analysis stream every 25 s unless told otherwise, 0 for #1105’s control, and never slower than 60 s (#1095)', () => {
+    expect(readServerConfig({}, 1)).toMatchObject({ config: { analysisHeartbeatMs: 25_000 } });
+    for (const [given, read] of [
+      ['0', 0],
+      ['1000', 1_000],
+      ['60000', 60_000],
+    ] as const) {
+      expect(readServerConfig({ analysisHeartbeatMs: given }, 1)).toMatchObject({
+        config: { analysisHeartbeatMs: read },
+      });
+    }
+    for (const refused of ['60001', '120000', '999', '25s', '-1']) {
+      const answer = readServerConfig({ analysisHeartbeatMs: refused }, 1);
+      expect(answer.ok, refused).toBe(false);
+      expect(answer.ok ? '' : answer.problems.join(' ')).toContain(
+        'OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS',
+      );
+    }
+  });
+
   it('refuses metrics on with no token, or with one too short to be one — #895 N3', () => {
     expect(readServerConfig({ metrics: 'on' }, 1).ok).toBe(false);
     expect(readServerConfig({ metrics: 'on', metricsToken: 'short' }, 1).ok).toBe(false);

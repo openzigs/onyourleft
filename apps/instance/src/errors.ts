@@ -31,7 +31,9 @@
  * `CLAUDE.md` §6 lists, leaked through a status code. #36 names the case
  * "forbidden/not-found" and this is the one code for it. `registration_closed`
  * (#772) is a 403 about the INSTANCE — it registers nobody — and names no
- * athlete's resource; `account_suspended` (#83) is a 403 sent only to the
+ * athlete's resource; `sealed_required` (#1192) is a 403 about the request's
+ * FORM — this route is reached only sealed (ADR 0047 D-7) — and is sent
+ * before anything about an athlete is read; `account_suspended` (#83) is a 403 sent only to the
  * suspended athlete's own devices, about their own account. A block is never
  * a 403: a request about somebody who blocked you is `not_found` (#83).
  */
@@ -39,6 +41,8 @@
 /** Every code this instance can send, and the HTTP status each one is sent with. */
 export const ERROR_STATUS = {
   validation_failed: 400,
+  instance_key_unknown: 400,
+  sealed_unopened: 400,
   unauthenticated: 401,
   wrong_purpose: 401,
   wrong_instance: 401,
@@ -46,11 +50,14 @@ export const ERROR_STATUS = {
   challenge_used: 401,
   challenge_expired: 401,
   bad_signature: 401,
+  stale_request: 401,
   key_revoked: 401,
   code_unknown: 401,
   code_used: 401,
   code_expired: 401,
+  address_unbound: 401,
   registration_closed: 403,
+  sealed_required: 403,
   account_suspended: 403,
   step_up_required: 403,
   registration_pending: 403,
@@ -59,10 +66,17 @@ export const ERROR_STATUS = {
   not_found: 404,
   method_not_allowed: 405,
   key_in_use: 409,
+  replayed: 409,
   last_device: 409,
   moderation_not_applicable: 409,
   address_in_use: 409,
+  address_limit: 409,
+  confirmation_superseded: 409,
   not_suspended: 409,
+  already_appealed: 409,
+  race_without_result: 409,
+  job_running: 409,
+  picture_source_unavailable: 409,
   payload_too_large: 413,
   file_type_unsupported: 415,
   file_undecodable: 422,
@@ -72,9 +86,13 @@ export const ERROR_STATUS = {
   record_content_mismatch: 422,
   record_not_your_key: 422,
   record_key_revoked: 422,
+  model_without_pictures: 422,
   rate_limited: 429,
   internal: 500,
+  picture_model_failed: 502,
   unavailable: 503,
+  analysis_off: 503,
+  pictures_off: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_STATUS;
@@ -103,6 +121,14 @@ export interface ErrorBody {
  */
 const MESSAGES: Record<ErrorCode, string> = {
   validation_failed: 'The request is not valid. Each field named in `fields` says why.',
+  instance_key_unknown:
+    'This instance does not hold that encryption key. Fetch its keys again and seal to a current one.',
+  sealed_unopened: 'The sealed request did not open under this instance’s key and this session.',
+  stale_request:
+    'The request was signed too far from this instance’s clock. `instanceTime` says what it reads.',
+  replayed: 'This sealed request has already been received.',
+  sealed_required:
+    'This request must be sealed to the instance’s key and signed by your device. It was not run.',
   unauthenticated: 'This needs a signed-in device.',
   wrong_purpose: 'The signature is not a statement made for this request.',
   wrong_instance: 'The signature was made for another instance.',
@@ -122,11 +148,32 @@ const MESSAGES: Record<ErrorCode, string> = {
   registration_refused: 'The instance’s moderators did not approve this account.',
   not_eligible: 'This account cannot join a public room yet. Your account page says why.',
   moderation_not_applicable: 'That action does not apply to that account or report as it stands.',
+  already_appealed: 'That decision has already been appealed; one appeal is decided per decision.',
+  race_without_result:
+    'That race is over without a result: it was interrupted, or never ridden to the line.',
   key_in_use: 'That device key is already registered here.',
   last_device: 'This is your last device. Revoking it needs one of your recovery codes.',
   address_in_use: 'That address is already the recovery address of another account here.',
+  address_limit:
+    'This account already has two recovery addresses. Clear one before adding another.',
+  confirmation_superseded:
+    'Another device’s confirmation of that address was used first, so this code no longer works.',
+  address_unbound:
+    'That code was mailed to an address that is no longer a recovery address of this account, or is still in its first week.',
   not_suspended: 'This account is not suspended. Sign in as usual.',
+  job_running:
+    'You already have a write-up being written on this instance. Wait for it to finish, or cancel it.',
   unavailable: 'This instance does not offer accounts.',
+  analysis_off:
+    'This instance has no model to write a ride up with. Its operator has not set one up.',
+  pictures_off:
+    'This instance has no model that takes pictures. Its operator has not named one. The picture was not kept.',
+  picture_source_unavailable:
+    'No hosted service is set up for your pictures: you hold no key of your own here, or your consent names another service than the one your key is for. The picture was not sent on, and was not kept.',
+  model_without_pictures:
+    'The model answered that it does not take pictures, so it cannot look at the side camera’s. Choose a model that does. The picture was not kept.',
+  picture_model_failed:
+    'The model gave no usable answer about this picture. The picture was not kept.',
   file_type_unsupported: 'The file is not a FIT, GPX or TCX activity file.',
   file_undecodable: 'The activity file could not be read, or holds no samples.',
   record_malformed: 'The signed record is not an activity record.',
@@ -150,14 +197,25 @@ export const JSON_TYPE = 'application/json; charset=utf-8';
 export interface ErrorOptions {
   readonly fields?: readonly FieldProblem[];
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * A fixed sentence of the caller's own module in place of the code's, for an
+   * `unavailable` that has to name what is missing — the instance's keys name
+   * `OYL_INSTANCE_SECRET_KEY` (#1189). ⚠️ Never a value from the request:
+   * "What a message may say" above binds it as it binds every message here.
+   */
+  readonly message?: string;
 }
 
 /** The body for a code. Exported so the specification and the tests read the same shape. */
-export function errorBody(code: ErrorCode, fields?: readonly FieldProblem[]): ErrorBody {
+export function errorBody(
+  code: ErrorCode,
+  fields?: readonly FieldProblem[],
+  message?: string,
+): ErrorBody {
   return {
     error: {
       code,
-      message: MESSAGES[code],
+      message: message ?? MESSAGES[code],
       ...(code === 'validation_failed' ? { fields: fields ?? [] } : {}),
     },
   };
@@ -165,7 +223,7 @@ export function errorBody(code: ErrorCode, fields?: readonly FieldProblem[]): Er
 
 /** An error response in the one shape, with the status its code is sent with. */
 export function errorResponse(code: ErrorCode, options: ErrorOptions = {}): Response {
-  return new Response(JSON.stringify(errorBody(code, options.fields)), {
+  return new Response(JSON.stringify(errorBody(code, options.fields, options.message)), {
     status: ERROR_STATUS[code],
     headers: { 'content-type': JSON_TYPE, ...options.headers },
   });

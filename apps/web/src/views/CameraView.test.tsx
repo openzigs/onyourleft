@@ -14,15 +14,6 @@ import type { AnalysisPort } from '../camera/analysis-port';
 import { riderAnalysisPort, type AnalysisSend } from '../camera/analysis-transport';
 import { BYSTANDER_SENTENCE } from '../camera/consent';
 import {
-  HOSTED_CONSENT,
-  HOSTED_MODEL_STORAGE_KEY,
-  HOSTED_MODEL_REFUSAL_TEXT,
-  HOSTED_TEST_QUESTION_LABEL,
-  readHostedModel,
-  writeHostedModel,
-} from '../camera/hosted-model';
-import { hostedModelPort, type HostedSend } from '../camera/hosted-transport';
-import {
   readSideAnalyserOnComputer,
   SIDE_ANALYSER_CONSENT,
   SIDE_ANALYSER_STORAGE_KEY,
@@ -52,7 +43,6 @@ import {
   SINGLE_PICTURE_PURPOSE_ALONE,
   SINGLE_PICTURE_TITLE,
 } from './CameraView';
-import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
@@ -102,7 +92,7 @@ describe('the way in — #557', () => {
   it('puts the side camera first, as a button, ahead of the one-picture camera, which says what it is for', async () => {
     const camera = scriptedCamera();
     const controller = controllerFor(camera);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(
       <CameraView
         controller={controller}
@@ -140,7 +130,7 @@ describe('the way in — #557', () => {
     for (const agreed of [false, true]) {
       const controller = controllerFor(scriptedCamera());
       if (agreed) {
-        controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+        controller.agree({ acknowledgedBystanders: true, allowLocal: true });
       }
       mounted = await mount(
         <CameraView
@@ -165,7 +155,7 @@ describe('the way in — #557', () => {
   it('says plainly that a side camera cannot be paired here, and points nowhere, when this device cannot pair — #566’s review', async () => {
     const camera = scriptedCamera();
     const controller = controllerFor(camera);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     const text = document.body.textContent ?? '';
     expect(text).toContain(SIDE_CAMERA_UNAVAILABLE);
@@ -233,7 +223,7 @@ describe('the consent flow', () => {
 describe('the camera itself', () => {
   async function agreedScreen(camera: ReturnType<typeof scriptedCamera>): Promise<void> {
     const controller = controllerFor(camera);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     await settle();
   }
@@ -314,7 +304,7 @@ describe('the refusal screen', () => {
   it('explains a denied permission and names what to do outside the app', async () => {
     const camera = scriptedCamera({ permission: 'not-permitted' });
     const controller = controllerFor(camera);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     const on = button('Turn the camera on');
     if (on === undefined) {
@@ -334,7 +324,7 @@ describe('the refusal screen', () => {
   it('carries no frame, crop, thumbnail or path to one', async () => {
     const camera = scriptedCamera({ startFails: 'unavailable' });
     const controller = controllerFor(camera);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     const on = button('Turn the camera on');
     if (on === undefined) {
@@ -356,7 +346,7 @@ describe('keeping this ride’s pictures', () => {
   ): Promise<CameraController> {
     const camera = scriptedCamera();
     const controller = controllerWith(camera, keep);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     await settle();
     const on = button('Turn the camera on');
@@ -540,7 +530,7 @@ describe('when the device says no — #498', () => {
 
   async function agreedAndOn(keep: FrameKeep): Promise<void> {
     const controller = controllerWith(scriptedCamera(), keep);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     await settle();
     const on = button('Turn the camera on');
@@ -684,7 +674,7 @@ describe('the presence switch', () => {
   }> {
     const camera = scriptedCamera();
     const controller = controllerFor(camera);
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     await settle();
     return { controller, camera };
@@ -715,7 +705,7 @@ describe('the presence switch', () => {
     expect(presenceBox()?.checked).toBe(true);
     // No second request and no second start — the one camera, the one consent.
     expect(camera.calls).toStrictEqual(before);
-    expect(controller.state().consent).toStrictEqual({ local: true, hosted: false });
+    expect(controller.state().consent).toStrictEqual({ local: true });
     // And it says what `unknown` does NOT do.
     expect(document.body.textContent).toContain('it will not pause your ride');
   });
@@ -762,7 +752,7 @@ describe('your own computer — #387', () => {
       schedule: manualSchedule().schedule,
       analysis: () => riderAnalysisPort(readAnalysisEndpoint(), { send }),
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(<CameraView controller={controller} />);
     await settle();
     return { controller, camera };
@@ -943,7 +933,7 @@ describe('your own computer — #387', () => {
       schedule: manualSchedule().schedule,
       analysis: () => port,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await saveStoredOn();
     mounted = await mount(<CameraView controller={controller} />);
     await settle();
@@ -1043,178 +1033,4 @@ describe('your own computer — #387', () => {
     );
     return Promise.resolve();
   }
-});
-
-describe('a hosted model, on your own key — #518', () => {
-  const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
-
-  beforeEach(() => {
-    localStorage.removeItem(HOSTED_MODEL_STORAGE_KEY);
-  });
-
-  afterEach(() => {
-    localStorage.removeItem(HOSTED_MODEL_STORAGE_KEY);
-  });
-
-  function hostedSend(): { send: HostedSend; sent: { url: string; init: RequestInit }[] } {
-    const sent: { url: string; init: RequestInit }[] = [];
-    return {
-      sent,
-      send: async (url, init) => {
-        sent.push({ url, init });
-        return Promise.resolve(
-          new Response(JSON.stringify({ choices: [{ message: { content: 'ready' } }] })),
-        );
-      },
-    };
-  }
-
-  /** The screen, camera agreed, wired the way `main.tsx` wires the hosted port. */
-  async function wired(send: HostedSend): Promise<{
-    controller: CameraController;
-    camera: ReturnType<typeof scriptedCamera>;
-  }> {
-    const camera = scriptedCamera();
-    const controller = new CameraController({
-      secureWindow: browserSecureWindow(),
-      port: camera.port,
-      schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(readHostedModel(), { guard: patternsOnlyGuard, send }),
-    });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
-    mounted = await mount(<CameraView controller={controller} />);
-    await settle();
-    return { controller, camera };
-  }
-
-  function field(id: string): HTMLInputElement {
-    const input = document.querySelector<HTMLInputElement>(`#${id}`);
-    if (input === null) {
-      throw new Error(`no #${id} on the screen`);
-    }
-    return input;
-  }
-
-  function hostedBox(): HTMLInputElement | undefined {
-    return queryAll<HTMLInputElement>(document, 'input[type="checkbox"]').find((box) =>
-      (box.closest('label')?.textContent ?? '').includes('Turn the hosted model on'),
-    );
-  }
-
-  async function saveService(): Promise<void> {
-    await typeInto(field('oyl-hosted-address'), 'https://models.example.invalid');
-    await typeInto(field('oyl-hosted-model'), 'a-model');
-    await typeInto(field('oyl-hosted-key'), KEY);
-    const form = field('oyl-hosted-address').form;
-    if (form === null) {
-      throw new Error('the address box is in no form');
-    }
-    await submitForm(form);
-  }
-
-  it('shows the ruled wording, starts empty and off, and offers no send', async () => {
-    await wired(hostedSend().send);
-    const text = document.body.textContent ?? '';
-    expect(text).toContain(HOSTED_CONSENT.headline);
-    for (const paragraph of HOSTED_CONSENT.paragraphs) {
-      expect(text).toContain(paragraph);
-    }
-    expect(field('oyl-hosted-address').value).toBe('');
-    expect(field('oyl-hosted-model').value).toBe('');
-    expect(field('oyl-hosted-key').value).toBe('');
-    expect(field('oyl-hosted-key').type).toBe('password');
-    for (const id of ['oyl-hosted-address', 'oyl-hosted-model', 'oyl-hosted-key']) {
-      expect(field(id).getAttribute('placeholder')).toBeNull();
-    }
-    expect(hostedBox()?.checked).toBe(false);
-    expect(button('Send a test question')).toBeUndefined();
-  });
-
-  it('keeps the key out of the page once it is saved', async () => {
-    await wired(hostedSend().send);
-    await saveService();
-    expect(readHostedModel()?.key).toBe(KEY);
-    expect(field('oyl-hosted-key').value).toBe('');
-    expect(document.body.innerHTML).not.toContain(KEY);
-  });
-
-  it('never fills a saved key back in', async () => {
-    writeHostedModel({ address: 'https://models.example.invalid', model: 'a-model', key: KEY });
-    await wired(hostedSend().send);
-    expect(field('oyl-hosted-address').value).toBe('https://models.example.invalid');
-    expect(field('oyl-hosted-key').value).toBe('');
-    expect(document.body.innerHTML).not.toContain(KEY);
-    expect(document.body.textContent).toContain('one is saved');
-  });
-
-  it('sends nothing until it is turned on, then one question and no picture', async () => {
-    const { send, sent } = hostedSend();
-    const { camera } = await wired(send);
-    await saveService();
-    expect(button('Send a test question')).toBeUndefined();
-    hostedBox()?.click();
-    await settle();
-    expect(hostedBox()?.checked).toBe(true);
-    const ask = button('Send a test question');
-    if (ask === undefined) {
-      expect.unreachable('no send control once turned on');
-      return;
-    }
-    // #847: the consent names this button by `HOSTED_TEST_QUESTION_LABEL`, so
-    // the label the page renders must be exactly that, not merely contain it.
-    expect(ask.textContent?.trim()).toBe(HOSTED_TEST_QUESTION_LABEL);
-    expect(document.body.textContent).toContain(`'${ask.textContent?.trim() ?? ''}'`);
-    await activateWithKeyboard(ask);
-    await settle();
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.url).toBe('https://models.example.invalid/v1/chat/completions');
-    expect(sent[0]?.init.body as string).not.toContain('image');
-    expect(camera.calls).not.toContain('capture');
-    expect(document.body.textContent).toContain('understood the question');
-  });
-
-  it('never sends a saved key to a different address typed with the key box blank — #760 review', async () => {
-    const { send, sent } = hostedSend();
-    await wired(send);
-    await saveService();
-    await typeInto(field('oyl-hosted-address'), 'https://other.example.invalid');
-    const form = field('oyl-hosted-address').form;
-    if (form === null) {
-      throw new Error('the address box is in no form');
-    }
-    await submitForm(form);
-    expect(document.body.textContent).toContain(
-      HOSTED_MODEL_REFUSAL_TEXT['key-for-another-address'],
-    );
-    expect(readHostedModel()?.address).toBe('https://models.example.invalid');
-    hostedBox()?.click();
-    await settle();
-    const ask = button('Send a test question');
-    if (ask === undefined) {
-      expect.unreachable('no send control once turned on');
-      return;
-    }
-    await activateWithKeyboard(ask);
-    await settle();
-    for (const request of sent) {
-      expect(request.url).not.toContain('other.example.invalid');
-    }
-  });
-
-  it('forgets the service and its key, and turns the hosted model off', async () => {
-    const { controller } = await wired(hostedSend().send);
-    await saveService();
-    hostedBox()?.click();
-    await settle();
-    const forget = button('Forget this service and key');
-    if (forget === undefined) {
-      expect.unreachable('no forget control');
-      return;
-    }
-    await activateWithKeyboard(forget);
-    await settle();
-    expect(localStorage.getItem(HOSTED_MODEL_STORAGE_KEY)).toBeNull();
-    expect(controller.state().consent.hosted).toBe(false);
-    expect(hostedBox()?.checked).toBe(false);
-  });
 });

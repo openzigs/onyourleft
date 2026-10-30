@@ -60,6 +60,8 @@
 
 import type { TransportAvailability } from '@onyourleft/sensors';
 
+import type { SettingsPage } from './system-settings-port';
+
 /** What the shell says about one unusable state. Already worded; just render it. */
 export interface ShellNotice {
   /** What happened, not what the rider did wrong. From `permissionNotice`. */
@@ -83,6 +85,24 @@ export interface ShellNotice {
    * would be an invitation to keep pressing something that cannot work"*.
    */
   readonly recoverable: boolean;
+  /**
+   * The Android settings page that fixes this, and the button's words —
+   * #1436. After a permanent denial Android shows no dialog again, and the
+   * app's own page in Settings is the only way back; a radio that is off is
+   * fixed in Bluetooth settings.
+   *
+   * Optional only so a notice written by hand in a test need not name one:
+   * `shell-support.ts` §`shellNotice` sets it from the notice's own action on
+   * every notice it builds, `null` where there is no page to open.
+   */
+  readonly settings?: SettingsLink | null;
+}
+
+/** A settings page a notice can open — #1436. */
+export interface SettingsLink {
+  readonly page: SettingsPage;
+  /** The button's words, from `permissionNotice`'s action. */
+  readonly label: string;
 }
 
 /**

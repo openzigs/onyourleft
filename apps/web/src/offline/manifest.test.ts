@@ -11,7 +11,8 @@
  * a second artefact for the same reason.
  *
  * ⚠️ **What this file deliberately does NOT do is read `dist`.** CI runs
- * `test:coverage` *before* `build` (docs/agents/ci.md §4c), so a Vitest assertion over
+ * `test:required` on a runner that never runs `build` (docs/agents/ci.md §4c;
+ * the build is another shard's since #1285), so a Vitest assertion over
  * the built output would skip on every CI run and report green — #142's shape
  * arriving through the ordering of a workflow rather than through a selector.
  * The built-output half of #405's criteria is in
@@ -24,8 +25,18 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { THEME_META_ATTRIBUTE } from '../design/theme-selection';
-import { COLOUR_TOKENS, THEMES, paletteColours, themeColour } from '../design/tokens';
+import {
+  DEFAULT_THEME_CHOICE,
+  resolveTheme,
+  THEME_META_ATTRIBUTE,
+} from '../design/theme-selection';
+import {
+  COLOUR_TOKENS,
+  DARK_COLOUR_TOKENS,
+  THEMES,
+  paletteColours,
+  themeColour,
+} from '../design/tokens';
 
 const PUBLIC_DIRECTORY = new URL('../../public/', import.meta.url);
 
@@ -113,14 +124,30 @@ describe('the web app manifest', () => {
 describe('the manifest and the design tokens cannot drift', () => {
   it('takes its colours from tokens rather than from a hex literal typed twice', () => {
     expect(manifest.theme_color).toBe(COLOUR_TOKENS.accent);
-    expect(manifest.background_color).toBe(COLOUR_TOKENS.canvas);
+  });
+
+  it('paints the launch background in the canvas the page starts in, on any device — #999', () => {
+    // The browser shows `background_color` before the page paints, and it has
+    // no media query, so it is one colour for a device in light mode and one in
+    // dark. Since #992 the page starts dark on both, and a light colour here
+    // was a white frame before a dark page: the flash #672 removed.
+    for (const devicePrefersDark of [false, true]) {
+      const theme = resolveTheme(DEFAULT_THEME_CHOICE, devicePrefersDark);
+      expect(manifest.background_color, `devicePrefersDark=${String(devicePrefersDark)}`).toBe(
+        paletteColours(theme).canvas,
+      );
+    }
+    expect(manifest.background_color).toBe(DARK_COLOUR_TOKENS.canvas);
   });
 
   it('declares no colour that is not a token — the other direction', () => {
     // `theme.a11y.test.ts`'s rule: a one-way check passes over a manifest that
     // grew a fourth colour nobody declared. Every `#rrggbb` anywhere in the
     // document has to be a token's value.
-    const declared = new Set(Object.values(COLOUR_TOKENS));
+    const declared = new Set([
+      ...Object.values(COLOUR_TOKENS),
+      ...Object.values(DARK_COLOUR_TOKENS),
+    ]);
     for (const [literal] of manifestText.matchAll(/#[0-9a-f]{6}/g)) {
       expect(declared).toContain(literal);
     }

@@ -10,7 +10,16 @@
  * `PUBLIC_ROUTE_WARNING` is a constant and not a string in a component.
  */
 
+import {
+  instanceAnalysisEraser,
+  PENDING_JOBS_STORAGE_KEY,
+} from '../ride-analysis/instance-analysis';
 import { instanceEraser, INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
+import {
+  createTrainerTargetMemory,
+  REMEMBERED_TARGET_MAX_AGE_SECONDS,
+  TRAINER_TARGETS_STORAGE_KEY,
+} from '../ride/trainer-target-memory';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
   ATHLETE_A,
@@ -31,7 +40,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import type { ActivityId } from '@onyourleft/store';
-import { unixSeconds } from '@onyourleft/domain';
+import { unixSeconds, watts } from '@onyourleft/domain';
+import { deviceId } from '@onyourleft/sensors';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -154,24 +164,33 @@ describe('what the rider is told before they press it', () => {
     expect(ERASE_CANNOT_REACH).toContain(
       'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
     );
-    // D-4's second line is about a PHOTOGRAPH sent to a hosted model, and the
-    // owner ruled the hosted path is never sent one (#518) — so that line is
-    // still not here, in either wording.
+    // D-4's second line is about a PHOTOGRAPH sent to a hosted model. The
+    // app's own hosted path is never sent one (#518), so D-4's wording — *"you
+    // sent"* — is still not here. Since #1106 there is one line about a
+    // photograph and a hosted service, and it says who sent it: the rider's
+    // instance, to a service they agreed to.
     expect(text).not.toContain('photograph you sent to a hosted');
-    expect(text).not.toMatch(/hosted[^,]*photograph|photograph[^,]*hosted/);
+    expect(
+      ERASE_CANNOT_REACH.filter((entry) =>
+        /hosted[^,]*photograph|photograph[^,]*hosted/.test(entry),
+      ),
+    ).toStrictEqual([
+      'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds',
+    ]);
     // And what was already true: a picture the rider copied off the device.
     expect(text).toContain('copied off this device');
   });
 
-  it('names the copy a hosted service holds of a question and of a ride’s numbers — #518, #803', () => {
+  it('names the copy a hosted service holds of a question and of a ride’s numbers, in the past tense since #1103 — #518, #803', () => {
     // ADR 0029's 2026-09-28 amendment wrote the line for a question; #803
-    // sends a ride's numbers there too, and the line says so. Not a picture.
+    // sent a ride's numbers there too. #1103 removed the path, and the owner
+    // ruled (#1104 G-4, 2026-10-26) the line stays, in the past tense.
     expect(ERASE_CANNOT_REACH).toContain(
-      'a question or a ride’s numbers you sent to a service you chose, on your own key, which is a copy that service holds',
+      'a question or a ride’s numbers this app sent, before this version, to a service you chose on a key kept on this device, which is a copy that service holds',
     );
   });
 
-  it('names the ride’s numbers sent to a hosted service, as the privacy policy does — #803', () => {
+  it('names the ride’s numbers sent to a hosted service, as the privacy policy does — #803, #1103', () => {
     const policy = readFileSync(
       fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
       'utf8',
@@ -181,11 +200,10 @@ describe('what the rider is told before they press it', () => {
       policy.indexOf('## Children'),
     );
     const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
-    expect(straight(erase)).toContain(
-      "a question or a ride's numbers you sent to a service you chose, which is a copy that service holds",
-    );
-    const line = ERASE_CANNOT_REACH.find((entry) => straight(entry).includes('service you chose'));
-    expect(straight(line ?? '')).toContain("a question or a ride's numbers");
+    const said =
+      "a question or a ride's numbers this app sent, before this version, to a service you chose on a key kept on this device, which is a copy that service holds";
+    expect(straight(erase)).toContain(said);
+    expect(ERASE_CANNOT_REACH.map(straight)).toContain(said);
   });
 
   it('names the rider’s goals, ride notes and documents among what an erase removes — #836', () => {
@@ -195,8 +213,37 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('documents you added');
   });
 
-  it('names the hosted service’s key among what an erase removes — #518', () => {
-    expect(ERASE_REMOVES.join(' ')).toContain('key you entered for a hosted model');
+  it('names no hosted key among what an erase removes: #1103 deletes it at launch', () => {
+    // From #518 the list named it, because this device kept it. #1103 deletes
+    // it on the first launch (`camera/retired-hosted-key.ts`), so the line
+    // would name something no device holds.
+    expect(ERASE_REMOVES.join(' ')).not.toContain('key you entered for a hosted model');
+  });
+
+  it('names the remembered trainer target, here and in the policy’s device-storage table — #1428', () => {
+    // Not a store row (#1305 keeps it in `localStorage`), and keyed on Android
+    // by the trainer's Bluetooth address, so a rider reading the list before an
+    // irreversible action is told it goes, and the policy says it is there.
+    const line = ERASE_REMOVES.find((entry) => entry.includes('trainer'));
+    expect(line).toContain('last power target each trainer');
+    expect(line).toContain('which trainer that was');
+
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const table = policy.slice(
+      policy.indexOf('## What the app holds, and where'),
+      policy.indexOf('## Location'),
+    );
+    const row = table.split('\n').find((entry) => entry.includes('last power target')) ?? '';
+    // What it holds, why, how long, and that it never leaves the device.
+    expect(row).toMatch(/^\| The last power target each trainer .* which trainer that was/);
+    expect(row).toContain('Bluetooth address');
+    expect(row).toContain('far under the trainer');
+    expect(row).toContain(`Trusted for ${REMEMBERED_TARGET_MAX_AGE_SECONDS / 60} minutes`);
+    expect(row).toContain('*Erase everything* removes it');
+    expect(row).toContain('never leaves the device');
   });
 
   it('says an exported file is out of reach, and that a shared ride is a copy', () => {
@@ -213,7 +260,55 @@ describe('what the rider is told before they press it', () => {
     // whose press sends a ride's numbers to the rider's own computer; seven
     // since #777, which connects this device to an instance — and arrived
     // with it, as this comment asked.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(7);
+    // Eight since #1106, whose instance path can send a photograph on to a
+    // hosted service the rider agreed to: ADR 0029 D-4's second line, true at last.
+    // Nine since #1104 (G-1): the instance sends a ride's numbers and looked-up
+    // history on to a hosted service the rider agreed to (#1251).
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(9);
+  });
+
+  it('names the photograph an instance sent on to a hosted service, as the privacy policy does — #1106', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    const line =
+      'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds';
+    // The policy's erase paragraph says it, and so does the screen before the press.
+    expect(straight(erase)).toContain(line);
+    expect(ERASE_CANNOT_REACH).toContain(line);
+  });
+
+  it('names the ride’s numbers and history an instance sent on to a hosted service, as the privacy policy does — #1104', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    const line =
+      "a ride's numbers and the parts of your history your instance sent to a service you agreed to, which is a copy that service holds";
+    expect(straight(erase)).toContain(line);
+    expect(ERASE_CANNOT_REACH.map(straight)).toContain(line);
+    // And the instance's own copy names what it worked out, not only what it
+    // received: the screen in a clause, the policy item by item.
+    expect(ERASE_CANNOT_REACH.join(' ')).toContain('anything it received or worked out for you');
+    for (const held of [
+      'the searchable copy it keeps for the analysis',
+      'the analyses it wrote',
+      'any key of yours it holds',
+      'your list of words to mask, and your privacy zones (their names, where they are and how large)',
+    ]) {
+      expect(straight(erase), held).toContain(held);
+    }
   });
 
   it('names what an instance holds, as the privacy policy does — #777, #778', () => {
@@ -234,7 +329,7 @@ describe('what the rider is told before they press it', () => {
     expect(straight(line ?? '')).toContain('which is a copy that instance holds');
   });
 
-  it('names the ride’s numbers sent to the rider’s own computer, as the privacy policy does — #804', () => {
+  it('names the ride’s numbers sent to the rider’s own computer, in the past tense, as the privacy policy does — #804, #1103', () => {
     const policy = readFileSync(
       fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
       'utf8',
@@ -244,15 +339,12 @@ describe('what the rider is told before they press it', () => {
       policy.indexOf('## Children'),
     );
     const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    const said =
+      "a ride's numbers this app sent, before this version, to your own computer for a write-up, which is a copy that computer holds";
     // The policy's erase paragraph says it…
-    expect(straight(erase)).toContain("a ride's numbers you sent to your own computer");
-    expect(straight(erase)).toContain('which is a copy that computer holds');
+    expect(straight(erase)).toContain(said);
     // …and so does the screen, before the rider presses anything.
-    const line = ERASE_CANNOT_REACH.find((entry) =>
-      straight(entry).includes("a ride's numbers you sent to your own computer"),
-    );
-    expect(line).toBeDefined();
-    expect(straight(line ?? '')).toContain('which is a copy that computer holds');
+    expect(ERASE_CANNOT_REACH.map(straight)).toContain(said);
   });
 });
 
@@ -280,6 +372,10 @@ describe('erasing, against the real store', () => {
       await store.putCameraFrame(cameraFrameFor(owner));
       // #528. Numbers read off a picture of the rider, named in ERASE_REMOVES.
       await store.putFramingReference(framingReferenceFor(owner));
+      // #1431. A ride the rider deleted, held in Recently deleted.
+      const deleted = rideFor(owner, { name: 'Deleted' });
+      await store.putActivity(deleted);
+      await store.moveActivityToRecentlyDeleted(owner, deleted.id, unixSeconds(0));
     });
     return ids;
   }
@@ -294,6 +390,11 @@ describe('erasing, against the real store', () => {
     expect(outcome.routes).toBe(1);
     expect(outcome.workouts).toBe(1);
     expect(outcome.cameraFrames).toBe(1);
+    expect(outcome.recentlyDeleted).toBe(1);
+    // #1431: no restore copy outlives an erase.
+    expect(
+      await harness.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, unixSeconds(0))),
+    ).toStrictEqual([]);
     // Read back through a fresh connection: the erase has to have reached disk,
     // not just the handle that ran it.
     const left = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
@@ -407,10 +508,10 @@ describe('erasing, against the real store', () => {
     const forgotten: string[] = [];
     await harness.write(async (store) =>
       eraseDevice(store, ATHLETE_A, {
-        hostedModel: { forget: () => void forgotten.push('hosted-model') },
+        retiredHostedKey: { forget: () => void forgotten.push('retired-hosted-key') },
       }),
     );
-    expect(forgotten).toStrictEqual(['hosted-model']);
+    expect(forgotten).toStrictEqual(['retired-hosted-key']);
   });
 
   it('forgets this device’s sign-in to an instance after the cascade, over real storage (#777)', async () => {
@@ -419,6 +520,9 @@ describe('erasing, against the real store', () => {
     const kept = new Map<string, string>([
       [INSTANCE_SESSION_STORAGE_KEY, 'token'],
       [INSTANCE_ACCOUNT_STORAGE_KEY, '{"origin":"https://ride.example"}'],
+      // #1106: what the rider agreed to send that instance, which names its address.
+      ['oyl.side-analyser-instance.v1', 'https://ride.example'],
+      ['oyl.side-analyser-instance-hosted.v1', 'https://models.example'],
       ['oyl.units.other', 'kept'],
     ]);
     await harness.write(async (store) =>
@@ -427,6 +531,61 @@ describe('erasing, against the real store', () => {
       }),
     );
     expect([...kept.keys()]).toStrictEqual(['oyl.units.other']);
+  });
+
+  it('forgets the pending-job note after the cascade, over real storage, and only that key (#1102)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const kept = new Map<string, string>([
+      [PENDING_JOBS_STORAGE_KEY, '{"ride":{"jobId":"j"}}'],
+      ['oyl.units.other', 'kept'],
+    ]);
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        instanceAnalysis: instanceAnalysisEraser({ removeItem: (key) => void kept.delete(key) }),
+      }),
+    );
+    expect([...kept.keys()]).toStrictEqual(['oyl.units.other']);
+  });
+
+  it('forgets every trainer’s acknowledged target, on the device and in the page, and only that key (#1305)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const rows = new Map<string, string>([['oyl.units.other', 'kept']]);
+    const storage = {
+      getItem: (key: string) => rows.get(key) ?? null,
+      setItem: (key: string, value: string) => void rows.set(key, value),
+      removeItem: (key: string) => void rows.delete(key),
+    };
+    // The trainer's device id: on Android, its Bluetooth address.
+    const address = deviceId('C4:7C:8D:6A:00:01');
+    const memory = createTrainerTargetMemory(storage);
+    memory.remember(address, watts(250), unixSeconds(1000));
+    expect(rows.has(TRAINER_TARGETS_STORAGE_KEY)).toBe(true);
+
+    await harness.write(async (store) => eraseDevice(store, ATHLETE_A, { trainerTargets: memory }));
+
+    expect([...rows.keys()]).toStrictEqual(['oyl.units.other']);
+    expect(createTrainerTargetMemory(storage).recall(address, unixSeconds(1000))).toBeUndefined();
+    // The page's copy went too: the next acknowledgement, from another
+    // trainer, rewrites the key without the erased one in it.
+    memory.remember(deviceId('neo'), watts(150), unixSeconds(1001));
+    expect(rows.get(TRAINER_TARGETS_STORAGE_KEY)).not.toContain('C4:7C');
+    expect(createTrainerTargetMemory(storage).recall(address, unixSeconds(1001))).toBeUndefined();
+  });
+
+  it('does not forget the pending-job note when the cascade threw (#1102)', async () => {
+    const forgotten: string[] = [];
+    const refusing = {
+      deleteAthlete: () => Promise.reject(new Error('refused')),
+      ensureAthlete: () => Promise.reject(new Error('unreachable')),
+    };
+    await expect(
+      eraseDevice(refusing, ATHLETE_A, {
+        instanceAnalysis: { forget: () => void forgotten.push('analysis') },
+      }),
+    ).rejects.toThrow('refused');
+    expect(forgotten).toStrictEqual([]);
   });
 
   it('does not forget the instance sign-in when the cascade threw (#777)', async () => {
@@ -451,7 +610,7 @@ describe('erasing, against the real store', () => {
     };
     await expect(
       eraseDevice(refusing, ATHLETE_A, {
-        hostedModel: { forget: () => void forgotten.push('hosted-model') },
+        retiredHostedKey: { forget: () => void forgotten.push('retired-hosted-key') },
       }),
     ).rejects.toThrow('refused');
     expect(forgotten).toStrictEqual([]);
@@ -501,15 +660,37 @@ describe('erasing, against the real store', () => {
 });
 
 describe('the sentence afterwards', () => {
+  it('counts the rides that were in Recently deleted, and only when there were some — #1431', () => {
+    const counts = { activities: 2, routes: 0, workouts: 0, segments: 0, cameraFrames: 0 };
+    expect(eraseSentence({ ...counts, recentlyDeleted: 3 })).toBe(
+      'Removed 2 rides, 3 deleted rides held for restore. This device now holds nothing about you.',
+    );
+    expect(eraseSentence({ ...counts, recentlyDeleted: 0 })).not.toContain('deleted');
+  });
+
   it('counts what went', () => {
     expect(
-      eraseSentence({ activities: 4, routes: 2, workouts: 0, segments: 1, cameraFrames: 0 }),
+      eraseSentence({
+        activities: 4,
+        routes: 2,
+        workouts: 0,
+        segments: 1,
+        cameraFrames: 0,
+        recentlyDeleted: 0,
+      }),
     ).toBe('Removed 4 rides, 2 routes, 1 segment. This device now holds nothing about you.');
   });
 
   it('says one ride rather than 1 rides', () => {
     expect(
-      eraseSentence({ activities: 1, routes: 0, workouts: 0, segments: 0, cameraFrames: 0 }),
+      eraseSentence({
+        activities: 1,
+        routes: 0,
+        workouts: 0,
+        segments: 0,
+        cameraFrames: 0,
+        recentlyDeleted: 0,
+      }),
     ).toContain('1 ride.');
   });
 
@@ -523,6 +704,7 @@ describe('the sentence afterwards', () => {
       workouts: 1,
       segments: 1,
       cameraFrames: 2,
+      recentlyDeleted: 1,
     });
     expect(sentence).toMatch(/^Removed [\d\s,a-z]+\. This device now holds nothing about you\.$/);
   });

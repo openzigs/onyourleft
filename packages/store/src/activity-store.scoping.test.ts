@@ -105,6 +105,8 @@ import type {
   SyncBaseRecord,
   RiderTextRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRecord,
+  WorldCorridorRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -124,6 +126,10 @@ import {
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
+  workoutGoalsFor,
+  unpackWorldCorridorFeatures,
+  worldCorridorFeaturesFor,
+  worldCorridorFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -182,7 +188,15 @@ interface World {
   readonly note: RiderTextRecord;
   readonly document: RiderTextRecord;
   readonly trustedKey: TrustedDeviceKeyRecord;
+  readonly workoutGoals: WorkoutGoalsRecord;
+  /** #1545: the map features around {@link World.route}. */
+  readonly corridor: WorldCorridorRecord;
+  /** #1431: a second ride, with a lap and a note, moved to Recently deleted. */
+  readonly binned: ReturnType<typeof rideFor>;
 }
+
+/** When each world's {@link World.binned} ride was deleted — #1431. */
+const BINNED_AT = unixSeconds(FIXTURE_EPOCH + 1_000_000);
 
 /** A distinct 64-character lowercase hex digest per athlete. */
 function fileHashFor(owner: AthleteId): string {
@@ -258,6 +272,13 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const document = riderTextFor(owner, 'document');
   // #898. A different key per athlete.
   const trustedKey = trustedDeviceKeyFor(owner);
+  // #1236. Different numbers per athlete.
+  const workoutGoals = workoutGoalsFor(owner);
+  // #1431. A second ride per athlete, deleted, so Recently deleted has a row
+  // of each athlete's for every probe of it to be tempted by.
+  const binned = rideFor(owner, { name: `Deleted by ${owner}` });
+  // #1545. Different features per athlete, around this athlete's own route.
+  const corridor = await worldCorridorFor(owner, route.id);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -284,10 +305,16 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putRiderText(note);
     await store.putRiderText(document);
     await store.putTrustedDeviceKey(trustedKey);
+    await store.putWorkoutGoals(workoutGoals);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
     });
+    await store.putActivity(binned);
+    await store.putLap(lapFor(binned, 1));
+    await store.putRiderText(riderTextFor(owner, 'note', binned.id));
+    await store.moveActivityToRecentlyDeleted(owner, binned.id, BINNED_AT);
+    await store.putWorldCorridor(corridor);
   });
 
   return {
@@ -310,6 +337,9 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     note,
     document,
     trustedKey,
+    workoutGoals,
+    corridor,
+    binned,
   };
 }
 
@@ -385,6 +415,64 @@ const PROBES: readonly ScopingProbe[] = [
       await expect(store.deleteActivity(mine.owner, theirs.ride.id)).resolves.toBe(false);
       // The return value is the weak half. This is the half that matters.
       await expect(store.getActivity(theirs.owner, theirs.ride.id)).resolves.toBeDefined();
+    },
+  },
+  {
+    member: 'moveActivityToRecentlyDeleted',
+    leaks: "another athlete's ride, taken out of their library rather than disclosed",
+    async run(store, mine, theirs) {
+      await expect(
+        store.moveActivityToRecentlyDeleted(mine.owner, theirs.ride.id, BINNED_AT),
+      ).resolves.toBe(false);
+      await expect(store.getActivity(theirs.owner, theirs.ride.id)).resolves.toBeDefined();
+    },
+  },
+  {
+    member: 'listRecentlyDeleted',
+    leaks: 'every ride anybody on the device deleted, with its name and distance',
+    async run(store, mine, theirs) {
+      const rows = await store.listRecentlyDeleted(mine.owner, BINNED_AT);
+      everyRowBelongsTo(rows, mine.owner);
+      expect(rows.map((row) => row.id)).not.toContain(theirs.binned.id);
+    },
+  },
+  {
+    member: 'restoreRecentlyDeleted',
+    leaks: "another athlete's deleted ride, brought back into the caller's library",
+    async run(store, mine, theirs) {
+      await expect(
+        store.restoreRecentlyDeleted(mine.owner, theirs.binned.id, BINNED_AT),
+      ).resolves.toBe('missing');
+      await expect(store.getActivity(mine.owner, theirs.binned.id)).resolves.toBeUndefined();
+      expect(await store.listRecentlyDeleted(theirs.owner, BINNED_AT)).toHaveLength(1);
+    },
+  },
+  {
+    member: 'deleteRecentlyDeletedForGood',
+    leaks: "another athlete's deleted ride, destroyed before its thirty days were up",
+    async run(store, mine, theirs) {
+      await expect(store.deleteRecentlyDeletedForGood(mine.owner, theirs.binned.id)).resolves.toBe(
+        false,
+      );
+      expect(await store.listRecentlyDeleted(theirs.owner, BINNED_AT)).toHaveLength(1);
+      expect(await store.listLaps(theirs.owner, theirs.binned.id)).toHaveLength(1);
+    },
+  },
+  {
+    member: 'emptyRecentlyDeleted',
+    leaks: "every athlete's Recently deleted, emptied by one of them",
+    async run(store, mine, theirs) {
+      await store.emptyRecentlyDeleted(mine.owner);
+      expect(await store.listRecentlyDeleted(theirs.owner, BINNED_AT)).toHaveLength(1);
+    },
+  },
+  {
+    member: 'purgeRecentlyDeleted',
+    leaks: "another athlete's deleted rides, removed on the caller's clock",
+    async run(store, mine, theirs) {
+      const later = unixSeconds(BINNED_AT + 365 * 24 * 60 * 60);
+      await store.purgeRecentlyDeleted(mine.owner, later);
+      expect(await store.listRecentlyDeleted(theirs.owner, BINNED_AT)).toHaveLength(1);
     },
   },
   {
@@ -598,6 +686,16 @@ const PROBES: readonly ScopingProbe[] = [
       const rows = await store.listRecordingSessions(mine.owner);
       everyRowBelongsTo(rows, mine.owner);
       expect(rows.map((row) => row.id)).not.toContain(theirs.recording.id);
+    },
+  },
+  {
+    member: 'readRecordingSessions',
+    leaks: "every unfinished recording on the device, the unreadable ones too — #1325's report",
+    async run(store, mine, theirs) {
+      const { sessions, unreadable } = await store.readRecordingSessions(mine.owner);
+      everyRowBelongsTo(sessions, mine.owner);
+      expect(sessions.map((row) => row.id)).not.toContain(theirs.recording.id);
+      expect(unreadable.map((row) => row.id)).not.toContain(theirs.recording.id);
     },
   },
   {
@@ -849,6 +947,56 @@ const PROBES: readonly ScopingProbe[] = [
       await expect(store.listTrustedDeviceKeys(mine.owner)).resolves.toStrictEqual([
         mine.trustedKey,
       ]);
+    },
+  },
+  {
+    member: 'getWorldCorridor',
+    leaks:
+      "the map features around another athlete's route — buildings and paths that outline where they ride from",
+    async run(store, mine, theirs) {
+      await expect(store.getWorldCorridor(mine.owner, theirs.route.id)).resolves.toBeUndefined();
+      const read = await store.getWorldCorridor(mine.owner, mine.route.id);
+      expect(read?.owner).toBe(mine.owner);
+      expect(read?.routeId).toBe(mine.route.id);
+      // The features themselves, decoded, are mine: a read that matched the
+      // row and handed back another's blob would pass on the key fields.
+      expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
+        worldCorridorFeaturesFor(mine.owner),
+      );
+    },
+  },
+  {
+    member: 'deleteWorldCorridor',
+    leaks: "the deletion of the map features kept around another athlete's route",
+    async run(store, mine, theirs) {
+      await store.deleteWorldCorridor(mine.owner, theirs.route.id);
+      await expect(store.getWorldCorridor(theirs.owner, theirs.route.id)).resolves.toBeDefined();
+    },
+  },
+  {
+    member: 'getWorkoutGoals',
+    leaks:
+      "another athlete's workout goals — a heart-rate hold of mine would then be bounded by the range somebody else chose",
+    async run(store, mine) {
+      await expect(store.getWorkoutGoals(mine.owner)).resolves.toStrictEqual({
+        status: 'kept',
+        record: mine.workoutGoals,
+      });
+    },
+  },
+  {
+    member: 'deleteWorkoutGoals',
+    leaks: "the deletion of another athlete's workout goals",
+    async run(store, mine, theirs) {
+      // Mine go; theirs stay. The world is shared and this runs twice, so
+      // mine are put back afterwards.
+      await expect(store.deleteWorkoutGoals(mine.owner)).resolves.toBe(true);
+      await expect(store.getWorkoutGoals(mine.owner)).resolves.toStrictEqual({ status: 'none' });
+      await expect(store.getWorkoutGoals(theirs.owner)).resolves.toStrictEqual({
+        status: 'kept',
+        record: theirs.workoutGoals,
+      });
+      await store.putWorkoutGoals(mine.workoutGoals);
     },
   },
   {

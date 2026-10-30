@@ -12,6 +12,67 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0059 is [ADR 0059](../adr/0059-delivery-a-parcel-round-game-mode.md)**, taken by
+  [#1804](https://github.com/openzigs/onyourleft/issues/1804) on 2026-10-28 for Delivery, the
+  parcel-round game mode, on the owner's rulings DL1, DL4, DL5, DL6, DL6b and DL11 of 2026-10-27 on
+  the epic [#1803](https://github.com/openzigs/onyourleft/issues/1803). The owner **accepted** it the
+  same day. It skipped **0057, claimed by [#1748](https://github.com/openzigs/onyourleft/issues/1748)**
+  (store fees the publisher pays), and **0058, claimed by
+  [#1752](https://github.com/openzigs/onyourleft/issues/1752)** (iOS screen capture on the camera
+  screens), each by its title and both unwritten on that day. **The next free number is 0060.** A
+  reviewer who remembers this file offering 0057 is reading the old file.
+  ⚠️ **0055 is [ADR 0055](../adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)**,
+  taken by [#1631](https://github.com/openzigs/onyourleft/issues/1631) on 2026-10-24 for the `places`
+  layer's kind and rank read from the corridor tiles already fetched, never a name, on the owner's
+  ruling (a) of that day on [#1628](https://github.com/openzigs/onyourleft/issues/1628). It was
+  claimed by #1631 when that issue was filed, and was **accepted** by the owner there on 2026-10-25.
+  It supersedes ADR 0054 D-2.2 in part. A reviewer who remembers this sentence offering 0055 is
+  reading the old file.
+  ⚠️ **0056 is [ADR 0056](../adr/0056-the-demos-shipped-map-under-odbl.md)**, taken by
+  [#1644](https://github.com/openzigs/onyourleft/issues/1644) on 2026-10-24 for the demo's shipped
+  map under ODbL 1.0, on the owner's rulings of that day on
+  [#1643](https://github.com/openzigs/onyourleft/issues/1643), and **accepted** by the owner on 2026-10-25. It supersedes ADR 0054 D-1 item 2 and D-3.5 in part, for the demo build only.
+  ⚠️ **0054 is [ADR 0054](../adr/0054-towns-from-real-map-data.md)**, taken by
+  [#1538](https://github.com/openzigs/onyourleft/issues/1538) on 2026-10-21 for towns from real map
+  data, on the owner's ruling of that day on [#1533](https://github.com/openzigs/onyourleft/issues/1533),
+  and **Accepted** by the owner that day. It supersedes ADR 0032 D-1 in part and is the successor
+  to ADR 0012 that ADR 0012 D-3.2 requires. A reviewer who remembers this sentence offering 0054 is
+  reading the old file.
+  ⚠️ **0053 is [ADR 0053](../adr/0053-the-fit-lap-mark-a-developer-field-of-our-own.md)**, taken by
+  [#1320](https://github.com/openzigs/onyourleft/issues/1320) on 2026-10-21 for the FIT lap mark, a
+  developer field of this client's own, and **accepted on the owner's ruling of that day on
+  [#1520](https://github.com/openzigs/onyourleft/pull/1520)**. It relates to ADR 0006 and does not
+  amend it. A reviewer who remembers this sentence offering 0053 is reading the old file.
+  ⚠️ **0052 is [ADR 0052](../adr/0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md)**,
+  taken by [#1122](https://github.com/openzigs/onyourleft/issues/1122) on 2026-10-16 for the side-camera
+  phone's tilt message and ADR 0044's acceptance, and **accepted on the owner's rulings of 2026-10-03
+  and 2026-10-04**. It widens ADR 0033 D-3 by one message. A reviewer who remembers this sentence
+  offering 0052 is reading the old file.
+  ⚠️ **0051 is [ADR 0051](../adr/0051-live-race-standings.md)**, taken by
+  [#1347](https://github.com/openzigs/onyourleft/issues/1347) on 2026-10-14 for live race standings,
+  and **accepted on the owner's ruling on that issue**. It supersedes ADR 0028 D-7.7 and, for live
+  racers only, ADR 0007 D4's second ❌. A reviewer who remembers this sentence offering 0051 is
+  reading the old file.
+  ⚠️ **0050 is [ADR 0050](../adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md)**, taken by
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106) on 2026-10-12 for the side camera's
+  pictures going to the rider's instance, sealed, and **accepted on the owner's decisions on that
+  issue**. It supersedes ADR 0029 D-6 and D-7, ADR 0047 D-14 Q4 and ADR 0046 D-1 for that one
+  payload. It was drafted as amendments that offered 0049; a reviewer who remembers this sentence
+  offering 0050 is reading the old file.
+  ⚠️ **0049 is [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)**, taken by
+  [#1275](https://github.com/openzigs/onyourleft/issues/1275) on 2026-10-11 for more open asset
+  sources for the realistic world and the meaning of "AI-generated", and **accepted on the owner's
+  ruling on that issue**. It supersedes ADR 0026 D-4's source list. A reviewer who remembers this
+  sentence offering 0049 is reading the old file.
+  ⚠️ **0048 is [ADR 0048](../adr/0048-workouts-that-change-during-the-ride.md)**, taken by
+  [#1233](https://github.com/openzigs/onyourleft/issues/1233) on 2026-10-09 for workouts that change
+  during the ride (a heart-rate hold on the device, and re-plans an instance agent may only
+  propose), and **accepted on the owner's rulings of the same day**. A reviewer who remembers this
+  sentence offering 0048 is reading the old file.
+  ⚠️ **0047 is [ADR 0047](../adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md)**,
+  taken by [#1179](https://github.com/openzigs/onyourleft/issues/1179) on 2026-10-08 for end-to-end
+  encryption between the app and its instance, and **accepted by the owner on 2026-10-08**. A
+  reviewer who remembers this sentence offering 0047, or calling it Proposed, is reading the old file.
   ⚠️ **0046 is [ADR 0046](../adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)**,
   taken by [#1093](https://github.com/openzigs/onyourleft/issues/1093) on 2026-10-04 for AI analysis
   on the rider's instance as a tool-calling agent, and **accepted by the owner on 2026-10-07**. It

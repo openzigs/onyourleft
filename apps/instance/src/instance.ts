@@ -9,20 +9,50 @@ import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
+import {
+  HOSTED_KEY_NO_SECRET,
+  HOSTED_KEY_UNREADABLE,
+  hostedKeyState,
+  importSecretKey,
+  ownHostedKeyState,
+  type HostedKeyState,
+  type SecretKey,
+} from './analysis/hosted-key.ts';
+import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
+import { agentEngine, replanEngine } from './analysis/engine.ts';
+import type { SourceOptions } from './analysis/source.ts';
+import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
+import { forgetMaskingOnRefusal } from './analysis/masking-item.ts';
+import {
+  ANALYSIS_SWEEP_PERIOD_MS,
+  createAnalysisJobs,
+  type AnalysisJobs,
+} from './analysis/jobs.ts';
+import { createLocalModel, createLocalPictureModel } from './analysis/model.ts';
+import {
+  createInstanceKeys,
+  InstanceKeysUnavailable,
+  type InstanceKeys,
+} from './keys/instance-keys.ts';
+import type { ModelConnection } from './analysis/model-turn.ts';
+import { hostedForPictures, SIDE_POSE_PICTURE_QUESTION } from './camera/hosted-pictures.ts';
+import { createSidePose } from './camera/side-pose.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
-import { logEvent, type LogSink } from './log.ts';
+import { logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
-import type { InstanceProbes } from './route-kit.ts';
+import type { InstanceProbes, SidePose } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
+import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
+import { createSync, type Sync } from './sync/sync.ts';
 
 /**
  * The running instance, put together (#780, #791): the store opened (never
@@ -55,6 +85,21 @@ import type { SqlStore } from './store/sql-store.ts';
 export const systemResolver: Resolver = async (hostname) =>
   (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
 
+/**
+ * The longest the instance waits between two passes over its keys (#1189):
+ * an hour, so a key the operator rotated from the command line, or a clock
+ * that moved, is picked up within it. The rule decides what a pass does; this
+ * only bounds how stale its schedule can get.
+ */
+const KEYS_RETRY_SECONDS = 3600;
+
+/**
+ * How soon a key pass tries again when an operator's `instance-key` command
+ * holds the key lease (#1203): long enough for the command to finish, which
+ * takes milliseconds.
+ */
+const KEYS_BUSY_RETRY_MS = 5_000;
+
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
   override readonly name = 'InstanceRefusal';
@@ -70,6 +115,8 @@ export interface InstanceOptions {
   readonly now?: () => number;
   /** How often a waiting instance looks at the migration again. */
   readonly migrationPollMs?: number;
+  /** How soon a key pass tries again while the key lease is held elsewhere (#1203): 5 s unless a test says otherwise. */
+  readonly keysBusyRetryMs?: number;
   /** How the embedding model's name is resolved: {@link systemResolver} unless a test says otherwise. */
   readonly resolve?: Resolver;
   /** The timers the rate-limit sweep runs on (#892) — Node's own unless a test's. */
@@ -84,6 +131,8 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
+  readonly hostedFetch?: typeof globalThis.fetch;
 }
 
 export interface StartedInstance {
@@ -94,6 +143,41 @@ export interface StartedInstance {
   readonly opened: Promise<void>;
   /** How many rate-limit keys — internet addresses among them — the accounts hold now (#892). */
   heldRateLimitKeys(): number;
+  /**
+   * The analysis model (#1096), once the store is open and when one is
+   * configured at a local address; `undefined` otherwise. The job engine
+   * (#1095) runs the agent (#1098) over it.
+   */
+  analysisModel(): ModelConnection | undefined;
+  /**
+   * The analysis jobs (#1095), once the store is open on an instance with
+   * accounts; `undefined` otherwise.
+   */
+  analysisJobs(): AnalysisJobs | undefined;
+  /** Resolves once the jobs a stopped instance left unended have been failed `interrupted`. */
+  readonly jobsRecovered: Promise<void>;
+  /**
+   * A rider's own hosted key and consent (#1199), and the test question
+   * (#1251) — built over the SAME sources the job engine is handed, which is
+   * what `instance.test.ts` reads this for. `undefined` until the store is
+   * open on an instance with accounts.
+   */
+  hostedSettings(): HostedSettings | undefined;
+  /**
+   * The hosted model key (#1097), opened with `OYL_INSTANCE_SECRET_KEY` if it
+   * can be — what `analysis/source.ts` §`modelForSource` is handed by the
+   * job engine (#1095). `none` until the store is open.
+   */
+  hostedModelKey(): Promise<HostedKeyState>;
+  /** Resolves once the hosted key's state has been logged at opening. */
+  readonly hostedKeyReported: Promise<void>;
+  /**
+   * The instance's own keys (#1189), once the store is open; `undefined`
+   * before. What `/v1/sealed` (#1191) unwraps with.
+   */
+  instanceKeys(): InstanceKeys | undefined;
+  /** Resolves once the first pass over the instance's keys has run and been logged. */
+  readonly keysMaintained: Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -135,7 +219,22 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let store: SqlStore | undefined;
   let identity: Identity | undefined;
   let history: History | undefined;
+  let analysisModel: ModelConnection | undefined;
+  let analysisJobs: AnalysisJobs | undefined;
+  let hostedSettings: HostedSettings | undefined;
+  let sidePose: SidePose | undefined;
+  let jobsRecovered: Promise<void> = Promise.resolve();
+  let hostedKeyReported: Promise<void> = Promise.resolve();
+  let instanceKeys: InstanceKeys | undefined;
+  let keysMaintained: Promise<void> = Promise.resolve();
+  let keysTimer: ReturnType<typeof setTimeout> | undefined;
+  // Imported once, non-extractable; a failed import is no secret at all.
+  const secretKey: Promise<SecretKey | undefined> =
+    server.secretKey === undefined
+      ? Promise.resolve(undefined)
+      : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
+  let sync: Sync | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
   let stopRetrying = (): void => undefined;
@@ -182,6 +281,18 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     onResult: async (roomId, result) => {
       await store?.putResult({ roomId, ...result });
     },
+    // #789: a plausibility flag is a report the room files.
+    onFlag: async (roomId, flag) => {
+      await identity?.moderation.fileFlag(
+        roomId,
+        flag.athleteId,
+        {
+          durationSeconds: flag.durationSeconds,
+          ceilingWattsPerKilogram: flag.ceilingWattsPerKilogram,
+        },
+        flag.tick,
+      );
+    },
     onRaceStarted: async (roomId) => {
       await store?.markRaceStarted(roomId, Math.floor(now() / 1000));
     },
@@ -222,6 +333,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       : {}),
     startRoom: async (roomId, athleteId) =>
       (await router.startRoom(roomId, athleteId)) ? 'started' : 'not_found',
+    seatOf: (roomId, riderId) => router.seatOf(roomId, riderId),
+    removeFromRoom: (roomId, athleteId) => router.removeFromRoom(roomId, athleteId),
   };
 
   const handlerOptions = {
@@ -271,6 +384,93 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ? { state: 'on', model: settings.embedding.model }
         : { state: 'off', code: settings.code },
     );
+    // The analysis model (#1096, ADR 0046 D-9 source 1): off, and saying why,
+    // when no local model is configured. Its address is checked again on
+    // every turn (`analysis/model.ts`); no model name is logged.
+    const analysis = options.config.analysis;
+    analysisModel =
+      analysis.kind === 'on'
+        ? createLocalModel({ settings: analysis, resolve: options.resolve ?? systemResolver })
+        : undefined;
+    logEvent(
+      log,
+      'analysis-model',
+      analysis.kind === 'on' ? { state: 'on' } : { state: 'off', code: analysis.code },
+    );
+    // The picture model (#1106): off unless the operator named one. No model name is logged.
+    logEvent(
+      log,
+      'picture-model',
+      options.config.pictures.kind === 'on'
+        ? { state: 'on' }
+        : { state: 'off', code: options.config.pictures.code },
+    );
+    // The hosted model key (#1097): whether one is held, and whether this
+    // secret opens it. A key that will not open — a restore onto a box with
+    // another secret — is SAID, never a crash: the hosted source is then
+    // unavailable, and the local model, or none, is all there is. Never the
+    // key, its URL or its model.
+    const opened = store;
+    hostedKeyReported = (async () => {
+      const state = await hostedKeyState(opened, await secretKey);
+      logEvent(log, 'hosted-model-key', {
+        state: state.kind,
+        ...(state.kind === 'unreadable' ? { hostedKeyProblem: HOSTED_KEY_UNREADABLE } : {}),
+        ...(state.kind === 'no-secret' ? { hostedKeyProblem: HOSTED_KEY_NO_SECRET } : {}),
+      });
+    })().catch((error: unknown) => {
+      logUnhandled(log, null, error);
+    });
+    // The instance's own keys (#1189, ADR 0047 D-5): made on the first start
+    // with a secret, rotated, re-signed and pruned by the one rule
+    // `keys/instance-keys.ts` states — run now, before `/v1/instance/keys`
+    // answers (it waits on this first pass), and again whenever the rule
+    // says the next step falls due, by the box's clock. A pass holds the key
+    // lease while it writes, so an operator's `instance-key` command and this
+    // timer are never two writers at once (#1203); a pass that finds the
+    // lease held tries again in a few seconds. No secret: no keys, and it
+    // says so.
+    const keys = createInstanceKeys({
+      store,
+      secret: server.secretKey,
+      origin: server.origin,
+      now: () => Math.floor(now() / 1000),
+      log,
+    });
+    instanceKeys = keys;
+    const maintainKeys = async (): Promise<void> => {
+      if (stopping) return;
+      let wakeInSeconds = KEYS_RETRY_SECONDS;
+      let busy = false;
+      try {
+        const done = await keys.maintain();
+        logEvent(log, 'instance-keys', {
+          state: 'ready',
+          made: done.made,
+          rotated: done.rotated,
+          signed: done.signed,
+          deleted: done.deleted,
+        });
+        wakeInSeconds = done.nextDueAt - Math.floor(now() / 1000);
+      } catch (error) {
+        if (error instanceof InstanceKeysUnavailable) {
+          logEvent(log, 'instance-keys', { state: error.code, keysProblem: error.message });
+          busy = error.code === 'busy';
+          if (!busy && error.code !== 'unreadable') return;
+        } else {
+          logUnhandled(log, null, error);
+        }
+      }
+      if (stopping) return;
+      const delayMs = busy
+        ? (options.keysBusyRetryMs ?? KEYS_BUSY_RETRY_MS)
+        : 1000 * Math.min(KEYS_RETRY_SECONDS, Math.max(1, wakeInSeconds));
+      keysTimer = setTimeout(() => {
+        keysMaintained = maintainKeys();
+      }, delayMs);
+      keysTimer.unref();
+    };
+    keysMaintained = maintainKeys();
     if (server.origin !== null) {
       identity = createIdentity({
         store,
@@ -278,21 +478,49 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ...identitySettings(options.config),
         now,
       });
+      // #1195: sync (#37, #38, #776, #35), and ONLY where the instance holds
+      // keys. Every sync route is sealed-only (ADR 0047 D-7, the owner's D-14
+      // Q7 ruling: "ships sealed only"), and an instance with no keys seals
+      // nothing (`handler.ts` §`sealsRoutes`) — so a keyless instance handed
+      // a sync would serve it in plaintext. With no keys, every sync route
+      // answers `unavailable`, as it did before this. The files go in the
+      // blob directory's own `objects/` tree, which `operator backup` copies.
+      const syncIndexed = history;
+      const people = identity;
+      // #331: whom a ghost is shown as — the choke point first, then the
+      // public projection, exactly as a room names its riders below.
+      const nameFor = async (viewerId: string, subjectId: string): Promise<string | undefined> => {
+        if (!(await people.moderation.canSee(viewerId, subjectId))) return undefined;
+        const profile = await people.profile(subjectId);
+        return profile.ok ? profile.value.displayName : undefined;
+      };
+      sync = keys.configured
+        ? createSync({
+            store,
+            blobs: createDiskBlobStore(server.blobsPath),
+            now,
+            itemStored: () => {
+              syncIndexed.schedule();
+            },
+            ghostRider: nameFor,
+          })
+        : undefined;
       // #784, #785: riders' rooms. Their routes are kept apart from the
       // synced files — under the blob directory's `rooms/` — and live only as
       // long as their room (`rooms/rooms.ts`), so a backup does not carry them.
-      const people = identity;
       rooms = createRooms({
         store,
         routes: createDiskBlobStore(join(server.blobsPath, 'rooms')),
-        nameFor: async (viewerId, subjectId) => {
-          if (!(await people.moderation.canSee(viewerId, subjectId))) return undefined;
-          const profile = await people.profile(subjectId);
-          return profile.ok ? profile.value.displayName : undefined;
-        },
+        nameFor,
         now,
+        // #788: public rooms only where the operator turned them on — off by
+        // default — and only for an athlete #775's predicate accepts.
+        publicRooms: options.config.legal.publicRooms,
+        eligible: async (caller) => {
+          const held = await people.account(caller);
+          return held.ok && held.value.publicRooms.eligible;
+        },
       });
-      handler = createHandler({ ...handlerOptions, identity, history, rooms });
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
       // the boundary it ends on, whether or not anybody asks again (#892).
@@ -306,7 +534,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // restart left, and every ten minutes after.
       const endRooms = (): void => {
         void roomsSwept
-          .sweep((roomId) => router.holds(roomId))
+          .sweep({
+            claim: (roomId) => router.claimForEnding(roomId),
+            release: (roomId) => router.releaseEnding(roomId),
+          })
           .catch((error: unknown) => {
             logEvent(log, 'rooms-sweep-failed', {
               error: error instanceof Error ? error.name : 'unknown',
@@ -331,11 +562,110 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         options.sweepTimers,
       );
+      // #1095: analysis jobs, on the accounts' sessions. Off — every start
+      // `analysis_off` — while the instance has no model and no secret to hold
+      // a hosted key under. A job a stopped instance left unended is failed `interrupted`
+      // before any new one is queued, and is never run again.
+      const reading = store;
+      // #1199: the athlete's OWN key — the one they stored, or the operator's
+      // one key for the operator's own jobs — and never anybody else's.
+      const hostedKey = async (athleteId: string): Promise<HostedKeyState> =>
+        ownHostedKeyState(reading, await secretKey, athleteId);
+      const local = analysisModel;
+      // #1229: the agent's history tool searches the index this instance keeps.
+      const indexed = history;
+      // What a hosted job's model is chosen from, and (#1251) what the test
+      // question's is: one object, so the two pass the same gate.
+      const sources: SourceOptions = {
+        local,
+        hostedKey,
+        // Q10 (#1199): the athlete's own recorded consent, naming an origin.
+        recordedConsent: async (athleteId) => (await reading.getHostedConsent(athleteId))?.origin,
+        // #1223: every hosted request masked by the athlete's own guard (#1101).
+        guard: (athleteId) => readMaskingGuard(reading, athleteId),
+        behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+        // #1251: a hosted job refused for no consent or key, after another device
+        // sent the list again, deletes it as a withdrawal does.
+        refusedForNoConsentOrKey: forgetMaskingOnRefusal(store, now),
+      };
+      hostedSettings = createHostedSettings({ store, secret: () => secretKey, now, sources });
+      // #1106: a side-camera picture, shown to the local model the operator
+      // named for pictures or to the hosted service the rider's OWN key is
+      // for. Handed no store and no log: a picture is kept nowhere.
+      const pictures = options.config.pictures;
+      sidePose = createSidePose({
+        local:
+          pictures.kind === 'on'
+            ? createLocalPictureModel({
+                settings: pictures,
+                resolve: options.resolve ?? systemResolver,
+                question: SIDE_POSE_PICTURE_QUESTION,
+              })
+            : undefined,
+        hostedKey,
+        hosted: (key) => hostedForPictures(key, options.hostedFetch),
+      });
+      const jobs = createAnalysisJobs({
+        store,
+        engine: agentEngine({
+          reads: store,
+          history: indexed,
+          sources,
+          clock: { now },
+        }),
+        // #1243: a re-plan during the ride, on the same sources and the same reads.
+        replan: replanEngine({ reads: store, sources, clock: { now } }),
+        // A hosted model needs only a secret to hold a rider's own key under
+        // (#1199): a rider who has none is refused `hosted_unavailable`.
+        available: async () => local !== undefined || (await secretKey) !== undefined,
+        now,
+        log,
+        heartbeatMs: server.analysisHeartbeatMs,
+      });
+      analysisJobs = jobs;
+      jobsRecovered = jobs.recover().then(
+        () => undefined,
+        (error: unknown) => {
+          logUnhandled(log, null, error);
+        },
+      );
+      // Ended jobs go seven days after they ended (the owner's Q5 ruling), and
+      // the start limit's ended windows with them: once now, and every hour.
+      const sweepJobs = (): void => {
+        void jobs.sweep().catch((error: unknown) => {
+          logUnhandled(log, null, error);
+        });
+      };
+      sweepJobs();
+      const stopSweepingJobs = sweepOnBoundaries(
+        { periodMs: ANALYSIS_SWEEP_PERIOD_MS, run: sweepJobs },
+        options.sweepTimers,
+      );
       stopSweeping = () => {
         stopRateLimitSweep();
         stopEndingRooms();
+        stopSweepingJobs();
       };
     }
+    // Replaced, not mutated (above): the accounts when there is an origin, and
+    // the instance's keys whatever there is.
+    handler = createHandler({
+      ...handlerOptions,
+      instanceKeys: keys,
+      // #1191: sealed requests need the accounts, so they come with them.
+      ...(identity === undefined
+        ? {}
+        : {
+            identity,
+            history,
+            rooms,
+            sealed: createSealed({ store, now }),
+            ...(sync === undefined ? {} : { sync }),
+            ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
+            ...(hostedSettings === undefined ? {} : { hostedSettings }),
+            ...(sidePose === undefined ? {} : { sidePose }),
+          }),
+    });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();
     // And again every few minutes, so a model started after the instance —
@@ -399,10 +729,21 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     opened,
     heldRateLimitKeys: () =>
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
+    analysisModel: () => analysisModel,
+    analysisJobs: () => analysisJobs,
+    hostedSettings: () => hostedSettings,
+    jobsRecovered: opened.then(() => jobsRecovered),
+    hostedModelKey: async () =>
+      store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),
+    hostedKeyReported: opened.then(() => hostedKeyReported),
+    instanceKeys: () => instanceKeys,
+    keysMaintained: opened.then(() => keysMaintained),
     async stop() {
       stopping = true;
+      if (keysTimer !== undefined) clearTimeout(keysTimer);
       stopSweeping();
       stopRetrying();
+      await analysisJobs?.stop();
       await router.stop();
       await listening.close();
       await history?.idle();

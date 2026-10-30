@@ -1,0 +1,1305 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * A running workout as a picture — #1307: the plan, where the rider is in it,
+ * the target the trainer confirmed and what the rider is doing against it.
+ *
+ * Pure geometry and one sentence, apart from the component that draws them
+ * (`WorkoutGraph.tsx`), for `workouts/block-chart.ts`'s reason: what the graph
+ * says is a decision worth testing on its own.
+ *
+ * ## It draws, and nothing else
+ *
+ * Nothing here writes to a trainer or decides a write. It reads what the Ride
+ * screen's workout panel reads — `ride/controller.ts` §`RideWorkoutSnapshot`
+ * — and the game is handed the same object (`game/trainer-port.ts`
+ * §`runningWorkout`). It needs no instance (ADR 0036 D-3).
+ *
+ * ## Three lanes, one above another, each with its numbers
+ *
+ * 1. **The plan**: every block as a bar, as wide as it is long and as tall as
+ *    its target — `block-chart.ts`'s drawing, on a scale whose top is THIS
+ *    workout's hardest target, so the bars use the lane. The part ridden is
+ *    an OUTLINE and the part to come is FILLED, so the two are told apart by
+ *    shape and not by colour (SC 1.4.1), and a line with a cap marks now.
+ *    ⚠️ No threshold rule is drawn here: on this scale it would leave the
+ *    lane on any workout that stays under threshold, and a line with no
+ *    label was the one mark the key did not explain.
+ * 2. **Heart rate**, only while a heart-rate hold has been running inside the
+ *    window: the chosen range as a band between two dashed edges, and heart
+ *    rate as a line in it.
+ * 3. **The last {@link TRACE_WINDOW_SECONDS} seconds**: the target as shaded
+ *    steps and the rider's power as a line over them. A stepped, shaded area
+ *    and a thin line are different shapes, again not only different colours.
+ *
+ * {@link workoutGraphLabels} is the numbers each lane carries beside its
+ * drawing — the clock, the target and the power in watts, heart rate and the
+ * range in beats per minute — because a picture with no number on it cannot
+ * be read against anything.
+ *
+ * ## The HUD's strip is fewer things, larger
+ *
+ * {@link workoutStripPaths}: ONE lane, chosen by what is running — heart rate
+ * against its range in a heart-rate hold, power against the confirmed target
+ * otherwise — a thin bar of how far through the workout the rider is, and one
+ * line of text ({@link workoutStripText}). Three lanes in 80 px left a
+ * heart-rate band seven pixels tall.
+ *
+ * ## ⚠️ The target drawn is the one the trainer ACKNOWLEDGED
+ *
+ * `holdingWatts`, never a target only asked for — `WorkoutPanel.tsx`'s rule
+ * for the tone, for the same reason. So a target raised to the trainer's
+ * minimum (#1297, #1301) or refused is drawn as what the machine holds:
+ *
+ * - in the third lane always, because that lane is drawn from nothing else;
+ * - in the plan, for the block being ridden: when what the trainer confirmed
+ *   is not what the plan asks for now ({@link heldInstead}), the rest of that
+ *   block is a DASHED OUTLINE at the height the plan asks and a shaded step
+ *   at the height the trainer holds, so the difference is the gap between
+ *   two shapes; the sentence and the lane's numbers say both. Every block
+ *   still to come stays drawn as the plan asks.
+ *
+ * ⚠️ **A block already finished is drawn as the plan asked for it**, as an
+ * outline. What the trainer held through it is in the third lane for as long
+ * as the window reaches back, and nowhere after that: the snapshot keeps
+ * {@link TRACE_MAX_SAMPLES} samples and no more.
+ *
+ * ## ⚠️ ONE source for what the trainer holds, read live
+ *
+ * {@link heldNow}: the controller's acknowledged target
+ * ({@link WorkoutGraphInput.holdingWatts}) while this app has control
+ * ({@link WorkoutGraphInput.hasControl}) — the two facts the panel's own
+ * "Holding … W." line is written from. EVERY number about the target that
+ * the graph writes or says is that one: the lane's caption, the HUD strip's
+ * line, the sentence under the graph, the image's name and the two shapes at
+ * the now line.
+ *
+ * ⚠️ Not the newest trace sample. Until #1307's third review the caption and
+ * the strip read the sample, and no sample is taken while the ride is
+ * paused — so through a pause they went on saying "Target 225 W" with the
+ * trainer eased to 50 W — while the plan lane read `holdingWatts` with no
+ * regard for control, and after a lost link said the trainer "confirmed
+ * instead" a target it was never sent. Two sources for one fact, and each
+ * wrong in the state the other was right in. The trace is what is DRAWN in
+ * the last two lanes, second by second, and nothing else.
+ *
+ * The rider's power and heart rate beside the lanes are live in the same
+ * way ({@link WorkoutGraphInput.live}).
+ *
+ * ## In a pause
+ *
+ * The workout's clock stops, so the last two lanes stop with it: nothing is
+ * sampled, and after the pause the lines carry on from where they stopped —
+ * the pause itself is not a stretch of the picture. ⚠️ The HUD's strip goes
+ * further (#1313, the owner's ruling): its lane draws NO line at all while
+ * paused, in either kind, and keeps only its bar and text
+ * ({@link WorkoutStripPaths.lane}). What the trainer holds
+ * through it (it is eased to its floor) is WRITTEN: the caption and the
+ * strip say "Paused" and the target the trainer confirmed, with the power
+ * the rider is making now. Nothing is marked as held instead: the plan asks
+ * for nothing while its clock is stopped.
+ *
+ * ## Room for a re-plan — #1244
+ *
+ * {@link WorkoutGraphInput.replaced} is what the plan was before a re-plan
+ * changed it, drawn as a dotted outline behind the plan that stands. #1244
+ * supplies it: `ride/controller.ts` §`RideWorkoutSnapshot.replaced`, from the
+ * moment a move is accepted, so a rider sees both before the block begins.
+ *
+ * ## No metric trademark
+ *
+ * Watts, beats per minute and a share of threshold, in those words
+ * (`docs/agents/scope-and-ip.md`).
+ */
+
+import {
+  blockChartPaths,
+  CHART_HEIGHT,
+  CHART_TOP_SHARE,
+  CHART_WIDTH,
+  FREE_RIDE_DRAWN_SHARE,
+  type BlockChartPaths,
+  type BlockChartSegment,
+} from '../workouts/block-chart';
+import { formatDuration } from '../format';
+import { durationText } from '../workouts/library';
+
+/** How far back the third lane reaches: five minutes. */
+export const TRACE_WINDOW_SECONDS = 300;
+
+/** The most samples a snapshot carries: one a second across the window. */
+export const TRACE_MAX_SAMPLES = TRACE_WINDOW_SECONDS;
+
+/** Lane heights, in drawing units: each lane is its own drawing. */
+export const PLAN_LANE_HEIGHT = CHART_HEIGHT;
+export const HEART_RATE_LANE_HEIGHT = 60;
+export const TRACE_LANE_HEIGHT = 100;
+
+/**
+ * How much of the plan lane's height the workout's hardest target takes. The
+ * rest is room above it for the now mark's cap.
+ */
+export const PLAN_FILL_SHARE = 0.85;
+
+/**
+ * How far in from the top and the bottom of the third lane its scale's two
+ * ends are drawn, in drawing units. ⚠️ So that a target of 0 W — an eased
+ * workout — is a step with a height and an edge above the lane's own bottom
+ * line, not a line drawn on top of it.
+ */
+export const TRACE_LANE_INSET = 10;
+
+/**
+ * How long after a block starts the graph waits before it calls a confirmed
+ * target that is not the plan's a different target ({@link heldInstead}).
+ * The write for a new block takes about a second to be acknowledged, and for
+ * that second the trainer truthfully still holds the block before: that is a
+ * write on its way, not a clamp, a refusal or an ease, and it must not wear
+ * their mark. `ride/controller.test.ts` §"#1307" crosses a block change with
+ * the real controller and reads every tick.
+ */
+export const HELD_GRACE_SECONDS = 3;
+
+/**
+ * How far the confirmed target may be from the plan's before the block is
+ * drawn at the confirmed height. A trainer confirms whole watts and the plan
+ * is a share of threshold, so the two differ by a rounding at the best of
+ * times.
+ */
+export const HELD_TOLERANCE_WATTS = 2;
+
+/**
+ * The least the third lane spans, bottom to top: a share of the highest value
+ * in it, and a floor in watts for a window with almost nothing in it.
+ */
+const TRACE_MINIMUM_SPAN_SHARE = 0.4;
+const TRACE_MINIMUM_SPAN_WATTS = 40;
+
+/** The room left beyond the highest and lowest value, as a share of the span. */
+const TRACE_BREATHING_SHARE = 0.05;
+
+/** Room around heart rate and its range in the second lane. */
+const HEART_RATE_MARGIN_BPM = 5;
+
+/** The now mark's cap: half its width and its height, in drawing units. */
+const CAP_HALF_WIDTH = 9;
+const CAP_HEIGHT = 16;
+
+/** One second of a running workout, as the graph's second and third lanes read it. */
+export interface WorkoutTraceSample {
+  /** Seconds into the workout, excluding paused time — the player's clock. */
+  readonly at: number;
+  /** The target the trainer last acknowledged, in watts; `undefined` when it holds none. */
+  readonly target: number | undefined;
+  /** The rider's power, or `undefined` when the reading is not live. Never a zero for a dropout. */
+  readonly power: number | undefined;
+  /** Heart rate, or `undefined` when the reading is not live. */
+  readonly heartRate: number | undefined;
+  /** The range a running heart-rate hold is keeping to, or `undefined` outside one. */
+  readonly range: { readonly low: number; readonly high: number } | undefined;
+  /**
+   * The target a running heart-rate hold was asking for at this second, in
+   * watts — its OWN target, before any stall-rescue relief
+   * (`@onyourleft/domain` §`HoldStatus.target`). `undefined` outside a running
+   * hold. Beside {@link target} it is how {@link heldInstead} tells a target
+   * the hold set from one the trainer holds instead of it.
+   */
+  readonly asked?: number | undefined;
+}
+
+/** What the graph is drawn from: a subset of `RideWorkoutSnapshot`, and assignable from it. */
+export interface WorkoutGraphInput {
+  readonly elapsedSeconds: number;
+  readonly timeline: {
+    readonly segments: readonly BlockChartSegment[];
+    readonly totalSeconds: number;
+  };
+  /** What the trainer last confirmed it holds. */
+  readonly holdingWatts: number | undefined;
+  /** The threshold the workout was started with, which turns a share into watts. */
+  readonly thresholdWatts?: number | undefined;
+  readonly trace?: readonly WorkoutTraceSample[] | undefined;
+  /** What a re-plan replaced, from its boundary on (#1244). @see the module note */
+  readonly replaced?: readonly BlockChartSegment[] | undefined;
+  /**
+   * The heart-rate hold of the block being ridden, as the screens show it
+   * (`hold-text.ts` §`WorkoutHold`): `target` is the hold's own, and a
+   * `reason` of `ineligible` is a hold that is OFF, riding the plan.
+   */
+  readonly hold?: { readonly reason: string; readonly target: number } | undefined;
+  /** A stall rescue in force — the target is eased. Only its presence is read. */
+  readonly rescue?: object | undefined;
+  /** `paused` stops the lanes and the marks. @see the module note */
+  readonly status?: string | undefined;
+  /**
+   * Whether this app has control of the trainer now. `false`: nothing is
+   * known of what it holds, and {@link heldNow} is `undefined`. Absent — a
+   * drawing with no controller behind it — is read as having control.
+   */
+  readonly hasControl?: boolean | undefined;
+  /**
+   * Whether the trainer's control client vouches for {@link holdingWatts}
+   * now — #1313. `false`, as for no control: {@link heldNow} is `undefined`.
+   * It is `false` for the tick after control is taken back, before the next
+   * write lands. Absent is read as vouched.
+   */
+  readonly targetConfirmed?: boolean | undefined;
+  /**
+   * The rider's power and heart rate now, each `undefined` when not live.
+   * Absent — a drawing with no controller behind it — the newest sample's.
+   */
+  readonly live?:
+    { readonly power: number | undefined; readonly heartRate: number | undefined } | undefined;
+  /**
+   * What the block asks, when the trainer holds that ask raised to its
+   * minimum (#1297, #1305) — the session's own word for it, set only once
+   * the raise has landed, and true on a ramp too.
+   */
+  readonly raisedFromWatts?: number | undefined;
+  /** No target is being sent for this block: it would be a large raise (#1305). */
+  readonly refused?: boolean | undefined;
+}
+
+/**
+ * The trace with one more sample, bounded: nothing older than the window, and
+ * at most {@link TRACE_MAX_SAMPLES}.
+ *
+ * ⚠️ A sample no later than the last one REPLACES it and everything after it,
+ * so a second tick inside one second of the workout's clock cannot make the
+ * line double back.
+ */
+export function withTraceSample(
+  trace: readonly WorkoutTraceSample[],
+  sample: WorkoutTraceSample,
+): readonly WorkoutTraceSample[] {
+  if (!Number.isFinite(sample.at)) {
+    return trace;
+  }
+  const kept = trace.filter(
+    (earlier) => earlier.at < sample.at && earlier.at >= sample.at - TRACE_WINDOW_SECONDS,
+  );
+  return [...kept.slice(-(TRACE_MAX_SAMPLES - 1)), sample];
+}
+
+/** The plan lane. */
+export interface PlanLanePaths {
+  /**
+   * The part still to ride, as the plan asks: filled, band by band. While
+   * {@link heldInstead} reports, the rest of the block being ridden is NOT in
+   * here — it is {@link asked} and {@link held}.
+   */
+  readonly toCome: BlockChartPaths;
+  /**
+   * The rest of the block being ridden at the height the PLAN asks, as an
+   * outline, while the trainer holds something else. Empty otherwise.
+   */
+  readonly asked: string;
+  /**
+   * What the trainer holds through the rest of that block: a closed step and
+   * its top edge. Both empty when it holds 0 W — there is no height to draw —
+   * and when the trainer holds what the plan asks.
+   */
+  readonly heldArea: string;
+  readonly heldEdge: string;
+  /** The part ridden, as one outline. */
+  readonly done: string;
+  /** What a re-plan replaced, as one outline. Empty when nothing was. */
+  readonly replaced: string;
+  /** Now: a line the height of the lane, and the cap on top of it. */
+  readonly now: string;
+  readonly nowCap: string;
+  /** Where now is, 0 to 1 across the lane — for a test to read rather than parse a path. */
+  readonly nowFraction: number;
+}
+
+/** The heart-rate lane. */
+export interface HeartRateLanePaths {
+  /** The chosen range, as a closed band, and its two edges as open lines. */
+  readonly range: string;
+  readonly rangeEdges: string;
+  readonly line: string;
+  /** The range the newest sample in a hold carries, in beats per minute. */
+  readonly low: number;
+  readonly high: number;
+  /** Where those two edges are drawn, 0 at the top of the lane to 1 at the bottom. */
+  readonly highAt: number;
+  readonly lowAt: number;
+}
+
+/** The lane of the last few minutes. */
+export interface TraceLanePaths {
+  /** The confirmed target as closed steps down to the ground, and their top edge. */
+  readonly targetArea: string;
+  readonly targetEdge: string;
+  readonly power: string;
+  /** The watts the bottom and the top of the lane stand for. @see traceScale */
+  readonly bottomWatts: number;
+  readonly topWatts: number;
+}
+
+export interface WorkoutGraphPaths {
+  readonly plan: PlanLanePaths;
+  /** `undefined` when no hold ran inside the window: the lane is not drawn. */
+  readonly heartRate: HeartRateLanePaths | undefined;
+  readonly trace: TraceLanePaths;
+}
+
+/** A number for a path, to two decimal places and no more. */
+function coordinate(value: number): string {
+  return String(Math.round(value * 100) / 100);
+}
+
+const targeted = (
+  segment: BlockChartSegment,
+): segment is BlockChartSegment & { readonly from: number; readonly to: number } =>
+  segment.from !== undefined && segment.to !== undefined;
+
+/** The segment a moment falls in, or `undefined` before the start and after the end. */
+function segmentNow(
+  segments: readonly BlockChartSegment[],
+  elapsed: number,
+): BlockChartSegment | undefined {
+  return segments.find((segment) => segment.startsAt <= elapsed && elapsed < segment.endsAt);
+}
+
+/** What the plan asks for at a moment inside a segment, as a share of threshold. */
+function shareAt(segment: { from: number; to: number } & BlockChartSegment, at: number): number {
+  const length = segment.endsAt - segment.startsAt;
+  const along = length > 0 ? (at - segment.startsAt) / length : 0;
+  return segment.from + (segment.to - segment.from) * along;
+}
+
+/**
+ * What the trainer is KNOWN to hold now, in watts: the target it last
+ * acknowledged, while this app has control and the control client vouches
+ * for it. `undefined` before any target is confirmed, once control is lost,
+ * and until a write lands after control is taken back (#1313) — the last
+ * write is not a held target.
+ * @see the module note: this is the graph's one source for it
+ */
+export function heldNow(input: WorkoutGraphInput): number | undefined {
+  return input.hasControl === false ||
+    input.targetConfirmed === false ||
+    !finite(input.holdingWatts)
+    ? undefined
+    : input.holdingWatts;
+}
+
+/** Whether the workout is paused: its clock, and so its lanes, are stopped. */
+const isPaused = (input: WorkoutGraphInput): boolean => input.status === 'paused';
+
+/** What {@link heldInstead} reports. */
+export interface HeldInstead {
+  /**
+   * What the trainer is known to hold. `undefined` only where no target was
+   * sent ({@link why} is `not-sent`) and none is known from before.
+   */
+  readonly heldWatts: number | undefined;
+  /**
+   * What was asked for now, in whole watts. `undefined` only where a
+   * heart-rate hold is eased ({@link why} is `eased`): the hold takes the
+   * eased number as its own, so what it asked before is not known.
+   */
+  readonly plannedWatts: number | undefined;
+  /** Who asked: the plan's block, or a running heart-rate hold. */
+  readonly by: 'plan' | 'hold';
+  /**
+   * `different`: the trainer confirmed another target than the one asked.
+   * `not-sent`: the block's target was not sent at all (#1305).
+   * `eased`: a stall rescue has eased a heart-rate hold.
+   */
+  readonly why: 'different' | 'not-sent' | 'eased';
+}
+
+/** Whether a heart-rate hold is setting the target now. An `ineligible` hold is off. */
+function holdRunning(
+  input: WorkoutGraphInput,
+): input is WorkoutGraphInput & { readonly hold: { readonly target: number } } {
+  return input.hold !== undefined && input.hold.reason !== 'ineligible';
+}
+
+/**
+ * Whether the trainer has been STUCK on `holdingWatts` for
+ * {@link HELD_GRACE_SECONDS} while the hold asked for something else, by the
+ * trace: every sample back from the newest confirms that same target, carries
+ * what the hold asked, and the two disagree — and the run reaches that far.
+ *
+ * ⚠️ "Stuck", not merely "different". A hold that is ramping decides a new
+ * target every second, and the sample for that second is taken while its
+ * write is still on its way: confirmed and asked disagree in EVERY sample of
+ * a ramp, for as long as the ramp lasts. What tells that from a clamp or a
+ * refusal is that the confirmed target is moving. Found by the real
+ * controller (`ride/controller.test.ts` §"a hold's own target is never
+ * marked"), which a difference-only rule failed.
+ */
+function holdMismatchHasLasted(input: WorkoutGraphInput, holdingWatts: number): boolean {
+  const samples = windowed(input);
+  let since: number | undefined;
+  for (let index = samples.length - 1; index >= 0; index -= 1) {
+    const sample = samples[index];
+    if (
+      sample === undefined ||
+      !finite(sample.target) ||
+      !finite(sample.asked) ||
+      sample.target !== holdingWatts ||
+      Math.abs(sample.target - sample.asked) <= HELD_TOLERANCE_WATTS
+    ) {
+      break;
+    }
+    since = sample.at;
+  }
+  return since !== undefined && input.elapsedSeconds - since >= HELD_GRACE_SECONDS;
+}
+
+/**
+ * What the trainer holds, when that is NOT what it was asked for now — a
+ * target raised to the machine's minimum (#1297), a write it refused, an
+ * eased target, a block whose target was not sent (#1305). `undefined` while
+ * the two agree, in a free ride, with no threshold to compare in, **while
+ * the workout is paused, and whenever what the trainer holds is not known**
+ * ({@link heldNow}: before any target is confirmed, and after control is
+ * lost).
+ *
+ * In this order:
+ *
+ * 1. **Not sent** ({@link WorkoutGraphInput.refused}): the session's own
+ *    fact. Reported at once, with whatever the trainer is known to hold from
+ *    before, which may be nothing.
+ * 2. **A running heart-rate hold** — below.
+ * 3. **Raised to the minimum** ({@link WorkoutGraphInput.raisedFromWatts}):
+ *    the session's own word, set only once the raise has landed. Reported at
+ *    once, on a ramp as on a steady block.
+ * 4. **Otherwise by the numbers**: confirmed more than
+ *    {@link HELD_TOLERANCE_WATTS} outside what the block asks.
+ *    ⚠️ On a ramp the plan moves every second and the confirmation trails
+ *    it, so a ramp is judged against its whole span rather than this
+ *    instant: only a target OUTSIDE what the ramp ever asks is a different
+ *    target. (A clamp INSIDE the span is rule 3's.)
+ *    ⚠️ And not in the first {@link HELD_GRACE_SECONDS} seconds of a block,
+ *    when the trainer still holds the block before because the new write has
+ *    not been acknowledged yet.
+ *
+ * ## ⚠️ A heart-rate hold's own target is not "held instead"
+ *
+ * The owner's ruling on #1307: a target the hold itself set is the workout
+ * doing what it was asked, however far it is from the block's start share.
+ * So while a hold is running ({@link WorkoutGraphInput.hold}, not
+ * `ineligible`) the block's share is never what the confirmed target is
+ * compared with:
+ *
+ * - **A stall rescue in force** ({@link WorkoutGraphInput.rescue}): the hold
+ *   is EASED, for as long as the rescue lasts — its relief steps and its
+ *   floor alike. ⚠️ With no number for what the hold asked: by H9 the player
+ *   hands the eased target to the hold as its own
+ *   (`@onyourleft/domain` §`HoldStatus.target`), so the target from before
+ *   the relief is not known here, and the eased one is not something the
+ *   hold "asked for".
+ * - **Otherwise** the confirmed target against the hold's own:
+ *   within {@link HELD_TOLERANCE_WATTS}, the hold set it and nothing is
+ *   reported; beyond it, only once the trainer has been STUCK on that target
+ *   for {@link HELD_GRACE_SECONDS} while the hold asked for another, by the
+ *   trace — a floor the hold's envelope did not know, or a write the trainer
+ *   goes on refusing. A hold that is ramping is a step behind in every
+ *   sample and is NOT reported: its confirmed target is moving.
+ *
+ * ⚠️ What this CANNOT see: a single refused write inside a hold. The player
+ * puts the hold back to where it was when a write does not land
+ * (`player.ts` §`holdCheckpoint`), so the hold's target and the confirmed one
+ * agree again and there is nothing to tell apart.
+ */
+export function heldInstead(input: WorkoutGraphInput): HeldInstead | undefined {
+  const { thresholdWatts } = input;
+  if (
+    isPaused(input) ||
+    thresholdWatts === undefined ||
+    !Number.isFinite(thresholdWatts) ||
+    thresholdWatts <= 0
+  ) {
+    return undefined;
+  }
+  const segment = segmentNow(input.timeline.segments, input.elapsedSeconds);
+  if (segment === undefined || !targeted(segment)) {
+    return undefined;
+  }
+  const held = heldNow(input);
+  const asksNow = Math.round(shareAt(segment, input.elapsedSeconds) * thresholdWatts);
+  if (input.refused === true) {
+    return { heldWatts: held, plannedWatts: asksNow, by: 'plan', why: 'not-sent' };
+  }
+  if (held === undefined) {
+    return undefined;
+  }
+  if (holdRunning(input)) {
+    if (input.rescue !== undefined) {
+      return { heldWatts: held, plannedWatts: undefined, by: 'hold', why: 'eased' };
+    }
+    const asked = input.hold.target;
+    if (
+      input.elapsedSeconds - segment.startsAt < HELD_GRACE_SECONDS ||
+      !Number.isFinite(asked) ||
+      Math.abs(held - asked) <= HELD_TOLERANCE_WATTS ||
+      !holdMismatchHasLasted(input, held)
+    ) {
+      return undefined;
+    }
+    return { heldWatts: held, plannedWatts: Math.round(asked), by: 'hold', why: 'different' };
+  }
+  if (finite(input.raisedFromWatts)) {
+    return {
+      heldWatts: held,
+      plannedWatts: Math.round(input.raisedFromWatts),
+      by: 'plan',
+      why: 'different',
+    };
+  }
+  if (input.elapsedSeconds - segment.startsAt < HELD_GRACE_SECONDS) {
+    // The write for this block may still be on its way. @see HELD_GRACE_SECONDS
+    return undefined;
+  }
+  const low = Math.min(segment.from, segment.to) * thresholdWatts;
+  const high = Math.max(segment.from, segment.to) * thresholdWatts;
+  if (held >= low - HELD_TOLERANCE_WATTS && held <= high + HELD_TOLERANCE_WATTS) {
+    return undefined;
+  }
+  return { heldWatts: held, plannedWatts: asksNow, by: 'plan', why: 'different' };
+}
+
+/** The segments before and after a moment, a segment that straddles it cut in two. */
+function splitAt(
+  segments: readonly BlockChartSegment[],
+  at: number,
+): { readonly before: readonly BlockChartSegment[]; readonly after: readonly BlockChartSegment[] } {
+  const before: BlockChartSegment[] = [];
+  const after: BlockChartSegment[] = [];
+  for (const segment of segments) {
+    if (segment.endsAt <= at) {
+      before.push(segment);
+    } else if (segment.startsAt >= at) {
+      after.push(segment);
+    } else {
+      const middle = targeted(segment) ? shareAt(segment, at) : undefined;
+      // The brands are the domain's; the cut is a number between two of them.
+      before.push({ ...segment, endsAt: at, to: middle } as BlockChartSegment);
+      after.push({ ...segment, startsAt: at, from: middle } as BlockChartSegment);
+    }
+  }
+  return { before, after };
+}
+
+/** Every part of a block chart as one path, for a shape drawn as an outline. */
+function outlineOf(paths: BlockChartPaths): string {
+  return paths.bands.join('') + paths.freeRide;
+}
+
+function planLane(input: WorkoutGraphInput): PlanLanePaths {
+  const total = input.timeline.totalSeconds;
+  const elapsed = Math.min(Math.max(0, input.elapsedSeconds), Math.max(0, total));
+  const held = heldInstead(input);
+  // ⚠️ No step for a target that was NOT SENT: whatever the trainer holds
+  // then is from before this block, and a step here would draw it as this
+  // block's confirmed target.
+  const heldShare =
+    held === undefined ||
+    held.why === 'not-sent' ||
+    held.heldWatts === undefined ||
+    input.thresholdWatts === undefined
+      ? undefined
+      : Math.max(0, held.heldWatts / input.thresholdWatts);
+  // What a running hold asks is one height, not the block's share.
+  const askedShare =
+    held?.by === 'hold' && held.plannedWatts !== undefined && input.thresholdWatts !== undefined
+      ? Math.max(0, held.plannedWatts / input.thresholdWatts)
+      : undefined;
+  const segments = input.timeline.segments;
+  const replaced = input.replaced ?? [];
+  // The scale's top is this workout's own hardest target — and what the
+  // trainer holds or a re-plan replaced, where either is higher — so the bars
+  // use the lane. With no target anywhere (a workout of free rides) it is the
+  // block chart's own.
+  const hardest = [...segments, ...replaced].reduce(
+    (most, segment) =>
+      Math.max(
+        most,
+        Number.isFinite(segment.from) ? (segment.from ?? 0) : 0,
+        Number.isFinite(segment.to) ? (segment.to ?? 0) : 0,
+      ),
+    Math.max(heldShare ?? 0, askedShare ?? 0),
+  );
+  const topShare =
+    hardest > 0 ? Math.max(hardest, FREE_RIDE_DRAWN_SHARE) / PLAN_FILL_SHARE : CHART_TOP_SHARE;
+  // ⚠️ The lane's width is the LONGER of the plan and what it replaced
+  // (#1244's review). A re-plan that shortens a workout leaves an outline
+  // that ends after the plan does; on the plan's own scale it ran past the
+  // chart's right edge (x to 1250 in a 1000-wide chart) and its tail was cut
+  // off. Everything in the lane shares this one scale.
+  const span = replaced.reduce((latest, segment) => Math.max(latest, segment.endsAt), total);
+  const scale = { endSeconds: span, topShare };
+  const { before, after } = splitAt(segments, elapsed);
+  // While the trainer holds something else, the rest of the block being
+  // ridden is taken out of the filled part and drawn as two shapes instead.
+  const riding = held === undefined ? undefined : after[0];
+  // ⚠️ No outline where what was asked is not known: an eased hold.
+  const outlined = held?.plannedWatts === undefined ? undefined : riding;
+  const toCome = riding === undefined ? after : after.slice(1);
+  const fraction = span > 0 && Number.isFinite(elapsed / span) ? elapsed / span : 0;
+  const x = fraction * CHART_WIDTH;
+  let heldArea = '';
+  let heldEdge = '';
+  if (riding !== undefined && heldShare !== undefined && heldShare > 0 && span > 0) {
+    const x0 = coordinate((riding.startsAt / span) * CHART_WIDTH);
+    const x1 = coordinate((riding.endsAt / span) * CHART_WIDTH);
+    const top = coordinate(PLAN_LANE_HEIGHT - (heldShare / topShare) * PLAN_LANE_HEIGHT);
+    const ground = coordinate(PLAN_LANE_HEIGHT);
+    heldEdge = `M${x0} ${top}H${x1}`;
+    heldArea = `M${x0} ${ground}L${x0} ${top}H${x1}L${x1} ${ground}Z`;
+  }
+  return {
+    toCome: blockChartPaths(toCome, scale),
+    asked:
+      outlined === undefined
+        ? ''
+        : outlineOf(
+            blockChartPaths(
+              [
+                askedShare === undefined
+                  ? outlined
+                  : ({ ...outlined, from: askedShare, to: askedShare } as BlockChartSegment),
+              ],
+              scale,
+            ),
+          ),
+    heldArea,
+    heldEdge,
+    done: outlineOf(blockChartPaths(before, scale)),
+    replaced: outlineOf(blockChartPaths(replaced, scale)),
+    now: `M${coordinate(x)} 0L${coordinate(x)} ${coordinate(PLAN_LANE_HEIGHT)}`,
+    nowCap: `M${coordinate(x - CAP_HALF_WIDTH)} 0L${coordinate(x + CAP_HALF_WIDTH)} 0L${coordinate(
+      x,
+    )} ${coordinate(CAP_HEIGHT)}Z`,
+    nowFraction: fraction,
+  };
+}
+
+/** The samples the two lower lanes draw: finite, in order, and inside the window. */
+function windowed(input: WorkoutGraphInput): readonly WorkoutTraceSample[] {
+  const end = input.elapsedSeconds;
+  return (input.trace ?? []).filter(
+    (sample) =>
+      Number.isFinite(sample.at) && sample.at <= end && sample.at >= end - TRACE_WINDOW_SECONDS,
+  );
+}
+
+const finite = (value: number | undefined): value is number =>
+  value !== undefined && Number.isFinite(value);
+
+/**
+ * A line through the samples that have a value, broken wherever one has none:
+ * a dropout is a gap, never a line drawn down to zero or across it.
+ */
+function brokenLine(
+  samples: readonly WorkoutTraceSample[],
+  value: (sample: WorkoutTraceSample) => number | undefined,
+  x: (at: number) => number,
+  y: (value: number) => number,
+): string {
+  let path = '';
+  let drawing = false;
+  for (const sample of samples) {
+    const here = value(sample);
+    if (!finite(here)) {
+      drawing = false;
+      continue;
+    }
+    path += `${drawing ? 'L' : 'M'}${coordinate(x(sample.at))} ${coordinate(y(here))}`;
+    drawing = true;
+  }
+  return path;
+}
+
+/**
+ * Runs of consecutive samples that all have a value, as closed steps between a
+ * floor and a ceiling, and each of the two as an open line of its own. A step
+ * holds its value until the next sample, which is what a setpoint does.
+ *
+ * ⚠️ A vertex is written only where the value CHANGES, so a steady target is
+ * one line and not three hundred collinear pieces: a dashed stroke over the
+ * pieces rendered as a solid one.
+ *
+ * ⚠️ Where a run ENDS: at the next sample, the one with no value, when a gap
+ * closes it — the trainer held the step until then — and at its own last
+ * sample when it is the newest, because nothing is known after that.
+ */
+function steps(
+  samples: readonly WorkoutTraceSample[],
+  ceiling: (sample: WorkoutTraceSample) => number | undefined,
+  floor: (sample: WorkoutTraceSample) => number,
+  x: (at: number) => number,
+): { readonly area: string; readonly edge: string; readonly floorEdge: string } {
+  let area = '';
+  let edge = '';
+  let floorEdge = '';
+  let run: WorkoutTraceSample[] = [];
+  /** A stepped line through the run as vertices, left to right. */
+  const vertices = (
+    value: (sample: WorkoutTraceSample) => number,
+    until: number,
+  ): readonly (readonly [string, string])[] => {
+    const out: (readonly [string, string])[] = [];
+    let level: string | undefined;
+    for (const sample of run) {
+      const here = coordinate(value(sample));
+      if (level === undefined) {
+        out.push([coordinate(x(sample.at)), here]);
+      } else if (here !== level) {
+        out.push([coordinate(x(sample.at)), level], [coordinate(x(sample.at)), here]);
+      }
+      level = here;
+    }
+    if (level !== undefined) out.push([coordinate(x(until)), level]);
+    return out;
+  };
+  const line = (points: readonly (readonly [string, string])[]): string =>
+    points.map(([px, py], index) => `${index === 0 ? 'M' : 'L'}${px} ${py}`).join('');
+  const close = (until: number): void => {
+    if (run.length === 0) return;
+    const top = vertices((sample) => ceiling(sample) ?? 0, until);
+    const bottom = vertices(floor, until);
+    edge += line(top);
+    floorEdge += line(bottom);
+    area += `${line(top)}${[...bottom]
+      .reverse()
+      .map(([px, py]) => `L${px} ${py}`)
+      .join('')}Z`;
+    run = [];
+  };
+  samples.forEach((sample, index) => {
+    if (finite(ceiling(sample))) {
+      run.push(sample);
+    } else {
+      close(sample.at);
+    }
+    if (index === samples.length - 1) {
+      close(sample.at);
+    }
+  });
+  return { area, edge, floorEdge };
+}
+
+/**
+ * The watts the bottom and the top of the third lane stand for.
+ *
+ * ⚠️ **Not from zero**, deliberately. What a rider reads here is power AGAINST
+ * the target, and at 225 W a rider eight watts off is three per cent of a
+ * zero-based lane: a flat line on a flat step. So the lane is fitted to what
+ * is in the window, with room either side — at least
+ * {@link TRACE_MINIMUM_SPAN_SHARE} of the highest value, so a rider dead on a
+ * steady target is not magnified into a wobble — and it reaches zero only
+ * when something in the window does (an eased target, a rider who stopped).
+ * The two ends are written on the lane, in watts, so the fitted scale can be
+ * read; they are drawn {@link TRACE_LANE_INSET} in from its edges.
+ */
+function traceScale(samples: readonly WorkoutTraceSample[]): {
+  readonly bottomWatts: number;
+  readonly topWatts: number;
+} {
+  let lowest = Infinity;
+  let highest = 0;
+  for (const sample of samples) {
+    for (const value of [sample.target, sample.power]) {
+      if (finite(value)) {
+        lowest = Math.min(lowest, Math.max(0, value));
+        highest = Math.max(highest, value);
+      }
+    }
+  }
+  if (lowest === Infinity) {
+    return { bottomWatts: 0, topWatts: TRACE_MINIMUM_SPAN_WATTS };
+  }
+  // What must be added either side to reach the least span, and a little
+  // more so nothing sits on a scale end. A window that already spans more —
+  // intervals — gets only the little more, and uses the lane.
+  const span = Math.max(
+    highest - lowest,
+    highest * TRACE_MINIMUM_SPAN_SHARE,
+    TRACE_MINIMUM_SPAN_WATTS,
+  );
+  const room = (span - (highest - lowest)) / 2 + span * TRACE_BREATHING_SHARE;
+  return {
+    bottomWatts: Math.max(0, Math.floor((lowest - room) / 10) * 10),
+    topWatts: Math.ceil((highest + room) / 10) * 10,
+  };
+}
+
+function traceLane(samples: readonly WorkoutTraceSample[], end: number): TraceLanePaths {
+  const { bottomWatts, topWatts } = traceScale(samples);
+  const x = (at: number): number =>
+    ((at - (end - TRACE_WINDOW_SECONDS)) / TRACE_WINDOW_SECONDS) * CHART_WIDTH;
+  const y = (watts: number): number =>
+    TRACE_LANE_HEIGHT -
+    TRACE_LANE_INSET -
+    ((Math.max(bottomWatts, watts) - bottomWatts) / (topWatts - bottomWatts)) *
+      (TRACE_LANE_HEIGHT - 2 * TRACE_LANE_INSET);
+  const target = steps(
+    samples,
+    (sample) => (finite(sample.target) ? y(sample.target) : undefined),
+    () => TRACE_LANE_HEIGHT,
+    x,
+  );
+  return {
+    targetArea: target.area,
+    targetEdge: target.edge,
+    power: brokenLine(samples, (sample) => sample.power, x, y),
+    bottomWatts,
+    topWatts,
+  };
+}
+
+/**
+ * The samples a heart-rate hold was running in. ⚠️ The ONE rule for whether
+ * the heart-rate lane is drawn — any of these inside the window — which its
+ * caption, its edge labels and the image's name all go by, so the name
+ * cannot be silent about a lane that is on the screen.
+ */
+function rangedSamples(samples: readonly WorkoutTraceSample[]): readonly WorkoutTraceSample[] {
+  return samples.filter(
+    (sample) => sample.range !== undefined && finite(sample.range.low) && finite(sample.range.high),
+  );
+}
+
+function heartRateLane(
+  samples: readonly WorkoutTraceSample[],
+  end: number,
+): HeartRateLanePaths | undefined {
+  const ranged = rangedSamples(samples);
+  if (ranged.length === 0) {
+    return undefined;
+  }
+  let low = Infinity;
+  let high = -Infinity;
+  for (const sample of samples) {
+    for (const value of [sample.range?.low, sample.range?.high, sample.heartRate]) {
+      if (finite(value)) {
+        low = Math.min(low, value);
+        high = Math.max(high, value);
+      }
+    }
+  }
+  low -= HEART_RATE_MARGIN_BPM;
+  high += HEART_RATE_MARGIN_BPM;
+  const x = (at: number): number =>
+    ((at - (end - TRACE_WINDOW_SECONDS)) / TRACE_WINDOW_SECONDS) * CHART_WIDTH;
+  const y = (bpm: number): number =>
+    HEART_RATE_LANE_HEIGHT - ((bpm - low) / (high - low)) * HEART_RATE_LANE_HEIGHT;
+  const rangedSet = new Set(ranged);
+  const valid = (sample: WorkoutTraceSample): boolean => rangedSet.has(sample);
+  const band = steps(
+    samples,
+    (sample) => (valid(sample) ? y(sample.range?.high ?? 0) : undefined),
+    (sample) => y(sample.range?.low ?? 0),
+    x,
+  );
+  const newest = ranged.at(-1)?.range ?? { low: 0, high: 0 };
+  return {
+    range: band.area,
+    rangeEdges: band.edge + band.floorEdge,
+    line: brokenLine(samples, (sample) => sample.heartRate, x, y),
+    low: newest.low,
+    high: newest.high,
+    highAt: y(newest.high) / HEART_RATE_LANE_HEIGHT,
+    lowAt: y(newest.low) / HEART_RATE_LANE_HEIGHT,
+  };
+}
+
+/** Everything the Ride screen's graph draws, as path data: one drawing a lane. */
+export function workoutGraphPaths(input: WorkoutGraphInput): WorkoutGraphPaths {
+  const samples = windowed(input);
+  return {
+    plan: planLane(input),
+    heartRate: heartRateLane(samples, input.elapsedSeconds),
+    trace: traceLane(samples, input.elapsedSeconds),
+  };
+}
+
+/** The HUD strip's bar of how far through the workout the rider is. */
+export const STRIP_PROGRESS_HEIGHT = 10;
+
+/** How far the strip's now mark stands out above and below its bar, in drawing units. */
+const STRIP_NOW_OVERHANG = 4;
+
+/** The HUD's strip — one lane and a bar. @see the module note */
+export interface WorkoutStripPaths {
+  /**
+   * `heart-rate` while a heart-rate hold is running NOW (the newest sample
+   * carries a range): the range's outline and heart rate. `power` otherwise:
+   * the confirmed target's stepped edge and the rider's power.
+   *
+   * ⚠️ **While the workout is paused BOTH paths of either kind are empty
+   * strings** (#1313, the owner's ruling of 2026-10-13): no target, range,
+   * power or heart-rate line is drawn. The kind and {@link laneHeight} are
+   * kept, so the lane holds its place, and the bar and the text are drawn as
+   * ever. {@link workoutStripName} says no more than is drawn.
+   */
+  readonly lane:
+    | { readonly kind: 'power'; readonly target: string; readonly power: string }
+    | { readonly kind: 'heart-rate'; readonly range: string; readonly heartRate: string };
+  /** The lane's height, in its own drawing units. */
+  readonly laneHeight: number;
+  readonly progress: {
+    /** The part ridden, as a closed bar from the start to now. Empty at the start. */
+    readonly done: string;
+    readonly now: string;
+    readonly nowFraction: number;
+  };
+}
+
+/**
+ * What the HUD's strip draws: one lane, and the bar. Paused, the lane's two
+ * paths are both empty and only the bar is drawn (@see WorkoutStripPaths.lane).
+ */
+export function workoutStripPaths(input: WorkoutGraphInput): WorkoutStripPaths {
+  const samples = windowed(input);
+  const total = input.timeline.totalSeconds;
+  const elapsed = Math.min(Math.max(0, input.elapsedSeconds), Math.max(0, total));
+  const fraction = total > 0 && Number.isFinite(elapsed / total) ? elapsed / total : 0;
+  const x = coordinate(fraction * CHART_WIDTH);
+  const heartRate =
+    samples.at(-1)?.range === undefined ? undefined : heartRateLane(samples, input.elapsedSeconds);
+  const trace = heartRate === undefined ? traceLane(samples, input.elapsedSeconds) : undefined;
+  // ⚠️ Paused, the lane is left EMPTY (#1313, the owner's ruling): the
+  // strip's text and bar say the pause, and a dashed target and a trace
+  // running to the right edge say a ride that is not happening. The lane
+  // keeps its kind and height so the panel does not move.
+  const drawn = !isPaused(input);
+  return {
+    lane:
+      heartRate !== undefined
+        ? {
+            kind: 'heart-rate',
+            range: drawn ? heartRate.rangeEdges : '',
+            heartRate: drawn ? heartRate.line : '',
+          }
+        : {
+            kind: 'power',
+            target: drawn ? (trace?.targetEdge ?? '') : '',
+            power: drawn ? (trace?.power ?? '') : '',
+          },
+    laneHeight: heartRate !== undefined ? HEART_RATE_LANE_HEIGHT : TRACE_LANE_HEIGHT,
+    progress: {
+      done: fraction > 0 ? `M0 0H${x}V${coordinate(STRIP_PROGRESS_HEIGHT)}H0Z` : '',
+      now: `M${x} ${coordinate(-STRIP_NOW_OVERHANG)}V${coordinate(
+        STRIP_PROGRESS_HEIGHT + STRIP_NOW_OVERHANG,
+      )}`,
+      nowFraction: fraction,
+    },
+  };
+}
+
+/**
+ * What the graph says under itself on the Ride screen — the owner's ruling on
+ * #1307: the lanes carry titles, so the paragraph that walked them top to
+ * bottom is gone. What is left explains the two marks a title cannot: the
+ * dashed outline at the now line, and the dotted one a re-plan leaves.
+ */
+export const GRAPH_KEY_REPLACED = 'The dotted outline is the plan before it was changed.';
+
+/** Who asked for the target the trainer does not hold, as the sentences say it. */
+const ASKER: Readonly<Record<HeldInstead['by'], string>> = {
+  plan: 'the plan',
+  hold: 'the heart-rate hold',
+};
+
+/** A number with its unit, joined so that a line cannot break between them. */
+const watts = (value: number): string => `${String(value)}\u00a0W`;
+
+/**
+ * The sentence for the shapes drawn at the now line while the trainer holds
+ * something it was not asked. It never points at a shape that is not there:
+ * at 0 W there is no step to shade; a target that was not sent has no step;
+ * an eased hold has no outline.
+ */
+export function graphKeyHeld(held: HeldInstead): string {
+  if (held.plannedWatts === undefined) {
+    // An eased hold: a step, and no outline.
+    return held.heldWatts !== undefined && held.heldWatts > 0
+      ? `At the line, the shaded step is what the trainer holds while the heart-rate hold is eased, ${watts(held.heldWatts)}.`
+      : `The heart-rate hold is eased and the trainer confirmed ${watts(held.heldWatts ?? 0)}, so nothing is shaded at the line.`;
+  }
+  const asked = `At the line, the dashed outline is what ${ASKER[held.by]} asks for now, ${watts(
+    held.plannedWatts,
+  )}.`;
+  if (held.why === 'not-sent' || held.heldWatts === undefined) {
+    return `${asked} No target was sent for it, so nothing is shaded.`;
+  }
+  return held.heldWatts > 0
+    ? `${asked} The shaded step is what the trainer confirmed instead, ${watts(held.heldWatts)}.`
+    : `${asked} The trainer confirmed ${watts(held.heldWatts)} instead, so nothing is shaded.`;
+}
+
+/** Everything said under the graph, or an empty string when there is nothing to explain. */
+export function workoutGraphKey(input: WorkoutGraphInput): string {
+  const held = heldInstead(input);
+  return [
+    ...(held === undefined ? [] : [graphKeyHeld(held)]),
+    ...((input.replaced ?? []).length > 0 ? [GRAPH_KEY_REPLACED] : []),
+  ].join(' ');
+}
+
+/**
+ * Every value the graph reads from an input apart from its three arrays
+ * (`timeline`, `trace`, `replaced`), as one string — #1313. Two inputs with
+ * the same key and the same three arrays draw the same graph and say the same
+ * words, so `WorkoutGraph.tsx` recomputes only when one of the four changes.
+ *
+ * ⚠️ Why: the controller's snapshot is a new object on every change of the
+ * ride — a power or heart-rate notification, several a second — while what
+ * the graph draws changes about once a second. Keyed on the object, every
+ * path and sentence was worked out again about six times a second.
+ *
+ * ⚠️ A field added to {@link WorkoutGraphInput} must be added here, or the
+ * graph goes on drawing the value from before it changed. `WorkoutGraph.test.tsx`
+ * §"the memo key" changes every field of a full input in turn and requires a
+ * new key for each.
+ */
+export function workoutGraphMemoKey(input: WorkoutGraphInput): string {
+  return JSON.stringify([
+    input.elapsedSeconds,
+    input.holdingWatts,
+    input.thresholdWatts,
+    input.hold === undefined ? 'no hold' : [input.hold.reason, input.hold.target],
+    // Only its presence is read.
+    input.rescue !== undefined,
+    input.status,
+    input.hasControl,
+    input.targetConfirmed,
+    // Absent is not the same as two readings that are not live: absent, the
+    // newest sample's are read (`readingsNow`).
+    input.live === undefined ? 'no live' : [input.live.power, input.live.heartRate],
+    input.raisedFromWatts,
+    input.refused,
+  ]);
+}
+
+/** The newest sample the graph may read: inside the window and no later than now. */
+function newest(input: WorkoutGraphInput): WorkoutTraceSample | undefined {
+  return windowed(input).at(-1);
+}
+
+/**
+ * The rider's power and heart rate NOW: live where a controller says
+ * ({@link WorkoutGraphInput.live}), and the newest sample's for a drawing
+ * with none behind it.
+ */
+function readingsNow(input: WorkoutGraphInput): {
+  readonly power: number | undefined;
+  readonly heartRate: number | undefined;
+} {
+  if (input.live !== undefined) {
+    return input.live;
+  }
+  const last = newest(input);
+  return { power: last?.power, heartRate: last?.heartRate };
+}
+
+/** How long is left of the block being ridden, as a clock, or `undefined` outside one. */
+export function leftInBlock(input: WorkoutGraphInput): string | undefined {
+  const segment = segmentNow(input.timeline.segments, input.elapsedSeconds);
+  return segment === undefined
+    ? undefined
+    : formatDuration(Math.ceil(segment.endsAt - input.elapsedSeconds));
+}
+
+/** A lane's caption: what the lane is, and the numbers that matter in it now. */
+export interface LaneLabel {
+  readonly title: string;
+  readonly reading: string;
+}
+
+export const GRAPH_TITLE_PLAN = 'Whole workout';
+export const GRAPH_TITLE_HEART_RATE = 'Heart rate';
+/**
+ * ⚠️ "min", not "minutes": measured, not taste. At 1280×800 a paused hold has
+ * three captions side by side, this lane's the longest ("Paused · Target
+ * 50 W · You 0 W"), and on the CI runner's fonts they fit on one line each
+ * with less than 4 % to spare. The shorter title is 26 px.
+ */
+export const GRAPH_TITLE_TRACE = 'Last 5 min';
+
+/**
+ * What the trainer holds, in the few words a caption and the HUD strip have,
+ * in its parts: two in a pause ("Paused" and the target), one otherwise.
+ * {@link targetWords} is their join; the strip writes them one under the other
+ * on a phone (#1313).
+ * ⚠️ From {@link heldNow} and {@link heldInstead} and nothing else.
+ */
+function targetParts(
+  input: WorkoutGraphInput,
+  withAsk: boolean,
+): readonly [string] | readonly [string, string] {
+  const held = heldNow(input);
+  const said = held === undefined ? 'No target' : `Target ${String(held)} W`;
+  if (isPaused(input)) {
+    return ['Paused', said];
+  }
+  const mark = heldInstead(input);
+  if (mark?.why === 'not-sent') {
+    return [
+      withAsk && mark.plannedWatts !== undefined
+        ? `No target sent (plan asks ${String(mark.plannedWatts)} W)`
+        : 'No target sent',
+    ];
+  }
+  if (!withAsk || mark === undefined) {
+    return [said];
+  }
+  return [
+    mark.plannedWatts === undefined
+      ? `${said} (hold eased)`
+      : `${said} (${mark.by} asks ${String(mark.plannedWatts)} W)`,
+  ];
+}
+
+/** {@link targetParts} as one line. */
+function targetWords(input: WorkoutGraphInput, withAsk: boolean): string {
+  return targetParts(input, withAsk).join(' · ');
+}
+
+/**
+ * The numbers written on the Ride screen's graph, lane by lane — #1307's
+ * second pass: a graph with no number on it could not be read against
+ * anything.
+ *
+ * ⚠️ The target is {@link heldNow} and the readings are {@link readingsNow}:
+ * live, so a pause or a lost link is said here as it happens.
+ */
+export function workoutGraphLabels(input: WorkoutGraphInput): {
+  readonly plan: LaneLabel;
+  readonly heartRate: LaneLabel | undefined;
+  readonly trace: LaneLabel;
+} {
+  const now = readingsNow(input);
+  const lane = rangedSamples(windowed(input)).length > 0;
+  const power = finite(now.power) ? `You ${String(Math.round(now.power))} W` : 'No power reading';
+  return {
+    plan: {
+      title: GRAPH_TITLE_PLAN,
+      reading: `${formatDuration(input.elapsedSeconds)} of ${formatDuration(
+        input.timeline.totalSeconds,
+      )}`,
+    },
+    heartRate: !lane
+      ? undefined
+      : {
+          title: GRAPH_TITLE_HEART_RATE,
+          reading: finite(now.heartRate)
+            ? `${String(Math.round(now.heartRate))} bpm`
+            : 'No reading',
+        },
+    trace: { title: GRAPH_TITLE_TRACE, reading: `${targetWords(input, true)} · ${power}` },
+  };
+}
+
+/**
+ * The HUD strip's one line: the numbers that matter for the lane it drew. In
+ * a heart-rate hold, heart rate, the range and the confirmed target the hold
+ * has set; otherwise the confirmed target and how long is left of the block.
+ * Paused, that and what the trainer holds — the strip has 270 px.
+ */
+export function workoutStripText(input: WorkoutGraphInput): string {
+  return workoutStripLines(input).join(STRIP_SEPARATOR);
+}
+
+/** Between the strip's two parts, where they are on one line. */
+export const STRIP_SEPARATOR = ' · ';
+
+/**
+ * {@link workoutStripText} in its parts, which the strip writes on one line
+ * where it is wide enough and as two where it is not (a phone, #1313) — the
+ * same words, divided only where the one line has its separator. One part or
+ * two.
+ */
+export function workoutStripLines(input: WorkoutGraphInput): readonly [string, ...string[]] {
+  if (isPaused(input)) {
+    return targetParts(input, false);
+  }
+  const target = targetWords(input, false);
+  const last = newest(input);
+  if (last?.range !== undefined) {
+    const range = `range ${String(last.range.low)}–${String(last.range.high)}`;
+    // ⚠️ "— bpm", the HUD's own mark for a reading that is not there
+    // (`hud/fields.ts`), and not "No heart rate": measured in the pinned
+    // Chromium, "No heart rate, range 130–140 · Target 167 W" is 271.5 px in a
+    // 270 px strip. The image's name still says it in words.
+    const heartRate = readingsNow(input).heartRate;
+    return [`${finite(heartRate) ? String(Math.round(heartRate)) : '—'} bpm, ${range}`, target];
+  }
+  const left = leftInBlock(input);
+  return left === undefined ? [target] : [target, `${left} left in block`];
+}
+
+/**
+ * What the graph shows, in words — its text equivalent (SC 1.1.1), and the
+ * name of the image. It says the numbers the picture is drawn from and
+ * describes no colour.
+ */
+export function workoutGraphText(
+  input: WorkoutGraphInput,
+  options: { readonly lines?: boolean } = {},
+): string {
+  // `lines: false` is the HUD strip in a pause (#1313): it draws no line, so
+  // its name does not give the numbers a line would have shown.
+  const lines = options.lines ?? true;
+  const parts = [
+    `Workout graph.${isPaused(input) ? ' Paused.' : ''} ${durationText(
+      Math.max(0, input.elapsedSeconds),
+    )} of ${durationText(input.timeline.totalSeconds)} ridden.`,
+  ];
+  const left = leftInBlock(input);
+  if (left !== undefined) {
+    parts.push(`${left} left in this block.`);
+  }
+  const mark = heldInstead(input);
+  if (mark?.why === 'not-sent') {
+    parts.push(
+      `No target was sent for this block, which asks for ${String(mark.plannedWatts ?? 0)} W.` +
+        (mark.heldWatts === undefined
+          ? ''
+          : ` The trainer still holds ${String(mark.heldWatts)} W from before it.`),
+    );
+  } else if (finite(input.holdingWatts)) {
+    // ⚠️ "Last confirmed" is `holdingWatts` itself, and is true with control
+    // lost too; what is added to it is only ever from `heldInstead`.
+    const confirmed = `Target the trainer last confirmed: ${String(input.holdingWatts)} W`;
+    parts.push(
+      mark === undefined
+        ? `${confirmed}.`
+        : mark.plannedWatts === undefined
+          ? `${confirmed}. The heart-rate hold is eased.`
+          : `${confirmed}, where ${ASKER[mark.by]} asks for ${String(mark.plannedWatts)} W.`,
+    );
+  }
+  const now = readingsNow(input);
+  if (lines && finite(now.power)) {
+    parts.push(`Your power: ${String(Math.round(now.power))} W.`);
+  }
+  // ⚠️ While the heart-rate lane is DRAWN — a hold inside the window — and
+  // not only while one is running: the name says every number on the image.
+  const range = rangedSamples(windowed(input)).at(-1)?.range;
+  if (lines && range !== undefined) {
+    parts.push(
+      finite(now.heartRate)
+        ? `Heart rate: ${String(Math.round(now.heartRate))} bpm, with a chosen range of ` +
+            `${String(range.low)}–${String(range.high)} bpm.`
+        : `No heart rate, with a chosen range of ${String(range.low)}–${String(range.high)} bpm.`,
+    );
+  }
+  if ((input.replaced ?? []).length > 0) {
+    parts.push(GRAPH_KEY_REPLACED);
+  }
+  return parts.join(' ');
+}
+
+/** The HUD strip's name: the graph's, without what the strip does not draw. */
+export function workoutStripName(input: WorkoutGraphInput): string {
+  // No outline: the strip draws none. No power or heart rate while paused: it draws no line.
+  return workoutGraphText({ ...input, replaced: undefined }, { lines: !isPaused(input) });
+}

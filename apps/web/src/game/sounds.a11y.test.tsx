@@ -85,6 +85,7 @@ const RENDERER: GameRenderer = {
     render: () => undefined,
     setQuality: () => undefined,
     setRiderKit: () => undefined,
+    setSeason: () => undefined,
     resize: () => undefined,
     destroy: () => undefined,
   }),

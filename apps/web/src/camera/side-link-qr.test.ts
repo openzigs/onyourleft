@@ -28,6 +28,7 @@ const OFFER = (() => {
       ],
     },
     Uint8Array.from({ length: 32 }, (_, index) => 255 - index),
+    1_792_512_345_678,
   );
   if (!('text' in made)) {
     throw new Error('no offer');
@@ -76,7 +77,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
 
   it('reads a code the running camera sees', async () => {
     const { controller } = controllerOn(() => photographed(pairingCodeModules(OFFER)));
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     expect(await controller.readPairingCode()).toBe(OFFER);
   });
@@ -91,7 +92,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
 
   it('reads nothing from a camera that is off', async () => {
     const { camera, controller } = controllerOn(() => photographed(pairingCodeModules(OFFER)));
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     controller.turnOff();
     expect(await controller.readPairingCode()).toBeUndefined();
@@ -100,7 +101,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
 
   it('reads nothing from a camera whose track ended by itself', async () => {
     const { camera, controller } = controllerOn(() => photographed(pairingCodeModules(OFFER)));
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     camera.endTheTrack();
     expect(await controller.readPairingCode()).toBeUndefined();
@@ -109,7 +110,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
 
   it('reads nothing once the rider withdraws consent', async () => {
     const { camera, controller } = controllerOn(() => photographed(pairingCodeModules(OFFER)));
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     controller.revoke();
     expect(await controller.readPairingCode()).toBeUndefined();
@@ -118,7 +119,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
 
   it('does not count a read as a capture — a code read is not a picture taken', async () => {
     const { controller } = controllerOn(() => photographed(pairingCodeModules(OFFER)));
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     await controller.readPairingCode();
     expect(controller.state().captured).toBe(0);
@@ -132,7 +133,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
       schedule: () => () => undefined,
       loadCodeReader: async () => Promise.reject(new Error('the chunk would not load')),
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     await expect(controller.readPairingCode()).resolves.toBe(PAIRING_READER_UNAVAILABLE);
     // Nothing was read off the camera for a reader that is not there.
@@ -143,7 +144,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
     const { controller } = controllerOn(() => {
       throw new Error('the camera went away');
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     await expect(controller.readPairingCode()).resolves.toBeUndefined();
   });

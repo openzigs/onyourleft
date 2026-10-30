@@ -20,13 +20,13 @@
  *   into `dist/pose/` by `tools/pose/pose-runtime-plugin.ts`, and served from
  *   the same place by the development server;
  * - `tools/precache/precache.ts` excludes `pose/` from the precache, so a rider
- *   who never pairs a side camera never downloads about 17 MB of model and
+ *   who never pairs a side camera never downloads about 19 MB of model and
  *   runtime (spike 0010 §7's warning, and ADR 0026 D-7's trade).
  *
  * ## ⚠️ The runtime reports usage to Google unless it is stopped, and it is stopped here
  *
  * **Found while building #530, and not in spike 0010.** `@mediapipe/tasks-vision`
- * 1.0.1 constructs a usage logger with every task (`vision_bundle.mjs`, the
+ * 1.1.1 constructs a usage logger with every task (`vision_bundle.mjs`, the
  * class that posts to `https://odml.pa.googleapis.com/v1/log` with an
  * `x-goog-api-key` read out of the WebAssembly module). It records the task,
  * the running mode, the platform and per-inference timings, and flushes them

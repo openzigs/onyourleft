@@ -29,7 +29,7 @@
  * can be perfectly accessible and say something false.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -38,7 +38,8 @@ import { fileURLToPath } from 'node:url';
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
-import { mount, queryAll } from '../testing/mount';
+import { scriptedInstance } from '../instance/testing';
+import { mount, queryAll, settle } from '../testing/mount';
 
 import { AboutView } from './AboutView';
 
@@ -195,13 +196,31 @@ describe('what the About page claims about the network — #404, then #408', () 
     // #892's review: the browser sends its own headers too, so "nothing else"
     // alone was not true. What the code guarantees is nothing else OF YOURS.
     expect(text).toContain('your internet address and device or browser type');
-    expect(text).toContain('nothing else of yours: no ride, route, position or heart rate');
+    expect(text).toContain('nothing else of yours when you connect: no ride, route, position');
     expect(text).not.toContain('from this version of the app, nothing else');
     expect(text).not.toContain('There is no account, no analytics and no server');
     const mounted = await mount(<AboutView />);
     const link = mounted.container.querySelector('a[href="#/settings/instance"]');
     mounted.unmount();
     expect(link?.textContent).toBe('connect to an instance');
+  });
+
+  it('names what a private room and a sync send, both of which it offers — #778, #1195, #1327', async () => {
+    // Rooms shipped (#784, #785) and so did sync (#1195): the page says what a
+    // room and a sync send, so that a rider is surprised by neither.
+    const text = (await aboutText()).replace(/\s+/g, ' ');
+    expect(text).toContain('the route of a room you make, your power and cadence while you ride');
+    expect(text).toContain('the weight you declare as you join, and a race’s result');
+    // #1327: sync has been offered since #1195, so the page must not say it is not.
+    expect(text).not.toContain('does not offer yet');
+    expect(text).toContain('Syncing with it sends your rides, whole');
+    expect(text).toContain('your rides, whole, with their positions and heart rate');
+    expect(text).toContain('sealed on this device for that instance alone');
+    expect(text).toContain('or sync them with an instance you connected to');
+    // #1215's review: the claims above are about the app as a whole, so they
+    // must not say a room's route or a sync's rides are never sent.
+    expect(text).not.toContain('transmits your rides, your heart rate or your position anywhere');
+    expect(text).toContain('a ride’s name and date go with it');
   });
 });
 
@@ -273,5 +292,141 @@ describe('what the About page says about a ride the app closed on — #411', () 
     expect(text).not.toContain('cannot be lost');
     expect(text).not.toContain('backup');
     expect(text).not.toContain('cloud');
+  });
+});
+
+describe('where the rides are, per platform and per instance — #1450', () => {
+  /**
+   * It said "clearing this browser's site data removes your rides, and there
+   * is no copy anywhere else to restore from" in the Android app too, and with
+   * an instance that keeps a synced ride. It is now History's sentence
+   * (`where-rides-are.ts`), pinned here as literals by the same discipline as
+   * the blocks above.
+   */
+  const BROWSER_ALONE =
+    'Rides are stored on this device. Clearing this browser’s site data ' +
+    'deletes them from this device — export anything you want to keep.';
+  const BROWSER_WITH_INSTANCE =
+    'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
+    'Clearing this browser’s site data deletes them from this device — export anything you ' +
+    'want to keep.';
+  const APP_ALONE =
+    'Rides are stored on this device. Uninstalling the app, or clearing its storage in ' +
+    'Android’s settings, deletes them from this device — export anything you want to keep.';
+  const APP_WITH_INSTANCE =
+    'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
+    'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from ' +
+    'this device — export anything you want to keep.';
+
+  async function said(
+    nativeShell: boolean,
+    instance?: ReturnType<typeof scriptedInstance>,
+  ): Promise<{ readonly sentence: string; readonly page: string }> {
+    const mounted = await mount(<AboutView nativeShell={nativeShell} instance={instance?.port} />);
+    await settle();
+    const sentences = queryAll(mounted.container, 'p')
+      .map((p) => p.textContent ?? '')
+      .filter((text) => text.startsWith('Rides are stored on this device'));
+    const page = (mounted.container.textContent ?? '').replace(/\s+/g, ' ');
+    mounted.unmount();
+    expect(sentences).toHaveLength(1);
+    return { sentence: sentences[0]!, page };
+  }
+
+  const CASES = [
+    {
+      name: 'a browser with no instance',
+      native: false,
+      connected: undefined,
+      want: BROWSER_ALONE,
+    },
+    { name: 'a browser, not connected', native: false, connected: false, want: BROWSER_ALONE },
+    { name: 'a browser, connected', native: false, connected: true, want: BROWSER_WITH_INSTANCE },
+    { name: 'the app with no instance', native: true, connected: undefined, want: APP_ALONE },
+    { name: 'the app, not connected', native: true, connected: false, want: APP_ALONE },
+    { name: 'the app, connected', native: true, connected: true, want: APP_WITH_INSTANCE },
+  ] as const;
+
+  for (const { name, native, connected, want } of CASES) {
+    it(`in ${name}`, async () => {
+      const instance = connected === undefined ? undefined : scriptedInstance({ connected });
+      const { sentence, page } = await said(native, instance);
+      expect(sentence).toBe(want);
+      expect(page).not.toContain('anywhere else');
+      expect(page).not.toContain('nowhere else');
+      if (native) expect(sentence).not.toContain('browser');
+    });
+  }
+
+  it('counts a signed-out instance as one: the rides synced before are still there', async () => {
+    const instance = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    expect((await said(false, instance)).sentence).toBe(BROWSER_WITH_INSTANCE);
+  });
+});
+
+/**
+ * Which copy of the app this is — #1745. A Play install and a direct-download
+ * install cannot update each other, and switching means an uninstall that
+ * deletes the rides on the device, so the Android app says which one it is.
+ * The sentences are literals here for the reason at the top of this file.
+ */
+describe('the About page names the channel the Android app came from', () => {
+  const HEADING = 'Which copy of the app this is';
+  const SWITCHING =
+    'Moving from one to the other means uninstalling this app first, and uninstalling deletes ' +
+    'the rides on this device — export them, or sync them with an instance, before you switch.';
+  const PLAY =
+    'This copy was installed from Google Play. The app is also offered as a direct download, an ' +
+    'APK file from its releases on GitHub, and the two cannot update each other, because each is ' +
+    `signed with a different key. ${SWITCHING}`;
+  const DIRECT =
+    'This copy is the direct download: an APK file, installed from outside Google Play. The copy ' +
+    'on Google Play and this one cannot update each other, because each is signed with a ' +
+    `different key. ${SWITCHING}`;
+  const NOT_RELEASED =
+    'This copy was not built by a release, so it is neither the Google Play copy nor the direct ' +
+    'download, and neither of those can update it. Moving to one of them means uninstalling this ' +
+    'app first, and uninstalling deletes the rides on this device — export them, or sync them ' +
+    'with an instance, before you switch.';
+
+  async function section(props: Parameters<typeof AboutView>[0]): Promise<string | undefined> {
+    const mounted = await mount(<AboutView {...props} />);
+    const heading = queryAll(mounted.container, 'h2').find((h) => h.textContent === HEADING);
+    const text = heading?.parentElement?.querySelector('p')?.textContent ?? undefined;
+    mounted.unmount();
+    return text;
+  }
+
+  it('says Google Play in a Play build', async () => {
+    expect(await section({ nativeShell: true, releaseChannel: 'play' })).toBe(PLAY);
+  });
+
+  it('says the direct download in an APK build', async () => {
+    expect(await section({ nativeShell: true, releaseChannel: 'direct' })).toBe(DIRECT);
+  });
+
+  it('claims neither channel in an app no release built', async () => {
+    vi.stubEnv('VITE_OYL_RELEASE_CHANNEL', '');
+    try {
+      expect(await section({ nativeShell: true, releaseChannel: undefined })).toBe(NOT_RELEASED);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reads the channel from the build when nothing is passed', async () => {
+    vi.stubEnv('VITE_OYL_RELEASE_CHANNEL', 'play');
+    try {
+      expect(await section({ nativeShell: true })).toBe(PLAY);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('is not shown in a browser, which has neither channel', async () => {
+    expect(await section({ nativeShell: false, releaseChannel: 'play' })).toBeUndefined();
   });
 });

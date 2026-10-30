@@ -61,6 +61,36 @@
  * the end of the workout all silence the tone. `game/audio-cues.ts` holds every
  * one of those rules; this panel only feeds it.
  *
+ * ## Re-plans during the ride — #1244, ADR 0048 D-7
+ *
+ * Two things, and both are the rider's own decision:
+ *
+ * - **The per-ride switch**, in the chooser, off every time the chooser is
+ *   shown (P7). Offered only where a re-plan could happen at all
+ *   ({@link WorkoutPanelProps.replansAvailable}), with **the whole of
+ *   #1245's disclosure** (`workout/replan-disclosure.ts` §`replanDisclosure`)
+ *   written under it, there before it is switched on and never behind a
+ *   disclosure widget: it is what leaves the device. The switch's label and
+ *   every sentence are that module's, which the privacy policy is held to
+ *   word for word, so the screen and the policy cannot say two things. Its
+ *   last sentence, *"This is off. …"*, is shown only while the switch is off.
+ *   ⚠️ #1329 (owner ruling, 2026-10-13): the switch and the disclosure's
+ *   HEADLINE are ABOVE the list, so a rider sees what the switch sends before
+ *   choosing a workout; the other eight sentences, in their order, are under
+ *   the list, because nine sentences above it would push every *Ride* off the
+ *   screen (#422; `rideview.browser.spec.ts` holds both on screen). No word
+ *   of the approved wording changed by the move.
+ * - ***Keep the plan***, while an accepted move waits for the next block: the
+ *   sentence first, then the one 48 px control
+ *   (`design/ride-time-controls.ts`). It is not offered at any other time,
+ *   because there is nothing to keep the plan from.
+ *
+ * A move's sentence and the status lines are `workout/replan-text.ts`'s,
+ * composed on this device; the control's name is `replan-disclosure.ts`'s.
+ * `RideAnnouncer` says the sentence, and the one that says a pause or a lost
+ * trainer discarded a waiting move; nothing here is `live` but the answer to
+ * the rider's own press, *"The plan stays as it was."* (#445's rule).
+ *
  * ## Colour carries nothing
  *
  * The status is a word and the block is a sentence, for `AnalysisView.tsx`'s
@@ -90,12 +120,28 @@ import {
   workoutRescueDetail,
   workoutRescueHeadline,
 } from '../workout/rescue-text';
+import { HOLD_LABEL, holdReading, holdSentence } from '../workout/hold-text';
+import { TargetBand } from '../workout/TargetBand';
+import {
+  REPLAN_KEEP_BUTTON,
+  REPLAN_SWITCH_LABEL,
+  replanDisclosure,
+} from '../workout/replan-disclosure';
+import {
+  PLAN_KEPT,
+  REPLAN_DISCARDED,
+  REPLAN_LABEL,
+  REPLAN_OFF_BUTTON,
+  REPLAN_STARTS_AT_NEXT_BLOCK,
+  REPLANS_OFF,
+  REPLANS_ON_BADGE,
+} from '../workout/replan-text';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 
-import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
+import type { RideWorkoutSnapshot, TrainerSnapshot, WorkoutChoices } from './controller';
 
 /** What each player status says to a rider. */
 const STATUS_TEXT: Readonly<Record<RideWorkoutSnapshot['status'], string>> = {
@@ -108,6 +154,17 @@ const STATUS_TEXT: Readonly<Record<RideWorkoutSnapshot['status'], string>> = {
   finished: 'Finished',
 };
 
+/**
+ * Why the trainer holds more than the block asks, after "Holding … W."
+ * (#1305): the session raised the block's target to the trainer's minimum
+ * (#1297), and "Now: …" still words the block as the workout wrote it.
+ */
+function raisedText(workout: RideWorkoutSnapshot): string {
+  return workout.raisedFromWatts === undefined
+    ? ''
+    : ` This block asks for ${String(workout.raisedFromWatts)} W, which is less than the lowest target this trainer accepts.`;
+}
+
 export interface WorkoutPanelProps {
   readonly trainer: TrainerSnapshot;
   readonly workout: RideWorkoutSnapshot | undefined;
@@ -115,8 +172,35 @@ export interface WorkoutPanelProps {
   readonly port?: WorkoutPort | undefined;
   /** The rider's threshold, or `undefined` when they have not set one. */
   readonly thresholdPower?: Watts | undefined;
-  readonly onStart: (record: WorkoutRecord) => void;
+  /**
+   * Start `record`, with what the rider chose for it in the chooser — #1244:
+   * whether re-plans are on for this ride. `{}` wherever the switch was not
+   * offered, which is off.
+   */
+  readonly onStart: (record: WorkoutRecord, choices: WorkoutChoices) => void;
   readonly onEnd: () => void;
+  /**
+   * Whether a re-plan could happen for a workout started now — #1244: the
+   * device is signed in to an instance and the rider has set their own two
+   * thresholds. `false` or absent, the switch is not shown and every workout
+   * starts with re-plans off.
+   */
+  readonly replansAvailable?: boolean | undefined;
+  /** *Keep the plan* — #1244. Absent, the control is not shown. */
+  readonly onKeepPlan?: (() => void) | undefined;
+  /**
+   * *Switch re-plans off* — #1244's review, ADR 0048 D-7: shown beside *End
+   * workout* while a workout runs with re-plans on, so the policy's *"switch
+   * it off and nothing more is sent"* names a control that exists while
+   * something is being sent. Absent, the control is not shown.
+   */
+  readonly onReplansOff?: (() => void) | undefined;
+  /**
+   * Whether a ride is in progress — #1244's review. The per-ride switch goes
+   * back to off whenever this changes, so *"off at the start of every ride"*
+   * holds for a rider who switched it on and started no workout.
+   */
+  readonly rideInProgress?: boolean | undefined;
   /**
    * Where the rider's announcement choice is read from (#397, #398) — this
    * DEVICE's storage unless a test hands in a double. The sound choice (#400)
@@ -150,7 +234,15 @@ export interface WorkoutPanelProps {
    * reason {@link sideCamera} passes through this panel.
    */
   readonly keepAliveFailed?: boolean | undefined;
+  /**
+   * #1318: the lap taken by hand that ended last, for the ride's one region —
+   * the same reason {@link sideCamera} passes through this panel.
+   */
+  readonly lap?: { readonly number: number; readonly sentence: string } | undefined;
 }
+
+/** The id the re-plan switch's `aria-describedby` names: the disclosure's headline. */
+const REPLAN_DISCLOSURE_HEADLINE_ID = 'oyl-replan-disclosure-headline';
 
 export function WorkoutPanel({
   trainer,
@@ -159,6 +251,10 @@ export function WorkoutPanel({
   thresholdPower,
   onStart,
   onEnd,
+  replansAvailable,
+  onKeepPlan,
+  onReplansOff,
+  rideInProgress,
   announcements,
   announcementPreference,
   power,
@@ -166,9 +262,25 @@ export function WorkoutPanel({
   announcerClock,
   sideCamera,
   keepAliveFailed,
+  lap,
 }: WorkoutPanelProps): JSX.Element {
   const [saved, setSaved] = useState<readonly WorkoutRecord[]>([]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
+  /**
+   * The per-ride switch (#1244, ADR 0048 P7). ⚠️ Off whenever a workout is
+   * loaded, so it is off again the next time the chooser is shown: a choice
+   * made for one ride is not carried into the next.
+   */
+  const [replans, setReplans] = useState(false);
+  const disclosure = replanDisclosure();
+  const loaded = workout !== undefined;
+  useEffect(() => {
+    if (loaded) setReplans(false);
+  }, [loaded]);
+  // Off again whenever a ride starts or ends: a choice is for one ride.
+  useEffect(() => {
+    setReplans(false);
+  }, [rideInProgress]);
   const storage = announcements ?? deviceStorage();
   const [sound, setSound] = useState<CuePreference>(() => readCuePreference(storage));
   /** This panel's sounds — made once, fed on every render. @see game/audio-cues.ts */
@@ -254,6 +366,7 @@ export function WorkoutPanel({
       workout={workout}
       sideCamera={sideCamera}
       keepAliveFailed={keepAliveFailed}
+      lap={lap}
       storage={announcements}
       preference={announcementPreference}
       clock={announcerClock}
@@ -295,9 +408,76 @@ export function WorkoutPanel({
           VISIBLE beside the ride controls, so it is the reading that moves, not
           the notice. `rideview.browser.spec.ts` §"#605" publishes the margin.
         */}
-        <Button variant="secondary" size="ride" type="button" onClick={onEnd}>
-          End workout
-        </Button>
+        {/*
+          ⚠️ #1244's review: *Switch re-plans off* on the SAME row as *End
+          workout*, and not under the plan-change notice. It is the control
+          the privacy policy names for stopping what is being sent, so it is
+          on the screen for as long as anything can be sent, where the other
+          control that ends things is; and on a row of its own under *Keep
+          the plan* it would have pushed that control down by 56 px.
+          `rideview.browser.spec.ts` §"#1244" measures both.
+        */}
+        <div className="oyl-workout-controls">
+          <Button
+            variant="secondary"
+            size="ride"
+            type="button"
+            onClick={onEnd}
+            // #1432: ends the workout's ERG; never stopped by the touch lock.
+            touchLockExempt
+          >
+            End workout
+          </Button>
+          {workout.replan === undefined ||
+          workout.replan.off === true ||
+          onReplansOff === undefined ? null : (
+            <Button variant="secondary" size="ride" type="button" onClick={onReplansOff}>
+              {REPLAN_OFF_BUTTON}
+            </Button>
+          )}
+        </div>
+        {workout.replan?.off !== true ? null : (
+          // The answer to the rider's own press, so it is `live` (#445).
+          // #1329: under the re-plan lines' own label, not the design
+          // system's default "Note".
+          <StatusMessage tone="info" label={REPLAN_LABEL} live>
+            {REPLANS_OFF}
+          </StatusMessage>
+        )}
+        {workout.replan?.waiting === undefined ? null : (
+          // #1244: an accepted re-plan waiting for the next block. The
+          // sentence, then the one control that drops it. Not `live`:
+          // `RideAnnouncer` says it, once.
+          <>
+            <StatusMessage tone="info" label={REPLAN_LABEL}>
+              {workout.replan.waiting.sentence} {REPLAN_STARTS_AT_NEXT_BLOCK}
+            </StatusMessage>
+            {onKeepPlan === undefined ? null : (
+              <Button variant="secondary" size="ride" type="button" onClick={onKeepPlan}>
+                {REPLAN_KEEP_BUTTON}
+              </Button>
+            )}
+          </>
+        )}
+        {workout.replan?.discarded === undefined ? null : (
+          // A pause or a lost trainer discarded the waiting move (D-8). One
+          // sentence, in the snapshot in which the plan ahead and the graph
+          // went back. Not `live`: `RideAnnouncer` says it, once.
+          <StatusMessage tone="info" label={REPLAN_LABEL}>
+            {REPLAN_DISCARDED}
+          </StatusMessage>
+        )}
+        {workout.replan?.kept !== true ? null : (
+          // The answer to the rider's own press, so it is `live` (#445).
+          <StatusMessage tone="info" label={REPLAN_LABEL} live>
+            {PLAN_KEPT}
+          </StatusMessage>
+        )}
+        {workout.replan?.notice === undefined ? null : (
+          // One short line, and never spoken: a failed request changes
+          // nothing about the ride (ADR 0048 D-9).
+          <StatusMessage tone="info">{workout.replan.notice}</StatusMessage>
+        )}
         {workout.rescue === undefined ? null : (
           // #585: the stall rescue's reason, which the workout path used to
           // compute and never show. Not `live`, for the fault's reason below:
@@ -315,6 +495,16 @@ export function WorkoutPanel({
             }}
           >
             {workoutRescueHeadline(workout.rescue)}
+          </StatusMessage>
+        )}
+        {workout.hold === undefined ? null : (
+          // #1240: the heart-rate hold — the range, the target, and one
+          // sentence from `workout/hold-text.ts`, the one module for them.
+          // Kept on the screen: it says what the trainer is being told and
+          // why, which is trainer-control text (#666). Not `live`:
+          // `RideAnnouncer` says it, at most once a minute.
+          <StatusMessage tone="info" label={HOLD_LABEL} kept>
+            {holdSentence(workout.hold)} {holdReading(workout.hold)}
           </StatusMessage>
         )}
         {workout.fault === undefined ? null : (
@@ -339,17 +529,85 @@ export function WorkoutPanel({
           {workout.holdingWatts === undefined
             ? 'The trainer has not confirmed a target yet.'
             : trainer.hasControl
-              ? `Holding ${String(workout.holdingWatts)} W.`
+              ? `Holding ${String(workout.holdingWatts)} W.${raisedText(workout)}`
               : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
+        {/*
+          #1434: the block being ridden against the target the trainer
+          confirmed — the band, the rider's 3 s power and the block's average,
+          the time left, and in ERG who holds what. Read, so after every
+          sentence above (#605's order). Draws nothing paused, in a free ride,
+          a running heart-rate hold or with no confirmed target.
+        */}
+        <TargetBand workout={workout} />
+        {/*
+          #1307: the same workout as a picture is NOT drawn here. It is the
+          Ride screen's own group, after this one (`views/RideView.tsx`), so a
+          landscape tablet can put it under the readings, where there is room
+          for it on screen, rather than at the foot of this narrow column.
+        */}
       </section>
     );
   }
 
   function chooser(): JSX.Element {
+    const offerReplans =
+      replansAvailable === true &&
+      trainer.hasControl &&
+      thresholdPower !== undefined &&
+      saved.length > 0;
     return (
       <section>
-        <h3>Ride a workout</h3>
+        {/*
+          #1244, restored on #1332 (the owner's ruling of 2026-10-14): while
+          the switch is on, two words say so HERE, on the heading's own line,
+          at its end, so nothing under them moves when the switch is pressed.
+          Nothing is shown while it is off, which is the default and sends
+          nothing.
+
+          ⚠️ BESIDE the heading, not inside it (#1244's fourth review): inside
+          the `h3` the heading's name became "Ride a workout Re-plans on",
+          and a heading is what a screen-reader user navigates by. It is a
+          paragraph straight after the heading, so it is read next.
+        */}
+        <div className="oyl-workout-heading">
+          <h3>Ride a workout</h3>
+          {offerReplans && replans ? (
+            <p className="oyl-workout-replans-on" data-oyl-replans-on="">
+              {REPLANS_ON_BADGE}
+            </p>
+          ) : null}
+        </div>
+        {!offerReplans ? null : (
+          // #1244: the per-ride switch, only where a workout can be started
+          // and a re-plan could happen. #1329: ABOVE the list, with the
+          // headline of #1245's disclosure; the rest of it is under the list.
+          <div className="oyl-workout-replans">
+            <label>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={replans}
+                aria-describedby={REPLAN_DISCLOSURE_HEADLINE_ID}
+                onChange={(event) => {
+                  setReplans(event.target.checked);
+                }}
+              />
+              {REPLAN_SWITCH_LABEL}
+            </label>
+            {/*
+              ⚠️ The switch is DESCRIBED by the headline alone, which says
+              what switching it on does in one sentence. The paragraphs are
+              ordinary text in reading order: nine sentences as one accessible
+              description would be read out in one breath on every focus.
+            */}
+            <div data-oyl-replan-disclosure="headline">
+              <p id={REPLAN_DISCLOSURE_HEADLINE_ID}>
+                <strong>{disclosure.headline}</strong>
+              </p>
+            </div>
+          </div>
+        )}
         {loadFault === undefined ? null : (
           <StatusMessage tone="warning" live>
             {loadFault}
@@ -393,7 +651,10 @@ export function WorkoutPanel({
                       setSound(choice);
                       cues.set(choice);
                       cues.begin();
-                      onStart(record);
+                      onStart(
+                        record,
+                        replansAvailable === true && replans ? { replans: true } : {},
+                      );
                     }}
                   >
                     Ride {row.name}
@@ -402,6 +663,18 @@ export function WorkoutPanel({
               );
             })}
           </ul>
+        )}
+        {!offerReplans ? null : (
+          // #1244: the disclosure's remaining sentences, in their order, under
+          // the list (#1329): the headline and the switch are above it.
+          <div data-oyl-replan-disclosure="rest">
+            {disclosure.paragraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+            <p>{disclosure.notNeeded}</p>
+            {/* True only while it is off (`ReplanDisclosure.offUntilOn`). */}
+            {replans ? null : <p>{disclosure.offUntilOn}</p>}
+          </div>
         )}
       </section>
     );

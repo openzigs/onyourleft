@@ -16,7 +16,7 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
   instance/           the self-hostable instance server (#767, ADR 0036, ADR 0037)
                         — one fetch-style handler (`Request → Response`,
                         `src/handler.ts`) behind a thin `node:http` listener
-                        (`src/node-listener.ts`), run as TypeScript by Node 24
+                        (`src/node-listener.ts`), run as TypeScript by Node 26
                         with no build step (`node src/main.ts`). It answers
                         `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
                         `/openapi.json` and `/licences/third-party.txt` on a
@@ -24,9 +24,17 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         identity (#855) and sync (#881) — answers
                         `unavailable` there (below). ⚠️ A reviewer who
                         remembers "and nothing else yet" is reading the old
-                        file. ⚠️ **One third-party runtime dependency since
-                        #769, `kysely`** (ADR 0037 D-9's row): its notices
-                        document says so and `check:notices` holds it. Since
+                        file. ⚠️ **Its third-party runtime closure is
+                        `kysely` (#769), `ws` (#780) and, since #1096, the
+                        AI SDK (`ai`, `@ai-sdk/openai-compatible`)**, each
+                        with an ADR 0037 D-9 row: its notices document says
+                        so and `check:notices` holds it. A reviewer who
+                        remembers "one, `kysely`" is reading the old file.
+                        `src/analysis/` is the post-ride agent (#1096,
+                        #1098): `model.ts` the ONE module that names the
+                        SDK (static or `import()`, `eslint.config.js`),
+                        `agent.ts` the tool-calling loop, `tools/` its
+                        read-only tools. Since
                         #842 it also holds `src/store/` — the `SqlStore` port
                         over SQLite (`node:sqlite` through Kysely, with a
                         forty-line adapter because Kysely reads NO rows from
@@ -56,7 +64,29 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `/ready` and `/metrics` (operator-enabled, and
                         only for a request carrying
                         `OYL_INSTANCE_METRICS_TOKEN`) since #791, and every
-                        log line through `log.ts` §`redacted`. Behind a
+                        log line through `log.ts` §`redacted`. Since
+                        #907 it also serves `/report`, the notice page —
+                        the instance's first HTML (`src/html.ts`: no
+                        script, a CSP, everything escaped) for anybody
+                        with no account, migration 0026's append-only
+                        `notice` table, and `GET /v1/moderation/notices`;
+                        `moderation/notices.ts` says what it keeps. Since
+                        #910 a suspension or a hidden name needs a
+                        statement of reasons (migration 0027, append-only,
+                        `moderation/statements.ts`), and `GET
+                        /v1/statements` is the THIRD route a way-out
+                        session reaches; since #911 an appeal against a
+                        statement (migration 0028, decided once) is the
+                        FOURTH. Since #912 a notice's steps are recorded
+                        beside it (migration 0029, append-only), and
+                        `moderation/record.ts` is the export. Since #913
+                        one item (a room, its route, a row of a result) is
+                        hidden alone (migration 0030, `hideItem`), and
+                        `rooms/rooms.ts`'s join, route and results reads
+                        each ask `listHiddenItemsOfRoom`. Since
+                        #909 `/terms` serves the operator's own terms file
+                        (`src/terms.ts`, never a default), named by date in
+                        `GET /instance`. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only
@@ -64,15 +94,20 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         (migrate, backup, restore, verify, room-open);
                         `deploy/home/` is #807's compose file and #52's
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
-                        measurement. Since #881 it also holds `src/sync/` —
+                        measurement, and `tools/replan-round-trip.ts` #1235's
+                        (an analysis job timed start to decrypted result;
+                        spike 0023). Since #881 it also holds `src/sync/` —
                         ingestion of a signed record and its original file
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and
                         tombstones (#776), and account export and deletion
-                        (#35) — and migration 0009, served only by a handler
-                        HANDED a `sync`, which `src/instance.ts` does not yet
-                        (it hands the accounts, and no sync), so every
-                        sync route answers `unavailable` on a running box.
+                        (#35) — and migration 0009, served by a handler
+                        HANDED a `sync`, which `src/instance.ts` does since
+                        #1195 — ONLY on an instance holding keys, because
+                        every sync route is sealed-only (ADR 0047 D-7) and a
+                        keyless instance seals nothing; there every sync route
+                        still answers `unavailable`. Its files go under the
+                        blob directory's `objects/`, which `backup` copies.
                         Every sync route declares `reaches: 'own'` (#83's
                         choke point). ⚠️ It depends on `@onyourleft/fit`
                         (workspace, Apache-2.0) to decode the file it is sent
@@ -93,7 +128,57 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         and checked on EVERY request (`address.ts`); a
                         refused or unset address turns the index off, never
                         the instance. `src/instance.ts` mounts it; sync does
-                        not feed it yet (above). ⚠️ Only `src/store/` may
+                        not feed it yet (above). Since #1189 it also holds
+                        `src/keys/` — the instance's Ed25519 identity key and
+                        rotating X25519 encryption key (ADR 0047 D-4, D-5),
+                        wrapped under `OYL_INSTANCE_SECRET_KEY` in migration
+                        0015's table, `GET /v1/instance/keys`, and the
+                        `instance-key` operator commands; no secret, no keys.
+                        Since #1203 every pass that writes a key — the
+                        instance's timer or an operator command — holds
+                        migration 0016's key lease, and is refused `busy`
+                        while another process does.
+                        Since #1191 it also holds `src/sealed/` —
+                        `POST /v1/sealed` (ADR 0047 D-8, D-9): opened, the
+                        device signature checked under the SESSION's key,
+                        120 s freshness, a durable replay record (migration
+                        0017), and the inner request dispatched through the
+                        same route table; a route marked `sealed: 'only'` is
+                        reachable no other way. The envelope, AAD, padding
+                        and framing are `packages/domain/src/sealed/`.
+                        Since #1192 every ADR 0047 D-7 phase-1 route is
+                        marked, and a plaintext request to one is
+                        `sealed_required` on an instance that holds keys
+                        (none: plaintext as before); `sealed/phase-one.ts`
+                        and, since #1210, `sealed/phase-two.ts` (sign-in,
+                        account, blocks, reports, room HTTP, session;
+                        #1382 added statements, appeals and the in-room
+                        report and host removal) are
+                        the committed lists the table is held to, and a
+                        test world's `call` seals a marked route itself.
+                        Since #1095 `src/analysis/jobs.ts` is the job
+                        engine (migration 0020, sealed-only routes, an SSE
+                        stream with `Last-Event-ID` resume and a heartbeat
+                        on injected timers); docs/architecture.md
+                        §"Analysis jobs — #1095" says what it keeps.
+                        Since #1229 a start may name the synced ride
+                        (`rideId`, migration 0021, checked to be the
+                        caller's), and the engine hands the agent the
+                        history index — it was handed none before.
+                        Since #1243 a second job type, a re-plan during
+                        the ride (ADR 0048): `POST /v1/analysis/replans`,
+                        told apart by `template_version` (`re-plan-1`),
+                        its own input, template, tools and budgets in
+                        `src/analysis/replan-*.ts`; it answers one
+                        `Proposal` or none and writes nothing —
+                        docs/architecture.md §"Re-plan jobs — #1243".
+                        Since #1251 `src/analysis/hosted-test.ts` is the
+                        test question: `POST /v1/analysis/hosted/test`,
+                        sealed-only, two fixed sentences on the rider's own
+                        key through `source.ts` §`modelForSource` — the
+                        gate a job passes — answering a closed word and
+                        never the service's own.
+                        ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
@@ -105,7 +190,8 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         is the first deploy target — built from the
                         REPOSITORY ROOT since #780, cut to an allowlist by
                         `Dockerfile.dockerignore`, with the production
-                        closure (`kysely`, `ws`, three workspace packages)
+                        closure (`kysely`, `ws`, the AI SDK, and five
+                        workspace packages — `packages/fit` since #1195)
                         installed from the lockfile;
                         `scripts/check-instance-image.sh` builds it, runs the
                         migrate step in it, and asks `/health` inside the
@@ -122,6 +208,15 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
+                        ⚠️ **A race names its riders and sends standings
+                        since #1347** (ADR 0051, protocol 2): `name` once a
+                        seat, from the admission's public name, and after
+                        every frame `standings` with the ROOM's time gap to
+                        each recipient and live W/kg; a group ride neither.
+                        ⚠️ **And drafts since #787** (ADR 0038 D-4): every
+                        `k` from the distances the room holds, before the
+                        tick re-simulates; a room's maker may turn it off
+                        (migration 0024), and off is `k = 1` for everybody.
                         ⚠️ **Mounted by two adapters since #780**, and a
                         reviewer who remembers "not by the instance" is
                         reading the old file: the Node adapter
@@ -171,9 +266,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         every adapter, byte-identical text per socket; #780
                         adds itself to that file's `ADAPTERS`
     src/rooms/          a rider's room (#784, #785): `POST /v1/rooms` makes a
-                        PRIVATE group ride or race on the creator's own route
-                        (its GPX, relayed by content hash; no field makes a
-                        room public — public rooms wait for #907, #910, #911),
+                        group ride or race on the creator's own route (its
+                        GPX, relayed by content hash), PRIVATE unless
+                        `visibility: public` (#788: operator's switch, #775's
+                        eligibility, blocks, 3 a day; `GET /v1/rooms/public`
+                        lists by start then made; `POST /v1/rooms/{roomId}/join`),
                         with a 75-bit code (`code.ts`) stored only as its
                         SHA-256; `POST /v1/rooms/join` (the code in a body,
                         rate-limited per athlete and per address, right or

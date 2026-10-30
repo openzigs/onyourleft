@@ -98,8 +98,10 @@ async function openPort(): Promise<TransferPort> {
     save: (file) => saved.push(file),
     drafts: { forget: () => forgotten.push('draft') },
     theme: { forget: () => forgotten.push('theme') },
-    hostedModel: { forget: () => forgotten.push('hosted-model') },
+    retiredHostedKey: { forget: () => forgotten.push('retired-hosted-key') },
     instance: { forget: () => forgotten.push('instance') },
+    instanceAnalysis: { forget: () => forgotten.push('instance-analysis') },
+    trainerTargets: { forget: () => forgotten.push('trainer-targets') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
@@ -646,16 +648,42 @@ describe('TransferView — exporting', () => {
     if (select === null) {
       throw new Error('the format chooser is not on the page');
     }
-    expect(document.body.textContent).toContain('FIT carries every channel');
+    // FIT carries no lap row's figures until #1471, so the screen says so
+    // rather than that FIT carries everything. Which splits are laps it
+    // carries since #1320, in this client's own mark.
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: each lap’s average heart rate, each lap’s highest heart rate, ' +
+        'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
+        'each lap’s climb. The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(/lap\.[a-z]/);
+    expect(document.body.textContent).not.toContain('FIT carries every channel');
 
     select.value = 'tcx';
     select.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    // Read out of `TCX_LOSSY_CHANNELS` rather than written here, so a codec
-    // that starts carrying temperature changes this sentence without anyone
-    // remembering to.
-    expect(document.body.textContent).toContain('point.temperature');
+    // #1452: in plain words, never the codec's code paths. The list is still
+    // the codec's (`TCX_LOSSY_CHANNELS`), named through `LOSSY_CHANNEL_NAMES`.
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: temperature, the ride’s name, each lap’s climb, ' +
+        'each lap’s distance, moving time. The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(
+      /point\.temperature|activity\.name|activity\.movingTime/,
+    );
+
+    select.value = 'gpx';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: the distance at each point, each lap’s elapsed time, ' +
+        'each lap’s distance, each lap’s average heart rate, each lap’s highest heart rate, ' +
+        'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
+        'which splits are laps and which are part laps, each lap’s climb, moving time. ' +
+        'The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(/point\.distance|lap\.total/);
   });
 
   it('reports a failed export without taking the page down', async () => {
@@ -992,7 +1020,14 @@ describe('TransferView — what it may say about another platform', () => {
     );
     // #672: the palette choice is on this device outside the store, as the
     // half-drawn route is, and the erase forgets both through the port.
-    expect([...forgotten].sort()).toStrictEqual(['draft', 'hosted-model', 'instance', 'theme']);
+    expect([...forgotten].sort()).toStrictEqual([
+      'draft',
+      'instance',
+      'instance-analysis',
+      'retired-hosted-key',
+      'theme',
+      'trainer-targets',
+    ]);
 
     // Now, and only now, read back through a connection nothing on the page
     // is holding — the ride has to be gone from disk rather than from a
@@ -1158,7 +1193,11 @@ describe('TransferView — what it may say about another platform', () => {
 
     // #35: a dialogue that implies more than the architecture can deliver is
     // the worst outcome. These are the three sentences that stop it doing that.
-    expect(document.body.textContent).toContain('nowhere else to ask');
+    // #1104 (G-3): "There is no server … nowhere else to ask" stopped being
+    // true when instances shipped; the screen now says the erase is local.
+    expect(document.body.textContent).not.toContain('There is no server');
+    expect(document.body.textContent).not.toContain('nowhere else to ask');
+    expect(document.body.textContent).toContain('it is finished on this device only');
     expect(document.body.textContent).toContain('already exported');
     expect(document.body.textContent).toContain('signs as a new identity');
   });

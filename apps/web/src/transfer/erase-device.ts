@@ -20,13 +20,11 @@
  * > visible to the user). A deletion dialogue that implies more than the
  * > architecture can deliver is the worst outcome.
  *
- * Here the answer is unusually good and should be said rather than assumed:
- * **there is nowhere else to ask.** Owner decision D6 means nothing has been
- * uploaded, so "delete my data" is complete rather than a request — which is a
- * stronger guarantee than a networked product can make, and the reason #57
- * rejected replication to peers we do not control. That changes the day
- * [#7](https://github.com/openzigs/onyourleft/issues/7) lands, and
- * {@link ERASE_CANNOT_REACH} is where the sentence will have to change with it.
+ * Until instances shipped the answer was **there is nowhere else to ask**.
+ * Since ADR 0036 a rider can sync to an instance and ask it for analyses, so
+ * an erase is complete on this device only, and {@link ERASE_CANNOT_REACH}
+ * says where the other copies are (#1104 removed the screen's "There is no
+ * server" sentence, which had stopped being true).
  *
  * ## The consequence a rider will not expect
  *
@@ -70,12 +68,23 @@ export const ERASE_CONFIRMATION = 'erase everything';
  */
 export const ERASE_REMOVES: readonly string[] = [
   'every ride, with all of its per-second samples',
+  // #1431. Rides the rider deleted are held for 30 days so one deleted by
+  // mistake can come back; an erase takes them too, and named so a rider who
+  // was counting on bringing one back reads that they cannot afterwards.
+  'every ride in Recently deleted, which cannot be brought back afterwards',
   // #221. Both of these went in the cascade and, until that issue, came out in
   // no export — so a rider who did the responsible thing lost them silently and
   // this list did not warn them. They are named separately from the ride
   // because they are separately recoverable: the export now carries the laps
   // inside each activity file and the signed record in a `.record.json` beside
   // it (ADR 0019), so a rider who reads this line has somewhere to go.
+  //
+  // ⚠️ **True of where each lap began and how long it lasted, and since #1312
+  // not of everything a lap holds.** A course lap's climb and its part-lap
+  // mark are in no file (#1321), its averages are not stated in one (they can
+  // be worked out again from the lap's samples), and an import writes no lap
+  // row at all (#1320) — so export everything, erase, import gives the rides
+  // back with no lap table. This line is the rider's warning of exactly that.
   'the laps and splits of every ride',
   // ⚠️ And this one is the irreversible half. ADR 0014 D-7: the signing key
   // cannot be backed up, so a record destroyed here can never be minted again,
@@ -151,12 +160,17 @@ export const ERASE_REMOVES: readonly string[] = [
   // cascades `riderTexts`. The instance's synced copy is not this device's to
   // erase — see the instance line in {@link ERASE_CANNOT_REACH}.
   'your goals, your notes on your rides and the documents you added for the analysis',
-  // #518. Not a store row: the address, model name and key of a hosted model
-  // the rider set up are kept in `localStorage` (`camera/hosted-model.ts`),
-  // where `deleteAthlete` cannot see them. A key to the rider's own account at
-  // somebody else's service is the last thing an erase should leave behind.
-  // {@link eraseDevice} is what makes the line true.
-  'the address, model name and key you entered for a hosted model',
+  // #1103: no line for a hosted model's key any more. From #518 it was kept in
+  // `localStorage` and this list named it; #1103 deletes it at the first launch
+  // (`camera/retired-hosted-key.ts`), so no device holds one to erase. An
+  // erase still forgets it, and the note that it was deleted, in case either
+  // is somehow left ({@link eraseDevice}'s `retiredHostedKey`).
+  // #1428. Not a store row: since #1305 the last target each trainer
+  // acknowledged, and when, is kept in `localStorage`
+  // (`ride/trainer-target-memory.ts`), keyed by the trainer's device id — on
+  // Android its Bluetooth address. `deleteAthlete` cannot see it, and
+  // {@link eraseDevice}'s `trainerTargets` is what makes the line true.
+  'the last power target each trainer you rode on confirmed, when it confirmed it, and which trainer that was',
 ];
 
 /**
@@ -179,31 +193,48 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   //   > a photograph you sent to your own machine to be analysed, which is a
   //   > copy that machine holds
   //
-  // D-4's SECOND line — *"a photograph you sent to a hosted model"* — is still
-  // not here, and now for a different reason: #518 built the hosted path, and
-  // the owner ruled it is sent NUMBERS ONLY and never a picture (ADR 0029's
-  // 2026-09-28 amendment). So the line that ships is the one after this, about
-  // what does leave; a line about a photograph would be false in the direction
-  // that frightens.
+  // D-4's SECOND line — *"a photograph you sent to a hosted model"* — was not
+  // here until #1106: #518 built the app's own hosted path, and the owner
+  // ruled it is sent NUMBERS ONLY and never a picture (ADR 0029's 2026-09-28
+  // amendment), which is still so. #1106's line, further down, is about the
+  // one path a photograph does have to a hosted service: through the rider's
+  // instance, by name.
   'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
   // #518, ADR 0029's 2026-09-28 amendment. The hosted service is a third party
-  // and keeps what it keeps; this project cannot compel a deletion. #803
-  // re-read it: the hosted path now sends a ride's numbers when the rider asks
-  // for an analysis (ADR 0029's 2026-09-29 amendment), so the line names them
-  // as well as a question — a line about a question alone would understate
-  // what that service may hold.
-  'a question or a ride’s numbers you sent to a service you chose, on your own key, which is a copy that service holds',
-  // #804, from #828's review. The post-ride ask sends a ride's NUMBERS to the
-  // rider's own computer (ADR 0035 D-9 B), and the privacy policy's erase
-  // paragraph already says an erase cannot reach that copy;
-  // `erase-device.test.ts` holds the two texts together.
-  'a ride’s numbers you sent to your own computer for a write-up, which is a copy that computer holds',
+  // and keeps what it keeps; this project cannot compel a deletion. #1103
+  // removed the path that sent it (ADR 0046 D-1), and the owner ruled on
+  // 2026-10-26 (#1104 G-4) that the line is KEPT in the past tense: a rider
+  // who used it before still has a copy out there.
+  'a question or a ride’s numbers this app sent, before this version, to a service you chose on a key kept on this device, which is a copy that service holds',
+  // #804, from #828's review, and in the past tense since #1103 for the same
+  // ruling: the post-ride ask sent a ride's NUMBERS to the rider's own
+  // computer (ADR 0035 D-9 B, withdrawn). The privacy policy's erase paragraph
+  // says the same; `erase-device.test.ts` holds the two texts together.
+  'a ride’s numbers this app sent, before this version, to your own computer for a write-up, which is a copy that computer holds',
+  // #1106: **ADR 0029 D-4's SECOND line, which the comment above said was not
+  // here** — *"a photograph you sent to a hosted model, which is a copy that
+  // service holds"*. It is true now, by one path: with the rider's own consent
+  // naming the service, their instance sends the side camera's pictures on to
+  // a hosted model on the rider's own key (`camera/instance-pose.ts`). The
+  // line says who sent it and that it was agreed to, because the app itself
+  // still sends a hosted service no picture. The instance keeps none, so the
+  // instance line below needs no change for it.
+  'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds',
+  // #1104 (G-1): since #1251 the rider's instance can send a ride's numbers,
+  // and the parts of their history its model looks up, masked, on to a
+  // hosted service on the rider's own key (`apps/instance`
+  // §`analysis/hosted.ts`). That service's copy is not the instance's to
+  // erase, nor this device's.
+  'a ride’s numbers and the parts of your history your instance sent to a service you agreed to, which is a copy that service holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
   // #777, #778. An erase forgets this device's sign-in to an instance
   // (`instance/instance-port.ts` §`instanceEraser`) and sends nothing; the
   // account the instance holds, and anything it received, are the instance's.
-  // ⚠️ Draft wording awaiting the owner's approval (#880).
-  'your account on an instance you connected to, and anything it received, which is a copy that instance holds',
+  // #1104 (G-2): and what it worked out for the rider — the history index
+  // (ADR 0040), the analyses it wrote (ADR 0046 D-12). The privacy policy's
+  // erase paragraph names each of them; this line stays short because the
+  // list is kept visible and #1026 holds the Files rows to 2x.
+  'your account on an instance you connected to, and anything it received or worked out for you, which is a copy that instance holds',
 ];
 
 /** The reason an erase is refused, or `undefined` when it is not. */
@@ -251,6 +282,8 @@ export interface EraseStore {
     readonly segments: number;
     /** #384. Usually zero — ADR 0029 D-2 keeps nothing unless the rider asked. */
     readonly cameraFrames: number;
+    /** #1431. Rides held in Recently deleted. */
+    readonly recentlyDeleted: number;
   }>;
   /**
    * Puts the athlete row back.
@@ -291,6 +324,12 @@ export interface EraseOutcome {
    * should not be told about a feature it never used.
    */
   readonly cameraFrames: number;
+  /**
+   * Rides in Recently deleted removed — #1431. Named only when non-zero, like
+   * the pictures: no restore copy outlives an erase, and a rider who had some
+   * is told they went.
+   */
+  readonly recentlyDeleted: number;
 }
 
 /**
@@ -326,18 +365,24 @@ export async function eraseDevice(
     readonly drafts?: EraseSideStores | undefined;
     /** The palette choice (#672) — `design/theme-selection.ts` §`themeEraser`. */
     readonly theme?: EraseSideStores | undefined;
-    /** The hosted model and its key (#518) — `camera/hosted-model.ts` §`hostedModelEraser`. */
-    readonly hostedModel?: EraseSideStores | undefined;
+    /** A hosted key from before #1103, and the note that it was deleted — `camera/retired-hosted-key.ts` §`retiredHostedKeyEraser`. */
+    readonly retiredHostedKey?: EraseSideStores | undefined;
     /** This device's sign-in to an instance (#777) — `instance/instance-port.ts` §`instanceEraser`. */
     readonly instance?: EraseSideStores | undefined;
+    /** The note of jobs asked of the instance and not yet seen to end (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`. */
+    readonly instanceAnalysis?: EraseSideStores | undefined;
+    /** The last target each trainer acknowledged, keyed by its device id (#1305) — `ride/trainer-target-memory.ts`. */
+    readonly trainerTargets?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
   const counts = await store.deleteAthlete(athleteId);
   options.drafts?.forget();
   options.theme?.forget();
-  options.hostedModel?.forget();
+  options.retiredHostedKey?.forget();
   options.instance?.forget();
+  options.instanceAnalysis?.forget();
+  options.trainerTargets?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }
@@ -347,6 +392,7 @@ export async function eraseDevice(
     workouts: counts.workouts,
     segments: counts.segments,
     cameraFrames: counts.cameraFrames,
+    recentlyDeleted: counts.recentlyDeleted,
   };
 }
 
@@ -366,6 +412,12 @@ export function eraseSentence(outcome: EraseOutcome): string {
     // ⚠️ "picture", not "camera frame". The list a rider reads before pressing
     // is in their words, and so is the sentence afterwards.
     parts.push(`${String(outcome.cameraFrames)} picture${outcome.cameraFrames === 1 ? '' : 's'}`);
+  }
+  if (outcome.recentlyDeleted > 0) {
+    parts.push(
+      // Lower case, as every other part: nothing in this sentence is a name.
+      `${String(outcome.recentlyDeleted)} deleted ride${outcome.recentlyDeleted === 1 ? '' : 's'} held for restore`,
+    );
   }
   // ⚠️ No ride name, no route name, no date. ADR 0004 decision D binds every
   // layer that formats location data into a string, and a route's name is

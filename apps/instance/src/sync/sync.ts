@@ -60,7 +60,7 @@ import {
 } from '@onyourleft/domain';
 
 import { verifyEd25519 } from '../auth/crypto.ts';
-import type { Caller, Outcome } from '../auth/identity.ts';
+import { accountChangeView, type Caller, type Outcome } from '../auth/identity.ts';
 import { BLOB_KEY, type BlobStore } from '../blob/blob-store.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
@@ -78,6 +78,14 @@ import {
   type StreamChannel,
 } from './activity-file.ts';
 import { createContentLock } from './content-lock.ts';
+import { ghostSpeed, type RiderGhost } from './race-ghost.ts';
+
+/**
+ * How many offered rides a ghost request looks through for one the caller may
+ * see (#331). Bounded so a route offered by many riders the caller blocked
+ * costs a fixed amount; past it, no ghost is the answer.
+ */
+export const GHOST_CANDIDATES = 20;
 
 export interface SyncOptions {
   readonly store: SqlStore;
@@ -92,6 +100,13 @@ export interface SyncOptions {
    * §`replaceSyncRow`).
    */
   readonly itemStored?: () => void;
+  /**
+   * The display name another rider is shown as to `viewerId`, or `undefined`
+   * when the viewer may not see them (#331) — `moderation.ts` §`canSee`, then
+   * the public projection, as a room's `nameFor` is. Absent, no ghost is
+   * served: a ghost whose rider cannot be checked is not sent.
+   */
+  readonly ghostRider?: (viewerId: string, subjectId: string) => Promise<string | undefined>;
 }
 
 /** What ingesting a record answers. */
@@ -150,6 +165,8 @@ export interface ManifestEntry {
   readonly activityId: string | null;
   /** A live activity's "may be raced" consent (#793), or `null` for anything else. */
   readonly mayBeRaced: boolean | null;
+  /** The route a live activity is offered to be raced on (#331), or `null`. */
+  readonly raceRouteSha256: string | null;
 }
 
 /** A signed record, as a pulling device fetches it (#776). */
@@ -209,7 +226,41 @@ export interface AccountExport {
     readonly lastUsedAt: number | null;
     readonly revokedAt: number | null;
   }[];
+  /**
+   * The FIRST recovery address bound, or `null` — kept for the version 1
+   * readers that predate a second one (#1194). Every address is in
+   * {@link AccountExport.recoveryEmails}.
+   */
   readonly recoveryEmail: string | null;
+  /**
+   * Every recovery address (#1194, ADR 0047 D-8): when it was confirmed
+   * (`null` for one bound before the hold existed) and the PUBLIC key that
+   * gave it.
+   */
+  readonly recoveryEmails: readonly {
+    readonly address: string;
+    readonly confirmedAt: number | null;
+    readonly boundByKey: string | null;
+  }[];
+  /**
+   * The account-change log (#1193, ADR 0047 D-8): every account-security
+   * change, oldest first, with the PUBLIC key that authorised it.
+   */
+  readonly accountChanges: readonly {
+    readonly id: number;
+    readonly at: number;
+    readonly kind: string;
+    readonly actorKey: string;
+    readonly subjectKey: string | null;
+    readonly via: string | null;
+    readonly address: string | null;
+  }[];
+  /** How far each of the athlete's devices has acknowledged that log (#1193). */
+  readonly accountChangeMarks: readonly {
+    readonly deviceKey: string;
+    readonly acknowledgedThrough: number;
+    readonly acknowledgedAt: number;
+  }[];
   readonly activities: readonly {
     readonly contentSha256: string;
     readonly recordSha256: string;
@@ -219,6 +270,8 @@ export interface AccountExport {
     readonly file: string;
     /** The rider's "may be raced" consent on this ride (#793). Not in the signed record. */
     readonly mayBeRaced: boolean;
+    /** The route this ride is offered to be raced on, or `null` (#331). */
+    readonly raceRouteSha256: string | null;
   }[];
   readonly items: readonly {
     readonly kind: SyncKind;
@@ -265,9 +318,36 @@ export interface AccountExport {
     readonly dimension: number;
     readonly passages: number;
   }[];
+  /**
+   * The write-ups the instance keeps for this athlete (ADR 0046 D-12): the
+   * screened text of each finished analysis job. The job's input and events
+   * are not here.
+   */
+  readonly analysisResults: readonly {
+    readonly jobId: string;
+    readonly source: string;
+    readonly templateVersion: string;
+    readonly endedAt: number;
+    readonly writeUp: string;
+  }[];
+  /**
+   * {@link HOSTED_KEY_HELD} when the instance holds a hosted model key for
+   * this athlete — one they stored (#1199), or the operator's one key held
+   * for them (#1097) — and `null` when it does not. That and nothing else:
+   * never the key, its service or its model.
+   */
+  readonly hostedModelKey: typeof HOSTED_KEY_HELD | null;
+  /**
+   * The athlete's recorded hosted consent (#1199, ADR 0046 Q10): the origin
+   * it names and when it was recorded (Unix seconds), or `null`.
+   */
+  readonly hostedConsent: { readonly origin: string; readonly recordedAt: number } | null;
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
 }
+
+/** What the export says of a hosted model key the instance holds for the athlete (#1097). */
+export const HOSTED_KEY_HELD = 'a hosted model key is held';
 
 /** What the export says it leaves out. Fixed sentences; nothing from the account. */
 export const EXPORT_LEAVES_OUT: readonly string[] = [
@@ -279,6 +359,7 @@ export const EXPORT_LEAVES_OUT: readonly string[] = [
   'The moderation log: what moderators did, and to whom, is the instance’s audit trail and is kept even when an account is deleted. Ask the instance’s operator for what it says about you.',
   'Reports other riders made about you: they are the reporters’, and naming them would tell you who they are.',
   'The history index’s passages and vectors: they are cut from the items above and worked out by the model named in historyIndex, so the same model can make them again from those items, and without it they mean nothing.',
+  'A hosted model key: hostedModelKey says only whether one is held. The key is a secret whoever set it can set again, and this file is meant to be carried around.',
 ];
 
 export interface Sync {
@@ -304,6 +385,26 @@ export interface Sync {
     contentSha256: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ readonly mayBeRaced: boolean }>>;
+  /**
+   * #331: offer one of the caller's consented rides to be raced on a route,
+   * by the SHA-256 of the route's canonical GPX — or withdraw the offer with
+   * `null`. Sent only by the device that signed the ride, after its privacy
+   * zones (`race-ghost.ts`). `not_found` for a ride the caller does not hold
+   * or has not consented to being raced.
+   */
+  setRaceRoute(
+    caller: Caller,
+    contentSha256: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ readonly routeSha256: string | null }>>;
+  /**
+   * #331: ONE other rider's ghost on a route, or `null` — `race-ghost.ts`
+   * says which, and what it carries.
+   */
+  ghost(
+    caller: Caller,
+    routeSha256: string,
+  ): Promise<Outcome<{ readonly ghost: RiderGhost | null }>>;
   /** #776: store an item — a write-up, a side-camera report, a goal, a note, a document. */
   putItem(
     caller: Caller,
@@ -423,12 +524,14 @@ export function createSync(options: SyncOptions): Sync {
       const items = [];
       // Each live ride's consent, which the manifest carries beside it (#793).
       const consent = new Map<string, boolean>();
+      const offered = new Map<string, string | null>();
       let after: ManifestPosition | undefined;
       for (;;) {
         const page = await store.listSyncManifest(caller.athleteId, after, 500);
         for (const row of page) {
           if (row.kind === 'activity' && row.mayBeRaced !== null) {
             consent.set(row.key, row.mayBeRaced);
+            offered.set(row.key, row.raceRouteSha256);
           }
           if (row.kind === 'activity' || row.body === null || row.digest === null) continue;
           items.push({
@@ -443,6 +546,7 @@ export function createSync(options: SyncOptions): Sync {
         if (page.length < 500 || last === undefined) break;
         after = { receivedAt: last.receivedAt, seq: last.seq };
       }
+      const recoveryEmails = await store.listRecoveryEmails(caller.athleteId);
       const records = await store.listActivityRecords(caller.athleteId);
       const activities = [];
       for (const record of records) {
@@ -453,6 +557,7 @@ export function createSync(options: SyncOptions): Sync {
           record: storedRecord(record),
           file: `/v1/sync/files/${record.contentSha256}`,
           mayBeRaced: consent.get(record.contentSha256) ?? false,
+          raceRouteSha256: offered.get(record.contentSha256) ?? null,
         });
       }
       return {
@@ -480,7 +585,20 @@ export function createSync(options: SyncOptions): Sync {
             lastUsedAt: key.lastUsedAt,
             revokedAt: key.revokedAt,
           })),
-          recoveryEmail: (await store.getRecoveryEmail(caller.athleteId))?.address ?? null,
+          recoveryEmail: recoveryEmails[0]?.address ?? null,
+          recoveryEmails: recoveryEmails.map((row) => ({
+            address: row.address,
+            confirmedAt: row.confirmedAt,
+            boundByKey: row.boundByKey,
+          })),
+          accountChanges: (await store.listAccountChanges(caller.athleteId)).map(accountChangeView),
+          accountChangeMarks: (await store.listAccountChangeMarks(caller.athleteId)).map(
+            (mark) => ({
+              deviceKey: mark.deviceKey,
+              acknowledgedThrough: mark.acknowledgedThrough,
+              acknowledgedAt: mark.acknowledgedAt,
+            }),
+          ),
           activities,
           items,
           results: (await store.listResults(caller.athleteId)).map((result) => ({
@@ -509,6 +627,24 @@ export function createSync(options: SyncOptions): Sync {
             dimension: row.dimension,
             passages: row.passages,
           })),
+          analysisResults: (await store.listAnalysisResults(caller.athleteId)).map((result) => ({
+            jobId: result.jobId,
+            source: result.source,
+            templateVersion: result.templateVersion,
+            endedAt: result.endedAt,
+            writeUp: result.writeUp,
+          })),
+          hostedModelKey:
+            (await store.getAthleteHostedKey(caller.athleteId)) !== undefined ||
+            (await store.getHostedModelKey())?.athleteId === caller.athleteId
+              ? HOSTED_KEY_HELD
+              : null,
+          hostedConsent: await (async () => {
+            const consent = await store.getHostedConsent(caller.athleteId);
+            return consent === undefined
+              ? null
+              : { origin: consent.origin, recordedAt: consent.recordedAt };
+          })(),
           notIncluded: EXPORT_LEAVES_OUT,
         },
       };
@@ -558,6 +694,7 @@ export function createSync(options: SyncOptions): Sync {
                 : storedRecord({ ...row, contentSha256: row.key, signedRecord: row.signedRecord })
                     .claims.activityId,
             mayBeRaced: row.signedRecord === null ? null : row.mayBeRaced,
+            raceRouteSha256: row.signedRecord === null ? null : row.raceRouteSha256,
           })),
           next:
             rows.length > limit && last !== undefined
@@ -586,6 +723,41 @@ export function createSync(options: SyncOptions): Sync {
       if (typeof mayBeRaced !== 'boolean') return invalid('mayBeRaced', 'must be true or false');
       const set = await store.setActivityMayBeRaced(caller.athleteId, contentSha256, mayBeRaced);
       return set ? { ok: true, value: { mayBeRaced } } : refuse('not_found');
+    },
+
+    setRaceRoute: async (caller, contentSha256, body) => {
+      if (!BLOB_KEY.test(contentSha256)) return refuse('not_found');
+      const { routeSha256 } = body;
+      if (!(
+        routeSha256 === null ||
+        (typeof routeSha256 === 'string' && BLOB_KEY.test(routeSha256))
+      )) {
+        return invalid('routeSha256', 'must be a lower-case SHA-256 in hex, or null');
+      }
+      const set = await store.setActivityRaceRoute(caller.athleteId, contentSha256, routeSha256);
+      return set ? { ok: true, value: { routeSha256 } } : refuse('not_found');
+    },
+
+    ghost: async (caller, routeSha256) => {
+      const none = { ok: true, value: { ghost: null } } as const;
+      if (!BLOB_KEY.test(routeSha256) || options.ghostRider === undefined) return none;
+      const candidates = await store.listRaceableOnRoute(
+        caller.athleteId,
+        routeSha256,
+        GHOST_CANDIDATES,
+      );
+      for (const candidate of candidates) {
+        const rider = await options.ghostRider(caller.athleteId, candidate.athleteId);
+        if (rider === undefined) continue;
+        const bytes = await blobs.get(candidate.contentSha256);
+        if (bytes === undefined) continue;
+        const decoded = decodeActivityFile(bytes);
+        if (!decoded.ok) continue;
+        const speed = ghostSpeed(decoded.samples);
+        if (speed === undefined) continue;
+        return { ok: true, value: { ghost: { rider, ...speed } } };
+      }
+      return none;
     },
 
     putItem: async (caller, kind, key, body) => {

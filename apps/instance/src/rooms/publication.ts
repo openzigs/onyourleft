@@ -107,16 +107,52 @@ function flagsOf(durations: readonly number[]): PublishedFlag[] {
 }
 
 /**
+ * The published order of a race's result, row by row (#913): finishers by
+ * place, a place nobody holds (an erased rider's) as `undefined`, then
+ * everyone who did not finish. Row N of the published result is entry N − 1
+ * here, whoever is viewing — which is what makes `result:<room>:<row>` a
+ * stable identifier (`@onyourleft/domain` §`moderation-item.ts`).
+ */
+export function publishedOrder(
+  results: readonly ResultForPublication[],
+  finishers = 0,
+): readonly (ResultForPublication | undefined)[] {
+  const placed = results
+    .filter((result) => result.place !== null)
+    .sort((a, b) => (a.place as number) - (b.place as number));
+  const order: (ResultForPublication | undefined)[] = [];
+  let expected = 1;
+  const nobodyUpTo = (last: number): void => {
+    for (; expected <= last; expected += 1) order.push(undefined);
+  };
+  for (const finisher of placed) {
+    const place = finisher.place as number;
+    nobodyUpTo(place - 1);
+    order.push(finisher);
+    expected = place + 1;
+  }
+  nobodyUpTo(finishers);
+  for (const other of results.filter((result) => result.place === null)) order.push(other);
+  return order;
+}
+
+/**
  * THE publication: every per-rider figure other riders are shown about a race.
  * Named fields only — a stored row is never spread into what is published.
  *
  * @param finishers how many riders crossed the line (`room_course.finishers`),
  * so an erased rider who finished LAST is still a place, as "a rider".
+ * @param hiddenOwners the riders whose row a moderator hid (#913), by athlete
+ * id and not by row number, because an erased rider moves the rows behind
+ * theirs up: shown to
+ * everybody else as "a rider" with no figure — the place, and nothing that was
+ * theirs — and to their own rider as before. Nothing is deleted.
  */
 export function publishRace(
   results: readonly ResultForPublication[],
   viewing: Viewing,
   finishers = 0,
+  hiddenOwners: ReadonlySet<string> = new Set(),
 ): PublishedResult {
   const row = (result: ResultForPublication): PublishedRow => {
     const you = result.athleteId === viewing.viewerAthleteId;
@@ -129,33 +165,21 @@ export function publishRace(
       flags: flagsOf(result.flaggedDurationsSeconds),
     };
   };
-  const placed = results
-    .filter((result) => result.place !== null)
-    .sort((a, b) => (a.place as number) - (b.place as number));
-  const rows: PublishedRow[] = [];
-  let expected = 1;
-  // A place with nobody in it: its rider erased their account (ruling Q2).
-  // Shown as "a rider" — the place, and nothing that was theirs.
-  const nobodyUpTo = (last: number): void => {
-    for (; expected <= last; expected += 1) {
-      rows.push({
-        place: expected,
-        displayName: null,
-        you: false,
-        finishMs: null,
-        wattsPerKilogram: null,
-        flags: [],
-      });
-    }
-  };
-  for (const finisher of placed) {
-    const place = finisher.place as number;
-    nobodyUpTo(place - 1);
-    rows.push(row(finisher));
-    expected = place + 1;
-  }
-  // And after the last place still held, up to how many crossed the line.
-  nobodyUpTo(finishers);
-  for (const other of results.filter((result) => result.place === null)) rows.push(row(other));
+  // A place with nobody in it: its rider erased their account (ruling Q2) —
+  // or a row a moderator hid (#913). Shown as "a rider": the place, and
+  // nothing that was theirs.
+  const nobody = (place: number | null): PublishedRow => ({
+    place,
+    displayName: null,
+    you: false,
+    finishMs: null,
+    wattsPerKilogram: null,
+    flags: [],
+  });
+  const rows = publishedOrder(results, finishers).map((entry, index) => {
+    if (entry === undefined) return nobody(index + 1);
+    const hidden = hiddenOwners.has(entry.athleteId) && entry.athleteId !== viewing.viewerAthleteId;
+    return hidden ? nobody(entry.place) : row(entry);
+  });
   return { rows };
 }

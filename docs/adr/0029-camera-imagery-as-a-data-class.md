@@ -1073,3 +1073,54 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   readable. Until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes the device
   path, the hosted consent the app ships stays the one the last 2026-09-29 entry above quotes; this
   entry quotes no consent of its own. The body above is not edited.
+- **2026-10-12** — **D-6's rejection of the Cloudflare Tunnel, and D-7's *"only for a frame the
+  rider is looking at, on a press"*, are superseded for ONE payload: a sealed side-camera picture on
+  its way to the rider's instance.** [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md),
+  accepted on the owner's decisions of 2026-10-12 on
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the decision, and its D-10 says
+  what stays of each: D-6's rule and every other row, D-7's *"the frame, and a fixed prompt … Nothing
+  else"*, and D-4, D-8 and D-9, which it applies. The body above is not edited. (#1106)
+- **2026-10-26** — **The hosted consent on the rider's instance, as it ships.** [#1104](https://github.com/openzigs/onyourleft/issues/1104)'s B1 and
+  B2 shipped in [#1303](https://github.com/openzigs/onyourleft/pull/1303) for
+  [#1251](https://github.com/openzigs/onyourleft/issues/1251), and the owner approved the wording on
+  that pull request on 2026-10-12 (*"1303 looks good"*). On 2026-10-26 the owner ruled on #1104 that
+  *"own machine"* becomes *"its own machine or its own private network"* everywhere it describes the
+  instance's model, because the instance's model address may be any host on its private network
+  and never a public one (`apps/instance` §`history/address.ts`). This is the consent as it now
+  reads, shown on the Instance screen with the service's address where this says *the address you
+  agreed to*:
+
+  > **This sends your ride, from your instance, to *the address you agreed to*.**
+  >
+  > If you agree, each time you ask for a ride analysis by this service, your instance sends that ride's numbers to *the address you agreed to*: your heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance, and each section's gradient and total climb, and how it went section by section. If the side camera filmed the ride, it is also sent how a few measurements of your riding position changed between the start and the end of filming. While it writes, the model may look up more on your instance and be sent it: short summaries of your recent rides, summaries of older rides, what you wrote about your goals, your notes and documents, your saved workouts, and earlier write-ups. The model decides during the analysis which of these it looks up, so the app cannot list them in advance.
+  >
+  > That is a company or a computer that is not yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot delete it for you afterwards. It sees your instance's internet address, not this device's.
+  >
+  > A ride analysis never sends it a picture — not a photograph of you, and nothing made from one. The ride's numbers carry no name, no place and no date. But what you wrote yourself can say anything, so this cannot promise that your name, where you ride or when is never sent. Before anything is sent, your instance masks e-mail addresses, phone numbers, links, street addresses, postcodes, coordinates, the names of your privacy zones and everything on your list of words to mask. Masking reduces what is sent; it does not guarantee that nothing personal gets through.
+  >
+  > So that your instance can mask, this device sends it your list of words to mask and your privacy zones — their names, where they are and how large — when you agree, and again each time you ask for a ride analysis by this service. They are sealed on the way, and your instance keeps them with your account.
+  >
+  > Your key is held by your instance, encrypted, and is sent only to *the address you agreed to*. It is never sent back to this device and is never put in a file the app or your instance exports. Whoever runs your instance holds the secret your key is encrypted with, so they could read your key. If that is not you, only use a key you are willing to let them see.
+  >
+  > When you press 'Send a test question', your instance sends it one test question, containing none of your data, to check it answers.
+  >
+  > If the service's address changes, you are asked again before anything is sent to the new one.
+  >
+  > You do not need this. Everything else in the app works without it, and a model your instance runs on its own machine or its own private network can write the same analysis without sending anything to a service.
+  >
+  > This is off. It stays off until you agree, and you can withdraw it at any time.
+
+  Where it departs from B1 as drafted on #1104 is recorded in ADR 0046's 2026-10-12 entry. On the
+  device-held path, which still ships beside it until
+  [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes it, the hosted consent the app
+  ships stays the one the last 2026-09-29 entry above quotes; a second entry records that removal. The body above is not edited. (#1104)
+- **2026-10-27** — **The device-held hosted key and the device's hosted consent are gone.** The
+  2026-10-26 entry above said a second entry would record this. [#1103](https://github.com/openzigs/onyourleft/issues/1103)
+  removed the hosted model on a key kept on the device (ADR 0046 D-1), its consent on the Camera
+  page, and the camera consent's second answer (`hosted`) that held it. The only hosted consent is
+  the one the 2026-10-26 entry quotes, recorded on the rider's instance and naming the service's
+  address. A key a device still held is deleted on the first launch of the version that removed the
+  path, and the rider is told once, on the Camera page. Nothing else on the device is deleted. The
+  erase list keeps the two copies a rider may have sent before, in the past tense (owner ruling of
+  2026-10-26 on #1104, G-4). The own-computer PICTURE path (D-6, the 2026-09-19 entry's Q1) is not
+  changed. The body above is not edited. (#1103)

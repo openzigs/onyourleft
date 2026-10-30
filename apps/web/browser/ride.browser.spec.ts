@@ -70,164 +70,74 @@
  *
  * ⚠️ **Read `ride-harness.tsx`'s header before reading a number here**, and in
  * particular what the page does not prove.
+ *
+ * ## Five files since #1414, and a reviewer who remembers one is reading the old file
+ *
+ * This was one spec of 609 cases, and Playwright runs one file's cases in one
+ * worker (the config is not `fullyParallel`, and `shared-load.ts` is why it
+ * must not be), so the file was a single six-minute group that `--shard`
+ * could not divide: `browser-1` ran 10.8 of its 12 minutes (run 39045325469)
+ * while `browser-2` ran 3.1. It is divided by section, with nothing changed
+ * inside a case, so a `§"…"` reference elsewhere to a section of
+ * `ride.browser.spec.ts` now names one of these:
+ *
+ * - **here**: the stage at every overlay and stacked viewport, the moving
+ *   time's band, a standing notice and once it is put away, a workout eased
+ *   (#585), sounds on, a side camera paired (#551), the cull, safe areas and
+ *   #439's insets;
+ * - **`ride-notices.browser.spec.ts`**: a ride that may stop with the screen
+ *   off (#647), the room's notice (#785), and keep the screen on beside every
+ *   notice that stays;
+ * - **`pre-ride.browser.spec.ts`**: #940's pre-ride chooser, its notices
+ *   never hidden while *Ride* is offered, and #1011's route tiles;
+ * - **`ride-workout.browser.spec.ts`**: a running workout on the HUD (#1307),
+ *   *Keep the plan* (#1244), a ride on a loop (#1312), and a lap ending while
+ *   a re-plan waits;
+ * - **`ride-room.browser.spec.ts`**: a race's standings (#1347), *Report*
+ *   (#789), a room ride's HUD (#1356), a rider near (#1358), a room ride with
+ *   sounds on (#1398), #1407, and sounds beside a side camera (#1409);
+ * - **`ride-delivery.browser.spec.ts`**: a Delivery round's HUD and throw
+ *   control at its start and nearly over (#1816), a sixth file since.
+ *
+ * What more than one of them reads — the viewports, `openRide`, the
+ * measuring and both-ways helpers — is `ride-stage.ts`, unchanged but for
+ * its `export`s. docs/agents/ci.md §4c "Five ride files — #1414" has
+ * the measurements before and after.
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
-import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
+import {
+  SUBPIXEL_TOLERANCE,
+  MINIMUM_TIER_RATIO,
+  HUD_SURFACE,
+  type Viewport,
+  OVERLAY_VIEWPORTS,
+  STACKED_VIEWPORTS,
+  openRide,
+  sharedRide,
+  measure,
+  inside,
+  overlap,
+  describeItem,
+  riderBox,
+  named,
+  withoutAnchors,
+  usesAnchorPositioning,
+  MAIN_FALLBACK_OVER_THE_RIDER,
+  ANCHORED,
+  bothWays,
+  MOVING_TIME_SPARE_PIXELS,
+  easedCollisions,
+  EASED_RIDER_CLEARANCE_PIXELS,
+  noticeText,
+} from './ride-stage';
+import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
-import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
-
-import { riderFrameBox } from '../src/game/camera';
-import { MAXIMUM_LEAN_RADIANS } from '../src/game/racing-line';
 import { workoutRescueText } from '../src/workout/rescue-text';
 
-import type { AnchorFallback, Box, StageItem, StageMeasurement } from './ride-harness';
-
-/**
- * How far past an edge a box may measure and still count as inside it.
- *
- * ⚠️ One pixel, and it is sub-pixel layout rather than slack: a panel whose
- * height comes from `1.05` line-heights and `0.8rem` labels has a fractional
- * box, and a strict comparison fails this gate on arithmetic rather than on
- * layout. Widening it further would let a whole line of text hide.
- */
-const SUBPIXEL_TOLERANCE = 1;
-
-/**
- * `hud-value-size.test.ts` §`MINIMUM_TIER_RATIO`, as the engine resolves it.
- *
- * Restated rather than imported: that file reads the stylesheet as text, and
- * this reads what Chromium made of it — a rule overridden by a later one, or
- * by a media query, satisfies the first and not the second.
- */
-const MINIMUM_TIER_RATIO = 1.5;
-
-/** `theme.css` §`--oyl-color-hud-surface`, as `getComputedStyle` spells it. */
-const HUD_SURFACE = 'rgb(16, 22, 28)';
-
-interface Viewport {
-  readonly name: string;
-  readonly width: number;
-  readonly height: number;
-  /**
-   * Whether the same DOM **without the stage** puts *End ride* below the fold
-   * here — i.e. whether this viewport can carry the control.
-   *
-   * ⚠️ Not every viewport can, and pretending otherwise would be asserting the
-   * opposite of the bug: upright on a tall screen the unstaged page FITS,
-   * exactly as #373's old placement was visible in portrait. So the control
-   * runs at every LANDSCAPE overlay viewport and at all four stacked ones, and
-   * at no upright overlay viewport.
-   *
-   * ⚠️ **Which leaves the column layout with no control of this kind, and that
-   * is stated rather than papered over.** What stands in for it there is the
-   * apparatus case — fourteen items, four panels, the surface token resolved —
-   * and the mutation record: a 7 rem track floor, a 14 rem plan view and a
-   * route panel moved back to the bottom each turned column-layout cases red
-   * when they were tried (B6, B8 and B11 in the pull request). A control that
-   * cannot honestly fail is worse than none.
-   */
-  readonly unstagedFails: boolean;
-}
-
-/**
- * Where the HUD is an OVERLAY — `theme.css` §`.oyl-game--riding`.
- *
- * ⚠️ Both layouts and both of their edges: the smallest viewport each admits as
- * well as the ordinary ones, because a layout is most likely to overflow at
- * the bottom of the range it claims.
- */
-const OVERLAY_VIEWPORTS: readonly Viewport[] = [
-  {
-    name: 'a landscape tablet — 1280×800, the owner’s',
-    width: 1280,
-    height: 800,
-    unstagedFails: true,
-  },
-  { name: 'a 4:3 tablet in landscape — 1024×768', width: 1024, height: 768, unstagedFails: true },
-  { name: 'a tablet upright — 800×1280', width: 800, height: 1280, unstagedFails: false },
-  { name: 'a phone in landscape — 844×390', width: 844, height: 390, unstagedFails: true },
-  { name: 'the smallest corners layout — 736×360', width: 736, height: 360, unstagedFails: true },
-  /**
-   * #512: the TALLEST of the short corners layout (`theme.css` §"A SHORT
-   * corners layout", `max-height: 30rem`). A leaning rider's box grows with
-   * the viewport's height while the panels, in rem, do not, so this is where
-   * the bottom row is nearest a rider leaning at the cap — 12 px, measured.
-   * Until #512 it was measured nowhere, and a 20 rem actions panel here was
-   * over the rider by about 50 px.
-   */
-  {
-    name: 'the tallest short corners layout — 736×480',
-    width: 736,
-    height: 480,
-    unstagedFails: true,
-  },
-  { name: 'a phone upright — 390×844', width: 390, height: 844, unstagedFails: false },
-  {
-    name: 'a narrow Android phone upright, in the app — 360×800',
-    width: 360,
-    height: 800,
-    unstagedFails: false,
-  },
-  { name: 'the smallest column layout — 360×752', width: 360, height: 752, unstagedFails: false },
-];
-
-/**
- * Where it is not — `theme.css` §`.oyl-game--riding` says why each is here.
- *
- * 320×256 is SC 1.4.10's viewport, which is a 1280×1024 window at 400 %.
- * 390×664 is a phone upright in a browser with the browser's own bars showing:
- * too short for three panels to clear the rider's helmet, by measurement.
- */
-const STACKED_VIEWPORTS: readonly Viewport[] = [
-  { name: 'reflow — 320×256', width: 320, height: 256, unstagedFails: true },
-  { name: 'a small phone on its side — 640×360', width: 640, height: 360, unstagedFails: true },
-  { name: 'a phone upright in a browser — 390×664', width: 390, height: 664, unstagedFails: false },
-  // ⚠️ Was "the smallest column layout" until the pull request's first CI run:
-  // on the runner's fonts the three top panels are 373 px here, 8 px over the
-  // rider's helmet, while the same case was green on a Mac. `theme.css`
-  // §"COLUMN" records what that changed.
-  { name: 'a very narrow phone upright — 320×704', width: 320, height: 704, unstagedFails: true },
-];
-
-async function openRide(page: Page, viewport: Viewport, query = ''): Promise<void> {
-  await page.setViewportSize({ width: viewport.width, height: viewport.height });
-  const response = await page.goto(`/ride.html${query}`);
-  // ⚠️ A page missing from `vite.browser.config.ts`'s `build.rollupOptions.input`
-  // is simply not built, and the failure is a 404 sixty seconds later inside
-  // `waitForFunction` with no mention of the config — the trap #266 confirmed
-  // by deleting its own line.
-  expect(
-    response?.status(),
-    'ride.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
-  ).toBe(200);
-  await page.waitForFunction(() => window.__oylRide !== undefined);
-  const published = await page.evaluate(() => ({
-    ready: window.__oylRide?.ready,
-    errors: window.__oylRide?.errors,
-  }));
-  // The harness rides for real, so "ready" means the picker offered a route,
-  // the ride started, the stage appeared and the trainer line was written.
-  expect(published.errors, 'the ride harness reported an error').toEqual([]);
-  expect(published.ready).toBe(true);
-}
-
-/**
- * {@link openRide}, loaded once for every case in a row that only MEASURES the
- * page at this viewport and query — #1051, `shared-load.ts`. A case that
- * changes the page (a control taking the stage's class off, an inset, a click)
- * takes its own `page` and calls `openRide`.
- */
-async function sharedRide(browser: Browser, viewport: Viewport, query = ''): Promise<Page> {
-  return sharedPage(
-    browser,
-    `ride.html${query} at ${String(viewport.width)}×${String(viewport.height)}`,
-    (page) => openRide(page, viewport, query),
-    test.info(),
-  );
-}
+import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
@@ -235,174 +145,6 @@ test.afterAll(releaseSharedPage);
 test.afterEach(async () => {
   await attachSharedPageOnFailure(test.info());
 });
-
-async function measure(page: Page): Promise<StageMeasurement> {
-  const measured = await page.evaluate(() => window.__oylRide?.measure());
-  if (measured === undefined) {
-    throw new Error('the ride harness published no measurement');
-  }
-  return measured;
-}
-
-function inside(box: Box, viewport: Viewport): boolean {
-  return (
-    box.left >= -SUBPIXEL_TOLERANCE &&
-    box.top >= -SUBPIXEL_TOLERANCE &&
-    box.right <= viewport.width + SUBPIXEL_TOLERANCE &&
-    box.bottom <= viewport.height + SUBPIXEL_TOLERANCE &&
-    box.width > 0 &&
-    box.height > 0
-  );
-}
-
-function overlap(a: Box, b: Box): boolean {
-  return (
-    a.left < b.right - SUBPIXEL_TOLERANCE &&
-    b.left < a.right - SUBPIXEL_TOLERANCE &&
-    a.top < b.bottom - SUBPIXEL_TOLERANCE &&
-    b.top < a.bottom - SUBPIXEL_TOLERANCE
-  );
-}
-
-function describeItem(item: StageItem): string {
-  const { box } = item;
-  return (
-    `${item.name} [${box.left.toFixed(0)},${box.top.toFixed(0)} → ` +
-    `${box.right.toFixed(0)},${box.bottom.toFixed(0)}]${item.onTop ? '' : ' COVERED'}`
-  );
-}
-
-/**
- * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels, for a rider
- * leaning as far as one is ever drawn (#499).
- *
- * ⚠️ Non-vacuous by construction rather than by luck: it throws on a box too
- * small to overlap anything, because "no panel overlaps a rectangle of no
- * size" is true of every layout there is.
- */
-function riderBox(viewport: Viewport, lean: number = MAXIMUM_LEAN_RADIANS): Box {
-  // At the lean cap (#499): the bicycle stays mid-frame on the racing line
-  // because the camera follows it across, but the rider's top rolls up to
-  // 0.95 m to one side. A panel over a leaning rider is over the rider, at
-  // EVERY overlay viewport — #512 closed the one (736×360) that used to be
-  // held to the upright box, by narrowing the short corners layout's bottom
-  // row rather than by moving the camera.
-  const rider = riderFrameBox(viewport.width / viewport.height, lean);
-  const box: Box = {
-    left: rider.left * viewport.width,
-    right: rider.right * viewport.width,
-    top: rider.top * viewport.height,
-    bottom: rider.bottom * viewport.height,
-    width: (rider.right - rider.left) * viewport.width,
-    height: (rider.bottom - rider.top) * viewport.height,
-  };
-  if (box.width < 10 || box.height < 40 || !inside(box, viewport)) {
-    throw new Error(`the rider's frame box is not a usable rectangle: ${JSON.stringify(box)}`);
-  }
-  return box;
-}
-
-function named(items: readonly StageItem[], name: string): StageItem {
-  const found = items.find((each) => each.name === name);
-  if (found === undefined) {
-    throw new Error(`the stage has no "${name}" — found: ${items.map((i) => i.name).join(', ')}`);
-  }
-  return found;
-}
-
-/**
- * #1120 — how many `@supports (anchor-name: …)` blocks `theme.css` has, and
- * how many `@supports not (anchor-name: …)` fallbacks. One each for #576's
- * side-camera row on a phone on its side, #1111's moving time below 802 px on
- * its side, and #1111's moving time upright. A block added or taken away
- * changes these, and the case that reads them says which.
- */
-const ANCHOR_BLOCKS = 3;
-const ANCHOR_FALLBACK_BLOCKS = 3;
-
-/**
- * #1120 — the stage measured as an engine with NO anchor positioning lays it
- * out: Android System WebView older than Chrome 125. `ride-harness.tsx`
- * §`withoutAnchors` takes every `@supports (anchor-name: …)` block out of the
- * live stylesheet, puts every `@supports not (anchor-name: …)` block in force
- * (or, for the control, takes those out too — `main` before #1120), measures,
- * and puts the stylesheet back, in one synchronous call on the page as it is:
- * no load of its own, and a shared page is left as it was.
- *
- * ⚠️ **It cannot pass over a page where nothing was taken out.** Every call is
- * required to have taken out every anchor block, put every fallback in force
- * (or taken them out), left NOTHING on the stage with an `anchor-name` or a
- * `position-anchor` as the engine computes them, and put every rule back
- * exactly. §"the instrument" also holds that the same count was MORE than
- * zero, before, wherever the layout uses anchors at all.
- */
-async function withoutAnchors(
-  page: Page,
-  fallback: AnchorFallback = 'shipped',
-): Promise<StageMeasurement & { readonly anchoredBefore: number }> {
-  const found = await page.evaluate((which) => window.__oylRide?.withoutAnchors(which), fallback);
-  if (found === undefined) {
-    throw new Error('the ride harness published no withoutAnchors');
-  }
-  expect(found.removed, 'every @supports (anchor-name: …) block taken out').toBe(ANCHOR_BLOCKS);
-  expect(found.forced, 'every @supports not (anchor-name: …) block put in force').toBe(
-    fallback === 'shipped' ? ANCHOR_FALLBACK_BLOCKS : 0,
-  );
-  expect(found.dropped, 'the fallbacks taken out too, for the control').toBe(
-    fallback === 'shipped' ? 0 : ANCHOR_FALLBACK_BLOCKS,
-  );
-  expect(found.anchoredAfter, 'nothing on the stage laid out by anchor positioning').toBe(0);
-  expect(found.restored, 'the stylesheet put back exactly').toBe(true);
-  return { ...found.measurement, anchoredBefore: found.anchoredBefore };
-}
-
-/**
- * Whether the layout at this viewport uses anchor positioning at all
- * (`theme.css`): the short corners layout — 46 rem wide or more, 22.5 to 30 rem
- * tall — and the column layout, under 46 rem wide and 47 rem tall or more.
- */
-function usesAnchorPositioning(viewport: Viewport): boolean {
-  const short = viewport.width >= 736 && viewport.height >= 360 && viewport.height <= 480;
-  const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
-  return short || column;
-}
-
-/**
- * #1120 — where the layout `main` gave an engine without anchor positioning
- * put a panel over the leaning rider on the widest ride: the moving time a
- * third secondary row (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
- * SIDE" and §"THE MOVING TIME ON AN UPRIGHT PHONE"). Measured on this
- * repository's CI fonts. At 360×800, 736×480 and 844×390 the widest ride had
- * the room, so this cannot fail there and is not run there; what failed at
- * 360×800 was a standing notice beside it, which §"a ride with a standing
- * notice" holds both ways.
- */
-const MAIN_FALLBACK_OVER_THE_RIDER = new Set(['736×360', '390×844', '360×752']);
-
-/** The two ways a stage is laid out (#1120), each with the words a failure carries. */
-const ANCHORED = 'with anchor positioning';
-const UNANCHORED = 'without anchor positioning (#1120)';
-
-/** One measurement of the page as it is, and one as an engine without anchors lays it out. */
-async function bothWays(page: Page): Promise<(readonly [string, StageMeasurement])[]> {
-  return [
-    [ANCHORED, await measure(page)],
-    [UNANCHORED, await withoutAnchors(page)],
-  ];
-}
-
-/**
- * #1124: the least room `9:59:59` may have in its field, in CSS pixels — at
- * every overlay viewport, both ways (with anchor positioning and without).
- * Until #1124 the field was a fixed track or a fixed 6 rem and the time was
- * measured into what was left: 1.0 px at 844×390 and both landscape tablets
- * on the CI runner's DejaVu Sans, which a font change would have turned red
- * with nothing wrong in the product. The field is sized from its value's
- * own digits now (`theme.css` §"THE MOVING TIME'S OWN WIDTH — #1124"), and
- * the spare width is published at every viewport and held to this, as the
- * fold checks hold 50 px.
- */
-const MOVING_TIME_SPARE_PIXELS = 4;
 
 for (const viewport of OVERLAY_VIEWPORTS) {
   test.describe(viewport.name, () => {
@@ -434,8 +176,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
-      // Ten readings, the strip, the plan view, the trainer line, two controls.
-      expect(seen.items).toHaveLength(15);
+      // Ten readings, the strip, the plan view, the trainer line, two controls
+      // and, since #1482, the touch lock.
+      expect(seen.items).toHaveLength(16);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -803,6 +546,10 @@ for (const viewport of MOVING_TIME_BAND_VIEWPORTS) {
     page,
   }, testInfo) => {
     await openRide(page, viewport);
+    const leaning = riderBox(viewport);
+    const rider =
+      `the leaning rider [${leaning.left.toFixed(0)},${leaning.top.toFixed(0)} → ` +
+      `${leaning.right.toFixed(0)},${leaning.bottom.toFixed(0)}]`;
     for (const [how, seen] of await bothWays(page)) {
       const shown = seen.moving;
       const spare = shown.field - shown.width;
@@ -825,6 +572,65 @@ for (const viewport of MOVING_TIME_BAND_VIEWPORTS) {
           .map(describeItem),
         note,
       ).toEqual([]);
+      // #1169: and these widths hold the overlay viewports' "no panel over
+      // the rider" too. At 802×600 the route and actions panels lay over the
+      // leaning rider's box, on `main`, and these cases did not look.
+      expect(
+        seen.panels.filter((each) => overlap(each.box, leaning)).map(describeItem),
+        `${how}: a panel over ${rider}`,
+      ).toEqual([]);
+    }
+  });
+}
+
+/**
+ * #1169 — the MIDDLE corners layout, more than 30 rem and under 47 rem tall,
+ * which no overlay viewport above is (802×600 is in §"#1124"). Its bottom row
+ * kept a tablet's 18 rem and 20 rem, and the leaning rider's box, which grows
+ * with the height, lay under one or both panels from 736 to 880 px wide on
+ * `main`. `theme.css` §"THE MIDDLE corners layout's bottom row" narrows the
+ * panels to stop short of the box. The band's narrowest width at a short and
+ * a tall height, where the panels are narrowest, and one wider, where on
+ * `main` only the actions panel was over the rider. Each also holds the
+ * controls inside the narrowed actions panel.
+ */
+const MIDDLE_CORNERS_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a short window, narrow — 736×560', width: 736, height: 560, unstagedFails: true },
+  {
+    name: 'the tallest middle corners layout — 736×751',
+    width: 736,
+    height: 751,
+    unstagedFails: true,
+  },
+  { name: 'a short window — 840×600', width: 840, height: 600, unstagedFails: true },
+];
+
+for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
+  test(`#1169 — no panel is laid over the leaning rider — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const leaning = riderBox(viewport);
+    const rider =
+      `the leaning rider [${leaning.left.toFixed(0)},${leaning.top.toFixed(0)} → ` +
+      `${leaning.right.toFixed(0)},${leaning.bottom.toFixed(0)}]`;
+    for (const [how, seen] of await bothWays(page)) {
+      expect(
+        seen.panels.filter((each) => overlap(each.box, leaning)).map(describeItem),
+        `${how}: a panel over ${rider}`,
+      ).toEqual([]);
+      // The narrowing is not paid for with a control off its panel.
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+      for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
+        const item = named(seen.items, name);
+        expect(inside(item.box, viewport), `${how}: ${describeItem(item)}`).toBe(true);
+        expect(
+          actions !== undefined &&
+            item.box.left >= actions.box.left - SUBPIXEL_TOLERANCE &&
+            item.box.right <= actions.box.right + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(item)} inside its panel`,
+        ).toBe(true);
+      }
     }
   });
 }
@@ -837,7 +643,7 @@ for (const viewport of STACKED_VIEWPORTS) {
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Ten readings since #1111's moving time, and the rest as above.
-      expect(seen.items).toHaveLength(15);
+      expect(seen.items).toHaveLength(16);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -856,7 +662,12 @@ for (const viewport of STACKED_VIEWPORTS) {
       // ⚠️ The PAGE cannot scroll even here. One scroller — the stage — and not
       // the scroll region inside a scrolling page that #419 rules out.
       expect(seen.pageOverflow).toBeLessThanOrEqual(0);
-      for (const name of ['the trainer line', 'control: Pause', 'control: End ride']) {
+      for (const name of [
+        'the trainer line',
+        'control: Pause',
+        'control: End ride',
+        'control: Lock',
+      ]) {
         const item = named(seen.items, name);
         expect(inside(item.box, viewport), describeItem(item)).toBe(true);
         expect(item.onTop, describeItem(item)).toBe(true);
@@ -887,6 +698,106 @@ for (const viewport of STACKED_VIEWPORTS) {
     });
   });
 }
+
+/**
+ * #1158 — the moving time where the HUD STACKS. #1124 sized the time's field
+ * from its own digits in the corners layouts and upright; where the HUD
+ * stacks it was still an `auto-fit` 5.5 rem track's reading, as narrow as
+ * 88 px, and `9:59:59` is 92.5 px on the CI runner's DejaVu Sans. It is
+ * `nowrap`, so it ran past its field into the gap: 2.5 px at 320×568, 4.0 px
+ * at 412×700 and 4.2 px at 700×500, measured for #1124 in no gate's list.
+ *
+ * Each viewport here is held to one line,
+ * {@link MOVING_TIME_SPARE_PIXELS} to spare, the secondary grid inside its
+ * panel and no overlap with any other reading. The readings scroll beneath
+ * the pinned actions panel in a stacked layout (§"Where four panels cannot
+ * share the screen"), so neither being on screen nor clearing a control is
+ * asserted. How many tracks a row holds and how many
+ * rows the tier takes are published, because the fix changes both.
+ */
+const STACKED_MOVING_TIME_VIEWPORTS: readonly Viewport[] = [
+  ...STACKED_VIEWPORTS,
+  { name: 'a small phone upright — 320×568', width: 320, height: 568, unstagedFails: true },
+  { name: 'a phone upright, short — 412×700', width: 412, height: 700, unstagedFails: true },
+  { name: 'a small tablet window — 700×500', width: 700, height: 500, unstagedFails: true },
+];
+
+for (const viewport of STACKED_MOVING_TIME_VIEWPORTS) {
+  test(`#1158 — stacked, the moving time fits its field with room to spare — ${viewport.name}`, async ({
+    browser,
+  }, testInfo) => {
+    const page = await sharedRide(browser, viewport);
+    const seen = await measure(page);
+    const grid = await page.evaluate(() => {
+      const secondary = document.querySelector('.oyl-hud__fields--secondary');
+      if (secondary === null) return { tracks: 0, rows: 0 };
+      const style = getComputedStyle(secondary);
+      return {
+        tracks: style.gridTemplateColumns.split(' ').length,
+        rows: style.gridTemplateRows.split(' ').length,
+      };
+    });
+    const shown = seen.moving;
+    const spare = shown.field - shown.width;
+    const field = named(seen.items, 'reading: Moving');
+    const note =
+      `9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+      `(${spare.toFixed(1)} px to spare); ${String(grid.tracks)} tracks × ` +
+      `${String(grid.rows)} rows; secondary tier ${String(shown.secondaryOverflow)} px ` +
+      `past its panel; ${describeItem(field)}`;
+    testInfo.annotations.push({ type: '#1158', description: note });
+    console.log(`#1158 — ${viewport.name} — ${note}`);
+    expect(shown.text, note).toBe('9:59:59');
+    expect(shown.lines, note).toBe(1);
+    expect(spare, note).toBeGreaterThanOrEqual(MOVING_TIME_SPARE_PIXELS);
+    expect(shown.secondaryOverflow, note).toBeLessThanOrEqual(0);
+    expect(
+      seen.items
+        .filter(
+          (each) =>
+            each !== field && each.name.startsWith('reading: ') && overlap(each.box, field.box),
+        )
+        .map(describeItem),
+      note,
+    ).toEqual([]);
+  });
+}
+
+/**
+ * #1158's other edge: UPRIGHT the time is drawn beside the controls, out of
+ * the grid (`theme.css` §"THE MOVING TIME ON AN UPRIGHT PHONE"), so the
+ * stacked floor must not reach the upright tier, where height is what is
+ * scarce. 640×960 is the width at which it would cost a row: six readings in
+ * one row of 5.5 rem tracks, two rows of the time's (on DejaVu Sans from
+ * 602 px to 669 px). Held as the count of 5.5 rem tracks the tier's own width
+ * makes.
+ */
+test('#1158 — upright, the secondary tier keeps its 5.5 rem tracks — 640×960', async ({
+  browser,
+}) => {
+  const viewport: Viewport = {
+    name: 'a small tablet upright — 640×960',
+    width: 640,
+    height: 960,
+    unstagedFails: false,
+  };
+  const page = await sharedRide(browser, viewport);
+  const tier = await page.evaluate(() => {
+    const secondary = document.querySelector('.oyl-hud__fields--secondary');
+    if (secondary === null) return { tracks: 0, expected: -1, floor: 0 };
+    const style = getComputedStyle(secondary);
+    const floor = 5.5 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const gap = parseFloat(style.columnGap);
+    const content =
+      secondary.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return {
+      tracks: style.gridTemplateColumns.split(' ').length,
+      expected: Math.floor((content + gap) / (floor + gap)),
+      floor,
+    };
+  });
+  expect(tier.tracks, JSON.stringify(tier)).toBe(tier.expected);
+});
 
 /**
  * A ride with something to say — `ride-harness.tsx` §`WITH_A_NOTICE`.
@@ -935,7 +846,7 @@ test.describe('a ride with a standing notice', () => {
             laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
           ).toEqual([]);
           // And the controls are still where a rider can press them.
-          for (const name of ['control: Pause', 'control: End ride']) {
+          for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
             const item = named(seen.items, name);
             expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
           }
@@ -949,7 +860,8 @@ test.describe('a ride with a standing notice', () => {
           const leaning = riderBox(viewport);
           expect(overlap(moving.box, leaning), describeItem(moving)).toBe(false);
           const controls = seen.items.filter((each) => each.name.startsWith('control: '));
-          expect(controls).toHaveLength(3);
+          // Pause, End ride, Trainer notice and, since #1482, the lock.
+          expect(controls).toHaveLength(4);
           expect(
             controls.filter((each) => overlap(each.box, moving.box)).map(describeItem),
           ).toEqual([]);
@@ -1029,7 +941,7 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
     }
   });
   found.push(...laidOut.filter((each) => overlap(each.box, leaning)).map(describeItem));
-  for (const name of ['control: Pause', 'control: End ride']) {
+  for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
     const item = named(seen.items, name);
     if (!inside(item.box, viewport) || !item.onTop) found.push(describeItem(item));
   }
@@ -1051,49 +963,6 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
   }
   return found;
 }
-
-/**
- * #585 — a running workout's stall rescue, on the game's HUD (PR #599's
- * review, finding B1). `?rescue=floor` is the workout fixture above with the
- * rescue in force, and the floor is the longest sentence
- * `workout/rescue-text.ts` builds.
- *
- * ⚠️ **Why this exists**: the harness's trainer double returned `undefined`
- * from `workoutRescue`, so no case here had ever laid the "Eased" notice out
- * — and beside the road notice a workout always has, it was 309 px tall on a
- * phone on its side and put *Pause* and *End ride* below the stage, with every
- * case in this file green. `GameView` §`roadNotice` now gives the Eased notice
- * the one notice cell while the rescue holds, and this measures that at every
- * overlay viewport; the control below puts the road notice back beside it and
- * requires the same measurement to fail.
- */
-function easedCollisions(seen: StageMeasurement, viewport: Viewport): string[] {
-  const laidOut = seen.panels.filter((each) => each.box.height > 1);
-  const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
-  laidOut.forEach((a, index) => {
-    for (const b of laidOut.slice(index + 1)) {
-      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
-    }
-  });
-  found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
-  found.push(
-    ...['control: Pause', 'control: End ride']
-      .map((name) => named(seen.items, name))
-      .filter((each) => !inside(each.box, viewport) || !each.onTop)
-      .map(describeItem),
-  );
-  return found;
-}
-
-/**
- * #605 — how far the Eased notice must end above the leaning rider's box on an
- * UPRIGHT screen, where the notice is stacked over the sky and the rider is
- * under it. The number §4f treats as proven on a device: #585 shipped this at
- * 2 px on the CI runner (20 on a Mac), which was inside the gate and proved
- * nothing about a Pixel 8's fonts. The one-sentence notice clears it by the
- * figure each run prints.
- */
-const EASED_RIDER_CLEARANCE_PIXELS = 50;
 
 /** The sentence the ride harness's rescue has, whole — as #585 put it on the HUD. */
 const WHOLE_EASED_SENTENCE = workoutRescueText(
@@ -1120,11 +989,6 @@ async function restoreWholeEasedSentence(page: Page): Promise<void> {
     }
     body.replaceChildren(label, whole);
   }, WHOLE_EASED_SENTENCE);
-}
-
-/** The HUD's notice cell as a rider reads it. */
-async function noticeText(page: Page): Promise<string> {
-  return page.evaluate(() => document.querySelector('.oyl-hud__notices')?.textContent ?? '');
 }
 
 test.describe('a ride with a workout eased — #585', () => {
@@ -1337,7 +1201,7 @@ function sideCameraCollisions(seen: StageMeasurement, viewport: Viewport): strin
     }
   });
   found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
-  const pressed = ['control: Pause', 'control: End ride', 'the side camera stop'];
+  const pressed = ['control: Pause', 'control: End ride', 'control: Lock', 'the side camera stop'];
   found.push(
     ...pressed
       .map((name) => named(seen.items, name))
@@ -1798,1174 +1662,150 @@ test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => 
 });
 
 /**
- * #647 — the ride being recorded may stop if the screen goes off, because the
- * platform refused the recording service. `?keepalive=failed` puts
- * *"Keep the screen on: your ride may stop without it."* in the
- * HUD's notice cell, where it stays for as long as the refusal does: it is a
- * safety sentence, so there is no toggle and no disclosure (the owner's ruling
- * on #654's re-review).
+ * #1441 — the ride's controls are never under the gesture bar, with the
+ * tablet's insets applied to the ENGINE (`insets.ts`) and read back, at every
+ * viewport the ride is laid out at: phone and tablet, upright and on its side.
  *
- * `&trainer=workout` adds the longest road notice, which stands open for a
- * ride's first seconds and has a *Trainer notice* control. ⚠️ **Since #693's
- * review (N2) the refusal changes that on upright phones under 25 rem wide
- * and nowhere else**: there (`GameView` §`ONE_NOTICE_ONLY_QUERY` — 360×800,
- * 360×752 and 390×844 here) the road notice and its control are off the HUD
- * while the refusal stands, because the two together ran over the rider, or
- * up to it, however the road notice got open; everywhere else it opens, and
- * is put away, exactly as it does without the refusal — and the pair is held
- * over nothing, clear of the rider's box by `EASED_RIDER_CLEARANCE_PIXELS`
- * upright.
+ * `.oyl-hud`'s padding is what holds them clear (`theme.css` §"Safe areas"),
+ * and §"safe areas" above proves it moves the panels at one tablet through the
+ * custom property. This is the gesture bar's half, through `env()`, at all of
+ * them: the bottom of every control is at or above the inset's top edge.
  *
- * The control takes the rule away — `matchMedia` answering "no" to that one
- * query before the page loads — and requires the pair, open, to come within
- * the clearance of the rider at the two 360 px phones. Not at 390×844, where
- * the pair ended 51 px above the rider on a Mac: inside the rule for the CI
- * runner's tighter fonts, not because it collides there.
+ * ⚠️ The control puts the padding back to the stage's own 8 px, and the
+ * actions' sticky edge with it, and a control must then sit inside the inset
+ * — or "clear of it" was a layout that never reached the bottom. Measured,
+ * the controls end 9 px above the inset at every viewport with the padding and
+ * 15 px inside it without.
+ *
+ * ⚠️ **320×256 too**, the stacked layout at its shortest. Its actions panel
+ * is pinned by `position: sticky`, which cannot lift it above the top of
+ * `.oyl-hud`, so with the tablet's 68 px of insets and the world at its old
+ * 40vh the panel ran out of room: *Pause* and *End ride* ended at 252 of 224.
+ * `theme.css` §"The STACKED layout's world gives up what the insets take" is
+ * the fix, and the panel that holds the controls is asserted as well as the
+ * controls: with the world short of only the bottom inset the controls
+ * scraped clear by 4 px while their panel ended 5 px inside the inset.
+ * Measured, the controls end 9 px above the inset at every viewport with the
+ * fix, and the actions panel exactly at it.
  */
-async function keepScreenOnNotice(page: Page): Promise<{
-  text: string;
-  inDisclosure: boolean;
-  roadNoticeShown: boolean;
-  roadNoticeOnHud: boolean;
-}> {
-  return page.evaluate(() => {
-    const label = [...document.querySelectorAll('.oyl-hud__notices .oyl-status__label')].find(
-      (each) => each.textContent?.startsWith('Keep the screen on'),
-    );
-    const notice = label?.closest('.oyl-status');
-    const road = document.querySelector('#oyl-hud-standing-notice');
-    return {
-      text: (notice?.textContent ?? '').replace(/\s+/g, ' '),
-      inDisclosure: (notice?.closest('details') ?? null) !== null,
-      roadNoticeShown: road !== null && !road.classList.contains('oyl-visually-hidden'),
-      roadNoticeOnHud: road !== null,
-    };
-  });
-}
+const WITHOUT_BOTTOM_INSET = `
+  .oyl-game--riding .oyl-hud { padding-bottom: var(--oyl-space-sm) !important; }
+  .oyl-game--riding .oyl-hud__actions { bottom: var(--oyl-space-sm) !important; }
+`;
 
-/** The keep-the-screen-on notice laid out on the stage, over nothing. */
-function keepScreenOnLaidOut(
-  seen: StageMeasurement,
-  viewport: Viewport,
-  what: string,
-): { readonly collisions: string[]; readonly clearance: number } {
-  const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-  const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
-  const laidOut = seen.panels.filter((each) => each.box.height > 1);
-  expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
-  const rider = riderBox(viewport);
-  const clearance = rider.top - (notice?.box.bottom ?? Infinity);
-  console.log(
-    `keep the screen on, ${what} — ${viewport.name} — notice cell ${(notice?.box.height ?? 0).toFixed(0)} px tall` +
-      (viewport.height > viewport.width
-        ? `; ${clearance.toFixed(0)} px above the rider's box`
-        : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
-  );
-  return { collisions: easedCollisions(seen, viewport), clearance };
-}
+test.describe('#1441 — the ride’s controls are clear of the gesture bar', () => {
+  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+    test(`every control ends above the bottom inset — ${viewport.name}`, async ({ page }) => {
+      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+      await openRide(page, viewport);
+      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+      const fold = viewport.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
+      const lowestOf = (items: readonly StageItem[]): number =>
+        Math.max(...items.map((each) => each.box.bottom));
 
-const KEEP_SCREEN_ON_SEEN = '!Keep the screen on: your ride may stop without it.';
-
-/** `GameView` §`ONE_NOTICE_ONLY_QUERY`'s phones: the column layout under 25 rem wide. */
-const oneNoticeOnly = (viewport: Viewport): boolean =>
-  viewport.width >= 360 && viewport.width < 400 && viewport.height >= 752;
-
-test.describe('a ride that may stop with the screen off — #647', () => {
-  for (const [query, what] of [
-    ['?keepalive=failed', 'alone'],
-    ['?keepalive=failed&trainer=workout', 'with the road notice'],
-  ] as const) {
-    for (const viewport of OVERLAY_VIEWPORTS) {
-      test(`the notice, ${what}, whole and over nothing — ${viewport.name}`, async ({ page }) => {
-        await openRide(page, viewport, query);
-        const found = await keepScreenOnNotice(page);
-        expect(found.text).toBe(KEEP_SCREEN_ON_SEEN);
-        expect(found.inDisclosure).toBe(false);
-        const withRoad = query.includes('trainer=workout');
-        if (withRoad && !oneNoticeOnly(viewport)) {
-          // As without the refusal: open for the ride's first seconds, beside
-          // it, with its control on the HUD.
-          expect(found.roadNoticeShown).toBe(true);
-          const toggle = named((await measure(page)).items, 'control: Trainer notice');
-          expect(inside(toggle.box, viewport) && toggle.onTop, describeItem(toggle)).toBe(true);
-        } else {
-          // Alone — and at the two narrowest upright phones, the road notice
-          // and its control are not on the HUD while the refusal stands.
-          expect(found.roadNoticeOnHud).toBe(false);
-          expect(
-            (await measure(page)).items.some((each) => each.name === 'control: Trainer notice'),
-          ).toBe(false);
-        }
-        const described = withRoad && oneNoticeOnly(viewport) ? 'road notice off the HUD' : what;
-        // #1120: and as an engine without anchor positioning lays it out.
-        for (const [how, seen] of await bothWays(page)) {
-          await test.step(how, () => {
-            const { collisions, clearance } = keepScreenOnLaidOut(
-              seen,
-              viewport,
-              `${described}, ${how}`,
-            );
-            expect(collisions).toEqual([]);
-            if (viewport.height > viewport.width) {
-              expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
-            }
-          });
-        }
-      });
-    }
-  }
-
-  // The control: the rule taken away. `matchMedia` answers "no" to
-  // ONE_NOTICE_ONLY_QUERY before the page loads, so at the two 360 px
-  // upright phones the road notice opens beside it as it does elsewhere — and
-  // must come within the clearance of the rider, or the rule is being held
-  // over a pair that always fitted.
-  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.width === 360)) {
-    test(`the control — without the rule, the road notice open beside it comes within the clearance of the rider — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await page.addInitScript(() => {
-        const real = window.matchMedia.bind(window);
-        // `not all` matches nothing, in the browser's own MediaQueryList.
-        window.matchMedia = (query: string): MediaQueryList =>
-          real(query.includes('width < 25rem') ? 'not all' : query);
-      });
-      await openRide(page, viewport, '?keepalive=failed&trainer=workout');
-      await expect.poll(async () => (await keepScreenOnNotice(page)).roadNoticeShown).toBe(true);
-      // ⚠️ Clearance only, since #693's re-review shortened the sentence (to
-      // one line on a Mac; the CI runner still wraps it): the pair open now
-      // ends 26 px (360×800) and 1 px (360×752) ABOVE the rider's box on a
-      // Mac, where the longer one ran 27 px into it — under the clearance
-      // still, and so still the rule's reason.
-      const { clearance } = keepScreenOnLaidOut(
-        await measure(page),
-        viewport,
-        'without the rule, the road notice open',
-      );
-      expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
-    });
-  }
-});
-
-/**
- * #647 — #693's re-review, B2: *"Keep the screen on"* beside EACH other
- * notice the HUD never puts away. The notice cell stacks every one of them —
- * the *Trainer* fault, *Eased* (#585), the side camera's lost link (#551) and
- * this — so a pair is a taller cell over the same rider, and none of the
- * sentences may be put away to make room.
- *
- * Every pair is held over nothing at every overlay viewport and, upright, to
- * `EASED_RIDER_CLEARANCE_PIXELS` above the leaning rider's box — #605's floor
- * for the Eased notice, which the other two pairs meet by the same geometry
- * (a two-line notice and a one-line one), so they are held to it too rather
- * than only to "no collision". Each prints its clearance.
- *
- * What gets it there: *"Keep the screen on: your ride may stop without it."*
- * is shorter — one line at 360 px on a Mac, though still two on the CI runner,
- * whose fonts are wider — and two notices sharing the cell give up half their
- * vertical padding (`theme.css` §"Two notices in the one cell"), which on the
- * runner is what clears the floor. As round one
- * of #693 shipped it — the longer sentence, full padding — the pair beside
- * Eased ended 38 px above the rider at 360×752; the control below puts both
- * back and requires the same measurement to fall under the floor.
- */
-const NEVER_PUT_AWAY: readonly (readonly [query: string, beside: string, words: string])[] = [
-  ['&rescue=floor', 'Eased', 'Eased'],
-  ['&side=lost', 'the side camera lost', 'Side camera'],
-  ['&gradient=refused', 'a trainer fault', 'stopped accepting the road'],
-];
-
-/**
- * The stage measured on a SETTLED frame that has both notices in the cell. The
- * refusing trainer's fault can be absent for a frame (`ride-harness.tsx`
- * §`REFUSED`), so the check and the measurement are one evaluation.
- *
- * ⚠️ **The first frame with both is not always the settled one** (#871): on
- * `main` the pair beside Eased at 360×752 measured 55 px above the rider on 2
- * of 8 local runs and 69 px on the other six, and 41 px once on CI (#868's
- * first run). So a measurement counts only when the next poll, both notices
- * still present, reads the same notice cell — two equal consecutive readings
- * of its box. The cell and not the whole stage: the ride is running, and a
- * reading's box may change width with its value between any two polls.
- */
-async function measureWithBoth(page: Page, words: string): Promise<StageMeasurement> {
-  let found: StageMeasurement | undefined;
-  let previous: string | undefined;
-  await expect
-    .poll(async () => {
-      const reading = await page.evaluate((beside) => {
-        const text = document.querySelector('.oyl-hud__notices')?.textContent ?? '';
-        return text.includes(beside) && text.includes('Keep the screen on')
-          ? window.__oylRide?.measure()
-          : undefined;
-      }, words);
-      const key =
-        reading === undefined
-          ? undefined
-          : JSON.stringify(
-              reading.panels.find((each) => each.name.includes('oyl-hud__notices'))?.box,
-            );
-      const settled = key !== undefined && key === previous;
-      previous = key;
-      found = settled ? reading : undefined;
-      return settled;
-    })
-    .toBe(true);
-  if (found === undefined) throw new Error('unreachable');
-  return found;
-}
-
-test.describe('keep the screen on, beside every notice that stays — #647', () => {
-  for (const [query, beside, words] of NEVER_PUT_AWAY) {
-    for (const viewport of OVERLAY_VIEWPORTS) {
-      test(`beside ${beside}, over nothing — ${viewport.name}`, async ({ page }) => {
-        await openRide(page, viewport, `?keepalive=failed${query}`);
-        const settled = await measureWithBoth(page, words);
-        // #1120: and the same settled frame as an engine without anchor
-        // positioning lays it out — read straight after, with both notices
-        // still in the cell (asserted).
-        const bare = await withoutAnchors(page);
-        expect(bare.panels.find((each) => each.name.includes('oyl-hud__notices'))?.box).toEqual(
-          settled.panels.find((each) => each.name.includes('oyl-hud__notices'))?.box,
-        );
-        for (const [how, seen] of [
-          [ANCHORED, settled],
-          [UNANCHORED, bare],
-        ] as const) {
-          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-          const rider = riderBox(viewport);
-          const clearance = rider.top - (notice?.box.bottom ?? Infinity);
-          console.log(
-            `keep the screen on beside ${beside} — ${viewport.name} — ${how} — notice cell ` +
-              `${(notice?.box.height ?? 0).toFixed(0)} px tall` +
-              (viewport.height > viewport.width
-                ? `; ${clearance.toFixed(0)} px above the rider's box`
-                : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
-          );
-          expect(easedCollisions(seen, viewport), how).toEqual([]);
-          if (viewport.height > viewport.width) {
-            expect(clearance, how).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
-          }
-        }
-      });
-    }
-  }
-
-  // The control: the cell as round one of #693 shipped it — the old, longer
-  // sentence in the same notice, and both notices at the padding a notice has
-  // alone. Same elements, same cell, same viewport; only the words and the
-  // padding change. It must fall under the floor, or the floor above is being
-  // held over a cell that could never have reached the rider.
-  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 752)) {
-    test(`the control — as round one shipped it, the pair beside Eased comes within ${String(EASED_RIDER_CLEARANCE_PIXELS)} px of the rider — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, '?keepalive=failed&rescue=floor');
-      await measureWithBoth(page, 'Eased');
-      await page.evaluate(() => {
-        const statuses = [
-          ...document.querySelectorAll<HTMLElement>('.oyl-hud__notices > .oyl-status'),
-        ];
-        const label = statuses
-          .map((each) => each.querySelector('.oyl-status__label'))
-          .find((each) => each?.textContent?.startsWith('Keep the screen on'));
-        const body = label?.parentElement;
-        if (label === null || label === undefined || body === null || body === undefined) {
-          throw new Error('no keep-the-screen-on notice to restore');
-        }
-        body.replaceChildren(label, 'your ride may stop if the screen goes off.');
-        for (const each of statuses) each.style.padding = 'var(--oyl-space-sm)';
-      });
-      const text = await noticeText(page);
-      expect(text).toContain('Eased');
-      expect(text).toContain('Keep the screen on: your ride may stop if the screen goes off.');
       const seen = await measure(page);
-      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-      const clearance = riderBox(viewport).top - (notice?.box.bottom ?? Infinity);
-      console.log(
-        `keep the screen on beside Eased, as round one shipped it — ${viewport.name} — ${clearance.toFixed(0)} px above the rider's box`,
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
+      const lowest = lowestOf(controls);
+      expect(
+        controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'a ride control is under the gesture bar',
+      ).toEqual([]);
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
       );
-      expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      expect(
+        actions.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'the panel holding the ride controls is under the gesture bar',
+      ).toEqual([]);
+
+      await page.addStyleTag({ content: WITHOUT_BOTTOM_INSET });
+      const reverted = (await measure(page)).items.filter((each) =>
+        each.name.startsWith('control: '),
+      );
+      const revertedLowest = lowestOf(reverted);
+      console.log(
+        `#1441 ${viewport.name}: lowest control ends at ${lowest.toFixed(1)} of ` +
+          `${String(fold)}; without the padding ${revertedLowest.toFixed(1)}`,
+      );
+      expect(
+        revertedLowest,
+        'without the padding the controls stay clear, so the assertion above cannot fail here',
+      ).toBeGreaterThan(fold + 0.5);
     });
   }
-});
 
-/*
- * #940 — THE PRE-RIDE CHOOSER.
- *
- * `ride.html?picker=chooser` stops at the chooser with seven routes rather than
- * riding (`ride-harness.tsx` §`PICKER`). The LAST route's name is as long as a
- * route's name can be (`routes/save.ts` §`MAXIMUM_ROUTE_NAME_LENGTH`), so the
- * *Ride* named after it is the tallest it gets. Each case chooses that card as
- * a rider does, puts the page back at `scrollY === 0`, and reads *Ride*: on the
- * screen, the topmost thing at its own centre, and on the owner's tablet with
- * the #439 insets 50 px clear of the fold (`rideview.browser.spec.ts`
- * §`FOLD_MARGIN_PIXELS`' floor and its reason). Every margin is printed.
- *
- * ⚠️ **The control is `?picker=list`**: the same chooser with the old picker's
- * layout put back — the loadout above the routes, one route to a row, and
- * *Ride* after them — and *Ride* must then be under the tablet's floor.
- * Without it, every assertion here is true of a chooser with one short route.
- */
+  /*
+   * The trainer line on TWO lines, whatever the fonts. On the CI runner's
+   * wider glyphs it takes two in the short corners layout's 16 rem actions
+   * panel, and on a Mac one, so the case above passed on a Mac while run
+   * 39323488405 found the panel at [472,181 → 728,329] against a gesture bar
+   * from 328 at 736×360. `min-height: 2lh` is the runner's wrap, set here so a
+   * Mac measures what the runner does: it reproduced that box exactly.
+   *
+   * ⚠️ The control puts back the body's 1.55 leading `theme.css` §"#1441 — the
+   * trainer line at the short corners layout" takes away, and the panel must
+   * then be under the gesture bar again — so the rule is what holds it clear.
+   * Measured on a Mac: the panel ends at 328.0 of 328 with the rule — on the
+   * gesture bar's edge, where `align-self: end` puts it when the column fits —
+   * and at 329.0 without. A pixel is the whole of the fault CI found, so the
+   * control's margin is that pixel and no more; Chromium lays it out the same
+   * on both, which is why the forced wrap reproduced CI's box to the pixel.
+   */
+  const SHORT_CORNERS = OVERLAY_VIEWPORTS.find(
+    (each) => each.width === 736 && each.height === 360,
+  ) as Viewport;
+  const TRAINER_ON_TWO_LINES = `
+    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { min-height: 2lh !important; }
+  `;
+  const BODY_LEADING = `
+    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { line-height: 1.55 !important; }
+  `;
 
-/** `rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`, restated for a different page. */
-const CHOOSER_FOLD_FLOOR_PIXELS = 50;
-
-/** `design/ride-time-controls.ts` §`RIDE_TIME_TARGET_PIXELS`. */
-const CHOOSER_RIDE_TARGET_PIXELS = 48;
-
-interface ChooserViewport {
-  readonly name: string;
-  readonly width: number;
-  readonly height: number;
-  readonly insets: boolean;
-}
-
-const TABLET_IN_THE_SHELL_CHOOSER: ChooserViewport = {
-  name: 'a landscape tablet inside the Android shell — 1280×800, insets 36/32',
-  width: 1280,
-  height: 800,
-  insets: true,
-};
-
-/** The three viewports #940 names. */
-const CHOOSER_VIEWPORTS: readonly ChooserViewport[] = [
-  { name: 'a phone upright — 390×844', width: 390, height: 844, insets: false },
-  { name: 'a phone in landscape — 844×390', width: 844, height: 390, insets: false },
-  TABLET_IN_THE_SHELL_CHOOSER,
-];
-
-/**
- * #940's second review: every size it measured a pinned *Ride* over the
- * promise at, and the two where the longest name outgrew the pin, beside
- * #940's own three and two between its layouts.
- */
-const CHOOSER_REVIEW_VIEWPORTS: readonly ChooserViewport[] = [
-  { name: '932×430', width: 932, height: 430, insets: false },
-  { name: '844×390', width: 844, height: 390, insets: false },
-  { name: '740×360', width: 740, height: 360, insets: false },
-  { name: '640×360', width: 640, height: 360, insets: false },
-  { name: '568×320', width: 568, height: 320, insets: false },
-  { name: '320×640', width: 320, height: 640, insets: false },
-  { name: '360×740', width: 360, height: 740, insets: false },
-  { name: '390×844', width: 390, height: 844, insets: false },
-  { name: '1024×768', width: 1024, height: 768, insets: false },
-  { name: '800×1280', width: 800, height: 1280, insets: false },
-  TABLET_IN_THE_SHELL_CHOOSER,
-];
-
-/** Where the chooser's *Ride* is, and the three readings of its size. */
-interface ChooserRide {
-  readonly text: string;
-  readonly top: number;
-  readonly bottom: number;
-  readonly left: number;
-  readonly right: number;
-  readonly width: number;
-  readonly height: number;
-  readonly onTop: boolean;
-  readonly scrollY: number;
-  readonly fold: number;
-  readonly minHeight: number;
-  readonly minWidth: number;
-}
-
-/**
- * Which notices stand above *Ride*. `promise` is the default fixture: a ready
- * trainer, so only #503's promise. `release` is a ready trainer whose last
- * release was not confirmed — the release fault AND the promise, the state in
- * which #940's pinned *Ride* hid the whole promise on every landscape phone.
- * `all` is the TALLEST stack (`ride-harness.tsx` §`ALL_NOTICES`): the release
- * fault, the trainer notice and the realistic world.
- */
-type ChooserNotices = 'promise' | 'release' | 'all';
-
-const CHOOSER_NOTICE_STATES: readonly ChooserNotices[] = ['promise', 'release', 'all'];
-
-async function openChooser(
-  page: Page,
-  viewport: ChooserViewport,
-  query: 'chooser' | 'list',
-  notices: ChooserNotices = 'promise',
-): Promise<void> {
-  if (viewport.insets) {
-    await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
-  }
-  await openRide(
+  test(`the actions panel stays clear with the trainer line on two lines — ${SHORT_CORNERS.name}`, async ({
     page,
-    { ...viewport, unstagedFails: false },
-    `?picker=${query}${notices === 'promise' ? '' : `&notices=${notices}`}`,
-  );
-}
-
-/** The notice labels each state must render, in order, every one above *Ride*. */
-const CHOOSER_NOTICE_LABELS: Readonly<Record<ChooserNotices, readonly string[]>> = {
-  promise: ['Your trainer'],
-  release: ['Not released', 'Your trainer'],
-  // #1011: the realistic world is a compact line FIRST, so #503's promise —
-  // or here the trainer notice standing in its place — is last before Ride.
-  all: ['Realistic world', 'Not released', 'The road will not reach your trainer'],
-};
-
-/**
- * One reading of the chooser at the page's CURRENT scroll, with whatever is
- * pinned left where it is: whether *Ride* is the topmost thing at its centre,
- * and for every notice how many of a grid of points over its whole box the
- * hit test reaches (`elementFromPoint` lands inside the notice), how many lie
- * off the screen or under the shell's sticky header (scrolled past), and how
- * many land on something else — which is a notice OBSCURED.
- */
-interface ChooserSight {
-  readonly scrollY: number;
-  readonly rideOnTop: boolean;
-  readonly notices: readonly {
-    readonly label: string;
-    readonly reached: number;
-    readonly offScreen: number;
-    readonly obscured: number;
-    readonly points: number;
-    /** Page coordinates, for the order. */
-    readonly top: number;
-    readonly bottom: number;
-  }[];
-  /** *Ride*'s top in page coordinates. */
-  readonly rideTop: number;
-}
-
-/** Read {@link ChooserSight} at each of `scrolls` (page offsets; clamped by the browser). */
-async function sightsAt(page: Page, scrolls: readonly number[] | 'sweep'): Promise<ChooserSight[]> {
-  return page.evaluate((asked) => {
-    const chooser = document.querySelector('.oyl-chooser');
-    if (chooser === null) throw new Error('no chooser');
-    const ride = [...chooser.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
-      (each.textContent ?? '').startsWith('Ride '),
-    );
-    if (ride === undefined) throw new Error('the chooser has no Ride');
-    const maximum = document.documentElement.scrollHeight - window.innerHeight;
-    const offsets: number[] = [];
-    if (asked === 'sweep') {
-      for (let y = 0; y < maximum; y += 24) offsets.push(y);
-      offsets.push(Math.max(0, maximum));
-    } else {
-      offsets.push(...asked);
-    }
-    const header = document.querySelector<HTMLElement>('.oyl-header');
-    const readings = [];
-    for (const offset of offsets) {
-      window.scrollTo(0, offset);
-      const rideBox = ride.getBoundingClientRect();
-      const cx = rideBox.left + rideBox.width / 2;
-      const cy = rideBox.top + rideBox.height / 2;
-      const inView = cx >= 0 && cx < window.innerWidth && cy >= 0 && cy < window.innerHeight;
-      const hit = inView ? document.elementFromPoint(cx, cy) : null;
-      // Every notice above Ride: each status box, and since #1011 the
-      // realistic world's one line.
-      const notices = [...chooser.querySelectorAll<HTMLElement>('.oyl-chooser__notices > *')].map(
-        (each) => {
-          const box = each.getBoundingClientRect();
-          let reached = 0;
-          let offScreen = 0;
-          let obscured = 0;
-          let points = 0;
-          // Every 6 px down and across over the WHOLE box, inset only by its
-          // corner radius: a hit test 1 px inside a rounded corner is outside
-          // the shape and lands on whatever is behind it.
-          const inset =
-            Math.max(1, Number.parseFloat(getComputedStyle(each).borderTopLeftRadius)) + 1;
-          for (let y = box.top + inset; y <= box.bottom - inset; y += 6) {
-            for (let x = box.left + inset; x <= box.right - inset; x += 6) {
-              points += 1;
-              if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
-                offScreen += 1;
-                continue;
-              }
-              const at = document.elementFromPoint(x, y);
-              if (at !== null && each.contains(at)) reached += 1;
-              else if (at !== null && header !== null && header.contains(at)) offScreen += 1;
-              else obscured += 1;
-            }
-          }
-          return {
-            label:
-              each
-                .querySelector('.oyl-status__label, .oyl-chooser__world-label')
-                ?.textContent?.replace(/:\s*$/, '') ?? '',
-            reached,
-            offScreen,
-            obscured,
-            points,
-            top: box.top + window.scrollY,
-            bottom: box.bottom + window.scrollY,
-          };
-        },
+  }) => {
+    await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+    await openRide(page, SHORT_CORNERS);
+    expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+    await page.addStyleTag({ content: TRAINER_ON_TWO_LINES });
+    const fold = SHORT_CORNERS.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
+    const actionsOf = (seen: StageMeasurement): StageItem => {
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
       );
-      readings.push({
-        scrollY: window.scrollY,
-        rideOnTop: hit !== null && ride.contains(hit),
-        notices,
-        rideTop: rideBox.top + window.scrollY,
-      });
-    }
-    window.scrollTo(0, 0);
-    return readings;
-  }, scrolls);
-}
-
-/**
- * Tab through EVERY control in the chooser — forwards from the top of the
- * page, or backwards from its last control — and for each, read how much of
- * it lies behind anything pinned ANYWHERE in the document: any box whose
- * computed `position` is `sticky` or `fixed` (the shell's header and its
- * navigation included), less the control's own ancestors. Chromium scrolls a
- * newly focused control just into the viewport, so a control at an edge is
- * exactly where a pinned box sits (WCAG 2.2 SC 2.4.11, and 2.4.12's "any
- * part").
- */
-async function tabWalk(
-  page: Page,
-  direction: 'forwards' | 'backwards',
-): Promise<
-  readonly {
-    readonly name: string;
-    readonly covered: number;
-    readonly height: number;
-  }[]
-> {
-  await page.evaluate((backwards) => {
-    window.scrollTo(0, 0);
-    (document.activeElement as HTMLElement | null)?.blur();
-    if (backwards) {
-      const chooser = document.querySelector('.oyl-chooser');
-      const controls = [
-        ...(chooser?.querySelectorAll<HTMLElement>('input, select, button, a[href]') ?? []),
-      ].filter((each) => each.tabIndex >= 0 && !(each as HTMLInputElement).disabled);
-      const last = controls.at(-1);
-      if (last === undefined) throw new Error('the chooser has no controls');
-      last.focus();
-    }
-  }, direction === 'backwards');
-  const key = direction === 'forwards' ? 'Tab' : 'Shift+Tab';
-  const seen: { name: string; covered: number; height: number }[] = [];
-  const read = () =>
-    page.evaluate(() => {
-      const element = document.activeElement as HTMLElement | null;
-      if (element === null || element === document.body) return { kind: 'nothing' as const };
-      const chooser = document.querySelector('.oyl-chooser');
-      if (chooser === null || !chooser.contains(element)) return { kind: 'outside' as const };
-      const box = element.getBoundingClientRect();
-      const pinned = [...document.querySelectorAll<HTMLElement>('*')].filter((each) => {
-        const position = getComputedStyle(each).position;
-        return (position === 'sticky' || position === 'fixed') && !each.contains(element);
-      });
-      let covered = 0;
-      for (const pin of pinned) {
-        const over = pin.getBoundingClientRect();
-        const height = Math.min(box.bottom, over.bottom) - Math.max(box.top, over.top);
-        const width = Math.min(box.right, over.right) - Math.max(box.left, over.left);
-        if (height > 0 && width > 0) covered = Math.max(covered, height);
-      }
-      // Off the screen counts as covered: a focused control nobody can see.
-      covered = Math.max(covered, -box.top, box.bottom - window.innerHeight, 0);
-      // A label's own words, without a `<select>`'s options inside it.
-      const label = (element as HTMLInputElement).labels?.[0];
-      const words =
-        label === undefined
-          ? ''
-          : [...label.childNodes]
-              .filter((node) => node.nodeType === Node.TEXT_NODE)
-              .map((node) => node.textContent ?? '')
-              .join('');
-      const name =
-        element.getAttribute('aria-label') ??
-        (words === '' ? (element.textContent ?? element.tagName) : words);
-      return {
-        kind: 'control' as const,
-        name: name.trim().slice(0, 60),
-        covered,
-        height: box.height,
-      };
-    });
-  if (direction === 'backwards') {
-    const first = await read();
-    if (first.kind === 'control') seen.push(first);
-  }
-  for (let press = 0; press < 60; press += 1) {
-    await page.keyboard.press(key);
-    const reading = await read();
-    if (reading.kind === 'nothing') break;
-    if (reading.kind === 'outside') {
-      if (seen.length > 0) break;
-      continue;
-    }
-    seen.push({ name: reading.name, covered: reading.covered, height: reading.height });
-  }
-  return seen;
-}
-
-/**
- * `routes/save.ts` §`MAXIMUM_ROUTE_NAME_LENGTH`, as the harness publishes it —
- * the spec runs in Node and does not import the client (`devices-fixture.ts`'
- * reason); the harness builds its longest name from the constant and refuses
- * to start if the two disagree.
- */
-async function maximumRouteName(page: Page): Promise<number> {
-  const published = await page.evaluate(() => document.documentElement.dataset.oylMaximumRouteName);
-  const bound = Number(published);
-  expect(bound, 'the harness published no route-name bound').toBeGreaterThan(0);
-  return bound;
-}
-
-/** Choose the last card, as a rider does, and return its name. */
-async function chooseLast(page: Page): Promise<string> {
-  const lastName = await page.evaluate(() => {
-    const radios = [...document.querySelectorAll<HTMLInputElement>('.oyl-chooser__radio')];
-    const last = radios.at(-1);
-    if (last === undefined || radios.length < 2) throw new Error('the chooser offers no routes');
-    last.click();
-    last.blur();
-    return document.querySelector(`label[for="${last.id}"]`)?.textContent ?? '';
-  });
-  await page.waitForFunction(
-    (name) =>
-      [...document.querySelectorAll('button')].some((each) => each.textContent === `Ride ${name}`),
-    lastName,
-  );
-  return lastName;
-}
-
-/** Choose the last card, as a rider does, then read *Ride* at the top of the page. */
-async function chooseLastAndReadRide(page: Page): Promise<ChooserRide> {
-  await chooseLast(page);
-  return page.evaluate(() => {
-    window.scrollTo(0, 0);
-    const ride = [...document.querySelectorAll<HTMLButtonElement>('.oyl-chooser__go button')].find(
-      (each) => (each.textContent ?? '').startsWith('Ride '),
-    );
-    if (ride === undefined) throw new Error('the chooser has no Ride');
-    const box = ride.getBoundingClientRect();
-    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-    const probe = document.createElement('div');
-    probe.style.cssText =
-      'position:fixed;visibility:hidden;bottom:0;height:env(safe-area-inset-bottom,0px)';
-    document.body.append(probe);
-    const inset = probe.getBoundingClientRect().height;
-    probe.remove();
-    // A navigation BAR along the bottom is a fold too (`controls-first`'s rule).
-    const nav = document.querySelector<HTMLElement>('.oyl-nav');
-    const navBox = nav?.getBoundingClientRect();
-    const barTop =
-      nav !== null &&
-      navBox !== undefined &&
-      getComputedStyle(nav).position === 'fixed' &&
-      navBox.width >= window.innerWidth - 1
-        ? navBox.top
-        : window.innerHeight;
-    const style = getComputedStyle(ride);
-    const minHeight = Number.parseFloat(style.minHeight);
-    const minWidth = Number.parseFloat(style.minWidth);
-    return {
-      text: ride.textContent ?? '',
-      top: box.top,
-      bottom: box.bottom,
-      left: box.left,
-      right: box.right,
-      width: box.width,
-      height: box.height,
-      onTop: hit !== null && ride.contains(hit),
-      scrollY: window.scrollY,
-      fold: Math.min(window.innerHeight - inset, barTop),
-      minHeight,
-      minWidth,
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      return actions[0] as StageItem;
     };
-  });
-}
 
-/** The most space between the last notice and *Ride*: one notice's own margin. */
-const CHOOSER_NOTICE_TO_RIDE_PIXELS = 16;
+    const seen = await measure(page);
+    const line = named(seen.items, 'the trainer line');
+    // The apparatus: two lines of the leading this case is about, so a
+    // trainer line that went away cannot pass it.
+    expect(line.box.height, 'the trainer line, on two lines').toBeGreaterThan(40);
+    const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+    expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
+    expect(
+      controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+      'a ride control is under the gesture bar',
+    ).toEqual([]);
+    const panel = actionsOf(seen);
+    expect(
+      panel.box.bottom,
+      `the panel holding the ride controls is under the gesture bar: ${describeItem(panel)}`,
+    ).toBeLessThanOrEqual(fold + 0.5);
 
-/**
- * Where #940's criterion — *Ride* on the screen at `scrollY === 0` — must hold,
- * and where it CANNOT without hiding a notice, which #503 forbids: on a phone
- * held sideways a release fault and the promise are taller than what the
- * shell leaves under its own title and summary (they end 15 px above the
- * fold on a Mac), and the tallest stack is taller than an upright phone's
- * screen above its navigation bar (21 px left). There the case requires
- * *Ride* to come straight after the last notice — the notices, and nothing
- * else, are what is in its way — and lets it be on the screen if the fonts
- * leave room.
- */
-const RIDE_AT_THE_TOP: Readonly<Record<ChooserNotices, readonly string[]>> = {
-  promise: CHOOSER_VIEWPORTS.map((each) => each.name),
-  release: [CHOOSER_VIEWPORTS[0]?.name ?? '', TABLET_IN_THE_SHELL_CHOOSER.name],
-  all: [TABLET_IN_THE_SHELL_CHOOSER.name],
-};
-
-test.describe('#940 — the pre-ride chooser', () => {
-  for (const notices of CHOOSER_NOTICE_STATES) {
-    for (const viewport of CHOOSER_VIEWPORTS) {
-      const onScreen = RIDE_AT_THE_TOP[notices].includes(viewport.name);
-      test(`notices ${notices}: ${onScreen ? 'Ride is on the screen' : 'Ride comes straight after the notices'} after choosing the last route — ${viewport.name}`, async ({
-        page,
-      }) => {
-        await openChooser(page, viewport, 'chooser', notices);
-        const ride = await chooseLastAndReadRide(page);
-        const margin = ride.fold - ride.bottom;
-        const lastNotice = await page.evaluate(() =>
-          Math.max(
-            ...[...document.querySelectorAll('.oyl-chooser__notices > *')].map(
-              (each) => each.getBoundingClientRect().bottom,
-            ),
-          ),
-        );
-        console.log(
-          `#940 notices ${notices} — ${viewport.name}: Ride at ${ride.top.toFixed(1)}–${ride.bottom.toFixed(1)} px (${ride.height.toFixed(0)} tall), ${margin.toFixed(1)} px above the fold; the notices end at ${lastNotice.toFixed(1)} px, ${(ride.fold - lastNotice).toFixed(1)} px above it`,
-        );
-
-        expect(ride.text.length).toBe('Ride '.length + (await maximumRouteName(page)));
-        expect(ride.scrollY).toBe(0);
-        expect(ride.left).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
-        expect(ride.right).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
-        // ONE line, whatever the name (`.oyl-chooser__ride-label`).
-        expect(ride.height).toBeLessThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS + SUBPIXEL_TOLERANCE);
-        if (onScreen) {
-          expect(ride.top).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
-          expect(margin).toBeGreaterThanOrEqual(viewport.insets ? CHOOSER_FOLD_FLOOR_PIXELS : 0);
-          expect(ride.onTop, 'something covers Ride at its own centre').toBe(true);
-        } else {
-          // Ride straight after the last notice, and nothing else between:
-          // what keeps it off the screen is the notices #503 needs read first.
-          expect(ride.top - lastNotice).toBeGreaterThanOrEqual(0);
-          expect(ride.top - lastNotice).toBeLessThanOrEqual(
-            CHOOSER_NOTICE_TO_RIDE_PIXELS + SUBPIXEL_TOLERANCE,
-          );
-        }
-      });
-    }
-  }
-
-  for (const viewport of CHOOSER_VIEWPORTS) {
-    test(`Ride is at least 48 × 48, as laid out and as declared — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openChooser(page, viewport, 'chooser');
-      const ride = await chooseLastAndReadRide(page);
-      // The shipped box.
-      expect(ride.height).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
-      expect(ride.width).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
-      // The declaration (`.oyl-button--ride`).
-      expect(ride.minHeight).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
-      expect(ride.minWidth).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
-      // The third reading, the box with the floor stripped, is the case after
-      // this loop: the last route's name wraps, and a two-line Ride is over 48
-      // without any floor, so it is read on the first route's one line.
-    });
-  }
-
-  test('the floor is what holds Ride at 48 px — a one-line Ride, stripped', async ({ page }) => {
-    await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'chooser');
-    const stripped = await page.evaluate(() => {
-      const ride = [
-        ...document.querySelectorAll<HTMLButtonElement>('.oyl-chooser__go button'),
-      ].find((each) => (each.textContent ?? '').startsWith('Ride '));
-      if (ride === undefined) throw new Error('the chooser has no Ride');
-      const shipped = ride.getBoundingClientRect().height;
-      ride.style.minHeight = '0px';
-      ride.style.minWidth = '0px';
-      return {
-        text: ride.textContent ?? '',
-        shipped,
-        stripped: ride.getBoundingClientRect().height,
-      };
-    });
-    expect(stripped.text).toBe('Ride Harness hills');
-    expect(stripped.shipped).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
-    expect(stripped.stripped).toBeLessThan(CHOOSER_RIDE_TARGET_PIXELS);
-  });
-
-  test('the control — the old list puts Ride under the tablet’s floor', async ({ page }) => {
-    await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'list');
-    const ride = await chooseLastAndReadRide(page);
-    const margin = ride.fold - ride.bottom;
+    await page.addStyleTag({ content: BODY_LEADING });
+    const reverted = actionsOf(await measure(page));
     console.log(
-      `#940 — the control, ${TABLET_IN_THE_SHELL_CHOOSER.name}: Ride ends ${margin.toFixed(1)} px above the fold`,
+      `#1441 ${SHORT_CORNERS.name}, the trainer line on two lines: the actions panel ends at ` +
+        `${panel.box.bottom.toFixed(1)} of ${String(fold)}; at the body's leading ` +
+        `${reverted.box.bottom.toFixed(1)}`,
     );
-    expect(margin).toBeLessThan(CHOOSER_FOLD_FLOOR_PIXELS);
+    expect(
+      reverted.box.bottom,
+      'at the body’s leading the panel stays clear, so the assertion above cannot fail here',
+    ).toBeGreaterThan(fold + 0.5);
   });
-
-  for (const colorScheme of ['light', 'dark'] as const) {
-    test(`a card's focus ring is 3:1, and the arrow keys move the choice — ${colorScheme}`, async ({
-      page,
-    }) => {
-      await page.emulateMedia({ colorScheme });
-      await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'chooser');
-      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(colorScheme);
-      await page.evaluate(() => {
-        (document.activeElement as HTMLElement | null)?.blur();
-      });
-      let onRadio = false;
-      for (let press = 0; press < 40 && !onRadio; press += 1) {
-        await page.keyboard.press('Tab');
-        onRadio = await page.evaluate(
-          () => document.activeElement?.classList.contains('oyl-chooser__radio') ?? false,
-        );
-      }
-      expect(onRadio, 'Tab never reached a route card').toBe(true);
-      const rings = await page.evaluate(() => {
-        const radio = document.activeElement as HTMLInputElement;
-        const card = radio.closest('.oyl-chooser__card') as HTMLElement;
-        const paintedBehind = (element: Element): string => {
-          for (let at = element.parentElement; at !== null; at = at.parentElement) {
-            const background = getComputedStyle(at).backgroundColor;
-            if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
-              return background;
-            }
-          }
-          return getComputedStyle(document.documentElement).backgroundColor;
-        };
-        const read = (element: Element) => {
-          const style = getComputedStyle(element);
-          return {
-            colour: style.outlineColor,
-            style: style.outlineStyle,
-            width: Number.parseFloat(style.outlineWidth),
-            surface: paintedBehind(element),
-          };
-        };
-        return {
-          visible: radio.matches(':focus-visible'),
-          checked: radio.checked,
-          card: read(card),
-          radio: read(radio),
-        };
-      });
-      expect(rings.visible).toBe(true);
-      for (const ring of [rings.card, rings.radio]) {
-        expect(ring.style).toBe('solid');
-        expect(ring.width).toBeGreaterThanOrEqual(2);
-        expect(
-          contrastRatio(hexOf(ring.colour), hexOf(ring.surface)),
-          `${ring.colour} on ${ring.surface}`,
-        ).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
-      }
-
-      // Native radio behaviour: an arrow key moves the choice, and Ride follows.
-      const rideText = () =>
-        page.evaluate(
-          () => [...document.querySelectorAll('.oyl-chooser__go button')].at(-1)?.textContent,
-        );
-      const before = await rideText();
-      await page.keyboard.press('ArrowDown');
-      const after = {
-        ride: await rideText(),
-        focused: await page.evaluate(
-          () => document.activeElement?.classList.contains('oyl-chooser__radio') ?? false,
-        ),
-      };
-      expect(after.focused).toBe(true);
-      expect(after.ride).not.toBe(before);
-
-      // The tab order is notices, Ride, the cards, the loadout: Tab leaves the
-      // group for the loadout and never meets Ride again, and Shift+Tab from
-      // the group lands on Ride, now named for the route just chosen.
-      const where = () =>
-        page.evaluate(() => {
-          const element = document.activeElement;
-          if (element === null) return 'nothing';
-          if (element.closest('.oyl-chooser__cards') !== null) return 'card';
-          if (element.closest('.oyl-chooser__loadout') !== null) return 'loadout';
-          if (element.closest('.oyl-chooser__go') !== null) return 'ride';
-          return 'elsewhere';
-        });
-      const order: string[] = [];
-      for (let press = 0; press < 20; press += 1) {
-        await page.keyboard.press('Tab');
-        const at = await where();
-        if (at !== 'loadout' && order.length > 0) break;
-        order.push(at);
-      }
-      expect(order[0], order.join(' → ')).toBe('loadout');
-      expect(order, order.join(' → ')).not.toContain('ride');
-      expect(order, order.join(' → ')).not.toContain('card');
-      for (let press = 0; press < 20 && (await where()) !== 'card'; press += 1) {
-        await page.keyboard.press('Shift+Tab');
-      }
-      await page.keyboard.press('Shift+Tab');
-      expect(await where()).toBe('ride');
-      expect(await rideText()).toBe(after.ride);
-    });
-  }
-});
-
-/*
- * #940's second review — the two blockers, as hit tests with NOTHING moved.
- *
- * - **#503**: whenever *Ride* is the topmost thing at its centre, every notice
- *   above it is reached by `elementFromPoint` over its WHOLE box at
- *   `scrollY === 0`; and at every scroll position, no point of a notice that is
- *   on the screen lands on anything but the notice (the shell's sticky header
- *   over a notice scrolled under it counts as scrolled past, not obscured).
- *   The notices also stand above *Ride* on the page. Measured in all three
- *   notice states, the release fault + promise among them, at every size the
- *   review measured a pinned *Ride* over the promise.
- * - **SC 2.4.11**: with the LONGEST route name chosen, a Tab walk forwards and
- *   a Shift+Tab walk backwards through every control in the chooser, in which
- *   no focused control lies behind anything pinned anywhere in the document,
- *   or off the screen — not wholly, and not by one pixel.
- */
-test.describe('#940 — the notices are never hidden while Ride is offered, and focus is never under anything pinned', () => {
-  for (const notices of CHOOSER_NOTICE_STATES) {
-    for (const viewport of CHOOSER_REVIEW_VIEWPORTS) {
-      test(`notices ${notices}: every notice is unobscured whenever Ride is — ${viewport.name}`, async ({
-        page,
-      }) => {
-        await openChooser(page, viewport, 'chooser', notices);
-        await chooseLast(page);
-        const sights = await sightsAt(page, 'sweep');
-        const first = sights[0] as ChooserSight;
-        const share = (notice: ChooserSight['notices'][number]) =>
-          ((100 * notice.reached) / notice.points).toFixed(0);
-        console.log(
-          `#940 #503 notices ${notices} — ${viewport.name}: at scrollY 0 Ride ${first.rideOnTop ? 'on top' : 'not on the screen'}, ${first.notices
-            .map((each) => `${each.label} ${share(each)} %`)
-            .join(
-              ', ',
-            )}; ${String(sights.filter((each) => each.rideOnTop).length)} of ${String(sights.length)} scroll positions show Ride`,
-        );
-        expect(first.scrollY).toBe(0);
-        expect(first.notices.map((each) => each.label)).toEqual(CHOOSER_NOTICE_LABELS[notices]);
-        for (const notice of first.notices) {
-          expect(notice.bottom, `${notice.label} is not above Ride`).toBeLessThanOrEqual(
-            first.rideTop + SUBPIXEL_TOLERANCE,
-          );
-        }
-        if (first.rideOnTop) {
-          for (const notice of first.notices) {
-            expect(
-              notice.reached,
-              `Ride is on the screen at scrollY 0 and ${notice.label} is ${share(notice)} % reached`,
-            ).toBe(notice.points);
-          }
-        }
-        for (const sight of sights) {
-          if (!sight.rideOnTop) continue;
-          for (const notice of sight.notices) {
-            expect(
-              notice.obscured,
-              `at scrollY ${sight.scrollY.toFixed(0)}, ${notice.label} is covered while Ride is on top`,
-            ).toBe(0);
-          }
-        }
-      });
-    }
-  }
-
-  for (const notices of ['promise', 'all'] as const) {
-    for (const viewport of CHOOSER_REVIEW_VIEWPORTS) {
-      for (const direction of ['forwards', 'backwards'] as const) {
-        test(`notices ${notices}, the longest route name: Tab ${direction}, and no focused control is under anything pinned — ${viewport.name}`, async ({
-          page,
-        }) => {
-          await openChooser(page, viewport, 'chooser', notices);
-          const name = await chooseLast(page);
-          expect(name.length).toBe(await maximumRouteName(page));
-          const walk = await tabWalk(page, direction);
-          console.log(
-            `#940 Tab ${direction}, notices ${notices} — ${viewport.name}: ${walk
-              .map(
-                (each) =>
-                  `${each.name.slice(0, 24)} ${each.covered.toFixed(0)}/${each.height.toFixed(0)}`,
-              )
-              .join(' | ')}`,
-          );
-          expect(
-            walk.some((each) => each.name.startsWith('Ride ')),
-            'the walk never reached Ride',
-          ).toBe(true);
-          expect(walk.length).toBeGreaterThanOrEqual(8);
-          for (const step of walk) {
-            expect(
-              step.covered,
-              `${step.name} is behind something pinned, or off the screen, when focused`,
-            ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
-          }
-        });
-      }
-    }
-  }
-});
-
-/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
-function hexOf(rgb: string): string {
-  const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
-  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
-  return `#${channels
-    .slice(1, 4)
-    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
-    .join('')}`;
-}
-
-/*
- * #1011 — Phase 2 of epic #935: the routes as TILES (the drawing fills the
- * tile, the facts on a solid band at its foot, the chosen tile told by a tick
- * and a word as well as its edge), two columns on a tablet and one on a phone,
- * one full-width *Ride*, and the realistic world as one line. Every #940 case
- * above still runs on this layout; these read what is new.
- *
- * Its control, `?picker=list` (the old layout, one route per row), must read
- * ONE column on the tablets — which is what makes "two columns" a measurement
- * of the shipped rule rather than of the harness.
- */
-const TILE_VIEWPORTS: readonly (ChooserViewport & { readonly columns: number })[] = [
-  { ...(CHOOSER_VIEWPORTS[0] as ChooserViewport), columns: 1 },
-  { ...(CHOOSER_VIEWPORTS[1] as ChooserViewport), columns: 1 },
-  { ...TABLET_IN_THE_SHELL_CHOOSER, columns: 2 },
-  { name: 'a tablet upright — 800×1280', width: 800, height: 1280, insets: false, columns: 2 },
-];
-
-interface TileReading {
-  readonly columns: number;
-  readonly tiles: readonly {
-    readonly width: number;
-    readonly shapeWidth: number;
-    readonly shapeHeight: number;
-    readonly shapeLeftInset: number;
-    readonly bandBottomInset: number;
-    readonly shapeToBand: number;
-    readonly bandBackground: string;
-    readonly bandText: string;
-    readonly chosenMark: boolean;
-    readonly chosenVisible: boolean;
-    readonly doubledEdge: string;
-  }[];
-  readonly rideWidth: number;
-  readonly goWidth: number;
-  readonly rideHeight: number;
-  readonly overlay: string;
-}
-
-async function readTiles(page: Page): Promise<TileReading> {
-  return page.evaluate(() => {
-    const cards = [...document.querySelectorAll<HTMLElement>('.oyl-chooser__card')];
-    const firstTop = cards[0]?.getBoundingClientRect().top ?? 0;
-    const columns = cards.filter(
-      (card) => Math.abs(card.getBoundingClientRect().top - firstTop) < 1,
-    ).length;
-    const ride = [...document.querySelectorAll<HTMLElement>('.oyl-chooser__go button')][0];
-    const go = document.querySelector<HTMLElement>('.oyl-chooser__go');
-    const probe = document.createElement('div');
-    probe.style.background = 'var(--oyl-color-surface-overlay)';
-    document.body.append(probe);
-    const overlay = getComputedStyle(probe).backgroundColor;
-    probe.remove();
-    return {
-      columns,
-      tiles: cards.map((card) => {
-        const box = card.getBoundingClientRect();
-        const border = Number.parseFloat(getComputedStyle(card).borderLeftWidth);
-        const shape = card.querySelector('svg.oyl-chooser__shape')?.getBoundingClientRect();
-        const band = card.querySelector<HTMLElement>('.oyl-chooser__facts');
-        const bandBox = band?.getBoundingClientRect();
-        const mark = card.querySelector<HTMLElement>('.oyl-chooser__chosen');
-        const markBox = mark?.getBoundingClientRect();
-        return {
-          width: box.width - 2 * border,
-          shapeWidth: shape?.width ?? 0,
-          shapeHeight: shape?.height ?? 0,
-          shapeLeftInset: (shape?.left ?? 0) - (box.left + border),
-          bandBottomInset: box.bottom - border - (bandBox?.bottom ?? 0),
-          shapeToBand: (bandBox?.top ?? 0) - (shape?.bottom ?? 0),
-          bandBackground: band === null ? '' : getComputedStyle(band).backgroundColor,
-          bandText: band?.textContent ?? '',
-          chosenMark: mark !== null,
-          chosenVisible:
-            mark !== null &&
-            markBox !== undefined &&
-            markBox.width > 0 &&
-            getComputedStyle(mark).visibility === 'visible',
-          doubledEdge: getComputedStyle(card, '::before').boxShadow,
-        };
-      }),
-      rideWidth: ride?.getBoundingClientRect().width ?? 0,
-      goWidth: go?.getBoundingClientRect().width ?? 0,
-      rideHeight: ride?.getBoundingClientRect().height ?? 0,
-      overlay,
-    };
-  });
-}
-
-test.describe('#1011 — route tiles, one full-width Ride, the realistic world in one line', () => {
-  for (const viewport of TILE_VIEWPORTS) {
-    test(`tiles in ${String(viewport.columns)} column(s), each filled by its drawing over a solid band — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openChooser(page, viewport, 'chooser');
-      const read = await readTiles(page);
-      console.log(
-        `#1011 ${viewport.name}: ${String(read.columns)} column(s), tile ${read.tiles[0]?.width.toFixed(0) ?? '?'} px, drawing ${read.tiles[0]?.shapeWidth.toFixed(0) ?? '?'}×${read.tiles[0]?.shapeHeight.toFixed(0) ?? '?'} px; Ride ${read.rideWidth.toFixed(0)} of ${read.goWidth.toFixed(0)} px`,
-      );
-      expect(read.columns).toBe(viewport.columns);
-      expect(read.tiles.length).toBeGreaterThan(1);
-      for (const [index, tile] of read.tiles.entries()) {
-        // The drawing fills the tile, edge to edge.
-        expect(Math.abs(tile.shapeLeftInset)).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
-        expect(tile.shapeWidth).toBeGreaterThanOrEqual(tile.width - SUBPIXEL_TOLERANCE);
-        expect(tile.shapeHeight).toBeGreaterThanOrEqual(100);
-        // The facts on a solid band at the foot, in the declared surface.
-        expect(Math.abs(tile.bandBottomInset)).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
-        // ...and the drawing stands on it: the slack in a row is sky, above.
-        expect(Math.abs(tile.shapeToBand)).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
-        expect(tile.bandBackground).toBe(read.overlay);
-        expect(tile.bandText).toMatch(/ · climb .+ · steepest \d+%$/);
-        // The chosen tile: a tick and a word, and the doubled edge.
-        expect(tile.chosenMark).toBe(index === 0);
-        if (index === 0) {
-          expect(tile.chosenVisible).toBe(true);
-          expect(tile.doubledEdge).toContain('inset');
-        } else {
-          expect(tile.doubledEdge).toBe('none');
-        }
-      }
-      // One full-width Ride, still 48 px.
-      expect(read.rideWidth).toBeGreaterThanOrEqual(read.goWidth - SUBPIXEL_TOLERANCE);
-      expect(read.rideHeight).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
-    });
-  }
-
-  test('control: the old one-per-row layout reads ONE column on the tablet', async ({ page }) => {
-    await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'list');
-    expect((await readTiles(page)).columns).toBe(1);
-  });
-
-  for (const viewport of CHOOSER_VIEWPORTS) {
-    test(`the realistic world is ONE line, first, and the promise’s place is last — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openChooser(page, viewport, 'chooser', 'all');
-      const line = await page.evaluate(() => {
-        const world = document.querySelector<HTMLElement>('.oyl-chooser__world');
-        const notices = [...document.querySelectorAll('.oyl-chooser__notices > *')];
-        const summary = world?.querySelector('summary')?.getBoundingClientRect();
-        const words = world?.querySelector('p');
-        const range = document.createRange();
-        if (words) range.selectNodeContents(words);
-        return {
-          slack: (words?.getBoundingClientRect().width ?? 0) - range.getBoundingClientRect().width,
-          height: world?.getBoundingClientRect().height ?? 0,
-          first: notices[0] === world,
-          summaryHeight: summary?.height ?? 0,
-          summaryWidth: summary?.width ?? 0,
-          link: world?.querySelector('a')?.textContent ?? '',
-        };
-      });
-      console.log(
-        `#1011 the realistic world's line — ${viewport.name}: ${line.height.toFixed(1)} px tall, ${line.slack.toFixed(1)} px to spare beside its words`,
-      );
-      expect(line.first).toBe(true);
-      expect(line.link).toBe('Change in Settings');
-      // One row: the ⓘ's 44 px target and the border, and nothing else.
-      expect(line.height).toBeLessThanOrEqual(44 + 4 + SUBPIXEL_TOLERANCE);
-      expect(line.summaryHeight).toBeGreaterThanOrEqual(44);
-      expect(line.summaryWidth).toBeGreaterThanOrEqual(44);
-    });
-  }
 });

@@ -33,6 +33,8 @@ import {
   watts,
 } from '@onyourleft/domain';
 
+import { NO_CARD_DEVICE } from '../instance/testing';
+import { keylessInstance } from '../rooms/rooms-testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
@@ -82,6 +84,7 @@ const renderer: GameRenderer = {
     render: () => undefined,
     setQuality: () => undefined,
     setRiderKit: () => undefined,
+    setSeason: () => undefined,
     resize: () => undefined,
     destroy: () => undefined,
   }),
@@ -121,7 +124,12 @@ describe('a room reaches the game through the shell — #782 review (N1)', () =>
     };
     // As `main.tsx` §`buildRoomPort` builds it: over this device's
     // `localStorage`, with only the network scripted.
-    const room = createRoomPort({ storage: localStorage, send, openSocket });
+    const room = createRoomPort({
+      ...NO_CARD_DEVICE,
+      storage: localStorage,
+      send: keylessInstance(send),
+      openSocket,
+    });
 
     globalThis.location.hash = '#/game';
     mounted = await mount(

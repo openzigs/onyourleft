@@ -48,6 +48,11 @@ export interface AthleteTable {
    * `null` while it never has (#775). Added by migration 0008.
    */
   readonly activated_at: number | null;
+  /**
+   * When the operator's `load-accounts add` made this throwaway account for a
+   * load run, or `null` for every rider's account (#1383). Added by migration 0032.
+   */
+  readonly load_run_at: number | null;
 }
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */
@@ -92,6 +97,12 @@ export interface ActivityRecordTable {
    * Defaults to `0`; not part of the signed record, because it is revocable.
    */
   readonly may_be_raced: Generated<number>;
+  /**
+   * The SHA-256 of the route a consented ride may be raced on, or `null` when
+   * it is not offered (#331, migration 0025). Set by the device that signed
+   * the ride, after its privacy-zone refusal; cleared by a revocation.
+   */
+  readonly race_route_sha256: Generated<string | null>;
 }
 
 /** A group ride or a race. */
@@ -119,6 +130,8 @@ export interface RoomCourseTable {
   readonly finishers: Generated<number | null>;
   /** Unix seconds: when this race's room said it was over — everybody off the road (#785, 0013). */
   readonly race_finished_at: Generated<number | null>;
+  /** `1` when the room drafts its riders, `0` when its maker turned drafting off (#787, 0024). */
+  readonly drafting: Generated<number>;
 }
 
 /** One athlete's result in one room. */
@@ -145,6 +158,8 @@ export interface PrivateRoomTable {
   readonly created_at: number;
   /** Unix seconds: when the room was over. Never opened again after. */
   readonly closed_at: number | null;
+  /** Unix seconds: when its creator said a PUBLIC room starts (#788, migration 0033); `NULL` for one shared by its code. */
+  readonly starts_at: number | null;
 }
 
 /** Who may be ticketed into a private room (#784, migration 0013). */
@@ -196,6 +211,13 @@ export interface DisplayNameChangeTable {
 export interface RecoveryEmailTable {
   readonly athlete_id: string;
   readonly address: string;
+  /**
+   * When `/confirm` bound it, Unix seconds; `null` for an address bound
+   * before migration 0019, which is established (#1194, ADR 0047 D-8).
+   */
+  readonly confirmed_at: number | null;
+  /** The key that gave the address (its binder); `null` before migration 0019. */
+  readonly bound_by_key: string | null;
 }
 
 /** An email recovery link's token, as its SHA-256 (#773). */
@@ -204,6 +226,8 @@ export interface EmailRecoveryTokenTable {
   readonly athlete_id: string;
   readonly expires_at: number;
   readonly used_at: number | null;
+  /** The address it was mailed to (#1194, migration 0019). */
+  readonly address: string | null;
 }
 
 /**
@@ -216,6 +240,39 @@ export interface RecoveryEmailConfirmationTable {
   readonly address: string;
   readonly expires_at: number;
   readonly used_at: number | null;
+  /** The key that gave the address, or `null` before migration 0018 (#1193). */
+  readonly requested_by_key: Generated<string | null>;
+  /**
+   * When another key's confirmation of the same address bound it first
+   * (#1194, migration 0019): this one is spent, and `confirmation_superseded`.
+   */
+  readonly superseded_at: Generated<number | null>;
+}
+
+/**
+ * One account-security change (#1193, ADR 0047 D-8, migration 0018), and the
+ * device key that authorised it.
+ */
+export interface AccountChangeTable {
+  readonly id: Generated<number>;
+  readonly athlete_id: string;
+  readonly at: number;
+  readonly kind: string;
+  readonly actor_key: string;
+  /** The key added or revoked, where the change is about a key. */
+  readonly subject_key: string | null;
+  /** How a key was added: `link_code`, `recovery_code` or `email_token`. */
+  readonly via: string | null;
+  /** The address added or cleared, where the change is about one. */
+  readonly address: string | null;
+}
+
+/** How far one device has acknowledged its athlete's account-change log (#1193). */
+export interface AccountChangeMarkTable {
+  readonly athlete_id: string;
+  readonly device_key: string;
+  readonly acknowledged_through: number;
+  readonly acknowledged_at: number;
 }
 
 /** One athlete blocking another (#83): the blocker's row. */
@@ -224,18 +281,36 @@ export interface BlockTable {
   /** No foreign key: `eraseAthlete` removes the rows naming an erased athlete (migration 0007). */
   readonly blocked_athlete_id: string;
   readonly created_at: number;
+  /** Opaque and random, never the blocked athlete's id: the column's default makes it (migration 0035, #1529). */
+  readonly handle: Generated<string>;
+  /** The name a race's result showed the blocker on the row they blocked from, or `NULL` (#1529). */
+  readonly shown_name: string | null;
 }
 
-/** A report (#83): the reporter's row. */
+/** A report (#83): the reporter's row, or the room's own for a flag (#789, migration 0031). */
 export interface ReportTable {
   readonly id: Generated<number>;
-  readonly athlete_id: string;
+  /** The reporter; `null` for a flag a room filed (#789). */
+  readonly athlete_id: string | null;
   readonly target_athlete_id: string;
   readonly reason: string;
   readonly created_at: number;
   readonly closed_at: number | null;
   readonly closed_by_athlete_id: string | null;
   readonly outcome: string | null;
+  /** The room it was made from, and the room's tick then (#789). */
+  readonly room_id: string | null;
+  readonly room_tick: number | null;
+  /** A plausibility flag's breached ceiling (#789): its duration and W/kg. */
+  readonly flag_duration_seconds: number | null;
+  readonly flag_ceiling_watts_per_kilogram: number | null;
+}
+
+/** A rider removed from a room by its host or a moderator (#789): the removed rider's row. */
+export interface RoomRemovalTable {
+  readonly room_id: string;
+  readonly athlete_id: string;
+  readonly removed_at: number;
 }
 
 /** One moderator action (#83). Append-only: the schema refuses an UPDATE or a DELETE. */
@@ -247,6 +322,80 @@ export interface ModerationLogTable {
   readonly report_id: number | null;
   readonly reason: string;
   readonly at: number;
+  /** The room the action was taken in (#789). */
+  readonly room_id: Generated<string | null>;
+}
+
+/**
+ * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
+ * the schema refuses an UPDATE or a DELETE. No column is a client address.
+ */
+export interface NoticeTable {
+  readonly id: Generated<number>;
+  readonly received_at: number;
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** A JSON array of item identifiers (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: string;
+  readonly location: string | null;
+  readonly notifier_name: string | null;
+  readonly notifier_email: string | null;
+  readonly bona_fide: 0 | 1;
+}
+
+/**
+ * A statement of reasons (#910, migration 0027): the DSA Art. 17(3) fields of
+ * one restricting action, keyed by its log entry. Append-only.
+ */
+export interface StatementTable {
+  readonly log_id: number;
+  readonly target_athlete_id: string;
+  readonly restriction: string;
+  readonly facts: string;
+  readonly decided_on: 'notice' | 'report' | 'own_initiative';
+  readonly legal_ground: string | null;
+  readonly terms_ground: string | null;
+  readonly notifier_named: string | null;
+  readonly moderator_conflict: 0 | 1;
+  readonly ends_at: number | null;
+  readonly at: number;
+}
+
+/**
+ * An appeal against a restriction (#911, migration 0028), one per statement.
+ * Decided once, never deleted.
+ */
+export interface AppealTable {
+  readonly id: Generated<number>;
+  readonly statement_log_id: number;
+  readonly appellant_athlete_id: string;
+  readonly grounds: string;
+  readonly filed_at: number;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  readonly decision: string | null;
+  readonly moderator_conflict: 0 | 1 | null;
+  readonly decided_at: number | null;
+  readonly decided_log_id: number | null;
+}
+
+/** One step taken on a notice (#912, migration 0029). Append-only; once a step a notice. */
+export interface NoticeStepTable {
+  readonly id: Generated<number>;
+  readonly notice_id: number;
+  readonly step: 'acknowledged' | 'decided' | 'notifier_told';
+  readonly actor_athlete_id: string;
+  readonly decision: string | null;
+  readonly log_id: number | null;
+  readonly at: number;
+}
+
+/** One item a moderator hid (#913, migration 0030). Restored once, never deleted. */
+export interface HiddenItemTable {
+  readonly log_id: number;
+  readonly item: string;
+  readonly owner_athlete_id: string;
+  readonly hidden_at: number;
+  readonly restored_at: number | null;
 }
 
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
@@ -260,7 +409,45 @@ export interface InviteCodeTable {
 
 /** What kind of thing a sync item is (#37, #776). */
 export type SyncKind =
-  'activity' | 'write-up' | 'ride-summary' | 'side-camera-report' | 'goal' | 'note' | 'document';
+  | 'activity'
+  | 'write-up'
+  | 'ride-summary'
+  | 'side-camera-report'
+  | 'goal'
+  | 'note'
+  | 'document'
+  /**
+   * The rider's masking data — their words-to-mask list and their privacy
+   * zones — for masking what a hosted model is sent (#1101, ADR 0046 D-10).
+   * Never indexed and never readable by an analysis tool.
+   */
+  | 'masking'
+  /**
+   * A saved workout (#1100): its body is the workout's own file format
+   * (`@onyourleft/domain` §`encodeWorkoutFile`, ADR 0017), keyed by the
+   * device's workout id. Read only by the agent's `workouts` tool, which
+   * re-validates every row (`decodeWorkoutFile`). Not indexed for history.
+   */
+  | 'workout'
+  /**
+   * The rider's TYPED workout goals (#1237, ADR 0048 D-10, the owner's Q9):
+   * one item, keyed `goals`, its body the goals as JSON
+   * (`@onyourleft/domain` §`readWorkoutGoals`). ⚠️ **Not `goal`**, #836's free
+   * text, which never sets a bound: only this kind may bound a heart-rate hold
+   * or a re-plan. Synced sealed only (ADR 0047), like every item, and not
+   * indexed for history. The device copy is canonical (ADR 0036 D-3).
+   */
+  | 'workout-goal'
+  /**
+   * A ride's re-plan decisions (#1315, ADR 0048 D-6 P9 and D-10): an item of
+   * its ride, keyed by the ride's activity id like a write-up, its body the
+   * list of records as JSON (`@onyourleft/domain` §`readReplanRecord`, which
+   * the device reads every entry of before it writes a pulled one). A move
+   * and a reason from two closed lists, and no text. Synced sealed only
+   * (ADR 0047), never indexed for history and read by no analysis tool. The
+   * device copy is canonical (ADR 0036 D-3); deleted with its ride.
+   */
+  | 'replan-record';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {
@@ -307,6 +494,158 @@ export interface HistoryPassageTable {
   readonly vector: Uint8Array;
 }
 
+/**
+ * The instance's ONE hosted model key (#1097, ADR 0046 D-9). Added by
+ * migration 0014. `slot` is always 1, so the table holds one row at most;
+ * `athlete_id` is the athlete it is held for — the operator (Q9) — so
+ * erasing them takes it (`eraseAthlete` derives its tables from the foreign
+ * keys). Other riders may be registered beside it (ruling 5). The key itself is AES-256-GCM ciphertext under the operator's
+ * `OYL_INSTANCE_SECRET_KEY` (`analysis/hosted-key.ts`); its plaintext is
+ * never a column.
+ */
+export interface HostedModelKeyTable {
+  readonly slot: number;
+  readonly athlete_id: string;
+  /** The hosted service's OpenAI-compatible base URL, `https:` only. */
+  readonly url: string;
+  readonly model: string;
+  /** The 12-byte nonce of this one encryption: fresh on every write. */
+  readonly iv: Uint8Array;
+  /** The key, encrypted, with GCM's tag on the end. */
+  readonly ciphertext: Uint8Array;
+  readonly set_at: number;
+}
+
+/**
+ * A rider's OWN hosted model key (#1199, ADR 0046 D-9 as the owner ruled it
+ * on 2026-10-09: bring-your-own only). Added by migration 0021. One row an
+ * athlete; the key is AES-256-GCM ciphertext under `OYL_INSTANCE_SECRET_KEY`,
+ * sealed exactly as {@link HostedModelKeyTable}'s, and never a column in clear.
+ */
+export interface AthleteHostedKeyTable {
+  readonly athlete_id: string;
+  /** The hosted service's OpenAI-compatible base URL, `https:` only. */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly set_at: number;
+  /** What the rider says a turn may spend reasoning (migration 0023, #1268), or null. */
+  readonly reasoning_tokens: number | null;
+}
+
+/**
+ * A rider's own recorded hosted consent (#1199, ADR 0046 Q10). Added by
+ * migration 0021. One row an athlete: the ORIGIN it names, and when.
+ */
+export interface AthleteHostedConsentTable {
+  readonly athlete_id: string;
+  readonly origin: string;
+  readonly recorded_at: number;
+}
+
+/**
+ * One of the instance's own keys (#1189, ADR 0047 D-4, D-5). Added by
+ * migration 0015. The private half is PKCS #8 wrapped with AES-256-GCM under
+ * a key derived from `OYL_INSTANCE_SECRET_KEY` (`keys/wrap.ts`); its plaintext
+ * is never a column.
+ */
+export interface InstanceKeyTable {
+  /** The first 8 bytes of SHA-256 over the public key, lowercase hex. */
+  readonly key_id: string;
+  readonly role: 'identity' | 'encryption';
+  /** The raw 32-byte public key. */
+  readonly public_key: Uint8Array;
+  /** The 12-byte nonce of this one wrap: fresh for every key. */
+  readonly iv: Uint8Array;
+  /** The private half, wrapped, with GCM's tag on the end. */
+  readonly wrapped: Uint8Array;
+  /** An encryption key's serial; `null` for the identity key. */
+  readonly serial: number | null;
+  /** When the key was made, by the box's clock: an encryption key's `notBefore`. */
+  readonly created_at: number;
+  /** When an encryption key's successor was made, or `null`. */
+  readonly superseded_at: number | null;
+}
+
+/** What the identity key signed (#1189): a key statement or an identity endorsement. */
+export interface InstanceKeyStatementTable {
+  /** The encryption key the statement names, or the NEW identity key an endorsement names. */
+  readonly key_id: string;
+  readonly kind: 'key' | 'identity-rotation';
+  readonly issued_at: number;
+  /** A key statement's `notAfter`; `null` for an endorsement. */
+  readonly not_after: number | null;
+  /** The signed RFC 8785 text. */
+  readonly body: string;
+  /** The Ed25519 signature over `body`'s UTF-8 bytes, lowercase hex. */
+  readonly signature: string;
+}
+
+/**
+ * Who is changing the instance's keys (#1203, ADR 0047 D-5). Added by
+ * migration 0016. One row at most, `name` always `'keys'`: held by one
+ * maintenance pass or one operator command at a time, and free once
+ * `expires_at` has passed, so a holder that died does not hold the keys for
+ * ever.
+ */
+export interface InstanceKeyLeaseTable {
+  readonly name: 'keys';
+  /** A random id the holding process chose for itself. */
+  readonly holder: string;
+  /** When the lease lapses, by the box's clock, Unix seconds. */
+  readonly expires_at: number;
+}
+
+/**
+ * A sealed request's `enc`, as the instance saw it (#1191, ADR 0047 D-9).
+ * Added by migration 0017; kept ten minutes.
+ */
+export interface SealedReplayTable {
+  /** SHA-256 of the request's `enc`, lowercase hex. */
+  readonly enc_sha256: string;
+  /** Unix seconds, by the box's clock. */
+  readonly seen_at: number;
+}
+
+/**
+ * One analysis job (#1095, ADR 0046 D-11). Added by migration 0020. An ended
+ * job is deleted seven days after `ended_at` (the owner's Q5 ruling).
+ */
+export interface AnalysisJobTable {
+  readonly id: string;
+  readonly athlete_id: string;
+  readonly status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'withheld';
+  readonly source: 'instance-local' | 'instance-hosted';
+  readonly template_version: string;
+  /** The device-built ride input, checked on the way in (`analysis/job-input.ts`). */
+  readonly input_json: string;
+  /**
+   * The synced ride the job writes up, by its own id, when the device named
+   * one (#1229, migration 0022); checked to be the athlete's at the start.
+   */
+  readonly ride_id: string | null;
+  /** The screened write-up, until the device acknowledges it or the job is deleted. */
+  readonly candidate: string | null;
+  /** One of `analysis/jobs.ts` §`JobFailure`, when the job failed. */
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly created_at: number;
+  readonly ended_at: number | null;
+}
+
+/** One event of a job's stream (#1095), numbered per job from 1. */
+export interface AnalysisEventTable {
+  readonly job_id: string;
+  readonly athlete_id: string;
+  readonly seq: number;
+  readonly kind: 'progress' | 'section' | 'withdrawn' | 'result';
+  /** The event's JSON. Never a tool's arguments or results. */
+  readonly data: string;
+  /** Unix milliseconds. */
+  readonly at: number;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -328,8 +667,25 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
   readonly history_source: HistorySourceTable;
   readonly history_passage: HistoryPassageTable;
+  readonly hosted_model_key: HostedModelKeyTable;
+  readonly instance_key: InstanceKeyTable;
+  readonly instance_key_statement: InstanceKeyStatementTable;
+  readonly instance_key_lease: InstanceKeyLeaseTable;
+  readonly sealed_replay: SealedReplayTable;
+  readonly account_change: AccountChangeTable;
+  readonly account_change_mark: AccountChangeMarkTable;
+  readonly analysis_job: AnalysisJobTable;
+  readonly analysis_event: AnalysisEventTable;
+  readonly athlete_hosted_key: AthleteHostedKeyTable;
+  readonly athlete_hosted_consent: AthleteHostedConsentTable;
+  readonly notice: NoticeTable;
+  readonly statement: StatementTable;
+  readonly appeal: AppealTable;
+  readonly notice_step: NoticeStepTable;
+  readonly hidden_item: HiddenItemTable;
 }

@@ -60,6 +60,12 @@ export async function openRoute(
   rideController?: RideController,
   extras: Omit<PopulatedShellExtras, 'rideController'> = {},
 ): Promise<Mounted> {
+  // #1439: a ride's chart is a `React.lazy` chunk whose axes are TEXT, so a
+  // walk that settled before the chunk arrived recorded the page without
+  // them, and one that settled after recorded them — the route-sentences
+  // record then depended on which test in the worker loaded it first. Loaded
+  // here, before any route renders, every walk sees the chart.
+  await import('../detail/TraceChart');
   globalThis.location.hash = hashFor(route);
   const mounted = await mount(
     <PopulatedShell

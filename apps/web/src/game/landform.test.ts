@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { elevationAt, metres, type RouteProfile } from '@onyourleft/domain';
 
+import { NO_LAND_CLASS } from './land-class';
 import {
   BEND_FOLD_SHARE,
   HORIZON_RISE_METRES,
@@ -110,7 +111,13 @@ function frameAt(
   const corridor = roadCorridor(profile, corridorOrigin(profile), odometer);
   return {
     corridor,
-    ground: terrainCorridor(profile, corridorOrigin(profile), corridor, scatterSeed(profile)),
+    ground: terrainCorridor(
+      profile,
+      corridorOrigin(profile),
+      corridor,
+      scatterSeed(profile),
+      NO_LAND_CLASS,
+    ),
   };
 }
 
@@ -325,10 +332,14 @@ describe('the gradient shows beside the road — #458', () => {
     for (const lateral of [13, 15, -13, -15]) {
       // 100 m into the climb, and 40 m further up it.
       const rider = elevationAt(profile, 400) - origin.elevation;
-      expect(terrainHeightAt(profile, origin, seed, 440, lateral)).toBeGreaterThan(rider + 2);
+      expect(terrainHeightAt(profile, origin, seed, 440, lateral, NO_LAND_CLASS)).toBeGreaterThan(
+        rider + 2,
+      );
       // 100 m into the descent, and 40 m further down it.
       const descending = elevationAt(profile, 900) - origin.elevation;
-      expect(terrainHeightAt(profile, origin, seed, 940, lateral)).toBeLessThan(descending - 2);
+      expect(terrainHeightAt(profile, origin, seed, 940, lateral, NO_LAND_CLASS)).toBeLessThan(
+        descending - 2,
+      );
     }
   });
 
@@ -340,7 +351,7 @@ describe('the gradient shows beside the road — #458', () => {
     const origin = corridorOrigin(profile);
     const seed = scatterSeed(profile);
     for (const lateral of [4.1, 6, 8, 11.9, -4.1, -11.9]) {
-      expect(terrainHeightAt(profile, origin, seed, 500, lateral)).toBeCloseTo(
+      expect(terrainHeightAt(profile, origin, seed, 500, lateral, NO_LAND_CLASS)).toBeCloseTo(
         -VERGE_DROP_METRES,
         9,
       );
@@ -366,7 +377,7 @@ describe('the gradient shows beside the road — #458', () => {
         if (height === undefined) continue;
         // @see STANDING_TOLERANCE_METRES — measured at up to 15.5 cm here.
         expect(
-          Math.abs(terrainHeightAt(profile, origin, seed, along, lateral) - height),
+          Math.abs(terrainHeightAt(profile, origin, seed, along, lateral, NO_LAND_CLASS) - height),
         ).toBeLessThan(STANDING_TOLERANCE_METRES);
         sampled += 1;
       }
@@ -452,7 +463,7 @@ describe('the ground is the same place on every lap — #458', () => {
     const seed = scatterSeed(profile);
     for (let along = 0; along < 3_000; along += 50) {
       const road = elevationAt(profile, along) - origin.elevation;
-      const height = terrainHeightAt(profile, origin, seed, along, 420);
+      const height = terrainHeightAt(profile, origin, seed, along, 420, NO_LAND_CLASS);
       expect(Math.abs(height - (road - VERGE_DROP_METRES))).toBeLessThanOrEqual(
         RELIEF_MAX_METRES + 1e-6,
       );

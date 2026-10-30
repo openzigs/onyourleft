@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openDatabase } from './node-sqlite.ts';
 import { openSqlStore } from './open-sql-store.ts';
 import type { RaceJob, RaceReport } from './testing/racing-identity-testing.ts';
 
@@ -126,6 +127,17 @@ describe('two writers on one database (#769)', () => {
 const RACERS = 60;
 const RACER = new URL('./testing/racing-identity-testing.ts', import.meta.url);
 
+/** `racing-identity-testing.ts` §`redeemFixture`, copied: importing it would run the racer. */
+function redeemFixture(athleteId: string): {
+  tokenSha256: string;
+  codeSha256: string;
+  address: string;
+} {
+  const hex = (prefix: string): string =>
+    `${prefix}${athleteId.replace(/\D/g, '').padStart(6, '0')}`.padEnd(64, '0');
+  return { tokenSha256: hex('aa'), codeSha256: hex('cc'), address: `${athleteId}@example.org` };
+}
+
 function racer(job: Omit<RaceJob, 'side'>, side: 0 | 1): Promise<RaceReport> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(RACER, { workerData: { ...job, side } satisfies RaceJob });
@@ -160,8 +172,46 @@ async function racers(operation: RaceJob['operation'], deferred: boolean) {
     for (const at of [10, 20]) {
       await store.renameAthlete(athleteId, `Earlier ${at}`, at, { count: 99, windowSeconds: 1 });
     }
+    if (operation === 'redeem') {
+      // An established address (confirmed at 1, past its hold at 10), a code,
+      // and a token mailed to the address (#1194).
+      const fixture = redeemFixture(athleteId);
+      await store.putEmailConfirmation({
+        tokenSha256: fixture.tokenSha256.replace(/^aa/, 'bb'),
+        athleteId,
+        address: fixture.address,
+        expiresAt: 1_000,
+        requestedByKey: `key-0-of-${athleteId}`,
+      });
+      await store.confirmRecoveryEmail(
+        athleteId,
+        fixture.tokenSha256.replace(/^aa/, 'bb'),
+        1,
+        `key-0-of-${athleteId}`,
+        2,
+      );
+      await store.putEmailRecoveryToken({
+        tokenSha256: fixture.tokenSha256,
+        athleteId,
+        expiresAt: 1_000,
+        address: fixture.address,
+      });
+    }
   }
   await store.close();
+  if (operation === 'redeem') {
+    const database = openDatabase(path);
+    try {
+      for (let index = 0; index < RACERS; index += 1) {
+        const athleteId = `racer-${index}`;
+        database
+          .prepare('INSERT INTO recovery_code VALUES (?, ?, 1, NULL)')
+          .run(redeemFixture(athleteId).codeSha256, athleteId);
+      }
+    } finally {
+      database.close();
+    }
+  }
   const job = {
     path,
     count: RACERS,
@@ -179,6 +229,8 @@ async function racers(operation: RaceJob['operation'], deferred: boolean) {
       liveKeys: (await fresh.listDeviceKeys(athleteId)).filter((key) => key.revokedAt === null)
         .length,
       renames: (await fresh.listDisplayNameChanges(athleteId)).length,
+      addresses: (await fresh.listRecoveryEmails(athleteId)).length,
+      tokenUsedAt: (await fresh.listEmailRecoveryTokens(athleteId))[0]?.usedAt ?? null,
     });
   }
   await fresh.close();
@@ -207,6 +259,27 @@ describe('the #867 rules hold between two connections on one file (#889)', () =>
       expect(athlete.renames).toBe(3);
     }
   });
+
+  it(
+    'a mailed token redeemed as its address is cleared: whichever transaction runs second loses (#1194)',
+    { timeout: 60_000 },
+    async () => {
+      const { errors, after } = await racers('redeem', false);
+      expect(errors).toEqual([]);
+      for (const athlete of after) {
+        expect(athlete.addresses).toBe(0);
+        // The redemption ran first (it spent the token at 50, and the clear
+        // then had nothing left to void) and took it; or the clear ran first
+        // (voiding it at 60) and the redemption is `unbound`. Never a token
+        // taken from an address already gone.
+        if (athlete.tokenUsedAt === 50) expect(athlete.outcomes).toEqual(['cleared', 'taken']);
+        else {
+          expect(athlete.tokenUsedAt).toBe(60);
+          expect(athlete.outcomes).toEqual(['cleared', 'unbound']);
+        }
+      }
+    },
+  );
 
   it(
     // Under WAL the race surfaces as SQLITE_BUSY (counted in `errors`), not as

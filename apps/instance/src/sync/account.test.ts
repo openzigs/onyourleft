@@ -10,6 +10,7 @@
  * anybody already downloaded, and not another instance.
  */
 
+import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
 import { AUTH_PURPOSE, ERASE_ACCOUNT_PURPOSE, LINK_PURPOSE, toHex } from '@onyourleft/domain';
 import { decodeFitActivity, decodeGpx, decodeTcx, trackPointsOf } from '@onyourleft/fit';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,6 +20,7 @@ import type { BlobStore } from '../blob/blob-store.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
 import { ITEM_KINDS, sha256Bytes, type AccountExport } from './sync.ts';
 import { authorised, corpusFile, signedRecordOf, syncWorld, uploadBody } from './sync-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -511,7 +513,10 @@ describe('a suspended rider may take their data out and delete their account, an
     const suspended = await world.call(
       'POST',
       `/v1/moderation/athletes/${bea!.athleteId}/suspend`,
-      { token: ownerSession.body.sessionToken as string, body: { reason: 'Repeated abuse' } },
+      {
+        token: ownerSession.body.sessionToken as string,
+        body: { reason: 'Repeated abuse', statement: TEST_STATEMENT },
+      },
     );
     expect(suspended.status, JSON.stringify(suspended.body)).toBe(200);
     return { bea: bea!, instance: world };
@@ -547,13 +552,13 @@ describe('a suspended rider may take their data out and delete their account, an
     const manifest = await authorised(instance, token, 'GET', '/v1/sync/manifest');
     expect(manifest.status).toBe(403);
 
-    const logBefore = await instance.freshRead((store) => store.listModerationLog());
+    const logBefore = await instance.freshRead((store) => wholeModerationLog(store));
     expect(logBefore.map((entry) => entry.targetAthleteId)).toContain(bea.athleteId);
     const erased = await authorised(instance, token, 'DELETE', '/v1/account', stepUp(bea));
     expect(erased.status, await erased.clone().text()).toBe(204);
     expect(await instance.freshRead((store) => store.getAthlete(bea.athleteId))).toBeUndefined();
     // The moderation log is the instance's audit trail and outlives the account.
-    expect(await instance.freshRead((store) => store.listModerationLog())).toEqual(logBefore);
+    expect(await instance.freshRead((store) => wholeModerationLog(store))).toEqual(logBefore);
   });
 
   it('refuses a way-out session to a key nobody holds: it is a way out, not in', async () => {
@@ -565,7 +570,10 @@ describe('a suspended rider may take their data out and delete their account, an
     expect(await instance.freshRead((store) => store.findDeviceKey(stranger.publicKey))).toBe(
       undefined,
     );
-  });
+    // 476 ms on green `main` (38337365635, EPYC 7763) and 2 574 ms under
+    // coverage (nightly 38279988356, EPYC 9V74), 51 % of Vitest's 5 s default.
+    // About three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
+  }, 8_000);
 
   it('refuses a way-out session to a revoked key, and opens no session for it (#926’s review, N1)', async () => {
     let lost: TestDevice | undefined;
@@ -610,7 +618,7 @@ describe('a suspended rider may take their data out and delete their account, an
     const act = (action: string) =>
       world!.call('POST', `/v1/moderation/athletes/${bea!.athleteId}/${action}`, {
         token: ownerToken,
-        body: { reason: 'Checked' },
+        body: { reason: 'Checked', statement: TEST_STATEMENT },
       });
     expect((await act('suspend')).status).toBe(200);
     const opened = await leaveSession(world, bea!.device);

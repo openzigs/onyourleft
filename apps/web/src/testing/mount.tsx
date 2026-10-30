@@ -167,7 +167,11 @@ export async function mount(element: ReactElement): Promise<Mounted> {
       });
     },
     unmount() {
-      root.unmount();
+      // Inside act: React 19 warns "An update to Root … was not wrapped in
+      // act(...)" for an unmount outside one (#1207).
+      act(() => {
+        root.unmount();
+      });
       container.remove();
     },
   };

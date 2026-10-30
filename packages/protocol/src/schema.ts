@@ -94,6 +94,35 @@ const COUNT = { kind: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } 
 const VERSION = { kind: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } as const;
 const RIDER_ID = { kind: 'integer', minimum: 0, maximum: 2_147_483_647 } as const;
 
+/**
+ * The longest time gap a standings row carries, in tenths of a second: 100
+ * hours, which no race on any route reaches.
+ */
+export const MAXIMUM_GAP_DECISECONDS = 3_600_000;
+
+/**
+ * The most W/kg a standings row carries, in tenths: 100 W/kg, five times the
+ * 18 W/kg five-second ceiling of ADR 0028 Q3. A room clamps a higher figure to
+ * it: {@link MAXIMUM_REPORTED_POWER_WATTS} at the lightest mass a room admits
+ * (20 kg, `@onyourleft/physics` §`DEFAULT_PLAUSIBILITY_LIMITS`) would be 125.
+ */
+export const MAXIMUM_WATTS_PER_KILOGRAM_TENTHS = 1_000;
+
+/**
+ * A display name, as `@onyourleft/domain` §`checkDisplayName` admits one:
+ * no control (`Cc`), no format character (`Cf`) — which is every
+ * bidirectional override, embedding, isolate and mark that function refuses
+ * by name — and no other default-ignorable code point, at most 32 scalar
+ * values: 64 UTF-16 code units, which is what `length` counts. Held on the
+ * wire too, so a hostile room cannot reverse the text of a list with an
+ * override a real instance would never have stored (#1347).
+ */
+const DISPLAY_NAME = {
+  kind: 'string',
+  pattern: /^[^\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]+$/u,
+  maximumLength: 64,
+} as const;
+
 /** Everything a message carries beside its `type`, keyed by that type. */
 export const MESSAGE_FIELDS = {
   hello: {
@@ -127,6 +156,7 @@ export const MESSAGE_FIELDS = {
           ridingPosition: { shape: { kind: 'enum', values: ['upright', 'hoods', 'drops'] } },
           reportIntervalMs: { shape: { kind: 'integer', minimum: 100, maximum: 60_000 } },
           frameIntervalMs: { shape: { kind: 'integer', minimum: 100, maximum: 60_000 } },
+          drafting: { shape: { kind: 'enum', values: ['on', 'off'] } },
         },
       },
     },
@@ -172,6 +202,39 @@ export const MESSAGE_FIELDS = {
     // An hour at most: no room is configured with a longer countdown (#785).
     startsInMs: { shape: { kind: 'integer', minimum: 0, maximum: 3_600_000 } },
   },
+  name: {
+    riderId: { shape: RIDER_ID },
+    displayName: { shape: DISPLAY_NAME },
+  },
+  standings: {
+    tick: { shape: COUNT },
+    riders: {
+      shape: {
+        kind: 'rows',
+        maximumLength: MAXIMUM_RIDERS,
+        row: {
+          kind: 'tuple',
+          slots: [
+            { name: 'riderId', shape: RIDER_ID },
+            {
+              name: 'gapDeciseconds',
+              shape: {
+                kind: 'integer',
+                minimum: -MAXIMUM_GAP_DECISECONDS,
+                maximum: MAXIMUM_GAP_DECISECONDS,
+              },
+            },
+            {
+              name: 'wattsPerKilogramTenths',
+              shape: { kind: 'integer', minimum: 0, maximum: MAXIMUM_WATTS_PER_KILOGRAM_TENTHS },
+            },
+            // A frame's two flags and FLAG_FINISHED.
+            { name: 'flags', shape: { kind: 'integer', minimum: 0, maximum: 7 } },
+          ],
+        },
+      },
+    },
+  },
   finish: {
     order: {
       shape: { kind: 'array', items: RIDER_ID, maximumLength: MAXIMUM_RIDERS, distinct: true },
@@ -188,5 +251,7 @@ export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
   'refuse',
   'frame',
   'countdown',
+  'name',
+  'standings',
   'finish',
 ];

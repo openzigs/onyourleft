@@ -17,6 +17,9 @@
  * - **The camera.** A port that never opens anything, as `shell-harness.tsx`'s
  *   is: what this page measures is where the SIGN is drawn, and a real camera
  *   would be a media device in the middle of a layout gate.
+ *   ⚠️ **Except `?pictures=`** (#1112), which measures the picture RATE and
+ *   so opens the synthetic camera through the real `browserCameraPort`; its
+ *   comment below says what it stands in for.
  * - **The link.** There is no production link (#529, held by ADR 0033 D-0), so
  *   the page hands the shell the scripted one the unit tests use, through
  *   `AppShellProps.sideCameraLink` — the prop #529 will fill.
@@ -33,8 +36,16 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
+import {
+  browserCameraPort,
+  canvasFrameGrabber,
+  videoSidePictureSampler,
+} from '../src/camera/browser-camera';
 import { CameraController } from '../src/camera/session';
-import { scriptedLink, scriptedSidePairing } from '../src/camera/testing';
+import { mainThreadJpegEncoder } from '../src/camera/side-picture-encoder';
+import { pairingCodeText } from '../src/camera/side-link-code';
+import { pairingCodeModules } from '../src/camera/side-link-qr';
+import { photographedCode, scriptedLink, scriptedSidePairing } from '../src/camera/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import { failLiveTablet, runLiveTablet } from './sidelive-harness';
@@ -55,6 +66,76 @@ const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: tru
  * tall as the screen.
  */
 const PAIRING_SCAN = new URLSearchParams(location.search).get('pairing') === 'scan';
+
+/**
+ * `?pairing=answer` — #1110: the same phone, one step on. Its camera "sees" a
+ * code, and the pairing answers with a code the size a real answer is (one
+ * IPv4 candidate, 49 modules), so the phone's own code is on the screen where
+ * the tablet's front camera has to read it — and its drawn width is measured.
+ */
+const PAIRING_ANSWER = new URLSearchParams(location.search).get('pairing') === 'answer';
+
+/** An answer as `side-link.ts` makes one, with one candidate: #1109 measured 149 characters. */
+function realisticAnswer(): string {
+  const made = pairingCodeText('answer', {
+    ufrag: 'Zq8h',
+    password: 'Qm3v0f8y1Jc9dZ2kL5nH7tRp',
+    fingerprint: Uint8Array.from({ length: 32 }, (_, index) => index * 7),
+    setup: 'active',
+    candidates: [{ address: '192.168.68.69', port: 50_123, transport: 'udp', type: 'host' }],
+  });
+  if (!('text' in made)) {
+    throw new Error('side-camera harness: no answer code');
+  }
+  return made.text;
+}
+
+/** What `?pairing=answer` measures: the phone's own code, as drawn. */
+export interface AnswerCodeMeasurement {
+  readonly viewport: { readonly width: number; readonly height: number };
+  /** The drawn code, quiet zone included. */
+  readonly code: Box;
+  /** Its modules across, quiet zone included: the `viewBox`'s width. */
+  readonly modules: number;
+  /** The column it is drawn in: what "as wide as its column" can be at most. */
+  readonly column: Box;
+}
+
+/**
+ * `?pictures=worker` and `?pictures=main-thread` — #1112: the phone FILMING
+ * through the real shell with the REAL camera path (`browserCameraPort` over
+ * the synthetic camera, `canvasFrameGrabber`, the real session's picture
+ * timer), with a main thread that is never idle, and how many pictures reach
+ * the link in {@link PICTURE_RATE_MILLISECONDS}.
+ *
+ * `worker` is the product. `main-thread` is the control: the same page with
+ * the side sampler's encoder put back to `canvas.toBlob`, which is what every
+ * picture used before #1112.
+ *
+ * ⚠️ **The busy main thread is a stand-in, and says so.** On the owner's phone
+ * something kept the WebView's main thread from giving Chromium an idle
+ * period, and a main-thread JPEG encode waits for one (`camera/
+ * side-picture-encoder.ts`' header): up to 4 s on Android, 1 s here. What
+ * keeps that phone's thread busy is not established; a chain of 4 ms tasks
+ * is the simplest page that never idles, and on it the old encoder waits the
+ * whole timeout for every picture.
+ */
+const PICTURES = new URLSearchParams(location.search).get('pictures');
+
+/** How long the rate is measured over, once filming has begun. */
+const PICTURE_RATE_MILLISECONDS = 3000;
+
+/** What `?pictures=` measures. */
+export interface PictureRateMeasurement {
+  readonly encoder: string;
+  /** Pictures the link accepted inside the window. */
+  readonly pictures: number;
+  readonly milliseconds: number;
+  /** The page's own recorder, as `webview-probe.mjs` would read it. */
+  readonly timings: unknown;
+  /** Whether the filming sign was up for the whole window. */
+  readonly filmingThroughout: boolean;
+}
 
 /**
  * `?live=tablet` — #1061: the TABLET's live view of the side camera, which
@@ -157,6 +238,10 @@ declare global {
        * picture, which is the order #1108 was filed against.
        */
       readonly oldOrder?: () => void;
+      /** `?pairing=answer` only (#1110): the phone's own code, as drawn. */
+      readonly answerCode?: () => AnswerCodeMeasurement;
+      /** `?pictures=` only (#1112): the measured rate. */
+      readonly pictures?: PictureRateMeasurement;
     };
   }
 }
@@ -296,8 +381,24 @@ function measurePairing(): PairingMeasurement {
   };
 }
 
-async function runPairingScan(host: Element): Promise<void> {
+async function runPairingScan(host: Element, answering = false): Promise<void> {
   globalThis.location.hash = '#/camera/side';
+  const answerCode = realisticAnswer();
+  const scripted = scriptedSidePairing({ phone: 'pairing', answered: false });
+  // `?pairing=answer`: whatever the camera reads, the pairing answers it.
+  const sidePairing = answering
+    ? {
+        ...scripted,
+        answerSideCamera: () =>
+          Promise.resolve({
+            answerCode,
+            link: scriptedLink('connecting'),
+            secondsForTabletToRead: () => 120,
+            onTabletReadCountdown: () => () => undefined,
+            tabletReadTimedOut: () => false,
+          }),
+      }
+    : scripted;
   const camera = new CameraController({
     secureWindow: browserSecureWindow(),
     port: {
@@ -307,8 +408,12 @@ async function runPairingScan(host: Element): Promise<void> {
         Promise.resolve({
           captureFrame: () => Promise.reject(new Error('this harness does not capture')),
           sampleLuminance: () => Promise.reject(new Error('this harness does not sample')),
-          // Nothing to read, so the screen goes on looking — the state measured.
-          readCodePixels: () => Promise.reject(new Error('this harness reads no code')),
+          // Nothing to read, so the screen goes on looking — the state measured;
+          // or, `?pairing=answer`, a code, so that it moves on to its own.
+          readCodePixels: () =>
+            answering
+              ? Promise.resolve(photographedCode(pairingCodeModules(answerCode)))
+              : Promise.reject(new Error('this harness reads no code')),
           captureSideFrame: () => Promise.reject(new Error('this harness sends no picture')),
           attachCameraPreview: (surface) => {
             surface.srcObject = uprightPicture();
@@ -329,11 +434,7 @@ async function runPairingScan(host: Element): Promise<void> {
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
-        <AppShell
-          capabilities={NO_BLUETOOTH}
-          camera={camera}
-          sidePairing={scriptedSidePairing({ phone: 'pairing', answered: false })}
-        />
+        <AppShell capabilities={NO_BLUETOOTH} camera={camera} sidePairing={sidePairing} />
       </StrictMode>,
     );
   });
@@ -346,10 +447,12 @@ async function runPairingScan(host: Element): Promise<void> {
   press('Turn the camera on');
   await until(
     () =>
-      (document.querySelector('[data-oyl-side-pairing]')?.textContent ?? '').includes(
-        'Looking for the tablet',
-      ),
-    'the phone looking for the tablet’s code',
+      answering
+        ? document.querySelector('[data-oyl-pairing-code]') !== null
+        : (document.querySelector('[data-oyl-side-pairing]')?.textContent ?? '').includes(
+            'Looking for the tablet',
+          ),
+    answering ? 'the phone’s own code' : 'the phone looking for the tablet’s code',
   );
   // The picture takes its upright shape once the video knows its size.
   await until(
@@ -372,6 +475,113 @@ async function runPairingScan(host: Element): Promise<void> {
         figure.after(pairing);
       }
     },
+    answerCode: measureAnswerCode,
+  };
+}
+
+function measureAnswerCode(): AnswerCodeMeasurement {
+  const code = document.querySelector('[data-oyl-pairing-code]');
+  const column = code?.parentElement;
+  if (code === null || column === null || column === undefined) {
+    throw new Error('side-camera harness: the phone’s code is not on the page');
+  }
+  return {
+    viewport: { width: innerWidth, height: innerHeight },
+    code: boxOf(code),
+    modules: Number(code.getAttribute('viewBox')?.split(' ')[2] ?? Number.NaN),
+    column: boxOf(column),
+  };
+}
+
+/** A main thread that is never idle: one 4 ms task after another, until stopped. */
+function neverIdle(): () => void {
+  let going = true;
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    if (!going) {
+      return;
+    }
+    const started = performance.now();
+    while (performance.now() - started < 4) {
+      // Busy, on purpose.
+    }
+    channel.port2.postMessage(0);
+  };
+  channel.port2.postMessage(0);
+  return () => {
+    going = false;
+    channel.port1.close();
+  };
+}
+
+async function runPictures(host: Element, encoder: string): Promise<void> {
+  globalThis.location.hash = '#/camera/side';
+  const products = canvasFrameGrabber();
+  const grabber =
+    encoder === 'main-thread'
+      ? {
+          ...products,
+          sidePictures: (stream: Parameters<typeof videoSidePictureSampler>[0]) =>
+            videoSidePictureSampler(stream, mainThreadJpegEncoder()),
+        }
+      : products;
+  const camera = new CameraController({
+    port: browserCameraPort({
+      devices: navigator.mediaDevices,
+      grabber,
+      secureContext: globalThis.isSecureContext,
+    }),
+    schedule: () => () => undefined,
+    secureWindow: browserSecureWindow(),
+  });
+  const link = scriptedLink();
+  await viewGroupsLoaded();
+  flushSync(() => {
+    createRoot(host).render(
+      <StrictMode>
+        <AppShell capabilities={NO_BLUETOOTH} camera={camera} sideCameraLink={link} />
+      </StrictMode>,
+    );
+  });
+  await until(() => document.querySelector('input[type="checkbox"]') !== null, 'the consent');
+  document.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+  await until(
+    () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked === true,
+    'the box to be ticked',
+  );
+  press('Turn the camera on');
+  await until(() => document.querySelector('video') !== null, 'the framing picture');
+  link.emit({ kind: 'start' });
+  await until(
+    () => document.querySelector('[data-oyl-side-camera-stage]') !== null,
+    'the filming sign',
+  );
+  // The first picture opens the camera's own video; the rate is measured after it.
+  await until(() => link.pictures.length > 0, 'a first picture');
+  const stop = neverIdle();
+  const before = link.pictures.length;
+  const started = performance.now();
+  let filmingThroughout = true;
+  while (performance.now() - started < PICTURE_RATE_MILLISECONDS) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    filmingThroughout &&= document.querySelector('[data-oyl-side-camera-stage]') !== null;
+  }
+  const milliseconds = performance.now() - started;
+  const pictures = link.pictures.length - before;
+  stop();
+  window.__oylSideCamera = {
+    ready: true,
+    errors,
+    measure,
+    loseLink: () => undefined,
+    unstyle: () => undefined,
+    pictures: {
+      encoder,
+      pictures,
+      milliseconds,
+      timings: window.__oylSideCameraTimings?.snapshot(),
+      filmingThroughout,
+    },
   };
 }
 
@@ -380,8 +590,12 @@ async function run(): Promise<void> {
   if (host === null) {
     throw new Error('side-camera harness: #shell is missing from sidecamera.html');
   }
-  if (PAIRING_SCAN) {
-    await runPairingScan(host);
+  if (PAIRING_SCAN || PAIRING_ANSWER) {
+    await runPairingScan(host, PAIRING_ANSWER);
+    return;
+  }
+  if (PICTURES !== null) {
+    await runPictures(host, PICTURES);
     return;
   }
   if (LIVE_TABLET) {

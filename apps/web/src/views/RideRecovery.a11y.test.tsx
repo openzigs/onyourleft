@@ -29,7 +29,8 @@ import { idleSnapshot, stubRideController } from '../ride/testing';
 import { AppShell } from '../shell/AppShell';
 import { routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
+import { DISCARD_EXPLAINED } from './RideView';
 
 const SPANNED_SECONDS = 4_320;
 
@@ -61,6 +62,7 @@ function offered(kind: RecoverableRide['kind'], id = 'left-behind'): Recoverable
     spanned: formatDuration(SPANNED_SECONDS),
     canContinue: kind === 'interrupted',
     alreadySaved: kind === 'already-saved',
+    damaged: [],
   };
 }
 
@@ -76,12 +78,26 @@ function offered(kind: RecoverableRide['kind'], id = 'left-behind'): Recoverable
  * loosening the audit. `HudPanel.a11y.test.tsx` makes the same argument for the
  * same reason.
  */
-async function show(rides: readonly RecoverableRide[]): Promise<Mounted> {
-  const stub = stubRideController({ ...idleSnapshot(), recoverable: rides });
+async function show(
+  rides: readonly RecoverableRide[],
+  unreadable: readonly string[] = [],
+): Promise<Mounted> {
+  return (await showWith(rides, unreadable)).view;
+}
+
+async function showWith(
+  rides: readonly RecoverableRide[],
+  unreadable: readonly string[] = [],
+): Promise<{ view: Mounted; stub: ReturnType<typeof stubRideController> }> {
+  const stub = stubRideController({
+    ...idleSnapshot(),
+    recoverable: rides,
+    unreadableRecordings: unreadable.map((id) => recordingSessionId(id)),
+  });
   globalThis.location.hash = `#${routeById('ride').path}`;
   mounted = await mount(<AppShell capabilities={CAPABLE} rideController={stub.controller} />);
   await settle();
-  return mounted;
+  return { view: mounted, stub };
 }
 
 describe('the offer is inside the accessibility gate', () => {
@@ -151,5 +167,168 @@ describe('what the offer says, and what it does not', () => {
     // the wording that keeps that honest.
     const view = await show([offered('interrupted')]);
     expect(view.container.textContent ?? '').toContain(`up to ${formatDuration(SPANNED_SECONDS)}`);
+  });
+});
+
+describe('a recording that will not read (#1325)', () => {
+  it('is said, and discarded on its id, beside a ride that reads', async () => {
+    const { view, stub } = await showWith([offered('interrupted')], ['damaged-one']);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('A recording that cannot be read, so it cannot be continued or saved.');
+    // The ride beside it is offered all the same.
+    expect(text).toContain('Continue this ride');
+    const discard = [...view.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Discard this recording',
+    );
+    if (discard === undefined) {
+      throw new Error('no discard for the unreadable recording');
+    }
+    await activateWithKeyboard(discard);
+    await settle();
+    // #1431: confirmed first — and said to be for good, since it cannot be kept.
+    expect(stub.calls.discardRecovered).toEqual([]);
+    expect(dialogText()).toContain(DISCARD_EXPLAINED.unreadable);
+    await activateWithKeyboard(buttonsNamed('Discard the recording')[0] as HTMLElement);
+    await settle();
+    expect(stub.calls.discardRecovered).toEqual([recordingSessionId('damaged-one')]);
+  });
+
+  it('shows the offer for an unreadable recording alone', async () => {
+    const view = await show([], ['damaged-one']);
+    expect(view.container.textContent ?? '').toContain('Rides still on this device');
+  });
+
+  it('audits clean with an unreadable recording on offer', async () => {
+    await show([offered('interrupted')], ['damaged-one']);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('says a ride whose pauses did not read saves with its moving time as its elapsed time', async () => {
+    const view = await show([
+      { ...offered('interrupted'), canContinue: false, damaged: ['pauses'] },
+    ]);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain(
+      'Its pauses could not be read, so saving it counts them as riding: its moving time will be its elapsed time.',
+    );
+    expect(text).toContain('Save this ride');
+    expect(text).not.toContain('Continue this ride');
+  });
+
+  it('does not warn about lost pauses on a ride already in the library', async () => {
+    const view = await show([{ ...offered('already-saved'), damaged: ['pauses'] }]);
+    const text = view.container.textContent ?? '';
+    expect(text).not.toContain('Its pauses could not be read');
+    expect(text).not.toContain('Save this ride');
+  });
+
+  it('does not call a ride whose state did not read a finished one', async () => {
+    const view = await show([{ ...offered('unsaved'), damaged: ['state'] }]);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('whether it was finished could not be read');
+    expect(text).not.toContain('A finished ride');
+    expect(text).toContain('Save this ride');
+  });
+});
+
+/**
+ * What a control's `aria-describedby` reads out: the text of every element it
+ * names, in order, hidden or not — as the accessible-description computation
+ * reads it.
+ */
+function describedAs(control: Element): string {
+  return (control.getAttribute('aria-describedby') ?? '')
+    .split(/\s+/)
+    .filter((id) => id !== '')
+    .map((id) => document.getElementById(id)?.textContent?.trim() ?? '')
+    .join(' ');
+}
+
+function buttonsNamed(name: string): HTMLElement[] {
+  return [...document.querySelectorAll('button')].filter((button) => button.textContent === name);
+}
+
+describe('controls that share a name are told apart — #1419', () => {
+  it('describes each Discard this ride by its own row', async () => {
+    // Two rides with the same sentence: only where each stands tells them apart.
+    await show([offered('interrupted', 'one'), offered('interrupted', 'two')]);
+    const discards = buttonsNamed('Discard this ride');
+    expect(discards).toHaveLength(2);
+    const descriptions = discards.map(describedAs);
+    expect(descriptions).toEqual([
+      `An interrupted ride, up to ${formatDuration(SPANNED_SECONDS)} long. Ride 1 of 2.`,
+      `An interrupted ride, up to ${formatDuration(SPANNED_SECONDS)} long. Ride 2 of 2.`,
+    ]);
+    // Continue and Save on the same row are described by the same row.
+    expect(buttonsNamed('Continue this ride').map(describedAs)).toEqual(descriptions);
+    expect(buttonsNamed('Save this ride').map(describedAs)).toEqual(descriptions);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('describes each Discard this recording by its own row', async () => {
+    await show([], ['broken-one', 'broken-two']);
+    expect(buttonsNamed('Discard this recording').map(describedAs)).toEqual([
+      'A recording that cannot be read, so it cannot be continued or saved. Recording 1 of 2.',
+      'A recording that cannot be read, so it cannot be continued or saved. Recording 2 of 2.',
+    ]);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('shows no new text: the position is the hidden half of the description', async () => {
+    const view = await show([offered('interrupted', 'one')], ['broken-one']);
+    for (const position of ['Ride 1 of 1.', 'Recording 1 of 1.']) {
+      const span = [...view.container.querySelectorAll('span')].find(
+        (element) => element.textContent === position,
+      );
+      expect(span?.hidden).toBe(true);
+    }
+  });
+});
+
+/** The open confirmation's text, or undefined. */
+function dialogText(): string | undefined {
+  return document.querySelector('[role="alertdialog"]')?.textContent ?? undefined;
+}
+
+describe('Save is the easy target, and Discard is small and confirmed — #1431', () => {
+  it('draws Save as a full button and Discard as a tertiary one', async () => {
+    await show([offered('unsaved')]);
+    const [save] = buttonsNamed('Save this ride');
+    const [discard] = buttonsNamed('Discard this ride');
+    expect(save?.className).toBe('oyl-button oyl-button--secondary');
+    expect(discard?.className).toBe('oyl-button oyl-button--tertiary');
+  });
+
+  it('asks before discarding, says the ride goes to Recently deleted, and keeps it on Keep', async () => {
+    const { stub } = await showWith([offered('unsaved')]);
+    await activateWithKeyboard(buttonsNamed('Discard this ride')[0] as HTMLElement);
+    await settle();
+    expect(stub.calls.discardRecovered).toEqual([]);
+    expect(dialogText()).toContain('Discard this ride?');
+    expect(dialogText()).toContain(DISCARD_EXPLAINED.ride);
+    // First focus is the way out, so a second Enter discards nothing.
+    expect(document.activeElement?.textContent).toBe('Keep the ride');
+    await activateWithKeyboard(buttonsNamed('Keep the ride')[0] as HTMLElement);
+    await settle();
+    expect(dialogText()).toBeUndefined();
+    expect(stub.calls.discardRecovered).toEqual([]);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('discards on the confirmation, and says a saved ride’s copy is only a copy', async () => {
+    const { stub } = await showWith([offered('already-saved')]);
+    await activateWithKeyboard(buttonsNamed('Discard this ride')[0] as HTMLElement);
+    await settle();
+    expect(dialogText()).toContain(DISCARD_EXPLAINED.copy);
+    await activateWithKeyboard(buttonsNamed('Discard the ride')[0] as HTMLElement);
+    await settle();
+    expect(stub.calls.discardRecovered).toEqual([recordingSessionId('left-behind')]);
+  });
+
+  it('audits clean with the confirmation open', async () => {
+    await show([offered('interrupted')]);
+    await activateWithKeyboard(buttonsNamed('Discard this ride')[0] as HTMLElement);
+    await settle();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 });

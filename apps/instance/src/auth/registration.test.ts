@@ -7,6 +7,7 @@
  * what is stored is read back through a SECOND store on the same file.
  */
 
+import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,17 +19,21 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { identitySettings, readConfig } from '../config.ts';
 import { startTestInstance, TEST_COMMIT, type TestInstance } from '../instance-testing.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
+import { sealedHandlerCall } from '../sealed/sealed-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import {
   codeOf,
   startModerationWorld,
+  startSoleModeratorWorld,
   type ModerationWorld,
+  type SoleModeratorWorld,
 } from '../moderation/moderation-testing.ts';
 import { createIdentity, DEFAULT_LIMITS, INVITE_LIFETIME_SECONDS } from './identity.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from './identity-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
-let world: ModerationWorld | undefined;
+let world: SoleModeratorWorld | undefined;
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   await world?.close();
@@ -40,8 +45,9 @@ async function start(
   registration: 'open' | 'approval' | 'invite' | 'closed',
   options: Parameters<typeof startModerationWorld>[0] = {},
 ): Promise<ModerationWorld> {
-  world = await startModerationWorld({ ...options, registration });
-  return world;
+  const started = await startModerationWorld({ ...options, registration });
+  world = started;
+  return started;
 }
 
 /** Sign in from a stated client address, through the real handler. */
@@ -63,17 +69,28 @@ async function signInFrom(
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
   const challenge = await post('/v1/auth/challenge', { publicKey: device.publicKey });
-  return post('/v1/auth/session', {
-    ...(await device.statement(challenge.body.nonce as string)),
-    ...extra,
-  });
+  // A new key registers only sealed (#1192), from the same address.
+  const sealed = await sealedHandlerCall(
+    w,
+    {
+      method: 'POST',
+      path: '/v1/auth/session',
+      body: { ...(await device.statement(challenge.body.nonce as string)), ...extra },
+      signer: device.signingKey,
+    },
+    address,
+  );
+  return {
+    status: sealed.reply?.status ?? sealed.status,
+    body: sealed.body as Record<string, unknown>,
+  };
 }
 
 describe('the default registration mode (#775; the project’s image: rulings Q5 and Q13)', () => {
-  it('is closed, on an instance started with nothing configured (#891 merge review, decision 21)', async () => {
+  it('is approval, on an instance started with nothing configured (owner’s ruling, 2026-10-15)', async () => {
     const configured = readConfig({ commit: TEST_COMMIT });
     if (!configured.ok) throw new Error(configured.problems.join(' '));
-    expect(configured.config.registration).toBe('closed');
+    expect(configured.config.registration).toBe('approval');
 
     const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-default-'));
     const store = await openSqlStore(join(directory, 'instance.sqlite'));
@@ -103,8 +120,16 @@ describe('the default registration mode (#775; the project’s image: rulings Q5
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await device.statement(nonce)),
     });
-    expect(session.status).toBe(403);
-    expect(codeOf((await session.json()) as Record<string, unknown>)).toBe('registration_closed');
+    // Registered, and waiting: read back on a fresh connection to the file.
+    expect(session.status).toBe(200);
+    const answer = (await session.json()) as { athleteId: string; registrationState: string };
+    expect(answer.registrationState).toBe('pending');
+    const fresh = await openSqlStore(join(directory, 'instance.sqlite'));
+    try {
+      expect((await fresh.getAthlete(answer.athleteId))?.registrationState).toBe('pending');
+    } finally {
+      await fresh.close();
+    }
   });
 
   it('is what the project’s image is configured with', () => {
@@ -161,7 +186,7 @@ describe('the four registration modes (#775)', () => {
     expect(codeOf(again.body)).toBe('code_used');
     // A refused registration spent nothing: the code was taken in the same
     // transaction that registered, so a failed attempt left no athlete behind.
-    const log = await w.freshRead((store) => store.listModerationLog());
+    const log = await w.freshRead((store) => wholeModerationLog(store));
     expect(log.map((entry) => entry.action)).toEqual(['mint_invite']);
 
     const late = (
@@ -245,7 +270,7 @@ describe('a moderator’s key named AFTER its account registered (#891’s revie
         registrationState: 'active',
         activatedAt: Math.floor(ms / 1000) - 60,
       });
-      expect(await fresh.listModerationLog()).toEqual([
+      expect(await wholeModerationLog(fresh)).toEqual([
         expect.objectContaining({
           action: 'activate_moderator_key',
           actorAthleteId: first.athleteId,
@@ -304,7 +329,7 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
     expect(refused.status).toBe(200);
 
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).map(
+      (await w.freshRead((store) => wholeModerationLog(store))).map(
         ({ action, actorAthleteId, targetAthleteId, reason }) => ({
           action,
           actorAthleteId,
@@ -362,7 +387,7 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
     await w.as(w.owner, 'POST', `/v1/moderation/registrations/${approvedRider.athleteId}/approve`, {
       reason: 'Known',
     });
-    const logged = (await w.freshRead((store) => store.listModerationLog())).length;
+    const logged = (await w.freshRead((store) => wholeModerationLog(store))).length;
 
     for (const path of [
       `/v1/moderation/registrations/${target}/approve`,
@@ -380,7 +405,33 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
     expect((await w.freshRead((store) => store.getAthlete(target)))?.registrationState).toBe(
       'pending',
     );
-    expect(await w.freshRead((store) => store.listModerationLog())).toHaveLength(logged);
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toHaveLength(logged);
+  });
+});
+
+describe('the approval queue with one moderator (#905): the owner alone decides', () => {
+  it('registers the owner active, and the owner approves a rider with no deputy named', async () => {
+    world = await startSoleModeratorWorld({ registration: 'approval' });
+    const w = world;
+    expect((await w.as(w.owner, 'GET', '/v1/auth/account')).body).toMatchObject({
+      registrationState: 'active',
+    });
+    const pending = await w.signIn(await testDevice(), { displayName: 'Anna' });
+    const anna = pending.body.athleteId as string;
+    const approved = await w.as(w.owner, 'POST', `/v1/moderation/registrations/${anna}/approve`, {
+      reason: 'Known to me',
+    });
+    expect(approved.status).toBe(200);
+    expect((await w.freshRead((store) => store.getAthlete(anna)))?.registrationState).toBe(
+      'active',
+    );
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
+      expect.objectContaining({
+        action: 'approve_registration',
+        actorAthleteId: w.owner.athleteId,
+        targetAthleteId: anna,
+      }),
+    ]);
   });
 });
 
@@ -411,6 +462,7 @@ describe('a suspension binds every key the athlete holds (#775, ADR 0028 D-6.2)'
 
     await w.as(w.owner, 'POST', `/v1/moderation/athletes/${athleteId}/suspend`, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
 
     for (const device of [first, second]) {
@@ -529,6 +581,7 @@ describe('public rooms need an eligible account (#775)', () => {
 
     await w.as(w.owner, 'POST', `/v1/moderation/athletes/${athleteId}/suspend`, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     expect((await ticket()).status).toBe(401);
   });

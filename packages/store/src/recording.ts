@@ -51,9 +51,17 @@
  * possible outcome for a recovery path.
  */
 
-import type { RecordedPause, Seconds, UnixSeconds } from '@onyourleft/domain';
+import type {
+  Metres,
+  RecordedPause,
+  ReplanRecord,
+  Seconds,
+  UnixSeconds,
+  WorkoutBlock,
+} from '@onyourleft/domain';
 
 import type { ActivityId, AthleteId, RecordingSessionId } from './ids';
+import type { RoomRaceFact, WorkoutBlockOutcome } from './records';
 import type { StreamChannels } from './streams';
 
 /**
@@ -78,6 +86,64 @@ export const RECORDING_STORED_STATES: readonly RecordingStoredState[] = [
   'paused',
   'stopped',
 ];
+
+/**
+ * The most re-plan records a recording's header keeps — #1328: the ride
+ * controller's own bound (`RIDE_REPLAN_RECORDS_LIMIT`), which keeps the
+ * latest. One move in three minutes makes far fewer in any real ride, so a
+ * longer list is a damaged or a planted row, and is not read past this.
+ */
+export const RECORDING_REPLAN_RECORDS_LIMIT = 200;
+
+/** One end of a lap: the instant, and the recording's own moving time at it. */
+export interface RecordedLapMark {
+  readonly at: UnixSeconds;
+  readonly movingTime: Seconds;
+}
+
+/**
+ * A lap of a course ridden during a recording, as the recording holds it
+ * before there is an activity for a lap row to belong to (#1312).
+ *
+ * ⚠️ **Where it began and ended, and what the course says of it — and no
+ * average.** A lap's power, heart rate and cadence are worked out from the
+ * recording's samples when the ride is saved, because until then a slot can
+ * still take a late reading. What is here is the part the samples cannot give
+ * back: nothing in the eight channels says where the line of a course was, how
+ * long its road is or how much it climbs.
+ */
+export interface RecordedCourseLap {
+  readonly from: RecordedLapMark;
+  readonly to: RecordedLapMark;
+  /** The course's road over the lap: a whole lap's length, or as far as the rider got. */
+  readonly distance: Metres;
+  /** Metres climbed over it, where the course can say. */
+  readonly ascent?: Metres | undefined;
+  /** The rider stopped before the line. Absent for a whole lap. */
+  readonly partial?: true | undefined;
+}
+
+/**
+ * One block of a structured workout during a recording, as the recording
+ * holds it before there is an activity — #1319. Where it began and ended and
+ * what became of it, and no average: as for a lap
+ * ({@link RecordedCourseLap}), the figures are worked out from the samples
+ * when the ride is saved.
+ *
+ * ⚠️ **The block being ridden is held as `cut-short`**, with its `to` moved on
+ * as it is ridden, until it ends. So a recording that dies inside a block is
+ * recovered with that block cut short, which is what it was.
+ */
+export type RecordedWorkoutBlock =
+  | {
+      readonly outcome: Exclude<WorkoutBlockOutcome, 'skipped'>;
+      readonly block: WorkoutBlock;
+      readonly from: RecordedLapMark;
+      readonly to: RecordedLapMark;
+      /** The stall rescue eased the trainer in this block. */
+      readonly eased?: true | undefined;
+    }
+  | { readonly outcome: 'skipped'; readonly block: WorkoutBlock };
 
 /** The small indexed row: one per recording. */
 export interface RecordingSessionRecord {
@@ -121,10 +187,127 @@ export interface RecordingSessionRecord {
    * crash can lose the link is the same window that already loses the discard.
    */
   readonly savedAs?: ActivityId | undefined;
+  /**
+   * The laps of a course completed so far, in the order they were ridden —
+   * #1312.
+   *
+   * ⚠️ **Optional, so it is not a migration**, by {@link savedAs}'s rule: a
+   * header written before it reads back with it absent, which is a recording
+   * with no laps.
+   *
+   * On the header for {@link pauses}' reason, and because it is the only place
+   * a crash leaves them: without it a ride recovered after a reload is saved
+   * with its samples and none of its laps.
+   */
+  readonly courseLaps?: readonly RecordedCourseLap[] | undefined;
+  /**
+   * The lap of a course in progress, as far as the rider had got by the last
+   * time it was told — #1322. A PART lap: from where the open lap began to
+   * the last mark the game gave of how far round the rider was.
+   *
+   * ⚠️ **Only for a recording that dies.** A ride ended normally part-way round
+   * a lap has its part lap in {@link courseLaps} already, from the game; a
+   * recording that is recovered after the tab died has no game to say how far
+   * round the rider was, so this is what it saves instead. Rewritten with every
+   * header, so it is as old as the last flush and no older.
+   *
+   * Optional, so not a migration, by {@link savedAs}'s rule. Lenient on the
+   * way out, as {@link courseLaps} is: one that does not read, or lies outside
+   * the recording or before the last completed lap's end, is dropped alone.
+   */
+  readonly openCourseLap?: RecordedCourseLap | undefined;
+  /**
+   * The private races this recording has ridden so far, as each room told
+   * this device — #785, #1360's review (B2). On the header for
+   * {@link courseLaps}' reason: a ride recovered after the app closed before
+   * *Stop* is saved with its races, not without them.
+   *
+   * ⚠️ **Untrusted on the way out, and never a reason to refuse a header.** A
+   * race that does not read is left out of what is written and dropped from
+   * what is read — never a throw — so it cannot fail a checkpoint, hide a
+   * recording from recovery, or hide another one. Optional, so not a migration.
+   */
+  readonly roomRaces?: readonly RoomRaceFact[] | undefined;
+  /**
+   * The blocks of the workouts ridden so far, in order, the one being ridden
+   * last — #1319. On the header for {@link courseLaps}' reason: a ride
+   * recovered after the app closed is saved with its blocks.
+   *
+   * ⚠️ **Untrusted on the way out, and never a reason to refuse a header**:
+   * a list that does not read is dropped whole (blocks are numbered by where
+   * they stand). Optional, so not a migration.
+   */
+  readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
+  /**
+   * The re-plan decisions made so far, oldest first — #1328, ADR 0048 D-6
+   * P9. On the header for {@link courseLaps}' reason: a ride recovered after
+   * the app closed is saved with the moves accepted and refused in it, as
+   * `RideFacts.replans`.
+   *
+   * ⚠️ **Untrusted on the way out, and never a reason to refuse a header.**
+   * Each entry is read through `readReplanRecord`, as the ride's own are: one
+   * that does not read is dropped and counted in {@link replansDropped}, and
+   * whatever is not a list holds no record and is counted as one. At most
+   * {@link RECORDING_REPLAN_RECORDS_LIMIT} are kept, the latest; the rest
+   * are counted. Optional, so not a migration.
+   */
+  readonly replans?: readonly ReplanRecord[] | undefined;
+  /**
+   * How many of this recording's re-plan records could not be kept or read
+   * back. Absent when none was. A count and nothing of the records.
+   * @see replans
+   */
+  readonly replansDropped?: number | undefined;
+  /**
+   * The fields of the stored header that did not read — #1325. Absent when
+   * every field read. Set by the read path only; the write path ignores it.
+   *
+   * - `'pauses'`: the pause list did not read, so {@link pauses} is EMPTY and
+   *   this recording's moving time is its elapsed time. A pause list decides
+   *   moving time, so one damaged pause drops the whole list rather than
+   *   leaving the others to describe a ride that never had only those.
+   * - `'state'`: the state did not read, so {@link state} is `stopped` — the
+   *   one state that offers no *Continue*, because nothing on disk says the
+   *   ride was still going.
+   *
+   * ⚠️ **Read rather than refused**, which is the decision #1325 asked for. A
+   * header that threw here hid every recoverable ride of the athlete, and its
+   * own samples could then be neither saved nor exported. A ride saved with
+   * its pauses counted as riding has a wrong moving time that the rider is
+   * told about; a ride that cannot be read has no moving time at all.
+   */
+  readonly damaged?: readonly RecordingHeaderDamage[] | undefined;
 }
+
+/** A field of a checkpoint header that did not read and was read as a stand-in. @see RecordingSessionRecord.damaged */
+export type RecordingHeaderDamage = 'pauses' | 'state';
 
 /** What `putRecordingSession` accepts. Identical; named for symmetry with `NewActivity`. */
 export type NewRecordingSession = RecordingSessionRecord;
+
+/**
+ * A checkpoint header that will not read at all — #1325.
+ *
+ * Its start, last write, sample interval, id, owner or `savedAs` did not
+ * decode, so nothing about it can be offered but its removal. **It is
+ * reported rather than thrown**, so it never hides another recording.
+ */
+export interface UnreadableRecordingSession {
+  /**
+   * The row's key **exactly as stored**, so `deleteRecordingSession` finds it
+   * even when that key is not a usable id — the one damage that would
+   * otherwise leave a row nothing could remove.
+   */
+  readonly id: RecordingSessionId;
+}
+
+/** What `readRecordingSessions` answers: every header of the athlete, each read on its own. */
+export interface RecordingSessionListing {
+  /** The headers that read, most recently checkpointed first. */
+  readonly sessions: RecordingSessionRecord[];
+  /** The headers that did not, in the same order. */
+  readonly unreadable: UnreadableRecordingSession[];
+}
 
 /** One flush: a contiguous window of the merged series. */
 export interface RecordingChunkRecord {
@@ -184,6 +367,21 @@ export interface RecoveredRecording {
   readonly channels: StreamChannels;
   readonly pauses: readonly RecordedPause[];
   readonly state: RecordingStoredState;
+  /** The header's laps of a course, none for a recording with none. @see RecordingSessionRecord.courseLaps */
+  readonly courseLaps: readonly RecordedCourseLap[];
+  /**
+   * The lap in progress at the last flush, as a part lap — #1322. Absent with
+   * none open. @see RecordingSessionRecord.openCourseLap
+   */
+  readonly openCourseLap?: RecordedCourseLap | undefined;
+  /** The header's races, none for a recording in none. @see RecordingSessionRecord.roomRaces */
+  readonly roomRaces: readonly RoomRaceFact[];
+  /** The header's workout blocks; absent with none. @see RecordingSessionRecord.workoutBlocks */
+  readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
+  /** The header's re-plan records; absent with none. @see RecordingSessionRecord.replans */
+  readonly replans?: readonly ReplanRecord[] | undefined;
+  /** @see RecordingSessionRecord.replansDropped */
+  readonly replansDropped?: number | undefined;
   /**
    * How many chunk rows made up the recovered prefix.
    *

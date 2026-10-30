@@ -67,8 +67,10 @@ import { ChartSlot } from '../design/ChartSlot';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import {
+  ELAPSED_TIME_LABEL,
   formatDuration,
   formatPowerValue,
+  MOVING_TIME_LABEL,
   formatStartedAt,
   POWER_UNIT,
   noPowerText,
@@ -86,6 +88,8 @@ import {
   type Trace,
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
+import { LapsTable } from '../detail/LapsTable';
+import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
 import { RaceConsentSection } from '../detail/RaceConsentSection';
@@ -93,7 +97,7 @@ import { MAXIMUM_RIDE_NOTE_CHARACTERS } from '@onyourleft/store';
 import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { NOTE_WORDS } from '../rider-text/words';
-import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import {
   CHART_POINTS,
   DEFAULT_SERIES,
@@ -109,8 +113,8 @@ import { readMapTilesChoice } from '../map/tiles-preference';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
+import { raceFactTerm, raceFactText } from '../rooms/race-result';
 import { hrefFor, routeById } from '../shell/routes';
-import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * The chart, loaded on demand.
@@ -154,16 +158,24 @@ export interface ActivityDetailViewProps {
    */
   readonly preferences?: PreferenceStorage | undefined;
   /**
-   * The post-ride ask (#804), or `undefined` for none — and then no control is
-   * offered, and `detail/RideWriteUpSection.tsx` says where one is set up
-   * (#805). `ride-analysis/RideWriteUpControl.tsx` is the press.
+   * A write-up asked of the rider's instance (#1102), or `undefined` where
+   * this browser cannot hold a sign-in: `detail/RideWriteUpSection.tsx` then
+   * says in one sentence that no write-up can be asked for here (#1103).
    */
-  readonly writeUp?: RideAnalysisPort | undefined;
+  readonly instanceWriteUp?: InstanceAnalysisPort | undefined;
   /**
    * Where the rider's note on this ride is kept (#836), or `undefined` where
    * there is no store — the box then says so and offers no control.
    */
   readonly riderText?: RiderTextPort | undefined;
+  /**
+   * #1439: drawn inside History's detail pane, which is the ride's one page
+   * there. The pane heads it with the ride's name (`shell/ListDetail.tsx`
+   * §`SELECTED_HEADING_ID`, from the list's own row, so focus has somewhere to land before
+   * this read is back) and has its own way back to the list, so the page
+   * draws neither its own name nor {@link WayOut}.
+   */
+  readonly embedded?: boolean | undefined;
 }
 
 /**
@@ -214,8 +226,9 @@ export function ActivityDetailView({
   map,
   basemap,
   preferences,
-  writeUp,
+  instanceWriteUp,
   riderText,
+  embedded = false,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
   // it cannot change while this one is showing.
@@ -357,7 +370,7 @@ export function ActivityDetailView({
           No local store on this browser. Rides are kept in this browser&rsquo;s own storage and
           this page cannot reach it — a private window or blocked site data is the usual reason.
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -368,7 +381,7 @@ export function ActivityDetailView({
         <StatusMessage tone="info" live>
           {READING_RIDE_TEXT}
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -379,7 +392,7 @@ export function ActivityDetailView({
         <StatusMessage tone="warning" live>
           Could not read this ride from the store on this device. {state.reason}
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -398,7 +411,7 @@ export function ActivityDetailView({
           No ride on this device has that id. It may have been deleted, or the link may have come
           from a different browser — rides are not shared between them.
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -413,23 +426,24 @@ export function ActivityDetailView({
 
   return (
     <>
-      <h2>{activity.name}</h2>
+      {embedded ? null : <h2>{activity.name}</h2>}
 
       <dl className="oyl-ride-summary">
         <div>
           <dt>Started</dt>
           <dd>{formatStartedAt(activity.startedAt, activity.startedAtTimeZone)}</dd>
         </div>
+        {/* #1437: the same two names as Home and History, moving first. */}
         <div>
-          <dt>Elapsed</dt>
+          <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
-            <Reading value={formatDuration(activity.elapsedTime)} />
+            <Reading value={formatDuration(activity.movingTime)} />
           </dd>
         </div>
         <div>
-          <dt>Moving</dt>
+          <dt>{ELAPSED_TIME_LABEL}</dt>
           <dd>
-            <Reading value={formatDuration(activity.movingTime)} />
+            <Reading value={formatDuration(activity.elapsedTime)} />
           </dd>
         </div>
         {/* #1070: a ride recorded with no speed channel stored 0 m, which is no
@@ -462,6 +476,17 @@ export function ActivityDetailView({
           */}
           <dd>{activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}</dd>
         </div>
+        {/* #785: the races this ride was ridden in, as each room said it —
+            kept with the ride on this device, one line each, in order (#1360's
+            review, N3). No row for a ride in no race. */}
+        {activity.rideFacts?.races === undefined || activity.rideFacts.races.length === 0 ? null : (
+          <div>
+            <dt>{raceFactTerm(activity.rideFacts.races)}</dt>
+            {activity.rideFacts.races.map((race, index) => (
+              <dd key={index}>{raceFactText(race)}</dd>
+            ))}
+          </div>
+        )}
       </dl>
 
       <h3>Traces</h3>
@@ -541,7 +566,9 @@ export function ActivityDetailView({
                   columns={['From', `${series.label} (${series.unit})`]}
                   rows={rows}
                   emptyMessage="No readings in this ride."
-                  tablePosition="beside"
+                  // #1439: the table is the chart's alternative, not a second
+                  // screen of numbers open under it by default.
+                  tablePosition="disclosed"
                   chart={
                     <Suspense fallback={null}>
                       <TraceChart
@@ -561,31 +588,19 @@ export function ActivityDetailView({
       )}
 
       <h3>Laps</h3>
-      {laps.length === 0 ? (
-        <p className="oyl-muted">This ride has no laps recorded.</p>
-      ) : (
-        <ScrollTable className="oyl-table" caption="Laps, in the order they were ridden">
-          <thead>
-            <tr>
-              <th scope="col">Lap</th>
-              <th scope="col">Elapsed</th>
-              <th scope="col">Moving</th>
-              <th scope="col">Distance ({distanceUnit(units)})</th>
-              <th scope="col">Avg power ({POWER_UNIT})</th>
-            </tr>
-          </thead>
-          <tbody>
-            {laps.map((lap) => (
-              <tr key={lap.id}>
-                <th scope="row">{String(lap.ordinal + 1)}</th>
-                <td>{formatDuration(lap.elapsedTime)}</td>
-                <td>{formatDuration(lap.movingTime)}</td>
-                <td>{formatDistance(lap.distance, units).value}</td>
-                <td>{lap.averagePower === undefined ? '—' : formatPowerValue(lap.averagePower)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </ScrollTable>
+      {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
+      <LapsTable laps={laps} units={units} />
+
+      {/*
+        #1319: a ride with a workout lists its blocks, under their own
+        heading after the laps — two tables, never one (WorkoutBlocksTable).
+        A ride with no workout renders nothing here.
+      */}
+      {activity.rideFacts?.workoutBlocks === undefined ? null : (
+        <>
+          <h3>Workout blocks</h3>
+          <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
+        </>
       )}
 
       {/*
@@ -599,11 +614,11 @@ export function ActivityDetailView({
         #804, #805. A model's write-up of this ride, on every ride's page and
         below the side camera's report, never in place of it (ADR 0035 D-3):
         the saved one, screened again, and the press that asks for a new one.
-        It sends nothing until that is pressed. With no model set up it is
-        one sentence and a link.
+        It sends nothing until that is pressed. With no instance it is one
+        sentence.
       */}
       <RideWriteUpSection
-        port={writeUp}
+        instance={instanceWriteUp}
         activityId={activity.id}
         initial={savedWriteUp}
         reread={async () =>
@@ -672,7 +687,7 @@ export function ActivityDetailView({
         </>
       ) : undefined}
 
-      <WayOut />
+      {embedded ? null : <WayOut />}
     </>
   );
 }

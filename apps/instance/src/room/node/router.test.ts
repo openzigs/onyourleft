@@ -12,9 +12,10 @@ import { WebSocket } from 'ws';
 
 import type { Frame } from '@onyourleft/protocol';
 
+import { logEvent, REDACTED } from '../../log.ts';
 import { helloText } from '../core/room-testing.ts';
 import { until } from './node-room-testing.ts';
-import { closeFrameBytes, roomHash } from './router.ts';
+import { closeFrameBytes, roomHash, type RoomLookup } from './router.ts';
 import {
   joinRoom,
   ridePlan,
@@ -235,7 +236,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
       admit: (_roomId, ticket) => {
         if (ticket !== 'good' || spent.has(ticket)) return undefined;
         spent.add(ticket);
-        return { athleteId: 'ann', declaredMassKilograms: 70 };
+        return { athleteId: 'ann', declaredMassKilograms: 70, displayName: 'Ann' };
       },
     });
     const noTicket = await join('gate', undefined);
@@ -250,6 +251,76 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     const reused = await join('gate', 'good');
     expect(await reused.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
+  }, 30_000);
+
+  it('logs each socket a room closed for a protocol reason, with the room, the reason and a count — #1400, #1402', async () => {
+    // Through the operator's real sink, as `instance.ts` wires it (#1402):
+    // the line is what an operator reads, not the event object.
+    const lines: string[] = [];
+    harness = await startRouter({
+      workers: 1,
+      event: (event, detail) => {
+        logEvent((line) => lines.push(line), event, detail);
+      },
+    });
+    const room = '0123456789abcdef0123456789abcdef';
+    // A seated rider holds the room open, so its counts are one room's.
+    const ann = await join(room, 'ticket-ann');
+    await until(() => ann.messages.length > 0, 'a welcome');
+    // A report before any hello: what the race load run's riders did through the tunnel.
+    const early = await join(room, undefined);
+    early.report(1, 200);
+    expect(await early.closed).toEqual({ code: 1008, reason: 'hello-expected' });
+    const again = await join(room, undefined);
+    again.report(1, 200);
+    expect(await again.closed).toEqual({ code: 1008, reason: 'hello-expected' });
+    const forged = await join(room, 'forged');
+    expect(await forged.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
+    await until(() => lines.length >= 3, 'three logged closes');
+    expect(lines.join('\n')).not.toContain(REDACTED);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'room-socket-closed', worker: 0, room, reason: 'hello-expected', count: 1 },
+      { event: 'room-socket-closed', worker: 0, room, reason: 'hello-expected', count: 2 },
+      { event: 'room-socket-closed', worker: 0, room, reason: 'ticket-refused', count: 1 },
+    ]);
+    // And the operator's metrics count it beside the refusals.
+    const [worker] = await harness.router.metrics();
+    expect(worker?.refusals).toMatchObject({ 'hello-expected': 2, 'ticket-refused': 1 });
+  }, 30_000);
+});
+
+describe('the rooms’ sweep and a socket agree on a room — #948', () => {
+  it('refuses a socket whose lookup read the room open while the sweep was ending it, and seats nobody', async () => {
+    const answers: ((found: RoomLookup) => void)[] = [];
+    harness = await startRouter({
+      workers: 1,
+      lookup: () => new Promise<RoomLookup>((resolve) => answers.push(resolve)),
+    });
+    const joining = join('ending', 'ticket-ann');
+    await until(() => answers.length === 1, 'the lookup to begin');
+    // The sweep claims the room and ends it while the lookup is in flight…
+    expect(harness.router.claimForEnding('ending')).toBe(true);
+    harness.router.releaseEnding('ending');
+    // …and the lookup answers what it read before the room was closed.
+    answers[0]?.({ kind: 'open', plan: ridePlan('ending') });
+    const late = await joining;
+    expect(await late.closed).toEqual({ code: 4005, reason: 'room-closed' });
+    expect(late.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+    expect(harness.router.holds('ending')).toBe(false);
+  }, 30_000);
+
+  it('forgets a released room once no lookup is in flight, and will not claim a room a worker holds', async () => {
+    harness = await startRouter({ workers: 1 });
+    // Claimed and released with no socket on the way: the room the sweep
+    // did NOT end is placed as usual on the next socket.
+    expect(harness.router.claimForEnding('kept')).toBe(true);
+    harness.router.releaseEnding('kept');
+    const ann = await join('kept', 'ticket-ann');
+    await until(() => ann.messages.length > 0, 'a welcome');
+    expect(ann.messages[0]?.type).toBe('welcome');
+    // Now a worker holds it, and the sweep may not have it.
+    expect(harness.router.holds('kept')).toBe(true);
+    expect(harness.router.claimForEnding('kept')).toBe(false);
   }, 30_000);
 });
 

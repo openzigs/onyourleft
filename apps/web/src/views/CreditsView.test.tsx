@@ -33,8 +33,15 @@ import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { creditsFrom, NOTHING_ASKED_LICENCES, SHIPPED_LICENCE_TEXTS } from '../credits/credits';
 import { parseAssetManifest } from '../credits/manifest';
 import { parseNotices, THIRD_PARTY_NOTICES_URL } from '../credits/notices';
+import { loadShippedLicence } from '../credits/licence-documents';
+import { loadNoticesDocument } from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
-import { mount, queryAll, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
+import {
+  ODBL_LICENCE_URL as FIT_ODBL_LICENCE_URL,
+  OSM_ATTRIBUTION as FIT_OSM_ATTRIBUTION,
+} from '@onyourleft/fit';
 
 import { CreditsView } from './CreditsView';
 
@@ -175,6 +182,14 @@ function linksOfCreditFor(file: string): readonly string[] {
     : queryAll<HTMLAnchorElement>(credit, 'a').map((link) => link.getAttribute('href') ?? '');
 }
 
+/** The licence-copy section's disclosures, by their summaries — #1744. */
+function licenceSummaries(): readonly string[] {
+  return queryAll<HTMLElement>(
+    mounted?.container ?? document,
+    '[data-terms="licence-copy"] details > summary',
+  ).map((summary) => summary.textContent ?? '');
+}
+
 const APACHE = [
   '[[asset]]',
   'path = "apps/web/public/pose/pose_landmarker_lite.task"',
@@ -194,11 +209,12 @@ describe('an asset whose licence asks for its text to travel with it — #597', 
     expect(sectionOf('apps/web/src/game/models/tree_default.glb')).toBe('nothing');
   });
 
-  it('links the copy of the licence this app ships, from its own credit', async () => {
+  it('offers the copy of the licence this app ships in its section, not as a link — #1744', async () => {
     await render(APACHE);
-    expect(linksOfCreditFor('apps/web/public/pose/pose_landmarker_lite.task')).toContain(
+    expect(linksOfCreditFor('apps/web/public/pose/pose_landmarker_lite.task')).not.toContain(
       './licences/Apache-2.0.txt',
     );
+    expect(licenceSummaries()).toEqual(['Read the Apache-2.0 licence']);
     expect(text()).toMatch(/copy of the licence travel with the work/);
   });
 
@@ -258,13 +274,14 @@ describe('the gate: no credit in ASSETS.toml renders without the licence it asks
     expect(section?.textContent).toContain('Binomial LLC');
     expect(section?.textContent).toContain('realistic/basis/basis_transcoder.wasm');
     const links = [...(section?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('href'));
-    expect(links).toContain('./licences/Apache-2.0.txt');
     expect(links).toContain('https://github.com/BinomialLLC/basis_universal');
+    expect(licenceSummaries()).toContain('Read the Apache-2.0 licence');
   });
 
   it('credits the display face with its copyright notice and the OFL it ships — #991', async () => {
     // OFL-1.1 condition 2: the copyright notice and the licence travel with
-    // the font. The notice is the credit's creator; the licence, the link.
+    // the font. The notice is the credit's creator; the licence, read in place
+    // since #1744.
     await render();
     const section = mounted?.container.querySelector('[data-terms="licence-copy"]');
     expect(section?.textContent).toContain('Copyright 2017 The Barlow Project Authors');
@@ -273,14 +290,14 @@ describe('the gate: no credit in ASSETS.toml renders without the licence it asks
       'apps/web/src/design/fonts/barlow-latin-800.woff2',
     ]) {
       expect(sectionOf(file), `${file} is not in the licence-copy section`).toBe('licence-copy');
-      expect(linksOfCreditFor(file)).toContain('./licences/OFL-1.1.txt');
       expect(linksOfCreditFor(file)).toContain('https://github.com/jpt/barlow');
     }
+    expect(licenceSummaries()).toContain('Read the OFL-1.1 licence');
     // The inputs ship in nothing and are not credited as if they did.
     expect(text()).not.toContain('tools/fonts/barlow/Barlow-Bold.ttf');
   });
 
-  it('links every Apache-2.0 credit to the licence copy this app ships', async () => {
+  it('offers the shipped copy of every licence a licence-copy credit names — #1744', async () => {
     const { licenceCopy } = creditsFrom(parseAssetManifest(ASSET_MANIFEST_SOURCE));
     // Not vacuous: the Roboto glyphs and the pose model are both credited,
     // and since #991 the display face under OFL-1.1.
@@ -290,11 +307,16 @@ describe('the gate: no credit in ASSETS.toml renders without the licence it asks
     for (const work of licenceCopy) {
       for (const file of work.files) {
         expect(sectionOf(file), `${file} is not in the licence-copy section`).toBe('licence-copy');
-        expect(linksOfCreditFor(file), `${file} links no copy of ${work.licence}`).toContain(
+        // Not a link: that opened the `.txt` over the app in the Android shell.
+        expect(linksOfCreditFor(file), `${file} links its licence away from the app`).not.toContain(
           SHIPPED_LICENCE_TEXTS[work.licence],
         );
       }
+      expect(licenceSummaries(), `no way to read ${work.licence}`).toContain(
+        `Read the ${work.licence} licence`,
+      );
     }
+    expect(hrefs().filter((href) => href.startsWith('./licences/'))).toEqual([]);
   });
 
   it('lists under the courtesy wording only licences that ask for nothing', async () => {
@@ -498,9 +520,13 @@ describe('the software this app includes — #664', () => {
     expect(software()).not.toContain(':capacitor-android');
   });
 
-  it('links the full notices document this app ships, relative to the page', async () => {
+  it('does not link the notices document away from the app — the Android shell trap', async () => {
+    // A `target="_blank"` link to it loaded the `.txt` over the app inside the
+    // Android WebView, and back then left the app: `notices-document.ts` says
+    // why. The document is shown on this screen instead; the file itself is
+    // still served at the URL, for a browser and the demo page.
     await render(undefined, NOTICES);
-    expect(hrefs()).toContain(THIRD_PARTY_NOTICES_URL);
+    expect(hrefs()).not.toContain(THIRD_PARTY_NOTICES_URL);
     expect(THIRD_PARTY_NOTICES_URL).toBe('./licences/third-party.txt');
   });
 
@@ -527,5 +553,223 @@ describe('the software this app includes — #664', () => {
       expect(software()).toContain(`${item.name} ${item.version}, under ${item.licence}`);
     }
     expect(software()).not.toContain('This list may be incomplete');
+  });
+});
+
+/**
+ * A whole notices document, standing in for the committed one: the
+ * Lucide/Feather case, an ISC manifest whose LICENSE also carries MIT.
+ */
+const DOCUMENT = [
+  'THIRD-PARTY SOFTWARE IN ON YOUR LEFT',
+  '',
+  '========================================================================',
+  'lucide-react 1.48.0 — ISC',
+  '',
+  'ISC License',
+  '',
+  'The MIT License (MIT) (for portions derived from Feather)',
+  'Copyright (c) 2013-2023 Cole Bemis',
+].join('\n');
+
+function showNotices(): HTMLElement {
+  const summary = queryAll<HTMLElement>(
+    mounted?.container ?? document,
+    '[data-terms="software"] details > summary',
+  ).find((candidate) => candidate.textContent === 'Read the full notices');
+  if (summary === undefined) {
+    throw new Error('Credits has no "Read the full notices" disclosure');
+  }
+  return summary;
+}
+
+function isOpen(): boolean {
+  return (showNotices().parentElement as HTMLDetailsElement).open;
+}
+
+function shownDocument(): string | undefined {
+  return (
+    mounted?.container.querySelector('[data-terms="software"] [data-notices-document]')
+      ?.textContent ?? undefined
+  );
+}
+
+async function renderWithDocument(load: () => Promise<string>): Promise<Mounted> {
+  const result = await mount(<CreditsView notices={NOTICES} noticesDocument={load} />);
+  mounted = result;
+  return result;
+}
+
+describe('the full notices, read inside the app — #664', () => {
+  it('shows nothing of the document until a rider asks, and reads nothing either', async () => {
+    const load = vi.fn(() => Promise.resolve(DOCUMENT));
+    await renderWithDocument(load);
+    expect(shownDocument()).toBeUndefined();
+    expect(load).not.toHaveBeenCalled();
+    expect(isOpen()).toBe(false);
+  });
+
+  it('renders the whole document on the screen when the disclosure is opened, by keyboard', async () => {
+    await renderWithDocument(() => Promise.resolve(DOCUMENT));
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(isOpen()).toBe(true);
+    // Verbatim, both halves of the Lucide/Feather licence.
+    expect(shownDocument()).toBe(DOCUMENT);
+    expect(shownDocument()).toContain('Cole Bemis');
+  });
+
+  it('hides it when closed, and shows it again without a second read', async () => {
+    const load = vi.fn(() => Promise.resolve(DOCUMENT));
+    await renderWithDocument(load);
+    await activateWithKeyboard(showNotices());
+    await settle();
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(shownDocument()).toBeUndefined();
+    expect(isOpen()).toBe(false);
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(shownDocument()).toBe(DOCUMENT);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('says it is reading while the document loads', async () => {
+    await renderWithDocument(() => new Promise<string>(() => undefined));
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(software()).toContain('Reading the notices this app carries.');
+    expect(shownDocument()).toBeUndefined();
+  });
+
+  it('says so when the document cannot be read, rather than showing an empty block', async () => {
+    await renderWithDocument(() => Promise.reject(new Error('chunk failed')));
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(software()).toContain('could not be read just now');
+    expect(shownDocument()).toBeUndefined();
+    expect(software()).not.toContain('Reading the notices this app carries.');
+  });
+
+  it('shows the real committed document by default', async () => {
+    // Read back through the screen's own default, not a fixture: the screen a
+    // rider opens renders what `check:notices` holds.
+    // Read once first, so the module is loaded and one `settle` is enough.
+    const committed = await loadNoticesDocument();
+    mounted = await mount(<CreditsView />);
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(shownDocument()).toBe(committed);
+    expect(shownDocument()).toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
+  });
+});
+
+describe('the map data — #1552, ADR 0054 D-3.6', () => {
+  const mapData = (): Element | null =>
+    mounted?.container.querySelector('[data-terms="map-data"]') ?? null;
+
+  it('names OpenStreetMap contributors, the ODbL 1.0 with its URL, and ODbL §4.3 a’s sentence', async () => {
+    await render();
+    const section = mapData();
+    expect(section?.querySelector('h2')?.textContent).toBe('Map data');
+    const words = (section?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(words).toContain('© OpenStreetMap contributors');
+    expect(words).toContain('Open Database License 1.0');
+    // Said only of what is true today: the realistic world draws no town from
+    // map data until #1540, so the screen does not claim it.
+    expect(words).not.toContain('towns');
+    expect(words).toContain(
+      'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).',
+    );
+    const licence = section?.querySelector<HTMLAnchorElement>(
+      'a[href="https://opendatacommons.org/licenses/odbl/1-0/"]',
+    );
+    expect(licence?.textContent).toBe('Open Database License 1.0');
+    expect(licence?.getAttribute('target')).toBe('_blank');
+    expect(licence?.getAttribute('rel') ?? '').toContain('noreferrer');
+  });
+
+  it('links the same ODbL URL, and credits in the same words, as an exported course', () => {
+    expect(ODBL_LICENCE_URL).toBe(FIT_ODBL_LICENCE_URL);
+    expect(OSM_ATTRIBUTION).toBe(FIT_OSM_ATTRIBUTION);
+  });
+
+  it('is there whatever the asset manifest holds, because it is not an asset', async () => {
+    await render(FIXTURE);
+    expect(mapData()?.textContent ?? '').toContain('© OpenStreetMap contributors');
+  });
+});
+
+/** The licence-copy section's disclosure for one licence — #1744. */
+function readLicence(licence: string): HTMLElement {
+  const summary = queryAll<HTMLElement>(
+    mounted?.container ?? document,
+    '[data-terms="licence-copy"] details > summary',
+  ).find((candidate) => candidate.textContent === `Read the ${licence} licence`);
+  if (summary === undefined) {
+    throw new Error(`Credits has no "Read the ${licence} licence" disclosure`);
+  }
+  return summary;
+}
+
+function shownLicence(licence: string): string | undefined {
+  return (
+    mounted?.container.querySelector(`[data-terms="licence-copy"] [data-licence-text="${licence}"]`)
+      ?.textContent ?? undefined
+  );
+}
+
+function licenceCopySection(): string {
+  return mounted?.container.querySelector('[data-terms="licence-copy"]')?.textContent ?? '';
+}
+
+describe('the licence texts this app ships, read inside the app — #1744', () => {
+  it('shows nothing and reads nothing until a rider opens one', async () => {
+    const load = vi.fn((licence: string) => Promise.resolve(`text of ${licence}`));
+    mounted = await mount(<CreditsView notices={NOTICES} licenceText={load} />);
+    expect(licenceSummaries()).toEqual(['Read the Apache-2.0 licence', 'Read the OFL-1.1 licence']);
+    expect(shownLicence('Apache-2.0')).toBeUndefined();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('renders the text of the licence opened, by keyboard, and only that one', async () => {
+    const load = vi.fn((licence: string) => Promise.resolve(`text of ${licence}`));
+    mounted = await mount(<CreditsView notices={NOTICES} licenceText={load} />);
+    await activateWithKeyboard(readLicence('OFL-1.1'));
+    await settle();
+    expect((readLicence('OFL-1.1').parentElement as HTMLDetailsElement).open).toBe(true);
+    expect(shownLicence('OFL-1.1')).toBe('text of OFL-1.1');
+    expect(shownLicence('Apache-2.0')).toBeUndefined();
+    expect(load.mock.calls).toEqual([['OFL-1.1']]);
+  });
+
+  it('says so when a licence text cannot be read, rather than showing an empty block', async () => {
+    mounted = await mount(
+      <CreditsView
+        notices={NOTICES}
+        licenceText={() => Promise.reject(new Error('chunk failed'))}
+      />,
+    );
+    await activateWithKeyboard(readLicence('Apache-2.0'));
+    await settle();
+    expect(licenceCopySection()).toContain(
+      'The Apache-2.0 licence this app carries could not be read just now.',
+    );
+    expect(shownLicence('Apache-2.0')).toBeUndefined();
+  });
+
+  it('shows the real shipped texts by default', async () => {
+    // Read back through the screen's own default, not a fixture. Read once
+    // first, so each module is loaded and one `settle` is enough.
+    const apache = await loadShippedLicence('Apache-2.0');
+    const ofl = await loadShippedLicence('OFL-1.1');
+    mounted = await mount(<CreditsView />);
+    await activateWithKeyboard(readLicence('Apache-2.0'));
+    await activateWithKeyboard(readLicence('OFL-1.1'));
+    await settle();
+    expect(shownLicence('Apache-2.0')).toBe(apache);
+    expect(shownLicence('Apache-2.0')).toMatch(/^\s*Apache License\s+Version 2\.0, January 2004/);
+    expect(shownLicence('OFL-1.1')).toBe(ofl);
+    expect(shownLicence('OFL-1.1')).toContain('SIL OPEN FONT LICENSE');
   });
 });

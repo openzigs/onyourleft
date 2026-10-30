@@ -111,12 +111,46 @@
  * eight seconds at two thirds of a target, and the error runs the safe way. A
  * latch that a free ride cleared would put the full target that caused the
  * spiral straight back on a rider whose legs have not been tested since.
+ *
+ * ## A plan revision is read at the next block boundary, never sooner (#1244)
+ *
+ * ADR 0048 D-2: an accepted re-plan becomes a new plan revision that this
+ * player reads at the next block boundary. {@link WorkoutPlayer.revise} takes
+ * the revised timeline and keeps it WAITING; the tick that reaches the end of
+ * the block being ridden starts reading it. Until then every target comes from
+ * the plan being ridden, so nothing a revision carries can change the block a
+ * rider is in. The re-plan writes nothing: this player is still the one thing
+ * that asks for a target.
+ *
+ * ⚠️ **The player checks the revision itself, and does not take the
+ * validator's word for it.** `replan.ts` §`validateProposal` already promises
+ * that nothing at or before the block being ridden differs. `revise` compares
+ * every segment before the boundary anyway and refuses a timeline in which
+ * one differs, because a caller that handed over the wrong timeline would
+ * otherwise move the offsets under a rider mid-block.
+ *
+ * A waiting revision is dropped by {@link WorkoutPlayer.keepPlan} (the rider's
+ * *Keep the plan*), a pause, a lost link, a stop and a new start (ADR 0048
+ * D-8, item 1). A revision that is dropped is gone: the plan being ridden
+ * carries on to its end.
  */
 
 import { seconds, watts, type Seconds, type Watts } from '../quantities';
 
 import { createErgRescue, type CadenceReading, type ErgRescueStep } from './erg-safety';
+import {
+  createHeartRateHold,
+  holdEligible,
+  holdEnvelope,
+  type HeartRateHold,
+  type HoldCheckpoint,
+  type HeartRateHoldContext,
+  type HeartRateSample,
+  type HoldReason,
+  type TrainerPowerRange,
+} from './heart-rate-hold';
 import { segmentAt, targetAt, type WorkoutSegment, type WorkoutTimeline } from './timeline';
+import type { HeartRateRange } from './workout';
 
 export type PlayerStatus = 'idle' | 'running' | 'paused' | 'finished';
 
@@ -137,6 +171,11 @@ export type PlayerIntent =
       readonly watts: Watts;
       readonly share: number;
       readonly eased: boolean;
+      /**
+       * Why a heart-rate hold's target is this one (#1239). Present on a
+       * write inside a hold block, and only there; the screens word it.
+       */
+      readonly hold?: HoldReason | undefined;
     }
   /**
    * Stop writing targets and let the rider ride.
@@ -184,6 +223,32 @@ export interface PlayerState {
    * next ERG tick puts the field back if it still holds.
    */
   readonly rescue: WorkoutRescue | undefined;
+  /**
+   * The heart-rate hold running in this block, and why its target is what it
+   * is (#1239). `undefined` outside a hold block, and when not running.
+   *
+   * Its own field for #585's reason: a hold's target is a `write-target` once
+   * and then `hold` for as long as it stands, and a screen has to say why on
+   * every one of those ticks.
+   */
+  readonly hold: HoldStatus | undefined;
+}
+
+/** A heart-rate hold, as a screen shows it. */
+export interface HoldStatus {
+  readonly reason: HoldReason;
+  readonly range: HeartRateRange;
+  /**
+   * The hold's own target.
+   *
+   * ⚠️ During a stall rescue this IS the eased number, not the target from
+   * before the relief: by H9 the player hands the eased target to the hold
+   * (`hold.rescued(target)`) and this reads `hold.current()` after it. Until
+   * #1307's review this comment said "before any stall-rescue relief", which
+   * the code has never done; a screen that wants "what the hold asked before
+   * it was eased" cannot have it from here.
+   */
+  readonly target: Watts;
 }
 
 /** A stall rescue in force: the floor or a relief share, with its fixed sentence. */
@@ -199,11 +264,29 @@ export interface PlayerOptions {
    * doing it again here would put a made-up number on a trainer.
    */
   readonly thresholdPower: Watts;
+  /**
+   * What a heart-rate hold needs to know about the rider (#1239). Absent, no
+   * hold runs: every hold block rides steady at its start share, which is H1's
+   * rule that nothing assumed may enable one.
+   */
+  readonly heartRateHold?: HeartRateHoldContext | undefined;
+  /**
+   * The machine's own Supported Power Range, which H3 puts under a hold's
+   * floor and over its ceiling. Absent, the hold is bounded by its own shares,
+   * and the ERG writer bounds the write by the range as it always does.
+   */
+  readonly trainerRange?: TrainerPowerRange | undefined;
 }
 
 /** What a tick is told about the rider. */
 export interface RiderSample {
   readonly cadence?: readonly CadenceReading[] | undefined;
+  /**
+   * Heart rate, oldest first, stamped on the same clock as `now` (#1239).
+   * `undefined` means there is no strap — a hold block then rides steady. A
+   * strap that has gone quiet is an EMPTY or stale history, never a zero.
+   */
+  readonly heartRate?: readonly HeartRateSample[] | undefined;
 }
 
 export interface WorkoutPlayer {
@@ -228,10 +311,82 @@ export interface WorkoutPlayer {
   linkLost(now: Seconds): PlayerState;
   /** End the workout deliberately. */
   stop(): PlayerState;
+  /**
+   * Read `next` from the end of the block being ridden (#1244, ADR 0048 D-2).
+   *
+   * Refused, and nothing kept, unless the player is running inside a block
+   * and every segment of `next` before that block's end is the segment being
+   * ridden now: same offsets, same targets, same hold. A revision already
+   * waiting is replaced.
+   *
+   * @returns whether the revision is now waiting for the boundary.
+   */
+  revise(next: WorkoutTimeline): boolean;
+  /**
+   * Drop a waiting revision: the plan being ridden stays in force.
+   *
+   * @returns whether there was one to drop.
+   */
+  keepPlan(): boolean;
+  /** The plan being ridden, and the revision waiting for the next boundary, if any. */
+  plan(): PlayerPlan;
+}
+
+/** @see WorkoutPlayer.plan */
+export interface PlayerPlan {
+  readonly riding: WorkoutTimeline;
+  readonly waiting: WorkoutTimeline | undefined;
+}
+
+/**
+ * Whether two segments, each the next in its own plan from the same start,
+ * ask the same thing of a rider over the same stretch.
+ *
+ * The start is not compared: segments are contiguous from zero, so two that
+ * follow equal segments start together. Nor are a hold's length and start
+ * share, which are the segment's own `endsAt` and `from`.
+ */
+function sameSegment(a: WorkoutSegment, b: WorkoutSegment): boolean {
+  const hold = a.hold;
+  const other = b.hold;
+  return (
+    a.endsAt === b.endsAt &&
+    a.from === b.from &&
+    a.to === b.to &&
+    a.block === b.block &&
+    (hold === undefined
+      ? other === undefined
+      : other !== undefined &&
+        hold.ceilingShare === other.ceilingShare &&
+        hold.range.low === other.range.low &&
+        hold.range.high === other.range.high)
+  );
 }
 
 export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
-  const { timeline, thresholdPower } = options;
+  const { thresholdPower } = options;
+  /** The plan being ridden. Replaced only by a waiting revision, at its boundary. */
+  let timeline = options.timeline;
+  /**
+   * A revision waiting for the end of the block it was accepted in (#1244):
+   * the timeline to read from `at`, an offset in the plan being ridden.
+   */
+  let waiting: { readonly timeline: WorkoutTimeline; readonly at: number } | undefined;
+  /** The hold running in the current block, and which block that is (H11). */
+  let activeHold: { readonly block: number; readonly hold: HeartRateHold } | undefined;
+  let holdStatus: HoldStatus | undefined;
+  /**
+   * The hold's target when the current rescue began, so a relief is taken off
+   * THAT and not compounded tick after tick on the eased number.
+   */
+  let rescueBase: Watts | undefined;
+  /**
+   * The hold as it was before the decision behind the write now outstanding.
+   * A write that never landed (refused, timed out, or forgotten on a pause) is
+   * a decision the heart never answered to, so it is put back rather than
+   * left to wind the loop up.
+   */
+  let holdCheckpoint: { readonly hold: HeartRateHold; readonly state: HoldCheckpoint } | undefined;
 
   let status: PlayerStatus = 'idle';
   let elapsed = 0;
@@ -266,7 +421,44 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
     held,
     intent,
     rescue: inForce,
+    hold: status === 'running' ? holdStatus : undefined,
   });
+
+  /** The hold for this segment, made afresh on entering a block or after a pause. */
+  const holdFor = (segment: WorkoutSegment, now: Seconds): HeartRateHold | undefined => {
+    const block = segment.hold;
+    if (block === undefined) {
+      activeHold = undefined;
+      holdStatus = undefined;
+      return undefined;
+    }
+    if (activeHold?.block !== segment.block) {
+      rescueBase = undefined;
+      activeHold = {
+        block: segment.block,
+        hold: createHeartRateHold(
+          holdEnvelope(
+            block,
+            thresholdPower,
+            options.heartRateHold?.goalCeiling,
+            options.trainerRange,
+          ),
+          holdEligible(block, options.heartRateHold),
+          now,
+        ),
+      };
+    }
+    return activeHold.hold;
+  };
+
+  /** A write that will not be acknowledged: forget it and the hold decision behind it. */
+  const abandonWrite = (): void => {
+    if (pending !== undefined && holdCheckpoint !== undefined) {
+      holdCheckpoint.hold.restore(holdCheckpoint.state);
+    }
+    holdCheckpoint = undefined;
+    pending = undefined;
+  };
 
   const advance = (now: Seconds): void => {
     if (status !== 'running' || runningSince === undefined) {
@@ -288,6 +480,10 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       lastAsked = undefined;
       intent = { kind: 'hold' };
       inForce = undefined;
+      activeHold = undefined;
+      holdStatus = undefined;
+      rescueBase = undefined;
+      waiting = undefined;
       rescue.reset();
       return snapshot();
     },
@@ -297,6 +493,13 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         return snapshot();
       }
       advance(now);
+
+      // #1244: the boundary a revision was waiting for. Before anything reads
+      // the timeline, so the first target of the next block is the revised one.
+      if (waiting !== undefined && elapsed >= waiting.at) {
+        timeline = waiting.timeline;
+        waiting = undefined;
+      }
 
       if (elapsed >= timeline.totalSeconds) {
         status = 'finished';
@@ -324,6 +527,8 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         pending = undefined;
         lastAsked = undefined;
         inForce = undefined;
+        activeHold = undefined;
+        holdStatus = undefined;
         intent = { kind: 'release', reason: 'This block sets no target of its own — ride easy.' };
         return snapshot();
       }
@@ -346,7 +551,18 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // #585: before any early return below, so a `hold` tick still says why.
       inForce = step.kind === 'full' ? undefined : step;
 
+      const segment = segmentAt(timeline, seconds(elapsed));
+      const hold = segment === undefined ? undefined : holdFor(segment, now);
+      if (step.kind === 'full') {
+        rescueBase = undefined;
+      } else if (hold !== undefined) {
+        rescueBase ??= hold.current();
+      }
+
       if (step.kind === 'floor') {
+        // H9: the rescue first. The hold is frozen, and resumes from the
+        // floor the rescue eased the trainer to — never from before it.
+        hold?.rescued(options.trainerRange?.minimum ?? hold.envelope.floor);
         pending = undefined;
         lastAsked = undefined;
         intent = { kind: 'release', reason: step.reason };
@@ -354,7 +570,45 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       }
 
       const eased = step.kind === 'relief';
-      const effective = step.kind === 'relief' ? share * step.share : share;
+      let target: Watts;
+      let reportedShare = share;
+      let holdReason: HoldReason | undefined;
+      if (hold === undefined) {
+        const effective = step.kind === 'relief' ? share * step.share : share;
+        target = watts(Math.round(thresholdPower * effective));
+      } else if (step.kind === 'relief') {
+        // H9 again: the relief applies to what the hold holds now, and the
+        // hold takes the eased number as its own. No heart-rate decision is
+        // made while the rescue writes.
+        // Never below the hold's own floor: `rescued` clamps there, and a
+        // write below it would be followed by an unbounded step back up.
+        const base = rescueBase ?? hold.current();
+        target = watts(Math.max(hold.envelope.floor, Math.round(base * step.share)));
+        hold.rescued(target);
+        holdReason = holdStatus?.reason ?? 'settling';
+        // The share BEFORE the relief, as for a block with no hold.
+        reportedShare = base / thresholdPower;
+      } else if (pending !== undefined) {
+        // No heart-rate decision while a write is outstanding: it would raise
+        // the target and its rise ledger against a load that has not arrived.
+        target = hold.current();
+        holdReason = holdStatus?.reason ?? 'settling';
+        reportedShare = target / thresholdPower;
+      } else {
+        const before = hold.checkpoint();
+        const decided = hold.decide(now, rider?.heartRate);
+        holdCheckpoint = { hold, state: before };
+        target = decided.watts;
+        holdReason = decided.reason;
+        reportedShare = target / thresholdPower;
+      }
+      if (hold !== undefined && holdReason !== undefined) {
+        holdStatus = {
+          reason: holdReason,
+          range: hold.envelope.range,
+          target: hold.current(),
+        };
+      }
 
       // ⚠️ While a write is outstanding the player asks for nothing more. That
       // is #14's "acknowledged before the interval is treated as begun", and it
@@ -371,15 +625,21 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // resistance to a person, with nothing to gain. A slow ramp is the same
       // case in disguise: its share moves every tick while the watts it
       // rounds to move every few seconds, and only the watts reach the wire.
-      const target = watts(Math.round(thresholdPower * effective));
       if (lastAsked === target) {
+        holdCheckpoint = undefined;
         intent = { kind: 'hold' };
         return snapshot();
       }
 
       pending = target;
       lastAsked = target;
-      intent = { kind: 'write-target', watts: target, share, eased };
+      intent = {
+        kind: 'write-target',
+        watts: target,
+        share: reportedShare,
+        eased,
+        ...(holdReason === undefined ? {} : { hold: holdReason }),
+      };
       return snapshot();
     },
 
@@ -394,8 +654,10 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // for, the rider has stopped, and the next tick after a resume decides
       // afresh. Keeping it would leave the player refusing to write on resume
       // until an acknowledgement that may never come.
-      pending = undefined;
+      abandonWrite();
       inForce = undefined;
+      // ADR 0048 D-8, item 1: a pause discards a waiting re-plan.
+      waiting = undefined;
       intent = { kind: 'release', reason: 'Paused.' };
       return snapshot();
     },
@@ -419,11 +681,17 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // is not holding it any more. A rider pressing resume should feel the
       // trainer pick up.
       lastAsked = undefined;
+      // H11 reads "no state past its BLOCK", not past a pause. The hold settles
+      // again, never starts higher than it was, and keeps an overshoot latch
+      // (D-9: no failure raises a target).
+      activeHold?.hold.resumed(now);
+      holdStatus = undefined;
       return snapshot();
     },
 
     acknowledge(written: Watts): PlayerState {
       pending = undefined;
+      holdCheckpoint = undefined;
       // ⚠️ `lastAsked` deliberately keeps what was ASKED FOR, not `written`.
       // `setTargetPower` quantises, so a readback of 151 W against an ask of
       // 150 W is an ordinary acknowledgement rather than a change — and a
@@ -436,7 +704,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
     },
 
     writeFailed(): PlayerState {
-      pending = undefined;
+      abandonWrite();
       // Forget what was asked for too, so the next tick counts as a change and
       // tries again rather than deciding nothing has moved. This — a refused,
       // timed-out or superseded write — is the one way an unchanged target is
@@ -451,8 +719,10 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       }
       status = status === 'finished' ? 'finished' : 'paused';
       runningSince = undefined;
-      pending = undefined;
+      abandonWrite();
       inForce = undefined;
+      // ADR 0048 D-8, item 1: so does a lost link.
+      waiting = undefined;
       intent = {
         kind: 'release',
         reason: 'The trainer disconnected, so the workout is paused. Nothing has been lost.',
@@ -465,8 +735,56 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       runningSince = undefined;
       pending = undefined;
       inForce = undefined;
+      waiting = undefined;
       intent = { kind: 'finished' };
       return snapshot();
     },
+
+    revise(next: WorkoutTimeline): boolean {
+      if (status !== 'running') {
+        return false;
+      }
+      const riding = segmentAt(timeline, seconds(elapsed));
+      if (riding === undefined) {
+        return false;
+      }
+      // The end of the BLOCK, not of the segment: an intervals block is many
+      // segments, and a revision read between two of them would change a
+      // block the rider is still in.
+      let boundary: number = riding.endsAt;
+      for (const segment of timeline.segments) {
+        if (segment.block === riding.block && segment.endsAt > boundary) {
+          boundary = segment.endsAt;
+        }
+      }
+      const before = timeline.segments.filter((segment) => segment.startsAt < boundary);
+      const revised = next.segments;
+      // A revision with fewer segments here has no `other` to match; one with
+      // more would have to differ in an earlier `endsAt`.
+      if (
+        !before.every((segment, index) => {
+          const other = revised[index];
+          return other !== undefined && sameSegment(segment, other);
+        })
+      ) {
+        return false;
+      }
+      // A revision that lengthens the block being ridden (more repeats) keeps
+      // every ridden segment equal and adds the rest after them, so it must
+      // also have left the block by the segment after `before`.
+      if (revised[before.length]?.block === riding.block) {
+        return false;
+      }
+      waiting = { timeline: next, at: boundary };
+      return true;
+    },
+
+    keepPlan(): boolean {
+      const had = waiting !== undefined;
+      waiting = undefined;
+      return had;
+    },
+
+    plan: () => ({ riding: timeline, waiting: waiting?.timeline }),
   };
 }
