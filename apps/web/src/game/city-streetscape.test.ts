@@ -16,10 +16,18 @@ import type { RouteProfile } from '@onyourleft/domain';
 import type { Junction } from './cross-streets';
 import { cityStreetscapeFixture, denseTownFixture, landBeside } from './footprint-fixtures-testing';
 import {
+  FACADE_OFFSET,
+  FACADE_PLAIN,
   FOOTPRINT_MAX_VERTICES,
+  FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   mappedTown,
+  PARTY_WALL_SAME_HEIGHT_METRES,
   STOREY_METRES,
+  STYLE_COMMERCIAL,
+  STYLE_OFFSET,
+  STYLE_SASH,
+  STYLE_SHUTTERS,
   TERRACE_DEPTH_METRES,
   TERRACE_GAP_METRES,
   TERRACE_STOREYS,
@@ -411,6 +419,31 @@ describe('what a city centre’s street costs — #1637', () => {
   });
 });
 
+/** One vertex of a plan's walls: where it is, its facade's `top` and its style's flags. */
+interface Vertex {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly top: number;
+  readonly flags: number;
+}
+
+/** Every vertex of a plan's `wall` triangles, in order — #1719. */
+function wallVertices(plan: FootprintPlan): Vertex[] {
+  const floats = plan.triangles.wall;
+  const out: Vertex[] = [];
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    out.push({
+      x: floats[at] as number,
+      y: floats[at + 1] as number,
+      z: floats[at + 2] as number,
+      top: floats[at + FACADE_OFFSET + 2] as number,
+      flags: floats[at + STYLE_OFFSET + 1] as number,
+    });
+  }
+  return out;
+}
+
 describe('a city centre’s lots — #1637', () => {
   const terraces = (plans: readonly FootprintPlan[]) =>
     plans.filter((plan) => plan.urban === 'city-centre' && TERRACE_STOREYS.includes(plan.storeys));
@@ -533,6 +566,73 @@ describe('a city centre’s lots — #1637', () => {
         expect(Math.max(...zs) - Math.min(...zs)).toBeCloseTo(span, 1);
       }
     }
+  });
+
+  it('shares each side wall with the next block: no window on it, and only the strip above a lower neighbour — #1719', () => {
+    // #1635's party walls, on #1637's blocks: read off the plans the press
+    // hands back. The road runs due north, so a shared side is the plane
+    // `z` = the boundary between two plots, from the block's front to its back.
+    const blocks = terraces(CITY.plans);
+    const { span } = lotSpacing(CITY.profile);
+    const normalX = drawnRoadFrame(CITY.profile, CITY.origin, 1_500)!.normalX;
+    /** The wall triangles of `plan` whose three corners lie on the plane `z` = `at`, within its own reach across. */
+    const onFace = (plan: FootprintPlan, at: number): Vertex[][] => {
+      const xs = Array.from(plan.footprint).filter((_, index) => index % 2 === 0);
+      const [low, high] = [Math.min(...xs) - 0.1, Math.max(...xs) + 0.1];
+      const vertices = wallVertices(plan);
+      const triangles: Vertex[][] = [];
+      for (let i = 0; i + 2 < vertices.length; i += 3) {
+        const three = vertices.slice(i, i + 3);
+        if (three.every((v) => Math.abs(v.z - at) < 0.25 && v.x > low && v.x < high)) {
+          triangles.push(three);
+        }
+      }
+      return triangles;
+    };
+    let level = 0;
+    let stepped = 0;
+    let ends = 0;
+    for (const side of [1, -1]) {
+      const mine = blocks
+        .filter((plan) => Math.sign(plan.centroid.x) === Math.sign(side * normalX))
+        .sort((a, b) => a.centroid.z - b.centroid.z);
+      for (let at = 1; at < mine.length; at += 1) {
+        const a = mine[at - 1] as FootprintPlan;
+        const b = mine[at] as FootprintPlan;
+        const boundary = (a.centroid.z + b.centroid.z) / 2;
+        if (Math.abs(b.centroid.z - a.centroid.z - span) > 0.05) {
+          // The control: a side no block stands against is a wall, windows and all.
+          const end = onFace(a, a.centroid.z + span / 2).flat();
+          expect(end.length).toBeGreaterThan(0);
+          expect(end.some((v) => v.top > 0)).toBe(true);
+          ends += 1;
+          continue;
+        }
+        if (Math.abs(a.eaves - b.eaves) <= PARTY_WALL_SAME_HEIGHT_METRES) {
+          // The same height: neither draws the shared face at all.
+          expect(onFace(a, boundary)).toHaveLength(0);
+          expect(onFace(b, boundary)).toHaveLength(0);
+          level += 1;
+          continue;
+        }
+        const [tall, low] = a.eaves > b.eaves ? [a, b] : [b, a];
+        const shared = onFace(tall, boundary).flat();
+        expect(shared.length).toBeGreaterThan(0);
+        expect(Math.min(...shared.map((v) => v.y))).toBeCloseTo(low.eaves, 3);
+        expect(Math.max(...shared.map((v) => v.y))).toBeCloseTo(tall.eaves, 3);
+        for (const v of shared) {
+          expect(v.top).toBe(FACADE_PLAIN);
+          expect(v.flags & (STYLE_SASH | STYLE_SHUTTERS | STYLE_COMMERCIAL)).toBe(0);
+        }
+        // The lower one's is behind the taller's wall: not drawn.
+        expect(onFace(low, boundary)).toHaveLength(0);
+        stepped += 1;
+      }
+    }
+    // Non-vacuity: both kinds of neighbour, and the ends the control reads.
+    expect(level).toBeGreaterThan(5);
+    expect(stepped).toBeGreaterThan(5);
+    expect(ends).toBeGreaterThan(0);
   });
 
   it('keeps every wall of every block off the pavement, on a bend too', () => {
