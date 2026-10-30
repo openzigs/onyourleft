@@ -143,6 +143,33 @@
  * the shop front's have no far fade and show the room at any distance. **No texture, no
  * cubemap, no atlas.**
  *
+ * ## The trims (#1663)
+ *
+ * The parts of a real facade's grammar a window and a wall need around them
+ * ({@link TRIM}, {@link trimPartAt}, the shader's `oylTrim*` terms):
+ *
+ * - a **lintel** over each window's head, its window's width and a little
+ *   more — stone on brick, the trim's paint on render and clapboard — deeper
+ *   over the ground floor's windows than over the floors above;
+ * - **quoins** up a brick wall's corners, in alternating long and short
+ *   blocks, but never on a terraced building (`footprint-buildings.ts`
+ *   §`STYLE_TERRACED`), whose corners are its row's;
+ * - a **string course** in stone along every storey line of a brick wall that
+ *   has windows above it, the first of them, the ground floor's band, deeper.
+ *
+ * A curtain wall (`STYLE_GLAZED`) has none of them. The storey lines are the
+ * plan's: as many as the facade lays rows of windows ({@link windowStoreysOf}),
+ * never `DEFAULT_STOREYS`. No texture, no triangle and no draw call.
+ *
+ * ⚠️ Known limits, left as they are. A quoin is painted after the windows and
+ * the glass is not reduced, so where a corner bay is narrow (`baysOf` allows
+ * bays down to `WINDOW_MIN_WALL_METRES`, 2 m) the stone covers a shutter or
+ * a picture window's frame at the corner; a blind bay there is not laid. And
+ * the trims sit inside the shader's windowed branch, so a brick wall with no
+ * windows (under 2 m, or any other plain face) has no quoins, which leaves
+ * one face of an L-shaped house's notch bare at a corner whose other face has
+ * them. The owner's `?town=mixed` look pairs include the shutter case.
+ *
  * ## The porch (#1589)
  *
  * A front porch's railing is one quad (`footprint-buildings.ts`
@@ -183,6 +210,7 @@ import {
   STYLE_GLAZED,
   STYLE_SASH,
   STYLE_SHUTTERS,
+  STYLE_TERRACED,
 } from './footprint-buildings';
 import { FRONT_PORCH } from './porch';
 import { SUN_ELEVATION_AT_POLE_DEGREES } from './world';
@@ -1027,6 +1055,142 @@ export function facadePartAt(
     hi: [(w.right + w.sillAcross) * bayMetres, w.bottom * STOREY_METRES],
   };
   return inSillShadow(x * bayMetres, y * STOREY_METRES, sillFace, view) ? 'shadow' : 'wall';
+}
+
+/**
+ * A facade's trims — #1663, in metres:
+ *
+ * - `lintel`, how deep a lintel is over an upper floor's window, and
+ *   `groundLintel` over the ground floor's: the heads differ between the two;
+ *   `overrun`, how far past its window's frame it runs either side;
+ * - `quoin` and `quoinShort`, how far a long and a short quoin reach from a
+ *   corner, alternating every `quoinCourse` up the wall, with a `quoinJoint`
+ *   between two blocks;
+ * - `stringCourse`, how deep a string course is on a storey line, and
+ *   `groundBand` on the first: the ground floor's band;
+ * - `stoneColour`, a lintel's, a quoin's and a string course's on brick,
+ *   linear.
+ */
+export const TRIM = {
+  lintel: 0.15,
+  groundLintel: 0.22,
+  overrun: 0.08,
+  quoin: 0.5,
+  quoinShort: 0.3,
+  quoinCourse: 0.3,
+  quoinJoint: 0.015,
+  stringCourse: 0.12,
+  groundBand: 0.2,
+  stoneColour: [0.5, 0.47, 0.42] as Rgb,
+} as const;
+
+/**
+ * What a point of a facade's trim is — #1663.
+ *
+ * @test-facing what {@link trimPartAt} answers, for `facade-trims.test.ts`
+ */
+export type TrimPart = 'lintel' | 'quoin' | 'string-course';
+
+/**
+ * A wall a trim is asked about — #1663: the surface its material is (a
+ * lintel on `brick` and `render`, a quoin and a string course on `brick`
+ * alone; clapboard is drawn on `render`), and its whole bays, so that its
+ * far corner is at `u = bays`.
+ *
+ * @test-facing what {@link trimPartAt} is asked about, for `facade-trims.test.ts`
+ * and the browser gate's `game-harness.ts` §`facadeTrimProbe`
+ */
+export interface TrimFace {
+  readonly surface: 'brick' | 'render' | 'other';
+  readonly bays: number;
+}
+
+/**
+ * How far up its storey a window's head is, as a share of the storey, on a
+ * face of `style` — a sash's, #1590's commercial window's or #1581's
+ * casement's: the share every row of windows must fit under the eaves by.
+ */
+function windowTopShareOf(style?: FacadeStyle): number {
+  if (style !== undefined && (style.flags & STYLE_SASH) !== 0) return SASH_TOP_SHARE;
+  const commercial = style !== undefined && (style.flags & STYLE_COMMERCIAL) !== 0;
+  return (commercial ? COMMERCIAL_WINDOW_IN_BAY : WINDOW_IN_BAY).top;
+}
+
+/**
+ * How many storeys of windows a face whose `top` is as `footprint-buildings.ts`
+ * §`FACADE_FLOATS` says holds — #1663: the plan's storeys as the facade lays
+ * them, a row wherever one fits under the eaves ({@link facadePartAt}), and so
+ * the number of storey lines a string course is on, plus one.
+ *
+ * @test-facing held by `facade-trims.test.ts`; the shader's `oylRows` is it
+ */
+export function windowStoreysOf(top: number, style?: FacadeStyle): number {
+  const share = windowTopShareOf(style);
+  return top >= share ? Math.floor(top - share + 1e-4) + 1 : 0;
+}
+
+/**
+ * The trim at `(u, v)` of a wall whose `top` and `skip` are as
+ * `footprint-buildings.ts` §`FACADE_FLOATS` says and whose style is `style`,
+ * or none — #1663's grammar, which `three-renderer.ts` §`trimsGlsl` draws from
+ * the same numbers: a quoin near either corner of a brick wall that is not
+ * terraced; a string course on each storey line of a brick wall with a row of
+ * windows above it; a lintel over each window's head on brick or render. None
+ * on a curtain wall, and none above the eaves.
+ *
+ * @test-facing held by `facade-trims.test.ts`; the product draws it in the shader
+ */
+export function trimPartAt(
+  u: number,
+  v: number,
+  top: number,
+  skip: number,
+  style: FacadeStyle,
+  face: TrimFace,
+): TrimPart | undefined {
+  if (!(top > 0) || v < 0 || v > top || (style.flags & STYLE_GLAZED) !== 0) return undefined;
+  const width = style.width;
+  const y = v * STOREY_METRES;
+  const masonry = face.surface === 'brick';
+  if (masonry && (style.flags & STYLE_TERRACED) === 0) {
+    const fromCorner = Math.min(u, face.bays - u) * width;
+    const reach = Math.floor(y / TRIM.quoinCourse) % 2 === 0 ? TRIM.quoin : TRIM.quoinShort;
+    if (fromCorner <= reach) return 'quoin';
+  }
+  if (masonry) {
+    const line = Math.round(v);
+    const depth = line === 1 ? TRIM.groundBand : TRIM.stringCourse;
+    if (
+      line >= 1 &&
+      line < windowStoreysOf(top, style) &&
+      Math.abs(y - line * STOREY_METRES) <= depth / 2
+    ) {
+      return 'string-course';
+    }
+  }
+  if (!masonry && face.surface !== 'render') return undefined;
+  const bay = Math.floor(u);
+  const storey = Math.floor(v);
+  if (storey + windowTopShareOf(style) > top || (storey === 0 && bay === skip)) return undefined;
+  const x = (u - bay - 0.5) * width;
+  const up = (v - storey) * STOREY_METRES;
+  let span: number;
+  let head: number;
+  if ((style.flags & STYLE_SASH) !== 0) {
+    const picture = storey === 0 && bay === style.extra;
+    const paired = !picture && width >= PAIR_MIN_BAY_METRES;
+    const sash = picture ? Math.min(width - PICTURE.margin, PICTURE.most) : SASH.width;
+    span = paired ? sash + MULLION_METRES / 2 : sash / 2;
+    head = WINDOW_SILL_METRES + SASH.height;
+  } else {
+    const w = (style.flags & STYLE_COMMERCIAL) !== 0 ? COMMERCIAL_WINDOW_IN_BAY : WINDOW_IN_BAY;
+    span = ((w.right - w.left) / 2) * width;
+    head = w.top * STOREY_METRES;
+  }
+  const depth = storey === 0 ? TRIM.groundLintel : TRIM.lintel;
+  return Math.abs(x) <= span + TRIM.overrun && up >= head && up <= head + depth
+    ? 'lintel'
+    : undefined;
 }
 
 /**

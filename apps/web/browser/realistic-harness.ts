@@ -60,8 +60,9 @@ import { mappedTown } from '../src/game/footprint-buildings';
 import {
   // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
-  cityCentreFixture as cityStreetscapeFixture,
+  cityStreetscapeFixture,
   countrysideFixture,
+  houseStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
@@ -81,6 +82,7 @@ import {
   decorationKindTriangles,
   decorationKindsOf,
   deliveryDrawnOf,
+  facadeTrimsOf,
   facadeWreathOf,
   firDepthPrepassOf,
   foliageOrderedOf,
@@ -115,6 +117,7 @@ import {
   overhangShadowsWithLevers,
   weatheringWithLevers,
   windowRoomsWithLevers,
+  facadeTrimsWithLevers,
   countrysideWithLevers,
   type Layer,
   type Lever,
@@ -425,7 +428,9 @@ async function run(): Promise<void> {
               ? cityCentreFixture(latitude)
               : config.town === 'city-street'
                 ? cityStreetscapeFixture(latitude)
-                : undefined;
+                : config.town === 'houses'
+                  ? houseStreetFixture(latitude)
+                  : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -495,6 +500,9 @@ async function run(): Promise<void> {
   // #1661's cost pair: the mapped facades without their weathering, the term
   // out of both of the facade's programs, as the shadows' is.
   weatheringOf(view, weatheringWithLevers(config.leversOff));
+  // #1663's cost pair: the mapped facades without their lintels, quoins and
+  // string courses, the term out of the facade's program, as the weathering's is.
+  facadeTrimsOf(view, facadeTrimsWithLevers(config.leversOff));
   // #1662's cost pair: the mapped panes without the rooms behind them and
   // their Fresnel, the term out of the facade's program, as the weathering's is.
   windowRoomsOf(view, windowRoomsWithLevers(config.leversOff));

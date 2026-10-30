@@ -395,6 +395,25 @@ describe('criterion 6 — one click cannot end a ride', () => {
  * single press, not which stub method was counted.
  */
 describe('#1430 — one press of the running screen cannot end a ride', () => {
+  const names = (): string[] =>
+    queryAll<HTMLButtonElement>(document, 'button').map((each) => (each.textContent ?? '').trim());
+  const lapShown = (): boolean => names().includes('Lap');
+
+  /**
+   * Settle until `done` holds — #1889. Pressing Start, Pause or Resume writes
+   * to the store before the screen hears of it, and how many turns that takes
+   * depends on the machine. A fixed count of settles read the screen too early
+   * under load; this waits for the state and fails naming it (as
+   * `ActivitiesView.test.tsx` does), with no timeout raised.
+   */
+  async function until(done: () => boolean, what: string): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (done()) return;
+      await settle();
+    }
+    throw new Error(`never: ${what}. Present: ${names().join(', ')}`);
+  }
+
   let harness: StoreHarness | undefined;
 
   afterEach(async () => {
@@ -402,7 +421,12 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     harness = undefined;
   });
 
-  async function riding(paused: boolean) {
+  /**
+   * The ride screen over the real controller, before Start is pressed. When
+   * `held` is given, the recorder's first write (the one Start waits on)
+   * does not finish until it resolves.
+   */
+  async function onTheScreen(held?: Promise<void>) {
     harness = createStoreHarness();
     await seedAthletes(harness);
     const store = harness;
@@ -410,8 +434,10 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     const controller = createRideController({
       transport,
       store: {
-        putRecordingSession: async (record) =>
-          store.write(async (inner) => inner.putRecordingSession(record)),
+        putRecordingSession: async (record) => {
+          await held;
+          return store.write(async (inner) => inner.putRecordingSession(record));
+        },
         appendRecordingChunk: async (chunk) =>
           store.write(async (inner) => inner.appendRecordingChunk(chunk)),
         readRecordingSessions: async (owner) =>
@@ -427,17 +453,27 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     });
     mounted = await mount(<RideView controller={controller} />);
     await settle();
+    return { controller, bench };
+  }
+
+  async function riding(paused: boolean) {
+    const { controller, bench } = await onTheScreen();
     await activateWithKeyboard(buttonNamed('Start recording'));
+    // #1889: the screen shows Pause and Stop the moment the phase is
+    // `recording`, but *Lap* only once the recorder has started — after its
+    // store write. Pressing Start does not wait for that write, so a loaded
+    // machine let this function return, and the row be read, before *Lap*
+    // was there. Wait for what the rider is waiting for.
+    await until(() => lapShown(), 'Lap on the running screen after Start recording');
     for (let second = 0; second < 3; second += 1) {
       bench.advance(seconds(1));
       await controller.tick(bench.now);
     }
     if (paused) {
       await activateWithKeyboard(buttonNamed('Pause'));
-      // The pause is written to the recorder before the screen hears of it.
-      for (let turn = 0; turn < 5 && controller.getSnapshot().phase !== 'paused'; turn += 1) {
-        await settle();
-      }
+      // The pause is written to the recorder before the screen hears of it:
+      // wait until the screen offers Resume, which is how the rider hears.
+      await until(() => names().includes('Resume'), 'Resume on the paused screen after Pause');
     }
     await settle();
     return { controller, bench };
@@ -450,9 +486,6 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     await harness?.destroy();
     harness = undefined;
   }
-
-  const names = (): string[] =>
-    queryAll<HTMLButtonElement>(document, 'button').map((each) => (each.textContent ?? '').trim());
 
   it.each([
     ['recording', false],
@@ -490,6 +523,31 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
       expect(row).toEqual(['Lap', paused ? 'Resume' : 'Pause', 'Stop']);
       await putAway(controller);
     }
+  });
+
+  it('shows Lap once the recorder has started, not with the phase: Pause and Stop come first (#1889)', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { controller, bench } = await onTheScreen(held);
+    await activateWithKeyboard(buttonNamed('Start recording'));
+    // Start is pressed and the recorder's first write is not done. The first
+    // tick publishes the controller's phase, `recording`: the screen offers
+    // Pause and Stop, but a lap cannot be taken yet, so Lap is not there.
+    // This is the window the order test above used to read inside, under load.
+    bench.advance(seconds(1));
+    await controller.tick(bench.now);
+    await until(() => names().includes('Pause'), 'Pause after Start recording');
+    expect(names()).not.toContain('Lap');
+    release();
+    await until(lapShown, 'Lap once the first write is done');
+    const row = queryAll<HTMLButtonElement>(
+      document,
+      '.oyl-ride__group--live .oyl-ride__actions button',
+    ).map((each) => (each.textContent ?? '').trim());
+    expect(row).toEqual(['Lap', 'Pause', 'Stop']);
+    await putAway(controller);
   });
 
   it('hands focus to Keep riding after Stop, and back to Stop after Keep riding — by keyboard', async () => {

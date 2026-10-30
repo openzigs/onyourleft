@@ -43,8 +43,10 @@ import { NO_URBAN_CLASS, urbanClassMap, type UrbanClassMap } from './urban-class
 const { profile, origin, corridor } = cityCentreFixture();
 const land = landClassMask(corridor);
 const urban = urbanClassMap(corridor, land, profile);
+// #1782's archetypes off, so the town twin differs from the city by #1636's gate alone: a
+// city centre's houses are given none, and a town's are.
 const planOf = (map: UrbanClassMap | undefined): readonly FootprintPlan[] =>
-  footprintPlans(corridor, land, profile, origin, undefined, map).plans;
+  footprintPlans(corridor, land, profile, origin, undefined, map, { houseArchetypes: false }).plans;
 const city = planOf(urban);
 /** The same corridor, its every stretch a town: the class gate's control. */
 const town = planOf({ classAt: () => 'town' });

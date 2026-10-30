@@ -40,6 +40,22 @@ export const LEGAL_LINK_TEXT = 'Who runs it, and how to contact them';
 export const TERMS_PAGE_PATH = '/terms';
 export const TERMS_LINK_TEXT = 'Its terms of service';
 
+/**
+ * #1381: the notice page's link where a screen names something to report —
+ * a room's references and a race result's, after the identifiers to copy. In
+ * About's words, to the page About links to.
+ */
+export function NoticePageLink({ href }: { readonly href: string }): JSX.Element {
+  return (
+    <p>
+      <a href={href} target="_blank" rel="noreferrer">
+        {REPORT_LINK_TEXT}
+      </a>{' '}
+      (opens in a new tab).
+    </p>
+  );
+}
+
 export function InstancePages({
   instance,
 }: {

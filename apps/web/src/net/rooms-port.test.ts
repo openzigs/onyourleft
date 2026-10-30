@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   northProfile,
   roomRoute,
+  ROOMS_ORIGIN,
   ScriptedInstance,
   signedInStorage,
   zoneNorth,
@@ -264,6 +265,24 @@ describe('blocking a rider from a race’s result — #1516', () => {
     });
     expect(await port(instance).blockRider('../blocks', 1)).toEqual({ kind: 'unreachable' });
     expect(instance.seen).toEqual([]);
+  });
+});
+
+describe('the notice page the references link to — #1381', () => {
+  it('is the notice page on the instance this device is signed in to, and asking sends nothing', () => {
+    const instance = new ScriptedInstance();
+    expect(port(instance).noticePage()).toBe(`${ROOMS_ORIGIN}/report`);
+    expect(instance.seen).toEqual([]);
+  });
+
+  it('is nothing on a device holding no instance session', () => {
+    const empty = createRoomsPort({
+      ...NO_CARD_DEVICE,
+      storage: { ...signedInStorage(), getItem: () => null },
+      zones: () => Promise.resolve([]),
+      send: new ScriptedInstance().send,
+    });
+    expect(empty.noticePage()).toBeUndefined();
   });
 });
 

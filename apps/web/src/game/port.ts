@@ -217,6 +217,24 @@ export interface RiderMarker {
    * browser harness want.
    */
   readonly crankAngle?: number | undefined;
+  /**
+   * What is written over this rider on the road — #783, and only ever on a
+   * `remote` rider: the room's public name for them (#774), which only a
+   * race's room sends (ADR 0051 D-3), or the seat label of the one rider
+   * *Follow* chose (`room-ride.ts` §`seatLabel`). The same words the HUD gives
+   * them, and nothing else about them.
+   *
+   * ⚠️ **The renderer draws no text.** `name-tags.ts` lays the name over the
+   * world as DOM, so it costs the scene no draw call and no triangle in either
+   * world; `room-wiring.test.tsx` reads it back off the page.
+   */
+  readonly label?: string | undefined;
+  /**
+   * Whether this is the one rider *Follow* chose — #783: where two names on
+   * the road would meet, theirs is the one kept, because it is the one the
+   * HUD's gap is to. Only ever on a `remote` rider; never an order.
+   */
+  readonly followed?: boolean | undefined;
 }
 
 /** One frame's worth of scene. */

@@ -31,6 +31,7 @@ const ROOMS: RoomsPort = {
   start: () => Promise.resolve({ kind: 'started' }),
   results: () => Promise.resolve({ kind: 'result', rows: [] }),
   blockRider: () => Promise.resolve({ kind: 'unreachable' as const }),
+  noticePage: () => undefined,
 };
 
 const RACE: EnteredRoom = {

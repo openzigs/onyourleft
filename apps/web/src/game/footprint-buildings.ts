@@ -119,6 +119,16 @@
  * - **Gutters and a downpipe** under a pitched roof's eaves, and **dormers**
  *   on a steep one ({@link DORMER_MIN_PITCH_DEGREES}).
  *
+ * ⚠️ **Since #1782 each share above is a house archetype's to set.** A
+ * residential footprint that fits a ranch, a Cape, a Colonial, a Foursquare, a
+ * bungalow or a gable-front farmhouse (`house-archetypes.ts`) is drawn only
+ * inside that archetype's features — its roof, pitches, porch, shutters,
+ * picture window, dormers, garage and cladding together — on the same seeded
+ * streams; every other one is `unknown` and takes the shares named here, byte
+ * for byte ({@link FootprintPlanOptions}'s `houseArchetypes`, the realistic
+ * page's `-house-archetypes`). An archetype's plan over a cap gives up its
+ * dormers, then its porch, and is never truncated.
+ *
  * The near level stays inside {@link FOOTPRINT_MAX_TRIANGLES} and the far
  * level, walls and roof, inside {@link FOOTPRINT_MAX_FAR_TRIANGLES}: a house's
  * detail is about 40 triangles, and since #1588 about 60 more — gutters, a
@@ -236,6 +246,16 @@ import {
   type PorchPoint,
   type PorchSpec,
 } from './porch';
+import {
+  ARCHETYPE_DROPS,
+  ARCHETYPE_FEATURES,
+  droppedFeatures,
+  footprintShapeOf,
+  houseArchetypeOf,
+  SEEDED_FEATURES,
+  type FeatureShare,
+  type HouseArchetype,
+} from './house-archetypes';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
@@ -500,6 +520,14 @@ export const STYLE_FLAT_ROOF = 64;
  */
 export const STYLE_CORNICE = 128;
 
+/**
+ * `flags`: a terraced building's walls — #1663: one with a party wall
+ * (#1635's {@link partyWallsOf}), whose corners are its row's, so no quoin is
+ * drawn at any of them (`facade.ts` §`trimPartAt`). Bit **256**: 128 is
+ * #1679's. @see STYLE_FLOATS
+ */
+export const STYLE_TERRACED = 256;
+
 /** What a plan is clad in — #1588. */
 export interface FootprintCladding {
   readonly wall: 'clapboard' | 'photograph';
@@ -582,6 +610,12 @@ export interface FootprintPlan {
    * ({@link untaggedStoreys}).
    */
   readonly urban: UrbanClass;
+  /**
+   * The US house it is — #1782 (`house-archetypes.ts`), which set its roof,
+   * porch, shutters, dormers, garage and cladding together; `unknown` where
+   * none fits, or with `levers=-house-archetypes`, and planned as before.
+   */
+  readonly archetype: HouseArchetype;
   /**
    * The house model it is drawn as at the near level, where one fits — #1585
    * (`house-models.ts`); `undefined` for every other plan, which keeps its
@@ -3437,6 +3471,7 @@ export function footprintPlans(
         { grid: others, own: index, porches, driveways },
         party.get(index) ?? NO_PARTY_WALLS,
         { split: options.splitRoofs ?? true, flat: false },
+        { on: options.houseArchetypes ?? true, dropped: 0 },
       ),
     );
   }
@@ -3510,6 +3545,15 @@ const terraceScratch = new Float64Array(LOT_FLOATS);
  * stretch of the road by its clearance (ADR 0054 D-5.2, D-5.4), and with no
  * wall on the pavement even where a bend's chord sags toward it.
  *
+ * ⚠️ **Planned with #1635's party walls — #1719.** Neighbouring blocks share a
+ * side wall, so every block is measured first and the party walls found
+ * between them ({@link partyWallsOf}) before any is planned: a shared face has
+ * no window, and where a block is a storey taller than the next, only the
+ * strip above the lower roof is drawn, plain. A block keeps clear of every
+ * mapped footprint, so a party wall is only ever between two blocks. Until
+ * #1719 each was planned with none, and a taller block's side kept its
+ * windows down to the pavement against its neighbour.
+ *
  * The first lap only: a plan stands in the corridor's frame, once a place.
  */
 function terracePlans(
@@ -3535,7 +3579,7 @@ function terracePlans(
   const front = KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES + TERRACE_GAP_METRES;
   const back = front + TERRACE_DEPTH_METRES;
   const lot = { x: span / 2, back: -TERRACE_DEPTH_METRES / 2, front: TERRACE_DEPTH_METRES / 2 };
-  const planned: FootprintPlan[] = [];
+  const blocks: Measured[] = [];
   for (let plot = 0; plot < plots; plot += 1) {
     const along = (plot + 0.5) * span;
     if (urban.classAt(along) !== 'city-centre') continue;
@@ -3577,8 +3621,9 @@ function terracePlans(
       }
       const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
       const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
-      // #1635: measured, then planned, as a mapped footprint is; with no party
-      // wall found between two blocks: a commercial block is flat whatever.
+      // #1635: measured, then planned, as a mapped footprint is — every block
+      // measured before any is planned, so the party walls between them are
+      // found first (#1719).
       const measured = measureFootprint(
         {
           kind: 'building',
@@ -3597,22 +3642,23 @@ function terracePlans(
         others.terrace === true,
       );
       if (typeof measured === 'string') continue;
-      planned.push(
-        planFootprint(
-          measured,
-          land,
-          profile,
-          origin,
-          seed,
-          maxVertices,
-          others,
-          NO_PARTY_WALLS,
-          roofing,
-        ),
-      );
+      blocks.push(measured);
     }
   }
-  return planned;
+  const party = partyWallsOf(blocks);
+  return blocks.map((measured, block) =>
+    planFootprint(
+      measured,
+      land,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      others,
+      party.get(block) ?? NO_PARTY_WALLS,
+      roofing,
+    ),
+  );
 }
 
 /** The entry a seeded draw in `[0, 1)` comes to, of `count`. */
@@ -4193,6 +4239,29 @@ export interface FootprintPlanOptions {
    * {@link FOOTPRINT_GABLE_MIN_RECTANGULARITY} flat (`?levers=-split-roofs`).
    */
   readonly splitRoofs?: boolean;
+  /**
+   * #1782: a residential footprint's US house archetype (`house-archetypes.ts`)
+   * setting its features together; `true` by default. Off plans every
+   * footprint by `main`'s independent shares (`?levers=-house-archetypes`).
+   */
+  readonly houseArchetypes?: boolean;
+}
+
+/**
+ * Whether a plan is given its archetype — #1782 — and how many of
+ * `house-archetypes.ts` §`ARCHETYPE_DROPS` it has given up to fit the caps.
+ */
+interface ArchetypeChoice {
+  readonly on: boolean;
+  readonly dropped: number;
+}
+
+/** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
+const NO_ARCHETYPE: ArchetypeChoice = { on: false, dropped: 0 };
+
+/** A feature's share: an archetype's own, or where it is `seeded`, the independent one. */
+function shareOf(feature: FeatureShare, seeded: number): number {
+  return feature === 'seeded' ? seeded : feature;
 }
 
 /** One measured footprint's plan — the second half of {@link measureFootprint}. */
@@ -4211,6 +4280,7 @@ function planFootprint(
   },
   party: readonly PartyWall[],
   roofing: RoofSplitting,
+  choice: ArchetypeChoice = NO_ARCHETYPE,
 ): FootprintPlan {
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
@@ -4247,47 +4317,78 @@ function planFootprint(
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = terraced ? { party: { walls: party, eaves } } : {};
-  // #1581: a pitched roof is a gable or, seeded, a hip; a barn is always a gable.
-  const roof: FootprintRoof = !pitched
-    ? 'flat'
-    : use === 'residential' && share(STREAM_HIP) < HIP_SHARE
-      ? 'hip'
-      : 'gable';
-  const pitchDegrees =
-    roof === 'flat'
-      ? 0
-      : (ROOF_PITCHES_DEGREES[
-          Math.floor(share(STREAM_PITCH) * ROOF_PITCHES_DEGREES.length)
-        ] as number);
   const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
   const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
   const residential = use === 'residential';
-  const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < CHIMNEY_SHARE;
+  // #1782: the US house it is, from what the plan already has, which sets its features
+  // together; `unknown` keeps every independent share, as before.
+  const archetype: HouseArchetype =
+    choice.on && frontFrame !== undefined
+      ? houseArchetypeOf({
+          area,
+          aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
+          rectangularity,
+          shape: footprintShapeOf(drawn.length / 2, split?.length),
+          storeys,
+          residential,
+          urban: urbanClass,
+          terraced,
+          // Deeper than wide: the front wall is across the long axis, not along it.
+          deep:
+            Math.abs(frontFrame.ex * rectangle.ux + frontFrame.ez * rectangle.uz) < Math.SQRT1_2,
+          pitched,
+        })
+      : 'unknown';
+  const features = droppedFeatures(
+    archetype === 'unknown' ? SEEDED_FEATURES : ARCHETYPE_FEATURES[archetype],
+    choice.dropped,
+  );
+  const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
+  const chimneyShare = shareOf(features.chimney, CHIMNEY_SHARE);
+  const pictureShare = shareOf(features.picture, PICTURE_SHARE);
+  // #1581: a pitched roof is a gable or, seeded, a hip; a barn is always a gable.
+  const roof: FootprintRoof = !pitched
+    ? 'flat'
+    : use === 'residential' && share(STREAM_HIP) < shareOf(features.hip, HIP_SHARE)
+      ? 'hip'
+      : 'gable';
+  const pitchDegrees =
+    roof === 'flat' ? 0 : (pitches[Math.floor(share(STREAM_PITCH) * pitches.length)] as number);
+  const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < chimneyShare;
   // A canopy only where it stands clear of the road's clearance, as the walls do.
   const withPorch =
     front !== undefined &&
     residential &&
     front.length >= PORCH.width &&
     front.distance - PORCH.depth >= ROAD_CLEARANCE_METRES &&
-    share(STREAM_PORCH) < PORCH_SHARE;
-  const withPosts = share(STREAM_POSTS) < PORCH_POSTS_SHARE;
+    share(STREAM_PORCH) < shareOf(features.canopy, PORCH_SHARE);
+  const withPosts = share(STREAM_POSTS) < shareOf(features.canopyPosts, PORCH_POSTS_SHARE);
 
   // #1588: the US house — its cladding, its windows' style, a garage.
   const clapboard =
-    residential && !part && storeys <= TOWER_STOREYS && share(STREAM_SIDING) < SIDING_SHARE;
+    residential &&
+    !part &&
+    storeys <= TOWER_STOREYS &&
+    share(STREAM_SIDING) < shareOf(features.siding, SIDING_SHARE);
   const shingled = roof !== 'flat' && share(STREAM_SHINGLE) < SHINGLE_SHARE;
   const { least, most } = CLAPBOARD_COURSE_METRES;
   const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
   const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
-  const brickFoundation = clapboard && share(STREAM_FOUNDATION) < BRICK_FOUNDATION_SHARE;
+  const brickFoundation =
+    clapboard &&
+    share(STREAM_FOUNDATION) < shareOf(features.brickFoundation, BRICK_FOUNDATION_SHARE);
   const flags =
     (residential ? STYLE_SASH : 0) +
-    (residential && share(STREAM_SHUTTERS) < SHUTTER_SHARE ? STYLE_SHUTTERS : 0) +
+    (residential && share(STREAM_SHUTTERS) < shareOf(features.shutters, SHUTTER_SHARE)
+      ? STYLE_SHUTTERS
+      : 0) +
     (roof === 'flat' ? STYLE_FLAT_ROOF : STYLE_EAVES) +
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
     (use === 'commercial' ? STYLE_COMMERCIAL : 0) +
     // #1636: a tower in a covered urban class is glazed; with no class, as before.
-    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0);
+    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0) +
+    // #1663: a terraced building's corners are its row's, and carry no quoin.
+    (terraced ? STYLE_TERRACED : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
   const roofStyle: Style = shingled
     ? [cladOf(CLAD_SHINGLE, SHINGLE_COURSE_METRES), 0, 0, -1]
@@ -4343,7 +4444,7 @@ function planFootprint(
     residential &&
     shop === undefined &&
     frontBays >= GARAGE_MIN_BAYS &&
-    share(STREAM_GARAGE) < GARAGE_SHARE
+    share(STREAM_GARAGE) < shareOf(features.garage, GARAGE_SHARE)
       ? garageOf(
           {
             length: front.length,
@@ -4395,7 +4496,7 @@ function planFootprint(
     frontFrame !== undefined &&
     residential &&
     shop === undefined &&
-    share(STREAM_FRONT_PORCH) < FRONT_PORCH.share
+    share(STREAM_FRONT_PORCH) < shareOf(features.frontPorch, FRONT_PORCH.share)
       ? frontPorchOf(
           {
             length: front.length,
@@ -4438,9 +4539,9 @@ function planFootprint(
     shop === undefined &&
     frontBays >= 3 &&
     frontBays % 2 === 1 &&
-    share(STREAM_PICTURE) < PICTURE_SHARE
+    share(STREAM_PICTURE) < pictureShare
       ? garage === undefined
-        ? middle + (share(STREAM_PICTURE) < PICTURE_SHARE / 2 ? -1 : 1)
+        ? middle + (share(STREAM_PICTURE) < pictureShare / 2 ? -1 : 1)
         : middle + (garage.bay === 0 ? 1 : -1)
       : -1;
   const windows: Windows = {
@@ -4468,7 +4569,7 @@ function planFootprint(
     roof !== 'flat' &&
     residential &&
     pitchDegrees >= DORMER_MIN_PITCH_DEGREES &&
-    share(STREAM_DORMER) < DORMER_SHARE;
+    share(STREAM_DORMER) < shareOf(features.dormer, DORMER_SHARE);
 
   const holes = building.rings
     .slice(1)
@@ -4546,7 +4647,7 @@ function planFootprint(
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
       if (withChimney) {
-        const end = share(STREAM_CHIMNEY) < CHIMNEY_SHARE / 2 ? 1 : -1;
+        const end = share(STREAM_CHIMNEY) < chimneyShare / 2 ? 1 : -1;
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], end);
       }
       if (withDormers) {
@@ -4629,12 +4730,36 @@ function planFootprint(
   let built = build(holed, true);
   if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
   if (holed && !fits(built.writing)) built = build(false, false);
+  // #1782: an archetype's plan that will not fit gives up its dormers, then its porch.
+  if (archetype !== 'unknown' && choice.dropped < ARCHETYPE_DROPS.length && !fits(built.writing)) {
+    return planFootprint(
+      measured,
+      land,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      others,
+      party,
+      roofing,
+      { ...choice, dropped: choice.dropped + 1 },
+    );
+  }
   // #1660: a split roof that will not fit falls back to the flat one — never truncated.
   if (roofRectangles.length > 1 && roof !== 'flat' && !fits(built.writing)) {
-    return planFootprint(measured, land, profile, origin, seed, maxVertices, others, party, {
-      ...roofing,
-      flat: true,
-    });
+    return planFootprint(
+      measured,
+      land,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      others,
+      party,
+      { ...roofing, flat: true },
+      // The flat retry is `unknown`, so it is planned as with the lever off: nothing dropped.
+      { ...choice, dropped: 0 },
+    );
   }
   const { writing, drew } = built;
 
@@ -4713,6 +4838,7 @@ function planFootprint(
     porch: frontPorchSpec !== undefined,
     frontStep,
     urban: urbanClass,
+    archetype,
     model,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,

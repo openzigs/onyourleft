@@ -186,6 +186,7 @@ import { useUnits } from '../units/context';
 import { gameDeliveryFromHash, gameRouteFromHash } from '../shell/routes';
 import { readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryInView } from './delivery/in-view';
+import { layNameTags, nameTags } from './name-tags';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
@@ -1006,6 +1007,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   unitsRef.current = units;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** #783: the other riders' names, laid over the world. @see layNameTags */
+  const namesRef = useRef<HTMLDivElement | null>(null);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
   const viewRef = useRef<RendererView | undefined>(undefined);
   /**
@@ -2427,6 +2430,26 @@ export function GameView(props: GameViewProps): JSX.Element {
               };
         if (prepared) {
           view.render(frame);
+          // #783: the other riders' names over the frame just drawn — DOM,
+          // so no draw call and no triangle in either world. Only a room ride
+          // carries one, and only with a world to lay them over; any other
+          // frame reads nothing off the page.
+          const names = namesRef.current;
+          const world = canvasRef.current;
+          if (
+            names !== null &&
+            world !== null &&
+            (names.childElementCount > 0 ||
+              frame.markers.some((marker) => marker.label !== undefined))
+          ) {
+            layNameTags(
+              names,
+              world,
+              view.hasContext
+                ? nameTags(frame, { width: world.clientWidth, height: world.clientHeight })
+                : [],
+            );
+          }
         } else {
           preparingViewRef.current = view;
           void view.prepare(frame).then(() => {
@@ -2718,6 +2741,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         // honest than an alt text describing a scene that changes every frame.
         aria-hidden="true"
       />
+      {/* #783: the other riders' names on the road, laid over the world by
+          `name-tags.ts`. Hidden for the world's reason: each is on the HUD as
+          text too — the followed rider's, and a race's standings. */}
+      <div ref={namesRef} className="oyl-game__names" aria-hidden="true" />
       <HudPanel
         profile={chosen.profile}
         announcement={announcement}
