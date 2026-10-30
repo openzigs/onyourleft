@@ -957,4 +957,32 @@ describe('other real riders on the road — #783', () => {
     const [a, b] = frame.markers.filter((marker) => marker.kind === 'remote');
     expect(Math.hypot((a?.x ?? 0) - (b?.x ?? 0), (a?.z ?? 0) - (b?.z ?? 0))).toBeGreaterThan(1);
   });
+
+  it('carries the name the room gave a rider to their marker, and none to one it did not', () => {
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: {
+        ...atStartLine(setup.profile),
+        ride: { ...atStartLine(setup.profile).ride, distance: metres(400) },
+      },
+      remoteRiders: [
+        {
+          riderId: 3,
+          distanceMetres: 420,
+          speedMetresPerSecond: 9,
+          label: 'Bea Ng',
+          followed: true,
+        },
+        { riderId: 8, distanceMetres: 430, speedMetresPerSecond: 9 },
+      ],
+    });
+    const [named, unnamed] = frame.markers.filter((marker) => marker.kind === 'remote');
+    expect(named?.label).toBe('Bea Ng');
+    // The followed flag rides along with the name, and only on the followed one.
+    expect(named?.followed).toBe(true);
+    expect('followed' in (unnamed ?? {})).toBe(false);
+    expect('label' in (unnamed ?? {})).toBe(false);
+    expect('label' in (frame.markers[0] ?? {})).toBe(false);
+  });
 });

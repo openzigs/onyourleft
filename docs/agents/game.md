@@ -141,7 +141,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ The camera pitches with the ROAD — both the eye and
                         the look-at ride the corridor's own heights — so a
                         pacer 50 m ahead stays put on a 20 % hill where a level
-                        gaze put it behind the rider's back
+                        gaze put it behind the rider's back. Since #783
+                        `projectToFrame` restates the renderer's camera
+                        without `three`, for the names below
+    src/game/name-tags.ts
+                        other riders' names on the road (#783): DOM laid over
+                        the world, so no draw call and no triangle in either
+                        world. Only `RiderMarker.label` — a race room's public
+                        name, or the followed rider's seat — and no figure.
+                        ⚠️ Only over riders the realistic world draws too
+                        (`realisticRemoteSplit`'s rule), within 60 m, at most
+                        8, the followed rider's first and a name that would
+                        cover another left out. `game.browser.spec.ts` §"#783"
+                        holds a name over the rider the renderer drew
     src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
                         parts as numbers rather than an asset, the two-bone knee
                         that puts each foot on its own pedal, and the one rule
