@@ -33,6 +33,7 @@ import type {
   BendMeasurement,
   LineMeasurement,
   NearFieldMeasurement,
+  StreetNearFieldMeasurement,
   PresenceCostMeasurement,
   RideStartMeasurement,
   HorizonReading,
@@ -133,6 +134,8 @@ interface GameHarnessResult {
   };
   readonly bend: { readonly right: BendMeasurement; readonly mirrored: BendMeasurement };
   readonly nearField: NearFieldMeasurement;
+  readonly nearFieldWall: StreetNearFieldMeasurement;
+  readonly nearFieldPerson: StreetNearFieldMeasurement;
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
   readonly resourcesAfterSecondSweep: number;
@@ -3447,6 +3450,59 @@ test.describe(
       // what the camera is passing, and the nearer plane shows it.
       expect(near.controlPixels).toBeGreaterThan(100);
       // And with it, nothing stands between the two planes.
+      expect(near.shippedPixels).toBe(0);
+    });
+
+    test('shows no cut mapped wall at its closest pass at 6 : 1, where the same frame uncut shows it — #1835', async ({
+      harnessRun,
+    }) => {
+      // `game-harness.ts` §`nearFieldStreetProbe`: the kerbside town round the
+      // planner's bends at the widest frame the stylesheet allows, where
+      // `near-field-street.test.ts` finds the plane meeting mapped walls.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearFieldWall;
+      console.info(
+        `#1835 mapped wall at ${String(near.distance)} m in the ${near.world} world, the cull ` +
+          `dropped ${String(near.cut.length)}, the nearest ${near.pivotMetres.toFixed(2)} m from ` +
+          `the eye: ${String(near.shippedPixels)} pixels cut with the cull, ` +
+          `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+      );
+      // Non-vacuity: the realistic world, and a frame with something to drop.
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      expect(near.noisePixels).toBe(0);
+      // The control — the defect, drawn: uncut, the wall's sliver shows.
+      expect(near.controlPixels).toBeGreaterThan(100);
+      // And with the cull, nothing stands between the two planes.
+      expect(near.shippedPixels).toBe(0);
+    });
+
+    test('draws no person the plane meets at their closest pass at 6 : 1, and draws them with the cull off — #1835', async ({
+      harnessRun,
+    }) => {
+      // The same probe on the villages' pavements round the bends. ⚠️ A person
+      // is culled on a box (`near-field.ts` §`personCut`), which is the safe
+      // way round: at the nearest pass the box meets the plane and no pixel of
+      // the body is cut, so the pixels' control has nothing to show here
+      // (logged, not asserted). What is asserted is that the view's people
+      // belt is handed the cull's people — read back off its meshes.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearFieldPerson;
+      console.info(
+        `#1835 person at ${String(near.distance)} m in the ${near.world} world, the cull ` +
+          `dropped ${String(near.cut.length)}, the nearest ${near.pivotMetres.toFixed(2)} m from ` +
+          `the eye: ${String(near.peopleDrawn.withCull)} people drawn with the cull, ` +
+          `${String(near.peopleDrawn.without)} without it; ${String(near.shippedPixels)} pixels ` +
+          `cut with the cull, ${String(near.controlPixels)} without it, ` +
+          `${String(near.noisePixels)} drawing it twice`,
+      );
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      // The control: with the cull off the belt draws the person too.
+      expect(near.peopleDrawn.without - near.peopleDrawn.withCull).toBe(near.cut.length);
+      expect(near.noisePixels).toBe(0);
       expect(near.shippedPixels).toBe(0);
     });
   },
