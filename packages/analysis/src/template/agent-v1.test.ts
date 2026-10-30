@@ -11,9 +11,14 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import type { ScreenReason } from '../screen/write-up-screen';
-import { agentSectionFigures, ANALYSIS_AGENT_TEMPLATE_V1, fenceData } from './agent-v1';
+import {
+  agentSectionFigures,
+  ANALYSIS_AGENT_TEMPLATE_V1,
+  fenceData,
+  HISTORY_FENCE_BEGIN,
+  HISTORY_FENCE_END,
+} from './agent-v1';
 import { LARGEST, ORDINARY, SMALLEST } from './template-fixtures-testing';
-import { HISTORY_FENCE_BEGIN, HISTORY_FENCE_END } from './template-v2';
 
 const EVERY_REASON: readonly ScreenReason[] = [
   'empty',
