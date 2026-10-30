@@ -50,7 +50,10 @@
 #   test green. No test left the required job: `check:test-split` fails the
 #   two scripts if their excludes differ. Coverage is reported, never gated
 #   (ADR 0005 decision C), so what moved is a table, from every pull
-#   request's run summary to one run a night.
+#   request's run summary to one run a night. Since #1701 it is the
+#   `coverage` job, on a runner of its own: after browser shard 1 in `heavy`
+#   it took that job to 1 242 s of its 1 800 s stop (run 40853930991), and a
+#   slow runner would have cancelled shard 1's tests with it.
 name: Nightly heavy checks
 
 # `schedule` and `workflow_dispatch`, plus a pull request that changes THIS
@@ -102,11 +105,11 @@ jobs:
     # repository (CLAUDE.md section 8).
     runs-on: ubuntu-latest
     # A stop, not a budget. The browser half stops itself first
-    # (playwright.config.ts GATE_BUDGET_MS). Since #1280 the coverage run is
-    # in this job too -- 482 to 510 s as a step of the required job on the
-    # EPYC 7763 -- after checks that took 322 to 521 s in all on the four
-    # scheduled runs to 2026-10-12; docs/agents/ci.md section 4c has what this
-    # job measured with it.
+    # (playwright.config.ts GATE_BUDGET_MS). The coverage run was in this job
+    # from #1280 to #1701 and is the `coverage` job now; docs/agents/ci.md
+    # section 4c "Coverage in a job of its own -- #1701" has what each
+    # measured, and nightly-split.test.ts holds every nightly job's slowest
+    # measured run inside 60 % of its stop.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -171,13 +174,50 @@ jobs:
       - name: Nightly browser checks (1 of 5)
         run: pnpm run test:browser:nightly:shard-1
 
-      # --- The coverage report (#1280) ----------------------------------------
-      #
-      # The required job's Vitest files, under coverage. LAST, and
-      # `!cancelled()`, so a red check above does not cost the night its
-      # report, and a slow report cannot cost the checks above their run. ⚠️ A
-      # test that fails HERE turns this job red and opens the nightly issue,
-      # and that is meant: these are the required job's own tests, so a failure
+  # The coverage report (#1280), in a job of its own since #1701: in `heavy`,
+  # after browser shard 1, it was 679 to 783 s of a job that reached 1 242 s
+  # of its 1 800 s stop, and it grows with every test file. On a runner of its
+  # own a slow report cannot cancel a browser check, nor a browser check the
+  # report. No Chromium: the required job's Vitest files run in `jsdom` and
+  # Node, and its `Tests` shard installs no browser either. Every other step
+  # and pin is `heavy`'s, whose comments say why.
+  coverage:
+    name: Nightly coverage report
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the run took 679 to 783 s as a step of `heavy`,
+    # and docs/agents/ci.md section 4c "Coverage in a job of its own -- #1701"
+    # has what it measured here.
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The required job's Vitest files, under coverage. Its `!cancelled()` is
+      # #1280's, from when it followed the browser checks in `heavy`; the two
+      # steps after it keep theirs so that a red run still publishes what it
+      # measured. ⚠️ A test that fails HERE turns this job red and opens the
+      # nightly issue, and that is meant: these are the required job's own tests, so a failure
       # here and not there is a case that passes only without instrumentation
       # -- a timeout tuned too close (docs/agents/ci.md section 4c), which is worth an
       # issue. The coverage FIGURES gate nothing, here or anywhere.
@@ -401,9 +441,9 @@ jobs:
   # Opens an issue the first time, and comments on it while it stays open.
   report:
     name: Report a red run
-    # Every job since #1675 (four since #1698, five since #1636 met #1689): a
-    # red realistic shard has to open the issue too.
-    needs: [heavy, browser-2, browser-3, browser-4, browser-5]
+    # Every job since #1675 (four since #1698, five since #1636 met #1689, six
+    # since #1701's `coverage`): a red realistic shard has to open the issue too.
+    needs: [heavy, coverage, browser-2, browser-3, browser-4, browser-5]
     # `result` rather than `failure()`: a job stopped by its timeout-minutes
     # ends `cancelled`, not `failed`, and a hung run must be reported too.
     # (A run cancelled by hand is reported as well; that is the cheaper error.)

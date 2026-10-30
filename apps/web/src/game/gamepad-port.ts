@@ -66,8 +66,6 @@
  * The name of the function `MainActivity.java` calls on the page's `window`
  * for each numbered button. `apps/mobile/src/android/gamepad-button-source.test.ts`
  * holds the Java to this name.
- *
- * @test-facing its caller is `MainActivity.java`, which no TypeScript can name; the shell's source test and this module's tests read it to hold the Java and the page to one name.
  */
 export const FORWARDED_BUTTON_GLOBAL = '__oylGamepadButton';
 

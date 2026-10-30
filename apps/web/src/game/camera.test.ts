@@ -40,8 +40,10 @@ import {
   NARROWEST_ASPECT,
   REFERENCE_ASPECT,
   WORST_CASE_ASPECT,
+  NEAR_PLANE_METRES,
   cameraRig,
   horizontalSpread,
+  projectToFrame,
   riderFrameBox,
   roadAppearsOverRiderMetres,
   verticalFieldOfViewDegrees,
@@ -559,5 +561,93 @@ describe('the bounds the cull and the fog rest on', () => {
         (0 - flat.eye.y) * (flat.target.y - flat.eye.y)) /
         length,
     ).toBeCloseTo(403.7, 1);
+  });
+});
+
+describe('a point projected into the frame, for the names over other riders — #783', () => {
+  const ASPECTS = [REFERENCE_ASPECT, 16 / 10, 4 / 3, 10 / 16, 9 / 19.5, WORST_CASE_ASPECT];
+
+  it('puts the rider’s helmet, rear tyre and handlebar where `riderFrameBox` does, at every aspect', () => {
+    const rig = cameraRig(poseOn(0));
+    for (const aspect of ASPECTS) {
+      const box = riderFrameBox(aspect);
+      const helmet = projectToFrame(rig, aspect, {
+        x: 0,
+        y: RIDER_HEIGHT_METRES,
+        z: RIDER_HELMET_AHEAD_METRES,
+      });
+      expect(helmet?.top).toBeCloseTo(box.top, 9);
+      expect(helmet?.left).toBeCloseTo(0.5, 9);
+      const tyre = projectToFrame(rig, aspect, { x: 0, y: 0, z: BICYCLE_REAR_CONTACT_METRES });
+      expect(tyre?.top).toBeCloseTo(box.bottom, 9);
+      // Heading +z, the road's normal — the rider's right — is −x (#583).
+      const right = projectToFrame(rig, aspect, {
+        x: -RIDER_HALF_WIDTH_METRES,
+        y: 0,
+        z: BICYCLE_REAR_CONTACT_METRES,
+      });
+      expect(right?.left).toBeCloseTo(box.right, 9);
+    }
+  });
+
+  it('agrees with this file’s own pinhole on a climb, a pacer 50 m up the road', () => {
+    for (const grade of [-0.2, -0.12, 0, 0.12, 0.2]) {
+      const rig = cameraRig(poseOn(grade));
+      const at = projectToFrame(rig, REFERENCE_ASPECT, { x: 0, y: grade * 50, z: 50 });
+      expect(at?.top).toBeCloseTo(downTheFrame(rig, 50, grade * 50, REFERENCE_ASPECT), 9);
+      const beside = projectToFrame(rig, REFERENCE_ASPECT, { x: -1.5, y: grade * 50, z: 50 });
+      expect((beside?.left ?? 0) - 0.5).toBeCloseTo(
+        offCentre(rig, 50, grade * 50, 1.5, REFERENCE_ASPECT),
+        9,
+      );
+    }
+  });
+
+  it('lands a point the same wherever the road heads: the projection is the camera’s, not the axes’', () => {
+    const heading = { x: 0.6, z: 0.8 };
+    const turned: CameraPose = {
+      ...poseOn(0.05),
+      x: 120,
+      z: -40,
+      headingX: heading.x,
+      headingZ: heading.z,
+    };
+    const straight = cameraRig(poseOn(0.05));
+    const rig = cameraRig(turned);
+    // 20 m ahead, 1.2 m to the right, 1.7 m up — in each road's own terms.
+    const ahead = 20;
+    const right = 1.2;
+    const up = 0.05 * ahead + 1.7;
+    const one = projectToFrame(straight, REFERENCE_ASPECT, { x: -right, y: up, z: ahead });
+    const other = projectToFrame(rig, REFERENCE_ASPECT, {
+      x: 120 + heading.x * ahead - heading.z * right,
+      y: up,
+      z: -40 + heading.z * ahead + heading.x * right,
+    });
+    expect(one).toBeDefined();
+    expect(other?.left).toBeCloseTo(one?.left ?? Number.NaN, 9);
+    expect(other?.top).toBeCloseTo(one?.top ?? Number.NaN, 9);
+    expect(other?.depth).toBeCloseTo(one?.depth ?? Number.NaN, 9);
+    expect(one?.left).toBeGreaterThan(0.5);
+  });
+
+  it('returns nothing behind the eye or nearer than the near plane', () => {
+    const rig = cameraRig(poseOn(0));
+    expect(projectToFrame(rig, REFERENCE_ASPECT, { x: 0, y: 1, z: -10 })).toBeUndefined();
+    const eyeZ = -CAMERA_BEHIND_METRES;
+    expect(
+      projectToFrame(rig, REFERENCE_ASPECT, {
+        x: 0,
+        y: CAMERA_ABOVE_METRES,
+        z: eyeZ + NEAR_PLANE_METRES * 0.5,
+      }),
+    ).toBeUndefined();
+    expect(
+      projectToFrame(rig, REFERENCE_ASPECT, {
+        x: 0,
+        y: CAMERA_ABOVE_METRES,
+        z: eyeZ + NEAR_PLANE_METRES * 2,
+      }),
+    ).toBeDefined();
   });
 });
