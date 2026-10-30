@@ -352,7 +352,10 @@ describe('the plans are clad — #1588, over the mixed town', () => {
   });
 
   it('lays a shingled slope’s facade in metres along its eaves and up it', () => {
-    for (const plan of pitched.filter((each) => each.cladding.roof === 'shingle')) {
+    // A #1785 variant's slopes are each at their own pitch: `roof-variants.test.ts`.
+    for (const plan of pitched.filter(
+      (each) => each.cladding.roof === 'shingle' && each.roofVariant === 'plain',
+    )) {
       const roof = verticesOf(plan, 'roof');
       const lowest = Math.min(...roof.map((vertex) => vertex.y));
       const eaves = roof.filter((vertex) => vertex.y < lowest + 1e-4);
@@ -526,11 +529,21 @@ describe('gutters, a downpipe and dormers — #1588', () => {
       const fronts = verticesOf(plan, 'trim').filter(
         (vertex) => Math.abs(outside(vertex) - (across + GUTTER.width)) < 1e-3,
       );
-      const top = eaveY - GUTTER.below;
+      // Since #1785 each under its own eave: a saltbox's front eave is lower than its back.
+      const eaveYs = roof
+        .filter((vertex) => Math.abs(outside(vertex) - across) < 1e-3)
+        .map((vertex) => vertex.y);
+      expect(Math.min(...eaveYs)).toBeCloseTo(eaveY, 3);
+      const tops = eaveYs.map((y) => y - GUTTER.below);
       // Each gutter: its front's six corners, and three each of its bottom's and its ends'.
       expect(fronts.length).toBe(2 * (6 + 3 + 3 + 3));
       for (const vertex of fronts) {
-        expect([top, top - GUTTER.depth].some((y) => Math.abs(vertex.y - y) < 1e-3)).toBe(true);
+        expect(
+          tops.some(
+            (top) =>
+              Math.abs(vertex.y - top) < 1e-3 || Math.abs(vertex.y - (top - GUTTER.depth)) < 1e-3,
+          ),
+        ).toBe(true);
       }
       // The downpipe reaches the ground at the plinth's foot level.
       const lowest = Math.min(...verticesOf(plan, 'trim').map((vertex) => vertex.y));

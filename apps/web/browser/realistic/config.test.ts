@@ -12,6 +12,7 @@ import {
   facadeTrimsWithLevers,
   firPrepassWithLevers,
   houseArchetypesWithLevers,
+  roofVariantsWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -310,6 +311,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(houseArchetypesWithLevers(parseConfig('?levers=-house-archetypes').leversOff)).toBe(
       false,
+    );
+  });
+
+  it('gives the archetypes their roof variants, as the product does, unless #1785’s lever takes them out', () => {
+    expect(LEVERS).toContain('roof-variants');
+    expect(roofVariantsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(roofVariantsWithLevers(LEVERS.filter((lever) => lever !== 'roof-variants'))).toBe(true);
+    expect(roofVariantsWithLevers(parseConfig('?levers=-roof-variants').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=houses&levers=-roof-variants'))).toBe(
+      `?levers=${encodeURIComponent('-roof-variants')}&town=houses`,
     );
   });
 

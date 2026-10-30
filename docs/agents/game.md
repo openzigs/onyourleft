@@ -1015,6 +1015,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pitch, porch, shutters, picture window, dormers,
                         garage and cladding together, `unknown` planned as
                         before (`-house-archetypes`, `town=houses`);
+                        since #1785 a gambrel, half-hipped, saltbox or
+                        side-hipped roof (`variantRoof`) on a share of the
+                        farmhouses, bungalows, Colonials and ranches, on a
+                        rectangle or each split one, the eaves at the mapped
+                        height, plain over a cap (`-roof-variants`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

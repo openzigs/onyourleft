@@ -36,8 +36,10 @@
  * neither a clean rectangle nor a clean L: a T, U or Z is no archetype's.
  * "At the edge of a village" is read as #1633's `rural` class, the stretch
  * past a village's built-up run. Where an archetype wants a feature not built
- * yet — a full-width porch, a gambrel, a shed dormer — it takes the nearest
- * one there is, and the gap is a sibling issue under #1656.
+ * yet — a full-width porch, a shed dormer — it takes the nearest one there
+ * is, and the gap is a sibling issue under #1656. Since #1785 the gambrel,
+ * the saltbox and the half-hipped and side-hipped roofs are built
+ * ({@link ARCHETYPE_FEATURES}' `roofVariant`).
  *
  * Plan-time only, built once at the press: no draw call, no byte, and no
  * shader term. Formats no string, so names no vertex (ADR 0004 D).
@@ -189,6 +191,22 @@ export function footprintShapeOf(corners: number, rectangles: number | undefined
  */
 export type FeatureShare = number | 'seeded';
 
+/**
+ * Every pitched roof's shape beyond #1581's gable and hip — #1785, built by
+ * `footprint-buildings.ts` §`variantRoof` on a rectangle and on each of
+ * #1660's split rectangles: a two-pitch `gambrel`, a `half-hipped` gable
+ * clipped at its top, a `saltbox` whose ridge stands toward the front, and a
+ * `side-hipped` roof, a hip at one end and a gable at the other.
+ */
+export const ROOF_VARIANTS = ['gambrel', 'half-hipped', 'saltbox', 'side-hipped'] as const;
+
+/** One of {@link ROOF_VARIANTS}, or `plain`: the gable or hip the plan drew before. */
+export type RoofVariant = 'plain' | (typeof ROOF_VARIANTS)[number];
+
+/** A variant an archetype may wear, and how likely, drawn on the footprint's own stream; or none. */
+export type VariantShare =
+  readonly [variant: Exclude<RoofVariant, 'plain'>, share: number] | 'none';
+
 /** The features one archetype admits; `planFootprint` draws only inside them. */
 export interface ArchetypeFeatures {
   /** A hip rather than a gable — `HIP_SHARE`. */
@@ -215,6 +233,8 @@ export interface ArchetypeFeatures {
   readonly siding: FeatureShare;
   /** Under clapboard, a brick foundation rather than block — `BRICK_FOUNDATION_SHARE`. */
   readonly brickFoundation: FeatureShare;
+  /** #1785: the roof variant it may wear in place of its gable or hip. */
+  readonly roofVariant: VariantShare;
 }
 
 /**
@@ -234,6 +254,7 @@ export const SEEDED_FEATURES: ArchetypeFeatures = {
   dormer: 'seeded',
   siding: 'seeded',
   brickFoundation: 'seeded',
+  roofVariant: 'none',
 };
 
 /**
@@ -241,6 +262,12 @@ export const SEEDED_FEATURES: ArchetypeFeatures = {
  * A feature its row does not name keeps its seeded share. The Foursquare's
  * one front dormer waits for the dormers issue under #1656: the gabled dormer
  * there is stands only on `DORMER_MIN_PITCH_DEGREES`, which its 30–35° is not.
+ *
+ * Since #1785 four of them may wear a {@link RoofVariant} in its gable's or
+ * hip's place, on a share of their footprints: the farmhouse a gambrel, the
+ * Colonial a saltbox, the bungalow a half-hipped gable, and the ranch — whose
+ * roof is a low hip or a gable — a side-hipped one, half of each. The shares
+ * are a sketch, tuned on the owner's look pair (`levers=-roof-variants`).
  */
 export const ARCHETYPE_FEATURES: Readonly<
   Record<Exclude<HouseArchetype, 'unknown'>, ArchetypeFeatures>
@@ -253,6 +280,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     picture: 1,
     garage: 1,
     dormer: 0,
+    roofVariant: ['side-hipped', 0.3],
   },
   cape: {
     ...SEEDED_FEATURES,
@@ -275,6 +303,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     frontPorch: 0,
     shutters: 1,
     dormer: 0,
+    roofVariant: ['saltbox', 0.35],
   },
   foursquare: {
     ...SEEDED_FEATURES,
@@ -297,6 +326,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     shutters: 0,
     dormer: 0,
     siding: 1,
+    roofVariant: ['half-hipped', 0.4],
   },
   farmhouse: {
     ...SEEDED_FEATURES,
@@ -309,6 +339,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     garage: 0,
     siding: 1,
     brickFoundation: 1,
+    roofVariant: ['gambrel', 0.4],
   },
 };
 

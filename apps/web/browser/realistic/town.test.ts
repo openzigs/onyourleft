@@ -6,13 +6,15 @@
  * `-split-roofs` and flat with it. Red if the lever is parsed but not handed
  * to the planner. Since #1782 `-house-archetypes` likewise: the street of
  * houses has its archetypes without it, and none, planned as before, with it.
+ * Since #1785 `-roof-variants` likewise: the street's variants without it, and
+ * none with it.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { FOOTPRINT_ROLES, footprintPlans } from '../../src/game/footprint-buildings';
 import { houseStreetFixture, mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
-import { HOUSE_ARCHETYPES } from '../../src/game/house-archetypes';
+import { HOUSE_ARCHETYPES, ROOF_VARIANTS } from '../../src/game/house-archetypes';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
 
 import { parseConfig } from './config';
@@ -63,6 +65,39 @@ describe('the realistic page’s `house-archetypes` lever — #1782', () => {
       undefined,
       urban,
       { houseArchetypes: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    plans.forEach((plan, index) => {
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
+describe('the realistic page’s `roof-variants` lever — #1785', () => {
+  const street = houseStreetFixture();
+
+  it('gives the street of houses every roof variant on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=houses').leversOff);
+    const variants = new Set(plans.map((plan) => plan.roofVariant));
+    for (const variant of ROOF_VARIANTS) expect(variants).toContain(variant);
+  });
+
+  it('plans every house as the planner with them off does, with `levers=-roof-variants`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=houses&levers=-roof-variants').leversOff,
+    );
+    expect(plans.every((plan) => plan.roofVariant === 'plain')).toBe(true);
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { roofVariants: false },
     ).plans;
     expect(plans.length).toBe(off.length);
     plans.forEach((plan, index) => {

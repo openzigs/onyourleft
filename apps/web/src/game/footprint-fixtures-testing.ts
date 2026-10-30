@@ -12,7 +12,7 @@
 import type { RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
-import type { FootprintVerdict } from './footprint-buildings';
+import { FOOTPRINT_ROLES, type FootprintPlan, type FootprintVerdict } from './footprint-buildings';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { FIXTURE_LATITUDE, northRoute, plannerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
@@ -893,4 +893,47 @@ export function houseStreetFixture(latitude = FIXTURE_LATITUDE): {
       streets: [],
     },
   };
+}
+
+/**
+ * An FNV-1a over every plan's roof, pitch, storeys, dormers, garage, porch and
+ * (`withPaint`) paint and every float of every role's triangles, in order: two
+ * towns' plans hash alike only if the belt would upload the same bytes for
+ * them. #1782's own copy is `house-archetypes.test.ts` §`fingerprint`; this
+ * one is shared by the levers that hold a plan to a frozen record of `main`'s
+ * (#1785's `-roof-variants` and the issues after it).
+ */
+export function planFingerprint(plans: readonly FootprintPlan[], withPaint = true): string {
+  let hash = 0x81_1c_9d_c5;
+  const mix = (word: number): void => {
+    hash ^= word;
+    hash = Math.imul(hash, 0x01_00_01_93) >>> 0;
+  };
+  const scalar = new Float32Array(1);
+  const scalarBits = new Uint32Array(scalar.buffer);
+  const value = (n: number): void => {
+    scalar[0] = n;
+    mix(scalarBits[0] as number);
+  };
+  for (const each of plans) {
+    value(['flat', 'gable', 'hip'].indexOf(each.roof));
+    value(each.pitchDegrees);
+    value(each.storeys);
+    value(each.dormers);
+    value(each.garage ? 1 : 0);
+    value(each.porch ? 1 : 0);
+    if (withPaint) {
+      value(each.paint.wall);
+      value(each.paint.roof);
+      value(each.paint.trim);
+      value(each.paint.door);
+    }
+    for (const role of FOOTPRINT_ROLES) {
+      const floats = each.triangles[role];
+      const bits = new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
+      mix(bits.length);
+      for (const word of bits) mix(word);
+    }
+  }
+  return hash.toString(16).padStart(8, '0');
 }
