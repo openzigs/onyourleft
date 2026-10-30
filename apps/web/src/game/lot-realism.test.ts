@@ -282,8 +282,8 @@ describe('each lot pane knows its own rectangle — #1665', () => {
         expect(read).toEqual(Array.from(glassPaneCoordinates(buildingPlan(kind, variant))));
         // And paired: the geometry's own position is where its own uv says.
         expectPaired(
-          geometry.getAttribute('position').array as ArrayLike<number>,
-          geometry.getAttribute('uv').array as ArrayLike<number>,
+          geometry.getAttribute('position').array,
+          geometry.getAttribute('uv').array,
           glassPanesOf(buildingPlan(kind, variant)),
         );
         geometry.dispose();
