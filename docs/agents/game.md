@@ -647,6 +647,38 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that had stopped listening while every target reported
                         success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
+    src/game/delivery/
+                        Delivery (epic #1803, ADR 0059), in the order a ride
+                        runs it. **The chooser** (#1818): `StageChooser.tsx`
+                        §`DeliveryControl` offers *Ride a Delivery round* only
+                        with the realistic world chosen (DL6), the week's day
+                        and houses from `delivery-progress.ts` beside it; it
+                        cannot know the town's houses (no map in its graph),
+                        so the press decides. **The press**, in `GameView`:
+                        `ride-round.ts` §`startDeliveryRide` reads the week
+                        and `assist-preference.ts` (#1813), draws ONE seed,
+                        and `targets.ts` picks the houses (#1808, #1856) and
+                        `obstacles.ts` places the obstacles (#1811). A short
+                        pick rides a shorter round standing for the day's
+                        count (`round.ts` §`Round.dayHouses`), and one of
+                        fewer than §`FEWEST_DELIVERY_HOUSES` is no round: an
+                        ordinary ride, `hud/delivery-announce.ts`
+                        §`TOO_FEW_HOUSES_TEXT` (or §`HOUSES_NOT_READY_TEXT`
+                        with no houses read) on the HUD and said once, and
+                        the week kept as it was. **Each simulation step that
+                        ran**: the throw (`throw-input.ts`, #1810), lane
+                        (`steer.ts`, #1820) and gamepad (`gamepad-input.ts`,
+                        #1821) intents come in through their ports, and
+                        §`stepDeliveryRide` runs `throw.ts` (#1809), the
+                        misses, `obstacles.ts` and `round.ts` (#1806); the
+                        HUD says it (`hud/delivery-announce.ts`, #1812) and
+                        the frame draws it (`in-view.ts`, #1814). **The
+                        round's end or the ride's**: §`endDeliveryRide`, and
+                        §`keepDeliveryWeek` writes the three counts. Two
+                        guarantees hold it, each a red test: DL5, nothing
+                        reaches the trainer (#1807, the next entry, and
+                        `delivery-wiring.test.tsx`), and DL11, no target
+                        leaves the ride (#1817, the entry after it)
     src/game/delivery/delivery-cannot-reach-trainer.test.ts
                         DL5 (ADR 0059 D-2, #1807): no module under
                         `delivery/` reaches, by any static import chain,
@@ -681,8 +713,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         through `obstacles.ts` §`roundScore` (crashes in it,
                         never below nought), and the week's counts kept at the
                         round's end or the ride's. `GameView` holds one per
-                        ride, solo only (DL9), read from the developer route
-                        `#/game?delivery=on` until #1818 offers it. ⚠️ **Nothing
+                        ride, solo only (DL9), asked for by the chooser since
+                        #1818 (or the developer route `#/game?delivery=on`),
+                        and none where the pick is under 3 houses. ⚠️ **Nothing
                         of it reaches the trainer** (DL5): it reads the
                         simulation and writes to itself, the HUD and the frame;
                         `game/delivery-wiring.test.tsx` rides one power trace
@@ -735,7 +768,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         always clear. Wired into the ride by #1853: the
                         round holds the steer state and steps it, and the
                         rider is drawn exactly where the obstacles meet them,
-                        a level bot or ghost making the room
+                        a level bot or ghost making the room. One just behind
+                        is held aside until its front wheel is behind the
+                        camera's eye, then eases to its line (#1863)
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
