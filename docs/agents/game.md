@@ -1015,6 +1015,35 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pitch, porch, shutters, picture window, dormers,
                         garage and cladding together, `unknown` planned as
                         before (`-house-archetypes`, `town=houses`);
+                        since #1785 a gambrel, half-hipped, saltbox or
+                        side-hipped roof (`variantRoof`) on a share of the
+                        farmhouses, bungalows, Colonials and ranches, on a
+                        rectangle or each split one, the eaves at the mapped
+                        height, plain over a cap (`-roof-variants`);
+                        since #1786 each archetype's dormers — two gabled on
+                        a Cape, a hipped one on a Foursquare's route-facing
+                        slope, a wide shed one on a bungalow — each kind on
+                        its own least pitch (`dormerOf`, `-dormer-variants`);
+                        since #1784 a full-width front porch on posts on a
+                        Foursquare, a bungalow and a farmhouse, and each
+                        archetype's eaves — 0.65 m on a bungalow and a
+                        Foursquare, 0.15 m on a Cape, 0.4 m on the rest
+                        (`-archetype-porches`). ⚠️ **Known gap**: the
+                        eave's shadow on the wall (`facade.ts`
+                        §`OVERHANG_SHADOW`, `eavesShadeAt`) is still cast
+                        from the constant `EAVES_OVERHANG_METRES`, so a
+                        0.65 m eave casts a 0.4 m eave's shadow and a
+                        0.15 m one too deep a shadow: #1784's answer (b),
+                        no float carries the depth to the shader;
+                        since #1783 a commercial or multi-family footprint's
+                        archetype (`building-archetypes.ts`) — a brick
+                        main-street block (sash windows over its shop front,
+                        an awning on two in three), a strip front (its sign
+                        band kept, one storey) or a garden apartment (a low
+                        hip or gable over 300–1 200 m², clapboard or brick,
+                        one door, no garage) — `unknown`, industry and towers
+                        planned as before (`-commercial-archetypes`,
+                        `town=commercial`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
