@@ -181,8 +181,10 @@ The same rules hold for **making** a public room and for **seeing** the listing 
 
 Every instance serves a **notice page** at `/report` (#907). Anybody can use it, with or without an
 account and with or without the app, to tell you about content on your instance that they think is
-illegal. The app links to it from *About*, on the instance the rider connected to. It is a plain
-form that runs no script, so it works with a keyboard and a screen reader.
+illegal. The app links to it from *About*, on the instance the rider connected to, and since
+#1381 from the references under a room the rider is in and under a race's result, after the
+identifiers to paste into it. It is a plain form that runs no script, so it works with a keyboard
+and a screen reader.
 
 A notice carries what the EU Digital Services Act's Art. 16(2) asks a notice to be able to carry:
 

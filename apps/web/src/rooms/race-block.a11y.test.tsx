@@ -60,6 +60,7 @@ async function result(answer: RaceBlockAnswer = { kind: 'blocked' }) {
       sent.push({ roomId, row });
       return Promise.resolve(answer);
     },
+    noticePage: () => undefined,
   };
   mounted = await mount(
     <main>
