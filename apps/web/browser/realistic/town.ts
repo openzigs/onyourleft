@@ -4,7 +4,8 @@
  * The owner's realistic page's mapped town, planned as `GameView`'s press
  * plans a ride's corridor — #1581 — with the levers that change its plans
  * read here, at load: since #1634 `urban-class`, since #1660
- * `split-roofs` and since #1782 `house-archetypes`. Its own module so that a test reads the plans the page
+ * `split-roofs`, since #1782 `house-archetypes` and since #1785
+ * `roof-variants`. Its own module so that a test reads the plans the page
  * draws, and a lever parsed but not handed to the planner is a red test
  * (`town.test.ts`).
  */
@@ -22,6 +23,7 @@ import type { RouteProfile } from '@onyourleft/domain';
 
 import {
   houseArchetypesWithLevers,
+  roofVariantsWithLevers,
   splitRoofsWithLevers,
   urbanClassWithLevers,
   type Lever,
@@ -56,11 +58,12 @@ export function plannedTown(
     town.origin,
     FOOTPRINT_MAX_VERTICES,
     urban,
-    // #1660: the L-, T-, U- and Z-shaped houses' split roofs, and #1782: the houses'
-    // archetypes, unless their lever is off.
+    // #1660: the L-, T-, U- and Z-shaped houses' split roofs, #1782: the houses'
+    // archetypes, and #1785: their roof variants, unless their lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
+      roofVariants: roofVariantsWithLevers(leversOff),
     },
   );
   return { land, plans, urban };

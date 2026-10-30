@@ -352,7 +352,10 @@ describe('the plans are clad — #1588, over the mixed town', () => {
   });
 
   it('lays a shingled slope’s facade in metres along its eaves and up it', () => {
-    for (const plan of pitched.filter((each) => each.cladding.roof === 'shingle')) {
+    // A #1785 variant's slopes are each at their own pitch: `roof-variants.test.ts`.
+    for (const plan of pitched.filter(
+      (each) => each.cladding.roof === 'shingle' && each.roofVariant === 'plain',
+    )) {
       const roof = verticesOf(plan, 'roof');
       const lowest = Math.min(...roof.map((vertex) => vertex.y));
       const eaves = roof.filter((vertex) => vertex.y < lowest + 1e-4);
@@ -517,20 +520,29 @@ describe('gutters, a downpipe and dormers — #1588', () => {
       const tan = Math.tan((plan.pitchDegrees * Math.PI) / 180);
       const roof = verticesOf(plan, 'roof');
       const eaveY = Math.min(...roof.map((vertex) => vertex.y));
-      const across = rectangle.halfShort + EAVES_OVERHANG_METRES;
-      const outside = (vertex: Vertex): number =>
-        Math.abs(
-          -(vertex.x - rectangle.cx) * rectangle.uz + (vertex.z - rectangle.cz) * rectangle.ux,
+      const across = (vertex: Vertex): number =>
+        -(vertex.x - rectangle.cx) * rectangle.uz + (vertex.z - rectangle.cz) * rectangle.ux;
+      const outside = (vertex: Vertex): number => Math.abs(across(vertex));
+      for (const side of [1, -1]) {
+        // Each long eave's own reach: since 2026-10-30 a saltbox's steep front overhangs less.
+        const reach = Math.max(...roof.map((vertex) => side * across(vertex)));
+        // The gutter's front: trim facing out at the gutter's reach, from its top to its foot.
+        const front = verticesOf(plan, 'trim').filter(
+          (vertex) => Math.abs(side * across(vertex) - (reach + GUTTER.width)) < 1e-3,
         );
-      // The gutters' fronts: trim facing out at the gutter's reach, from its top to its foot.
-      const fronts = verticesOf(plan, 'trim').filter(
-        (vertex) => Math.abs(outside(vertex) - (across + GUTTER.width)) < 1e-3,
-      );
-      const top = eaveY - GUTTER.below;
-      // Each gutter: its front's six corners, and three each of its bottom's and its ends'.
-      expect(fronts.length).toBe(2 * (6 + 3 + 3 + 3));
-      for (const vertex of fronts) {
-        expect([top, top - GUTTER.depth].some((y) => Math.abs(vertex.y - y) < 1e-3)).toBe(true);
+        // Under its own eave, which since 2026-10-30 is level with the other on every variant.
+        const eaveYs = roof
+          .filter((vertex) => Math.abs(side * across(vertex) - reach) < 1e-3)
+          .map((vertex) => vertex.y);
+        expect(Math.min(...eaveYs)).toBeCloseTo(eaveY, 3);
+        const top = Math.min(...eaveYs) - GUTTER.below;
+        // Its front's six corners, and three each of its bottom's and its ends'.
+        expect(front.length).toBe(6 + 3 + 3 + 3);
+        for (const vertex of front) {
+          expect(
+            Math.abs(vertex.y - top) < 1e-3 || Math.abs(vertex.y - (top - GUTTER.depth)) < 1e-3,
+          ).toBe(true);
+        }
       }
       // The downpipe reaches the ground at the plinth's foot level.
       const lowest = Math.min(...verticesOf(plan, 'trim').map((vertex) => vertex.y));
