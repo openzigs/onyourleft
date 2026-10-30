@@ -37,6 +37,20 @@ describe("the demo page's query — #1647", () => {
   });
 
   it.each([
+    ['?autoplay=0', { ok: true, preset: CLIMB_PRESET, autoplay: false }],
+    ['?controls=0', { ok: true, preset: CLIMB_PRESET, controls: false }],
+    ['?units=imperial', { ok: true, preset: CLIMB_PRESET, units: 'imperial' }],
+    [
+      '?preset=sprint&autoplay=0&controls=0&units=imperial',
+      { ok: true, preset: SPRINT_PRESET, autoplay: false, controls: false, units: 'imperial' },
+    ],
+    // A default named reads as one left out.
+    ['?autoplay=1&controls=1&units=metric', { ok: true, preset: CLIMB_PRESET }],
+  ])('%j sets the embed’s start, controls and units — #1654', (search, expected) => {
+    expect(parseDemoQuery(search)).toEqual(expected);
+  });
+
+  it.each([
     ['?speed=2', 'This demo has no setting called “speed”.'],
     ['?preset=climb&world=stylised', 'This demo has no setting called “world”.'],
     ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, not “sprnt”.'],
@@ -49,6 +63,12 @@ describe("the demo page's query — #1647", () => {
     ['?route=a&route=b', 'This demo’s “route” setting is given more than once.'],
     ['?showcase=on', 'This demo’s “showcase” setting takes no value, not “on”.'],
     ['?showcase&preset=climb', 'This demo’s showcase is ridden by the group preset.'],
+    ['?autoplay=false', 'This demo’s “autoplay” setting is 0 or 1, not “false”.'],
+    ['?autoplay', 'This demo’s “autoplay” setting is 0 or 1, not “”.'],
+    ['?controls=no', 'This demo’s “controls” setting is 0 or 1, not “no”.'],
+    ['?autoplay=0&autoplay=1', 'This demo’s “autoplay” setting is given more than once.'],
+    ['?units=miles', 'This demo’s units are one of metric, imperial, not “miles”.'],
+    ['?units=Imperial', 'This demo’s units are one of metric, imperial, not “Imperial”.'],
   ])('refuses %j, saying why, rather than riding the default', (search, message) => {
     expect(parseDemoQuery(search)).toEqual({ ok: false, message });
   });

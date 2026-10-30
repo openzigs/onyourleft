@@ -15,6 +15,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import '../design/theme.css';
+import './demo.css';
 import type { GameView } from '../game/port';
 import {
   decorationBeltOf,

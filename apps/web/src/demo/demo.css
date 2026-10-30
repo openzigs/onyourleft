@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/*
+ * The demo page's own rules — #1654. Only what the demo needs and the
+ * product's `theme.css` must not carry: imported by `main.tsx` alone, so it is
+ * in the demo build and never in the rider app's.
+ *
+ * `?controls=0` (`query.ts`): the HUD's actions panel — *Play* and *Stop* —
+ * is not shown, for a site that offers its own way to hide the demo (WCAG 2.2
+ * SC 2.2.2; `docs/demo-embedding.md` says what the site then owes).
+ * `DemoPage.tsx` sets the class only while the demo moves by itself: a demo
+ * that starts still keeps its *Play*, or nothing could start it.
+ */
+.oyl-demo--no-controls .oyl-hud__actions {
+  display: none;
+}

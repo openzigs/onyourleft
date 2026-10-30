@@ -29,6 +29,7 @@ import { BAKED_ROUTE_UNAVAILABLE, type ReadDemoFile } from './baked-route';
 import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudCore';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { DemoPage } from './DemoPage';
+import { REALISTIC_LOADING } from './realistic-loading';
 import { REFERENCE_ASPECT } from '../game/camera';
 import type { SceneFrame } from '../game/port';
 import { projectThrough } from './camera-tour-testing';
@@ -274,6 +275,102 @@ describe('the demo page — #1647', { timeout: RIDE_TIMEOUT_MS }, () => {
   });
 });
 
+describe('the demo page as an embed — #1654', { timeout: RIDE_TIMEOUT_MS }, () => {
+  const statusText = (): string | null | undefined =>
+    mounted?.container.querySelector('[role="status"]:not([data-oyl-announcer])')?.textContent;
+
+  it.each([
+    ['loads', { loaded: true }, ''],
+    [
+      'cannot load',
+      { loaded: false, offline: false, detail: 'refused' },
+      'The realistic world could not be loaded',
+    ],
+  ])(
+    'says the realistic world is loading until it %s, and then not',
+    async (_what, outcome, after) => {
+      let arrive: (outcome: RealisticWorldOutcome) => void = () => undefined;
+      const shown = await page({
+        outcome: new Promise((resolve) => {
+          arrive = resolve;
+        }),
+      });
+      await shown.step(30);
+      expect(statusText()).toBe(REALISTIC_LOADING);
+      expect(shown.last()?.realisticLoading).toBe(true);
+      await act(async () => {
+        arrive(outcome);
+        await Promise.resolve();
+      });
+      await shown.step(1);
+      expect(shown.last()?.realisticLoading).toBe(false);
+      expect(statusText()).not.toContain(REALISTIC_LOADING);
+      expect(statusText()?.startsWith(after)).toBe(true);
+    },
+  );
+
+  it('with ?autoplay=0, starts paused on a still frame until Play is pressed', async () => {
+    const shown = await page({ search: '?preset=climb&autoplay=0' });
+    await shown.step(TWO_SECONDS);
+    expect(shown.last()).toMatchObject({ state: 'paused', distance: 0 });
+    expect(shown.last()?.framesDrawn).toBe(1);
+    expect(shown.button('Pause')).toBeUndefined();
+    await activateWithKeyboard(shown.button('Play') as HTMLButtonElement);
+    await shown.step(60);
+    expect(shown.last()?.state).toBe('playing');
+    expect(shown.last()?.distance).toBeGreaterThan(0);
+  });
+
+  /** Whether the stage carries the class `demo.css` hides the HUD's actions panel by. */
+  const withoutControls = (): boolean =>
+    mounted?.container.querySelector('.oyl-game')?.classList.contains('oyl-demo--no-controls') ===
+    true;
+
+  it.each([
+    ['?preset=climb', false],
+    ['?preset=climb&controls=1', false],
+    ['?preset=climb&controls=0', true],
+  ])('%j plays, and hides the HUD’s Pause and Stop: %s', async (search, hidden) => {
+    const shown = await page({ search });
+    await shown.step(60);
+    expect(shown.last()?.state).toBe('playing');
+    expect(shown.last()?.distance).toBeGreaterThan(0);
+    expect(withoutControls()).toBe(hidden);
+    // The readings are the HUD's either way.
+    expect(mounted?.container.querySelector('.oyl-hud__fields--primary')).not.toBeNull();
+  });
+
+  it.each([
+    ['&autoplay=0', false],
+    ['', true],
+  ])(
+    'with ?controls=0 and a still start (%j, reduced motion %s), still offers Play',
+    async (extra, reducedMotion) => {
+      const shown = await page({ search: `?preset=climb&controls=0${extra}`, reducedMotion });
+      await shown.step(10);
+      expect(shown.last()?.state).toBe('paused');
+      expect(withoutControls()).toBe(false);
+      await activateWithKeyboard(shown.button('Play') as HTMLButtonElement);
+      await shown.step(60);
+      expect(shown.last()?.state).toBe('playing');
+      expect(withoutControls()).toBe(false);
+    },
+  );
+
+  it.each([
+    ['', 'km/h'],
+    ['&units=imperial', 'mph'],
+  ])('with %j, the HUD reads its speed in %s', async (extra, unit) => {
+    const shown = await page({ search: `?preset=climb${extra}` });
+    await shown.step(60);
+    const units = [...(mounted?.container.querySelectorAll('.oyl-hud__unit') ?? [])].map((each) =>
+      each.textContent?.trim(),
+    );
+    expect(units).toContain(unit);
+    expect(units).not.toContain(unit === 'mph' ? 'km/h' : 'mph');
+  });
+});
+
 describe('the demo page on a baked route — #1652', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'oyl-demo-page-'));
   let files: Map<string, Uint8Array<ArrayBuffer>>;
@@ -370,6 +467,9 @@ describe('the demo page on a baked route — #1652', () => {
     const shown = await page({
       search: '?preset=climb&route=fixture',
       readFile: served(new Map([[bundlePath, whole.slice(0, whole.length >> 1)]])),
+      // Loaded, so the status line holds the route's sentence alone (#1654's
+      // loading line is gone by then).
+      outcome: Promise.resolve({ loaded: true }),
     });
     await until(() => shown.last() !== undefined);
     await shown.step(60);

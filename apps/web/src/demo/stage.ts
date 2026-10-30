@@ -99,6 +99,12 @@ export interface DemoSnapshot {
   /** What the page says about the world, if anything. */
   readonly notice: string | undefined;
   /**
+   * #1654: whether the realistic world's files are still arriving — from the
+   * stage's start until their load settles, loaded or not. The page shows a
+   * loading line while it is true (the owner's ruling of 2026-10-24 on #1643).
+   */
+  readonly realisticLoading: boolean;
+  /**
    * #1652: the baked route the run was given and its corridor's feature
    * counts, or `undefined` on the synthetic road. The browser gate checks the
    * counts against the fixture bundle's.
@@ -230,6 +236,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   const showcase = options.showcase;
   let pass = 1;
   let realisticLoaded = false;
+  let realisticLoading = true;
   let realisticLeft = false;
   let appliedWorld: 'stylised' | 'realistic' | undefined;
   let appliedDate: string | undefined;
@@ -296,6 +303,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
         framesDrawn,
         distance: ride.state.ride.distance,
         notice,
+        realisticLoading,
         mapData: player.mapData,
         mappedBuildings,
         skipped: shown?.skipped ?? [],
@@ -386,15 +394,22 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
 
   void renderer.loadRealisticWorld().then((outcome) => {
     realisticLoaded = outcome.loaded;
+    realisticLoading = false;
+    // The page may have gone while the files arrived.
+    if (destroyed) return;
     // #1653: a showcase in its stylised moment is told only that the world failed.
-    if (!destroyed && showcase !== undefined && !quality.realistic) {
+    if (showcase !== undefined && !quality.realistic) {
       if (!outcome.loaded) notice = realisticWorldNotice(outcome);
       redraw();
       publish();
       return;
     }
-    // The page may have gone, or the ladder left realism, while the files arrived.
-    if (destroyed || !quality.realistic) return;
+    // The ladder may have left realism while the files arrived: the loading
+    // line still goes (#1654), on a paused demo too.
+    if (!quality.realistic) {
+      publish();
+      return;
+    }
     if (outcome.loaded) {
       view.setQuality(worldRung(quality));
     } else {
