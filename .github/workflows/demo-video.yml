@@ -1,0 +1,172 @@
+# The demo's videos — #1655, epic #1643.
+#
+# By hand (`workflow_dispatch`): renders the three presets with
+# `demo:video` (apps/web/tools/demo/demo-video.ts) and uploads each as an
+# artefact, after `demo:video:check` has held the render to its claims. The
+# videos ride the synthetic road: CI never bakes OpenStreetMap data (ADR 0056
+# D-9), so a video of a baked route is rendered by the owner, locally, with
+# `--route`.
+#
+# On a pull request only when the video tooling itself changes, and then only
+# the checks: a pull request that does not touch these paths runs nothing here,
+# and no pull request renders the presets (CI minutes; the issue's own rule).
+#
+# ⚠️ Standard runners only (CLAUDE.md section 8: a larger runner is charged even
+# on a public repository), every action pinned to a full commit SHA, only the
+# plain pull-request trigger (WF001), and no secret: the job reads the
+# repository and writes artefacts, with `contents: read`.
+
+name: Demo video
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds of ride in each video
+        default: '30'
+      size:
+        description: WIDTHxHEIGHT in pixels, each even
+        default: '1280x720'
+      fps:
+        description: Frames a second, 1 to 60
+        default: '30'
+  pull_request:
+    paths:
+      - .github/workflows/demo-video.yml
+      - apps/web/playwright.video.config.ts
+      - apps/web/tools/demo/demo-video.ts
+      - apps/web/tools/demo/demo-video.video.spec.ts
+      - apps/web/tools/demo/render-video.ts
+      - apps/web/tools/demo/video.ts
+      - apps/web/src/demo/render-clock.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Demo video checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in rules.yml:
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.1.0 --jq .object.sha
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      # Not on the runner image (ubuntu-24.04's readme lists no ffmpeg). A tool
+      # the render runs, never shipped.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | head -n 1
+
+      - name: Build the demo
+        run: pnpm --filter @onyourleft/web run build:demo
+
+      - name: Check the render
+        run: pnpm --filter @onyourleft/web run demo:video:check
+
+  render:
+    name: Render ${{ matrix.preset }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: check
+    runs-on: ubuntu-latest
+    # Not yet measured on a runner. On a Mac, three seconds of the climb at
+    # 1280 × 720 and 10 frames a second, the realistic world's load included,
+    # took 16 s (#1655). A runner's SwiftShader is slower; this stop leaves 900
+    # frames four seconds each.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [climb, sprint, group]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+
+      - name: Build the demo
+        run: pnpm --filter @onyourleft/web run build:demo
+
+      # The inputs reach the command as environment variables, never pasted
+      # into the script, and `demo:video` refuses any value it cannot use.
+      - name: Render the video
+        env:
+          PRESET: ${{ matrix.preset }}
+          SECONDS_OF_RIDE: ${{ inputs.seconds }}
+          SIZE: ${{ inputs.size }}
+          FPS: ${{ inputs.fps }}
+        run: >-
+          pnpm --filter @onyourleft/web run demo:video --
+          --preset "$PRESET" --seconds "$SECONDS_OF_RIDE" --size "$SIZE" --fps "$FPS"
+
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload the video
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: demo-video-${{ matrix.preset }}
+          path: apps/web/demo/dist/video/
+          if-no-files-found: error

@@ -1747,6 +1747,13 @@ Repository-level security scanning — CodeQL default setup, secret scanning wit
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
 workflow step. Adding one would duplicate it.
 
+[`.github/workflows/demo-video.yml`](../../.github/workflows/demo-video.yml) — **`Demo video`**
+([#1655](https://github.com/openzigs/onyourleft/issues/1655)) — on `workflow_dispatch` it runs
+`demo:video:check` and then renders the three demo presets on `ubuntu-latest`, uploading each as an
+artefact. On a pull request it runs only when its own tooling's paths change, and then runs only the
+checks. It installs `ffmpeg` with `apt-get` because the runner image has none. It is not a required
+check and uses no secret. [`docs/demo-video.md`](../demo-video.md) describes it.
+
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs
 [`scripts/sync-roadmap.py`](../../scripts/sync-roadmap.py) at 04:41 UTC nightly and on
