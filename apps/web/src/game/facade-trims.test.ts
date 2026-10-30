@@ -433,6 +433,13 @@ describe('the trims, in the shader — #1663', () => {
     expect(fragment).toContain(
       'float oylRows = oylTop >= oylTopShare ? floor(oylTop - oylTopShare + 0.0001) + 1.0 : 0.0;',
     );
+    // The far corner is the wall's far end, not the near one's mirror; terraced buildings get no quoin.
+    expect(fragment).toContain(
+      'float oylFromCorner = min(oylM.x, (oylBaysAll - vOylFacade.x) * oylTrimBay);',
+    );
+    expect(fragment).toContain(
+      'float oylQuoin = (1.0 - oylFlag(oylFlags, oylTerracedFlag)) * step(vOylFacade.y, oylTop)',
+    );
     // The far corner, from u² over u.
     expect(vertex).toContain('vOylUu = oylFacade.x * oylFacade.x;');
     expect(fragment).toContain('varying float vOylUu;');

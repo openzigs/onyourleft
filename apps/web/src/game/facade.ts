@@ -144,6 +144,15 @@
  * plan's: as many as the facade lays rows of windows ({@link windowStoreysOf}),
  * never `DEFAULT_STOREYS`. No texture, no triangle and no draw call.
  *
+ * ⚠️ Known limits, left as they are. A quoin is painted after the windows and
+ * the glass is not reduced, so where a corner bay is narrow (`baysOf` allows
+ * bays down to `WINDOW_MIN_WALL_METRES`, 2 m) the stone covers a shutter or
+ * a picture window's frame at the corner; a blind bay there is not laid. And
+ * the trims sit inside the shader's windowed branch, so a brick wall with no
+ * windows (under 2 m, or any other plain face) has no quoins, which leaves
+ * one face of an L-shaped house's notch bare at a corner whose other face has
+ * them. The owner's `?town=mixed` look pairs include the shutter case.
+ *
  * ## The porch (#1589)
  *
  * A front porch's railing is one quad (`footprint-buildings.ts`

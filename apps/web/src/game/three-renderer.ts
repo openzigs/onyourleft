@@ -16050,7 +16050,7 @@ function facadeCommonGlsl(
   overhangs: boolean,
   weathering: boolean,
   surface: StructureSurface,
-  trims = false,
+  trims: boolean,
 ): string {
   return /* glsl */ `
   uniform float oylFacadeOn;
@@ -16279,8 +16279,8 @@ export const FACADE_SHOWN_GLSL =
 function facadeFragmentGlsl(
   overhangs: boolean,
   weathering: boolean,
-  trims = false,
-  surface: StructureSurface = 'render',
+  trims: boolean,
+  surface: StructureSurface,
 ): string {
   return /* glsl */ `
   float oylGlass = 0.0;
