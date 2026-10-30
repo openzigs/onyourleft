@@ -979,10 +979,16 @@ function ride(name: string): void {
       // What the renderer draws of them at this aspect (#1835): the people
       // `three-renderer.ts` hands its people belt, and the mapped buildings
       // its belt does not hide — a house model with its plan.
+      // The cull hands back the very same people when it drops nobody, which
+      // is nearly every frame: only then is a set of who is left built.
       const people = peopleClearOfTheCamera(frame.people, pyramid);
-      const drawnPeople = new Set([...(people?.near ?? []), ...(people?.far ?? [])]);
-      const cut = new Map<FootprintPlan, boolean>();
+      const drawnPeople =
+        people === frame.people
+          ? undefined
+          : new Set([...(people?.near ?? []), ...(people?.far ?? [])]);
+      let cut: Map<FootprintPlan, boolean> | undefined;
       const cutOf = ({ plan, radius }: { plan: FootprintPlan; radius: number }): boolean => {
+        cut ??= new Map();
         const known = cut.get(plan);
         if (known !== undefined) return known;
         const answer = mappedBuildingCut(plan, radius, pyramid);
@@ -992,7 +998,7 @@ function ride(name: string): void {
       for (const subject of subjects) {
         const dropped =
           subject.person !== undefined
-            ? !drawnPeople.has(subject.person)
+            ? drawnPeople !== undefined && !drawnPeople.has(subject.person)
             : subject.building !== undefined && cutOf(subject.building);
         if (dropped) tally(found.dropped, label, subject.what);
         if (!meets(subject, pyramid)) continue;
