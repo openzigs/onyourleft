@@ -56,30 +56,71 @@ public class MainActivity extends BridgeActivity {
      * before, {@code super.dispatchKeyEvent}, untouched. The script is a constant plus a number
      * from 1 to 16 and a boolean, so nothing a page or a pad holds is ever written into it.
      *
-     * <p>⚠️ The pad is judged by its device, not only by the event: a generic pad Android lists
-     * as KEYBOARD | JOYSTICK (no GAMEPAD, the spike's Twin USB receiver) raises its buttons through
-     * its keyboard mapper, so the key event's own source is plain KEYBOARD. Measured on the owner's
-     * tablet on 2026-10-30, every press was dropped until the device's sources were added in
-     * {@link #sourcesOf}. A real keyboard raises no numbered button, so this admits no keyboard.
+     * <p>⚠️ Which devices are admitted: a numbered code is forwarded when the event's source or
+     * its device's sources include JOYSTICK or GAMEPAD. The device counts because a generic pad
+     * Android lists as KEYBOARD | JOYSTICK (no GAMEPAD, the spike's Twin USB receiver) raises its
+     * buttons through its keyboard mapper, so the key event's own source is plain KEYBOARD.
+     * Measured on the owner's tablet on 2026-10-30, every press was dropped until the device's
+     * sources were added in {@link #sourcesOf}. So a device that is both a keyboard and a pad is
+     * admitted, as that receiver is; a device that is only a keyboard, or a D-pad, is not.
+     *
+     * <p>⚠️ A release of a button this sent down is always sent (#1893). Unplugging a pad while a
+     * button is held makes Android send a cancelled release, and by then {@code getDevice()} may
+     * no longer find the device, so the release would be judged a keyboard's and kept from the
+     * page, which would hold the button down until a reload. {@link #buttonsDown} remembers each
+     * button sent down, and {@link #sentDown} sends its release whatever the device says.
+     * {@code gamepad-port.ts} also lets go of every forwarded button when a pad disconnects.
+     *
+     * <p>Only KEYCODE_BUTTON_1 to 16 are looked at further: every other key goes to
+     * {@code super.dispatchKeyEvent} before its device is asked for.
      *
      * <p>CI does not build Android: {@code apps/mobile/src/android/gamepad-button-source.test.ts}
-     * reads this source and runs {@link #forwardedButton} over each class of key event; whether a
-     * pad throws on a device is #1858's tablet step.
+     * reads this source and runs this dispatch, with the methods it calls, over stub key events;
+     * whether a pad throws on a device is #1858's tablet step.
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        int button = forwardedButton(event.getKeyCode(), sourcesOf(event));
+        int keyCode = event.getKeyCode();
+        if (!isNumberedButton(keyCode)) {
+            return super.dispatchKeyEvent(event);
+        }
+        int action = event.getAction();
+        int button = forwardedButton(keyCode, sourcesOf(event));
+        if (button == 0 && action == KeyEvent.ACTION_UP) {
+            button = sentDown(buttonsDown, keyCode);
+        }
         Bridge bridge = getBridge();
         if (button == 0 || bridge == null || bridge.getWebView() == null) {
             return super.dispatchKeyEvent(event);
         }
-        int action = event.getAction();
         if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            buttonsDown = buttonsDown | (1 << button);
             forwardButton(bridge.getWebView(), button, true);
         } else if (action == KeyEvent.ACTION_UP) {
+            buttonsDown = buttonsDown & ~(1 << button);
             forwardButton(bridge.getWebView(), button, false);
         }
         return true;
+    }
+
+    /**
+     * The numbered buttons sent to the page as down and not yet as up: bit {@code n} for button
+     * {@code n}.
+     */
+    private int buttonsDown;
+
+    /** Whether a key code is one of KEYCODE_BUTTON_1 to 16. */
+    static boolean isNumberedButton(int keyCode) {
+        return keyCode >= KeyEvent.KEYCODE_BUTTON_1 && keyCode <= KeyEvent.KEYCODE_BUTTON_16;
+    }
+
+    /**
+     * The button a numbered key code is, from 1 to 16, if {@code down} holds it as sent down, or 0:
+     * how a release whose device has gone still reaches the page (#1893).
+     */
+    static int sentDown(int down, int keyCode) {
+        int button = keyCode - KeyEvent.KEYCODE_BUTTON_1 + 1;
+        return (down & (1 << button)) == 0 ? 0 : button;
     }
 
     /**

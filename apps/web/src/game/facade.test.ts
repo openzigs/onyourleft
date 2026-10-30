@@ -14,6 +14,13 @@ import { describe, expect, it } from 'vitest';
 import {
   DOOR_IN_FACE,
   facadePartAt,
+  glassWeightsAt,
+  INTERIOR,
+  INTERIOR_PALETTES,
+  interiorAt,
+  litRoomAt,
+  roomPaintOf,
+  roomSeedAt,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
   type FacadePart,
@@ -31,6 +38,7 @@ import {
   type FootprintPlan,
 } from './footprint-buildings';
 import { mixedTownFixture } from './footprint-fixtures-testing';
+import { unpackInstanceTint } from './instance-tint';
 import { landClassMask } from './land-class';
 
 const town = mixedTownFixture();
@@ -226,6 +234,192 @@ describe('the plans’ facades — #1581, over the mixed town', () => {
         for (const vertex of verticesOf(plan, role)) expect(vertex.top, role).toBe(FACADE_PLAIN);
       }
       for (const vertex of verticesOf(plan, 'trim')) expect(vertex.top).toBe(FACADE_PAINT);
+    }
+  });
+});
+
+/** A plan's seeded tint as the shader decodes it (`vOylTint`): hue in radians, saturation, brightness. */
+function tintOf(plan: FootprintPlan): readonly [number, number, number] {
+  const tint = unpackInstanceTint(plan.tint);
+  return [(tint.hueDegrees * Math.PI) / 180, tint.saturation, tint.brightness];
+}
+
+/** Every windowed wall of `of`'s plans: its bays, its whole storeys and its building's tint. */
+function windowCells(of: readonly FootprintPlan[]): {
+  readonly bays: number;
+  readonly storeys: number;
+  readonly tint: readonly [number, number, number];
+}[] {
+  return of.flatMap((plan) =>
+    windowedWalls(plan).map((quad) => ({
+      bays: Math.round(Math.max(...quad.map((vertex) => vertex.u))),
+      storeys: Math.floor((quad[0] as FacadeVertex).top),
+      tint: tintOf(plan),
+    })),
+  );
+}
+
+describe('the room behind the glass — #1662', () => {
+  const HALF = Math.SQRT1_2;
+  /** A sash's glass, metres, and the point at its middle. */
+  const size: readonly [number, number] = [0.71, 1.31];
+  const middle: readonly [number, number] = [0, 0];
+  const seed = 0.42;
+
+  it('meets the back wall 3.5 m behind the glass, head-on through the pane’s middle', () => {
+    const hit = interiorAt(middle, size, [0, 0, 1], seed, 'home', false);
+    expect(hit.surface).toBe('back');
+    expect(hit.deep).toBeCloseTo(INTERIOR.depth, 9);
+    expect(INTERIOR.depth).toBe(3.5);
+  });
+
+  it('meets the floor on a ray 45° downward, and the ceiling on one 45° upward', () => {
+    // The eye above the pane looks down into the room, and below it, up.
+    const down = interiorAt(middle, size, [0, HALF, HALF], seed, 'home', false);
+    expect(down.surface).toBe('floor');
+    // The floor is `below` under the pane's foot: as deep behind the glass as it is under the eye's point.
+    expect(down.deep).toBeCloseTo(size[1] / 2 + INTERIOR.below, 9);
+    expect(interiorAt(middle, size, [0, -HALF, HALF], seed, 'home', false).surface).toBe('ceiling');
+  });
+
+  it('meets the right-hand wall on a ray 45° to the left, and the left-hand wall on one to the right', () => {
+    // The eye 45° to the face's left (toward −u) looks in toward +u: the right-hand wall.
+    const fromLeft = interiorAt(middle, size, [-HALF, 0, HALF], seed, 'home', false);
+    expect(fromLeft.surface).toBe('right');
+    expect(fromLeft.deep).toBeCloseTo(size[0] / 2 + INTERIOR.side, 9);
+    expect(interiorAt(middle, size, [HALF, 0, HALF], seed, 'home', false).surface).toBe('left');
+  });
+
+  it('paints the floor darker than the ceiling, and the deeper a plane the darker', () => {
+    const luminance = (rgb: readonly number[]): number =>
+      0.2126 * (rgb[0] ?? 0) + 0.7152 * (rgb[1] ?? 0) + 0.0722 * (rgb[2] ?? 0);
+    for (let k = 0; k < 40; k += 1) {
+      const s = (k + 0.5) / 40;
+      const floor = interiorAt([0, -0.6], size, [0, HALF, HALF], s, 'home', false);
+      const ceiling = interiorAt([0, -0.6], size, [0, -HALF, HALF], s, 'home', false);
+      if (floor.surface === 'floor' && ceiling.surface === 'ceiling') {
+        expect(luminance(floor.colour), String(s)).toBeLessThan(luminance(ceiling.colour));
+      }
+    }
+    // One side wall, met near the glass and deep in: the same paint, fainter deeper.
+    const near = interiorAt([0.3, 0], size, [-0.9, 0, Math.sqrt(1 - 0.81)], seed, 'home', false);
+    const deep = interiorAt([-0.3, 0], size, [-0.5, 0, Math.sqrt(1 - 0.25)], seed, 'home', false);
+    expect(near.surface).toBe('right');
+    expect(deep.surface).toBe('right');
+    expect(deep.deep).toBeGreaterThan(near.deep + 1);
+    expect(luminance(deep.colour)).toBeLessThan(luminance(near.colour));
+  });
+
+  it('lights a lit room warm, brighter than an unlit one, and below every paint it is painted with', () => {
+    const unlit = interiorAt(middle, size, [0, 0, 1], seed, 'home', false).colour;
+    const lit = interiorAt(middle, size, [0, 0, 1], seed, 'home', true).colour;
+    expect(lit[0]).toBeGreaterThan(unlit[0]);
+    // Warm: more red than blue.
+    expect(lit[0] / lit[2]).toBeGreaterThan(1.5);
+    for (const channel of [...INTERIOR.lit, ...INTERIOR.unlit]) expect(channel).toBeLessThan(1);
+  });
+
+  it('draws a blind across the top of the glass of a seeded share of rooms, and never across its middle', () => {
+    let blinds = 0;
+    const rooms = 1000;
+    for (let k = 0; k < rooms; k += 1) {
+      const s = (k + 0.5) / rooms;
+      const top = interiorAt([0, size[1] / 2 - 0.01], size, [0, 0, 1], s, 'home', false);
+      if (top.surface === 'blind') blinds += 1;
+      expect(interiorAt(middle, size, [0, 0, 1], s, 'home', false).surface).not.toBe('blind');
+    }
+    expect(blinds / rooms).toBeGreaterThan(INTERIOR.blind.share - 0.06);
+    expect(blinds / rooms).toBeLessThan(INTERIOR.blind.share + 0.06);
+  });
+
+  it('gives two cells on one wall different room paints in at least 3 of 4 neighbouring pairs', () => {
+    const walls = windowCells(plans);
+    let pairs = 0;
+    let differ = 0;
+    for (const wall of walls) {
+      for (let storey = 0; storey < wall.storeys; storey += 1) {
+        for (let k = 0; k + 1 < wall.bays; k += 1) {
+          const a = roomPaintOf(roomSeedAt([k, storey], wall.tint));
+          const b = roomPaintOf(roomSeedAt([k + 1, storey], wall.tint));
+          pairs += 1;
+          if (a !== b) differ += 1;
+        }
+      }
+    }
+    expect(pairs).toBeGreaterThan(500);
+    // The issue asks 3 in 4; the seed's parity makes it every pair.
+    expect(differ / pairs).toBeGreaterThanOrEqual(0.75);
+    expect(differ).toBe(pairs);
+    // And the paints still vary from wall to wall: every one of the palette's six is used.
+    const used = new Set(
+      walls.flatMap((wall) =>
+        Array.from({ length: wall.bays }, (_, k) => roomPaintOf(roomSeedAt([k, 1], wall.tint))),
+      ),
+    );
+    expect(used.size).toBe(INTERIOR_PALETTES.home.walls.length);
+  });
+
+  it('gives the same cell the same paint across two builds of the plans', () => {
+    const again = footprintPlans(
+      town.corridor,
+      landClassMask(town.corridor),
+      town.profile,
+      town.origin,
+    ).plans;
+    const first = windowCells(plans);
+    const second = windowCells(again);
+    expect(second.length).toBe(first.length);
+    first.forEach((wall, at) => {
+      const other = second[at];
+      expect(other?.tint).toEqual(wall.tint);
+      for (let k = 0; k < wall.bays; k += 1) {
+        expect(roomPaintOf(roomSeedAt([k, 1], other?.tint ?? [0, 0, 0]))).toBe(
+          roomPaintOf(roomSeedAt([k, 1], wall.tint)),
+        );
+      }
+    });
+  });
+
+  it('keeps #1581’s one lit room in five over 2 000 window cells, and seeds the room apart from it', () => {
+    let cells = 0;
+    let lit = 0;
+    let litAndPale = 0;
+    for (const wall of windowCells(plans)) {
+      for (let storey = 0; storey < wall.storeys; storey += 1) {
+        for (let k = 0; k < wall.bays; k += 1) {
+          cells += 1;
+          if (litRoomAt([k, storey], wall.tint)) {
+            lit += 1;
+            if (roomSeedAt([k, storey], wall.tint) < 0.5) litAndPale += 1;
+          }
+        }
+      }
+    }
+    expect(cells).toBeGreaterThanOrEqual(2000);
+    expect(Math.abs(lit / cells - 0.2)).toBeLessThanOrEqual(0.03);
+    // The room's seed is not the lit hash: a lit room is any paint.
+    expect(litAndPale / lit).toBeGreaterThan(0.35);
+    expect(litAndPale / lit).toBeLessThan(0.65);
+  });
+
+  it('weights the environment by Schlick’s Fresnel with F0 0.04: a pane is its room head-on and the sky at a graze', () => {
+    const radians = (degrees: number): number => (degrees * Math.PI) / 180;
+    expect(INTERIOR.fresnel).toBe(0.04);
+    const headOn = glassWeightsAt(1);
+    expect(headOn.environment).toBeCloseTo(0.04, 9);
+    expect(headOn.environment).toBeLessThanOrEqual(0.1);
+    expect(headOn.room).toBeCloseTo(0.96, 9);
+    // 80° off the normal: 0.04 + 0.96 (1 − cos 80°)⁵ = 0.41. The issue's
+    // "at least 0.6" is Schlick's at 85°, not at 80°; both are held.
+    const eighty = glassWeightsAt(Math.cos(radians(80)));
+    expect(eighty.environment).toBeCloseTo(0.04 + 0.96 * (1 - Math.cos(radians(80))) ** 5, 9);
+    expect(eighty.environment).toBeGreaterThan(0.4);
+    expect(glassWeightsAt(Math.cos(radians(85))).environment).toBeGreaterThanOrEqual(0.6);
+    expect(glassWeightsAt(0).environment).toBe(1);
+    for (let degrees = 0; degrees < 90; degrees += 5) {
+      const { environment, room } = glassWeightsAt(Math.cos(radians(degrees)));
+      expect(environment + room).toBeCloseTo(1, 12);
+      expect(environment).toBeLessThan(glassWeightsAt(Math.cos(radians(degrees + 5))).environment);
     }
   });
 });
