@@ -8,6 +8,7 @@
  * | `preset` | which preset is ridden (`presets.ts`) | `climb`, `sprint`, `group`; default `climb` |
  * | `route` | a baked route's map data and road, read from `routes/` (#1652, `baked-route.ts`) | a route id `demo:bake` wrote; absent rides the synthetic road |
  * | `showcase` | the feature-showcase timeline (#1653, `showcase.ts`), ridden by the `group` preset | present, with no value; `preset`, if given, must be `group` |
+ * | `render` | the video render's stepped clock (#1655, `tools/demo/render-video.ts`): the page moves only when the render steps it | present, with no value |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, with a sentence the page
  * shows, as `browser/realistic/config.ts` refuses them: an embedding site that
@@ -20,7 +21,7 @@ import { DEMO_PRESETS } from './presets';
 import type { DemoPreset } from './script';
 
 /** The parameters the page understands. */
-const KNOWN = new Set(['preset', 'route', 'showcase']);
+const KNOWN = new Set(['preset', 'route', 'showcase', 'render']);
 
 /** The preset the showcase is ridden by: its last moment is a group (#1653). */
 export const SHOWCASE_PRESET_ID = 'group';
@@ -34,6 +35,8 @@ export type DemoQuery =
       readonly route?: string;
       /** #1653: whether the showcase timeline runs. */
       readonly showcase?: true;
+      /** #1655: the video render drives the page's clock (`render-clock.ts`). */
+      readonly render?: true;
     }
   | { readonly ok: false; readonly message: string };
 
@@ -47,6 +50,10 @@ export function parseDemoQuery(search: string): DemoQuery {
     if (params.getAll(key).length > 1) {
       return { ok: false, message: `This demo’s “${key}” setting is given more than once.` };
     }
+  }
+  const render = params.get('render');
+  if (render !== null && render !== '') {
+    return { ok: false, message: `This demo’s “render” setting takes no value, not “${render}”.` };
   }
   const showcase = params.get('showcase');
   if (showcase !== null && showcase !== '') {
@@ -76,5 +83,6 @@ export function parseDemoQuery(search: string): DemoQuery {
     preset,
     ...(route === null ? {} : { route }),
     ...(showcase === null ? {} : { showcase: true as const }),
+    ...(render === null ? {} : { render: true as const }),
   };
 }
