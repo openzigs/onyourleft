@@ -153,12 +153,14 @@ const REQUIRED_CHECK = 'Repository rules';
  * ⚠️ **It still cannot notice a shard that got slower since the last row.**
  * The one job grew about 21 s a day in the week to 2026-10-12; the table's
  * newest row is how old these bounds are.
+ *
+ * Since #1701 the nightly jobs' table too, between the two
+ * `nightly-measurements` markers, read the same way.
  */
-function measuredShards(): (column: string) => number[] {
+function measuredShards(table = 'shard-measurements'): (column: string) => number[] {
   const doc = read(ROOT, 'docs', 'agents', 'ci.md');
   const block =
-    /<!-- shard-measurements:start -->\n([\s\S]*?)<!-- shard-measurements:end -->/.exec(doc)?.[1] ??
-    '';
+    new RegExp(`<!-- ${table}:start -->\\n([\\s\\S]*?)<!-- ${table}:end -->`).exec(doc)?.[1] ?? '';
   const cells = (line: string): string[] =>
     line
       .split('|')
@@ -600,6 +602,24 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     }
   });
 
+  it('holds every nightly job’s slowest measured run inside 60 % of its own stop — #1701', () => {
+    // #1701's acceptance, as #1698 holds each realistic shard's loads: `heavy`
+    // reached 1 242 s of its 1 800 s stop with the coverage report in it (run
+    // 40853930991). The figures are the table in docs/agents/ci.md §4c
+    // §"Coverage in a job of its own — #1701", one column per job id, so a job
+    // added without being measured is a red case. `report` runs only after a
+    // red run, so it has no reading to hold.
+    const measured = measuredShards('nightly-measurements');
+    for (const [id, job] of jobsOf(nightly)) {
+      if (id === 'report') continue;
+      const stop = Number(jobField(job, 'timeout-minutes')) * 60;
+      const slowest = Math.max(...measured(id));
+      // A figure under a minute is a typo, not a job that installs.
+      expect(slowest, id).toBeGreaterThan(60);
+      expect(slowest, id).toBeLessThanOrEqual(NIGHTLY_SHARE * stop);
+    }
+  });
+
   it('runs every nightly job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {
     for (const [id, job] of jobsOf(nightly)) {
       expect(jobField(job, 'runs-on'), id).toBe('ubuntu-latest');
@@ -666,6 +686,21 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(nightly.indexOf('run: pnpm run test:coverage')).toBeLessThan(
       nightly.indexOf('- name: Upload the coverage report'),
     );
+  });
+
+  it('takes the coverage report in a job of its own, with no browser shard or other suite beside it — #1701', () => {
+    // After browser shard 1 in `heavy` the report took that job to 1 242 s of
+    // its 1 800 s stop (run 40853930991): a slow runner would have stopped the
+    // job and cancelled shard 1's tests with it.
+    const homes = [...jobsOf(nightly)].filter(([, job]) =>
+      job.includes('run: pnpm run test:coverage\n'),
+    );
+    expect(homes).toHaveLength(1);
+    const [, job = ''] = homes[0] ?? [];
+    const suites = [...job.matchAll(/^ +run: pnpm (?:run )?(\S+)/gm)].map((match) =>
+      String(match[1]),
+    );
+    expect(suites).toEqual(['install', 'test:coverage']);
   });
 
   it('still takes and publishes the report when an earlier nightly step went red — #1286’s review', () => {
