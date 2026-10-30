@@ -218,9 +218,20 @@ export type StartedJob =
       readonly rideRefused?: true;
       /**
        * The refusal named the service (#1796): the rider's consent on the
-       * instance now names another than the one this device showed.
+       * instance now names another than the one this device showed. Only the
+       * instance's own words for that ({@link NOT_THE_SERVICE}); any other
+       * refusal of `endpoint` is an ordinary `validation_failed`.
        */
       readonly serviceMoved?: true;
+      /**
+       * The instance does not know the `endpoint` field at all (#1796): one
+       * older than #1796 refuses every key it does not know with these exact
+       * words. Such an instance makes no check of the service, and the start
+       * may be sent again without the field, as an app before #1796 sent it.
+       * An instance that knows the field never answers this of `endpoint`, so
+       * a refusal of the service itself is never sent again.
+       */
+      readonly endpointUnknown?: true;
     }
   /** No answer: nothing is known to have been queued. */
   | { readonly kind: 'unreachable' };
@@ -248,17 +259,36 @@ export async function startJob(
     kind: 'refused',
     ...(code === undefined ? {} : { code }),
     ...(refusesField(answer.body, 'rideId') ? { rideRefused: true } : {}),
-    ...(refusesField(answer.body, 'endpoint') ? { serviceMoved: true } : {}),
+    ...(refusesField(answer.body, 'endpoint', NOT_THE_SERVICE) ? { serviceMoved: true } : {}),
+    ...(refusesField(answer.body, 'endpoint', NOT_A_FIELD) ? { endpointUnknown: true } : {}),
   };
 }
 
-/** Whether a `validation_failed` refusal names `field` among its fields: the ride id (#1229), the service (#1796). */
-function refusesField(body: unknown, field: 'rideId' | 'endpoint'): boolean {
+/**
+ * `apps/instance` §`jobs.ts` §`NOT_THE_SERVICE`'s problem: the rider's
+ * recorded consent names another service than the start's `endpoint` (#1796).
+ */
+const NOT_THE_SERVICE = 'must be the service your recorded consent names';
+
+/**
+ * `apps/instance` §`jobs.ts`'s problem for a body key it does not know — what
+ * an instance older than #1796 answers of `endpoint`.
+ */
+const NOT_A_FIELD = 'is not a field of a job';
+
+/**
+ * Whether a `validation_failed` refusal names `field` among its fields: the
+ * ride id (#1229), the service (#1796) — with exactly `problem`, when given.
+ */
+function refusesField(body: unknown, field: 'rideId' | 'endpoint', problem?: string): boolean {
   const error = (body as { error?: { code?: unknown; fields?: unknown } } | null)?.error;
   return (
     error?.code === 'validation_failed' &&
     Array.isArray(error.fields) &&
-    error.fields.some((each) => (each as { field?: unknown } | null)?.field === field)
+    error.fields.some((each) => {
+      const named = each as { field?: unknown; problem?: unknown } | null;
+      return named?.field === field && (problem === undefined || named.problem === problem);
+    })
   );
 }
 

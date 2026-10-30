@@ -100,11 +100,23 @@ describe('the request', () => {
         session({ call: async () => Promise.resolve({ status: 400, body }) }),
         analysisJobRequest(INPUT, '1', 'instance-hosted', undefined, 'https://models.example'),
       );
+    const endpoint = (problem: string) => ({
+      error: { code: 'validation_failed', fields: [{ field: 'endpoint', problem }] },
+    });
     expect(
-      await answered({
-        error: { code: 'validation_failed', fields: [{ field: 'endpoint', problem: 'x' }] },
-      }),
+      await answered(endpoint('must be the service your recorded consent names')),
     ).toStrictEqual({ kind: 'refused', code: 'validation_failed', serviceMoved: true });
+    // An instance older than #1796 does not know the field: no service was refused.
+    expect(await answered(endpoint('is not a field of a job'))).toStrictEqual({
+      kind: 'refused',
+      code: 'validation_failed',
+      endpointUnknown: true,
+    });
+    // Any other refusal of the field is an ordinary one.
+    expect(await answered(endpoint('x'))).toStrictEqual({
+      kind: 'refused',
+      code: 'validation_failed',
+    });
     expect(
       await answered({
         error: { code: 'validation_failed', fields: [{ field: 'source', problem: 'x' }] },

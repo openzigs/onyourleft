@@ -257,6 +257,7 @@ export const INSTANCE_ASK_TEXT = {
   'masking-not-sent':
     'This device could not give your instance your list of words to mask and your privacy zones, so nothing was sent to the service and nothing was kept.',
   // #1796: the key was replaced, and agreed to again, for another service on another device.
+  // ⚠️ Draft wording awaiting the owner's approval (#1935).
   'service-moved':
     'Your instance now sends write-ups to a different service than the one named here, so nothing was sent and nothing was kept. Open Instance in Settings to see which it is, then ask again.',
   failed: 'The write-up did not finish, so nothing was kept.',
@@ -594,6 +595,7 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
     source: InstanceJobSource,
     view: (view: InstanceJobView) => void,
     signal: AbortSignal,
+    endpoint: string | undefined,
   ): Promise<InstanceAskOutcome> {
     view({ phase: 'starting', sections: [], withdrawn: false });
     const input = await readRideInput(store, owner, activityId, {
@@ -611,17 +613,25 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
       if (!sent) return failed(INSTANCE_ASK_TEXT['masking-not-sent']);
     }
     const rideId = await syncedRideId(options.syncBase, owner, activityId);
-    // #1796: a hosted start names the service the press named, read again now.
-    const endpoint = source === 'instance-hosted' ? options.hosted?.endpoint() : undefined;
+    // #1796: a hosted start names the service the press named (`ask`).
+    let named = endpoint;
+    let ride = rideId;
     let started = await startJob(
       session,
-      analysisJobRequest(input, template.version, source, rideId, endpoint),
+      analysisJobRequest(input, template.version, source, ride, named),
     );
-    // A ride the instance no longer holds: the same start, naming no ride.
-    if (started.kind === 'refused' && started.rideRefused === true && rideId !== undefined) {
+    // Each field at most once, in whichever order the instance refuses them:
+    // - an instance older than #1796 does not know `endpoint`, and checks no
+    //   service: the same start, naming none, as an app before #1796 sent it.
+    //   Only on those exact words — a refusal of the service is never retried;
+    // - a ride the instance no longer holds (#1229): the same start, naming no ride.
+    for (let retry = 0; retry < 2 && started.kind === 'refused'; retry += 1) {
+      if (started.endpointUnknown === true && named !== undefined) named = undefined;
+      else if (started.rideRefused === true && ride !== undefined) ride = undefined;
+      else break;
       started = await startJob(
         session,
-        analysisJobRequest(input, template.version, source, undefined, endpoint),
+        analysisJobRequest(input, template.version, source, ride, named),
       );
     }
     if (started.kind === 'unreachable') return failed(INSTANCE_ASK_TEXT.unreachable);
@@ -662,19 +672,28 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
 
     pendingJob: (activityId) => readPending().has(activityId),
 
-    async ask(activityId, source, view, signal) {
+    async ask(activityId, source, view, signal, shownEndpoint) {
       if (!options.connected()) return failed(INSTANCE_ASK_TEXT['no-instance']);
       // #1228: a page drawn while hosted was offered keeps its press after the
       // rider withdraws; the offer is read again at the press, and without it
       // nothing is sent — not the masking list, not the ride.
-      if (source === 'instance-hosted' && options.hosted?.endpoint() === undefined) {
+      const held = source === 'instance-hosted' ? options.hosted?.endpoint() : undefined;
+      if (source === 'instance-hosted' && held === undefined) {
         return failed(INSTANCE_FAILURE_TEXT.hosted_unavailable);
       }
+      // #1796: the start names the service the page showed, never one this
+      // device learnt of since (another tab's read of the instance). When the
+      // two differ nothing is sent, so an instance too old to check the
+      // service itself cannot be handed one the rider was not shown.
+      if (shownEndpoint !== undefined && held !== undefined && shownEndpoint !== held) {
+        return failed(INSTANCE_ASK_TEXT['service-moved']);
+      }
+      const endpoint = source === 'instance-hosted' ? (shownEndpoint ?? held) : undefined;
       followed.delete(activityId);
       cancelledEarly.delete(activityId);
       starting.add(activityId);
       try {
-        return await askNow(activityId, source, view, signal);
+        return await askNow(activityId, source, view, signal, endpoint);
       } finally {
         starting.delete(activityId);
         cancelledEarly.delete(activityId);
