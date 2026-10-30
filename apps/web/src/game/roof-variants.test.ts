@@ -15,7 +15,6 @@ import type { BuildingFeature } from '@onyourleft/map-features';
 
 import {
   CHIMNEY,
-  EAVES_OVERHANG_METRES,
   eavePitchOf,
   FACADE_OFFSET,
   FOOTPRINT_MAX_FAR_TRIANGLES,
@@ -28,6 +27,7 @@ import {
   HALF_HIP,
   minimumAreaRectangle,
   SALTBOX,
+  VERGE_OVERHANG_METRES,
   STYLE_EAVES,
   STYLE_OFFSET,
   type FootprintPlan,
@@ -37,6 +37,7 @@ import {
 import {
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   houseStreetFixture,
   landBeside,
   mixedTownFixture,
@@ -392,7 +393,7 @@ describe('each variant’s shape, read back from the plan — #1785', () => {
         );
       // The back eave drops the overhang at the plan's pitch, and the front's is level with it.
       const back =
-        plan.eaves - EAVES_OVERHANG_METRES * Math.tan((plan.pitchDegrees * Math.PI) / 180);
+        plan.eaves - eavesOverhangOf(plan) * Math.tan((plan.pitchDegrees * Math.PI) / 180);
       expect(lowest(false)).toBeCloseTo(back, 3);
       expect(Math.abs(lowest(true) - lowest(false))).toBeLessThan(0.005);
       // The front reaches out less than the back, for the steeper slope to fall as far.
@@ -402,8 +403,8 @@ describe('each variant’s shape, read back from the plan — #1785', () => {
             .filter(([c]) => (Math.sign(c - offset) === Math.sign(offset)) === front)
             .map(([c]) => Math.abs(c)),
         ) - rectangle.halfShort;
-      expect(reach(false)).toBeCloseTo(EAVES_OVERHANG_METRES, 3);
-      expect(reach(true)).toBeLessThan(EAVES_OVERHANG_METRES - 0.05);
+      expect(reach(false)).toBeCloseTo(eavesOverhangOf(plan), 3);
+      expect(reach(true)).toBeLessThan(reach(false) - 0.03);
       // And by just that: the front's eave is on its slope's plane, ridge to wall top and on.
       const front = (peak.y - plan.eaves) / (rectangle.halfShort - Math.abs(offset));
       expect((plan.eaves - lowest(true)) / reach(true)).toBeCloseTo(front, 3);
@@ -575,7 +576,7 @@ describe('watertight, at the mapped eaves — #1785, on a rectangle and on #1660
         const pitch = eavePitchOf(variant, plan.pitchDegrees);
         const low = Math.min(...roof.map((vertex) => vertex.y));
         expect(low).toBeCloseTo(
-          plan.eaves - EAVES_OVERHANG_METRES * Math.tan((pitch * Math.PI) / 180),
+          plan.eaves - eavesOverhangOf(plan) * Math.tan((pitch * Math.PI) / 180),
           3,
         );
         // #1660's notch test: no roof or soffit hangs past its rectangles by more than the overhang.
@@ -593,7 +594,10 @@ describe('watertight, at the mapped eaves — #1785, on a rectangle and on #1660
               Math.max(0, Math.abs(a) - each.halfLong, Math.abs(c) - each.halfShort),
             );
           }
-          expect(least).toBeLessThanOrEqual(EAVES_OVERHANG_METRES + TOLERANCE);
+          // Since #1784 a Cape's eaves are tighter than every verge.
+          expect(least).toBeLessThanOrEqual(
+            Math.max(eavesOverhangOf(plan), VERGE_OVERHANG_METRES) + TOLERANCE,
+          );
         }
       }
     },
@@ -725,9 +729,9 @@ describe('gutters, a chimney and dormers on a variant — #1785', () => {
       const roof = verticesOf(plan, 'porch-roof');
       if (roof.length === 0) continue; // a canopy, not a front porch
       porched += 1;
-      // The steepest eave drops EAVES_OVERHANG × tan(lower) below the walls' top; the gutter hangs
+      // The steepest eave drops its overhang × tan(lower) below the walls' top; the gutter hangs
       // under it, and the porch's roof meets the wall below the gutter's foot (#1589).
-      const drop = EAVES_OVERHANG_METRES * Math.tan((GAMBREL.lowerDegrees * Math.PI) / 180);
+      const drop = eavesOverhangOf(plan) * Math.tan((GAMBREL.lowerDegrees * Math.PI) / 180);
       const gutterFoot = plan.eaves - drop - GUTTER.below - GUTTER.depth;
       expect(Math.max(...roof.map((vertex) => vertex.y))).toBeLessThan(gutterFoot);
     }
@@ -838,7 +842,12 @@ describe('the archetypes’ variants and the lever — #1785', () => {
   it('plans every footprint as `origin/main` did with `-roof-variants`, and chooses no variant', () => {
     for (const name of ['mixed', 'houses'] as const) {
       // Since #1786 its dormers are off too: `main` had neither.
-      const off = planned(towns[name], { roofVariants: false, dormerVariants: false });
+      const off = planned(towns[name], {
+        roofVariants: false,
+        dormerVariants: false,
+        archetypePorches: false,
+        commercialArchetypes: false,
+      });
       expect(off.every((plan) => plan.roofVariant === 'plain')).toBe(true);
       expect(planFingerprint(off)).toBe(MAIN_FINGERPRINTS[name]);
     }

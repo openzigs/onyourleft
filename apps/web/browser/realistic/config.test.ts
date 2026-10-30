@@ -11,6 +11,8 @@ import {
   DEFAULT_CONFIG,
   facadeTrimsWithLevers,
   firPrepassWithLevers,
+  archetypePorchesWithLevers,
+  commercialArchetypesWithLevers,
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
   roofVariantsWithLevers,
@@ -118,6 +120,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'utf8',
     );
     expect(harness).toMatch(/config\.town === 'houses'\s*\?\s*houseStreetFixture\(latitude\)/);
+  });
+
+  it('rides the commercial street through #1783’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=commercial').town).toBe('commercial');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(
+      /config\.town === 'commercial'\s*\?\s*commercialStreetFixture\(latitude\)/,
+    );
   });
 
   it('rides the city centre through #1636’s fixture, which is where it is wired', () => {
@@ -382,6 +395,36 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(dormerVariantsWithLevers(parseConfig('?levers=-dormer-variants').leversOff)).toBe(false);
     expect(configQuery(parseConfig('?town=houses&levers=-dormer-variants'))).toBe(
       `?levers=${encodeURIComponent('-dormer-variants')}&town=houses`,
+    );
+  });
+
+  it('gives the archetypes their porches and eaves, as the product does, unless #1784’s lever takes them out', () => {
+    expect(LEVERS).toContain('archetype-porches');
+    expect(archetypePorchesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      archetypePorchesWithLevers(LEVERS.filter((lever) => lever !== 'archetype-porches')),
+    ).toBe(true);
+    expect(archetypePorchesWithLevers(parseConfig('?levers=-archetype-porches').leversOff)).toBe(
+      false,
+    );
+    expect(configQuery(parseConfig('?town=houses&levers=-archetype-porches'))).toBe(
+      `?levers=${encodeURIComponent('-archetype-porches')}&town=houses`,
+    );
+  });
+
+  it('gives the commercial footprints their archetypes, as the product does, unless #1783’s lever takes them out', () => {
+    expect(LEVERS).toContain('commercial-archetypes');
+    expect(commercialArchetypesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      commercialArchetypesWithLevers(LEVERS.filter((lever) => lever !== 'commercial-archetypes')),
+    ).toBe(true);
+    expect(
+      commercialArchetypesWithLevers(parseConfig('?levers=-commercial-archetypes').leversOff),
+    ).toBe(false);
+    expect(configQuery(parseConfig('?town=commercial&levers=-commercial-archetypes'))).toBe(
+      `?levers=${encodeURIComponent('-commercial-archetypes')}&town=commercial`,
     );
   });
 

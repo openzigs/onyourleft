@@ -252,10 +252,17 @@ import {
   SIGN_PAINTS,
   TRIM_PAINTS,
 } from './building-paint';
+import {
+  buildingArchetypeOf,
+  GARDEN_APARTMENT_FEATURES,
+  MAIN_STREET_AWNING_SHARE,
+  type BuildingArchetype,
+} from './building-archetypes';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import type { AnchorKind } from './decorations';
 import {
   FRONT_PORCH,
+  fullPorchSpanOf,
   hipFits,
   porchPieces,
   porchPitchOf,
@@ -651,6 +658,14 @@ export interface FootprintPlan {
    */
   readonly archetype: HouseArchetype;
   /**
+   * The commercial or multi-family building it is — #1783
+   * (`building-archetypes.ts`): a main-street block, a strip front or a garden
+   * apartment, which set its cladding, roof, ground floor and upper windows
+   * together; `unknown` where none fits, or with `levers=-commercial-archetypes`,
+   * and planned as before.
+   */
+  readonly buildingArchetype: BuildingArchetype;
+  /**
    * The house model it is drawn as at the near level, where one fits — #1585
    * (`house-models.ts`); `undefined` for every other plan, which keeps its
    * extrusion. A modelled plan keeps its extrusion too: it is its far level,
@@ -959,6 +974,13 @@ export const SHOP_FRONT_MIN_WALL_METRES = 4;
  * wall it stands — under the door's 2 cm, so the door is in front of it.
  */
 export const SHOP_FRONT_PLACE = { inset: 0.3, height: 2.7, least: 2.4, proud: 0.01 } as const;
+
+/**
+ * The least a strip front is lowered to for its sign band (#1783): above the door's
+ * surround ({@link DOOR_FACE}, 2.15 m), so an untagged one-storey store (3.0 m of wall)
+ * still carries both.
+ */
+const SIGNED_FRONT_LEAST = 2.2;
 
 /** A sign band — #1590: its gap over the shop front, its height, and how proud it stands. */
 export const SIGN_BAND = { gap: 0.05, height: 0.6, proud: 0.03 } as const;
@@ -2055,6 +2077,8 @@ interface RoofDress {
    * `ground`; none where absent.
    */
   readonly gutters?: { readonly side: number; readonly end: number; readonly ground: number };
+  /** #1784: how far the eaves overhang the walls across a slope; {@link EAVES_OVERHANG_METRES} where absent. */
+  readonly overhang?: number;
 }
 
 /** A face of a box {@link boxFaces} draws: its normal, along the long axis, across it, or down. */
@@ -2150,10 +2174,11 @@ function pitchedRoof(
   const sin = Math.sin(pitch);
   const cos = Math.cos(pitch);
   const ridgeTop = eaves + halfShort * tan;
-  const across = halfShort + EAVES_OVERHANG_METRES;
-  const along = halfLong + (shape === 'gable' ? VERGE_OVERHANG_METRES : EAVES_OVERHANG_METRES);
+  const overhang = dress.overhang ?? EAVES_OVERHANG_METRES;
+  const across = halfShort + overhang;
+  const along = halfLong + (shape === 'gable' ? VERGE_OVERHANG_METRES : overhang);
   // Overhanging, the eaves line falls below the wall top by the overhang's drop.
-  const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+  const eaveY = eaves - overhang * tan;
   const ridgeHalf = shape === 'gable' ? along : Math.max(0, halfLong - halfShort);
   const thick = ROOF_THICKNESS_METRES;
   const corner = (a: number, c: number, y: number): Vec => [
@@ -2472,7 +2497,8 @@ function variantRoof(
     }
   };
 
-  const out = halfShort + EAVES_OVERHANG_METRES;
+  const overhang = dress.overhang ?? EAVES_OVERHANG_METRES;
+  const out = halfShort + overhang;
   const pitch = radians(pitchDegrees);
   const tan = Math.tan(pitch);
   const gableReach = halfLong + VERGE_OVERHANG_METRES;
@@ -2489,7 +2515,7 @@ function variantRoof(
       const knee = halfShort * (1 - GAMBREL.lowerShare);
       const kneeY = eaves + (halfShort - knee) * Math.tan(lower);
       const top = kneeY + knee * Math.tan(upper);
-      const eaveY = eaves - EAVES_OVERHANG_METRES * Math.tan(lower);
+      const eaveY = eaves - overhang * Math.tan(lower);
       const a = gableReach;
       for (const side of [1, -1]) {
         slope(
@@ -2549,8 +2575,8 @@ function variantRoof(
       const a = gableReach;
       // Both eaves level (owner, 2026-10-30): the back's overhang drops at the plan's pitch, and
       // the steeper front's is shortened to drop the same, so the two eave lines are one height.
-      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
-      const frontOut = halfShort + (EAVES_OVERHANG_METRES * tan) / Math.tan(front);
+      const eaveY = eaves - overhang * tan;
+      const frontOut = halfShort + (overhang * tan) / Math.tan(front);
       const outOf = (side: number): number => (side === placing.front ? frontOut : out);
       for (const side of [1, -1]) {
         const its = side === placing.front ? front : pitch;
@@ -2599,7 +2625,7 @@ function variantRoof(
       const footC = clip + VERGE_OVERHANG_METRES;
       const footY = clipY - VERGE_OVERHANG_METRES * tan;
       const ridgeEnd = halfLong - clip;
-      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+      const eaveY = eaves - overhang * tan;
       for (const side of [1, -1]) {
         slope(
           [
@@ -2660,9 +2686,9 @@ function variantRoof(
     case 'side-hipped': {
       const hip = placing.end;
       const top = eaves + halfShort * tan;
-      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+      const eaveY = eaves - overhang * tan;
       const gableA = -hip * gableReach;
-      const hipA = hip * (halfLong + EAVES_OVERHANG_METRES);
+      const hipA = hip * (halfLong + overhang);
       // The hip's ridge end: the hip rises at the slopes' pitch over the half-width.
       const ridgeEnd = hip * Math.max(0, halfLong - halfShort);
       for (const side of [1, -1]) {
@@ -3492,10 +3518,12 @@ export function porchWallTopOf(
   eaves: number,
   roof: FootprintRoof,
   pitchDegrees: number,
+  overhang = EAVES_OVERHANG_METRES,
 ): number {
   const storey = floor + STOREY_METRES - 0.05;
   if (roof === 'flat') return Math.min(storey, eaves - 0.15);
-  const eaveY = eaves - EAVES_OVERHANG_METRES * Math.tan((pitchDegrees * Math.PI) / 180);
+  // #1784: an archetype's own overhang drops its eaves further, or less.
+  const eaveY = eaves - overhang * Math.tan((pitchDegrees * Math.PI) / 180);
   return Math.min(storey, eaveY - GUTTER.below - GUTTER.depth - 0.03);
 }
 
@@ -3513,6 +3541,12 @@ export interface PorchSite {
   readonly lowest: number;
   /** Whether a ring of `(a, n)` corners in the porch's frame is clear of the road, every footprint, and every porch and driveway placed. */
   readonly clear: (corners: readonly (readonly [number, number])[]) => boolean;
+  /**
+   * #1784: an archetype's full-width porch — the whole wall less its end
+   * margins and a garage's bay, on four posts — rather than the seeded width.
+   * A front too narrow for four posts, with steps in the middle bay, has no porch.
+   */
+  readonly full?: boolean;
 }
 
 /** A front porch's seeded draws, each in `[0, 1)`. */
@@ -3562,12 +3596,15 @@ export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | un
     if (along > 0) right = Math.min(right, along - bay / 2 - endMargin);
     else left = Math.min(left, -along - bay / 2 - endMargin);
   }
-  const span = porchSpanOf(
-    { left, right },
-    width.least + (width.most - width.least) * draws.width,
-    draws.posts < FRONT_PORCH.fourPostShare,
-    draws.side < 0.5 ? 1 : -1,
-  );
+  const span =
+    site.full === true
+      ? fullPorchSpanOf({ left, right })
+      : porchSpanOf(
+          { left, right },
+          width.least + (width.most - width.least) * draws.width,
+          draws.posts < FRONT_PORCH.fourPostShare,
+          draws.side < 0.5 ? 1 : -1,
+        );
   if (span === undefined) return undefined;
   const { stepsAt } = span;
   for (
@@ -4254,6 +4291,8 @@ export function footprintPlans(
           on: options.houseArchetypes ?? true,
           dropped: 0,
           dormers: options.dormerVariants ?? true,
+          porches: options.archetypePorches ?? true,
+          buildings: options.commercialArchetypes ?? true,
         },
       ),
     );
@@ -4754,6 +4793,10 @@ interface ShopDraws {
   readonly paint: number;
   readonly stripes: number;
   readonly depth: number;
+  /** #1783: an archetype's awning share in place of {@link AWNING}'s. */
+  readonly awningShare?: number;
+  /** #1783: a strip front's sign band, the front lowered for it where the room is short. */
+  readonly signed?: boolean;
 }
 
 /**
@@ -4771,12 +4814,17 @@ export function shopOf(
   clear: (corners: readonly (readonly [number, number])[]) => boolean,
   draws: ShopDraws,
 ): ShopPlan | undefined {
-  const height = Math.min(SHOP_FRONT_PLACE.height, room - 0.3);
-  if (height < SHOP_FRONT_PLACE.least) return undefined;
+  const tallest = Math.min(SHOP_FRONT_PLACE.height, room - 0.3);
+  // #1783: a strip front keeps its sign band, its front lowered under it, no lower than its least.
+  const banded = room - 0.05 - SIGN_BAND.gap - SIGN_BAND.height;
+  const lowered = draws.signed === true && banded < tallest && banded >= SIGNED_FRONT_LEAST - 1e-9;
+  const height = lowered ? banded : tallest;
+  if (height < (lowered ? SIGNED_FRONT_LEAST - 1e-9 : SHOP_FRONT_PLACE.least)) return undefined;
   const width = length - 2 * SHOP_FRONT_PLACE.inset;
-  const sign = height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 ? SIGN_BAND.height : 0;
+  const sign =
+    height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 + 1e-9 ? SIGN_BAND.height : 0;
   let awning = 0;
-  if (draws.awning < AWNING.share) {
+  if (draws.awning < (draws.awningShare ?? AWNING.share)) {
     const half = width / 2 - AWNING.inset;
     const { least, most } = AWNING.depth;
     for (
@@ -5054,6 +5102,21 @@ export interface FootprintPlanOptions {
    * (`?levers=-dormer-variants`).
    */
   readonly dormerVariants?: boolean;
+  /**
+   * #1784: an archetype's own eaves — wide on a bungalow and a Foursquare,
+   * tight on a Cape — and its full-width front porch on a Foursquare, a
+   * bungalow and a farmhouse; `true` by default. Off, every plan is as before
+   * (`?levers=-archetype-porches`).
+   */
+  readonly archetypePorches?: boolean;
+  /**
+   * #1783: a commercial or multi-family footprint's archetype — a brick
+   * main-street block, a strip front, a garden apartment
+   * (`building-archetypes.ts`) — setting its cladding, roof, ground floor and
+   * upper windows together; `true` by default. Off, every plan is as before
+   * (`?levers=-commercial-archetypes`).
+   */
+  readonly commercialArchetypes?: boolean;
 }
 
 /**
@@ -5065,6 +5128,10 @@ interface ArchetypeChoice {
   readonly dropped: number;
   /** #1786: whether its called-for dormers are built (`-dormer-variants` off), or #1588's. */
   readonly dormers?: boolean;
+  /** #1784: whether its own eaves and porch width are built (`-archetype-porches` off), or #1589's. */
+  readonly porches?: boolean;
+  /** #1783: whether a commercial or multi-family footprint is given its archetype (`-commercial-archetypes` off). */
+  readonly buildings?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -5108,16 +5175,33 @@ function planFootprint(
   const terraced = party.length > 0;
   // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
   const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
+  // #1783: the commercial or multi-family building it is, which sets its cladding, roof,
+  // ground floor and upper windows together; `unknown` is planned as before.
+  const buildingArchetype: BuildingArchetype =
+    choice.buildings === true && !part
+      ? buildingArchetypeOf({
+          area,
+          aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
+          rectangularity,
+          fourCorners: drawn.length / 2 === 4,
+          storeys,
+          use,
+          urban: urbanClass,
+          terraced,
+        })
+      : 'unknown';
   const pitched =
     !roofing.flat &&
-    pitchedFootprint({
+    (pitchedFootprint({
       area,
       rectangularity,
       wallHeight,
       use,
       terraced,
       rectilinear: split !== undefined,
-    });
+    }) ||
+      // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
+      (buildingArchetype === 'garden-apartment' && wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES));
   // The rectangles a pitched roof is built over, the largest first. A split of one is a
   // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
   // two or three is the notch fix.
@@ -5151,7 +5235,12 @@ function planFootprint(
         })
       : 'unknown';
   const features = droppedFeatures(
-    archetype === 'unknown' ? SEEDED_FEATURES : ARCHETYPE_FEATURES[archetype],
+    archetype !== 'unknown'
+      ? ARCHETYPE_FEATURES[archetype]
+      : // #1783: a garden apartment's, as a house's are.
+        buildingArchetype === 'garden-apartment'
+        ? GARDEN_APARTMENT_FEATURES
+        : SEEDED_FEATURES,
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -5178,6 +5267,9 @@ function planFootprint(
       : 'gable';
   const pitchDegrees =
     roof === 'flat' ? 0 : (pitches[Math.floor(share(STREAM_PITCH) * pitches.length)] as number);
+  // #1784: the archetype's eaves across a slope, while the lever is on; else #1581's.
+  const overhang =
+    choice.porches === true && features.eaves !== 'seeded' ? features.eaves : EAVES_OVERHANG_METRES;
   const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < chimneyShare;
   // Which end of the ridge the chimney stands toward; a side-hipped roof hips the other (#1785).
   const chimneyEnd = share(STREAM_CHIMNEY) < chimneyShare / 2 ? 1 : -1;
@@ -5204,7 +5296,8 @@ function planFootprint(
     clapboard &&
     share(STREAM_FOUNDATION) < shareOf(features.brickFoundation, BRICK_FOUNDATION_SHARE);
   const flags =
-    (residential ? STYLE_SASH : 0) +
+    // #1783: a main-street block's upper windows are sashes, in the bays' rhythm.
+    (residential || buildingArchetype === 'main-street' ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < shareOf(features.shutters, SHUTTER_SHARE)
       ? STYLE_SHUTTERS
       : 0) +
@@ -5260,6 +5353,11 @@ function planFootprint(
             paint: share(STREAM_AWNING_PAINT),
             stripes: share(STREAM_AWNING_STRIPES),
             depth: share(STREAM_AWNING_DEPTH),
+            // #1783: an awning on two in three main-street shop fronts; a strip front's sign band.
+            ...(buildingArchetype === 'main-street'
+              ? { awningShare: MAIN_STREET_AWNING_SHARE }
+              : {}),
+            ...(buildingArchetype === 'strip-front' ? { signed: true } : {}),
           },
         )
       : undefined;
@@ -5330,7 +5428,15 @@ function planFootprint(
               ? {}
               : { garage: { along: garage.along, width: garage.width } }),
             floor,
-            wallTop: porchWallTopOf(floor, eaves, roof, eavePitchOf(variant, pitchDegrees)),
+            wallTop: porchWallTopOf(
+              floor,
+              eaves,
+              roof,
+              eavePitchOf(variant, pitchDegrees),
+              overhang,
+            ),
+            // #1784: the archetype's full-width porch on posts.
+            full: choice.porches === true && features.porchWidth === 'full',
             lowest,
             groundAt: (a, n) =>
               groundAt(
@@ -5483,6 +5589,7 @@ function planFootprint(
       const ridge = roofOver(main, {
         roof: roofStyle,
         gable: wallStyle,
+        overhang,
         ...(residential
           ? { gutters: { side: facing, end: -garageEnd, ground: base + FOUNDATION_METRES } }
           : {}),
@@ -5491,7 +5598,7 @@ function planFootprint(
       // The chimney stands on the highest ridge — the widest rectangle's — so it clears them all.
       let stack = { rectangle: main, ridge };
       for (const other of roofRectangles.slice(1)) {
-        const its = roofOver(other, { roof: roofStyle, gable: wallStyle });
+        const its = roofOver(other, { roof: roofStyle, gable: wallStyle, overhang });
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
       if (withChimney) {
@@ -5693,7 +5800,10 @@ function planFootprint(
         );
   const wallSurface = clapboard
     ? SIDING_SURFACE
-    : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+    : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+      buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+      ? 'brick'
+      : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
@@ -5735,6 +5845,7 @@ function planFootprint(
     frontStep,
     urban: urbanClass,
     archetype,
+    buildingArchetype,
     model,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
