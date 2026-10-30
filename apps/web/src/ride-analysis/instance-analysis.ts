@@ -256,6 +256,9 @@ export const INSTANCE_ASK_TEXT = {
   // #1251: the instance masks with its own copy of the list, so no copy, no hosted job.
   'masking-not-sent':
     'This device could not give your instance your list of words to mask and your privacy zones, so nothing was sent to the service and nothing was kept.',
+  // #1796: the key was replaced, and agreed to again, for another service on another device.
+  'service-moved':
+    'Your instance now sends write-ups to a different service than the one named here, so nothing was sent and nothing was kept. Open Instance in Settings to see which it is, then ask again.',
   failed: 'The write-up did not finish, so nothing was kept.',
 } as const;
 
@@ -608,15 +611,23 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
       if (!sent) return failed(INSTANCE_ASK_TEXT['masking-not-sent']);
     }
     const rideId = await syncedRideId(options.syncBase, owner, activityId);
+    // #1796: a hosted start names the service the press named, read again now.
+    const endpoint = source === 'instance-hosted' ? options.hosted?.endpoint() : undefined;
     let started = await startJob(
       session,
-      analysisJobRequest(input, template.version, source, rideId),
+      analysisJobRequest(input, template.version, source, rideId, endpoint),
     );
     // A ride the instance no longer holds: the same start, naming no ride.
     if (started.kind === 'refused' && started.rideRefused === true && rideId !== undefined) {
-      started = await startJob(session, analysisJobRequest(input, template.version, source));
+      started = await startJob(
+        session,
+        analysisJobRequest(input, template.version, source, undefined, endpoint),
+      );
     }
     if (started.kind === 'unreachable') return failed(INSTANCE_ASK_TEXT.unreachable);
+    if (started.kind === 'refused' && started.serviceMoved === true) {
+      return failed(INSTANCE_ASK_TEXT['service-moved']);
+    }
     if (started.kind === 'refused') {
       return failed(
         started.code === undefined ? INSTANCE_ASK_TEXT.refused : instanceFailureText(started.code),

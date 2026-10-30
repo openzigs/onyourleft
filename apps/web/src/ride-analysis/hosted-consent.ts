@@ -252,10 +252,25 @@ export const HOSTED_ANSWER_REFUSAL_TEXT = {
 
 export type HostedAnswerRefusal = keyof typeof HOSTED_ANSWER_REFUSAL_TEXT;
 
-/** Said when the instance did not answer, or answered something this cannot read. */
+/**
+ * Said when the instance did not answer a READ of the settings, or answered
+ * something this cannot read. Nothing was asked to change, so nothing did.
+ */
 export const HOSTED_UNREADABLE =
   'Your instance did not answer, or answered something this app cannot read. Nothing was ' +
   'changed, and nothing was sent to a service.';
+
+/**
+ * Said when a CHANGE — a key stored or removed, an agreement given or
+ * withdrawn — had no answer this can read (#1796). The request may have
+ * reached the instance, and been done, before its answer was lost, so this
+ * says it cannot tell and never that nothing changed. None of the four sends
+ * anything to a service. ⚠️ Draft wording awaiting the owner's approval (#1796).
+ */
+export const HOSTED_CHANGE_UNKNOWN =
+  'Your instance did not answer, or answered something this app cannot read, so this app ' +
+  'cannot tell whether your change was made. Nothing was sent to a service. Open this page ' +
+  'again to see what your instance holds.';
 
 /** Said by an instance that cannot hold a rider's own key. */
 export const HOSTED_NOT_OFFERED =

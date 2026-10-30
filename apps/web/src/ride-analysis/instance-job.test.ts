@@ -79,6 +79,39 @@ describe('the request', () => {
     ).toStrictEqual({ kind: 'refused', code: 'job_running' });
   });
 
+  it('carries the service the press named on a hosted job, and on no other (#1796)', () => {
+    expect(
+      analysisJobRequest(INPUT, '1', 'instance-hosted', undefined, 'https://models.example'),
+    ).toStrictEqual({
+      input: INPUT,
+      templateVersion: '1',
+      source: 'instance-hosted',
+      endpoint: 'https://models.example',
+    });
+    expect(
+      analysisJobRequest(INPUT, '1', 'instance-local', undefined, 'https://models.example'),
+    ).not.toHaveProperty('endpoint');
+    expect(analysisJobRequest(INPUT, '1', 'instance-hosted')).not.toHaveProperty('endpoint');
+  });
+
+  it('says when a refusal names the service, and only then (#1796)', async () => {
+    const answered = (body: unknown) =>
+      startJob(
+        session({ call: async () => Promise.resolve({ status: 400, body }) }),
+        analysisJobRequest(INPUT, '1', 'instance-hosted', undefined, 'https://models.example'),
+      );
+    expect(
+      await answered({
+        error: { code: 'validation_failed', fields: [{ field: 'endpoint', problem: 'x' }] },
+      }),
+    ).toStrictEqual({ kind: 'refused', code: 'validation_failed', serviceMoved: true });
+    expect(
+      await answered({
+        error: { code: 'validation_failed', fields: [{ field: 'source', problem: 'x' }] },
+      }),
+    ).toStrictEqual({ kind: 'refused', code: 'validation_failed' });
+  });
+
   it('is sent as the start’s body, under the session token', async () => {
     const calls: unknown[] = [];
     const started = await startJob(
