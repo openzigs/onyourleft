@@ -49,6 +49,7 @@ import type {
   InviteCodeTable,
   LinkCodeTable,
   ModerationLogTable,
+  NoticeErasureTable,
   NoticeTable,
   StatementTable,
   AppealTable,
@@ -583,10 +584,33 @@ export interface Notice {
   readonly notifierEmail: string | null;
   /** Whether the notifier made the bona fide statement (DSA Art. 16(2)(d)). */
   readonly bonaFide: boolean;
+  /**
+   * When its notifier details were erased (#1381), and what the notifier had
+   * given — or `null` while they are held. Once erased, the explanation is
+   * empty and the location, name and email are `null`.
+   */
+  readonly erased: NoticeErasure | null;
 }
 
-/** What a notice is stored with: everything but the id the store gives it. */
-export type NewNotice = Omit<Notice, 'id'>;
+/** A notice's notifier details erased (#1381): when, and what the notifier had given. */
+export interface NoticeErasure {
+  /** Unix seconds. */
+  readonly at: number;
+  readonly gaveName: boolean;
+  readonly gaveEmail: boolean;
+}
+
+/** What a notice is stored with: everything but the id the store gives it, as received. */
+export type NewNotice = Omit<Notice, 'id' | 'erased'>;
+
+/** What erasing a notice's notifier details did (#1381). */
+export type NoticeDetailsErased =
+  | 'erased'
+  | 'not_found'
+  /** No decision is recorded on it: an open notice keeps what its notifier gave. */
+  | 'not_closed'
+  /** They were erased already. */
+  | 'already';
 
 /** A step taken on a notice after it was received (#912). */
 export type NoticeStepKind = 'acknowledged' | 'decided' | 'notifier_told';
@@ -1633,6 +1657,15 @@ export interface SqlStore {
   /** Every step taken on every notice, oldest first (#912). */
   listNoticeSteps(): Promise<readonly NoticeStep[]>;
   /**
+   * Erase a closed notice's notifier details (#1381), in ONE transaction with
+   * the checks it rests on: the notice exists, its decision is recorded, and
+   * they are not erased already. The explanation is emptied and the location,
+   * name and email set to `null`; whether a name and an email were given is
+   * kept, with `at` (Unix seconds). The decision, its dates, the items and
+   * the notice's id stay. Scrubbed, as {@link SqlStore.eraseAthlete} is.
+   */
+  eraseNoticeDetails(noticeId: number, at: number): Promise<NoticeDetailsErased>;
+  /**
    * Hide one item (#913), in ONE transaction: the log entry, the statement of
    * reasons its owner is shown, and the hidden item — or, for an item already
    * hidden, nothing.
@@ -1966,7 +1999,13 @@ function noticeItems(text: string): readonly string[] {
   return Array.isArray(parsed) ? parsed.filter((each) => typeof each === 'string') : [];
 }
 
-const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
+const noticeFrom = (
+  row: Selectable<NoticeTable> & {
+    readonly erased_at: number | null;
+    readonly gave_name: NoticeErasureTable['gave_name'] | null;
+    readonly gave_email: NoticeErasureTable['gave_email'] | null;
+  },
+): Notice => ({
   id: row.id,
   receivedAt: row.received_at,
   kind: row.kind,
@@ -1976,6 +2015,10 @@ const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
   notifierName: row.notifier_name,
   notifierEmail: row.notifier_email,
   bonaFide: row.bona_fide === 1,
+  erased:
+    row.erased_at === null
+      ? null
+      : { at: row.erased_at, gaveName: row.gave_name === 1, gaveEmail: row.gave_email === 1 },
 });
 
 const statementFrom = (
@@ -4627,6 +4670,50 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ),
       ),
 
+    eraseNoticeDetails: (noticeId, at) =>
+      exclusive(() =>
+        // Scrubbed (#1097): what the notifier typed is not left in a free page or the log.
+        scrubbing(() =>
+          db.transaction().execute(async (trx): Promise<NoticeDetailsErased> => {
+            const notice = await trx
+              .selectFrom('notice')
+              .select(['id', 'notifier_name', 'notifier_email'])
+              .where('id', '=', noticeId)
+              .executeTakeFirst();
+            if (notice === undefined) return 'not_found';
+            const erased = await trx
+              .selectFrom('notice_erasure')
+              .select('notice_id')
+              .where('notice_id', '=', noticeId)
+              .executeTakeFirst();
+            if (erased !== undefined) return 'already';
+            const decided = await trx
+              .selectFrom('notice_step')
+              .select('id')
+              .where('notice_id', '=', noticeId)
+              .where('step', '=', 'decided')
+              .executeTakeFirst();
+            if (decided === undefined) return 'not_closed';
+            // The erasure row first: migration 0036's trigger allows the update only after it.
+            await trx
+              .insertInto('notice_erasure')
+              .values({
+                notice_id: noticeId,
+                gave_name: notice.notifier_name === null ? 0 : 1,
+                gave_email: notice.notifier_email === null ? 0 : 1,
+                at,
+              })
+              .execute();
+            await trx
+              .updateTable('notice')
+              .set({ explanation: '', location: null, notifier_name: null, notifier_email: null })
+              .where('id', '=', noticeId)
+              .execute();
+            return 'erased';
+          }),
+        ),
+      ),
+
     hideItem: (hide) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -4699,7 +4786,19 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     listNotices: () =>
       exclusive(async () =>
-        (await db.selectFrom('notice').selectAll().orderBy('id').execute()).map(noticeFrom),
+        (
+          await db
+            .selectFrom('notice')
+            .leftJoin('notice_erasure', 'notice_erasure.notice_id', 'notice.id')
+            .selectAll('notice')
+            .select([
+              'notice_erasure.at as erased_at',
+              'notice_erasure.gave_name',
+              'notice_erasure.gave_email',
+            ])
+            .orderBy('notice.id')
+            .execute()
+        ).map(noticeFrom),
       ),
 
     moderate: (action) =>

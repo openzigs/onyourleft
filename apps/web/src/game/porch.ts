@@ -176,6 +176,27 @@ export function porchSpanOf(
   return undefined;
 }
 
+/**
+ * A full-width porch's span — #1784: the whole of the room `[−left, right]`
+ * on four posts, evenly spaced, the steps in the middle bay. It is not
+ * centred on the door where a garage cuts one side back, so it runs as far
+ * as the free end allows. `undefined` where a bay is too narrow for the steps.
+ */
+export function fullPorchSpanOf(room: {
+  readonly left: number;
+  readonly right: number;
+}): PorchSpan | undefined {
+  const { post } = FRONT_PORCH;
+  const w = room.left + room.right;
+  if (w / 3 - post < STEP_OPENING) return undefined;
+  const centre = (room.right - room.left) / 2;
+  const half = w / 2;
+  const posts = [-half, -half / 3, half / 3, half].map(
+    (at, index) => centre + at + (index === 0 ? post / 2 : index === 3 ? -post / 2 : 0),
+  );
+  return { from: -room.left, to: room.right, posts, stepsAt: centre };
+}
+
 /** A porch, decided: everything {@link porchPieces} draws it from. */
 export interface PorchSpec extends PorchSpan {
   /** How far the deck reaches out from the wall. */
