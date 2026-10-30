@@ -4,10 +4,10 @@
  * The owner's realistic page's mapped town, planned as `GameView`'s press
  * plans a ride's corridor — #1581 — with the levers that change its plans
  * read here, at load: since #1634 `urban-class`, since #1660
- * `split-roofs`, since #1782 `house-archetypes` and since #1785
- * `roof-variants`. Its own module so that a test reads the plans the page
- * draws, and a lever parsed but not handed to the planner is a red test
- * (`town.test.ts`).
+ * `split-roofs`, since #1782 `house-archetypes`, since #1785
+ * `roof-variants` and since #1786 `dormer-variants`. Its own module so that
+ * a test reads the plans the page draws, and a lever parsed but not handed to
+ * the planner is a red test (`town.test.ts`).
  */
 
 import {
@@ -22,6 +22,7 @@ import type { WorldCorridor } from '../../src/game/world-data/corridor';
 import type { RouteProfile } from '@onyourleft/domain';
 
 import {
+  dormerVariantsWithLevers,
   houseArchetypesWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
@@ -59,11 +60,13 @@ export function plannedTown(
     FOOTPRINT_MAX_VERTICES,
     urban,
     // #1660: the L-, T-, U- and Z-shaped houses' split roofs, #1782: the houses'
-    // archetypes, and #1785: their roof variants, unless their lever is off.
+    // archetypes, #1785: their roof variants, and #1786: their dormers, unless their
+    // lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
       roofVariants: roofVariantsWithLevers(leversOff),
+      dormerVariants: dormerVariantsWithLevers(leversOff),
     },
   );
   return { land, plans, urban };

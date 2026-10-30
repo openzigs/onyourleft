@@ -1020,6 +1020,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         farmhouses, bungalows, Colonials and ranches, on a
                         rectangle or each split one, the eaves at the mapped
                         height, plain over a cap (`-roof-variants`);
+                        since #1786 each archetype's dormers — two gabled on
+                        a Cape, a hipped one on a Foursquare's route-facing
+                        slope, a wide shed one on a bungalow — each kind on
+                        its own least pitch (`dormerOf`, `-dormer-variants`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

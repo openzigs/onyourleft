@@ -7,7 +7,8 @@
  * to the planner. Since #1782 `-house-archetypes` likewise: the street of
  * houses has its archetypes without it, and none, planned as before, with it.
  * Since #1785 `-roof-variants` likewise: the street's variants without it, and
- * none with it.
+ * none with it; and since #1786 `-dormer-variants`: the Foursquares' hipped
+ * dormers without it, and none with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -98,6 +99,41 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
       undefined,
       urban,
       { roofVariants: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    plans.forEach((plan, index) => {
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
+describe('the realistic page’s `dormer-variants` lever — #1786', () => {
+  const street = houseStreetFixture();
+  const foursquareDormers = (query: string): number =>
+    plannedTown(street, parseConfig(query).leversOff)
+      .plans.filter((plan) => plan.archetype === 'foursquare')
+      .reduce((sum, plan) => sum + plan.dormers, 0);
+
+  it('stands a dormer on the street’s Foursquares on the product’s page', () => {
+    expect(foursquareDormers('?town=houses')).toBeGreaterThan(3);
+  });
+
+  it('plans every house as the planner with them off does, with `levers=-dormer-variants`', () => {
+    expect(foursquareDormers('?town=houses&levers=-dormer-variants')).toBe(0);
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=houses&levers=-dormer-variants').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { dormerVariants: false },
     ).plans;
     expect(plans.length).toBe(off.length);
     plans.forEach((plan, index) => {
