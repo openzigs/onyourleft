@@ -322,6 +322,10 @@ export interface RemoteRiderInput {
   /** Along the route, the room's odometer, in metres. */
   readonly distanceMetres: number;
   readonly speedMetresPerSecond: number;
+  /** What to write over them on the road, if anything. @see RiderMarker.label */
+  readonly label?: string | undefined;
+  /** The one rider *Follow* chose. @see RiderMarker.followed */
+  readonly followed?: boolean | undefined;
 }
 
 /** Builds one frame. */
@@ -752,6 +756,10 @@ interface Rider {
   readonly lane?: number | undefined;
   /** Where a Delivery round steered it, in place of the line — the rider's only. @see SceneInput.steeredLateral */
   readonly steered?: number | undefined;
+  /** A remote rider's name on the road. @see RiderMarker.label */
+  readonly label?: string | undefined;
+  /** @see RiderMarker.followed */
+  readonly followed?: boolean | undefined;
 }
 
 /**
@@ -834,6 +842,8 @@ function ridersOnTheRoad(
       crankAngle: pedalling(remote.distanceMetres),
       pedalling: remote.speedMetresPerSecond > 0,
       lane: remote.riderId % 2 === 0 ? -1 : 1,
+      label: remote.label,
+      followed: remote.followed,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a
@@ -853,8 +863,17 @@ function ridersOnTheRoad(
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
     const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
+    const cranked = crankAngle === undefined ? marker : { ...marker, crankAngle };
     return {
-      marker: crankAngle === undefined ? marker : { ...marker, crankAngle },
+      // #783: the name the room gave them, carried to the frame as words only.
+      marker:
+        rider.label === undefined
+          ? cranked
+          : {
+              ...cranked,
+              label: rider.label,
+              ...(rider.followed === true ? { followed: true } : {}),
+            },
       lateral,
     };
   });

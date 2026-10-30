@@ -498,8 +498,11 @@ describe('a pacer or ghost just behind a steered rider, in front of the camera â
     const route = northRoute(2_000, () => 0);
     let inFront = 0;
     let behindTheEye = 0;
-    for (let steered = -1.75; steered <= 1.75 + 1e-9; steered += 0.25) {
-      for (let gap = 0; gap >= -10; gap -= 0.25) {
+    // 8 x 21 = 168 frames, not the 15 x 41 = 615 it began as (#1883): this sweep builds
+    // a whole frame per step, and it sat at the edge of the 5 s timeout under coverage.
+    // The 0.5 grid still puts 176 markers in front of the eye and 160 behind it.
+    for (let steered = -1.75; steered <= 1.75 + 1e-9; steered += 0.5) {
+      for (let gap = 0; gap >= -10; gap -= 0.5) {
         const frame = sceneFrame(inputFor(route, 1_000, gap, steered, 'both'));
         const { eye } = cameraRig(frame.camera);
         const { headingX, headingZ } = frame.camera;

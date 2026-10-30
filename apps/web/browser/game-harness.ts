@@ -263,6 +263,7 @@ import {
   windowRevealsWithLevers,
 } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
+import { nameTags } from '../src/game/name-tags';
 import { bannerPlace, standPoint } from '../src/game/gantry';
 import { billboardsAt } from '../src/game/billboards';
 import {
@@ -588,6 +589,14 @@ declare global {
        * buffer — #424's first criterion. @see riderExtent
        */
       readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+      /**
+       * #783: a remote rider's name, and where the renderer drew that rider,
+       * at the same two shapes. @see nameTagProbe
+       */
+      readonly nameTag: {
+        readonly landscape: NameTagMeasurement;
+        readonly portrait: NameTagMeasurement;
+      };
       /**
        * The rider at the apex of a 20 m hairpin on the line, and — the control —
        * the same rider on the centreline, upright (#499). @see lineProbe
@@ -1170,6 +1179,115 @@ function riderExtent(width: number, height: number): RiderExtent {
     right: (highColumn + 1) / width,
     pixels,
   };
+}
+
+/**
+ * #783: where a remote rider's name was put, and where the renderer drew that
+ * rider. @see nameTagProbe
+ */
+export interface NameTagMeasurement {
+  /** The name's anchor, the bottom middle of it, as `name-tags.ts` gave it; absent if it named nobody. */
+  readonly tag: { readonly left: number; readonly top: number } | undefined;
+  /** The pixels the remote rider changed, as {@link riderExtent} measures the rider's. */
+  readonly drawn: RiderExtent;
+}
+
+/** What the harness reports for a name before it has measured one. */
+const NO_NAME_TAG: NameTagMeasurement = { tag: undefined, drawn: NO_RIDER };
+
+/**
+ * One named remote rider 8 m up the road and 1.5 m to the side of the line,
+ * drawn by the REAL renderer through the frame's own camera, and the name
+ * `name-tags.ts` §`nameTags` hangs over them — #783. The name is DOM laid over
+ * the world, so nothing but this can say that it lands over the rider the
+ * renderer actually drew: `camera.ts` §`projectToFrame` restates the
+ * renderer's camera without `three`, and a restatement can be wrong (a
+ * mirrored axis, a fixed lens) and agree with itself in every jsdom test.
+ *
+ * Off to the side on purpose, so the spec's control — the same name mirrored
+ * across the middle of the frame — has somewhere else to land. The rider
+ * alone is isolated as {@link riderExtent} isolates it: the same frame with
+ * and without them, and the pixels that differ.
+ */
+function nameTagProbe(width: number, height: number): NameTagMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(width, height);
+  const profile = levelRoute();
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin: corridorOrigin(profile),
+    state: { ...start, ride: { ...start.ride, distance: metres(1_000) } },
+    remoteRiders: [{ riderId: 1, distanceMetres: 1_008, speedMetresPerSecond: 0, label: 'Bea Ng' }],
+  });
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  const placed = frame.markers.find((marker) => marker.kind === 'remote');
+  if (gl === null || placed === undefined) {
+    view.destroy();
+    return NO_NAME_TAG;
+  }
+  // 1.5 m across the road toward its normal, the rider's right.
+  const remote: RiderMarker = {
+    ...placed,
+    x: placed.x - placed.headingZ * 1.5,
+    z: placed.z + placed.headingX * 1.5,
+  };
+  // The rider's own marker stays in the frame `nameTags` reads — it ranks by
+  // distance from them — and out of the frames drawn, so the pixels that
+  // change are the remote rider's alone.
+  const named: SceneFrame = {
+    ...frame,
+    scatter: [],
+    markers: [...frame.markers.filter((marker) => marker.kind === 'rider'), remote],
+  };
+  const [tag] = nameTags(named, { width, height });
+  const remoteOnly: SceneFrame = { ...frame, scatter: [], markers: [remote] };
+  const nobody: SceneFrame = { ...frame, scatter: [], markers: [] };
+  view.render(remoteOnly);
+  view.render(remoteOnly);
+  const present = readRegion(gl, 0, 0, width, height);
+  view.render(nobody);
+  view.render(nobody);
+  const absent = readRegion(gl, 0, 0, width, height);
+  view.destroy();
+  let pixels = 0;
+  let lowRow = height;
+  let highRow = -1;
+  let lowColumn = width;
+  let highColumn = -1;
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const at = (row * width + column) * 4;
+      if (
+        present[at] === absent[at] &&
+        present[at + 1] === absent[at + 1] &&
+        present[at + 2] === absent[at + 2]
+      ) {
+        continue;
+      }
+      pixels += 1;
+      lowRow = Math.min(lowRow, row);
+      highRow = Math.max(highRow, row);
+      lowColumn = Math.min(lowColumn, column);
+      highColumn = Math.max(highColumn, column);
+    }
+  }
+  const drawn: RiderExtent =
+    pixels === 0
+      ? { ...NO_RIDER, aspect: width / height }
+      : {
+          aspect: width / height,
+          // `readPixels` rows run from the BOTTOM, so the highest row is the top.
+          top: 1 - (highRow + 1) / height,
+          bottom: 1 - lowRow / height,
+          left: lowColumn / width,
+          right: (highColumn + 1) / width,
+          pixels,
+        };
+  return { tag: tag === undefined ? undefined : { left: tag.left, top: tag.top }, drawn };
 }
 
 /** What the harness reports for the line before it has measured one. */
@@ -11983,6 +12101,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     roadFarPixel: NOWHERE,
     roadProbeRows: [0, 0],
     riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
+    nameTag: { landscape: NO_NAME_TAG, portrait: NO_NAME_TAG },
     line: {
       on: NO_LINE,
       onUpright: NO_LINE,
@@ -12163,6 +12282,7 @@ async function run(): Promise<void> {
   let roadFarPixel: Pixel = NOWHERE;
   let roadProbeRows: readonly [number, number] = [0, 0];
   let riderFrame = { landscape: NO_RIDER, portrait: NO_RIDER };
+  let nameTag = { landscape: NO_NAME_TAG, portrait: NO_NAME_TAG };
   let line = {
     on: NO_LINE,
     onUpright: NO_LINE,
@@ -12782,6 +12902,9 @@ async function run(): Promise<void> {
       // criterion's own frame; 10 : 16 is a tablet held upright.
       riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
       phaseEnds('default: rider extent');
+      // #783, on canvases of their own, at the same two shapes. @see nameTagProbe
+      nameTag = { landscape: nameTagProbe(640, 360), portrait: nameTagProbe(400, 640) };
+      phaseEnds('default: a name over a remote rider');
       // #499, on a canvas of its own. @see lineProbe
       line = lineProbe(640, 360);
       phaseEnds('default: line');
@@ -12837,6 +12960,7 @@ async function run(): Promise<void> {
     roadFarPixel,
     roadProbeRows,
     riderFrame,
+    nameTag,
     line,
     bend,
     resourcesAfterFirstFrame,
