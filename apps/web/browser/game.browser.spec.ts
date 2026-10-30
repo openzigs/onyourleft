@@ -37,6 +37,7 @@ import type {
   RideStartMeasurement,
   HorizonReading,
   LogoMeasurement,
+  NameTagMeasurement,
   OrientationAgreement,
   RealisticMeasurement,
   StylisedTextureMeasurement,
@@ -124,6 +125,11 @@ interface GameHarnessResult {
   readonly roadFarPixel: Pixel;
   readonly roadProbeRows: readonly [number, number];
   readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+  /** #783. @see game-harness.ts §`nameTagProbe` */
+  readonly nameTag: {
+    readonly landscape: NameTagMeasurement;
+    readonly portrait: NameTagMeasurement;
+  };
   readonly line: {
     readonly on: LineMeasurement;
     readonly onUpright: LineMeasurement;
@@ -3237,6 +3243,45 @@ test.describe('the rider is prominent — #424', () => {
 });
 
 /**
+ * #783 — another rider's name lands over the rider the RENDERER drew.
+ *
+ * A name is DOM laid over the world (`name-tags.ts`), placed by `camera.ts`
+ * §`projectToFrame`, which restates the renderer's camera without `three`.
+ * jsdom holds the restatement to `riderFrameBox`; only a real draw can say it
+ * agrees with the camera three was actually given. `game-harness.ts`
+ * §`nameTagProbe` draws one named remote rider off to the side of the line,
+ * reads where they landed off the drawing buffer, and reports where the name
+ * was put.
+ */
+test.describe('another rider’s name is over the rider the renderer drew — #783', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
+  test('across the frame inside the rider, and just above their helmet, landscape and upright', async ({
+    harnessRun,
+  }) => {
+    const { nameTag } = await harness(harnessRun);
+    for (const { tag, drawn } of [nameTag.landscape, nameTag.portrait]) {
+      // Non-vacuity: a rider was drawn, and a name was put somewhere.
+      expect(drawn.pixels).toBeGreaterThan(50);
+      expect(tag).toBeDefined();
+      const left = tag?.left ?? Number.NaN;
+      const top = tag?.top ?? Number.NaN;
+      expect(left).toBeGreaterThanOrEqual(drawn.left);
+      expect(left).toBeLessThanOrEqual(drawn.right);
+      // Above the top of the drawn helmet — `NAME_TAG_ABOVE_METRES` is under
+      // a tenth of the rider’s height — by less than a quarter of the
+      // rider's own drawn height and a little.
+      expect(top).toBeLessThan(drawn.top);
+      expect(drawn.top - top).toBeLessThan((drawn.bottom - drawn.top) * 0.25 + 0.01);
+      // ⚠️ The control: the same name mirrored across the middle of the
+      // frame — what a projection with its right-hand axis the wrong way round
+      // would give — is NOT over the rider, so the check above can fail.
+      expect(1 - left < drawn.left || 1 - left > drawn.right).toBe(true);
+    }
+  });
+});
+
+/**
  * The racing line and the lean, read off the drawing buffer — #499.
  *
  * `line-on-the-road.test.ts` holds the FRAME to the line: the marker is where
@@ -3812,10 +3857,12 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     const ratio = (a: readonly number[], b: readonly number[]): number =>
       luminance(a) / luminance(b);
     // In the shadow the near place keeps under 0.92 of the far place's light —
-    // the old `> 12` on a wall this bright. Measured locally (SwiftShader, 2026-10-24), a wall 5 m high from 5 m:
-    // 126/138/143 0.3 m under the eaves against 142/154/159 1.5 m under, 0.90;
-    // 146/158/164 and 142/154/159 with the lever, 1.03. CI printed 0.82 and,
-    // with the lever, 0.97 (#1715).
+    // the old `> 12` on a wall this bright. Measured locally (SwiftShader,
+    // 2026-10-29), a wall 7 m high from 5 m, each place read across the 0.3 m
+    // of plain wall the probe chose (#1715): 112/101/86 0.3 m under the eaves
+    // against 131/118/102 1.5 m under, 0.86; 133/121/105 and 131/118/102 with
+    // the lever, 1.02. Before #1715, read as a three-pixel column on a 5 m
+    // wall, CI printed 0.82 and, with the lever, 0.97.
     expect(ratio(shadow.near, shadow.far)).toBeLessThan(0.92);
     // THE CONTROL: with the term out of the program, #1588's 0.6 m band reaches
     // neither place, so the two are the same wall within 5 %, either way — the
@@ -3824,7 +3871,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(ratio(shadow.nearOff, shadow.farOff) - 1)).toBeLessThan(0.05);
     // ... and it is the shadow, not the wall, that darkened the near place:
     // against the same two places with the term out, the near one keeps under
-    // 0.92 of its share of the far one's light (0.87 locally, 0.84 on CI) ...
+    // 0.92 of its share of the far one's light (0.84 locally) ...
     expect(ratio(shadow.near, shadow.far) / ratio(shadow.nearOff, shadow.farOff)).toBeLessThan(
       0.92,
     );
@@ -3942,6 +3989,32 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apartOff).toBeLessThan(6);
     // ... and the grime is what more than that is, past the gate's tolerance of 4.
     expect(apart - apartOff).toBeGreaterThan(4);
+  });
+
+  test('#1663 a mapped brick wall is its lintel 0.1 m over a window’s head and brick 0.5 m over, and brick at both with -facade-trims', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { facadeTrim: trim } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a brick wall seen from ${trim.metres.toFixed(0)} m: ${rgb(trim.lintel)} 0.1 m over a ` +
+      `window's head against ${rgb(trim.over)} 0.5 m over; ${rgb(trim.lintelOff)} and ` +
+      `${rgb(trim.overOff)} with -facade-trims`;
+    testInfo.annotations.push({ type: 'a mapped window’s lintel', description: measured });
+    console.log(`a mapped window’s lintel — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(trim.aimed).toBe(true);
+    for (const values of [trim.lintel, trim.over, trim.lintelOff, trim.overOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The stone lintel is lighter than the brick round it, past the gate's tolerance of 4.
+    expect(Math.abs(luminance(trim.lintel) - luminance(trim.over))).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program both are the brick ...
+    expect(Math.abs(luminance(trim.lintelOff) - luminance(trim.overOff))).toBeLessThan(4);
+    // ... and it is the lintel, not the wall, that changed the lower place.
+    expect(Math.abs(luminance(trim.lintel) - luminance(trim.lintelOff))).toBeGreaterThan(12);
+    expect(Math.abs(luminance(trim.over) - luminance(trim.overOff))).toBeLessThan(4);
   });
 
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({

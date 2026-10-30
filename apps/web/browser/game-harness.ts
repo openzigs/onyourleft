@@ -135,6 +135,7 @@ import {
   SASH_TOP_SHARE,
   SHOP_FRONT,
   shopFrontPartAt,
+  trimPartAt,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
 } from '../src/game/facade';
@@ -255,14 +256,17 @@ import {
   windowRevealsOf,
   overhangShadowsOf,
   weatheringOf,
+  facadeTrimsOf,
 } from '../src/game/three-renderer';
 import {
+  facadeTrimsWithLevers,
   overhangShadowsWithLevers,
   parseConfig,
   weatheringWithLevers,
   windowRevealsWithLevers,
 } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
+import { nameTags } from '../src/game/name-tags';
 import { bannerPlace, standPoint } from '../src/game/gantry';
 import { billboardsAt } from '../src/game/billboards';
 import {
@@ -588,6 +592,14 @@ declare global {
        * buffer — #424's first criterion. @see riderExtent
        */
       readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+      /**
+       * #783: a remote rider's name, and where the renderer drew that rider,
+       * at the same two shapes. @see nameTagProbe
+       */
+      readonly nameTag: {
+        readonly landscape: NameTagMeasurement;
+        readonly portrait: NameTagMeasurement;
+      };
       /**
        * The rider at the apex of a 20 m hairpin on the line, and — the control —
        * the same rider on the centreline, upright (#499). @see lineProbe
@@ -1170,6 +1182,115 @@ function riderExtent(width: number, height: number): RiderExtent {
     right: (highColumn + 1) / width,
     pixels,
   };
+}
+
+/**
+ * #783: where a remote rider's name was put, and where the renderer drew that
+ * rider. @see nameTagProbe
+ */
+export interface NameTagMeasurement {
+  /** The name's anchor, the bottom middle of it, as `name-tags.ts` gave it; absent if it named nobody. */
+  readonly tag: { readonly left: number; readonly top: number } | undefined;
+  /** The pixels the remote rider changed, as {@link riderExtent} measures the rider's. */
+  readonly drawn: RiderExtent;
+}
+
+/** What the harness reports for a name before it has measured one. */
+const NO_NAME_TAG: NameTagMeasurement = { tag: undefined, drawn: NO_RIDER };
+
+/**
+ * One named remote rider 8 m up the road and 1.5 m to the side of the line,
+ * drawn by the REAL renderer through the frame's own camera, and the name
+ * `name-tags.ts` §`nameTags` hangs over them — #783. The name is DOM laid over
+ * the world, so nothing but this can say that it lands over the rider the
+ * renderer actually drew: `camera.ts` §`projectToFrame` restates the
+ * renderer's camera without `three`, and a restatement can be wrong (a
+ * mirrored axis, a fixed lens) and agree with itself in every jsdom test.
+ *
+ * Off to the side on purpose, so the spec's control — the same name mirrored
+ * across the middle of the frame — has somewhere else to land. The rider
+ * alone is isolated as {@link riderExtent} isolates it: the same frame with
+ * and without them, and the pixels that differ.
+ */
+function nameTagProbe(width: number, height: number): NameTagMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(width, height);
+  const profile = levelRoute();
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin: corridorOrigin(profile),
+    state: { ...start, ride: { ...start.ride, distance: metres(1_000) } },
+    remoteRiders: [{ riderId: 1, distanceMetres: 1_008, speedMetresPerSecond: 0, label: 'Bea Ng' }],
+  });
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  const placed = frame.markers.find((marker) => marker.kind === 'remote');
+  if (gl === null || placed === undefined) {
+    view.destroy();
+    return NO_NAME_TAG;
+  }
+  // 1.5 m across the road toward its normal, the rider's right.
+  const remote: RiderMarker = {
+    ...placed,
+    x: placed.x - placed.headingZ * 1.5,
+    z: placed.z + placed.headingX * 1.5,
+  };
+  // The rider's own marker stays in the frame `nameTags` reads — it ranks by
+  // distance from them — and out of the frames drawn, so the pixels that
+  // change are the remote rider's alone.
+  const named: SceneFrame = {
+    ...frame,
+    scatter: [],
+    markers: [...frame.markers.filter((marker) => marker.kind === 'rider'), remote],
+  };
+  const [tag] = nameTags(named, { width, height });
+  const remoteOnly: SceneFrame = { ...frame, scatter: [], markers: [remote] };
+  const nobody: SceneFrame = { ...frame, scatter: [], markers: [] };
+  view.render(remoteOnly);
+  view.render(remoteOnly);
+  const present = readRegion(gl, 0, 0, width, height);
+  view.render(nobody);
+  view.render(nobody);
+  const absent = readRegion(gl, 0, 0, width, height);
+  view.destroy();
+  let pixels = 0;
+  let lowRow = height;
+  let highRow = -1;
+  let lowColumn = width;
+  let highColumn = -1;
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const at = (row * width + column) * 4;
+      if (
+        present[at] === absent[at] &&
+        present[at + 1] === absent[at + 1] &&
+        present[at + 2] === absent[at + 2]
+      ) {
+        continue;
+      }
+      pixels += 1;
+      lowRow = Math.min(lowRow, row);
+      highRow = Math.max(highRow, row);
+      lowColumn = Math.min(lowColumn, column);
+      highColumn = Math.max(highColumn, column);
+    }
+  }
+  const drawn: RiderExtent =
+    pixels === 0
+      ? { ...NO_RIDER, aspect: width / height }
+      : {
+          aspect: width / height,
+          // `readPixels` rows run from the BOTTOM, so the highest row is the top.
+          top: 1 - (highRow + 1) / height,
+          bottom: 1 - lowRow / height,
+          left: lowColumn / width,
+          right: (highColumn + 1) / width,
+          pixels,
+        };
+  return { tag: tag === undefined ? undefined : { left: tag.left, top: tag.top }, drawn };
 }
 
 /** What the harness reports for the line before it has measured one. */
@@ -4091,6 +4212,16 @@ const OVERHANG_PROBE_METRES = 5;
 /** The sun {@link overhangShadowProbe} sets, square to the wall: **60°** high. */
 const OVERHANG_PROBE_SUN_DEGREES = 60;
 
+/**
+ * How far either side of its bay line {@link overhangShadowProbe} needs plain
+ * wall, and reads it: **0.15 m**. #1715: the read is the whole of that
+ * stretch, not a column three pixels wide, because the wall's photograph
+ * moves a three-pixel column's light by about ±5 from one place to the next
+ * on the same plain wall (measured locally, SwiftShader, 2026-10-29: 110 to
+ * 131 along one wall in the same sun), and the control compares two places.
+ */
+const OVERHANG_PROBE_HALF_WIDTH = 0.15;
+
 const NO_OVERHANG_SHADOW: OverhangShadowMeasurement = {
   aimed: false,
   metres: 0,
@@ -4181,7 +4312,7 @@ function overhangShadowProbe(
       const bay = length / bays;
       const plain = (k: number): boolean =>
         [nearBelow, farBelow].every((below) =>
-          [-0.15, 0, 0.15].every((off) =>
+          [-OVERHANG_PROBE_HALF_WIDTH, 0, OVERHANG_PROBE_HALF_WIDTH].every((off) =>
             [-0.1, 0, 0.1].every(
               (up) =>
                 facadePartAt(
@@ -4280,15 +4411,28 @@ function overhangShadowProbe(
       targetRoadY: eye.y,
     },
   };
+  // Along the wall: its normal turned a quarter.
+  const alongX = -line.nz / across;
+  const alongZ = line.nx / across;
   const meanAt = (point: Point3): number[] => {
-    // A column 0.2 m tall and three pixels wide: a clapboard course or more, so
-    // that the read is the wall's and not where on its course it falls.
+    // A patch 0.2 m tall, a clapboard course or more, so that the read is the
+    // wall's and not where on its course it falls; and as wide as the plain
+    // wall either side of the bay line, so that it is not where on the
+    // photograph it falls either (#1715).
     const top = pixelFor(frame, canvas, { ...point, y: point.y + 0.1 });
     const bottom = pixelFor(frame, canvas, { ...point, y: point.y - 0.1 });
-    const x = Math.round((top.x + bottom.x) / 2) - 1;
+    const side = (sign: number): number =>
+      pixelFor(frame, canvas, {
+        ...point,
+        x: point.x + sign * alongX * OVERHANG_PROBE_HALF_WIDTH,
+        z: point.z + sign * alongZ * OVERHANG_PROBE_HALF_WIDTH,
+      }).x;
+    const [left, right] = [side(-1), side(1)].sort((a, b) => a - b) as [number, number];
+    const x = Math.round(left);
+    const columns = Math.max(3, Math.round(right - left));
     const y0 = Math.round(Math.min(top.y, bottom.y));
     const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
-    const pixels = readRegion(gl, x, y0, 3, rows);
+    const pixels = readRegion(gl, x, y0, columns, rows);
     const sums = [0, 0, 0];
     for (let at = 0; at < pixels.length; at += 4) {
       for (let channel = 0; channel < 3; channel += 1) {
@@ -5043,6 +5187,255 @@ function weatheringProbe(
       farOff: meanAt(farPoint),
     };
   } finally {
+    weatheringOf(view, true);
+  }
+}
+
+/** What {@link facadeTrimProbe} publishes — #1663. */
+interface FacadeTrimMeasurement {
+  /** Whether a mapped brick wall's window was found facing the road, with plain wall over its lintel. */
+  readonly aimed: boolean;
+  /** How far the camera is from the wall, metres. */
+  readonly metres: number;
+  /** The wall {@link FACADE_TRIM_PROBE_ABOVE} over the window's head, trimmed: in its lintel, and over it. */
+  readonly lintel: readonly number[];
+  readonly over: readonly number[];
+  /** The same two places with `-facade-trims`: main's program, the brick at both. */
+  readonly lintelOff: readonly number[];
+  readonly overOff: readonly number[];
+}
+
+/** How far over a window's head {@link facadeTrimProbe} reads the wall: **0.1 m** and **0.5 m**. */
+const FACADE_TRIM_PROBE_ABOVE = [0.1, 0.5] as const;
+
+/** How far {@link facadeTrimProbe}'s camera is from the wall: **4 m**. */
+const FACADE_TRIM_PROBE_METRES = 4;
+
+const NO_FACADE_TRIM: FacadeTrimMeasurement = {
+  aimed: false,
+  metres: 0,
+  lintel: [],
+  over: [],
+  lintelOff: [],
+  overOff: [],
+};
+
+/**
+ * #1663: a lintel reaches the screen. #1581's mixed town (`?town=mixed`'s):
+ * of the brick walls with sash windows (not clapboard) that face the road, 8
+ * to 40 m from it somewhere from 1 000 m along it, on a house with no porch,
+ * garage or shop front, the nearest window whose wall 0.1 m over its head is
+ * its lintel and 0.5 m over is plain wall, both by the twin (`facade.ts`
+ * §`trimPartAt`, §`facadePartAt`), and a camera {@link FACADE_TRIM_PROBE_METRES}
+ * out from it, level, between the two, the sun square to the wall at #1658's
+ * 60°. Read with the trims built, and with them taken out as the owner's
+ * `&levers=-facade-trims` takes them (`facadeTrimsOf`): main's program, in
+ * which both are the brick's photograph. #1658's shadow and #1661's
+ * weathering are out for both, as #1658's probe takes the weathering out:
+ * each has its own probe.
+ */
+function facadeTrimProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): FacadeTrimMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Opening {
+    /** The window's middle at its head, on the wall; the wall's outward normal and its direction. */
+    readonly head: Point3;
+    readonly nx: number;
+    readonly nz: number;
+    readonly ex: number;
+    readonly ez: number;
+  }
+  const [lintelAbove, overAbove] = FACADE_TRIM_PROBE_ABOVE;
+  const sashHead = WINDOW_SILL_METRES + SASH.height;
+  const openings: Opening[] = [];
+  for (const plan of plans) {
+    if (plan.porch || plan.garage || plan.shop.front) continue;
+    if (plan.surfaces.wall !== 'brick' || plan.cladding.wall !== 'photograph') continue;
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const skip = f(0, FACADE_OFFSET + 3);
+      const flags = f(0, STYLE_OFFSET + 1);
+      if (!(top > 0) || (flags & STYLE_SASH) === 0) continue;
+      const style = { flags, width: f(0, STYLE_OFFSET + 2), extra: f(0, STYLE_OFFSET + 3) };
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 1) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      const bay = length / bays;
+      const face = { surface: 'brick' as const, bays };
+      const ex = (b.x - a.x) / length;
+      const ez = (b.z - a.z) / length;
+      // Across the window's middle at both heights, and a little either side: the twin's part there.
+      const reads = (
+        k: number,
+        storey: number,
+        above: number,
+        part: 'lintel' | undefined,
+      ): boolean =>
+        [-0.3, 0, 0.3].every((off) =>
+          [-0.04, 0, 0.04].every((dy) => {
+            const u = k + 0.5 + off / bay;
+            const v = storey + (sashHead + above + dy) / STOREY_METRES;
+            return (
+              trimPartAt(u, v, top, skip, style, face) === part &&
+              facadePartAt(u, v, top, skip, style) === 'wall'
+            );
+          }),
+        );
+      for (let storey = 0; storey + 1 <= top; storey += 1) {
+        for (let k = 0; k < bays; k += 1) {
+          if (!reads(k, storey, lintelAbove, 'lintel') || !reads(k, storey, overAbove, undefined)) {
+            continue;
+          }
+          openings.push({
+            head: {
+              x: a.x + ex * (k + 0.5) * bay,
+              y: floor + storey * STOREY_METRES + sashHead,
+              z: a.z + ez * (k + 0.5) * bay,
+            },
+            nx: f(0, 3),
+            nz: f(0, 5),
+            ex,
+            ez,
+          });
+        }
+      }
+    }
+  }
+  const start = atStartLine(profile);
+  let chosen: { readonly along: number; readonly opening: Opening } | undefined;
+  for (let along = 1_000; along <= 2_000 && chosen === undefined; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const opening of openings) {
+      const distance = Math.hypot(road.x - opening.head.x, road.z - opening.head.z);
+      const facing =
+        ((road.x - opening.head.x) * opening.nx + (road.z - opening.head.z) * opening.nz) /
+        distance;
+      if (distance < 8 || distance > 40 || facing < 0.7) continue;
+      if (distance < nearest) {
+        nearest = distance;
+        chosen = { along, opening };
+      }
+    }
+  }
+  if (chosen === undefined) return NO_FACADE_TRIM;
+  const { opening } = chosen;
+  // A point `above` metres over the window's head and `across` along the wall, a little proud of it.
+  const over = (above: number, across = 0): Point3 => ({
+    x: opening.head.x + opening.nx * 0.01 + opening.ex * across,
+    y: opening.head.y + above,
+    z: opening.head.z + opening.nz * 0.01 + opening.ez * across,
+  });
+  const eye = {
+    x: opening.head.x + opening.nx * FACADE_TRIM_PROBE_METRES,
+    y: opening.head.y + (lintelAbove + overAbove) / 2,
+    z: opening.head.z + opening.nz * FACADE_TRIM_PROBE_METRES,
+  };
+  const headingX = -opening.nx;
+  const headingZ = -opening.nz;
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(chosen.along) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings,
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  // The sun square to the wall, as #1658's probe sets it, so that both heights are lit alike.
+  const elevation = (OVERHANG_PROBE_SUN_DEGREES * Math.PI) / 180;
+  const across = Math.hypot(opening.nx, opening.nz);
+  const frame: SceneFrame = {
+    ...base,
+    scatter: [],
+    markers: [],
+    world: {
+      ...base.world,
+      sun: {
+        ...base.world.sun,
+        x: (opening.nx / across) * Math.cos(elevation),
+        y: Math.sin(elevation),
+        z: (opening.nz / across) * Math.cos(elevation),
+      },
+    },
+    camera: {
+      ...base.camera,
+      x: eye.x + headingX * CAMERA_BEHIND_METRES,
+      z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+      targetRoadY: eye.y,
+    },
+  };
+  const meanAt = (above: number): number[] => {
+    // A strip 0.6 m across the window's middle and 0.08 m tall: several bricks
+    // wide, so that the read is the wall's and not one brick's or one joint's.
+    const left = pixelFor(frame, canvas, over(above, -0.3));
+    const right = pixelFor(frame, canvas, over(above, 0.3));
+    const top = pixelFor(frame, canvas, over(above + 0.04));
+    const bottom = pixelFor(frame, canvas, over(above - 0.04));
+    const x = Math.round(Math.min(left.x, right.x));
+    const width = Math.max(1, Math.round(Math.abs(right.x - left.x)));
+    const y0 = Math.round(Math.min(top.y, bottom.y));
+    const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
+    const pixels = readRegion(gl, x, y0, width, rows);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixels.length / 4));
+  };
+  // The trims alone: #1658's shadow and #1661's weathering have their own probes.
+  overhangShadowsOf(view, false);
+  weatheringOf(view, false);
+  try {
+    view.render(frame);
+    view.render(frame);
+    const lintel = meanAt(lintelAbove);
+    const overLintel = meanAt(overAbove);
+    // The owner's lever, read as the page reads it.
+    facadeTrimsOf(view, facadeTrimsWithLevers(parseConfig('?levers=-facade-trims').leversOff));
+    view.render(frame);
+    view.render(frame);
+    return {
+      aimed: true,
+      metres: FACADE_TRIM_PROBE_METRES,
+      lintel,
+      over: overLintel,
+      lintelOff: meanAt(lintelAbove),
+      overOff: meanAt(overAbove),
+    };
+  } finally {
+    facadeTrimsOf(view, true);
+    overhangShadowsOf(view, true);
     weatheringOf(view, true);
   }
 }
@@ -7577,6 +7970,8 @@ export interface RealisticMeasurement {
   readonly awningShadow: OverhangPairMeasurement;
   /** #1661: a mapped render wall's foot and above it, weathered and not. @see weatheringProbe */
   readonly weathering: WeatheringMeasurement;
+  /** #1663: a mapped brick wall over a window's head, in its lintel and over it, trimmed and not. @see facadeTrimProbe */
+  readonly facadeTrim: FacadeTrimMeasurement;
   /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
@@ -9703,6 +10098,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   corniceShadow: NO_OVERHANG_PAIR,
   awningShadow: NO_OVERHANG_PAIR,
   weathering: NO_WEATHERING,
+  facadeTrim: NO_FACADE_TRIM,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
   tint: {
@@ -11285,6 +11681,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const weathering = weatheringProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped wall’s weathering — #1661');
 
+  // #1663, on the same view: a mapped brick wall over a window's head, trimmed and not.
+  const facadeTrim = facadeTrimProbe(view, gl, canvas);
+  phaseEnds('realistic: a mapped window’s lintel — #1663');
+
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
   const townEdge = townEdgeProbe(view);
   phaseEnds('realistic: a town’s edge — #1586');
@@ -11541,6 +11941,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     corniceShadow,
     awningShadow,
     weathering,
+    facadeTrim,
     townEdge,
     lots,
     tint,
@@ -11963,6 +12364,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     roadFarPixel: NOWHERE,
     roadProbeRows: [0, 0],
     riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
+    nameTag: { landscape: NO_NAME_TAG, portrait: NO_NAME_TAG },
     line: {
       on: NO_LINE,
       onUpright: NO_LINE,
@@ -12143,6 +12545,7 @@ async function run(): Promise<void> {
   let roadFarPixel: Pixel = NOWHERE;
   let roadProbeRows: readonly [number, number] = [0, 0];
   let riderFrame = { landscape: NO_RIDER, portrait: NO_RIDER };
+  let nameTag = { landscape: NO_NAME_TAG, portrait: NO_NAME_TAG };
   let line = {
     on: NO_LINE,
     onUpright: NO_LINE,
@@ -12762,6 +13165,9 @@ async function run(): Promise<void> {
       // criterion's own frame; 10 : 16 is a tablet held upright.
       riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
       phaseEnds('default: rider extent');
+      // #783, on canvases of their own, at the same two shapes. @see nameTagProbe
+      nameTag = { landscape: nameTagProbe(640, 360), portrait: nameTagProbe(400, 640) };
+      phaseEnds('default: a name over a remote rider');
       // #499, on a canvas of its own. @see lineProbe
       line = lineProbe(640, 360);
       phaseEnds('default: line');
@@ -12817,6 +13223,7 @@ async function run(): Promise<void> {
     roadFarPixel,
     roadProbeRows,
     riderFrame,
+    nameTag,
     line,
     bend,
     resourcesAfterFirstFrame,

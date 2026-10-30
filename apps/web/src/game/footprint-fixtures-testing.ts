@@ -749,3 +749,88 @@ export function countrysideFixture(latitude = FIXTURE_LATITUDE): {
     },
   };
 }
+
+/** One house of {@link houseStreetFixture}: its `(along, lateral)` corners about its middle, and its mapped height. */
+interface StreetHouse {
+  readonly corners: readonly (readonly [number, number])[];
+  readonly height: number;
+}
+
+/** An L `long` along the road by `deep` across it, a quarter of it notched out of one corner. */
+function ellAbout(long: number, deep: number): readonly (readonly [number, number])[] {
+  const a = long / 2;
+  const d = deep / 2;
+  return [
+    [-a, -d],
+    [a, -d],
+    [a, 0],
+    [0, 0],
+    [0, d],
+    [-a, d],
+  ];
+}
+
+/**
+ * #1782's fixture: a street of US houses, one footprint for each of
+ * `house-archetypes.ts`' archetypes in turn, for the owner's look pair
+ * (`?town=houses`) and for the plans to be asserted over where the mixed town
+ * has none of a kind. Along a level road from 1 000 m to 1 500 m, both sides,
+ * on residential land, a house every 25 m, its middle 22 m out, square to the
+ * road: a ranch 17 m along by 8 m deep and one storey; a Cape 10.5 by 8, one
+ * storey; a bungalow 7.5 along by 13 deep, one storey; a Colonial 12 by 8.5,
+ * two storeys; a Foursquare 9.5 by 9, two storeys; and a ranch as an L, 18 by
+ * 9. Then from 1 700 m to 2 100 m, on land the map draws nothing on, a
+ * farmhouse every 100 m either side, 11 along by 16 deep, two storeys, sparse
+ * enough that #1633 reads the stretch rural. Nothing here is a real place.
+ */
+export function houseStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const street: readonly StreetHouse[] = [
+    { corners: rectangleBeside(0, 0, 17, 8), height: 3.5 },
+    { corners: rectangleBeside(0, 0, 10.5, 8), height: 3.5 },
+    { corners: rectangleBeside(0, 0, 7.5, 13), height: 3.5 },
+    { corners: rectangleBeside(0, 0, 12, 8.5), height: 6.5 },
+    { corners: rectangleBeside(0, 0, 9.5, 9), height: 6.5 },
+    { corners: ellAbout(18, 9), height: 3.5 },
+  ];
+  const buildings: BuildingFeature[] = [];
+  const place = (house: StreetHouse, along: number, side: number): void => {
+    const ring = house.corners.map(([a, n]) => [along + a, side * 22 + n] as const);
+    buildings.push(buildingBeside(profile, origin, [ring], house.height));
+  };
+  let index = 0;
+  for (let along = 1_000; along < 1_500; along += 25) {
+    for (const side of [1, -1]) {
+      place(street[index % street.length] as StreetHouse, along, side);
+      index += 1;
+    }
+  }
+  const farmhouse: StreetHouse = { corners: rectangleBeside(0, 0, 11, 16), height: 6.5 };
+  for (let along = 1_700; along < 2_100; along += 100) {
+    for (const side of [1, -1]) place(farmhouse, along, side);
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'house-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_550, -70, 70),
+        // The farmhouses' fields, behind them and across the road between them.
+        landBeside(profile, origin, 'landuse', 'farmland', 1_650, 2_150, 32, 300),
+        landBeside(profile, origin, 'landuse', 'farmland', 1_650, 2_150, -300, -32),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}

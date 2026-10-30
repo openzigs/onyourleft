@@ -317,11 +317,14 @@ a red `nightly-split.test.ts`, not a quiet move. `check:test-split`, still requi
 file in neither run.
 
 ⚠️ **Since [#1280](https://github.com/openzigs/onyourleft/issues/1280) it also takes the coverage
-report**, which is a report and not a check: its last three steps run `test:coverage` — the
+report**, which is a report and not a check: three steps run `test:coverage` — the
 required job's own Vitest files, under V8's instrumentation — publish the table to the run's
 summary and upload the HTML as the `coverage-report` artefact. Nothing left the required job but
-the table (§"Coverage out of the required job — #1280"). The steps are last and carry
-`if: ${{ !cancelled() }}`, so a red check above them does not cost the night its report. A test
+the table (§"Coverage out of the required job — #1280"). ⚠️ **Since
+[#1701](https://github.com/openzigs/onyourleft/issues/1701) the three are the `coverage` job, on a
+runner of its own** (§"Coverage in a job of its own — #1701" below); a reviewer who remembers them
+as the last steps of `heavy` is reading the old file. They carry `if: ${{ !cancelled() }}`, from
+when they followed the browser checks, so a red coverage run still publishes what it measured. A test
 that fails under coverage there turns the nightly job red and opens its issue, deliberately: the
 same test passed in the required job, so it is one that passes only without instrumentation.
 
@@ -437,6 +440,51 @@ fewest loads (shard 5); if every shard would pass 7, add `realistic-<name>.brows
 a `test:browser:nightly:shard-6` script and a `browser-6` job copied from `browser-5`, name the new
 `spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a
 load made through an alias of `ride` or a direct `page.goto` of the page is not counted: call `ride`.
+
+#### Coverage in a job of its own — #1701
+
+⚠️ **`test:coverage` and its two reporting steps are the `coverage` job (`Nightly coverage
+report`) since [#1701](https://github.com/openzigs/onyourleft/issues/1701)**, not the last three
+steps of `heavy`. In `heavy` they ran after browser shard 1, under that job's 1 800 s stop, and
+the job used 998 to 1 276 s of it on #1699's runs, 55 to 71 %. On the scheduled run
+[40853930991](https://github.com/openzigs/onyourleft/actions/runs/40853930991) (2026-10-29) it
+took **1 242 s**: `Tests outside coverage` 42 s, `Nightly browser checks (1 of 5)` 377 s and
+`Tests under coverage` 783 s. The coverage step grows with every test file, so a slow runner would
+have stopped the job and cancelled shard 1's tests with it.
+
+The new job is `heavy`'s steps with no Chromium, because the required job's `Tests` shard installs
+no browser either, and its stop is 30 minutes. `heavy` keeps its own 30 minutes, and Playwright's
+840 s `GATE_BUDGET_MS` still stops shard 1 before the job's stop would. `report` needs every job,
+and `nightly-split.test.ts` refuses a coverage run that shares a job with any other suite.
+`nightly-split.test.ts` also holds **every nightly job's slowest measured run at or under 60 % of
+its own stop**. It reads the figures from the table below, one column per job id. `report` is left
+out because it runs only after a red run. A new job needs a column, and the table needs at least
+three rows. Each figure is the job's own seconds, from its start to its end, as the Actions API
+gives them (`gh api repos/openzigs/onyourleft/actions/runs/<id>/jobs`), not counting the time it
+queued.
+
+<!-- nightly-measurements:start -->
+| Run | Event | heavy | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
+|---|---|--:|--:|--:|--:|--:|--:|
+| [40974080277](https://github.com/openzigs/onyourleft/actions/runs/40974080277) attempt 1 | `pull_request` | 565 | 896 | 551 | 431 | 277 | 344 |
+| [40974044131](https://github.com/openzigs/onyourleft/actions/runs/40974044131) | `workflow_dispatch` | 571 | 808 | 491 | 289 | 332 | 496 |
+| 40974080277 attempt 2 | `pull_request` | 588 | 906 | 344 | 292 | 278 | 307 |
+<!-- nightly-measurements:end -->
+
+The stops are 1 800 s for `heavy` and `coverage` and 1 200 s for each browser shard, so the slowest
+readings are 33 %, 50 %, 46 %, 36 %, 28 % and 41 % of them. `Tests under coverage` itself took 873,
+783 and 882 s. The CPUs, in column order:
+
+- Attempt 1: all EPYC 7763 except `browser-4`, an EPYC 9V74.
+- The dispatch: EPYC 7763 for `heavy`, `browser-2` and `browser-4`, EPYC 9V74 for `coverage` and
+  `browser-3`, and a Xeon Platinum 8370C for `browser-5`. That run went red: #1636's city-centre
+  case reached its 300 s test timeout there, so its 496 s includes a case that hung.
+- Attempt 2: a Xeon Platinum 8370C for `heavy`, an EPYC 7763 for `coverage`, a Xeon Platinum
+  8573C for `browser-2`, and EPYC 9V74 for the other three.
+
+The coverage job is the one closest to its bound: 60 % of 1 800 s is 1 080 s, 174 s more than its
+slowest reading. When a new row turns this red, split `test:coverage` between two jobs, as #1675
+split the browser checks. Do not lengthen the stop or change the 60 %.
 
 
 #### 23m39s of 25 — #1051
