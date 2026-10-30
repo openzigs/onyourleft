@@ -9,7 +9,9 @@
  * Since #1785 `-roof-variants` likewise: the street's variants without it, and
  * none with it; and since #1786 `-dormer-variants`: the Foursquares' hipped
  * dormers without it, and none with it; and since #1784 `-archetype-porches`:
- * the bungalows' wide eaves without it, and #1581's with it.
+ * the bungalows' wide eaves without it, and #1581's with it; and since #1783
+ * `-commercial-archetypes`: the commercial street's archetypes without it,
+ * and none with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +22,12 @@ import {
   footprintPlans,
   minimumAreaRectangle,
 } from '../../src/game/footprint-buildings';
-import { houseStreetFixture, mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
+import {
+  commercialStreetFixture,
+  houseStreetFixture,
+  mixedTownFixture,
+} from '../../src/game/footprint-fixtures-testing';
+import { BUILDING_ARCHETYPES } from '../../src/game/building-archetypes';
 import { HOUSE_ARCHETYPES, ROOF_VARIANTS } from '../../src/game/house-archetypes';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
 
@@ -191,6 +198,39 @@ describe('the realistic page’s `archetype-porches` lever — #1784', () => {
       undefined,
       urban,
       { archetypePorches: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    plans.forEach((plan, index) => {
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
+describe('the realistic page’s `commercial-archetypes` lever — #1783', () => {
+  const street = commercialStreetFixture();
+
+  it('gives the commercial street every archetype on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=commercial').leversOff);
+    const archetypes = new Set(plans.map((plan) => plan.buildingArchetype));
+    for (const archetype of BUILDING_ARCHETYPES) expect(archetypes).toContain(archetype);
+  });
+
+  it('plans every footprint with none, as the planner with them off does, with `levers=-commercial-archetypes`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=commercial&levers=-commercial-archetypes').leversOff,
+    );
+    expect(plans.every((plan) => plan.buildingArchetype === 'unknown')).toBe(true);
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { commercialArchetypes: false },
     ).plans;
     expect(plans.length).toBe(off.length);
     plans.forEach((plan, index) => {

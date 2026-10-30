@@ -1035,6 +1035,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         0.65 m eave casts a 0.4 m eave's shadow and a
                         0.15 m one too deep a shadow: #1784's answer (b),
                         no float carries the depth to the shader;
+                        since #1783 a commercial or multi-family footprint's
+                        archetype (`building-archetypes.ts`) — a brick
+                        main-street block (sash windows over its shop front,
+                        an awning on two in three), a strip front (its sign
+                        band kept, one storey) or a garden apartment (a low
+                        hip or gable over 300–1 200 m², clapboard or brick,
+                        one door, no garage) — `unknown`, industry and towers
+                        planned as before (`-commercial-archetypes`,
+                        `town=commercial`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

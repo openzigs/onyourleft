@@ -252,6 +252,12 @@ import {
   SIGN_PAINTS,
   TRIM_PAINTS,
 } from './building-paint';
+import {
+  buildingArchetypeOf,
+  GARDEN_APARTMENT_FEATURES,
+  MAIN_STREET_AWNING_SHARE,
+  type BuildingArchetype,
+} from './building-archetypes';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import type { AnchorKind } from './decorations';
 import {
@@ -652,6 +658,14 @@ export interface FootprintPlan {
    */
   readonly archetype: HouseArchetype;
   /**
+   * The commercial or multi-family building it is — #1783
+   * (`building-archetypes.ts`): a main-street block, a strip front or a garden
+   * apartment, which set its cladding, roof, ground floor and upper windows
+   * together; `unknown` where none fits, or with `levers=-commercial-archetypes`,
+   * and planned as before.
+   */
+  readonly buildingArchetype: BuildingArchetype;
+  /**
    * The house model it is drawn as at the near level, where one fits — #1585
    * (`house-models.ts`); `undefined` for every other plan, which keeps its
    * extrusion. A modelled plan keeps its extrusion too: it is its far level,
@@ -960,6 +974,13 @@ export const SHOP_FRONT_MIN_WALL_METRES = 4;
  * wall it stands — under the door's 2 cm, so the door is in front of it.
  */
 export const SHOP_FRONT_PLACE = { inset: 0.3, height: 2.7, least: 2.4, proud: 0.01 } as const;
+
+/**
+ * The least a strip front is lowered to for its sign band (#1783): above the door's
+ * surround ({@link DOOR_FACE}, 2.15 m), so an untagged one-storey store (3.0 m of wall)
+ * still carries both.
+ */
+const SIGNED_FRONT_LEAST = 2.2;
 
 /** A sign band — #1590: its gap over the shop front, its height, and how proud it stands. */
 export const SIGN_BAND = { gap: 0.05, height: 0.6, proud: 0.03 } as const;
@@ -4271,6 +4292,7 @@ export function footprintPlans(
           dropped: 0,
           dormers: options.dormerVariants ?? true,
           porches: options.archetypePorches ?? true,
+          buildings: options.commercialArchetypes ?? true,
         },
       ),
     );
@@ -4771,6 +4793,10 @@ interface ShopDraws {
   readonly paint: number;
   readonly stripes: number;
   readonly depth: number;
+  /** #1783: an archetype's awning share in place of {@link AWNING}'s. */
+  readonly awningShare?: number;
+  /** #1783: a strip front's sign band, the front lowered for it where the room is short. */
+  readonly signed?: boolean;
 }
 
 /**
@@ -4788,12 +4814,17 @@ export function shopOf(
   clear: (corners: readonly (readonly [number, number])[]) => boolean,
   draws: ShopDraws,
 ): ShopPlan | undefined {
-  const height = Math.min(SHOP_FRONT_PLACE.height, room - 0.3);
-  if (height < SHOP_FRONT_PLACE.least) return undefined;
+  const tallest = Math.min(SHOP_FRONT_PLACE.height, room - 0.3);
+  // #1783: a strip front keeps its sign band, its front lowered under it, no lower than its least.
+  const banded = room - 0.05 - SIGN_BAND.gap - SIGN_BAND.height;
+  const lowered = draws.signed === true && banded < tallest && banded >= SIGNED_FRONT_LEAST - 1e-9;
+  const height = lowered ? banded : tallest;
+  if (height < (lowered ? SIGNED_FRONT_LEAST - 1e-9 : SHOP_FRONT_PLACE.least)) return undefined;
   const width = length - 2 * SHOP_FRONT_PLACE.inset;
-  const sign = height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 ? SIGN_BAND.height : 0;
+  const sign =
+    height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 + 1e-9 ? SIGN_BAND.height : 0;
   let awning = 0;
-  if (draws.awning < AWNING.share) {
+  if (draws.awning < (draws.awningShare ?? AWNING.share)) {
     const half = width / 2 - AWNING.inset;
     const { least, most } = AWNING.depth;
     for (
@@ -5078,6 +5109,14 @@ export interface FootprintPlanOptions {
    * (`?levers=-archetype-porches`).
    */
   readonly archetypePorches?: boolean;
+  /**
+   * #1783: a commercial or multi-family footprint's archetype — a brick
+   * main-street block, a strip front, a garden apartment
+   * (`building-archetypes.ts`) — setting its cladding, roof, ground floor and
+   * upper windows together; `true` by default. Off, every plan is as before
+   * (`?levers=-commercial-archetypes`).
+   */
+  readonly commercialArchetypes?: boolean;
 }
 
 /**
@@ -5091,6 +5130,8 @@ interface ArchetypeChoice {
   readonly dormers?: boolean;
   /** #1784: whether its own eaves and porch width are built (`-archetype-porches` off), or #1589's. */
   readonly porches?: boolean;
+  /** #1783: whether a commercial or multi-family footprint is given its archetype (`-commercial-archetypes` off). */
+  readonly buildings?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -5134,16 +5175,33 @@ function planFootprint(
   const terraced = party.length > 0;
   // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
   const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
+  // #1783: the commercial or multi-family building it is, which sets its cladding, roof,
+  // ground floor and upper windows together; `unknown` is planned as before.
+  const buildingArchetype: BuildingArchetype =
+    choice.buildings === true && !part
+      ? buildingArchetypeOf({
+          area,
+          aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
+          rectangularity,
+          fourCorners: drawn.length / 2 === 4,
+          storeys,
+          use,
+          urban: urbanClass,
+          terraced,
+        })
+      : 'unknown';
   const pitched =
     !roofing.flat &&
-    pitchedFootprint({
+    (pitchedFootprint({
       area,
       rectangularity,
       wallHeight,
       use,
       terraced,
       rectilinear: split !== undefined,
-    });
+    }) ||
+      // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
+      (buildingArchetype === 'garden-apartment' && wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES));
   // The rectangles a pitched roof is built over, the largest first. A split of one is a
   // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
   // two or three is the notch fix.
@@ -5177,7 +5235,12 @@ function planFootprint(
         })
       : 'unknown';
   const features = droppedFeatures(
-    archetype === 'unknown' ? SEEDED_FEATURES : ARCHETYPE_FEATURES[archetype],
+    archetype !== 'unknown'
+      ? ARCHETYPE_FEATURES[archetype]
+      : // #1783: a garden apartment's, as a house's are.
+        buildingArchetype === 'garden-apartment'
+        ? GARDEN_APARTMENT_FEATURES
+        : SEEDED_FEATURES,
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -5233,7 +5296,8 @@ function planFootprint(
     clapboard &&
     share(STREAM_FOUNDATION) < shareOf(features.brickFoundation, BRICK_FOUNDATION_SHARE);
   const flags =
-    (residential ? STYLE_SASH : 0) +
+    // #1783: a main-street block's upper windows are sashes, in the bays' rhythm.
+    (residential || buildingArchetype === 'main-street' ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < shareOf(features.shutters, SHUTTER_SHARE)
       ? STYLE_SHUTTERS
       : 0) +
@@ -5289,6 +5353,11 @@ function planFootprint(
             paint: share(STREAM_AWNING_PAINT),
             stripes: share(STREAM_AWNING_STRIPES),
             depth: share(STREAM_AWNING_DEPTH),
+            // #1783: an awning on two in three main-street shop fronts; a strip front's sign band.
+            ...(buildingArchetype === 'main-street'
+              ? { awningShare: MAIN_STREET_AWNING_SHARE }
+              : {}),
+            ...(buildingArchetype === 'strip-front' ? { signed: true } : {}),
           },
         )
       : undefined;
@@ -5731,7 +5800,10 @@ function planFootprint(
         );
   const wallSurface = clapboard
     ? SIDING_SURFACE
-    : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+    : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+      buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+      ? 'brick'
+      : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
@@ -5773,6 +5845,7 @@ function planFootprint(
     frontStep,
     urban: urbanClass,
     archetype,
+    buildingArchetype,
     model,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
