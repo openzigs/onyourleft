@@ -369,7 +369,7 @@ describe('which archetype a footprint is — #1782', () => {
       coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
       landUse: [
         landBeside(profile, origin, 'landuse', 'residential', 900, 1_200, -60, 60),
-        landBeside(profile, origin, 'landuse', 'retail', 1_200, 1_400, -60, 60),
+        landBeside(profile, origin, 'landuse', 'commercial', 1_200, 1_400, -60, 60),
       ],
       buildings,
       paths: [],
