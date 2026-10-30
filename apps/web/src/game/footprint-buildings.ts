@@ -973,6 +973,13 @@ export const SHOP_FRONT_MIN_WALL_METRES = 4;
  */
 export const SHOP_FRONT_PLACE = { inset: 0.3, height: 2.7, least: 2.4, proud: 0.01 } as const;
 
+/**
+ * The least a strip front is lowered to for its sign band (#1783): above the door's
+ * surround ({@link DOOR_FACE}, 2.15 m), so an untagged one-storey store (3.0 m of wall)
+ * still carries both.
+ */
+const SIGNED_FRONT_LEAST = 2.2;
+
 /** A sign band — #1590: its gap over the shop front, its height, and how proud it stands. */
 export const SIGN_BAND = { gap: 0.05, height: 0.6, proud: 0.03 } as const;
 
@@ -4799,13 +4806,12 @@ export function shopOf(
   const tallest = Math.min(SHOP_FRONT_PLACE.height, room - 0.3);
   // #1783: a strip front keeps its sign band, its front lowered under it, no lower than its least.
   const banded = room - 0.05 - SIGN_BAND.gap - SIGN_BAND.height;
-  const height =
-    draws.signed === true && banded < tallest && banded >= SHOP_FRONT_PLACE.least
-      ? banded
-      : tallest;
-  if (height < SHOP_FRONT_PLACE.least) return undefined;
+  const lowered = draws.signed === true && banded < tallest && banded >= SIGNED_FRONT_LEAST - 1e-9;
+  const height = lowered ? banded : tallest;
+  if (height < (lowered ? SIGNED_FRONT_LEAST - 1e-9 : SHOP_FRONT_PLACE.least)) return undefined;
   const width = length - 2 * SHOP_FRONT_PLACE.inset;
-  const sign = height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 ? SIGN_BAND.height : 0;
+  const sign =
+    height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 + 1e-9 ? SIGN_BAND.height : 0;
   let awning = 0;
   if (draws.awning < (draws.awningShare ?? AWNING.share)) {
     const half = width / 2 - AWNING.inset;

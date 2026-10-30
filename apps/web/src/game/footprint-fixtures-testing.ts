@@ -946,7 +946,7 @@ export function commercialStreetFixture(latitude = FIXTURE_LATITUDE): {
     }
   }
   for (let along = 1_800; along < 2_600; along += 160) {
-    place(rectangleBeside(0, 0, 40, 15), along, 40, 3.3);
+    place(rectangleBeside(0, 0, 40, 15), along, 40, 3);
     place(rectangleBeside(0, 0, 24, 18), along + 80, 40, 6.5);
     place(rectangleBeside(0, 0, 36, 14), along, -40, index % 2 === 0 ? 6.5 : 9.5);
     index += 1;

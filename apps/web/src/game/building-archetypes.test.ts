@@ -361,11 +361,13 @@ describe('the caps — #1783', () => {
  *
  * A frozen record of the planner before #1783, not a snapshot to refresh. If
  * #1785, #1786 or #1784 changes before it merges, #1784's head's are
- * re-derived from it, and the PR says so.
+ * re-derived from it, and the PR says so. `porches.commercial` was re-derived when the
+ * fixture's strip fronts went from 3.3 m to the untagged 3 m (the lever off plans them as
+ * before; only the input changed).
  */
 const BEFORE = {
   main: { mixed: '18e7375f', houses: '15da7210' },
-  porches: { mixed: 'eea32fc0', houses: '8b985bcc', commercial: 'bf05708e' },
+  porches: { mixed: 'eea32fc0', houses: '8b985bcc', commercial: '10ef9ae2' },
 } as const;
 
 describe('the fallback and the lever — #1783', () => {

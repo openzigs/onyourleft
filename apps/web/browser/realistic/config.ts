@@ -331,6 +331,7 @@ export type Layer = (typeof LAYERS)[number];
 export const LEVERS = [
   'air',
   'archetype-porches',
+  'commercial-archetypes',
   'crag',
   'decorations',
   'dormer-variants',
@@ -341,7 +342,6 @@ export const LEVERS = [
   'generated-conifers',
   'generated-trees',
   'ground-blend',
-  'commercial-archetypes',
   'ground-clutter',
   'hedge-breaks',
   'house-archetypes',
