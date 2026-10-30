@@ -866,7 +866,7 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
       const roof = verticesOf(plan, 'roof');
       const eaves = eavesOf(plan);
       // The lowest edge of the roof is the overhang's, its fall below the wall top — since
-      // #1785 at its steepest eave's pitch, a saltbox's front.
+      // #1785 at a gambrel's lower pitch; a saltbox's two eaves are level, at the plan's.
       const low = Math.min(...roof.map(([, y]) => y as number));
       const pitch = eavePitchOf(plan.roofVariant, plan.pitchDegrees);
       const fall = EAVES_OVERHANG_METRES * Math.tan((pitch * Math.PI) / 180);

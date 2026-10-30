@@ -376,6 +376,40 @@ describe('each variant’s shape, read back from the plan — #1785', () => {
     }
   });
 
+  it('levels a saltbox’s two eaves: the steep front’s overhang drops no lower than the back’s', () => {
+    for (const plan of forced('saltbox', 6)) {
+      const rectangle = minimumAreaRectangle(plan.footprint);
+      const peak = ridgeOf(plan)[0] as Vertex;
+      const offset = localOf(rectangle, peak.x, peak.z)[1];
+      const sides = verticesOf(plan, 'roof').map(
+        (vertex) => [localOf(rectangle, vertex.x, vertex.z)[1], vertex.y] as const,
+      );
+      const lowest = (front: boolean): number =>
+        Math.min(
+          ...sides
+            .filter(([c]) => (Math.sign(c - offset) === Math.sign(offset)) === front)
+            .map(([, y]) => y),
+        );
+      // The back eave drops the overhang at the plan's pitch, and the front's is level with it.
+      const back =
+        plan.eaves - EAVES_OVERHANG_METRES * Math.tan((plan.pitchDegrees * Math.PI) / 180);
+      expect(lowest(false)).toBeCloseTo(back, 3);
+      expect(Math.abs(lowest(true) - lowest(false))).toBeLessThan(0.005);
+      // The front reaches out less than the back, for the steeper slope to fall as far.
+      const reach = (front: boolean): number =>
+        Math.max(
+          ...sides
+            .filter(([c]) => (Math.sign(c - offset) === Math.sign(offset)) === front)
+            .map(([c]) => Math.abs(c)),
+        ) - rectangle.halfShort;
+      expect(reach(false)).toBeCloseTo(EAVES_OVERHANG_METRES, 3);
+      expect(reach(true)).toBeLessThan(EAVES_OVERHANG_METRES - 0.05);
+      // And by just that: the front's eave is on its slope's plane, ridge to wall top and on.
+      const front = (peak.y - plan.eaves) / (rectangle.halfShort - Math.abs(offset));
+      expect((plan.eaves - lowest(true)) / reach(true)).toBeCloseTo(front, 3);
+    }
+  });
+
   it('builds a side-hipped roof with a hip at one end and a gable at the other', () => {
     for (const plan of forced('side-hipped', 6)) {
       const rectangle = minimumAreaRectangle(plan.footprint);
@@ -590,8 +624,13 @@ describe('gutters, a chimney and dormers on a variant — #1785', () => {
       let hung = 0;
       for (const plan of forced(variant, 6)) {
         const rectangle = minimumAreaRectangle(plan.footprint);
-        const across = rectangle.halfShort + EAVES_OVERHANG_METRES;
         for (const side of [1, -1]) {
+          // The eave's own reach: since 2026-10-30 a saltbox's steep front overhangs less.
+          const across = Math.max(
+            ...verticesOf(plan, 'roof').map(
+              (vertex) => side * localOf(rectangle, vertex.x, vertex.z)[1],
+            ),
+          );
           const eave = verticesOf(plan, 'roof').filter(
             (vertex) => Math.abs(localOf(rectangle, vertex.x, vertex.z)[1] - side * across) < 1e-3,
           );
