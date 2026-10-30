@@ -189,7 +189,7 @@ import {
   type LinearColour,
 } from '../src/game/realistic-light';
 import { srgbByteToLinear } from '../src/game/scenery-palette';
-import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
+import { buildingPlan, glassPanesOf, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   bicycleTreadOf,
   riderKitOf,
@@ -267,6 +267,7 @@ import {
   remoteRiderControlOf,
   windowRevealsOf,
   windowRoomsOf,
+  lotRealismOf,
   overhangShadowsOf,
   weatheringOf,
   facadeTrimsOf,
@@ -278,6 +279,7 @@ import {
   weatheringWithLevers,
   windowRevealsWithLevers,
   windowRoomsWithLevers,
+  lotRealismWithLevers,
 } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { nameTags } from '../src/game/name-tags';
@@ -6119,44 +6121,9 @@ function lotsProbe(
   gl: WebGL2RenderingContext,
   canvas: HTMLCanvasElement,
 ): LotsMeasurement {
-  const profile = northRouteForHarness();
-  const origin = corridorOrigin(profile);
-  const at = (along: number, lateral: number): readonly [number, number] | undefined => {
-    const road = drawnRoadFrame(profile, origin, along);
-    return road === undefined
-      ? undefined
-      : [road.x + road.normalX * lateral, road.z + road.normalZ * lateral];
-  };
-  const corners = [at(1_000, -60), at(1_400, -60), at(1_400, 60), at(1_000, 60)];
-  if (corners.some((point) => point === undefined)) return NO_LOTS;
-  const xs = corners.map((point) => point?.[0] ?? 0);
-  const zs = corners.map((point) => point?.[1] ?? 0);
-  const corridor: WorldCorridor = {
-    routeId: 'harness-1550',
-    origin,
-    covered: () => true,
-    // Only the town's own stretch is read: the procedural world decides the rest.
-    coveredBoxes: [
-      {
-        minX: Math.min(...xs) - 100,
-        maxX: Math.max(...xs) + 100,
-        minZ: Math.min(...zs) - 100,
-        maxZ: Math.max(...zs) + 100,
-      },
-    ],
-    landUse: [
-      {
-        layer: 'landuse',
-        kind: 'residential',
-        rings: [Float32Array.from(corners.flatMap((point) => point ?? []))],
-      },
-    ],
-    buildings: [],
-    paths: [],
-    streets: [],
-  };
-  const land = landClassMask(corridor);
-  const town = mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans);
+  const lotsTown = lotsTownForHarness();
+  if (lotsTown === undefined) return NO_LOTS;
+  const { profile, origin, corridor, land, town } = lotsTown;
   const start = atStartLine(profile);
   const frameWith = (lotsOff: boolean): SceneFrame =>
     sceneFrame({
@@ -6221,6 +6188,355 @@ function lotsProbe(
     onRgb: meanAt(lots),
     offRgb: meanAt(off),
   };
+}
+
+/**
+ * #1550's mapped town with no footprints, which `structuresAt` fills with
+ * procedural lots — a residential polygon 60 m either side of the level road
+ * from 1 000 m to 1 400 m along, every tile there read, no buildings in it:
+ * {@link lotsProbe}'s, and since #1665 {@link lotRealismProbe}'s.
+ *
+ * ⚠️ The corridor is built here rather than read from `?corridor=archive`, as
+ * #1547's and #1551's probes build theirs: #1539's archive fixture holds no
+ * residential land within a lot's reach of the road (its block is ~70 m off
+ * it), and what is measured is a lot on a known stretch.
+ */
+function lotsTownForHarness():
+  | {
+      readonly profile: ReturnType<typeof routeProfile>;
+      readonly origin: ReturnType<typeof corridorOrigin>;
+      readonly corridor: WorldCorridor;
+      readonly land: ReturnType<typeof landClassMask>;
+      readonly town: ReturnType<typeof mappedTown>;
+    }
+  | undefined {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const at = (along: number, lateral: number): readonly [number, number] | undefined => {
+    const road = drawnRoadFrame(profile, origin, along);
+    return road === undefined
+      ? undefined
+      : [road.x + road.normalX * lateral, road.z + road.normalZ * lateral];
+  };
+  const corners = [at(1_000, -60), at(1_400, -60), at(1_400, 60), at(1_000, 60)];
+  if (corners.some((point) => point === undefined)) return undefined;
+  const xs = corners.map((point) => point?.[0] ?? 0);
+  const zs = corners.map((point) => point?.[1] ?? 0);
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1550',
+    origin,
+    covered: () => true,
+    // Only the town's own stretch is read: the procedural world decides the rest.
+    coveredBoxes: [
+      {
+        minX: Math.min(...xs) - 100,
+        maxX: Math.max(...xs) + 100,
+        minZ: Math.min(...zs) - 100,
+        maxZ: Math.max(...zs) + 100,
+      },
+    ],
+    landUse: [
+      {
+        layer: 'landuse',
+        kind: 'residential',
+        rings: [Float32Array.from(corners.flatMap((point) => point ?? []))],
+      },
+    ],
+    buildings: [],
+    paths: [],
+    streets: [],
+  };
+  const land = landClassMask(corridor);
+  const town = mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans);
+  return { profile, origin, corridor, land, town };
+}
+
+/** What {@link lotRealismProbe} publishes — #1665. */
+interface LotRealismMeasurement {
+  /** Whether a lot house was found with a plain side wall and a row of front windows to aim at. */
+  readonly aimed: boolean;
+  /** A lot's side wall {@link WEATHERING_PROBE_UP} above its ground: with the realism, and with `-lot-realism`. */
+  readonly near: readonly number[];
+  readonly far: readonly number[];
+  readonly nearOff: readonly number[];
+  readonly farOff: readonly number[];
+  /** Two neighbouring panes of its front's upper row: with the realism, and with `-lot-realism`. */
+  readonly left: readonly number[];
+  readonly right: readonly number[];
+  readonly leftOff: readonly number[];
+  readonly rightOff: readonly number[];
+  /** How many pane pairs were read to find two that match with the realism out. */
+  readonly pairsTried: number;
+}
+
+const NO_LOT_REALISM: LotRealismMeasurement = {
+  aimed: false,
+  near: [],
+  far: [],
+  nearOff: [],
+  farOff: [],
+  left: [],
+  right: [],
+  leftOff: [],
+  rightOff: [],
+  pairsTried: 0,
+};
+
+/** How far {@link lotRealismProbe}'s camera stands from a lot's panes: **8 m**, square on. */
+const LOT_PANES_PROBE_METRES = 8;
+
+/**
+ * #1665: a procedural lot's wall is weathered, and two neighbouring lot panes
+ * show two rooms. #1550's lot town ({@link lotsTownForHarness}), its houses
+ * drawn as lots (`building`, painted, no model), the nearest first:
+ *
+ * - **the wall**: the house's `+x` side wall, `buildings.ts` §`buildingPlan`'s,
+ *   at a place no opening comes within 0.4 m of, read
+ *   {@link WEATHERING_PROBE_UP} above the lot's ground — 0.3 m in the splash
+ *   grime and 1.5 m above it — from {@link WEATHERING_PROBE_METRES} out,
+ *   level, the sun square to the wall at #1658's 60°, as #1661's probe reads
+ *   a mapped wall;
+ * - **the panes**: two windows side by side in the front's upper row
+ *   (`glassPanesOf`, one apart, so an even and an odd), each read a little
+ *   off its middle, clear of any bar, from {@link LOT_PANES_PROBE_METRES} out,
+ *   square on to the point between them. #1550's glass is one flat pane, so a
+ *   pair is kept where the two read the same within
+ *   {@link ROOMS_PROBE_TOLERANCE} with the realism out.
+ *
+ * Each read with the realism built and with it taken out as the owner's
+ * `&levers=-lot-realism` takes it (`lotRealismOf`).
+ */
+function lotRealismProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): LotRealismMeasurement {
+  const lotsTown = lotsTownForHarness();
+  if (lotsTown === undefined) return NO_LOT_REALISM;
+  const { profile, origin, corridor, land, town } = lotsTown;
+  const start = atStartLine(profile);
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(1_060) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedTown: town,
+  });
+  // Only the buildings: no tree, hedge or post between a camera and its wall.
+  const buildings = base.scatter.filter((item) => item.kind === 'building');
+  const houses = buildings
+    .filter(
+      (item) =>
+        item.paint !== undefined &&
+        item.house === undefined &&
+        land.classAt(item.x, item.z) === 'built-up',
+    )
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - base.camera.x, a.z - base.camera.z) -
+        Math.hypot(b.x - base.camera.x, b.z - base.camera.z),
+    );
+  /** A house-local point and direction in the world, as the structure belt places its instance. */
+  const toWorld = (house: ScatterItem, p: readonly [number, number, number]): Point3 => {
+    const cos = Math.cos(house.rotation);
+    const sin = Math.sin(house.rotation);
+    const [x, y, z] = p.map((value) => value * house.scale) as [number, number, number];
+    return { x: house.x + cos * x + sin * z, y: house.y + y, z: house.z - sin * x + cos * z };
+  };
+  const turned = (house: ScatterItem, n: readonly number[]): { x: number; z: number } => {
+    const cos = Math.cos(house.rotation);
+    const sin = Math.sin(house.rotation);
+    const [x = 0, , z = 0] = n;
+    return { x: cos * x + sin * z, z: -sin * x + cos * z };
+  };
+  const frameFor = (
+    eye: Point3,
+    headingX: number,
+    headingZ: number,
+    sunNormal?: { x: number; z: number },
+  ): SceneFrame => {
+    const elevation = (OVERHANG_PROBE_SUN_DEGREES * Math.PI) / 180;
+    return {
+      ...base,
+      scatter: buildings,
+      markers: [],
+      world:
+        sunNormal === undefined
+          ? base.world
+          : {
+              ...base.world,
+              sun: {
+                ...base.world.sun,
+                x: sunNormal.x * Math.cos(elevation),
+                y: Math.sin(elevation),
+                z: sunNormal.z * Math.cos(elevation),
+              },
+            },
+      camera: {
+        ...base.camera,
+        x: eye.x + headingX * CAMERA_BEHIND_METRES,
+        z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+        headingX,
+        headingZ,
+        eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+        targetRoadY: eye.y,
+      },
+    };
+  };
+  const patchAt = (frame: SceneFrame, point: Point3, rows: number, columns: number): number[] => {
+    const centre = pixelFor(frame, canvas, point);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - Math.floor(columns / 2),
+      Math.round(centre.y) - Math.floor(rows / 2),
+      columns,
+      rows,
+    );
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixels.length / 4));
+  };
+  const apart = (x: readonly number[], y: readonly number[]): number =>
+    Math.max(...x.map((value, channel) => Math.abs(value - (y[channel] ?? 0))));
+  const lever = (): void =>
+    lotRealismOf(view, lotRealismWithLevers(parseConfig('?levers=-lot-realism').leversOff));
+  const [nearUp, farUp] = WEATHERING_PROBE_UP;
+  let tried = 0;
+  try {
+    // The control first: the realism out, until a pair matches.
+    lever();
+    for (const house of houses.slice(0, 6)) {
+      const plan = buildingPlan('building', house.variant);
+      const side = plan.openings.find((opening) => opening.face.normal[0] > 0.99);
+      if (side === undefined) continue;
+      const { face, wall } = side;
+      // A place on the side wall no opening comes within 0.4 m of.
+      const clear = (u: number): boolean =>
+        plan.openings.every((opening) => {
+          if (opening.face.normal[0] < 0.99) return true;
+          const us = opening.outline.map(([value]) => value);
+          return u < Math.min(...us) - 0.4 || u > Math.max(...us) + 0.4;
+        });
+      let u: number | undefined;
+      for (let at = wall.uMin + 0.5; at <= wall.uMax - 0.5; at += 0.1) {
+        if (clear(at)) {
+          u = at;
+          break;
+        }
+      }
+      // The front's upper row: two windows side by side, numbered one apart.
+      const panes = glassPanesOf(plan);
+      const row = panes
+        .map((pane, index) => ({ pane, index }))
+        .filter(({ pane }) => pane.face.normal[2] > 0.99)
+        .map(({ pane, index }) => {
+          const us = pane.outline.map(([value]) => value);
+          const vs = pane.outline.map(([, value]) => value);
+          return {
+            index,
+            face: pane.face,
+            u0: Math.min(...us),
+            u1: Math.max(...us),
+            v0: Math.min(...vs),
+            v1: Math.max(...vs),
+          };
+        });
+      const top = Math.max(...row.map((pane) => pane.v0));
+      const upper = row
+        .filter((pane) => Math.abs(pane.v0 - top) < 0.01)
+        .sort((a, b) => a.u0 - b.u0);
+      if (u === undefined || upper.length < 2) continue;
+      // The wall, 5 m out from its plain place, the sun square to it.
+      const wallNormal = turned(house, face.normal);
+      const onWall = (up: number): Point3 =>
+        toWorld(house, [
+          face.origin[0] + face.right[0] * (u ?? 0) + face.normal[0] * 0.01,
+          up,
+          face.origin[2] + face.right[2] * (u ?? 0) + face.normal[2] * 0.01,
+        ]);
+      const wallFoot = onWall(0);
+      const wallFrame = frameFor(
+        {
+          x: wallFoot.x + wallNormal.x * WEATHERING_PROBE_METRES,
+          y: house.y + ((nearUp + farUp) / 2) * house.scale,
+          z: wallFoot.z + wallNormal.z * WEATHERING_PROBE_METRES,
+        },
+        -wallNormal.x,
+        -wallNormal.z,
+        wallNormal,
+      );
+      // The panes: a little off each middle, toward its lower outer corner, clear of a bar.
+      const pairs = upper.slice(1).map((pane, at) => [upper[at], pane] as const);
+      for (const [a, b] of pairs) {
+        if (a === undefined) continue;
+        tried += 1;
+        const paneAt = (pane: typeof a): Point3 =>
+          toWorld(house, [
+            pane.face.origin[0] +
+              pane.face.right[0] * (pane.u0 + (pane.u1 - pane.u0) * 0.3) +
+              pane.face.normal[0] * 0.02,
+            pane.v0 + (pane.v1 - pane.v0) * 0.3,
+            pane.face.origin[2] +
+              pane.face.right[2] * (pane.u0 + (pane.u1 - pane.u0) * 0.3) +
+              pane.face.normal[2] * 0.02,
+          ]);
+        const leftAt = paneAt(a);
+        const rightAt = paneAt(b);
+        const frontNormal = turned(house, a.face.normal);
+        const middle = {
+          x: (leftAt.x + rightAt.x) / 2,
+          y: leftAt.y,
+          z: (leftAt.z + rightAt.z) / 2,
+        };
+        const paneFrame = frameFor(
+          {
+            x: middle.x + frontNormal.x * LOT_PANES_PROBE_METRES,
+            y: middle.y,
+            z: middle.z + frontNormal.z * LOT_PANES_PROBE_METRES,
+          },
+          -frontNormal.x,
+          -frontNormal.z,
+        );
+        view.render(paneFrame);
+        view.render(paneFrame);
+        const leftOff = patchAt(paneFrame, leftAt, 3, 3);
+        const rightOff = patchAt(paneFrame, rightAt, 3, 3);
+        if (apart(leftOff, rightOff) >= ROOMS_PROBE_TOLERANCE) continue;
+        view.render(wallFrame);
+        view.render(wallFrame);
+        const nearOff = patchAt(wallFrame, onWall(nearUp), 5, 5);
+        const farOff = patchAt(wallFrame, onWall(farUp), 5, 5);
+        lotRealismOf(view, true);
+        view.render(paneFrame);
+        view.render(paneFrame);
+        const left = patchAt(paneFrame, leftAt, 3, 3);
+        const right = patchAt(paneFrame, rightAt, 3, 3);
+        view.render(wallFrame);
+        view.render(wallFrame);
+        return {
+          aimed: true,
+          near: patchAt(wallFrame, onWall(nearUp), 5, 5),
+          far: patchAt(wallFrame, onWall(farUp), 5, 5),
+          nearOff,
+          farOff,
+          left,
+          right,
+          leftOff,
+          rightOff,
+          pairsTried: tried,
+        };
+      }
+    }
+    return { ...NO_LOT_REALISM, pairsTried: tried };
+  } finally {
+    lotRealismOf(view, true);
+  }
 }
 
 /** Six kilometres of level, low farmland — somewhere a village stands. */
@@ -8446,6 +8762,8 @@ export interface RealisticMeasurement {
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
   readonly lots: LotsMeasurement;
+  /** #1665: a lot wall's grime and two lot panes' rooms, with the realism and without. @see lotRealismProbe */
+  readonly lotRealism: LotRealismMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -10572,6 +10890,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   facadeTrim: NO_FACADE_TRIM,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
+  lotRealism: NO_LOT_REALISM,
   tint: {
     trees: [],
     treesControl: [],
@@ -12168,6 +12487,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const lots = lotsProbe(view, gl, canvas);
   phaseEnds('realistic: lots in an unmapped town — #1550');
 
+  // #1665, on the same view: a lot wall's grime and two lot panes' rooms, with the realism and without.
+  const lotRealism = lotRealismProbe(view, gl, canvas);
+  phaseEnds('realistic: the lots’ weathering and rooms — #1665');
+
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -12420,6 +12743,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     facadeTrim,
     townEdge,
     lots,
+    lotRealism,
     tint,
     grounding,
     tread,

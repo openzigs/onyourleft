@@ -363,6 +363,8 @@ import {
   BUILDING_ROLES,
   BUILDING_VARIANTS,
   buildingPlan,
+  glassPaneCoordinates,
+  PANE_STRIDE,
   FOUNDATION_METRES,
   isBuiltKind,
   LOT_PORCH,
@@ -14338,6 +14340,12 @@ interface StructurePart {
   /** #1588: what a clad lot draws it as. @see LOT_PART */
   readonly part: number;
   readonly geometry: BufferGeometry;
+  /**
+   * #1665: a lot's glass, its vertices' places in their own panes
+   * (`buildings.ts` §`glassPaneCoordinates`), laid in its `uv` in place of
+   * the metres glass samples nothing with.
+   */
+  readonly paneUv?: Float32Array;
 }
 
 /**
@@ -14434,6 +14442,8 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
                 ? LOT_PART.porch
                 : LOT_PART.other,
         geometry,
+        // #1665: each glass vertex's place in its own pane, for the room behind it.
+        ...(role === 'glass' ? { paneUv: glassPaneCoordinates(plan) } : {}),
       });
     }
     return parts;
@@ -14547,9 +14557,19 @@ export function realisticStructureGeometry(
     : { across: 1, up: 1 };
   const mine: BufferGeometry[] = [];
   for (const part of realisticStructureParts(kind, variant)) {
-    if (part.surface === surface)
-      mine.push(projectedInMetres(part.geometry, tile, part.shade, part.grounded, part.part));
-    else part.geometry.dispose();
+    if (part.surface === surface) {
+      const projected = projectedInMetres(
+        part.geometry,
+        tile,
+        part.shade,
+        part.grounded,
+        part.part,
+      );
+      // #1665: a pane's own coordinates in the glass's `uv`. @see glassPaneCoordinates
+      if (part.paneUv !== undefined)
+        projected.setAttribute('uv', new BufferAttribute(part.paneUv, 2));
+      mine.push(projected);
+    } else part.geometry.dispose();
   }
   if (mine.length === 0) return undefined;
   const joined = mergeGeometries(mine);
@@ -14680,18 +14700,20 @@ function structureMaterials(
         surface,
       ),
     );
-  return {
-    lit: biased(
-      constructed(
-        new MeshStandardMaterial({
-          color: finish.tint,
-          roughness: finish.roughness,
-          metalness: finish.metalness,
-          vertexColors: true,
-          ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
-        }),
-      ),
+  const lit = biased(
+    constructed(
+      new MeshStandardMaterial({
+        color: finish.tint,
+        roughness: finish.roughness,
+        metalness: finish.metalness,
+        vertexColors: true,
+        ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+      }),
     ),
+  );
+  return {
+    // #1665: a lit pane shows #1662's room behind it.
+    lit: surface === 'glass' ? withLotGlass(lit) : lit,
     flat: biased(
       constructed(
         new MeshBasicMaterial({
@@ -14817,8 +14839,18 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   const count = String(LOT_PAINTS);
+  // #1665: #1661's weathering on a lot's walls and roofs — the lit material's
+  // only: the flat rung is the step down, and pays for none of it.
+  const weathers =
+    channel !== 'trim' &&
+    (material as { isMeshStandardMaterial?: boolean }).isMeshStandardMaterial === true;
+  if (weathers) {
+    LOT_REALISM_TAUGHT.add(material);
+    defineLotLevers(material);
+  }
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
+    const weathered = weathers && lotRealismBuiltIn(material);
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
         shader.vertexShader,
@@ -14831,6 +14863,9 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
           'varying vec3 vOylLotNormal;',
           `const vec3 oylLotPaints[${count}] = vec3[${count}](${entries});`,
           `const vec3 oylCladPaints[${count}] = vec3[${count}](${clad});`,
+          ...(weathered
+            ? ['varying vec3 vOylWorld;', 'flat varying float vOylAge;', WEATHER_PHOTO_GLSL]
+            : []),
         ].join('\n'),
         'vertex',
         spliced,
@@ -14838,6 +14873,7 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
       '#include <begin_vertex>',
       [
         '#include <begin_vertex>',
+        ...(weathered ? [LOT_WEATHER_VERTEX_GLSL] : []),
         'vOylPaint = vec3(1.0);',
         'vOylLot = vec4(position, 0.0);',
         'vOylLotNormal = normal;',
@@ -14882,12 +14918,15 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
           'varying vec3 vOylLotNormal;',
           `const float vOylLotRoof = ${channel === 'roof' ? '1.0' : '0.0'};`,
           CLADDING_HELPERS_GLSL,
+          weatheringGlsl(weathered, surface),
         ].join('\n'),
         'fragment',
         spliced,
       ),
       '#include <color_fragment>',
-      `#include <color_fragment>\ndiffuseColor.rgb *= vOylPaint;\n${LOT_CLADDING_GLSL}`,
+      `#include <color_fragment>\ndiffuseColor.rgb *= vOylPaint;\n${LOT_CLADDING_GLSL}${
+        weathered ? (channel === 'roof' ? LOT_WEATHER_ROOF_GLSL : LOT_WEATHER_WALL_GLSL) : ''
+      }`,
       'fragment',
       spliced,
     );
@@ -17140,6 +17179,222 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
   };
   // #1661: the weathering bakes in the surface's streak share and parging.
   material.customProgramCacheKey = () => `${earlierKey}|oyl-facade-${surface}`;
+  return material;
+}
+
+/**
+ * Whether the procedural lots' programs are built with #1665's realism —
+ * #1661's weathering on their walls and roofs, #1662's rooms behind their
+ * glass: always, in the product. @see lotRealismOf
+ */
+let lotRealismBuilt = true;
+
+/** The define for {@link lotRealismBuilt} — #1665, as `OYL_WINDOW_ROOMS` is #1662's. */
+const LOT_REALISM_DEFINE = 'OYL_LOT_REALISM';
+
+/** The lot materials that carry {@link LOT_REALISM_DEFINE}: a lit wall or roof's, and a lit pane's. */
+const LOT_REALISM_TAUGHT = new WeakSet<Material>();
+
+/** Whether `material` is built with #1665's realism, by its define. */
+function lotRealismBuiltIn(material: Material): boolean {
+  return (material as { defines?: Record<string, unknown> }).defines?.[LOT_REALISM_DEFINE] !== 0;
+}
+
+/** Sets `material`'s {@link LOT_REALISM_DEFINE} to {@link lotRealismBuilt}. */
+function defineLotLevers(material: Material): void {
+  const carrier = material as { defines?: Record<string, unknown> };
+  carrier.defines = { ...carrier.defines, [LOT_REALISM_DEFINE]: lotRealismBuilt ? 1 : 0 };
+}
+
+/**
+ * Whether a structure material is one #1665's lever builds its realism in or
+ * out of.
+ *
+ * @test-facing held by `lot-realism.test.ts`, which asserts the lit walls',
+ * roofs' and glass's materials, and not the flat rung's
+ */
+export function carriesLotRealism(material: Material): boolean {
+  return LOT_REALISM_TAUGHT.has(material);
+}
+
+/**
+ * Builds the procedural lots' walls and roofs with #1661's weathering and
+ * their glass with #1662's rooms — #1665 — or, `on` false, without them: the
+ * functions and every splice of them left out of the programs, so every lot
+ * is drawn as before #1665. As `weatheringOf` does for the mapped facades, a
+ * setting of the module's, and the materials already in `view`'s scene are
+ * compiled again.
+ *
+ * @test-facing the owner's page's `-lot-realism` lever (`realistic-harness.ts`)
+ * and the browser gate's read of it (`game-harness.ts` §`lotRealismProbe`);
+ * the product always builds it
+ */
+export function lotRealismOf(view: GameView, on: boolean): void {
+  lotRealismBuilt = on;
+  if (view instanceof ThreeGameView) view.lotsRecompiled();
+}
+
+/**
+ * #1665's vertex half of #1661's weathering on a lot: the fragment's place in
+ * the world — through the instance's matrix, a lot being an instance — and
+ * its building's age from the instance's seeded tint (#621's `vOylTint`, set
+ * at `color_vertex`, before this), as `WEATHER_VERTEX_GLSL` works out a mapped
+ * building's. The photograph is not laid per lot: a lot's is already laid by
+ * where it stands.
+ */
+const LOT_WEATHER_VERTEX_GLSL = /* glsl */ `
+#ifdef USE_INSTANCING
+vOylWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+#else
+vOylWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+#endif
+vOylAge = oylWeatherAgeOf(vOylTint);`;
+
+/**
+ * The derivatives and the plane #1661's noise is laid in, on a lot — the
+ * opening of {@link WEATHER_CLADDING_GLSL}'s, in a block of its own in `main`,
+ * out of every branch.
+ */
+const LOT_WEATHER_PLANE_GLSL = /* glsl */ `
+    vec3 oylWdx = dFdx(vOylWorld);
+    vec3 oylWdy = dFdy(vOylWorld);
+    vec3 oylWN = normalize(cross(oylWdx, oylWdy));
+    vec3 oylWfw = abs(oylWdx) + abs(oylWdy);
+    float oylWpw = max(max(max(oylWfw.x, oylWfw.y), oylWfw.z), 0.00001);
+    float oylUpFacing = abs(oylWN.y);
+    vec2 oylPlane = vec2(
+      oylWeatherPlaneA(oylUpFacing, oylWN.x, oylWN.z, vOylWorld.x, vOylWorld.z),
+      oylWeatherPlaneB(oylUpFacing, vOylWorld.y, vOylWorld.z)
+    );
+    diffuseColor.rgb *= oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw);`;
+
+/**
+ * #1665: #1661's weathering on a lot's wall, after its paint and cladding —
+ * the photograph's repeat broken, and splash grime at its foot, from the
+ * same functions a mapped wall's are drawn with (`oylWeatherTile`,
+ * `oylWeatherGrime`), its height the vertex's above the lot's ground
+ * (`vOylLot`'s `y`).
+ */
+const LOT_WEATHER_WALL_GLSL = /* glsl */ `
+  // #1665: #1661's weathering, on a lot's wall.
+  {${LOT_WEATHER_PLANE_GLSL}
+    if (vOylLot.y < oylSplashHigh && oylUpFacing < 0.3) {
+      float oylGrime = oylWeatherGrime(oylUpFacing, 1.0, vOylLot.y, oylPlane.x, vOylAge, oylWpw);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
+        * (1.0 - oylSplashStrength * oylGrime);
+    }
+  }`;
+
+/**
+ * #1665: #1661's weathering on a lot's roof — the photograph's repeat
+ * broken, and moss where it faces up, from `oylWeatherTile` and
+ * `oylWeatherMoss`.
+ */
+const LOT_WEATHER_ROOF_GLSL = /* glsl */ `
+  // #1665: #1661's weathering, on a lot's roof.
+  {${LOT_WEATHER_PLANE_GLSL}
+    if (oylUpFacing > oylMossFaceLow) {
+      diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, vOylAge, oylWpw));
+    }
+  }`;
+
+/**
+ * #1665: the room behind a lot's pane — #1662's `oylInterior`, called, not
+ * copied. The pane's place in it is its `uv` (`buildings.ts`
+ * §`glassPaneCoordinates`: −1 to 1 across and up, plus
+ * {@link PANE_STRIDE} times the pane's index across); its half-size is
+ * `|∇uv|⁻¹`, from the face's derivatives, exact because the `uv` is affine on
+ * a pane; and the eye is read in the pane's frame from the same gradients,
+ * as #1659's reveal reads a mapped wall's. The room's seed is the pane's
+ * index and its building's seeded tint (`oylRoomSeedOf`, as a mapped bay's:
+ * a plan numbers a wall's windows along it, so two side by side take a warm
+ * and a cool paint), one in five lit (#1581's rule). Far
+ * off, a pane a few pixels across, it fades to the flat glass it was drawn
+ * as, and its metalness with it, so the far picture does not move.
+ */
+const LOT_GLASS_GLSL = /* glsl */ `
+  // #1665: #1662's room behind a lot's pane.
+  float oylRoomShare = 0.0;
+  {
+    vec3 oylQx = dFdx(vViewPosition);
+    vec3 oylQy = dFdy(vViewPosition);
+    vec3 oylCr = cross(oylQx, oylQy);
+    float oylArea = max(length(oylCr), 1e-12);
+    vec3 oylN = oylCr / oylArea;
+    vec3 oylGu = (cross(oylQy, oylN) * dFdx(vOylPane.x) + cross(oylN, oylQx) * dFdy(vOylPane.x)) / oylArea;
+    vec3 oylGv = (cross(oylQy, oylN) * dFdx(vOylPane.y) + cross(oylN, oylQx) * dFdy(vOylPane.y)) / oylArea;
+    float oylIndex = floor((vOylPane.x + ${glslFloat(PANE_STRIDE / 2)}) / ${glslFloat(PANE_STRIDE)});
+    vec2 oylAt = vec2(vOylPane.x - ${glslFloat(PANE_STRIDE)} * oylIndex, vOylPane.y);
+    vec2 oylHalf = vec2(1.0 / max(length(oylGu), 1e-4), 1.0 / max(length(oylGv), 1e-4));
+    vec3 oylToEye = normalize(vViewPosition);
+    vec3 oylEye = vec3(
+      dot(oylToEye, oylGu * oylHalf.x),
+      dot(oylToEye, oylGv * oylHalf.y),
+      abs(dot(oylToEye, oylN))
+    );
+    vec2 oylCell = vec2(oylIndex, 0.0) + floor(vOylTint.xy * 1000.0);
+    float oylGlassF = oylFresnelOf(oylEye.z);
+    oylRoomShare = 1.0 - oylFadeOf(0.5 * max(fwidth(vOylPane.x), fwidth(vOylPane.y)));
+    vec3 oylRoomC = oylInterior(
+      oylAt * oylHalf, 2.0 * oylHalf, oylEye,
+      oylRoomSeedOf(vec2(oylIndex, 0.0), vOylTint.xy), 0.0, step(0.8, oylWindowHash(oylCell))
+    ) * (1.0 - oylGlassF);
+    diffuseColor.rgb = mix(diffuseColor.rgb, oylRoomC, oylRoomShare);
+  }`;
+
+/**
+ * Teaches a lot's lit glass #1662's rooms — #1665 ({@link LOT_GLASS_GLSL}),
+ * and a pane a dielectric where the room is drawn, so that three's Fresnel
+ * weights the sky it gives back, as #1662's mapped panes are. With
+ * `lot-realism` off nothing is spliced. Throws, as the tint does, if three's
+ * program no longer holds an include it is spliced at. Idempotent.
+ */
+function withLotGlass<M extends Material>(material: M): M {
+  if (LOT_REALISM_TAUGHT.has(material)) return material;
+  LOT_REALISM_TAUGHT.add(material);
+  defineLotLevers(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1665's rooms behind a lot's glass";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    if (!lotRealismBuiltIn(material)) return;
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nvarying vec2 vOylPane;',
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvOylPane = uv;',
+      'vertex',
+      spliced,
+    );
+    let fragment = replacedOrThrown(
+      shader.fragmentShader,
+      '#include <common>',
+      `#include <common>\nvarying vec2 vOylPane;\n${CLADDING_HELPERS_GLSL}\n${INTERIOR_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <color_fragment>',
+      `#include <color_fragment>\n${LOT_GLASS_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      fragment,
+      '#include <metalnessmap_fragment>',
+      '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.0, oylRoomShare);',
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-lot-glass`;
   return material;
 }
 
@@ -20833,6 +21088,22 @@ class ThreeGameView implements GameView {
           : [material]) {
         if (!drawsFacade(each)) continue;
         defineFacadeLevers(each);
+        each.needsUpdate = true;
+      }
+    });
+  }
+
+  /** @see lotRealismOf — every lot material #1665's lever reaches, in the scene, compiled again. */
+  lotsRecompiled(): void {
+    this.#scene.traverse((node) => {
+      const { material } = node as { material?: Material | Material[] };
+      for (const each of Array.isArray(material)
+        ? material
+        : material === undefined
+          ? []
+          : [material]) {
+        if (!carriesLotRealism(each)) continue;
+        defineLotLevers(each);
         each.needsUpdate = true;
       }
     });

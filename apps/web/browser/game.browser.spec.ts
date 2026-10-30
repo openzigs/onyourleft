@@ -3915,6 +3915,47 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart(rooms.left, rooms.right)).toBeGreaterThan(4);
   });
 
+  test('#1665 a lot’s wall is grimed 0.3 m up and not 1.5 m up, and two lot panes show two rooms, and neither with -lot-realism', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { lotRealism: lot } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a lot's side wall 0.3 m up ${rgb(lot.near)} against 1.5 m up ${rgb(lot.far)}; ` +
+      `${rgb(lot.nearOff)} and ${rgb(lot.farOff)} with -lot-realism. Two front panes ` +
+      `(pair ${String(lot.pairsTried)} read): ${rgb(lot.left)} against ${rgb(lot.right)}; ` +
+      `${rgb(lot.leftOff)} and ${rgb(lot.rightOff)} with -lot-realism`;
+    testInfo.annotations.push({ type: 'the lots’ weathering and rooms', description: measured });
+    console.log(`the lots’ weathering and rooms — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    const apart = (x: readonly number[], y: readonly number[]): number =>
+      Math.max(...x.map((value, channel) => Math.abs(value - (y[channel] ?? 0))));
+    expect(lot.aimed).toBe(true);
+    for (const values of [
+      lot.near,
+      lot.far,
+      lot.nearOff,
+      lot.farOff,
+      lot.left,
+      lot.right,
+      lot.leftOff,
+      lot.rightOff,
+    ]) {
+      expect(values).toHaveLength(3);
+    }
+    // The grime: the wall 0.3 m up is darker against 1.5 m up than it is with the
+    // realism out (#500's grounding darkens the foot either way), by more than the
+    // gate's tolerance of 4.
+    const gap = luminance(lot.far) - luminance(lot.near);
+    const gapOff = luminance(lot.farOff) - luminance(lot.nearOff);
+    expect(gap - gapOff).toBeGreaterThan(4);
+    // THE CONTROL: with the term out of the program the two panes are #1550's same flat glass.
+    expect(apart(lot.leftOff, lot.rightOff)).toBeLessThan(4);
+    // With the realism, two rooms: past that tolerance.
+    expect(apart(lot.left, lot.right)).toBeGreaterThan(4);
+  });
+
   test('#1658 a sunlit mapped wall is in its eaves’ shadow 0.3 m under them and not 1.5 m under, and neither with -overhang-shadows', async ({
     harnessRun,
   }, testInfo) => {
