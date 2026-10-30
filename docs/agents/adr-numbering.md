@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0060 is [ADR 0060](../adr/0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)**,
+  taken by [#1895](https://github.com/openzigs/onyourleft/issues/1895) on 2026-10-30 for the lap
+  race (the epic [#1894](https://github.com/openzigs/onyourleft/issues/1894)), written as **Proposed**
+  and put to the owner. It took the next free number after 0059; **0057 and 0058 stay claimed** by
+  [#1748](https://github.com/openzigs/onyourleft/issues/1748) and
+  [#1752](https://github.com/openzigs/onyourleft/issues/1752). **The next free number is 0061.** A
+  reviewer who remembers this file offering 0060 is reading the old file.
   ⚠️ **0059 is [ADR 0059](../adr/0059-delivery-a-parcel-round-game-mode.md)**, taken by
   [#1804](https://github.com/openzigs/onyourleft/issues/1804) on 2026-10-28 for Delivery, the
   parcel-round game mode, on the owner's rulings DL1, DL4, DL5, DL6, DL6b and DL11 of 2026-10-27 on
@@ -19,7 +26,7 @@ It has the same authority as the root file. Where the text below says "this file
   same day. It skipped **0057, claimed by [#1748](https://github.com/openzigs/onyourleft/issues/1748)**
   (store fees the publisher pays), and **0058, claimed by
   [#1752](https://github.com/openzigs/onyourleft/issues/1752)** (iOS screen capture on the camera
-  screens), each by its title and both unwritten on that day. **The next free number is 0060.** A
+  screens), each by its title and both unwritten on that day. The next free number was then 0060. A
   reviewer who remembers this file offering 0057 is reading the old file.
   ⚠️ **0055 is [ADR 0055](../adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)**,
   taken by [#1631](https://github.com/openzigs/onyourleft/issues/1631) on 2026-10-24 for the `places`
