@@ -17,6 +17,7 @@ import {
   FACADE_DOOR,
   FACADE_GARAGE,
   FACADE_OFFSET,
+  FOOTPRINT_GABLE_MIN_RECTANGULARITY,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_ROLES,
@@ -24,6 +25,7 @@ import {
   footprintPlans,
   PORCH,
   ROOF_PITCHES_DEGREES,
+  STYLE_BRICK_FOUNDATION,
   STYLE_OFFSET,
   STYLE_SHUTTERS,
   type FootprintPlan,
@@ -42,6 +44,7 @@ import {
   ARCHETYPE_CUES,
   ARCHETYPE_DROPS,
   ARCHETYPE_FEATURES,
+  ARCHETYPE_MIN_RECTANGULARITY,
   droppedFeatures,
   footprintShapeOf,
   HOUSE_ARCHETYPES,
@@ -120,6 +123,26 @@ function hasPostedPorch(plan: FootprintPlan): boolean {
   );
 }
 
+/** A canopy over the door: trim above a door's height, within a canopy's reach of the door. */
+function hasCanopy(plan: FootprintPlan): boolean {
+  const door = verticesOf(plan, 'door').filter((vertex) => vertex.top === FACADE_DOOR);
+  if (door.length === 0) return false;
+  const floor = Math.min(...door.map((vertex) => vertex.y));
+  const mx = door.reduce((sum, vertex) => sum + vertex.x, 0) / door.length;
+  const mz = door.reduce((sum, vertex) => sum + vertex.z, 0) / door.length;
+  return verticesOf(plan, 'trim').some(
+    (vertex) =>
+      vertex.y > floor + 2.3 &&
+      Math.hypot(vertex.x - mx, vertex.z - mz) <= Math.hypot(PORCH.width / 2, PORCH.depth),
+  );
+}
+/** A front porch round the door (#1589): the porch role has triangles. */
+const hasFrontPorch = (plan: FootprintPlan): boolean => plan.triangles.porch.length > 0;
+const hasChimney = (plan: FootprintPlan): boolean => plan.triangles.chimney.length > 0;
+/** A brick foundation band: a wall vertex carrying the foundation flag. */
+const hasBrickFoundation = (plan: FootprintPlan): boolean =>
+  verticesOf(plan, 'wall').some((vertex) => (vertex.flags & STYLE_BRICK_FOUNDATION) !== 0);
+
 const hasDormer = (plan: FootprintPlan): boolean => plan.triangles.dormer.length > 0;
 /** A gable end: a wall vertex above the eaves, under the gable's ridge. */
 const hasGable = (plan: FootprintPlan): boolean =>
@@ -178,6 +201,11 @@ function fingerprint(plans: readonly FootprintPlan[], withPaint = true): string 
  * {@link fingerprint} with `main`'s own `footprint-buildings.ts` in place:
  * the mixed town with its urban class (the realistic page's), the mixed town
  * with none, and the street of houses (the same with a class or without).
+ *
+ * A frozen record of the pre-#1782 planner, not a snapshot to refresh. If a later
+ * change moves these, it has changed what the lever-off plan is: update them only
+ * with a stated, reviewed reason in the PR. To re-derive, check out `7f7d66ab`'s
+ * `footprint-buildings.ts` and run {@link fingerprint} over the same three towns.
  */
 const MAIN_FINGERPRINTS = {
   mixed: 'f23e2062',
@@ -388,6 +416,31 @@ describe('an archetype sets its features together — #1782, read back from the 
     expect(ofArchetype('ranch').some(hasPicture)).toBe(true);
   });
 
+  it('builds every Colonial hipless, at 30 to 35 degrees, with a chimney, a canopy and shutters, and no porch', () => {
+    const colonials = ofArchetype('colonial');
+    expect(colonials.length).toBeGreaterThan(3);
+    for (const each of colonials) {
+      expect(each.roof).toBe('gable');
+      expect(each.pitchDegrees).toBeGreaterThanOrEqual(30);
+      expect(each.pitchDegrees).toBeLessThanOrEqual(35);
+      expect(hasChimney(each)).toBe(true);
+      expect(hasCanopy(each)).toBe(true);
+      expect(hasFrontPorch(each)).toBe(false);
+      expect(hasPostedPorch(each)).toBe(false);
+      expect(hasShutters(each)).toBe(true);
+      expect(hasDormer(each)).toBe(false);
+    }
+  });
+
+  it('stands every Foursquare on a front porch on posts', () => {
+    const foursquares = ofArchetype('foursquare');
+    expect(foursquares.length).toBeGreaterThan(3);
+    for (const each of foursquares) expect(hasPostedPorch(each)).toBe(true);
+    // A front porch replaces the canopy where it fits, so each has one or the other.
+    for (const each of foursquares) expect(hasFrontPorch(each) || hasCanopy(each)).toBe(true);
+    expect(foursquares.some(hasFrontPorch)).toBe(true);
+  });
+
   it('builds no Foursquare with a gable roof', () => {
     for (const each of ofArchetype('foursquare')) {
       expect(hasGable(each)).toBe(false);
@@ -410,8 +463,12 @@ describe('an archetype sets its features together — #1782, read back from the 
     for (const each of ofArchetype('farmhouse')) {
       expect(hasGarage(each)).toBe(false);
       expect(each.cladding.wall).toBe('clapboard');
+      expect(hasBrickFoundation(each)).toBe(true);
       expect(each.pitchDegrees).toBeGreaterThanOrEqual(40);
     }
+    // Its porch on posts: a front porch where it fits, else the canopy on posts.
+    for (const each of ofArchetype('farmhouse')) expect(hasPostedPorch(each)).toBe(true);
+    expect(ofArchetype('farmhouse').some(hasFrontPorch)).toBe(true);
   });
 
   it('admits only pitches the roofs are built at', () => {
@@ -456,6 +513,12 @@ describe('the fallback and the lever — #1782', () => {
   it('control: with the lever on, the towns are not `origin/main`’s', () => {
     expect(fingerprint(mixedPlans)).not.toBe(MAIN_FINGERPRINTS.mixed);
     expect(fingerprint(housePlans)).not.toBe(MAIN_FINGERPRINTS.houses);
+  });
+});
+
+describe('the archetype bar for a clean rectangle — #1782', () => {
+  it('is the bar a footprint needs for a gable roof', () => {
+    expect(ARCHETYPE_MIN_RECTANGULARITY).toBe(FOOTPRINT_GABLE_MIN_RECTANGULARITY);
   });
 });
 

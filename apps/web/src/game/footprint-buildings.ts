@@ -4736,7 +4736,8 @@ function planFootprint(
       others,
       party,
       { ...roofing, flat: true },
-      choice,
+      // The flat retry is `unknown`, so it is planned as with the lever off: nothing dropped.
+      { ...choice, dropped: 0 },
     );
   }
   const { writing, drew } = built;
