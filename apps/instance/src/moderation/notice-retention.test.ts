@@ -283,6 +283,34 @@ describe('erasing a closed notice’s notifier details (#1381)', () => {
     });
   });
 
+  it('keeps the details of a notice decided between the sweep reading it and the write (#1923)', async () => {
+    // The race in a known order: the sweep has read the notice as undecided, and
+    // a decision lands before its erasing write.
+    let decideFirst: (() => Promise<unknown>) | undefined;
+    const w = (world = await startModerationWorld({
+      storeSeenBy: (store) => ({
+        ...store,
+        eraseNoticeDetails: async (...args) => {
+          const decide = decideFirst;
+          decideFirst = undefined;
+          await decide?.();
+          return store.eraseNoticeDetails(...args);
+        },
+      }),
+    }));
+    const raced = await notice(w, 'raced');
+    const receivedAt = Math.floor(w.clock.ms / 1000);
+    decideFirst = () => step(w, raced, { step: 'decided', decision: 'Not illegal.' });
+    w.clock.ms = undecidedNoticeDetailsDueAt(receivedAt) * 1000;
+    expect(await erase(w)).toBe(0);
+    expect(decideFirst).toBeUndefined();
+    expect(await queued(w, raced)).toMatchObject({
+      notifierName: 'raced-name',
+      detailsErasedAt: null,
+      decidedAt: undecidedNoticeDetailsDueAt(receivedAt),
+    });
+  });
+
   it('is the only change the schema lets anybody make to a notice', async () => {
     const w = (world = await startModerationWorld());
     const kept = await notice(w, 'kept');
