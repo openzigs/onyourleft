@@ -16340,9 +16340,12 @@ export const FACADE_SHOWN_GLSL =
  * commercial window's, a dormer's, a curtain wall's, a fanlight, a shop
  * door's and a shop front's — shows the room behind it ({@link INTERIOR_GLSL})
  * weighted by `1 − F` of Schlick's Fresnel (`oylGlassF`), and the finish
- * gives back the environment by `F` ({@link withFacade}). Far off a pane
- * still fades to the mean it faded to before, which reads #1581's flat room,
- * so the far picture does not move. Without `rooms`, #1581's flat room.
+ * gives back the environment by `F` ({@link withFacade}). Far off a sash's,
+ * a casement's and a curtain wall's pane still fade to the mean they faded
+ * to before, which reads #1581's flat room. ⚠️ The dormer's, the fanlight,
+ * the shop door's and the shop front's have no far fade: they show the
+ * room's hard edges at any distance, at metalness 0 and not 0.35, so the
+ * far picture moves for those four. Without `rooms`, #1581's flat room.
  *
  * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
  * after every declaration — so that one window in five is a lit room by
@@ -16945,6 +16948,10 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
       // F0 0.04, `lights_physical_fragment`'s `specularColor`, toward 1 at a
       // graze — weights the environment the pane gives back, and the room
       // under it carries the 1 − F of the same Schlick term (`oylGlassF`).
+      // ⚠️ At metalness 0 three also weights the image-lit diffuse by
+      // (1 − totalScatteringDielectric), so the room's image-lit share is
+      // weighted by roughly (1 − F)²: negligible head-on, growing toward a
+      // graze, where the room is the minor part of the pane anyway.
       // Before #1662, and with `-window-rooms`, a constant 0.35.
       `#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, ${rooms ? '0.0' : '0.35'}, oylGlass);`,
       'fragment',

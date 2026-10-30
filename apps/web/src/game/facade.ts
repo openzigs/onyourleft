@@ -138,7 +138,9 @@
  * ({@link litRoomAt}) warm. The pane is a dielectric: the environment it gives
  * back is weighted by Schlick's Fresnel from F0 0.04, and the room by what is
  * left ({@link glassWeightsAt}), so a pane is its room head-on and the sky at
- * a graze. Far off a pane fades to the same mean as before. **No texture, no
+ * a graze. Far off a sash's, a casement's and a curtain wall's pane fades to
+ * the same mean as before; the dormer's, the fanlight, the shop door's and
+ * the shop front's have no far fade and show the room at any distance. **No texture, no
  * cubemap, no atlas.**
  *
  * ## The porch (#1589)

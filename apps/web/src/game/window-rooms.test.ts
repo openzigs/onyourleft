@@ -30,6 +30,7 @@ import {
 } from './facade';
 import { footprintPlans } from './footprint-buildings';
 import { mixedTownFixture } from './footprint-fixtures-testing';
+import { GlslProgram } from './glsl-program-testing';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
@@ -135,41 +136,72 @@ function bodyOf(source: string, signature: string): string {
 }
 
 /**
- * The program's own `oylRoomHit` and `oylFresnelOf`, run: their text as the
- * shader holds it, every `const float` it declares, GLSL's built-ins, a
- * `float` local a `let` and the `vec2` it answers an array — so that the
- * test holds what the GPU runs to the twin and not a copy of it.
+ * The text of the function `signature` opens, from its signature through its
+ * closing brace.
  */
-function shaderRoom(source: string): {
-  readonly hit: (...args: readonly number[]) => readonly [number, number];
-  readonly fresnel: (cosine: number) => number;
-} {
-  const constants = [...source.matchAll(/const float (oyl\w+) = (-?[\d.e-]+);/g)].map(
-    (match) => `const ${match[1] ?? ''} = ${match[2] ?? ''};`,
+function functionOf(source: string, signature: string): string {
+  const start = source.indexOf(signature);
+  return `${source.slice(start, start + signature.length)} {${bodyOf(source, signature)}}`;
+}
+
+/**
+ * The shader's room, run: its hash, its constants and `INTERIOR_GLSL` through
+ * the end of `oylInterior`, as the program holds them, evaluated on the CPU
+ * ({@link GlslProgram}) — so that the test holds what the GPU runs to the
+ * twin and not a copy of it.
+ */
+function shaderRoom(fragment: string): GlslProgram {
+  const start = fragment.indexOf('const float oylRoomDepth');
+  const last =
+    'vec3 oylInterior(vec2 pane, vec2 paneSize, vec3 eyeFace, float seed, float palette, float lit)';
+  const end = fragment.indexOf(last) + last.length + bodyOf(fragment, last).length + 3;
+  if (start < 0 || end < start) throw new Error('the program holds no room');
+  return new GlslProgram(
+    `${functionOf(fragment, 'float oylWindowHash(vec2 cell)')}\n${fragment.slice(start, end)}`,
   );
-  const js = (body: string): string =>
-    body.replace(/\bfloat\s+(\w+)\s*=/g, 'let $1 =').replace(/return vec2\(/g, 'return (');
-  const hitBody = js(
-    bodyOf(
-      source,
-      'vec2 oylRoomHit(float px, float py, float w, float h, float ex, float ey, float ez)',
-    ),
-  ).replace(/return \((oyl\w+), (oyl\w+)\);/, 'return [$1, $2];');
-  const fresnelBody = js(bodyOf(source, 'float oylFresnelOf(float cosine)'));
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- runs the shader's own function text
-  const make = new Function(
-    'abs',
-    'min',
-    'max',
-    'clamp',
-    `${constants.join('\n')}
-function oylRoomHit(px, py, w, h, ex, ey, ez) {${hitBody}}
-function oylFresnelOf(cosine) {${fresnelBody}}
-return { hit: oylRoomHit, fresnel: oylFresnelOf };`,
-  ) as (...builtIns: unknown[]) => ReturnType<typeof shaderRoom>;
-  return make(Math.abs, Math.min, Math.max, (x: number, lo: number, hi: number) =>
-    Math.min(Math.max(x, lo), hi),
-  );
+}
+
+/**
+ * Every `oylInterior(` call in the program but its definition: the pane
+ * centre and the pane size each hands the room, as text, in the order the
+ * program lays them down.
+ */
+function interiorCalls(
+  fragment: string,
+): readonly { readonly name: string; readonly pane: string; readonly size: string }[] {
+  const names = [
+    'curtain wall',
+    'sash',
+    'casement',
+    'fanlight',
+    'shop door',
+    'dormer',
+    'shop front',
+  ];
+  const found: { name: string; pane: string; size: string }[] = [];
+  for (const match of fragment.matchAll(/oylInterior\(/g)) {
+    const open = match.index + match[0].length;
+    if (fragment.startsWith('vec2 pane,', open)) continue;
+    const args: string[] = [];
+    let depth = 0;
+    let from = open;
+    for (let at = open; at < fragment.length; at += 1) {
+      const c = fragment[at];
+      if (c === '(') depth += 1;
+      else if (c === ')' && depth > 0) depth -= 1;
+      else if (c === ')' || (c === ',' && depth === 0)) {
+        args.push(fragment.slice(from, at).trim());
+        from = at + 1;
+        if (c === ')') break;
+      }
+    }
+    found.push({
+      name: names[found.length] ?? `call ${String(found.length)}`,
+      pane: args[0] ?? '',
+      size: args[1] ?? '',
+    });
+  }
+  return found;
 }
 
 /** The shader's plane codes, as `oylRoomHit` numbers them. */
@@ -237,7 +269,16 @@ describe('the room behind the glass, in the shader — #1662', () => {
             // A seed whose room has no blind: the twin's blind is drawn on the glass, not met by the ray.
             const twin = interiorAt(pane, size, eye, 0.97, 'home', false);
             if (twin.surface === 'blind') continue;
-            const [plane, t] = room.hit(pane[0], pane[1], size[0], size[1], eye[0], eye[1], eye[2]);
+            const [plane, t] = room.call(
+              'oylRoomHit',
+              pane[0],
+              pane[1],
+              size[0],
+              size[1],
+              eye[0],
+              eye[1],
+              eye[2],
+            ) as [number, number];
             expect(PLANES[plane], `${String(a)}° ${String(b)}°`).toBe(twin.surface);
             expect(t * Math.max(eye[2], INTERIOR.graze)).toBeCloseTo(twin.deep, 9);
             seen.add(twin.surface);
@@ -251,12 +292,231 @@ describe('the room behind the glass, in the shader — #1662', () => {
     expect([...seen].sort()).toEqual(['back', 'ceiling', 'floor', 'left', 'right']);
   });
 
+  it('colours every point of every pane as the twin does: paint, fall, blind, figure and light', () => {
+    const room = shaderRoom(compiled().fragment);
+    const sizes: readonly (readonly [number, number])[] = [
+      [0.71, 1.31],
+      [1.6, 1.1],
+    ];
+    const seeds = Array.from({ length: 48 }, (_, i) => (i * 0.618033 + 0.05) % 1);
+    const angles = [-60, -12, 0, 7, 20, 50];
+    // Where on the glass, as a share of its size from its middle: head, sill and between.
+    const SPREAD = [-0.45, -0.2, 0.05, 0.28, 0.46];
+    const seen = { blind: 0, figure: 0, wall: 0, side: 0, ceiling: 0, floor: 0, lit: 0, unlit: 0 };
+    let compared = 0;
+    for (const [at, seed] of seeds.entries()) {
+      for (const [paletteAt, palette] of INTERIOR_PALETTE_ORDER.entries()) {
+        for (const lit of [false, true]) {
+          for (const size of sizes) {
+            for (const a of angles) {
+              for (const b of angles) {
+                const [ax, by] = [(a * Math.PI) / 180, (b * Math.PI) / 180];
+                const raw = [Math.sin(ax), Math.sin(by), Math.cos(ax) * Math.cos(by)] as const;
+                const length = Math.hypot(...raw);
+                const eye = raw.map((c) => c / length) as unknown as FaceDirection;
+                const pane: readonly [number, number] = [
+                  (SPREAD[(at + angles.indexOf(a)) % SPREAD.length] ?? 0) * size[0],
+                  (SPREAD[(2 * at + angles.indexOf(b)) % SPREAD.length] ?? 0) * size[1],
+                ];
+                const twin = interiorAt(pane, size, eye, seed, palette, lit);
+                const colour = room.call(
+                  'oylInterior',
+                  [...pane],
+                  [...size],
+                  [...eye],
+                  seed,
+                  paletteAt,
+                  lit ? 1 : 0,
+                ) as number[];
+                const label = `seed ${String(seed)} ${palette} ${lit ? 'lit' : 'unlit'} ${String(a)}° ${String(b)}°`;
+                twin.colour.forEach((channel, i) => {
+                  expect(colour[i], label).toBeCloseTo(channel, 9);
+                });
+                compared += 1;
+                seen[lit ? 'lit' : 'unlit'] += 1;
+                if (twin.surface === 'blind') seen.blind += 1;
+                else if (twin.surface === 'left' || twin.surface === 'right') seen.side += 1;
+                else if (twin.surface === 'ceiling') seen.ceiling += 1;
+                else if (twin.surface === 'floor') seen.floor += 1;
+                else {
+                  // The back wall: the figure's dark paint, or the wall's own.
+                  const light = lit ? INTERIOR.lit : INTERIOR.unlit;
+                  const fall =
+                    1 + (INTERIOR.backShade - 1) * Math.min(twin.deep / INTERIOR.depth, 1);
+                  const figure = interiorLinear(INTERIOR.silhouette.paint)[0] * light[0] * fall;
+                  seen[Math.abs(twin.colour[0] - figure) < 1e-12 ? 'figure' : 'wall'] += 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(compared).toBe(seeds.length * 3 * 2 * sizes.length * angles.length ** 2);
+    // Every branch of the colour is met, many times, by both lights.
+    for (const [branch, count] of Object.entries(seen)) {
+      expect(count, branch).toBeGreaterThan(20);
+    }
+  });
+
+  it('asks every pane’s room for the glass it draws: the centre and size at each call site', () => {
+    const { fragment } = compiled();
+    const calls = interiorCalls(fragment);
+    expect(calls.map((call) => call.name)).toEqual([
+      'curtain wall',
+      'sash',
+      'casement',
+      'fanlight',
+      'shop door',
+      'dormer',
+      'shop front',
+    ]);
+    const constants = new GlslProgram(
+      [...fragment.matchAll(/const float (oyl\w+) = (-?[\d.e-]+);/g)]
+        .map((match) => `const float ${match[1] ?? ''} = ${match[2] ?? ''};`)
+        .join('\n'),
+    );
+    const k = (name: string): number => constants.constant(name) as number;
+    const at = (name: string): { pane: string; size: string } => {
+      const call = calls.find((c) => c.name === name);
+      if (call === undefined) throw new Error(`no call site ${name}`);
+      return { pane: call.pane, size: call.size };
+    };
+    /** The call's pane centre and size, against the glass `lo` to `hi`, in its own frame, taken from `bindingsAt`. */
+    const holds = (
+      name: string,
+      lo: readonly [number, number],
+      hi: readonly [number, number],
+      bindingsAt: (point: readonly [number, number]) => Record<string, number | number[]>,
+      scale: readonly [number, number] = [1, 1],
+    ): void => {
+      const { pane, size } = at(name);
+      const glass = [(hi[0] - lo[0]) * scale[0], (hi[1] - lo[1]) * scale[1]];
+      const sizeBound = constants.evaluate(size, bindingsAt(lo)) as number[];
+      expect(sizeBound[0], `${name} width`).toBeCloseTo(glass[0] as number, 9);
+      expect(sizeBound[1], `${name} height`).toBeCloseTo(glass[1] as number, 9);
+      // The glass's corners and middle, as the point of the glass the pane is asked at.
+      for (const [fx, fy] of [
+        [0, 0],
+        [1, 1],
+        [0.5, 0.5],
+        [0.25, 0.8],
+      ] as const) {
+        const point: readonly [number, number] = [
+          lo[0] + (hi[0] - lo[0]) * fx,
+          lo[1] + (hi[1] - lo[1]) * fy,
+        ];
+        const value = constants.evaluate(pane, bindingsAt(point)) as number[];
+        expect(value[0], `${name} x at ${String(fx)}`).toBeCloseTo(
+          (fx - 0.5) * (glass[0] as number),
+          9,
+        );
+        expect(value[1], `${name} y at ${String(fy)}`).toBeCloseTo(
+          (fy - 0.5) * (glass[1] as number),
+          9,
+        );
+      }
+    };
+
+    // Metres, the glass an arbitrary rectangle.
+    const curtainLo = [0.4, 0.9] as const;
+    const curtainHi = [1.9, 3.1] as const;
+    holds('curtain wall', curtainLo, curtainHi, (q) => ({
+      oylQ: [...q],
+      oylLo: [...curtainLo],
+      oylHi: [...curtainHi],
+    }));
+    // The sash's and the dormer's panes are the sash's own, passed through.
+    expect(at('sash')).toEqual({ pane: 'oylPaneAt', size: 'oylPaneSize' });
+    expect(at('dormer')).toEqual({ pane: 'oylPaneAt', size: 'oylPaneSize' });
+    const sashPane = /\n\s+pane = ([^;]+);/.exec(fragment);
+    const sashSize = /\n\s+paneSize = ([^;]+);/.exec(fragment);
+    expect(sashPane?.[1]).toBeDefined();
+    expect(sashSize?.[1]).toBeDefined();
+    const sashLo = [-0.25, 0.8] as const;
+    const sashHi = [0.25, 1.9] as const;
+    const sashBound = (q: readonly [number, number]): Record<string, number[]> => ({
+      oylQ: [...q],
+      oylLo: [...sashLo],
+      oylHi: [...sashHi],
+    });
+    for (const [fx, fy] of [
+      [0, 0],
+      [1, 1],
+      [0.5, 0.5],
+    ] as const) {
+      const q: readonly [number, number] = [
+        sashLo[0] + (sashHi[0] - sashLo[0]) * fx,
+        sashLo[1] + (sashHi[1] - sashLo[1]) * fy,
+      ];
+      const pane = constants.evaluate(sashPane?.[1] ?? '', sashBound(q)) as number[];
+      expect(pane[0], `sash x at ${String(fx)}`).toBeCloseTo(
+        (fx - 0.5) * (sashHi[0] - sashLo[0]),
+        9,
+      );
+      expect(pane[1], `sash y at ${String(fy)}`).toBeCloseTo(
+        (fy - 0.5) * (sashHi[1] - sashLo[1]),
+        9,
+      );
+    }
+    const sashSized = constants.evaluate(sashSize?.[1] ?? '', sashBound(sashLo)) as number[];
+    expect(sashSized).toEqual([sashHi[0] - sashLo[0], sashHi[1] - sashLo[1]]);
+
+    // The casement: the bay's units for the glass, the point in metres.
+    const toM = [4.2, 3.1] as const;
+    const caseLo = [0.2, 0.3] as const;
+    const caseHi = [0.6, 0.8] as const;
+    holds(
+      'casement',
+      [caseLo[0] * toM[0], caseLo[1] * toM[1]],
+      [caseHi[0] * toM[0], caseHi[1] * toM[1]],
+      (q) => ({
+        oylQ: [...q],
+        oylLo: [...caseLo],
+        oylHi: [...caseHi],
+        oylToM: [...toM],
+      }),
+    );
+
+    // The fanlight, in the door's face units: the glass the fanlight's own rect lays down.
+    const doorM = [k('oylDoorW'), k('oylDoorH')] as const;
+    holds(
+      'fanlight',
+      [k('oylDoorA') + 0.04, k('oylFan')],
+      [1 - k('oylDoorA') - 0.04, 1 - k('oylDoorU') - 0.02],
+      (point) => ({ oylAt: [...point], oylDoorM: [...doorM] }),
+      doorM,
+    );
+
+    // The shop door, in metres: the glass the door's pane rect lays down.
+    holds(
+      'shop door',
+      [k('oylDoorSurround') + k('oylShopDoorFrame'), k('oylShopDoorRail')],
+      [
+        k('oylDoorW') - k('oylDoorSurround') - k('oylShopDoorFrame'),
+        k('oylDoorH') - k('oylDoorSurround') - k('oylShopDoorFrame'),
+      ],
+      (point) => ({ oylD: [...point] }),
+    );
+
+    // The shop front, in metres: one pane of the span, riser and sill below it, the frame above.
+    const shopH = 3.4;
+    const fromX = 0.7;
+    const span = 2.2;
+    holds(
+      'shop front',
+      [fromX, k('oylShopRiser') + k('oylShopSill')],
+      [fromX + span, shopH - k('oylShopFrame')],
+      (point) => ({ oylS: [...point], oylFromX: fromX, oylSpan: span, oylShopH: shopH }),
+    );
+  });
+
   it('weights the room by 1 − F of the twin’s Schlick term at every pane it draws', () => {
     const { fragment } = compiled();
     const room = shaderRoom(fragment);
     for (let degrees = 0; degrees <= 90; degrees += 5) {
       const cosine = Math.cos((degrees * Math.PI) / 180);
-      expect(room.fresnel(cosine)).toBeCloseTo(glassWeightsAt(cosine).environment, 12);
+      expect(room.call('oylFresnelOf', cosine)).toBeCloseTo(glassWeightsAt(cosine).environment, 12);
     }
     // Read once from the eye's slant in the face's frame, outside every branch.
     expect(fragment).toContain('float oylGlassF = oylGlassF0;');
