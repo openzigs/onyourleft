@@ -3807,13 +3807,15 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     }
     // In the shadow, the wall's colour keeps about 0.6 of its light: past the
     // gate's tolerance of 4 that #1659's control is held to, three times over.
-    // Measured locally (SwiftShader, 2026-10-24), a wall 5 m high from 5 m:
-    // 126/138/143 0.3 m under the eaves against 142/154/159 1.5 m under;
-    // 146/158/164 and 142/154/159 with the lever.
+    // Measured locally (SwiftShader, 2026-10-29), a wall 7 m high from 5 m, each
+    // place read across the 0.3 m of plain wall the probe chose (#1715):
+    // 112/101/86 0.3 m under the eaves against 131/118/102 1.5 m under;
+    // 133/121/105 and 131/118/102 with the lever.
     expect(luminance(shadow.far) - luminance(shadow.near)).toBeGreaterThan(12);
     // THE CONTROL: with the term out of the program, #1588's 0.6 m band reaches
     // neither place, so the near one is no darker than the far one (it read
-    // 4 lighter: the same wall, a metre higher) ...
+    // 3 lighter: the same wall, a metre higher). #1715: read as a three-pixel
+    // column it read 4 darker, at this bound, where the wall's photograph fell ...
     expect(luminance(shadow.nearOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
     // ... and it is the shadow, not the wall, that darkened the near place.
     expect(luminance(shadow.nearOff) - luminance(shadow.near)).toBeGreaterThan(12);
