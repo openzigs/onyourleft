@@ -182,7 +182,8 @@ export interface PhoneSidePairing {
   /**
    * Whole seconds left for the tablet to read {@link answerCode} — #1108.
    * `side-link.ts` §`TABLET_READ_LIMIT_MILLISECONDS` is the wait, and why it is
-   * a person's rather than a machine's. `undefined` once the tablet has read
+   * a person's rather than a machine's; since #1110 it ends no later than the
+   * tablet's offer does. `undefined` once the tablet has read
    * the code; `0` once the time ran out, which ends the link.
    */
   secondsForTabletToRead(): number | undefined;
@@ -193,6 +194,13 @@ export interface PhoneSidePairing {
    * @returns the unsubscribe.
    */
   onTabletReadCountdown(listener: () => void): () => void;
+  /**
+   * Whether the link ended because the tablet's time to read
+   * {@link answerCode} ran out — #1110. Recorded by the wait's own timer as it
+   * fires, not worked out from a clock, so the screen can tell that failure
+   * from every other one however the wall clock moved.
+   */
+  tabletReadTimedOut(): boolean;
 }
 
 /** Where a pairing comes from, on either device. */

@@ -28,6 +28,7 @@ import { lineStands, linesNear } from './gantry';
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
 import {
+  BICYCLE_FRONT_METRES,
   BICYCLE_LENGTH_METRES,
   RIDER_HALF_WIDTH_METRES,
   bicycleRoll,
@@ -36,6 +37,12 @@ import {
   simulatedCrankAngle,
   type RiderRoll,
 } from './bicycle';
+import {
+  countrysideWithout,
+  NO_LAND_CLASS,
+  type CountrysideLever,
+  type LandClassMask,
+} from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -55,9 +62,45 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
-import { STRUCTURE_MAX_ITEMS, clearOfBuildings, structuresAt } from './settlements';
+import {
+  NO_MAPPED_TOWN,
+  STRUCTURE_MAX_ITEMS,
+  clearOfBuildings,
+  clearOfSettlements,
+  structuresAt,
+  type MappedTown,
+  type SettlementFootprint,
+} from './settlements';
+import {
+  boardsClearOfSideRoads,
+  clearOfSideRoads,
+  mappedJunctions,
+  sideRoadsAt,
+  type SideRoad,
+} from './cross-streets';
+import { NO_PAVEMENT_DATA, pavementSides } from './footways';
+import { BILLBOARD_FOOTPRINT } from './logo-board';
+import {
+  NO_PEOPLE,
+  besideSideRoads,
+  clearOfPavements,
+  footwayWalks,
+  groundOf,
+  peopleAt,
+  streetWalks,
+  type PeopleInView,
+} from './people';
+import { distanceToDrawnRoad } from './road-grid';
+import { streetsAt, type VillageStreet } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
+import type { WorldCorridor } from './world-data/corridor';
+import {
+  clearOfMappedBuildings,
+  mappedChunk,
+  type MappedBuildings,
+  type MappedBuildingsInView,
+} from './mapped-buildings';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -96,6 +139,53 @@ export interface SceneInput {
   readonly botDistance?: number | undefined;
   /** The rider's own previous attempt, when they chose to race one. Optional. */
   readonly ghost?: GhostTrack | undefined;
+  /**
+   * The route's corridor of map features, fixed when the ride started — #1539,
+   * ADR 0054. Absent on every ride with none: the stylised world, map tiles
+   * off, no archive, offline with nothing kept, or a read still running at
+   * the press.
+   *
+   * Read here twice since #1546 and #1551. #1546 reads it through
+   * {@link landClass}, built from it once at the press; since #1551 the
+   * village streets read its footways: a pavement stands on the side a
+   * sidewalk is mapped on, where the corridor was read (`footways.ts`
+   * §`pavementSides`). #1540 places buildings from it (ADR 0054 D-5).
+   * `world-data/corridor-wiring.test.tsx` reads it back off the input
+   * `sceneFrame` was handed, which is the guard an optional field nobody
+   * supplies needs (`check-wiring.mjs` §Limits).
+   */
+  readonly worldCorridor?: WorldCorridor | undefined;
+  /**
+   * What the ground is where {@link worldCorridor} read map data — #1546,
+   * `land-class.ts`, built from it ONCE, at the press, by `GameView`. Every
+   * placement rule reads it: no procedural site on mapped land, and no tree,
+   * shrub, rock or field boundary on mapped built-up land or water.
+   *
+   * Absent is {@link NO_LAND_CLASS}, today's world — every ride with no
+   * corridor, and the browser gate's `-landclass` control.
+   * `world-data/corridor-wiring.test.tsx` reads it back off the input.
+   */
+  readonly landClass?: LandClassMask | undefined;
+  /**
+   * The buildings planned from {@link worldCorridor}'s footprints — #1540's
+   * plans, indexed by `mapped-buildings.ts` §`mappedBuildingsOf` — built ONCE,
+   * at the press, by `GameView`, as {@link landClass} is. #1549: each frame
+   * carries them on to the renderer with the rider's chunk
+   * (`SceneFrame.mappedBuildings`), and no tree, shrub or rock stands on their
+   * ground.
+   *
+   * Absent on every ride with no corridor, which is today's world.
+   * `world-data/corridor-wiring.test.tsx` reads it back off the input.
+   */
+  readonly mappedBuildings?: MappedBuildings | undefined;
+  /**
+   * What #1550's procedural lots read of the corridor's footprints, built ONCE,
+   * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
+   * indexed from — #1583. `sceneFrame` never plans: planning a dense corridor
+   * can take its whole 400 ms budget, which a render frame cannot spend.
+   * Absent is no mapped town, as on every ride with no corridor.
+   */
+  readonly mappedTown?: MappedTown | undefined;
   /**
    * Other real riders in a room, where to draw them — #783: the interest set's
    * riders (`net/interest.ts`), each at the distance `net/snapshots.ts`
@@ -162,6 +252,67 @@ export interface SceneInput {
    * feature, so a ride that forgot it rides the line.
    */
   readonly centreline?: boolean | undefined;
+  /**
+   * Leaves the trees, shrubs and rocks standing on a settlement's ground, as
+   * every frame did before #1534 — the browser gate's control, and nothing
+   * else. Absent, or `false`, clears them (`settlements.ts`
+   * §`clearOfSettlements`). Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly settlementsWooded?: boolean | undefined;
+  /**
+   * Builds no procedural lot in a mapped town, as every frame did before
+   * #1550 — the browser gate's `-lots` control, and nothing else. Absent, or
+   * `false`, fills mapped built-up land that has no footprints with lots
+   * (`settlements.ts` §`lotsAt`). Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly lotsOff?: boolean | undefined;
+  /**
+   * How many people the rung draws as bodies — #1541 (`quality.ts`
+   * §`QualitySettings.people`): `people.ts` §`PEOPLE_NEAR_MAX` at most.
+   * Absent, or 0, places nobody.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a ride that forgot it draws no people. `realistic-choice.test.tsx` §"#1541"
+   * reads it back off the frame the renderer was handed, as it reads
+   * `crankAngle`; the owner's page passes it in `browser/realistic/frame.ts`.
+   */
+  readonly people?: number | undefined;
+  /**
+   * Places people with #1541's rule OFF — on a line's every point and between,
+   * carriageway or not (`people.ts` §`PeopleOptions.rule`): the browser gate's
+   * control, and nothing else. Absent, or `false`, keeps everybody off the
+   * carriageway. Optional the safe way round, for {@link centreline}'s reason.
+   */
+  readonly peopleOnTheRoad?: boolean | undefined;
+  /**
+   * #1542's changes switched off, each restoring the countryside before it —
+   * the realistic page's `-land-planting`, `-land-boundaries` and
+   * `-ground-clutter` levers, and nothing else (`land-class.ts`
+   * §`CountrysideLever`). Absent, or empty, is every change on. Optional the
+   * safe way round, for {@link centreline}'s reason.
+   */
+  readonly countrysideOff?: readonly CountrysideLever[] | undefined;
+  /**
+   * Where a Delivery round has steered the rider across the road, in metres
+   * right of the centre line — #1820, `delivery/steer.ts`
+   * §`steeredLateralFor`. It takes the racing line's place for the RIDER
+   * only, in {@link lateralOf}; nobody else is steered. A drawing, never
+   * physics: `simulation.ts` never reads it.
+   *
+   * The rider is drawn there exactly, the offset the obstacles meet, and a
+   * bot or ghost level with them makes the room instead (#1853,
+   * {@link lateralOf}) — or just behind them, until it is behind the camera
+   * (#1863).
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a Delivery ride that forgot it draws the rider on the line while
+   * the obstacles meet them in a lane. `delivery-wiring.test.tsx` reads it
+   * back off the input every frame of a round was built from (#1853). Absent
+   * on every other ride, a room ride included (DL9).
+   */
+  readonly steeredLateral?: number | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -171,6 +322,10 @@ export interface RemoteRiderInput {
   /** Along the route, the room's odometer, in metres. */
   readonly distanceMetres: number;
   readonly speedMetresPerSecond: number;
+  /** What to write over them on the road, if anything. @see RiderMarker.label */
+  readonly label?: string | undefined;
+  /** The one rider *Follow* chose. @see RiderMarker.followed */
+  readonly followed?: boolean | undefined;
 }
 
 /** Builds one frame. */
@@ -183,12 +338,55 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // tree and the hillside it stands on are hashed from the same route.
   const seed = scatterSeed(input.profile);
   const riders = placedRiders(input, corridor);
-  const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed);
+  // #1565: the cross streets along exactly the stretch of road this frame drew
+  // — mapped where the corridor has streets (found once a corridor), and a
+  // crossroads at each procedural village — before the scenery, which is kept
+  // off them.
+  const junctions =
+    input.worldCorridor === undefined
+      ? undefined
+      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed);
+  const sideRoads = sideRoadsAt(
+    input.profile,
+    input.origin,
+    seed,
+    (corridor.centre[0] as CorridorPoint).along,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    riderDistance,
+    junctions ?? [],
+    input.landClass ?? NO_LAND_CLASS,
+  );
+  const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
+  // #1535: the village streets along exactly the stretch of road this frame
+  // drew, for `scenery`'s reason — and outside the structures' budget,
+  // because a street is one mesh rather than items a rung could thin.
+  const streets = streetsAt(
+    input.profile,
+    input.origin,
+    seed,
+    (corridor.centre[0] as CorridorPoint).along,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    // #1551: built once a corridor, so this is a lookup on every later frame.
+    input.worldCorridor === undefined
+      ? NO_PAVEMENT_DATA
+      : pavementSides(input.worldCorridor, input.profile, input.origin),
+    input.landClass ?? NO_LAND_CLASS,
+    // #1637: and a city centre's street wherever the ride's urban class says
+    // so, broken over the mapped junctions' mouths — both fixed at the press,
+    // so this too is a lookup on every later frame.
+    input.mappedTown?.urban,
+    junctions,
+  );
+  const camera = cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral);
   return {
+    // #1549: the ride's mapped buildings, and where the rider is among them.
+    ...(input.mappedBuildings === undefined
+      ? {}
+      : { mappedBuildings: mappedInView(input.mappedBuildings, corridor, riderDistance) }),
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
     // — so the rider stays where `camera.ts` §`riderFrameBox` says they are.
-    camera: cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral),
+    camera,
     markers: riders.map((rider) => rider.marker),
     // Recomputed per frame rather than cached against the profile: it is two
     // bounded passes over at most `WORLD_SAMPLE_LIMIT` samples, and a cache
@@ -198,13 +396,25 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     scatter: items,
     // #966: the billboards in view, out of the structures' budget.
     billboards,
+    sideRoads,
+    streets,
+    // #1541: the people on those streets' pavements and the corridor's
+    // footways, near the rider, at the ride's own clock.
+    // #1619: and off the side roads, drawn or mapped, as off the road.
+    people: people(input, streets, camera, seed, sideRoads),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
     // whole of the no-crack guarantee. Every band, whatever the rung: the
     // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
     // the rung moves no vertex and the scenery stands on the same ground.
     terrain: {
-      mesh: terrainCorridor(input.profile, input.origin, corridor, seed),
+      mesh: terrainCorridor(
+        input.profile,
+        input.origin,
+        corridor,
+        seed,
+        input.landClass ?? NO_LAND_CLASS,
+      ),
       horizon: horizonRelief(input.profile, input.origin, seed),
     },
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)
@@ -219,6 +429,45 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       lineStands(input.profile, input.units ?? 'metric'),
     ),
   };
+}
+
+/**
+ * The people a frame draws — #1541 (`people.ts`): on the frame's village
+ * streets and the corridor's footways, around the rider's drawn place, at the
+ * ride's own clock — the one #625's breath runs on, which a held ride holds.
+ * Nobody where the rung draws nobody.
+ */
+function people(
+  input: SceneInput,
+  streets: readonly VillageStreet[],
+  camera: CameraPose,
+  seed: number,
+  sideRoads: readonly SideRoad[],
+): PeopleInView {
+  const near = input.people ?? 0;
+  if (near <= 0) return NO_PEOPLE;
+  const { profile, origin } = input;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const rule = input.peopleOnTheRoad !== true;
+  const road = (x: number, z: number, reach: number): number =>
+    distanceToDrawnRoad(profile, origin, x, z, reach);
+  const lines = streets.flatMap((street) => streetWalks(street, road, rule));
+  if (input.worldCorridor !== undefined) {
+    // #1620: and the mapped footways off those streets' pavements, which walk them already.
+    lines.push(
+      ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
+    );
+  }
+  return peopleAt(lines, {
+    x: camera.x,
+    z: camera.z,
+    seconds: ghostClock(input.state),
+    near,
+    rule,
+    // #1619: nobody on a side road this frame draws, either.
+    road: besideSideRoads(road, sideRoads),
+    ground: groundOf(profile, origin, seed, land),
+  });
 }
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */
@@ -247,32 +496,85 @@ function scenery(
   input: SceneInput,
   riderDistance: number,
   seed: number,
+  sideRoads: readonly SideRoad[],
 ): { readonly scatter: readonly ScatterItem[]; readonly billboards: readonly Billboard[] } {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
-  const natural = scatterAt(input.profile, input.origin, seed, first.along, last.along, {
-    maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS,
-    riderMetres: riderDistance,
-  });
+  // #1546: what the ground is where map data was read; nothing, where it was not.
+  const land = input.landClass ?? NO_LAND_CLASS;
+  // #1542: what the countryside makes of it, lever by lever.
+  const countryside = countrysideWithout(input.countrysideOff ?? []);
+  const natural = scatterAt(
+    input.profile,
+    input.origin,
+    seed,
+    first.along,
+    last.along,
+    { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
+    land,
+    countryside,
+  );
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
   const structureBudget = Math.max(0, input.structureItems ?? STRUCTURE_MAX_ITEMS);
-  const billboards = nearestBillboards(
-    billboardsAt(input.profile, input.origin, seed, first.along, last.along),
-    riderDistance,
-    structureBudget,
+  // #1565: and none on a side road.
+  const billboards = boardsClearOfSideRoads(
+    nearestBillboards(
+      billboardsAt(input.profile, input.origin, seed, first.along, last.along),
+      riderDistance,
+      structureBudget,
+    ),
+    sideRoads,
+    BILLBOARD_FOOTPRINT,
   );
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
   // the natural scenery kept clear of every building, and of every billboard.
-  const built = structuresAt(input.profile, input.origin, seed, first.along, last.along, {
-    maxItems: structureBudget - billboards.length,
-    riderMetres: riderDistance,
-  });
+  // #1534: and off every settlement's ground, so no house stands in a wood.
+  const footprints: SettlementFootprint[] = [];
+  const placed = structuresAt(
+    input.profile,
+    input.origin,
+    seed,
+    first.along,
+    last.along,
+    { maxItems: structureBudget - billboards.length, riderMetres: riderDistance },
+    footprints,
+    land,
+    // #1550: the corridor's kept footprints and commercial land, built once a
+    // corridor, which the procedural lots of a mapped town keep clear of.
+    // `null` is the `-lots` control: no lots at all.
+    input.lotsOff === true ? null : (input.mappedTown ?? NO_MAPPED_TOWN),
+    countryside,
+  );
+  // #1565: no wall, hedge, fence, signpost or building on a side road, and no
+  // tree, shrub or rock either.
+  const built = clearOfSideRoads(placed, sideRoads);
+  // #1549: and off every mapped building's ground, by #1534's rule — whose
+  // control (`settlementsWooded`) leaves both standing.
+  const cleared = clearOfSideRoads(
+    input.settlementsWooded === true
+      ? natural
+      : clearOfMappedBuildings(
+          clearOfSettlements(natural, footprints, land),
+          input.mappedBuildings,
+        ),
+    sideRoads,
+  );
   return {
-    scatter: [...built, ...clearOfBillboards(clearOfBuildings(natural, built), billboards)],
+    scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,
   };
+}
+
+/** The mapped buildings, with the rider's chunk and drawn place. @see SceneFrame.mappedBuildings */
+function mappedInView(
+  buildings: MappedBuildings,
+  corridor: RoadCorridor,
+  riderDistance: number,
+): MappedBuildingsInView {
+  const here = placeOnCorridor(corridor, riderDistance);
+  return { buildings, chunk: mappedChunk(riderDistance), x: here.x, z: here.z };
 }
 
 /**
@@ -371,6 +673,22 @@ const SIDE_BY_SIDE_METRES = 1.2;
 const LEVEL_FADE_METRES = 2;
 
 /**
+ * How far behind a rider a Delivery round steered (#1820) another rider is held
+ * aside of them: until its front wheel is level with the chase camera's eye,
+ * {@link CAMERA_BEHIND_METRES} + {@link BICYCLE_FRONT_METRES} = **5.36 m** —
+ * #1863. Nearer than that, some of it is between the camera and the rider,
+ * large in the foreground; beyond it, it eases back to its own line over
+ * {@link LEVEL_FADE_METRES}, wholly behind the eye, where no frame shows it.
+ * At 30 km/h the hold and the fade are 0.9 s of road.
+ *
+ * Exact on a straight. `behind` is measured along the road, while the eye sits
+ * {@link CAMERA_BEHIND_METRES} straight back along the rider's heading, so on a
+ * bend the front wheel is level with the eye only to within a fraction of a
+ * metre (about 0.5 m sideways on a 20 m hairpin, outside the frustum).
+ */
+const HELD_BEHIND_METRES = CAMERA_BEHIND_METRES + BICYCLE_FRONT_METRES;
+
+/**
  * How far from the centre a rider is ever drawn: **3.2 m** — half a handlebar
  * and 0.1 m inside the 7 m road's edge. Wider than the line's own
  * {@link LINE_LIMIT_METRES}, because a rider moved aside for another has to go
@@ -436,6 +754,12 @@ interface Rider {
   readonly pedalling: boolean;
   /** The side of the line it moves to when level, where the kind's is not enough. @see LEVEL_LANES */
   readonly lane?: number | undefined;
+  /** Where a Delivery round steered it, in place of the line — the rider's only. @see SceneInput.steeredLateral */
+  readonly steered?: number | undefined;
+  /** A remote rider's name on the road. @see RiderMarker.label */
+  readonly label?: string | undefined;
+  /** @see RiderMarker.followed */
+  readonly followed?: boolean | undefined;
 }
 
 /**
@@ -461,6 +785,7 @@ function ridersOnTheRoad(
       speed: input.state.ride.speed,
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
+      steered: input.steeredLateral,
     },
   ];
   const bot = input.state.bot;
@@ -517,6 +842,8 @@ function ridersOnTheRoad(
       crankAngle: pedalling(remote.distanceMetres),
       pedalling: remote.speedMetresPerSecond > 0,
       lane: remote.riderId % 2 === 0 ? -1 : 1,
+      label: remote.label,
+      followed: remote.followed,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a
@@ -536,39 +863,89 @@ function ridersOnTheRoad(
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
     const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
+    const cranked = crankAngle === undefined ? marker : { ...marker, crankAngle };
     return {
-      marker: crankAngle === undefined ? marker : { ...marker, crankAngle },
+      // #783: the name the room gave them, carried to the frame as words only.
+      marker:
+        rider.label === undefined
+          ? cranked
+          : {
+              ...cranked,
+              label: rider.label,
+              ...(rider.followed === true ? { followed: true } : {}),
+            },
       lateral,
     };
   });
 }
 
 /**
+ * How level two riders are: 1 within a bicycle's length of each other, 0 at
+ * {@link LEVEL_FADE_METRES} beyond it, and eased between.
+ */
+function levelness(one: Rider, other: Rider): number {
+  const gap = Math.abs(other.distance - one.distance);
+  return Math.min(
+    1,
+    Math.max(0, (BICYCLE_LENGTH_METRES + LEVEL_FADE_METRES - gap) / LEVEL_FADE_METRES),
+  );
+}
+
+/**
  * How far across the road one rider is drawn: the line, eased toward
  * {@link LEVEL_LANES} by how level they are with the nearest other rider.
  *
- * `line·(1 − g·w) + lane·side·w`, where `w` runs from 1 within a bicycle's
- * length of another rider to 0 at {@link LEVEL_FADE_METRES} beyond it, and `g`
- * is {@link LINE_GIVEN_UP}. At `w = 1` that is at most
- * `2.9·0.69 + 1.2 = 3.2 m` from the centre, which is {@link DRAWN_LIMIT_METRES}.
+ * `line·(1 − g·w) + lane·side·w`, where `w` is {@link levelness} with the
+ * nearest other rider and `g` is {@link LINE_GIVEN_UP}. At `w = 1` that is at
+ * most `2.9·0.69 + 1.2 = 3.2 m` from the centre, which is
+ * {@link DRAWN_LIMIT_METRES}.
+ *
+ * A rider a Delivery round steered (#1820) is drawn in its steered place
+ * exactly and gives up nothing, because that is the place the obstacles meet
+ * it (`delivery/ride-round.ts`), so a crash is drawn as one (#1853). The others
+ * make the room instead: each is eased, by its levelness with the steered
+ * rider, toward a place at least {@link SIDE_BY_SIDE_METRES} from them on its
+ * own side of them — the bot to the negative side, the ghost to the positive.
+ * Within a bicycle's length, where the levelness is 1, it is there, so nobody
+ * is drawn inside the rider; beyond, the bicycles are a length apart along the
+ * road, #499's own rule — ahead of the rider. BEHIND them it is held there
+ * until its front wheel is behind the camera's eye ({@link heldBehind}, #1863),
+ * because nearer it is between the camera and the rider: let go at #499's fade,
+ * it was drawn large in the foreground and swept across it to its own line.
+ * Nobody jumps across the rider as they steer, because a side never changes
+ * and every term is continuous. A lane is at most 1.75 m from the centre, so
+ * that place is at most `1.75 + 1.2 = 2.95 m` out, inside
+ * {@link DRAWN_LIMIT_METRES}.
  */
 function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
+  if (rider.steered !== undefined) return rider.steered;
   let level = 0;
   for (const other of riders) {
     if (other === rider) continue;
-    const gap = Math.abs(other.distance - rider.distance);
-    level = Math.max(
-      level,
-      Math.min(
-        1,
-        Math.max(0, (BICYCLE_LENGTH_METRES + LEVEL_FADE_METRES - gap) / LEVEL_FADE_METRES),
-      ),
-    );
+    level = Math.max(level, levelness(rider, other));
   }
-  const onLine = lineOffsetAt(line, rider.distance);
-  return (
-    onLine * (1 - LINE_GIVEN_UP * level) +
-    (rider.lane ?? LEVEL_LANES[rider.kind]) * SIDE_BY_SIDE_METRES * level
+  const side = rider.lane ?? LEVEL_LANES[rider.kind];
+  const drawn =
+    lineOffsetAt(line, rider.distance) * (1 - LINE_GIVEN_UP * level) +
+    side * SIDE_BY_SIDE_METRES * level;
+  const steered = riders.find((other) => other.steered !== undefined);
+  if (steered?.steered === undefined) return drawn;
+  const clear = steered.steered + side * SIDE_BY_SIDE_METRES;
+  const aside = side < 0 ? Math.min(drawn, clear) : Math.max(drawn, clear);
+  return drawn + (aside - drawn) * Math.max(levelness(rider, steered), heldBehind(rider, steered));
+}
+
+/**
+ * How much of its place aside a rider behind a steered one keeps — #1863: 1 from
+ * level with them back to {@link HELD_BEHIND_METRES}, 0 at
+ * {@link LEVEL_FADE_METRES} beyond, eased between, and 0 for a rider ahead.
+ */
+function heldBehind(rider: Rider, steered: Rider): number {
+  const behind = steered.distance - rider.distance;
+  if (behind <= 0) return 0;
+  return Math.min(
+    1,
+    Math.max(0, (HELD_BEHIND_METRES + LEVEL_FADE_METRES - behind) / LEVEL_FADE_METRES),
   );
 }
 

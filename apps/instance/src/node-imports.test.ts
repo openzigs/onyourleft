@@ -24,7 +24,11 @@ function load(register: boolean): { status: number | null; output: string } {
     `const physics = await import('@onyourleft/physics');`,
     `const domain = await import('@onyourleft/domain');`,
     `const protocol = await import('@onyourleft/protocol');`,
-    `if (typeof physics.advanceRider !== 'function' || typeof domain.watts !== 'function' || typeof protocol.encodeMessage !== 'function') process.exit(3);`,
+    // The analysis agent's package (#1098): written for a bundler like the
+    // three, and run under Node's type stripping, which refuses a parameter
+    // property — so loading it here is the check that it has none.
+    `const analysis = await import('@onyourleft/analysis');`,
+    `if (typeof physics.advanceRider !== 'function' || typeof domain.watts !== 'function' || typeof protocol.encodeMessage !== 'function' || typeof analysis.screenWriteUp !== 'function') process.exit(3);`,
   ].join('\n');
   const run = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
     cwd: INSTANCE,
@@ -35,7 +39,7 @@ function load(register: boolean): { status: number | null; output: string } {
 }
 
 describe('Node loads the workspace packages the room core needs', () => {
-  it('with the hook: all three load and have the exports the core uses', () => {
+  it('with the hook: all four load and have the exports the core uses', () => {
     const run = load(true);
     expect(run.output).toBe('');
     expect(run.status).toBe(0);

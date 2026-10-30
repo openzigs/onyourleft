@@ -78,7 +78,31 @@ export interface TrackLap {
   readonly totalElapsedTime: Seconds | undefined;
   readonly totalDistance: Metres | undefined;
   readonly points: readonly TrackPoint[];
+  /**
+   * #1321: the figures TCX has a lap element for, and the lap's kind. GPX has
+   * none of them (`GPX_LOSSY_CHANNELS`). Optional, so a lap built without them
+   * is still a lap; the TCX decoder always fills them in, as `undefined` for an
+   * element the file does not carry.
+   */
+  readonly averageHeartRate?: BeatsPerMinute | undefined;
+  /** The highest heart-rate reading of the lap. */
+  readonly maxHeartRate?: BeatsPerMinute | undefined;
+  readonly averageCadence?: RevolutionsPerMinute | undefined;
+  /** `ActivityExtension` v2's `LX/AvgWatts`. */
+  readonly averagePower?: Watts | undefined;
+  /** `ActivityExtension` v2's `LX/MaxWatts`. */
+  readonly maxPower?: Watts | undefined;
+  /** TCX's `Intensity`. Written as `Active` when absent: the element is required. */
+  readonly intensity?: TcxIntensity | undefined;
+  /** TCX's `TriggerMethod`: what ended the lap. Written as `Manual` when absent. */
+  readonly triggerMethod?: TcxTriggerMethod | undefined;
 }
+
+/** The two values TCX v2's `Intensity_t` admits. */
+export type TcxIntensity = 'Active' | 'Resting';
+
+/** The five values TCX v2's `TriggerMethod_t` admits. */
+export type TcxTriggerMethod = 'Manual' | 'Distance' | 'Location' | 'Time' | 'HeartRate';
 
 /** A whole activity, as GPX or TCX can carry it. */
 export interface TrackActivity {

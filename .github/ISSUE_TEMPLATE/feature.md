@@ -4,6 +4,12 @@ about: Something the project should do and does not
 labels: feature
 ---
 
+<!--
+For the maintainers, after it is opened (docs/agents/filing-issues.md): add one
+`area:` label, make it a sub-issue of its epic, and give it a `priority:` label
+only when it should not take its epic's tier. The roadmap board places it by these.
+-->
+
 ## What, and for whom
 
 ## Why it belongs here

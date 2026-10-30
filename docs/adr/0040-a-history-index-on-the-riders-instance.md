@@ -543,3 +543,21 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   side-camera pose summary out of the index is now the owner's ruling (Q2): never indexed, never
   returned by a tool. D-1, D-3 to D-7 and D-10 to D-11 are otherwise unchanged. The body above is
   not edited.
+- **2026-10-26** — **D-11's disclosure lands, and its rider-text sentence is replaced.** D-11 asked
+  the privacy policy to say, in the pull request that first stored history, that the instance keeps
+  a searchable copy, computed there, deleted with its source and the account, and not reached by a
+  device erase. That pull request did not, and the owner folded the item into [#1104](https://github.com/openzigs/onyourleft/issues/1104) on
+  2026-10-23 (from #918 item 6). The policy's *An instance you connect to* now has a row for it, and
+  Play Data Safety's *Other user-generated content* and *Files and docs* rows name it. D-11's drafted
+  sentence *"When you ask for an analysis, the parts that match are sent to the model you set up — on
+  your own computer, or, if you turned it on, a service you chose, after the details on your list are
+  masked"* was false once ADR 0046 moved analysis to the instance: no device path sends history. The
+  rider is now shown (`apps/web/src/rider-text/disclosure.ts`):
+
+  > When you ask your instance for an analysis, the model it uses may read the parts that match, and
+  > if you agreed to a hosted service there, those parts are sent to that service after the details
+  > on your list are masked.
+
+  The sentence before it now reads *"worked out by a model on that machine or its own private
+  network"*, under the owner's ruling of 2026-10-26 recorded in ADR 0035's entry of that date, which
+  matches D-6's own rule for the embedding model. The body above is not edited. (#1104)

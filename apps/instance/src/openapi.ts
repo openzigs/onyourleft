@@ -64,13 +64,37 @@ function operation(route: Route): Record<string, unknown> {
     const success =
       route.response.contentType === 'application/json'
         ? { 'application/json': { schema: route.response.schema } }
-        : route.response.contentType === 'application/octet-stream'
-          ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
-          : { 'text/plain': { schema: { type: 'string' } } };
-    responses['200'] = { description: 'OK', content: success };
+        : route.response.contentType === 'sealed'
+          ? {
+              'application/json': { schema: route.response.schema },
+              'text/event-stream': {
+                schema: {
+                  type: 'string',
+                  description:
+                    'When the inner route streams: frames of one `data:` line each — the first `{ "v": 1, "nonce", "ct" }`, then `{ "ct" }` — never an `event:` or `id:` field, ending with a sealed `end` event.',
+                },
+              },
+            }
+          : route.response.contentType === 'application/octet-stream'
+            ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
+            : route.response.contentType === 'text/event-stream'
+              ? {
+                  'text/event-stream': {
+                    schema: { type: 'string', description: route.response.description },
+                  },
+                }
+              : route.response.contentType === 'text/html'
+                ? { 'text/html': { schema: { type: 'string' } } }
+                : { 'text/plain': { schema: { type: 'string' } } };
+    responses[route.accepted === true ? '202' : '200'] = {
+      description: route.accepted === true ? 'Accepted' : 'OK',
+      content: success,
+    };
   }
   const codes = new Set<ErrorCode>([...EVERY_ROUTE, ...(route.errors ?? [])]);
   if (route.identity === true || route.sync === true) codes.add('unavailable');
+  // A plaintext request to a sealed route is refused before anything else (#1192).
+  if (route.sealed !== undefined) codes.add('sealed_required');
   // Several codes share a status, so a status names every code it may carry.
   const byStatus = new Map<number, ErrorCode[]>();
   for (const code of ERROR_CODES) {
@@ -98,12 +122,23 @@ function operation(route: Route): Record<string, unknown> {
     summary: route.summary,
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(route.auth === 'session' ? { security: [{ session: [] }] } : {}),
+    // #1191, #1192, #1210: `only` — reachable only inside `POST /v1/sealed`,
+    // and a plaintext request is `sealed_required`, on an instance holding keys.
+    ...(route.sealed === undefined ? {} : { 'x-oyl-sealed': route.sealed }),
     ...(route.request === undefined
       ? {}
       : {
           requestBody: {
             required: true,
             content: { 'application/json': { schema: route.request } },
+          },
+        }),
+    ...(route.form === undefined
+      ? {}
+      : {
+          requestBody: {
+            required: true,
+            content: { 'application/x-www-form-urlencoded': { schema: route.form } },
           },
         }),
     responses,

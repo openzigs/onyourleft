@@ -42,6 +42,10 @@ import type { StoreHarness } from '@onyourleft/store/testing';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
+  expandWorkout,
+  seconds,
+  thresholdShare,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -69,9 +73,10 @@ import {
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { LOSS_REASON } from '../ride/TrainerPanel';
 import { workoutRescueHeadline } from '../workout/rescue-text';
+import { HOLD_LABEL, holdReading, holdSentence, type WorkoutHold } from '../workout/hold-text';
 import { RELEASE_INCOMPLETE } from '../workout/session';
 import { ALL_ROUTES, routeById, type RouteDefinition, type RouteId } from '../shell/routes';
-import { openRoute } from '../testing/hierarchy-walk';
+import { openRoute, selectFixtureItem } from '../testing/hierarchy-walk';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { sentencesIn } from '../testing/route-sentences';
 import { capacitorShellSupport } from '../support/shell-support';
@@ -85,22 +90,24 @@ import {
   DevicesView,
 } from '../views/DevicesView';
 import {
-  COMPUTER_SENDS,
-  COMPUTER_SENDS_LEAD,
+  INSTANCE_SENDS,
+  INSTANCE_SENDS_LEAD,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
   WRITE_UP_POSE_TEXT,
   WRITE_UP_SOURCE_TEXT,
 } from '../detail/write-up';
 import { ACTIVITY_DETAIL_KEPT_VISIBLE } from '../views/ActivityDetailView';
-import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
 import { RACE_CONSENT_SENTENCE } from '../detail/RaceConsentSection';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { ACTIVITIES_KEPT_VISIBLE } from '../views/ActivitiesView';
+import { ANALYSIS_KEPT_VISIBLE } from '../views/AnalysisView';
 import { RideView } from '../views/RideView';
 import { ROUTES_KEPT_VISIBLE } from '../views/RoutesView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
+import { hostedKeptVisible } from '../ride-analysis/hosted-consent';
+import { SCRIPTED_HOSTED_KEY } from '../ride-analysis/hosted-settings-testing';
 import { MODERATION_KEPT_VISIBLE } from '../views/ModerationView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
 import { browserSecureWindow } from '../camera/secure-window-testing';
@@ -130,7 +137,9 @@ const NOTHING_TUCKED = 'nothing on this route is tucked by #666';
  * wiring gate watches (§4j), and a list only this test reads is not product
  * code. Fragments where a sentence carries a number.
  */
-const RIDE_KEPT_VISIBLE: readonly string[] = ['Everything stays on this device.'];
+const RIDE_KEPT_VISIBLE: readonly string[] = [
+  'Recorded on this device. Nothing is sent unless you switched that on.',
+];
 
 /** What the populated walk's Ride screen renders: a trainer under this app's control, in ERG. */
 const RIDE_POPULATED_KEPT_VISIBLE: readonly string[] = [
@@ -161,6 +170,23 @@ const RIDE_CONTROLLED_KEPT_VISIBLE: readonly string[] = [
   KEEP_SCREEN_ON_LABEL,
   RIDE_MAY_STOP_WITH_SCREEN_OFF,
   RIDE_NOTIFICATION_REFUSED,
+];
+
+/**
+ * A running workout's heart-rate hold — #1240. Trainer-control text: it says
+ * what the trainer is being told and why, so it may never be tucked.
+ */
+const RIDE_HOLD: WorkoutHold = {
+  reason: 'lowered',
+  range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+  target: 165,
+};
+const RIDE_HOLD_KEPT_VISIBLE: readonly string[] = [
+  HOLD_LABEL,
+  holdSentence(RIDE_HOLD),
+  holdReading(RIDE_HOLD),
+  // A loaded workout owns the target (#605), which the ERG form says, kept.
+  'End the workout to set a target by hand.',
 ];
 
 /** A controllable trainer this app does not hold, after the link dropped. */
@@ -211,7 +237,7 @@ const KEPT: Record<RouteId, Kept> = {
     // #1013: a camera notice is kept whole; the walk meets only `no-consent`.
     elsewhere: [...CAMERA_AGREED_KEPT_VISIBLE, ...CAMERA_NOTICE_SENTENCES],
     reason:
-      '“Your own computer” and the hosted model (#518) render only once the camera is agreed to, which the walk never does; it is mounted agreed below',
+      '“Your own computer” and the side camera’s pictures on the instance render only once the camera is agreed to, which the walk never does; it is mounted agreed below',
   },
   'side-camera': { sentences: SIDE_CAMERA_KEPT_VISIBLE },
   // The walk hands Files a store holding one ride, so its export panel — and
@@ -235,7 +261,11 @@ const KEPT: Record<RouteId, Kept> = {
   ride: {
     sentences: RIDE_KEPT_VISIBLE,
     populated: RIDE_POPULATED_KEPT_VISIBLE,
-    elsewhere: [...RIDE_CONTROLLED_KEPT_VISIBLE, ...RIDE_UNCONTROLLED_KEPT_VISIBLE],
+    elsewhere: [
+      ...RIDE_CONTROLLED_KEPT_VISIBLE,
+      ...RIDE_UNCONTROLLED_KEPT_VISIBLE,
+      ...RIDE_HOLD_KEPT_VISIBLE,
+    ],
     reason:
       'the release, the stall rescue, the recording-service notices and a lost control render only in states the walk does not reach; two mounted cases below cover them',
   },
@@ -249,13 +279,29 @@ const KEPT: Record<RouteId, Kept> = {
   },
   workouts: { sentences: [], reason: NOTHING_TUCKED },
   activities: { sentences: ACTIVITIES_KEPT_VISIBLE },
-  analysis: { sentences: [], reason: NOTHING_TUCKED },
-  routes: { sentences: ROUTES_KEPT_VISIBLE },
+  analysis: { sentences: ANALYSIS_KEPT_VISIBLE },
+  // #1442: who can see a shared route is said beside a CHOSEN route, where
+  // *Who can see it* is; the walk chooses none, so it is mounted below.
+  routes: {
+    sentences: [],
+    elsewhere: ROUTES_KEPT_VISIBLE,
+    reason:
+      'the sharing warning renders only beside a chosen route; a mounted case below chooses one',
+  },
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
+  more: { sentences: [], reason: `${NOTHING_TUCKED}: it is a list of links (#1429)` },
   // #778: what an instance receives, before sign-in and after; and, once
   // connected (the populated walk), what disconnecting does and does not do.
-  instance: { sentences: INSTANCE_KEPT_VISIBLE, populated: INSTANCE_CONNECTED_KEPT_VISIBLE },
+  // #1251: and, signed in with a key held, the hosted service's section —
+  // who could read the key, and the whole consent beside its switch.
+  instance: {
+    sentences: INSTANCE_KEPT_VISIBLE,
+    populated: [
+      ...INSTANCE_CONNECTED_KEPT_VISIBLE,
+      ...hostedKeptVisible(SCRIPTED_HOSTED_KEY.origin),
+    ],
+  },
   // #955: that every action is logged, and the log outlives an erased account
   // — on the page a moderator acts from (the populated walk; the empty one is
   // an account that moderates nothing, which acts on nothing).
@@ -268,12 +314,13 @@ const KEPT: Record<RouteId, Kept> = {
   'activity-detail': {
     sentences: [],
     // #805, carried from #831's review: what leaves the device, and when, on
-    // the ride's page — the ask's explanation and the approved words of what
-    // it sends (ADR 0035 D-9 B). The populated fixture sets up the ask.
+    // the ride's page. Since #1103 that is the instance paragraph alone: the
+    // own-computer ask and its words (ADR 0035 D-9 B) are gone.
     // #793: what the "may be raced" box allows, and that sharing is not it.
     populated: [
-      WRITE_UP_EXPLANATION,
-      `${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`,
+      // #1102: what a write-up asked of the rider's instance sends (#1104 B3).
+      // The populated fixture is signed in to an instance.
+      `${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`,
       RACE_CONSENT_SENTENCE,
       // #836: the note box's disclosure (ADR 0040 D-11) — where the note goes and
       // that a model reads it.
@@ -306,13 +353,15 @@ const KEPT: Record<RouteId, Kept> = {
  * each is checked drawn and reachable on its route.
  */
 const NOTES: Partial<Record<RouteId, readonly string[]>> = {
-  ride: ['Everything stays on this device.'],
+  ride: ['Recorded on this device. Nothing is sent unless you switched that on.'],
   routes: [
     'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
       'cannot be shared at all.',
   ],
   camera: ['Pictures and ride details stay on this device unless you turn on sending them below.'],
-  settings: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
+  settings: [
+    'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+  ],
   instance: ['Your rides stay on this device.'],
   'side-camera': ['This phone keeps nothing about you afterwards.'],
 };
@@ -537,6 +586,7 @@ const GAME_RENDERER: GameRenderer = {
     render: () => undefined,
     setQuality: () => undefined,
     setRiderKit: () => undefined,
+    setSeason: () => undefined,
     resize: () => undefined,
     destroy: () => undefined,
   }),
@@ -641,6 +691,37 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     }
   }
 
+  it('Routes, with a route chosen: who can see a shared route stays out of its ⓘ (#1442)', async () => {
+    const route = routeById('routes');
+    const main = await open(route, true);
+    expect(await selectFixtureItem(route)).toBe(true);
+    expect(main.querySelector('select[name="visibility"]')).not.toBeNull();
+    const kept = withNotes(route);
+    expect(allFaults(main, [...kept.sentences, ...ROUTES_KEPT_VISIBLE], everyListed(kept))).toEqual(
+      [],
+    );
+  });
+
+  it('Activities, with a ride chosen: its page in the detail pane keeps what the ride’s own page keeps (#1439)', async () => {
+    // The walk chooses no ride, and the chosen ride's pane IS the ride's page
+    // since #1439 — with every sentence `activity-detail` holds visible.
+    const route = routeById('activities');
+    const main = await open(route, true);
+    expect(await selectFixtureItem(route)).toBe(true);
+    for (let turn = 0; turn < 10 && main.querySelector('.oyl-race-consent') === null; turn += 1) {
+      await settle();
+    }
+    const ride = KEPT['activity-detail'];
+    const kept = [...withNotes(route).sentences, ...(ride.populated ?? [])];
+    expect(
+      main.querySelector('.oyl-race-consent'),
+      'the ride’s page did not render',
+    ).not.toBeNull();
+    expect(allFaults(main, kept, [...everyListed(withNotes(route)), ...everyListed(ride)])).toEqual(
+      [],
+    );
+  });
+
   it('Devices, where a browser can pair: the one-gesture sentence and the limits stay out of its disclosure', async () => {
     const working: BluetoothPort = {
       getAvailability: async () => Promise.resolve(true),
@@ -683,16 +764,23 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     expect(allFaults(main, DEVICES_SHELL_KEPT_VISIBLE, everyListed(KEPT.devices))).toEqual([]);
   });
 
-  it('Camera, agreed to: what is sent to the rider’s own computer stays out of any disclosure', async () => {
+  it('Camera, agreed to: what is sent to the rider’s own computer, and to their instance, stays out of any disclosure', async () => {
     const controller = new CameraController({
       secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(
       <main>
-        <CameraView controller={controller} />
+        <CameraView
+          controller={controller}
+          // #1106: signed in to an instance, so its section and what it says is sent are there.
+          sidePictures={{
+            sideInstanceOrigin: () => 'https://rides.example',
+            askHostedPictureService: () => Promise.resolve({ kind: 'none' }),
+          }}
+        />
       </main>,
     );
     await settle();
@@ -727,6 +815,46 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     const main = document.querySelector('main');
     if (main === null) throw new Error('no main');
     expect(allFaults(main, RIDE_CONTROLLED_KEPT_VISIBLE, everyListed(KEPT.ride))).toEqual([]);
+  });
+
+  it('Ride, a workout’s heart-rate hold (#1240)', async () => {
+    const riding = ridingSnapshot();
+    const timeline = expandWorkout({
+      name: 'Hold',
+      blocks: [
+        {
+          kind: 'heart-rate-hold',
+          seconds: seconds(1800),
+          range: RIDE_HOLD.range,
+          startShare: thresholdShare(0.5),
+          ceilingShare: thresholdShare(0.8),
+        },
+      ],
+    });
+    const stub = stubRideController({
+      ...riding,
+      workout: {
+        name: 'Hold',
+        status: 'running',
+        elapsedSeconds: 300,
+        totalSeconds: 1800,
+        holdingWatts: 165,
+        nowRiding: '30 min holding 130–140 bpm',
+        fault: undefined,
+        rescue: undefined,
+        hold: RIDE_HOLD,
+        timeline,
+      },
+    });
+    mounted = await mount(
+      <main>
+        <RideView controller={stub.controller} />
+      </main>,
+    );
+    await settle();
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    expect(allFaults(main, RIDE_HOLD_KEPT_VISIBLE, everyListed(KEPT.ride))).toEqual([]);
   });
 
   it('Ride, a controllable trainer this app lost control of', async () => {

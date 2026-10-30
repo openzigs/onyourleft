@@ -53,6 +53,7 @@ export type RouteId =
   | 'credits'
   | 'instance'
   | 'moderation'
+  | 'more'
   | 'not-found';
 
 /**
@@ -278,7 +279,13 @@ export const ROUTES: readonly RouteDefinition[] = [
     navLabel: 'Ride',
     title: 'Ride',
     summary: 'Record a ride from the sensors paired on this device.',
-    notes: ['Everything stays on this device.'],
+    // ⚠️ #1244's review: this was "Everything stays on this device.", which
+    // stopped being true of this screen when a rider could switch on
+    // *Re-plan during the ride* a few lines above it (and was already untrue
+    // of a ride whose side-camera pictures the rider had switched on sending).
+    // It claims only what holds in every state: where the ride is recorded,
+    // and that sending is something the rider switched on.
+    notes: ['Recorded on this device. Nothing is sent unless you switched that on.'],
   },
   {
     id: 'game',
@@ -315,7 +322,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/activities',
     navLabel: 'Activities',
     title: 'Activities',
-    summary: 'Rides recorded on this device, newest first.',
+    // #1442: was "Rides recorded on this device, newest first." — and the
+    // line under the list says where the rides are (`where-rides-are.ts`),
+    // so the screen said it twice.
+    summary: 'Your rides, newest first.',
   },
   {
     id: 'analysis',
@@ -405,7 +415,9 @@ export const ROUTES: readonly RouteDefinition[] = [
     navLabel: 'Settings',
     title: 'Settings',
     summary: 'How this device shows your numbers.',
-    notes: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
+    notes: [
+      'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+    ],
   },
   {
     id: 'about',
@@ -444,6 +456,31 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
   title: 'Draw a route',
   summary: 'Place waypoints and have the roads between them worked out.',
   help: ['Every control works from the keyboard, and a half-drawn route survives closing the tab.'],
+};
+
+/**
+ * The More tab's own page — #1429: a menu of every page under it.
+ *
+ * Before #1429 the tab labelled "More" opened Devices, the first page of its
+ * group, and the section row under the title was the only list of the rest —
+ * which left Instance, reached from Settings, out of it. The tab now opens a
+ * page whose title is the tab's label, listing each page with its one line:
+ * `views/MoreView.tsx`.
+ *
+ * **Not in {@link ROUTES}**, so the section row's pages are unchanged and it is
+ * not a sixth segment in a row that only just fits five on a phone
+ * (`theme.css` §`.oyl-subnav-link`); {@link groupDestination} names it for
+ * the More group instead. It is in {@link ALL_ROUTES}, so the accessibility
+ * gate and the reflow walk audit it unasked.
+ */
+export const MORE_ROUTE: RouteDefinition = {
+  id: 'more',
+  group: 'more',
+  layout: 'prose',
+  path: '/more',
+  navLabel: 'More',
+  title: 'More',
+  summary: 'Devices, files, the camera, settings, an instance and this app.',
 };
 
 /**
@@ -627,6 +664,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   CREDITS_ROUTE,
   INSTANCE_ROUTE,
   MODERATION_ROUTE,
+  MORE_ROUTE,
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
@@ -778,7 +816,8 @@ export function routeForHash(hash: string): RouteDefinition {
  * The query and any nested fragment are dropped: no route is chosen by its
  * query, and silently matching `'/activities?x=1'` against nothing would
  * send a perfectly good deep link to the not-found page. (One query is READ,
- * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010.) A **path** parameter
+ * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010, and
+ * {@link gameDeliveryFromHash}, #1816.) A **path** parameter
  * is a different thing and is matched — see {@link matchHash}.
  */
 export function normaliseHash(hash: string): string {
@@ -868,6 +907,20 @@ export function gameRouteFromHash(hash: string): string | undefined {
   return chosen === null || chosen === '' ? undefined : chosen;
 }
 
+/**
+ * Whether the game's developer route asks for a Delivery round — #1816:
+ * `#/game?delivery=on`, beside {@link hrefForGameRoute}'s `route`. A QUERY,
+ * for that one's reason: it is still the game route, and nothing starts a
+ * ride from a link — the rider still presses Ride, and `GameView` reads this
+ * at the press. The stage chooser does not offer Delivery yet (#1818), so
+ * this is how a developer, and #733's tablet step, switch it on. Only `on`
+ * is a yes; anything else, or nothing, is an ordinary ride.
+ */
+export function gameDeliveryFromHash(hash: string): boolean {
+  const query = /^[^?]*\?([^#]*)/.exec(hash)?.[1];
+  return query !== undefined && new URLSearchParams(query).get('delivery') === 'on';
+}
+
 /** The link to one segment's effort history (#67). */
 export function hrefForSegment(id: string): string {
   return hrefFor(SEGMENT_DETAIL_ROUTE, id);
@@ -879,9 +932,24 @@ export function routesInGroup(group: NavGroupId): readonly RouteDefinition[] {
 }
 
 /**
- * Where a group's link goes: its first route. Total, for the reason
- * {@link routeById} is — a group nothing belongs to lands on not-found.
+ * Where a group's link goes: its first route, except More's, which opens its
+ * own menu page (#1429, {@link MORE_ROUTE}) so that the tab goes where its
+ * label says. Total, for the reason {@link routeById} is — a group nothing
+ * belongs to lands on not-found.
  */
 export function groupDestination(group: NavGroupId): RouteDefinition {
+  if (group === 'more') {
+    return MORE_ROUTE;
+  }
   return routesInGroup(group)[0] ?? NOT_FOUND_ROUTE;
+}
+
+/**
+ * What the More menu lists — #1429: every page in the group's section row,
+ * with Instance after Settings, where it is otherwise reached from.
+ */
+export function moreMenuRoutes(): readonly RouteDefinition[] {
+  const pages = routesInGroup('more');
+  const settings = pages.findIndex((route) => route.id === 'settings');
+  return [...pages.slice(0, settings + 1), INSTANCE_ROUTE, ...pages.slice(settings + 1)];
 }

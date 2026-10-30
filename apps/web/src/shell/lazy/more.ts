@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The More group's views — Devices, Files, Camera, the side camera, Settings,
- * connecting to an instance (#777), moderating one (#955), About and Credits.
+ * The More group's views — the More menu (#1429), Devices, Files, Camera, the
+ * side camera, Settings, connecting to an instance (#777), moderating one
+ * (#955), About and Credits.
  *
  * One module per navigation group (#674), so the bundler writes each group
  * into a chunk of its own that `AppShell` loads with `import()` only when a
@@ -20,3 +21,4 @@ export { InstanceView } from '../../views/InstanceView';
 export { ModerationView } from '../../views/ModerationView';
 export { AboutView } from '../../views/AboutView';
 export { CreditsView } from '../../views/CreditsView';
+export { MoreView } from '../../views/MoreView';

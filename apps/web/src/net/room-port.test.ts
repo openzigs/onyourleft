@@ -2,6 +2,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { NO_CARD_DEVICE } from '../instance/testing';
+import { keylessInstance } from '../rooms/rooms-testing';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import type {
@@ -10,9 +12,22 @@ import type {
   OpenInstanceSocket,
 } from '../instance/instance-transport';
 import { createRoomPort, roomPortOver } from './room-port';
+import { ROOM_REPORT_REASON_KEYS } from './room-session';
 import { flush, ManualClock } from './testing';
 
 const ORIGIN = 'https://ride.example';
+
+/**
+ * Let the ticket's request settle: since #1210 a device with no card reads
+ * the instance's keys first, and a `Response`'s body is read across tasks,
+ * not only microtasks.
+ */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flush();
+  }
+}
 
 function storageWith(entries: Record<string, string>): Storage {
   const map = new Map(Object.entries(entries));
@@ -66,14 +81,14 @@ describe('the production room port — #782', () => {
     const sockets = recordingSockets();
     const clock = new ManualClock();
     createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith(SIGNED_IN),
-      send,
+      send: keylessInstance(send),
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
     }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
-    await flush();
-    await flush();
+    await settle();
     expect(send).toHaveBeenCalledTimes(1);
     const [url, init] = send.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${ORIGIN}/v1/rooms/room-1/ticket`);
@@ -96,8 +111,9 @@ describe('the production room port — #782', () => {
     const sockets = recordingSockets();
     const clock = new ManualClock();
     const connection = createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith({}),
-      send,
+      send: keylessInstance(send),
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
@@ -127,8 +143,9 @@ describe('the production room port — #782', () => {
       const sockets = recordingSockets();
       const clock = new ManualClock();
       const connection = createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: storageWith(SIGNED_IN),
-        send,
+        send: keylessInstance(send),
         openSocket: sockets.open,
         timers: clock,
         now: clock.now,
@@ -147,8 +164,9 @@ describe('the production room port — #782', () => {
     const sockets = recordingSockets();
     const clock = new ManualClock();
     const connection = createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith(SIGNED_IN),
-      send,
+      send: keylessInstance(send),
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
@@ -176,33 +194,56 @@ describe('the production room port — #782', () => {
       const send = vi.fn(() => Promise.resolve(new Response('{}', { status })));
       const clock = new ManualClock();
       const connection = createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: storageWith(SIGNED_IN),
-        send,
+        send: keylessInstance(send),
         openSocket: recordingSockets().open,
         timers: clock,
         now: clock.now,
       }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
-      await flush();
-      await flush();
+      await settle();
       await clock.advance(120_000);
       expect(connection.status()).toEqual({ kind: 'refused', reason });
       expect(send).toHaveBeenCalledTimes(1);
     });
   }
 
+  it('reads `sealed_required` to the ticket as cannot-seal, not as not-eligible (#1210)', async () => {
+    // An instance holding keys whose keys this device could not read: it
+    // refuses the plaintext ticket before reading it, and says why.
+    const send = vi.fn(() =>
+      Promise.resolve(
+        Response.json({ error: { code: 'sealed_required', message: 'Sealed.' } }, { status: 403 }),
+      ),
+    );
+    const clock = new ManualClock();
+    const connection = createRoomPort({
+      ...NO_CARD_DEVICE,
+      storage: storageWith(SIGNED_IN),
+      send: keylessInstance(send),
+      openSocket: recordingSockets().open,
+      timers: clock,
+      now: clock.now,
+    }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+    await settle();
+    await clock.advance(120_000);
+    expect(connection.status()).toEqual({ kind: 'refused', reason: 'cannot-seal' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   for (const status of [429, 500, 503]) {
     it(`reads a ${String(status)} to the ticket as unreachable, and tries again`, async () => {
       const send = vi.fn(() => Promise.resolve(new Response('{}', { status })));
       const clock = new ManualClock();
       const connection = createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: storageWith(SIGNED_IN),
-        send,
+        send: keylessInstance(send),
         openSocket: recordingSockets().open,
         timers: clock,
         now: clock.now,
       }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
-      await flush();
-      await flush();
+      await settle();
       expect(connection.status().kind).toBe('lost');
       await clock.advance(2_000);
       expect(send.mock.calls.length).toBeGreaterThan(1);
@@ -214,6 +255,7 @@ describe('the production room port — #782', () => {
     const release = vi.fn();
     const clock = new ManualClock();
     createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith({}),
       keepAlive: () => release,
       timers: clock,
@@ -235,11 +277,90 @@ describe('a link that fails at once — #782', () => {
         open: () => {
           throw new Error('never');
         },
+        report: () => {
+          throw new Error('no instance');
+        },
       }),
       { timers: clock, now: clock.now, keepAlive: () => () => undefined },
     ).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
     await flush();
     expect(connection.status().kind).toBe('lost');
+    // #789: a report over a link that throws files nothing, and says so.
+    await expect(connection.report(1, 'cheating')).resolves.toEqual({ kind: 'unreachable' });
     connection.leave();
+  });
+});
+
+describe('an in-ride report — #789', () => {
+  function reporting(status: number, body: string | null = null) {
+    return vi.fn((url: string) =>
+      Promise.resolve(
+        url.endsWith('/ticket')
+          ? new Response(JSON.stringify({ ticket: 'the-ticket', expiresAt: 1 }), { status: 200 })
+          : new Response(body, { status }),
+      ),
+    );
+  }
+
+  function joined(send: InstanceSend, storage = storageWith(SIGNED_IN)) {
+    const clock = new ManualClock();
+    return createRoomPort({
+      ...NO_CARD_DEVICE,
+      storage,
+      send: keylessInstance(send),
+      openSocket: recordingSockets().open,
+      timers: clock,
+      now: clock.now,
+    }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+  }
+
+  it('posts the seat and the reason to the room’s own report route, with the session token, and nothing else', async () => {
+    const send = reporting(204);
+    const connection = joined(send);
+    await settle();
+    send.mockClear();
+    await expect(connection.report(3, 'display-name')).resolves.toEqual({ kind: 'reported' });
+    expect(send).toHaveBeenCalledTimes(1);
+    const [url, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${ORIGIN}/v1/rooms/room-1/reports`);
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer session-token');
+    // A seat and a reason: no screenshot, no position, no power, no mass.
+    expect(JSON.parse(init.body as string)).toEqual({ riderId: 3, reason: 'display-name' });
+    connection.leave();
+  });
+
+  for (const [status, kind] of [
+    [429, 'rate-limited'],
+    [404, 'gone'],
+    [422, 'refused'],
+    [503, 'unreachable'],
+  ] as const) {
+    it(`reads a ${String(status)} as ${kind}`, async () => {
+      const send = reporting(status, '{}');
+      const connection = joined(send);
+      await settle();
+      await expect(connection.report(1, 'other')).resolves.toEqual({ kind });
+      connection.leave();
+    });
+  }
+
+  it('sends nothing for a rider with no instance session, and says it was refused', async () => {
+    const send = reporting(204);
+    const connection = joined(send, storageWith({}));
+    await settle();
+    await expect(connection.report(1, 'cheating')).resolves.toEqual({ kind: 'refused' });
+    expect(send).not.toHaveBeenCalled();
+    connection.leave();
+  });
+
+  it('offers exactly the reasons the instance accepts', async () => {
+    const instance = (await import(
+      /* @vite-ignore */ new URL('../../../instance/src/moderation/moderation.ts', import.meta.url)
+        .href
+    )) as { ROOM_REPORT_REASONS: Record<string, string> };
+    expect([...ROOM_REPORT_REASON_KEYS].sort()).toEqual(
+      Object.keys(instance.ROOM_REPORT_REASONS).sort(),
+    );
   });
 });

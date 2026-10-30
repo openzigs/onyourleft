@@ -6,7 +6,7 @@ import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { STRUCTURE_KINDS, type SceneryKind } from '../../src/game/scatter';
 import { corridorOrigin } from '../../src/game/terrain';
 import { rideFrame } from './frame';
-import { realisticRoute } from './route';
+import { VILLAGE_HOLD_METRES, realisticRoute, villageRoute } from '../../src/demo/synthetic-road';
 
 const profile = realisticRoute();
 const origin = corridorOrigin(profile);
@@ -14,7 +14,7 @@ const structures = new Set<SceneryKind>(STRUCTURE_KINDS);
 
 /** How many scenery items and how many structures one frame of the ride carries. */
 function carried(
-  rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>,
+  rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>,
   distance: number,
 ): { readonly scenery: number; readonly structures: number } {
   const frame = rideFrame({ profile, origin, distance, elapsed: 10, rung });
@@ -29,7 +29,7 @@ describe('the realistic page’s frames carry the rung’s scenery budget, as Ga
 
   it('carries no more than a small rung allows, scenery and structures each', () => {
     for (const distance of along) {
-      const frame = carried({ scatterItems: 5, structureItems: 2 }, distance);
+      const frame = carried({ scatterItems: 5, structureItems: 2, people: 0 }, distance);
       expect(frame.scenery, `${String(distance)} m`).toBeLessThanOrEqual(5);
       expect(frame.structures, `${String(distance)} m`).toBeLessThanOrEqual(2);
     }
@@ -51,5 +51,57 @@ describe('the realistic page’s frames carry the rung’s scenery budget, as Ga
     // The control: the route is dense enough that the top rung carries more, so
     // the bound above is the budget and not an empty valley.
     expect(topTotal).toBeGreaterThan(reducedTotal);
+  });
+});
+
+describe('the realistic page’s `-settlement-clearing` lever leaves the settlements’ ground wooded — #1534', () => {
+  it('draws what a ride draws without it, and only adds scenery with it', () => {
+    const top = REALISTIC_LADDER[0] as QualitySettings;
+    let added = 0;
+    for (let distance = 0; distance < profile.totalDistance; distance += 150) {
+      const key = (item: { kind: string; x: number; z: number }): string =>
+        `${item.kind} ${String(item.x)} ${String(item.z)}`;
+      const ride = rideFrame({ profile, origin, distance, elapsed: 10, rung: top });
+      const lever = rideFrame({
+        profile,
+        origin,
+        distance,
+        elapsed: 10,
+        rung: top,
+        settlementsWooded: true,
+      });
+      const wooded = new Set(lever.scatter.map(key));
+      // Everything a ride draws, the lever draws too: it only puts back.
+      for (const item of ride.scatter) expect(wooded.has(key(item)), key(item)).toBe(true);
+      added += lever.scatter.length - ride.scatter.length;
+    }
+    // The control: the page's route has settlements with ground to clear.
+    expect(added).toBeGreaterThan(0);
+  });
+});
+
+describe('the realistic page’s `-people` lever places nobody — #1541', () => {
+  it('puts people on the village road’s pavements at the top rung, and none with the lever', () => {
+    const village = villageRoute();
+    const villageOrigin = corridorOrigin(village);
+    const top = REALISTIC_LADDER[0] as QualitySettings;
+    const count = (peopleOff: boolean): number => {
+      let total = 0;
+      for (let elapsed = 0; elapsed < 60; elapsed += 10) {
+        const frame = rideFrame({
+          profile: village,
+          origin: villageOrigin,
+          distance: VILLAGE_HOLD_METRES,
+          elapsed,
+          rung: top,
+          peopleOff,
+        });
+        total += (frame.people?.near.length ?? 0) + (frame.people?.far.length ?? 0);
+      }
+      return total;
+    };
+    // The control: the page's village hold has people to place.
+    expect(count(false)).toBeGreaterThan(0);
+    expect(count(true)).toBe(0);
   });
 });

@@ -57,10 +57,10 @@ const PORT = 4319;
  * ⚠️ The one above previews `browser/` — the harness — and an offline claim
  * about the product has to be measured against `apps/web/dist`, which that
  * server does not serve. So there are two `webServer` entries, not two
- * Playwright projects and emphatically not two CI jobs: `main` requires a
- * status check whose context is exactly `Repository rules`, and a second job
- * reports under a different context and could not block a merge (docs/agents/ci.md
- * §4c).
+ * Playwright projects and emphatically not two CI jobs for them: since #1720
+ * the gate is three jobs, `browser-1` to `browser-3`, which divide the spec
+ * files and not the servers — each starts both — and which the job named
+ * `Repository rules` waits for (docs/agents/ci.md §4c).
  *
  * ⚠️ **The product server serves a single-page app**, with Vite's default
  * `appType`. That is deliberate and is the opposite of the harness's `'mpa'`:
@@ -70,6 +70,19 @@ const PORT = 4319;
  * `offline.browser.spec.ts`.
  */
 const PRODUCT_PORT = 4320;
+
+/**
+ * The **demo** build's port — #1648. A third server, for the reason the
+ * product has a second: what the demo is measured to fetch has to be measured
+ * against `demo/dist`, the files an embedding site serves, and neither server
+ * above serves them. `test:browser` and every script that starts these servers
+ * builds it first (`vite preview` refuses a missing `dist`).
+ *
+ * ⚠️ **Its own origin, and no storage state for it**: {@link FOLLOW_THE_DEVICE}
+ * names the other two origins only, so a demo page starts with empty storage
+ * and `shell-demo.browser.spec.ts` can assert it is still empty after a ride.
+ */
+const DEMO_PORT = 4321;
 
 /**
  * The bind address, written down once.
@@ -95,6 +108,8 @@ const HOST = '127.0.0.1';
 export const HARNESS_ORIGIN = `http://${HOST}:${String(PORT)}`;
 /** Where `apps/web/dist` is served from. The product, not the gate's own pages. */
 export const PRODUCT_ORIGIN = `http://${HOST}:${String(PRODUCT_PORT)}`;
+/** Where `apps/web/demo/dist` is served from — #1648. */
+export const DEMO_ORIGIN = `http://${HOST}:${String(DEMO_PORT)}`;
 
 /**
  * The flags every browser this gate launches is given.
@@ -140,6 +155,10 @@ export const LAUNCH_ARGS = [
 
 /**
  * How long the whole run may take before it stops itself — #651.
+ *
+ * ⚠️ **Since #1285 "the job" in everything below is history**: the gate is
+ * the `browser` shard, a job of its own with a 25-minute stop, and
+ * {@link GATE_STEP_MS} has today's arithmetic. This value did not move.
  *
  * ⚠️ **The job's `timeout-minutes` is 25, and this has to END before it does,
  * or the run reports nothing**: a job the runner cancels says "cancelled" and
@@ -229,7 +248,7 @@ export const GAME_PART_MS = 85_000;
 /**
  * What bounds the required gate's STEP — #1128's review. `rules.yml` runs
  * `test:browser` under `timeout --verbose --kill-after=10s` this many seconds,
- * with the step's own `timeout-minutes: 13` behind it, and
+ * with the step's own `timeout-minutes: 14` (13 until #651) behind it, and
  * `nightly-split.test.ts` holds the workflow to both.
  *
  * ⚠️ **Why it exists.** Run 37254251351 attempt 3 (an EPYC 9V45) started the
@@ -258,8 +277,56 @@ export const GAME_PART_MS = 85_000;
  * 815 s, 50 s MORE than this: so a `chromium` run that uses all of its 720 s
  * leaves the game run 35 s, and this stop, not the game's, is the one that
  * names it.
+ *
+ * ⚠️ **It is 825 s since #651, the job's stop is 30 minutes, and a reviewer
+ * who remembers 765 s inside 25 is reading the old file.** By 2026-10-12 a
+ * green job on the 7763 took 1 459–1 498 s and five were cancelled at the
+ * 25-minute stop with no test red (`docs/agents/ci.md` §"Thirty minutes —
+ * #651"). The step then started as late as 841 s in (run 38196648879 attempt
+ * 3; #1280 corrected "four" and "835 s … attempt 1"), and the slowest step that finished took 679 s (run 38183688472) — one
+ * the job's stop cut short had run 694 s (run 38055121023). 825 s is 1.19
+ * times that 694 s, and it now HOLDS both Playwright stops and the builds
+ * (720 + 85 + 14 = 819 s: the 14 s is the builds, the web servers and the
+ * gap between the runs, 10 s until #1280 corrected it), so a `chromium` run
+ * that uses all of its 720 s still leaves the game run its 85 s, and each
+ * stop names its own run. 841 + 825 + 10 (the kill) was 1 676 s; the step's
+ * `timeout-minutes: 14` (840 s) ended it by 1 681 s, and with the 4 s of
+ * coverage steps that was 1 685 s, 115 s inside the job's 1 800.
+ *
+ * ⚠️ **Since #1280 the step starts 674–699 s in on the 7763**, because the
+ * Vitest step before it takes no coverage (the report is nightly): 699 + 840
+ * + 4 s is 1 543 s, 257 s inside the job's 1 800. `nightly-split.test.ts`
+ * holds all three — the two stops inside this, the step's stop at least three
+ * minutes inside the job's, and the job's stop at least five clear of the
+ * slowest job — from the measurements in `docs/agents/ci.md` §"Coverage out
+ * of the required job — #1280", which it reads rather than repeats.
+ *
+ * ⚠️ **Since #1285 the gate is a job of its own — the `browser` shard of
+ * `Repository rules` — and every "into the job" above is the one job's
+ * history.** The step starts 35–48 s into its job, not 700: before it are
+ * the checkout, the install and the browser install, which has a ten-minute
+ * stop of its own. The job's stop is 25 minutes, so 48 + 840 + 4 s is 892 s,
+ * 608 s inside 1 500, and with the install at its stop 20 + 600 + 840 + 4 is
+ * 1 464 s, still inside. **No stop here moved**: on the EPYC 7763 in a shard
+ * the step took 663, 685 and 714 s (825 is 1.16 times the slowest), the
+ * `chromium` run 583, 604 and 632 s ({@link CHROMIUM_PART_MS} is 1.14 times)
+ * and the `game` run 66 to 68 s (run 38262894650 attempts 5 and 2, and
+ * 38270763442).
+ * `nightly-split.test.ts` holds the two sums above, and each shard's stop at
+ * least five minutes clear of its slowest run, from the table in
+ * `docs/agents/ci.md` §"Shards — #1285".
+ *
+ * ⚠️ **Since #1362 the gate is TWO shards, and every stop here is now each
+ * shard's.** The `chromium` run took 690 to 708 s of {@link CHROMIUM_PART_MS}
+ * on the EPYC 7763 (five of the last ten green `main` runs before #1362), and
+ * run 38656925947 reached it with one case not run. So `test:browser:shard-1`
+ * and `test:browser:shard-2` each run half the `chromium` project (Playwright's
+ * `--shard`) under the same stop, workers and wrapper, and the second runs
+ * the `game` run after its half. `test:browser` is still the whole gate in one
+ * command, locally; `nightly-split.test.ts` holds that the shards are exactly
+ * it. The figures are `docs/agents/ci.md` §"Two browser shards — #1362".
  */
-export const GATE_STEP_MS = 765_000;
+export const GATE_STEP_MS = 825_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
 export const CHROMIUM_WORKERS = 3;
 
@@ -300,7 +367,9 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 15_000 },
   retries: 0,
-  reporter: [['list']],
+  // `not-run-reporter.ts` names each test a run did not reach and fails the
+  // run for it (#1675): Playwright's own summary only counts them.
+  reporter: [['list'], ['./browser/not-run-reporter.ts']],
   // Everything this gate generates lands under the harness build directory,
   // which `.gitignore` and `scripts/check-repo-rules.sh` both already handle by
   // its name. A failure artefact outside it would be a file the repository
@@ -334,6 +403,15 @@ export default defineConfig({
       // the harness.
       command: `pnpm exec vite preview --host ${HOST} --port ${String(PRODUCT_PORT)} --strictPort`,
       url: PRODUCT_ORIGIN,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      stdout: 'pipe',
+    },
+    {
+      // The demo (#1648): `vite.demo.config.ts` serves `demo/dist`, which
+      // `test:browser` builds first.
+      command: `pnpm exec vite preview --config vite.demo.config.ts --host ${HOST} --port ${String(DEMO_PORT)} --strictPort`,
+      url: DEMO_ORIGIN,
       reuseExistingServer: false,
       timeout: 60_000,
       stdout: 'pipe',
@@ -375,7 +453,7 @@ export default defineConfig({
   // whenever any other spec failed, which a gate must not do.
   //
   // Not a second browser and not a second job — one `playwright test`, one
-  // Chromium, the one `Repository rules` check (docs/agents/ci.md §4c).
+  // Chromium, one shard of the `Repository rules` check (docs/agents/ci.md §4c).
   //
   // ⚠️ **A third project since #866, `nightly`, and it is NOT part of the
   // gate.** Every test tagged `@nightly` (`browser/nightly.ts`, a reviewed

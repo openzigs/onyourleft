@@ -20,7 +20,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { PRIVACY_POLICY_PATH, PRIVACY_POLICY_URL } from './policy';
+import { ERASE_ACCOUNT_TEXT } from '../views/EraseAccount';
+import {
+  ACCOUNT_DELETION_PATH,
+  ACCOUNT_DELETION_URL,
+  PRIVACY_POLICY_PATH,
+  PRIVACY_POLICY_URL,
+} from './policy';
 
 /** The repository root, resolved from this file rather than from `cwd`. */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
@@ -79,9 +85,12 @@ describe('the published privacy policy', () => {
     const text = readFileSync(POLICY, 'utf8');
     expect(text).toContain('A second phone you pair as a side camera');
     // ⚠️ Three since #518, whose hosted question is the third; four since
-    // #777, whose instance sign-in is the fourth. Each count it made false is
-    // pinned gone as the one before it was.
+    // #777, whose instance sign-in is the fourth; five since #1539, whose
+    // realistic-world corridor is the fifth (#1104); and FOUR again since
+    // #1103, which removed #518's hosted transport from the device. Each count
+    // it made false is pinned gone as the one before it was.
     expect(text).toContain('exactly **four** network calls');
+    expect(text).not.toContain('exactly **five** network calls');
     expect(text).not.toContain('exactly **three** network calls');
     expect(text).not.toContain('exactly **two** network calls');
     expect(text).not.toContain('exactly **one** network call');
@@ -97,5 +106,41 @@ describe('the published privacy policy', () => {
     expect(text).toContain('contains a usage logger');
     expect(text).toContain('The app blocks it');
     expect(text).not.toContain('No third-party SDK of any kind is linked into the app');
+  });
+});
+
+describe('the web page for requesting account deletion — #906 item 4', () => {
+  const PAGE = join(ROOT, ACCOUNT_DELETION_PATH);
+  /** The page's text with its Markdown emphasis and line breaks taken out. */
+  const read = (): string => readFileSync(PAGE, 'utf8').replace(/[*_]/g, '').replace(/\s+/g, ' ');
+
+  it('is a document that exists at the path the URL is built from', () => {
+    expect(existsSync(PAGE), `${ACCOUNT_DELETION_PATH} is missing`).toBe(true);
+    expect(ACCOUNT_DELETION_URL.endsWith(`/${ACCOUNT_DELETION_PATH}`)).toBe(true);
+    expect(ACCOUNT_DELETION_URL.startsWith('https://')).toBe(true);
+  });
+
+  it('says what Google Play requires of it: the app, both ways to ask, and what is kept', () => {
+    const text = read();
+    // The app's name as it appears on the store listing, and its package.
+    expect(text).toContain('On Your Left');
+    expect(text).toContain('dev.openzigs.onyourleft');
+    // The in-app path, by the label the button carries, and its confirmation.
+    expect(text).toContain(ERASE_ACCOUNT_TEXT.erase);
+    expect(text).toContain(ERASE_ACCOUNT_TEXT.confirmErase);
+    // The private route: `data-safety.test.ts` holds it to the Data Safety answer's address.
+    expect(text).toContain('mailto:');
+    // An emailed request proves the account is the sender's with a recovery
+    // code, never a name, which is neither unique nor secret (owner, 2026-10-27).
+    expect(text).toContain('recovery codes you were shown');
+    expect(text).toContain('only when the code matches');
+    // What is deleted and what is kept, with the device's copy among the kept.
+    expect(text).toContain('What is deleted, and what is kept');
+    expect(text).toContain('moderation log');
+    expect(text).toContain('deletes nothing on your device');
+  });
+
+  it('is named by the privacy policy where it says how to delete', () => {
+    expect(readFileSync(POLICY, 'utf8')).toContain(ACCOUNT_DELETION_URL);
   });
 });

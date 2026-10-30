@@ -112,11 +112,16 @@ import type { Admit } from '../room/core/room.ts';
 import {
   InviteRefusedError,
   OwnershipConflictError,
+  type AccountChange,
   type DeviceKey,
+  isEstablished,
+  type KeyAddedVia,
+  type RecoveryStepUp,
   type SessionScope,
   type SqlStore,
   type Take,
 } from '../store/sql-store.ts';
+import { confirmationMailText, recoveryMailText, type RecoveryMailText } from './recovery-mail.ts';
 import {
   isPublicKey,
   isSignature,
@@ -147,6 +152,14 @@ export const EMAIL_RECOVERY_LIFETIME_SECONDS = 30 * 60;
 export const INVITE_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 /** The life of the link that confirms a recovery address (#865). */
 export const EMAIL_CONFIRMATION_LIFETIME_SECONDS = 24 * 60 * 60;
+/**
+ * How long a newly confirmed recovery address is HELD (#1194, ADR 0047 D-8):
+ * until then it recovers nothing, steps nothing up, and revoking the key that
+ * bound it clears it. Past it, the address is established.
+ */
+export const RECOVERY_ADDRESS_HOLD_SECONDS = 7 * 24 * 60 * 60;
+/** The most recovery addresses an account holds, held or established (#1194). */
+export const RECOVERY_ADDRESS_LIMIT = 2;
 /** How many recovery codes a new athlete is shown (ruling Q1). */
 export const RECOVERY_CODE_COUNT = 10;
 /** The name a new athlete has until they choose one — and what others see of a hidden one (#83). */
@@ -217,6 +230,29 @@ export interface IdentityLimits {
    * over any rider's use. Chosen.
    */
   readonly historySearchesPerAthlete: RateLimit;
+  /**
+   * Sealed requests per session (#1191, ADR 0047 D-9): counted on the
+   * session's token hash BEFORE any X25519, so a signed-in caller in a loop
+   * costs a hash and a lookup per request past it, never a Diffie–Hellman.
+   */
+  readonly sealedPerSession: RateLimit;
+  /**
+   * Sealed requests with no session (register, link, recover) per client
+   * address, before any X25519 (#1191, D-9). ⚠️ Per RIDER only through
+   * `client-address.ts`: behind `cloudflared` every request comes from one
+   * peer unless the operator sets `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` and
+   * trusts the proxy, and then this is one shared bucket — and an address the
+   * adapter did not know at all is the bucket `unknown`.
+   */
+  readonly sessionlessSealedPerAddress: RateLimit;
+  /**
+   * Notices of illegal content per client address (#907): the notice page
+   * takes them from anybody, with no account, so an address is the only
+   * thing to count. In memory, like every limit here, so no address is
+   * stored; the instance's own cap is counted from the store
+   * (`moderation.ts` §`NOTICES_PER_HOUR`).
+   */
+  readonly noticesPerAddress: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -231,21 +267,36 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   confirmationsPerAddress: { limit: 10, windowMs: 60 * 60_000 },
   firstLinksPerAddress: { limit: 3, windowMs: 60 * 60_000 },
   historySearchesPerAthlete: DEFAULT_HISTORY_SEARCHES,
+  // Chosen: a rider's app makes a few sealed calls a minute, and a write-up a
+  // dozen; 120 is far over that and still bounds a loop.
+  sealedPerSession: { limit: 120, windowMs: 60_000 },
+  // Chosen: registering, linking and recovering are a handful of requests a
+  // rider makes once; the inner routes' own limits apply after this one.
+  sessionlessSealedPerAddress: { limit: 30, windowMs: 60_000 },
+  // Chosen: one person reporting what they saw sends one or two; five an
+  // hour leaves room for a correction and bounds a script.
+  noticesPerAddress: { limit: 5, windowMs: 60 * 60_000 },
 };
 
 /**
- * How an emailed link reaches a rider. The instance has no mail transport of
+ * How a mailed code reaches a rider. The instance has no mail transport of
  * its own; an operator who enables email recovery supplies one.
+ *
+ * ⚠️ **A mailer sends `mail` as it is** (#1194, ADR 0047 D-8): the token is a
+ * code the rider TYPES into the app, and the mail holds no link of any kind —
+ * no URL on the instance's origin or any other, no custom scheme, no App
+ * Link. `docs/operating-an-instance.md` §"Email recovery" says why, and says
+ * not to route the mail through Cloudflare Email Routing.
  */
 export interface RecoveryMailer {
-  /** A recovery link: the token goes in `POST /v1/auth/recover`'s `emailToken`. */
-  send(address: string, token: string): Promise<void>;
+  /** A recovery code: the token goes in `POST /v1/auth/recover`'s `emailToken`. */
+  send(address: string, token: string, mail: RecoveryMailText): Promise<void>;
   /**
-   * The link that confirms `address` is the athlete's (#865): the token goes
-   * in `POST /v1/auth/recovery-email/confirm`, from the athlete's signed-in
-   * device. Until it does, the address recovers nothing.
+   * The code that confirms `address` (#865): the token goes in
+   * `POST /v1/auth/recovery-email/confirm`, from a device signed in as the
+   * athlete. Until it does, the address recovers nothing.
    */
-  confirm(address: string, token: string): Promise<void>;
+  confirm(address: string, token: string, mail: RecoveryMailText): Promise<void>;
 }
 
 export interface IdentityOptions {
@@ -254,7 +305,7 @@ export interface IdentityOptions {
   readonly origin: string;
   /** Unix milliseconds. */
   readonly now?: () => number;
-  /** How this instance takes new riders (#775). Unset is `closed` (`config.ts` §`DEFAULT_REGISTRATION`). */
+  /** How this instance takes new riders (#775). Unset is `approval` (`config.ts` §`DEFAULT_REGISTRATION`). */
   readonly registration?: RegistrationMode;
   /** Public-room eligibility's thresholds (#775). */
   readonly publicRooms?: PublicRoomThresholds;
@@ -323,6 +374,71 @@ export interface DeviceView {
   readonly thisDevice: boolean;
 }
 
+/**
+ * A recovery address as the device list shows it (#1194): what the one-off
+ * review asks the rider about, held or established.
+ */
+export interface RecoveryAddressView {
+  readonly address: string;
+  /** When it was confirmed; `null` for one bound before the hold existed. */
+  readonly confirmedAt: number | null;
+  /** When its hold ends, Unix seconds; `null` once it is established. */
+  readonly heldUntil: number | null;
+  /** The key that gave it; `null` for one bound before the hold existed. */
+  readonly boundByKey: string | null;
+}
+
+/** What `GET /v1/auth/devices` answers (#1194 adds the addresses). */
+export interface DevicesView {
+  readonly devices: readonly DeviceView[];
+  readonly recoveryAddresses: readonly RecoveryAddressView[];
+}
+
+/** The recovery options `recover` carries beside its secret (#1194, ADR 0047 D-8). */
+export interface RecoverOptions {
+  /** The full reset: new codes, every address cleared, everything mailed or minted voided. */
+  readonly reset?: unknown;
+  /** Revoke every other key, each as a plain revoke. */
+  readonly revokeOtherKeys?: unknown;
+}
+
+/** One account-change entry as a device is shown it (#1193). */
+export type AccountChangeView = Omit<AccountChange, 'athleteId'>;
+
+/** An entry as a device and the export show it: everything but the athlete, who is asking. */
+export function accountChangeView(entry: AccountChange): AccountChangeView {
+  return {
+    id: entry.id,
+    at: entry.at,
+    kind: entry.kind,
+    actorKey: entry.actorKey,
+    subjectKey: entry.subjectKey,
+    via: entry.via,
+    address: entry.address,
+  };
+}
+
+/**
+ * An entry as `GET /v1/auth/account-changes` answers it: the view, plus the
+ * day the SUBJECT key was added, so a notice can name a revoked key ("the key
+ * added on 1 August") from the entry alone (#1193, the owner's ruling of
+ * 2026-10-09). Read from `device_key` at read time — a revoked key's row is
+ * kept, so it is always there — and `null` for an entry with no subject.
+ */
+export interface AccountChangeRead extends AccountChangeView {
+  /** Unix seconds; `null` when the entry names no subject key. */
+  readonly subjectAddedAt: number | null;
+}
+
+/** The account-change log as one device reads it (#1193, ADR 0047 D-8). */
+export interface AccountChanges {
+  readonly changes: readonly AccountChangeRead[];
+  /** This device's mark: the highest entry id it has acknowledged, or 0. */
+  readonly acknowledgedThrough: number;
+  /** Entries after that mark made by a key other than this device's. */
+  readonly notices: readonly AccountChangeRead[];
+}
+
 /** What an athlete sees of their own account (#775). */
 export interface Account {
   readonly athleteId: string;
@@ -352,6 +468,11 @@ export interface Identity {
     publicKey: unknown,
     address: string | null,
   ): Promise<Outcome<{ nonce: string; expiresAt: number }>>;
+  /**
+   * Sign in, or register a key this instance has not seen. On an instance
+   * that holds keys the route is reached only sealed (#1192, #1210, ADR 0047
+   * D-7): the handler refuses a plaintext request before this is called.
+   */
   signIn(
     statement: unknown,
     registration: RegistrationFields,
@@ -391,19 +512,65 @@ export interface Identity {
   ticket(caller: Caller, roomId: string, declaredMass: unknown): Promise<Outcome<MintedTicket>>;
   /** The room core's admission for one room. */
   admitterFor(roomId: string): Admit;
-  devices(caller: Caller): Promise<readonly DeviceView[]>;
+  devices(caller: Caller): Promise<DevicesView>;
   revokeDevice(caller: Caller, publicKey: string, recoveryCode: unknown): Promise<Outcome<null>>;
   mintLinkCode(caller: Caller): Promise<Outcome<{ linkCode: string; expiresAt: number }>>;
   link(statement: unknown, linkCode: unknown): Promise<Outcome<{ athleteId: string }>>;
+  /**
+   * Add a key with a recovery code or a mailed token (#773), and — #1194 —
+   * the full reset and *revoke every other key* in the same transaction. The
+   * new codes, with the reset, are answered once.
+   */
   recover(
     statement: unknown,
     proof: { readonly recoveryCode?: unknown; readonly emailToken?: unknown },
-  ): Promise<Outcome<{ athleteId: string }>>;
+    options?: RecoverOptions,
+  ): Promise<Outcome<{ athleteId: string; recoveryCodes?: readonly string[] }>>;
   requestEmailRecovery(address: unknown, client: string | null): Promise<Outcome<null>>;
-  /** Give an address for recovery: mails a link to confirm it, and binds nothing (#865). */
+  /** Give an address for recovery: mails a code to confirm it, and binds nothing (#865). */
   setRecoveryEmail(caller: Caller, address: unknown): Promise<Outcome<null>>;
-  /** Follow that link, signed in as the athlete who gave the address (#865). */
+  /**
+   * Type that code, signed in as the athlete who gave the address (#865): the
+   * address is ADDED, held, beside whatever is bound (#1194, item 9's order).
+   */
   confirmRecoveryEmail(caller: Caller, token: unknown): Promise<Outcome<null>>;
+  /**
+   * Clear one of the caller's addresses (#1194): a held one only by the key
+   * that bound it, an established one only with a step-up — a recovery code,
+   * or a code mailed to THAT address.
+   */
+  clearRecoveryEmail(
+    caller: Caller,
+    request: {
+      readonly address?: unknown;
+      readonly recoveryCode?: unknown;
+      readonly emailToken?: unknown;
+    },
+  ): Promise<Outcome<null>>;
+  /**
+   * The full reset (#1194): with a step-up — a recovery code, or a code mailed
+   * to an established address — new codes, answered once, and every address,
+   * pending confirmation, mailed token and link code cleared or voided.
+   */
+  resetRecovery(
+    caller: Caller,
+    request: { readonly recoveryCode?: unknown; readonly emailToken?: unknown },
+  ): Promise<Outcome<{ recoveryCodes: readonly string[] }>>;
+  /**
+   * The caller's account-change log (#1193, ADR 0047 D-8): every entry, this
+   * device's mark, and the NOTICES — each entry made by a key other than the
+   * caller's since the caller's device last acknowledged.
+   */
+  accountChanges(caller: Caller): Promise<AccountChanges>;
+  /**
+   * Move the CALLER's device's mark to `through` (#1193): the session's key,
+   * never a key the request names, so no key can mark a notice seen for
+   * another device.
+   */
+  acknowledgeAccountChanges(
+    caller: Caller,
+    through: unknown,
+  ): Promise<Outcome<{ acknowledgedThrough: number }>>;
   /**
    * Forget every rate-limit key — an internet address, a public key, an email
    * address — whose window has ended (#892's review). The Node adapter runs it
@@ -422,6 +589,17 @@ export interface Identity {
    * `rate_limited` and embeds nothing.
    */
   allowHistorySearch(caller: Caller): boolean;
+  /**
+   * Count one sealed request against the caller's session (#1191). `false`
+   * when over {@link IdentityLimits.sealedPerSession}: `rate_limited`, before
+   * any X25519.
+   */
+  allowSealedRequest(caller: Caller): boolean;
+  /**
+   * Count one sealed request with no session against the client's address
+   * (#1191). `false` when over {@link IdentityLimits.sessionlessSealedPerAddress}.
+   */
+  allowSessionlessSealedRequest(address: string | null): boolean;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -451,15 +629,47 @@ function normalisedCode(value: string): string {
  */
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
-function readableCode(): string {
+/**
+ * The length of a MAILED code — a recovery code from `/recover/email` and a
+ * confirmation code from `/recovery-email` — which a rider types from the
+ * mail into the app (#1194, the owner's ruling of 2026-10-09: it replaced 43
+ * base64url characters). Twelve from {@link CODE_ALPHABET}:
+ * 12 × log2(31) = 12 × 4.954 = 59.4 bits, about 7.9 × 10^17 codes.
+ *
+ * Why that is enough for these two and not for the recovery codes (79 bits):
+ * a mailed code is single use and lives 30 minutes (recovery) or 24 hours
+ * (confirmation), and every guess is rate-limited. A recovery guess needs a
+ * fresh signed challenge, at most 60 a minute per client address
+ * (`challengePerAddress`): 1 800 guesses in a code's 30 minutes, so a million
+ * addresses guessing at once land 1.8 × 10^9 guesses, a 2.3 × 10^-9 chance per
+ * live code. A confirmation guess is scoped to the athlete who asked and
+ * goes through their sealed session, at most 120 a minute
+ * (`sealedPerSession`): 172 800 in a code's 24 hours, 2.2 × 10^-13. A
+ * recovery code lives for ever, which is why it keeps sixteen.
+ */
+const MAILED_CODE_LENGTH = 12;
+
+function readableCode(length = 16): string {
   const ceiling = 256 - (256 % CODE_ALPHABET.length);
   let code = '';
-  while (code.length < 16) {
-    for (const byte of crypto.getRandomValues(new Uint8Array(16))) {
-      if (byte < ceiling && code.length < 16) code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+  while (code.length < length) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(length))) {
+      if (byte < ceiling && code.length < length) {
+        code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+      }
     }
   }
   return code.match(/.{4}/g)?.join('-') ?? code;
+}
+
+/**
+ * A code to mail, and the SHA-256 the store keeps of it — of the code as
+ * {@link normalisedCode} reads it, so a rider may type it in either case,
+ * with or without its hyphens or spaces, as they may a recovery code.
+ */
+async function mailedCode(): Promise<{ code: string; sha256: string }> {
+  const code = readableCode(MAILED_CODE_LENGTH);
+  return { code, sha256: await sha256Hex(normalisedCode(code)) };
 }
 
 function takeRefusal(outcome: Take<object>['outcome'], prefix: 'challenge' | 'code'): ErrorCode {
@@ -470,10 +680,70 @@ function takeRefusal(outcome: Take<object>['outcome'], prefix: 'challenge' | 'co
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
 
+/** A recovery code once {@link normalisedCode} has read it: sixteen of {@link CODE_ALPHABET}. */
+const RECOVERY_CODE = new RegExp(`^[${CODE_ALPHABET}]{16}$`);
+
+/**
+ * The SHA-256 the store keeps of a recovery code as a rider typed it — in
+ * either case, with or without its hyphens or spaces — or `undefined` when
+ * what was typed is not the shape of one (#1802: the operator's
+ * `account-erase`, which is handed a code from an email).
+ */
+export async function recoveryCodeSha256(typed: string): Promise<string | undefined> {
+  const code = normalisedCode(typed);
+  return RECOVERY_CODE.test(code) ? sha256Hex(code) : undefined;
+}
+
+/** Fresh recovery codes, and the SHA-256s the store keeps of them. */
+async function freshRecoveryCodes(): Promise<{ codes: string[]; sha256s: string[] }> {
+  const codes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);
+  return {
+    codes,
+    sha256s: await Promise.all(codes.map((code) => sha256Hex(normalisedCode(code)))),
+  };
+}
+
+/**
+ * A step-up's proof, read: one of a recovery code or a mailed token, never
+ * both and never neither — `step_up_required` when neither was sent.
+ */
+async function stepUpOf(request: {
+  readonly recoveryCode?: unknown;
+  readonly emailToken?: unknown;
+}): Promise<Outcome<RecoveryStepUp>> {
+  const { recoveryCode, emailToken } = request;
+  if (recoveryCode !== undefined && emailToken !== undefined) {
+    return invalid('emailToken', 'must not be sent with a recoveryCode: send one of the two');
+  }
+  if (recoveryCode !== undefined) {
+    if (typeof recoveryCode !== 'string') return invalid('recoveryCode', 'must be a string');
+    return {
+      ok: true,
+      value: { kind: 'code', codeSha256: await sha256Hex(normalisedCode(recoveryCode)) },
+    };
+  }
+  if (emailToken !== undefined) {
+    if (typeof emailToken !== 'string') return invalid('emailToken', 'must be a string');
+    return {
+      ok: true,
+      value: { kind: 'token', tokenSha256: await sha256Hex(normalisedCode(emailToken)) },
+    };
+  }
+  return refuse('step_up_required');
+}
+
+/** A boolean option, absent meaning `false`. */
+function flag(value: unknown, field: string): Outcome<boolean> {
+  if (value === undefined) return { ok: true, value: false };
+  return typeof value === 'boolean' ? { ok: true, value } : invalid(field, 'must be true or false');
+}
+
 export function createIdentity(options: IdentityOptions): Identity {
   const { store, origin } = options;
   const now = options.now ?? (() => Date.now());
   const seconds = (): number => Math.floor(now() / 1000);
+  /** Now less the hold: an address confirmed after this is still held (#1194). */
+  const heldSince = (): number => seconds() - RECOVERY_ADDRESS_HOLD_SECONDS;
   const limits = options.limits ?? DEFAULT_LIMITS;
   const registration = options.registration ?? DEFAULT_REGISTRATION;
   const publicRooms = options.publicRooms ?? DEFAULT_PUBLIC_ROOM_THRESHOLDS;
@@ -494,12 +764,19 @@ export function createIdentity(options: IdentityOptions): Identity {
   const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
   const firstLinksPerAddress = createRateLimiter(limits.firstLinksPerAddress, now);
   const historySearches = createRateLimiter(limits.historySearchesPerAthlete, now);
+  const sealedPerSession = createRateLimiter(limits.sealedPerSession, now);
+  const sessionlessSealed = createRateLimiter(limits.sessionlessSealedPerAddress, now);
+  const noticesPerAddress = createRateLimiter(limits.noticesPerAddress, now);
   const tickets = createTicketBook(now, () => randomToken(32));
   const moderation = createModeration({
     store,
     now,
     ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
     ...(options.moderationLimits === undefined ? {} : { limits: options.moderationLimits }),
+    // An address the adapter could not give shares one bucket, as a
+    // registration's does: failing closed.
+    allowNoticeFrom: (address) =>
+      noticesPerAddress.allow(address === null ? 'unknown' : addressKey(address)),
   });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -556,9 +833,16 @@ export function createIdentity(options: IdentityOptions): Identity {
   async function addKey(
     athleteId: string,
     publicKey: string,
+    via: KeyAddedVia,
+    actorKey: string,
   ): Promise<Outcome<{ athleteId: string }>> {
     try {
-      await store.putDeviceKey({ publicKey, athleteId, addedAt: seconds(), revokedAt: null });
+      // Logged in the store's own transaction, so a key is never added
+      // without the entry every other device is shown (#1193).
+      await store.putDeviceKey(
+        { publicKey, athleteId, addedAt: seconds(), revokedAt: null },
+        { via, actorKey },
+      );
     } catch (error) {
       // The store checks ownership in its own transaction, so a key linked
       // twice at once is refused there; it is the same refusal, not a 500.
@@ -639,10 +923,10 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (pairCount !== 1 || !established) return undefined;
       if (!firstLinksPerAddress.allow(address)) return undefined;
     }
-    const token = randomToken(32);
+    const mailed = await mailedCode();
     return {
-      token,
-      tokenSha256: await sha256Hex(token),
+      token: mailed.code,
+      tokenSha256: mailed.sha256,
       address,
       expiresAt: seconds() + EMAIL_CONFIRMATION_LIFETIME_SECONDS,
     };
@@ -730,7 +1014,13 @@ export function createIdentity(options: IdentityOptions): Identity {
       // The athlete exists and their recovery codes are about to be shown for
       // the only time: a mail transport that fails must not turn that into an
       // error. They can give the address again from a signed-in device.
-      await mailer.confirm(confirmation.address, confirmation.token).catch(() => undefined);
+      await mailer
+        .confirm(
+          confirmation.address,
+          confirmation.token,
+          confirmationMailText(confirmation.token, at),
+        )
+        .catch(() => undefined);
     }
     return {
       ok: true,
@@ -758,6 +1048,9 @@ export function createIdentity(options: IdentityOptions): Identity {
     confirmationsPerAddress,
     firstLinksPerAddress,
     historySearches,
+    sealedPerSession,
+    sessionlessSealed,
+    noticesPerAddress,
   ];
 
   return {
@@ -774,6 +1067,9 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.confirmationsPerAddress,
       limits.firstLinksPerAddress,
       limits.historySearchesPerAthlete,
+      limits.sealedPerSession,
+      limits.sessionlessSealedPerAddress,
+      limits.noticesPerAddress,
     ]),
 
     sweepRateLimits() {
@@ -786,6 +1082,14 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     allowHistorySearch(caller) {
       return historySearches.allow(caller.athleteId);
+    },
+
+    allowSealedRequest(caller) {
+      return sealedPerSession.allow(caller.tokenSha256);
+    },
+
+    allowSessionlessSealedRequest(address) {
+      return sessionlessSealed.allow(address === null ? 'unknown' : addressKey(address));
     },
 
     async challenge(publicKey, address) {
@@ -1017,12 +1321,32 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (room.visibility === 'public') {
         const held = await account(caller.athleteId);
         if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');
+        // #788: never two riders with a block between them, either way round,
+        // in one public room — a block made since they joined it included.
+        if (await store.hasBlockWithRoomMember(roomId, caller.athleteId))
+          return refuse('not_found');
       }
+      // #789: a rider the room's host or a moderator removed is not let back
+      // in — told what a room that does not exist tells them.
+      if (await store.isRemovedFromRoom(roomId, caller.athleteId)) return refuse('not_found');
+      // #1347: a race names its riders to each other, by the ONE public
+      // projection (#774) — a name a moderator hid is `Rider` already.
+      const athlete = await store.getAthlete(caller.athleteId);
+      if (athlete === undefined) return refuse('not_found');
       return {
         ok: true,
         value: tickets.mint(roomId, {
           athleteId: caller.athleteId,
           declaredMassKilograms: declaredMass,
+          displayName: publicAthlete(athlete).displayName,
+          // #789: a race names neither of two riders with a block between
+          // them, either way round, to the other.
+          blocks: [
+            ...new Set([
+              ...(await store.listBlocks(caller.athleteId)).map((each) => each.blockedAthleteId),
+              ...(await store.listBlockedBy(caller.athleteId)),
+            ]),
+          ],
         }),
       };
     },
@@ -1030,13 +1354,25 @@ export function createIdentity(options: IdentityOptions): Identity {
     admitterFor: (roomId) => tickets.admitterFor(roomId),
 
     async devices(caller) {
-      return (await store.listDeviceKeys(caller.athleteId)).map((key) => ({
-        publicKey: key.publicKey,
-        addedAt: key.addedAt,
-        lastUsedAt: key.lastUsedAt,
-        revokedAt: key.revokedAt,
-        thisDevice: key.publicKey === caller.deviceKey,
-      }));
+      const since = heldSince();
+      return {
+        devices: (await store.listDeviceKeys(caller.athleteId)).map((key) => ({
+          publicKey: key.publicKey,
+          addedAt: key.addedAt,
+          lastUsedAt: key.lastUsedAt,
+          revokedAt: key.revokedAt,
+          thisDevice: key.publicKey === caller.deviceKey,
+        })),
+        recoveryAddresses: (await store.listRecoveryEmails(caller.athleteId)).map((row) => ({
+          address: row.address,
+          confirmedAt: row.confirmedAt,
+          heldUntil:
+            row.confirmedAt === null || isEstablished(row, since)
+              ? null
+              : row.confirmedAt + RECOVERY_ADDRESS_HOLD_SECONDS,
+          boundByKey: row.boundByKey,
+        })),
+      };
     },
 
     async revokeDevice(caller, publicKey, recoveryCode) {
@@ -1047,19 +1383,33 @@ export function createIdentity(options: IdentityOptions): Identity {
       // two keys at once each see two, and leave the athlete with none.
       const proof =
         typeof recoveryCode === 'string' ? await sha256Hex(normalisedCode(recoveryCode)) : null;
-      const outcome = await store.revokeDeviceKey(caller.athleteId, publicKey, seconds(), proof);
+      // Undoes what that key did and nothing else (#1193, ADR 0047 D-8): the
+      // store voids the codes it minted and its pending confirmation, logs the
+      // revoke by the CALLER's key, and never replaces the recovery codes.
+      const outcome = await store.revokeDeviceKey(
+        caller.athleteId,
+        publicKey,
+        seconds(),
+        proof,
+        caller.deviceKey,
+        heldSince(),
+      );
       return outcome === 'revoked' ? { ok: true, value: null } : refuse(outcome);
     },
 
     async mintLinkCode(caller) {
       const linkCode = readableCode();
-      const expiresAt = seconds() + LINK_CODE_LIFETIME_SECONDS;
-      await store.putLinkCode({
-        codeSha256: await sha256Hex(normalisedCode(linkCode)),
-        athleteId: caller.athleteId,
-        mintedByKey: caller.deviceKey,
-        expiresAt,
-      });
+      const at = seconds();
+      const expiresAt = at + LINK_CODE_LIFETIME_SECONDS;
+      await store.putLinkCode(
+        {
+          codeSha256: await sha256Hex(normalisedCode(linkCode)),
+          athleteId: caller.athleteId,
+          mintedByKey: caller.deviceKey,
+          expiresAt,
+        },
+        at,
+      );
       return { ok: true, value: { linkCode, expiresAt } };
     },
 
@@ -1070,24 +1420,48 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (await keyInUse(proof.value)) return refuse('key_in_use');
       const taken = await store.takeLinkCode(await sha256Hex(normalisedCode(linkCode)), seconds());
       if (taken.outcome !== 'taken') return refuse(takeRefusal(taken.outcome, 'code'));
-      return addKey(taken.athleteId, proof.value);
+      // Named by the key that MINTED the code: that is the key that allowed it.
+      return addKey(taken.athleteId, proof.value, 'link_code', taken.mintedByKey);
     },
 
-    async recover(statement, proof) {
+    async recover(statement, proof, options = {}) {
       const byEmail = proof.emailToken !== undefined;
       if (byEmail && mailer === undefined) return refuse('not_found');
       const secret = byEmail ? proof.emailToken : proof.recoveryCode;
       if (typeof secret !== 'string') {
         return invalid(byEmail ? 'emailToken' : 'recoveryCode', 'must be a string');
       }
+      const reset = flag(options.reset, 'reset');
+      if (!reset.ok) return reset;
+      const revokeOtherKeys = flag(options.revokeOtherKeys, 'revokeOtherKeys');
+      if (!revokeOtherKeys.ok) return revokeOtherKeys;
       const key = await proven(statement, RECOVER_PURPOSE);
       if (!key.ok) return key;
       if (await keyInUse(key.value)) return refuse('key_in_use');
-      const taken = byEmail
-        ? await store.takeEmailRecoveryToken(await sha256Hex(secret), seconds())
-        : await store.takeRecoveryCode(await sha256Hex(normalisedCode(secret)), seconds());
+      const fresh = reset.value ? await freshRecoveryCodes() : undefined;
+      // One transaction (#1194): the secret spent — a mailed token re-checked
+      // against its address — the key added, and the options applied, so a
+      // rider recovering from a thief leaves the thief no key to race with.
+      const taken = await store.recoverAccount({
+        publicKey: key.value,
+        at: seconds(),
+        heldSince: heldSince(),
+        proof: byEmail
+          ? { kind: 'token', tokenSha256: await sha256Hex(normalisedCode(secret)) }
+          : { kind: 'code', codeSha256: await sha256Hex(normalisedCode(secret)) },
+        revokeOtherKeys: revokeOtherKeys.value,
+        ...(fresh === undefined ? {} : { resetCodeSha256s: fresh.sha256s }),
+      });
+      if (taken.outcome === 'key_in_use') return refuse('key_in_use');
+      if (taken.outcome === 'unbound') return refuse('address_unbound');
       if (taken.outcome !== 'taken') return refuse(takeRefusal(taken.outcome, 'code'));
-      return addKey(taken.athleteId, key.value);
+      return {
+        ok: true,
+        value: {
+          athleteId: taken.athleteId,
+          ...(fresh === undefined ? {} : { recoveryCodes: fresh.codes }),
+        },
+      };
     },
 
     async requestEmailRecovery(address, client) {
@@ -1100,16 +1474,18 @@ export function createIdentity(options: IdentityOptions): Identity {
         return refuse('rate_limited');
       }
       // The same answer whether or not the address is known, so it cannot be
-      // used to find out who rides here.
+      // used to find out who rides here. Only an ESTABLISHED address is
+      // mailed (#1194): one inside its hold recovers nothing.
       const held = await store.findRecoveryEmail(normalised);
-      if (held !== undefined) {
-        const token = randomToken(32);
+      if (held !== undefined && isEstablished(held, heldSince())) {
+        const { code: token, sha256 } = await mailedCode();
         await store.putEmailRecoveryToken({
-          tokenSha256: await sha256Hex(token),
+          tokenSha256: sha256,
           athleteId: held.athleteId,
           expiresAt: seconds() + EMAIL_RECOVERY_LIFETIME_SECONDS,
+          address: held.address,
         });
-        await mailer.send(held.address, token);
+        await mailer.send(held.address, token, recoveryMailText(token));
       }
       return { ok: true, value: null };
     },
@@ -1134,13 +1510,23 @@ export function createIdentity(options: IdentityOptions): Identity {
         // that nobody was sent — nor replaces the athlete's earlier one.
         // Registration swallows the same failure instead, because there the
         // athlete's recovery codes are about to be shown for the only time.
+        // Named by the day the asking key was added (review L2), so a rider
+        // with two mails at one address types their own device's code.
+        const askedBy =
+          (await store.listDeviceKeys(caller.athleteId)).find(
+            (key) => key.publicKey === caller.deviceKey,
+          )?.addedAt ?? seconds();
         try {
-          await mailer.confirm(confirmation.address, confirmation.token);
+          await mailer.confirm(
+            confirmation.address,
+            confirmation.token,
+            confirmationMailText(confirmation.token, askedBy),
+          );
         } catch {
           return refuse('internal');
         }
-        // Replaces this athlete's earlier unconfirmed link, if any, so the
-        // table holds at most one pending confirmation an athlete (#883).
+        // Replaces THIS KEY's earlier unconfirmed code, if any, so the table
+        // holds at most one pending confirmation a key (#883, #1194).
         // ⚠️ The other direction is NOT covered: if this write fails after
         // the mail went, the address holds a link the store never kept —
         // following it answers `code_unknown`, binds nothing, and this route
@@ -1151,6 +1537,7 @@ export function createIdentity(options: IdentityOptions): Identity {
           athleteId: caller.athleteId,
           address: confirmation.address,
           expiresAt: confirmation.expiresAt,
+          requestedByKey: caller.deviceKey,
         });
       }
       return { ok: true, value: null };
@@ -1165,14 +1552,94 @@ export function createIdentity(options: IdentityOptions): Identity {
       // store scopes the token to the caller, so theirs is `code_unknown`.
       const taken = await store.confirmRecoveryEmail(
         caller.athleteId,
-        await sha256Hex(token),
+        await sha256Hex(normalisedCode(token)),
         seconds(),
+        caller.deviceKey,
+        RECOVERY_ADDRESS_LIMIT,
       );
+      // `added: false` — the address was already this athlete's — is the same
+      // success: no new hold, no new binder (review J2).
       if (taken.outcome === 'taken') return { ok: true, value: null };
       // Only the reader of the mailbox holds the token, so telling them the
       // address is another account's tells nobody else anything.
       if (taken.outcome === 'held') return refuse('address_in_use');
+      if (taken.outcome === 'superseded') return refuse('confirmation_superseded');
+      if (taken.outcome === 'limit') return refuse('address_limit');
       return refuse(takeRefusal(taken.outcome, 'code'));
+    },
+
+    async clearRecoveryEmail(caller, request) {
+      const given = addressOf(request.address, 'address');
+      if (!given.ok) return given;
+      // No step-up sent is a `null` proof here, not a refusal: a held address
+      // is cleared by its binder with none.
+      const sent = request.recoveryCode !== undefined || request.emailToken !== undefined;
+      const proof = sent ? await stepUpOf(request) : undefined;
+      if (proof !== undefined && !proof.ok) return proof;
+      if (proof?.ok === true && proof.value.kind === 'token' && mailer === undefined) {
+        return refuse('not_found');
+      }
+      const outcome = await store.clearRecoveryEmail({
+        athleteId: caller.athleteId,
+        address: given.value,
+        at: seconds(),
+        actorKey: caller.deviceKey,
+        heldSince: heldSince(),
+        proof: proof?.ok === true ? proof.value : null,
+      });
+      return outcome === 'cleared' ? { ok: true, value: null } : refuse(outcome);
+    },
+
+    async resetRecovery(caller, request) {
+      const proof = await stepUpOf(request);
+      if (!proof.ok) return proof;
+      if (proof.value.kind === 'token' && mailer === undefined) return refuse('not_found');
+      const fresh = await freshRecoveryCodes();
+      const outcome = await store.resetRecovery({
+        athleteId: caller.athleteId,
+        at: seconds(),
+        actorKey: caller.deviceKey,
+        heldSince: heldSince(),
+        proof: proof.value,
+        newCodeSha256s: fresh.sha256s,
+      });
+      return outcome === 'reset'
+        ? { ok: true, value: { recoveryCodes: fresh.codes } }
+        : refuse(outcome);
+    },
+
+    async accountChanges(caller) {
+      const added = new Map(
+        (await store.listDeviceKeys(caller.athleteId)).map((key) => [key.publicKey, key.addedAt]),
+      );
+      const changes = (await store.listAccountChanges(caller.athleteId)).map(
+        (entry): AccountChangeRead => ({
+          ...accountChangeView(entry),
+          subjectAddedAt: entry.subjectKey === null ? null : (added.get(entry.subjectKey) ?? null),
+        }),
+      );
+      const mark =
+        (await store.listAccountChangeMarks(caller.athleteId)).find(
+          (each) => each.deviceKey === caller.deviceKey,
+        )?.acknowledgedThrough ?? 0;
+      return {
+        changes,
+        acknowledgedThrough: mark,
+        notices: changes.filter((entry) => entry.id > mark && entry.actorKey !== caller.deviceKey),
+      };
+    },
+
+    async acknowledgeAccountChanges(caller, through) {
+      if (typeof through !== 'number' || !Number.isSafeInteger(through) || through < 0) {
+        return invalid('through', 'must be a whole number, 0 or more');
+      }
+      const acknowledgedThrough = await store.acknowledgeAccountChanges(
+        caller.athleteId,
+        caller.deviceKey,
+        through,
+        seconds(),
+      );
+      return { ok: true, value: { acknowledgedThrough } };
     },
   };
 }

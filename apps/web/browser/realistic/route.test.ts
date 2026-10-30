@@ -15,13 +15,32 @@ import { createHash } from 'node:crypto';
 import { headingOnRoute } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
+import { INITIAL_QUALITY, worldRung } from '../../src/game/quality';
 import { scatterSeed } from '../../src/game/scatter';
 import { structuresAt } from '../../src/game/settlements';
+import { FURNITURE_KINDS, streetsAt } from '../../src/game/streets';
 import { corridorOrigin } from '../../src/game/terrain';
 import { waterways } from '../../src/game/waterways';
 import { auditWetGround } from '../../src/game/wet-ground-testing';
-import { SUN_AZIMUTH_DEGREES } from '../../src/game/world';
-import { realisticRoute, type Facing } from './route';
+import { mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
+import { natureOn } from '../../src/game/season';
+import {
+  routeHemisphere,
+  routeLatitudeMagnitude,
+  snowCoverIn,
+  SUN_AZIMUTH_DEGREES,
+  worldStyle,
+} from '../../src/game/world';
+import { rideFrame } from './frame';
+import {
+  placeLatitude,
+  realisticRoute,
+  routeDigest,
+  VILLAGE_HOLD_METRES,
+  villageRoute,
+  type Facing,
+} from '../../src/demo/synthetic-road';
+import { frameCensus } from './village';
 
 // #702: every Part Z step holds on the route as the page rides it by default,
 // and on the route turned towards the sun and away from it.
@@ -149,5 +168,161 @@ describe('which way the page looks, relative to the sun — #702', () => {
       expect(Math.abs(turned.totalDistance - unturned.totalDistance)).toBeLessThan(1e-6);
       expect(scatterSeed(turned)).toBe(scatterSeed(unturned));
     }
+  });
+});
+
+/** Every structure the whole of `profile` carries, by kind. */
+function structureCounts(profile: ReturnType<typeof realisticRoute>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of structuresAt(
+    profile,
+    corridorOrigin(profile),
+    scatterSeed(profile),
+    0,
+    profile.totalDistance,
+    { maxItems: 100_000, riderMetres: 0 },
+  )) {
+    counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** The owner's tablet, 16 : 10 in landscape — validation 0002 AE2's frame. */
+const TABLET_ASPECT = 16 / 10;
+
+describe('the village road — #1559, validation 0002 AE2', () => {
+  it('leaves the default road alone, and is another road', () => {
+    // The sha-256 above pins the default road; this pins the fingerprint the
+    // page publishes of it, which the browser gate reads back.
+    expect(routeDigest(realisticRoute())).toBe('815d189f');
+    // And the village road is pinned too: AE2's row is taken on it, and a
+    // change to it moves the village out of the frame the row names.
+    expect(routeDigest(villageRoute())).toBe('b7d4ea60');
+  });
+
+  it('passes through villages, with churches and shops, where the default road passes none', () => {
+    const village = structureCounts(villageRoute());
+    expect(village.get('church') ?? 0).toBeGreaterThanOrEqual(1);
+    expect(village.get('shop-row') ?? 0).toBeGreaterThanOrEqual(1);
+    expect(village.get('building') ?? 0).toBeGreaterThan(10);
+    // The control, and validation 0002's finding: the default road's
+    // settlements are farmsteads, with no church and no shops.
+    const valley = structureCounts(realisticRoute());
+    expect(valley.get('church') ?? 0).toBe(0);
+    expect(valley.get('shop-row') ?? 0).toBe(0);
+  });
+
+  it('lays #1535’s pavements through them, with every kind of #1536’s furniture', () => {
+    const profile = villageRoute();
+    const streets = streetsAt(
+      profile,
+      corridorOrigin(profile),
+      scatterSeed(profile),
+      0,
+      profile.totalDistance,
+    );
+    expect(streets.length).toBeGreaterThanOrEqual(1);
+    for (const street of streets) expect(street.pavement.indices.length).toBeGreaterThan(0);
+    const kinds = new Set(streets.flatMap((street) => street.furniture.map((item) => item.kind)));
+    for (const kind of FURNITURE_KINDS) expect(kinds, kind).toContain(kind);
+  });
+
+  // #702's facings turn the whole road about its first point, so the hold is
+  // the same frame turned; and the ladder's second rung keeps every building.
+  for (const facing of [undefined, 'sun', 'away'] as const) {
+    for (const level of [0, 1] as const) {
+      it(`holds the church and the shops in frame at ${String(VILLAGE_HOLD_METRES)} m${facing === undefined ? '' : ` facing ${facing}`}, realistic rung ${String(level)}`, () => {
+        const profile = villageRoute(facing);
+        const census = frameCensus(
+          rideFrame({
+            profile,
+            origin: corridorOrigin(profile),
+            distance: VILLAGE_HOLD_METRES,
+            elapsed: 0,
+            rung: worldRung({ realistic: true, quality: { ...INITIAL_QUALITY, level } }),
+          }),
+          TABLET_ASPECT,
+        );
+        expect(census.structures.church.inView).toBeGreaterThanOrEqual(1);
+        expect(census.structures['shop-row'].inView).toBeGreaterThanOrEqual(1);
+        expect(census.structures.building.inView).toBeGreaterThan(5);
+        expect(census.streets).toBeGreaterThanOrEqual(1);
+        expect(census.pavementTriangles).toBeGreaterThan(0);
+        for (const kind of FURNITURE_KINDS) {
+          expect(census.furniture[kind].inView, kind).toBeGreaterThan(0);
+        }
+      });
+    }
+  }
+
+  // The census's `inView` is the frustum's count, not the frame's: at 940 m
+  // the frame still carries the shop row but the camera has it out of view.
+  it('counts the shop row carried but not in view at 940 m', () => {
+    const profile = villageRoute();
+    const census = frameCensus(
+      rideFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        distance: 940,
+        elapsed: 0,
+        rung: worldRung({ realistic: true, quality: INITIAL_QUALITY }),
+      }),
+      TABLET_ASPECT,
+    );
+    // #1566: four, the commercial plots either side of the crossroads, on both sides.
+    expect(census.structures['shop-row']).toEqual({ carried: 4, inView: 0 });
+  });
+
+  it('is a hold the default road cannot give: no church or shop row in its frame there', () => {
+    const profile = realisticRoute();
+    const census = frameCensus(
+      rideFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        distance: VILLAGE_HOLD_METRES,
+        elapsed: 0,
+        rung: worldRung({ realistic: true, quality: INITIAL_QUALITY }),
+      }),
+      TABLET_ASPECT,
+    );
+    expect(census.structures.church.carried).toBe(0);
+    expect(census.structures['shop-row'].carried).toBe(0);
+    expect(census.streets).toBe(0);
+  });
+});
+
+describe('`?place=` — the page’s roads where their season shows — #1623', () => {
+  const on = (month: number, day: number) => ({ year: 2026, month, day });
+  const natureOf = (profile: ReturnType<typeof realisticRoute>, day: ReturnType<typeof on>) =>
+    natureOn(day, routeHemisphere(profile), routeLatitudeMagnitude(profile));
+
+  it('leaves every road where it was with no place', () => {
+    expect(routeDigest(realisticRoute(undefined, undefined))).toBe(routeDigest(realisticRoute()));
+    expect(placeLatitude(undefined)).toBe(51.5);
+  });
+
+  it('mirrors the road into the south, where 20 October is spring', () => {
+    const north = realisticRoute();
+    const south = realisticRoute(undefined, 'south');
+    expect(routeHemisphere(south)).toBe('south');
+    expect(routeLatitudeMagnitude(south)).toBeCloseTo(routeLatitudeMagnitude(north), 1);
+    expect(natureOf(north, on(10, 20)).autumn).toBeGreaterThan(0.8);
+    expect(natureOf(south, on(10, 20)).autumn).toBe(0);
+  });
+
+  it('rides `nordic` where a winter’s snow lies on the road’s own ground, and July’s does not', () => {
+    for (const profile of [
+      realisticRoute(undefined, 'nordic'),
+      villageRoute(undefined, 'nordic'),
+      mixedTownFixture(placeLatitude('nordic')).profile,
+    ]) {
+      const world = worldStyle(profile);
+      expect(routeHemisphere(profile)).toBe('north');
+      expect(snowCoverIn(world, natureOf(profile, on(1, 15)).winter)).toBe(1);
+      expect(snowCoverIn(world, natureOf(profile, on(7, 15)).winter)).toBe(0);
+    }
+    // And at 51.5° N, where every row was taken, a January lays none at sea level.
+    const town = mixedTownFixture().profile;
+    expect(snowCoverIn(worldStyle(town), natureOf(town, on(1, 15)).winter)).toBe(0);
   });
 });

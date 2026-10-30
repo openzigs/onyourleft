@@ -25,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SqlStore } from './sql-store.ts';
 import {
   activityRecordFixture,
+  analysisJobIdFixture,
   ATHLETES,
   SHARED_CONTENT_SHA256,
   syncItemFixtures,
@@ -32,6 +33,7 @@ import {
   HISTORY_FIXTURE_CONVENTION,
   HISTORY_FIXTURE_DIMENSION,
   HISTORY_FIXTURE_MODEL,
+  seedStatements,
   seedWorld,
   type StoreHarness,
 } from './testing/index.ts';
@@ -97,6 +99,17 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
       return found;
     },
   },
+  listLiveSyncItems: {
+    // Every kind the fixtures carry, asked as the caller (#1098's tool reads).
+    probe: async (store, athleteId) =>
+      (
+        await Promise.all(
+          syncItemFixtures(athleteId).map((item) =>
+            store.listLiveSyncItems(athleteId, item.kind, 1000),
+          ),
+        )
+      ).flat(),
+  },
   listActivityRecords: { probe: (store, athleteId) => store.listActivityRecords(athleteId) },
   // #835, ADR 0040 D-3 and OWASP LLM08:2025's partitioning: the history index.
   // Each passage is labelled with its source's key, which names its owner, so
@@ -132,12 +145,19 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listResults: { probe: (store, athleteId) => store.listResults(athleteId) },
   listRecoveryCodes: { probe: (store, athleteId) => store.listRecoveryCodes(athleteId) },
   listLinkCodes: { probe: (store, athleteId) => store.listLinkCodes(athleteId) },
+  // Migration 0018's (#1193): the log and the marks, seeded for all three.
+  listAccountChanges: {
+    probe: async (store, athleteId) =>
+      (await store.listAccountChanges(athleteId)).map((entry) => ({ athleteId: entry.athleteId })),
+  },
+  listAccountChangeMarks: { probe: (store, athleteId) => store.listAccountChangeMarks(athleteId) },
+  acknowledgeAccountChanges: {
+    notAScopedRead: 'a write; scoping is account-changes.test.ts’s',
+  },
   listDisplayNameChanges: {
     probe: (store, athleteId) => store.listDisplayNameChanges(athleteId),
   },
-  getRecoveryEmail: {
-    probe: async (store, athleteId) => one(await store.getRecoveryEmail(athleteId)),
-  },
+  listRecoveryEmails: { probe: (store, athleteId) => store.listRecoveryEmails(athleteId) },
   listEmailConfirmations: {
     probe: (store, athleteId) => store.listEmailConfirmations(athleteId),
   },
@@ -157,7 +177,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   listReports: {
     probe: async (store, athleteId) =>
-      (await store.listReports(athleteId)).map((report) => ({ athleteId: report.athleteId })),
+      (await store.listReports(athleteId)).map((report) => ({
+        athleteId: report.athleteId ?? 'nobody',
+      })),
   },
 
   findSession: {
@@ -169,6 +191,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   takeChallenge: { notAScopedRead: 'spends a nonce, issued before any athlete is named (#772)' },
   pruneChallenges: { notAScopedRead: 'a write over challenges, which belong to no athlete' },
   takeRecoveryCode: { notAScopedRead: 'recovery: the code is what names the athlete (#773)' },
+  findRecoveryCode: {
+    notAScopedRead: 'the operator’s account-erase: the code is what names the athlete (#1802)',
+  },
   hasRecoveryCode: {
     notAScopedRead:
       'a yes or no, keyed by the athlete: sql-store.identity.test.ts holds it to its own athlete (#898)',
@@ -179,6 +204,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'email recovery: the token is what names the athlete (#773)',
   },
   touchDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  recordSealedRequest: {
+    notAScopedRead: 'a write over sealed requests’ `enc`s, which name no athlete (#1191)',
+  },
   revokeDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   revokeSession: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   registerAthlete: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
@@ -188,6 +216,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putEmailRecoveryToken: { notAScopedRead: 'a write' },
   putEmailConfirmation: { notAScopedRead: 'a write' },
   confirmRecoveryEmail: { notAScopedRead: 'a write; scoping is sql-store.identity.test.ts’s' },
+  clearRecoveryEmail: {
+    notAScopedRead: 'a write; scoping is recovery-addresses.test.ts’s (three athletes)',
+  },
+  resetRecovery: {
+    notAScopedRead: 'a write; scoping is recovery-addresses.test.ts’s (three athletes)',
+  },
+  recoverAccount: {
+    notAScopedRead: 'recovery: the code or the token is what names the athlete (#773, #1194)',
+  },
   getRoom: { notAScopedRead: 'a room belongs to no athlete' },
   getRoomCourse: { notAScopedRead: 'a room’s course belongs to the room, not to an athlete' },
   listRoomResults: { notAScopedRead: 'a finish order is every rider’s, by design (ADR 0037)' },
@@ -218,6 +255,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listRaceableActivities: {
     notAScopedRead:
       'cross-athlete BY DESIGN (ADR 0039 D-2): other riders’ consented rides, never the requester’s own; sync/race-consent.test.ts holds the consent and the exclusion',
+  },
+  setActivityRaceRoute: {
+    notAScopedRead:
+      'a write; its scoping is sync/race-ghost.test.ts’s (another athlete’s record, offered as the caller)',
+  },
+  listRaceableOnRoute: {
+    notAScopedRead:
+      'cross-athlete BY DESIGN (ADR 0039 D-2, #331): other riders’ consented, offered rides on ONE route, never the requester’s own; sync/race-ghost.test.ts holds the consent, the route and the exclusion',
   },
   isContentHeld: {
     notAScopedRead:
@@ -257,11 +302,56 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   countOpenPrivateRoomsWithRoute: {
     notAScopedRead: 'blob collection: a count across rooms, never a row (#784)',
   },
+  listOpenPublicRooms: {
+    notAScopedRead:
+      'the public listing: every open PUBLIC room, by its course and start, naming nobody (#788); rooms/public-rooms.test.ts holds a private room out of it',
+  },
+  hasBlockWithRoomMember: {
+    notAScopedRead:
+      'a yes or no for ONE (room, athlete) pair, never a row; rooms/public-rooms.test.ts holds a block either way round',
+  },
   sight: {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },
   listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
-  listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
+  getReport: {
+    notAScopedRead:
+      'one report by id, for the moderator deciding it; reached only by `dismiss` (#899)',
+  },
+  putNotice: { notAScopedRead: 'a write, from anybody: a notice names no athlete column (#907)' },
+  countNoticesSince: {
+    notAScopedRead: 'a count across the instance, never a row: the notices’ cap (#907)',
+  },
+  listStatements: {
+    probe: async (store, athleteId) =>
+      (await store.listStatements(athleteId)).map((row) => ({ athleteId: row.targetAthleteId })),
+  },
+  putAppeal: {
+    notAScopedRead: 'a write; statements.test.ts holds another rider’s statement out of it',
+  },
+  listAppeals: {
+    probe: async (store, athleteId) =>
+      (await store.listAppeals(athleteId)).map((row) => ({ athleteId: row.appellantAthleteId })),
+  },
+  listEveryAppeal: { notAScopedRead: 'the moderators’ record of every appeal (#912)' },
+  listOpenAppeals: { notAScopedRead: 'the moderators’ queue: every open appeal (#911)' },
+  decideAppeal: { notAScopedRead: 'a moderator’s write; appeals.test.ts' },
+  putNoticeStep: { notAScopedRead: 'a moderator’s write about a notice; notice-steps.test.ts' },
+  listNoticeSteps: { notAScopedRead: 'the moderators’ record of every notice (#912)' },
+  hideItem: { notAScopedRead: 'a moderator’s write; items.test.ts' },
+  listHiddenItemsOfRoom: {
+    notAScopedRead:
+      'the hidden items of one room, by identifier, which every read of that room asks (#913)',
+  },
+  listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
+  isRemovedFromRoom: {
+    notAScopedRead:
+      'a yes or no about the CALLER’s own removal from a room, asked when they ask for a ticket (#789)',
+  },
+  listBlockedBy: {
+    notAScopedRead:
+      'who blocks this athlete, read only to keep names apart in a room the two share; answered to nobody (#789)',
+  },
   listModerationLogPage: {
     notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
   },
@@ -270,13 +360,111 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   putBlock: { notAScopedRead: 'a write' },
   deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
+  deleteBlockByHandle: {
+    notAScopedRead:
+      'a write; another athlete’s handle deleting nothing is sql-store.moderation.test.ts’s (#1529)',
+  },
   putReport: { notAScopedRead: 'a write' },
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
   logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
+  listLoadAthletes: {
+    notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',
+  },
   confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
   mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
+  // #1095: a job, and its events, asked for by EVERY athlete's job id as the caller.
+  getAnalysisJob: {
+    probe: async (store, athleteId) => {
+      const found: Owned[] = [];
+      for (const owner of ATHLETES) {
+        const job = await store.getAnalysisJob(athleteId, analysisJobIdFixture(owner));
+        if (job !== undefined) found.push(job);
+      }
+      return found;
+    },
+  },
+  listAnalysisEvents: {
+    probe: async (store, athleteId) =>
+      (
+        await Promise.all(
+          ATHLETES.map((owner) =>
+            store.listAnalysisEvents(athleteId, analysisJobIdFixture(owner), 0, 1000),
+          ),
+        )
+      ).flat(),
+  },
+  listAnalysisResults: {
+    probe: (store, athleteId) => store.listAnalysisResults(athleteId),
+  },
+  createAnalysisJob: {
+    notAScopedRead: 'a write; its one-job-per-athlete rule is analysis/jobs.test.ts’s',
+  },
+  claimAnalysisJob: {
+    notAScopedRead:
+      'the worker’s claim of the oldest queued job of ANY athlete; never served to a rider, and the job it answers is run as its own athlete’s (analysis/jobs.test.ts)',
+  },
+  appendAnalysisEvent: {
+    notAScopedRead: 'a write, to a running job of the named athlete only (analysis/jobs.test.ts)',
+  },
+  endAnalysisJob: {
+    notAScopedRead: 'a write; another athlete’s job is not ended (analysis/jobs.test.ts)',
+  },
+  acknowledgeAnalysisJob: {
+    notAScopedRead: 'a write; another athlete’s job is not_found (analysis/jobs.test.ts)',
+  },
+  interruptAnalysisJobs: {
+    notAScopedRead: 'the worker’s, at start: every athlete’s unended jobs, by design',
+  },
+  pruneAnalysisJobs: { notAScopedRead: 'retention: every athlete’s ended jobs, by design' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
+  putHostedModelKey: {
+    notAScopedRead:
+      'the operator’s write, for the operator’s athlete (sql-store.hosted-key.test.ts)',
+  },
+  getHostedModelKey: {
+    notAScopedRead:
+      'the instance’s ONE key, read by the instance and the operator command, never served to a rider; who may USE it is analysis/source.ts’s, held to its athlete (source.test.ts)',
+  },
+  clearHostedModelKey: { notAScopedRead: 'a write: the operator’s, not a rider’s' },
+  putAthleteHostedKey: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  getAthleteHostedKey: {
+    probe: async (store, athleteId) => one(await store.getAthleteHostedKey(athleteId)),
+  },
+  clearAthleteHostedKey: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  putHostedConsent: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  getHostedConsent: {
+    probe: async (store, athleteId) => one(await store.getHostedConsent(athleteId)),
+  },
+  clearHostedConsent: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  listInstanceKeys: {
+    notAScopedRead:
+      'the instance’s own keys (#1189), wrapped; read by the instance and the operator command, never served to a rider, and naming no athlete',
+  },
+  listInstanceKeyStatements: {
+    notAScopedRead:
+      'what the instance signed about its own keys (#1189): public, the same for every caller, naming no athlete',
+  },
+  putInstanceKey: { notAScopedRead: 'a write: the instance’s own key, naming no athlete' },
+  addEncryptionKey: { notAScopedRead: 'a write: the instance’s own key, naming no athlete' },
+  putInstanceKeyStatement: { notAScopedRead: 'a write: a public statement, naming no athlete' },
+  deleteInstanceKeys: { notAScopedRead: 'a write: the instance’s own keys' },
+  replaceIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
+  clearInstanceKeys: { notAScopedRead: 'a write: the operator’s reset' },
+  claimIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
+  takeInstanceKeyLease: {
+    notAScopedRead: 'a write: who may change the instance’s own keys, naming no athlete',
+  },
+  renewInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
+  releaseInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
   close: { notAScopedRead: 'not a read' },
 };
 
@@ -284,6 +472,7 @@ let harness: StoreHarness;
 beforeAll(async () => {
   harness = await createStoreHarness();
   await harness.write(seedWorld);
+  await harness.write(seedStatements);
 });
 afterAll(() => harness.destroy());
 

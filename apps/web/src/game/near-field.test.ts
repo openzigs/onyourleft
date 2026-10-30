@@ -47,6 +47,7 @@ import {
   clearOfTheCamera,
   intrudes,
   nearPyramid,
+  peopleClearOfTheCamera,
   sceneryReach,
   shapeMeets,
   triangleMeets,
@@ -56,6 +57,7 @@ import {
   type ShapeTriangles,
   type ShapesOf,
 } from './near-field';
+import type { Person } from './people';
 import {
   boundsOf,
   fittedRealistic,
@@ -63,7 +65,11 @@ import {
   modelTriangles,
   referenceShapeMeets,
 } from './near-field-testing';
-import { REALISTIC_VEGETATION } from './realistic-assets';
+import {
+  REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
+  REALISTIC_VEGETATION,
+} from './realistic-assets';
 import {
   circuitRoute,
   hairpinRoute,
@@ -159,12 +165,40 @@ describe('the bounds — every shape a kind is drawn as fits inside its reach', 
         }
       }
     }
+    // #1283: and the scanned broadleaves, which a ride no longer draws and the
+    // owner's page still can — the same reach holds them.
+    for (const model of REALISTIC_BROADLEAVES.scanned) {
+      const { triangles, extras } = modelTriangles(`${REALISTIC_MODELS}${model.file}`);
+      expectInside(
+        `scanned ${model.name}`,
+        sceneryReach('tree-broadleaf', 'realistic'),
+        boundsOf(fittedRealistic(triangles, extras, sceneryFitMetres('tree-broadleaf'))),
+        true,
+      );
+      checked += 1;
+    }
+    // #1294: and the scanned firs, for the same reason.
+    for (const model of REALISTIC_CONIFERS.scanned) {
+      const { triangles, extras } = modelTriangles(`${REALISTIC_MODELS}${model.file}`);
+      expectInside(
+        `scanned ${model.name}`,
+        sceneryReach('tree-conifer', 'realistic'),
+        boundsOf(fittedRealistic(triangles, extras, sceneryFitMetres('tree-conifer'))),
+        true,
+      );
+      checked += 1;
+    }
+    // What a ride draws as a conifer is the generated firs (#1294): the loop
+    // above held THEM to the conifer's reach, not the scans a second time.
+    expect(REALISTIC_VEGETATION['tree-conifer']).toBe(REALISTIC_CONIFERS.generated);
     // Every committed natural model, so a table that forgot one is a red count
-    // rather than a shape nobody checked.
+    // rather than a shape nobody checked: the stylised kit's, and the realistic
+    // world's four generated broadleaves, two generated firs, two shrubs and a
+    // rock, with the two scanned broadleaves and the two scanned firs.
     const stylisedFiles = readdirSync(STYLISED_MODELS).filter(
       (file) => file.endsWith('.glb') && !file.startsWith('building-'),
     ).length;
-    expect(checked).toBe(stylisedFiles + 7);
+    expect(checked).toBe(stylisedFiles + 13);
   });
 
   it('holds the stylised house, fitted and centred, as a box turned with the item', () => {
@@ -592,6 +626,52 @@ describe('clearOfTheCamera — what the renderer is handed', () => {
   it('drops a kind whose shape is not known on its box, the safe way round', () => {
     const post = item('post', 0, 1.5, NEAR_PLANE_METRES);
     expect(clearOfTheCamera([post], LEVEL, aspect, 'stylised', shapes)).toEqual([]);
+  });
+});
+
+describe('peopleClearOfTheCamera — the people the renderer is handed (#1835)', () => {
+  /** A person standing at `(x, z)`, on the road's plane under the {@link LEVEL} eye. */
+  const person = (x: number, z: number): Person => ({
+    x,
+    y: 0,
+    z,
+    yaw: 0,
+    gait: 'walk',
+    phase: 0,
+    height: 1.75,
+    look: { skin: 0, top: 0, bottoms: 0, shoes: 0, hair: 0 },
+    distance: z,
+  });
+  const pyramid = nearPyramid(LEVEL, 16 / 10);
+
+  it('hands back the very same people when nobody is cut, and anyone with the cull off', () => {
+    const people = { near: [person(0, 20), person(3, 0.4)], far: [person(0, 80)] };
+    expect(peopleClearOfTheCamera(people, pyramid)).toBe(people);
+    const inside = { near: [person(0, 0.4)], far: [] };
+    expect(peopleClearOfTheCamera(inside, undefined)).toBe(inside);
+    expect(peopleClearOfTheCamera(undefined, pyramid)).toBeUndefined();
+  });
+
+  it('drops a person standing in the plane, near or far, and keeps the rest in order', () => {
+    const before = person(0, 20);
+    const after = person(-3, 30);
+    const far = person(0, 80);
+    const kept = peopleClearOfTheCamera(
+      { near: [before, person(0, 0.4), after], far: [person(0.2, 0.3), far] },
+      pyramid,
+    );
+    expect(kept?.near).toEqual([before, after]);
+    expect(kept?.far).toEqual([far]);
+  });
+
+  it('drops a person whose box reaches the plane from beside it, and not one 0.75 m further out', () => {
+    // The 16 : 10 plane is 0.56 m to either side of the axis; a person's box
+    // reaches `PERSON_REACH_METRES`, 0.5 m, from their feet.
+    expect(peopleClearOfTheCamera({ near: [person(0.9, 0.45)], far: [] }, pyramid)?.near).toEqual(
+      [],
+    );
+    const beyond = { near: [person(1.65, 0.45)], far: [] };
+    expect(peopleClearOfTheCamera(beyond, pyramid)).toBe(beyond);
   });
 });
 

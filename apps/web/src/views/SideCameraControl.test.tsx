@@ -22,7 +22,7 @@ import {
   type SidePairingOptions,
 } from '../camera/side-link';
 import { FRAMING_CHECK_POSES, SideAnalysis } from '../camera/side-analysis';
-import type { SidePoseOutcome } from '../camera/side-analysis-port';
+import type { SidePoseOutcome, SideUnavailableReason } from '../camera/side-analysis-port';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { PAIRING_REFUSAL_TEXT } from '../camera/side-link-code';
 import { pairingCodeModules } from '../camera/side-link-qr';
@@ -46,6 +46,7 @@ import type { SideLiveEstimator, SideShownLook } from '../camera/side-live-view-
 
 import {
   SIDE_FRAMING_TEXT,
+  SIDE_INSTANCE_STOPPED_TEXT,
   SideCameraControl,
   sidePicturesText,
   TABLET_NEXT_STEP,
@@ -139,7 +140,7 @@ async function tablet(
       : {}),
   });
   if (options.agreed !== false) {
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   }
   mounted = await mount(
     <SideCameraControl controller={controller} pairing={port} snapshots={options.snapshots} />,
@@ -600,7 +601,7 @@ describe('what the tablet says about the pictures — #530', () => {
   /** A pairing whose tablet looks at pictures with a model that answers `outcome`. */
   async function analysing(
     outcome: SidePoseOutcome = { kind: 'no-rider', cause: 'said-nobody' },
-    place?: 'tablet' | 'computer',
+    place?: 'tablet' | 'computer' | 'instance',
   ) {
     const context = await tablet({
       analyse: (control) =>
@@ -733,6 +734,53 @@ describe('what the tablet says about the pictures — #530', () => {
     expect(document.querySelector('[data-oyl-side-pictures]')?.textContent).toContain(
       'no more pictures are being sent to it',
     );
+  });
+
+  it('says the pictures are sealed and sent to the rider’s instance when that is where they go — #1106', async () => {
+    const { send } = await analysing({ kind: 'no-rider', cause: 'said-nobody' }, 'instance');
+    const shown = (): string =>
+      document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
+    expect(shown()).toContain('sealed and sent on to your instance');
+    expect(shown()).not.toContain('on this tablet as they arrive');
+    expect(shown()).not.toContain('your computer');
+    await send(2);
+    expect(shown()).toBe(
+      'Pictures sealed and sent to your instance, and not kept here: 2, with you in 0 of them. ' +
+        'Not sent, because one was already with your instance: 0.',
+    );
+  });
+
+  it.each(Object.keys(SIDE_INSTANCE_STOPPED_TEXT) as SideUnavailableReason[])(
+    'says why the instance stopped, and that no more pictures are sent: %s — #1106',
+    async (why) => {
+      const { send } = await analysing({ kind: 'unavailable', why }, 'instance');
+      await send(1);
+      const shown = document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
+      expect(shown).toBe(
+        `${SIDE_INSTANCE_STOPPED_TEXT[why]} Pictures are still thrown away here as they arrive.`,
+      );
+      expect(SIDE_INSTANCE_STOPPED_TEXT[why]).toMatch(/sent|being sent/);
+    },
+  );
+
+  it('says a model that takes no pictures does not, in those words — #1106, ruling 3', () => {
+    expect(SIDE_INSTANCE_STOPPED_TEXT['model-without-pictures']).toContain(
+      'The model answered that it does not take pictures',
+    );
+    // A stop the instance gave no reason for still says the pictures stopped.
+    expect(
+      sidePicturesText({
+        place: 'instance',
+        model: 'unavailable',
+        posed: 0,
+        noRider: 0,
+        noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
+        unreadable: 0,
+        skipped: 0,
+        framing: 'no-reference',
+        finished: false,
+      }),
+    ).toContain(SIDE_INSTANCE_STOPPED_TEXT['not-answering']);
   });
 
   it('says there is no earlier session to line up with, when there is none', async () => {

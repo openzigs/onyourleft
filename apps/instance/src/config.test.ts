@@ -2,7 +2,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_HOST, DEFAULT_PORT, readConfig, readHistorySettings } from './config.ts';
+import {
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  readAnalysisModelSettings,
+  readConfig,
+  readPictureModelSettings,
+  readHistorySettings,
+} from './config.ts';
+import { NO_LEGAL_SETTINGS } from './legal.ts';
 
 const COMMIT = 'fedcba9876543210fedcba9876543210fedcba98';
 
@@ -17,7 +25,7 @@ describe('readConfig', () => {
         commit: COMMIT,
         sourceUrl: `https://github.com/openzigs/onyourleft/tree/${COMMIT}`,
         bodyLimitBytes: 1024 * 1024,
-        registration: 'closed',
+        registration: 'approval',
         moderators: {},
         publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
         clientAddressHeader: null,
@@ -27,7 +35,19 @@ describe('readConfig', () => {
           code: 'not-set',
           reason: 'OYL_INSTANCE_EMBEDDING_URL is not set, so no embedding model is configured.',
         },
+        analysis: {
+          kind: 'off',
+          code: 'not-set',
+          reason: 'OYL_INSTANCE_ANALYSIS_MODEL_URL is not set, so no analysis model is configured.',
+        },
+        pictures: {
+          kind: 'off',
+          code: 'not-set',
+          reason: 'OYL_INSTANCE_PICTURE_MODEL is not set, so no local model takes pictures.',
+        },
         name: null,
+        legal: NO_LEGAL_SETTINGS,
+        terms: null,
       },
     });
   });
@@ -84,9 +104,11 @@ describe('readConfig', () => {
     expect(result.ok ? 0 : result.problems.length).toBe(3);
   });
 
-  it('registers nobody when nothing is set (#891 merge review), and reads each mode', () => {
+  it('registers by approval when nothing is set (owner’s ruling on #775, 2026-10-15), and reads each mode', () => {
     const unset = readConfig({ commit: COMMIT });
-    expect(unset.ok && unset.config.registration).toBe('closed');
+    expect(unset.ok && unset.config.registration).toBe('approval');
+    const empty = readConfig({ commit: COMMIT, registration: '' });
+    expect(empty.ok && empty.config.registration).toBe('approval');
     for (const mode of ['open', 'approval', 'invite', 'closed']) {
       const result = readConfig({ commit: COMMIT, registration: ` ${mode} ` });
       expect(result.ok && result.config.registration).toBe(mode);
@@ -116,6 +138,12 @@ describe('readConfig', () => {
     expect(same.ok ? [] : same.problems).toEqual([
       'OYL_INSTANCE_OWNER_KEY and OYL_INSTANCE_DEPUTY_KEY must be two different keys.',
     ]);
+  });
+
+  it('names the owner alone when the deputy is empty, as the project’s instance does (#905)', () => {
+    const owner = 'a'.repeat(64);
+    const sole = readConfig({ commit: COMMIT, ownerKey: owner, deputyKey: '' });
+    expect(sole.ok && sole.config.moderators).toEqual({ owner });
   });
 
   it('reads the public-room thresholds, defaulting to a week and three rides', () => {
@@ -221,6 +249,28 @@ describe('the history index’s settings (#835, ADR 0040 D-5, D-6)', () => {
     expect(settings.kind === 'off' ? settings.reason : '').toContain(why);
   });
 
+  it('refuses https: by a name, whose certificate could never verify at the checked address (#1248)', () => {
+    for (const embeddingUrl of ['https://ollama:11434', 'https://localhost:11434']) {
+      const settings = readHistorySettings({ embeddingUrl });
+      expect(settings, embeddingUrl).toMatchObject({ kind: 'off', code: 'tls-by-name' });
+      expect(settings.kind === 'off' && settings.reason).toContain('cannot verify');
+    }
+    for (const embeddingUrl of [
+      'https://192.168.1.20:11434',
+      'https://[fd00::7]',
+      'http://ollama',
+    ]) {
+      const settings = readHistorySettings({ embeddingUrl });
+      expect(settings.kind, embeddingUrl).toBe('on');
+      expect(settings.kind === 'on' && settings.embedding.endpoint.href).toBe(
+        new URL(embeddingUrl).origin + '/',
+      );
+    }
+    const whole = readConfig({ commit: COMMIT, embeddingUrl: 'https://ollama:11434' });
+    expect(whole.ok).toBe(true);
+    expect(whole.ok && whole.config.history).toMatchObject({ kind: 'off', code: 'tls-by-name' });
+  });
+
   it('refuses a model name that is not one, and starts the instance anyway', () => {
     const settings = readHistorySettings({
       embeddingUrl: 'http://ollama:11434',
@@ -233,5 +283,135 @@ describe('the history index’s settings (#835, ADR 0040 D-5, D-6)', () => {
     });
     expect(whole.ok).toBe(true);
     expect(whole.ok && whole.config.history.kind).toBe('off');
+  });
+});
+
+describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
+  it('is off, saying nothing is set, with no address', () => {
+    expect(readAnalysisModelSettings({})).toMatchObject({ kind: 'off', code: 'not-set' });
+    expect(readAnalysisModelSettings({ analysisModelUrl: ' ', analysisModel: 'm' }).kind).toBe(
+      'off',
+    );
+  });
+
+  it('takes a Compose service name, a loopback or a private literal, with its path', () => {
+    for (const [url, href] of [
+      ['http://ollama:11434/v1', 'http://ollama:11434/v1'],
+      ['http://ollama:11434/v1/', 'http://ollama:11434/v1'],
+      ['http://127.0.0.1:11434/v1', 'http://127.0.0.1:11434/v1'],
+      ['http://localhost:11434/v1', 'http://localhost:11434/v1'],
+      ['http://192.168.1.20:11434/v1', 'http://192.168.1.20:11434/v1'],
+      ['http://[fd00::7]:11434/v1', 'http://[fd00::7]:11434/v1'],
+    ] as const) {
+      const settings = readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm:7b' });
+      expect(settings.kind === 'on' && settings.baseUrl.href, url).toBe(href);
+      expect(settings.kind === 'on' && settings.model).toBe('m:7b');
+    }
+  });
+
+  it('takes an operator’s reasoning allowance, and turns analysis off for one it cannot read (#1268)', () => {
+    const base = { analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'm' };
+    const said = readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: ' 3072 ' });
+    expect(said.kind === 'on' && said.reasoningTokens).toBe(3_072);
+    const none = readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: ' ' });
+    expect(none.kind === 'on' && none.reasoningTokens).toBeUndefined();
+    for (const bad of ['0', '-4', '1.5', 'many', '16385', '1e3x']) {
+      expect(
+        readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: bad }),
+        bad,
+      ).toMatchObject({ kind: 'off', code: 'bad-reasoning' });
+    }
+  });
+
+  it('refuses a public name and a .local name at reading, and says why', () => {
+    for (const url of [
+      'https://models.example.com/v1',
+      'http://ollama.local:11434/v1',
+      'http://8.8.8.8/v1',
+    ]) {
+      const settings = readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm' });
+      expect(settings, url).toMatchObject({ kind: 'off', code: 'not-local' });
+      expect(settings.kind === 'off' && settings.reason).toContain('ADR 0046 D-9');
+    }
+  });
+
+  it('refuses https: by a name, whose certificate could never verify at the checked address (#1187)', () => {
+    for (const url of ['https://ollama:11434/v1', 'https://localhost:11434/v1']) {
+      const settings = readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm' });
+      expect(settings, url).toMatchObject({ kind: 'off', code: 'tls-by-name' });
+      expect(settings.kind === 'off' && settings.reason).toContain('cannot verify');
+    }
+    for (const url of ['https://192.168.1.20:11434/v1', 'https://[fd00::7]/v1']) {
+      expect(
+        readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm' }).kind,
+        url,
+      ).toBe('on');
+    }
+  });
+
+  it('names no picture model unless the operator does: the analysis model is never used for pictures (#1106)', () => {
+    const server = { analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'writes' };
+    expect(readPictureModelSettings(server)).toMatchObject({ kind: 'off', code: 'not-set' });
+    expect(readPictureModelSettings({ ...server, pictureModel: ' ' })).toMatchObject({
+      kind: 'off',
+      code: 'not-set',
+    });
+    const on = readPictureModelSettings({ ...server, pictureModel: ' sees:4b ' });
+    expect(on.kind === 'on' && on.model).toBe('sees:4b');
+    expect(on.kind === 'on' && on.baseUrl.href).toBe('http://ollama:11434/v1');
+    // It needs the server's address and not the analysis model's name.
+    expect(
+      readPictureModelSettings({ analysisModelUrl: server.analysisModelUrl, pictureModel: 'sees' })
+        .kind,
+    ).toBe('on');
+  });
+
+  it('turns pictures off, saying why, for a bad model name or a server it cannot use (#1106)', () => {
+    expect(
+      readPictureModelSettings({ analysisModelUrl: 'http://ollama/v1', pictureModel: 'a b' }),
+    ).toMatchObject({ kind: 'off', code: 'bad-model' });
+    const unset = readPictureModelSettings({ pictureModel: 'sees' });
+    expect(unset).toMatchObject({ kind: 'off', code: 'no-server' });
+    expect(unset.kind === 'off' && unset.reason).toContain('OYL_INSTANCE_ANALYSIS_MODEL_URL');
+    // The local-address rule is the analysis model's own: a public host takes no picture.
+    const remote = readPictureModelSettings({
+      analysisModelUrl: 'http://models.example.com/v1',
+      pictureModel: 'sees',
+    });
+    expect(remote).toMatchObject({ kind: 'off', code: 'no-server' });
+    expect(remote.kind === 'off' && remote.reason).toContain('private network');
+  });
+
+  it('has NO default model: an address with no model is off, and says so', () => {
+    const settings = readAnalysisModelSettings({ analysisModelUrl: 'http://ollama:11434/v1' });
+    expect(settings).toMatchObject({ kind: 'off', code: 'no-model' });
+    expect(settings.kind === 'off' && settings.reason).toContain('There is no default');
+  });
+
+  it('refuses a URL with credentials, a query or a fragment, a non-HTTP scheme, and a bad model name', () => {
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'http://u:p@ollama/v1', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-base-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'http://ollama/v1?x=1', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-base-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'ftp://ollama/v1', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-a-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'not a url', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-a-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'http://ollama/v1', analysisModel: 'a b' }),
+    ).toMatchObject({ code: 'bad-model' });
+  });
+
+  it('never stops the instance starting: readConfig is ok with analysis refused', () => {
+    const result = readConfig({
+      commit: 'fedcba9876543210fedcba9876543210fedcba98',
+      analysisModelUrl: 'https://models.example.com/v1',
+      analysisModel: 'm',
+    });
+    expect(result.ok && result.config.analysis.kind).toBe('off');
   });
 });

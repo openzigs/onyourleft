@@ -56,6 +56,7 @@ import { Reading } from '../design/Reading';
 import {
   formatDuration,
   formatPowerValue,
+  MOVING_TIME_LABEL,
   noPowerText,
   POWER_UNIT,
   shownAveragePower,
@@ -129,10 +130,17 @@ export function RideResultCard({
         Ride saved
       </h3>
       <dl className="oyl-result__facts">
+        {/* #1437's review: the moving time, named as on Home and History —
+            Home's "Last ride" pattern, the time alone. History's "of …
+            elapsed" line does not fit here: under a `10:23:45` in a 10rem
+            track it wraps, and that put *Start a new ride* 34.9 px from the
+            fold on a 4:3 tablet in the shell (59.7 px without it), under the
+            browser gate's 50 px (#1042). Elapsed time as a fifth fact wraps
+            the row instead: −4.0 px. The ride's page has both. */}
         <div>
-          <dt>Elapsed</dt>
+          <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
-            <Reading value={formatDuration(result.elapsedTime)} />
+            <Reading value={formatDuration(result.movingTime)} />
           </dd>
         </div>
         {distance === undefined ? null : (
@@ -179,18 +187,19 @@ export function RideResultCard({
 }
 
 /**
- * What the card's region says, once — the save, its elapsed time and distance,
- * and the game's outcome where there is one. Distance in the unit's spoken
- * word, `units/format.ts` §`spokenDistanceUnit`'s reason, and `undefined` for
- * a ride that knows none (#1070): the sentence then states the elapsed time
- * alone rather than "0.0 kilometres".
+ * What the card's region says, once — the save, its moving time (as the card
+ * shows it and names it — #1437's review) and distance, and the game's outcome
+ * where there is one. Distance in the unit's spoken word,
+ * `units/format.ts` §`spokenDistanceUnit`'s reason, and `undefined` for a ride
+ * that knows none (#1070): the sentence then states the time alone rather than
+ * "0.0 kilometres".
  */
 export function resultSentence(result: SavedRide, spokenDistance: string | undefined): string {
-  const elapsed = `${formatDuration(result.elapsedTime)} elapsed`;
+  const time = `${MOVING_TIME_LABEL.toLowerCase()} ${formatDuration(result.movingTime)}`;
   const facts =
     spokenDistance === undefined
-      ? `Ride saved: ${elapsed}.`
-      : `Ride saved: ${elapsed}, ${spokenDistance}.`;
+      ? `Ride saved: ${time}.`
+      : `Ride saved: ${time}, ${spokenDistance}.`;
   return result.gameOutcome === undefined
     ? facts
     : `${facts} ${GAME_OUTCOME_TEXT[result.gameOutcome]}`;

@@ -162,6 +162,44 @@ interface HudMeasurement {
   readonly displacement: readonly Displacement[];
   /** #400/#401 — the mute and the volume, measured three ways. */
   readonly sound: readonly SoundControlMeasurement[];
+  readonly draft: readonly DraftMeasurement[];
+  /** #1812 — a Delivery round's readings, on each Delivery stage. */
+  readonly delivery: readonly DeliveryMeasurement[];
+}
+
+/** @see hud-harness.tsx §`DeliveryMeasurement` */
+interface DeliveryMeasurement {
+  readonly stage: string;
+  readonly panel: Box | undefined;
+  readonly fields: readonly {
+    readonly label: string;
+    readonly box: Box;
+    readonly valueOverflows: boolean;
+  }[];
+  readonly others: readonly { readonly label: string; readonly box: Box }[];
+  readonly actions: readonly { readonly label: string; readonly box: Box }[];
+  readonly screen: Box;
+}
+
+interface Box {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface DraftMeasurement {
+  readonly draft: number;
+  readonly field: Box | undefined;
+  readonly gauge: Box | undefined;
+  readonly fill: Box | undefined;
+  readonly full: Box | undefined;
+  readonly panel: Box | undefined;
+  readonly valueOverflows: boolean;
+  readonly others: readonly { readonly label: string; readonly box: Box }[];
+  readonly screen: Box;
 }
 
 /** @see hud-harness.tsx §`SoundControlMeasurement` */
@@ -668,3 +706,272 @@ for (const viewport of REGION_VIEWPORTS) {
     });
   });
 }
+
+/**
+ * The gauge's full scale, in percent — `hud/draft-scale.ts`, mirrored like
+ * every other harness type here. The harness renders one stage at it.
+ */
+const DRAFT_FULL_SCALE = 59;
+
+/** The smallest gauge a rider could read on a bar-mounted phone. */
+const GAUGE_MINIMUM = { width: 40, height: 6 } as const;
+
+function inside(inner: Box, outer: Box): boolean {
+  return (
+    inner.left >= outer.left - SUBPIXEL_SLACK &&
+    inner.right <= outer.right + SUBPIXEL_SLACK &&
+    inner.top >= outer.top - SUBPIXEL_SLACK &&
+    inner.bottom <= outer.bottom + SUBPIXEL_SLACK
+  );
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`#787 — the draft field and its gauge at ${viewport.name}`, () => {
+    test('is drawn inside its field, on screen, over no other field, with its full scale drawn', async ({
+      page,
+    }) => {
+      const measured = await measure(page, viewport);
+      // Both stages, so a harness that stopped rendering them passes over nothing.
+      expect(measured.draft.map((stage) => stage.draft)).toEqual([DRAFT_FULL_SCALE, 20]);
+      for (const stage of measured.draft) {
+        const name = `${viewport.name}/${String(stage.draft)} %`;
+        const { field, gauge, fill, full, panel } = stage;
+        expect(field, `${name}: no draft field`).toBeDefined();
+        expect(gauge, `${name}: no gauge`).toBeDefined();
+        expect(fill, `${name}: no fill`).toBeDefined();
+        expect(full, `${name}: no full-scale mark`).toBeDefined();
+        expect(panel, `${name}: no panel`).toBeDefined();
+        if (
+          field === undefined ||
+          gauge === undefined ||
+          fill === undefined ||
+          full === undefined ||
+          panel === undefined
+        ) {
+          continue;
+        }
+        // Big enough to read, and inside the field it belongs to.
+        expect(gauge.width, `${name} gauge width`).toBeGreaterThanOrEqual(GAUGE_MINIMUM.width);
+        expect(gauge.height, `${name} gauge height`).toBeGreaterThanOrEqual(GAUGE_MINIMUM.height);
+        expect(inside(gauge, field), `${name}: the gauge spills out of its field`).toBe(true);
+        expect(inside(field, panel), `${name}: the field spills out of its panel`).toBe(true);
+        expect(stage.valueOverflows, `${name}: the value overflows`).toBe(false);
+        // On the screen a rider sees, and on top of no other reading.
+        expect(inside(field, stage.screen), `${name}: the field is off the screen`).toBe(true);
+        for (const other of stage.others) {
+          expect(boxesOverlap(field, other.box), `${name} lands on ${other.label}`).toBe(false);
+        }
+        // The fill is the share of the full scale, measured off the drawn boxes.
+        expect(fill.left).toBeCloseTo(gauge.left, 0);
+        expect(fill.width / gauge.width, `${name} fill share`).toBeCloseTo(
+          Math.min(1, stage.draft / DRAFT_FULL_SCALE),
+          1,
+        );
+        // And the full-scale end is drawn where the scale ends.
+        expect(
+          Math.abs((full.left + full.right) / 2 - gauge.right),
+          `${name} full mark`,
+        ).toBeLessThanOrEqual(2);
+        expect(full.height, `${name} full mark height`).toBeGreaterThan(0);
+      }
+    });
+  });
+}
+
+/**
+ * #1812 — a Delivery round's two readings, *Houses* and *Score*, at every
+ * viewport, on the harness's three Delivery stages (`hud-harness.tsx`
+ * §`DELIVERY_STAGES`): the same solo ride with no round, with the largest
+ * round at its start, and with it nearly over — the widest value and the
+ * widest phrase each field shows.
+ *
+ * ## What is held
+ *
+ * Each field is inside the secondary panel and on the screen, its value fits
+ * its box, and it is over no other reading a rider can see. On a phone the
+ * secondary panel **gains no row with the round**: the pacer's dashed field
+ * gives way, laid out at no size and still in the list (`theme.css` §"A ROOM
+ * RIDE ON A PHONE", the trade #419 asks to have recorded). On the tablet
+ * nothing gives way.
+ *
+ * ⚠️ **"No row", not "no taller"**, and the difference was measured. The
+ * phrase under each of the round's values is a line the ordinary ride's
+ * readings do not have, so in the pinned Chromium on a Mac the panel is
+ * 142.9 px with the round against 129.5 px without it at every phone viewport
+ * — and 141.5 px for a room ride, whose *Draft* phrase and gauge are the same
+ * line. A third row is 209.3 px upright. Whether those 13 px stay clear of the
+ * leaning rider is measured in a real ride, which this page is not: that is
+ * #1816's, `ride-delivery.browser.spec.ts`, beside `ride-room.browser.spec.ts`
+ * §"#1356".
+ *
+ * ## The ride's controls
+ *
+ * Neither field is over the ride's controls, `.oyl-hud__actions` (Pause and
+ * End ride): not the panel and not either button, at every viewport and on
+ * both round stages. A rider reaching for Pause mid-round must find it.
+ *
+ * ## The controls
+ *
+ * The same page with that rule undone puts a third row in the secondary panel
+ * on an upright phone, so "no row" can fail. (On a phone on its side the
+ * round fits in two rows even then, so the control is upright.) And a
+ * *Houses* field moved onto Pause is seen to overlap it, so "over no ride
+ * control" can fail too.
+ */
+const DELIVERY_LABELS = ['Houses', 'Score'] as const;
+
+const DELIVERY_RULE_UNDONE = `
+  .oyl-game--riding .oyl-hud .oyl-hud__fields--secondary > .oyl-hud__field--gives-way {
+    position: static !important; width: auto !important; height: auto !important;
+    margin: 0 !important; overflow: visible !important; clip-path: none !important;
+    white-space: normal !important;
+  }
+`;
+
+/** A box laid out at some size: a field that gave way is 1 px square and clipped. */
+function laidOut(box: Box): boolean {
+  return box.width > 1 && box.height > 1;
+}
+
+/**
+ * How many rows the secondary panel's grid holds on a Delivery stage: the
+ * distinct tops of the readings laid out inside it. A field set elsewhere on
+ * the stage — the moving time on an upright phone (`theme.css` §"THE MOVING
+ * TIME ON AN UPRIGHT PHONE") — is not in the panel's box and not counted.
+ */
+function rows(stage: DeliveryMeasurement): number {
+  const panel = stage.panel;
+  if (panel === undefined) return 0;
+  const tops = [...stage.fields, ...stage.others]
+    .filter((each) => laidOut(each.box) && inside(each.box, panel))
+    .map((each) => Math.round(each.box.top));
+  return new Set(tops).size;
+}
+
+/**
+ * The ride controls a box lands on: `.oyl-hud__actions` and each button in it.
+ * Throws when the stage has no Pause and no End ride, so a harness that
+ * stopped rendering them cannot pass over nothing.
+ */
+function onARideControl(box: Box, stage: DeliveryMeasurement): string[] {
+  const labels = stage.actions.map((each) => each.label);
+  if (
+    !labels.includes('the ride controls') ||
+    !labels.includes('Pause') ||
+    !labels.includes('End ride')
+  ) {
+    throw new Error(
+      `the ${stage.stage} Delivery stage has no Pause and End ride: ${labels.join(', ')}`,
+    );
+  }
+  return stage.actions.filter((each) => boxesOverlap(box, each.box)).map((each) => each.label);
+}
+
+function deliveryStage(measured: HudMeasurement, stage: string): DeliveryMeasurement {
+  const found = measured.delivery.find((each) => each.stage === stage);
+  if (found === undefined) throw new Error(`the harness rendered no ${stage} Delivery stage`);
+  return found;
+}
+
+for (const viewport of VIEWPORTS) {
+  const tablet = viewport.width >= 1000;
+  test.describe(`#1812 — a Delivery round's readings at ${viewport.name}`, () => {
+    test(`are on the screen, inside their panel, fitting their boxes, over no other reading${tablet ? '' : ', and no row added to the panel'}`, async ({
+      page,
+    }) => {
+      const measured = await measure(page, viewport);
+      // Every stage, so a harness that stopped rendering one passes over nothing.
+      expect(measured.delivery.map((each) => each.stage)).toEqual(['none', 'start', 'end']);
+      const none = deliveryStage(measured, 'none');
+      expect(none.fields).toEqual([]);
+      expect(none.panel).toBeDefined();
+      // The ordinary ride's panel is the two rows every claim below is against.
+      expect(rows(none)).toBe(2);
+      for (const stage of ['start', 'end']) {
+        const round = deliveryStage(measured, stage);
+        const name = `${viewport.name}/${stage}`;
+        expect(
+          round.fields.map((each) => each.label),
+          name,
+        ).toEqual([...DELIVERY_LABELS]);
+        const panel = round.panel;
+        expect(panel, `${name}: no secondary panel`).toBeDefined();
+        if (panel === undefined || none.panel === undefined) continue;
+        for (const field of round.fields) {
+          expect(laidOut(field.box), `${name}: ${field.label} is laid out at no size`).toBe(true);
+          expect(inside(field.box, panel), `${name}: ${field.label} spills out of its panel`).toBe(
+            true,
+          );
+          expect(inside(field.box, round.screen), `${name}: ${field.label} is off the screen`).toBe(
+            true,
+          );
+          expect(field.valueOverflows, `${name}: ${field.label}'s value overflows`).toBe(false);
+          for (const other of round.others.filter((each) => laidOut(each.box))) {
+            expect(
+              boxesOverlap(field.box, other.box),
+              `${name}: ${field.label} lands on ${other.label}`,
+            ).toBe(false);
+          }
+          expect(onARideControl(field.box, round), `${name}: ${field.label} lands on`).toEqual([]);
+        }
+        const pacer = round.others.find((each) => each.label === 'Pacer');
+        expect(pacer, `${name}: no pacer field in the list`).toBeDefined();
+        if (pacer === undefined) continue;
+        if (tablet) {
+          // On the tablet nothing gives way.
+          expect(laidOut(pacer.box), `${name}: the pacer gave way`).toBe(true);
+        } else {
+          expect(laidOut(pacer.box), `${name}: the pacer did not give way`).toBe(false);
+          expect(rows(round), `${name}: the round put a row in the panel`).toBe(rows(none));
+        }
+      }
+    });
+  });
+}
+
+test.describe('#1812 — the Delivery measurement can see a third row at all', () => {
+  test('finds one on an upright phone with the give-way rule undone', async ({ page }) => {
+    const portrait = VIEWPORTS.find((viewport) => viewport.name === 'portrait');
+    if (portrait === undefined) throw new Error('no portrait viewport to control at');
+    await measure(page, portrait);
+    await page.addStyleTag({ content: DELIVERY_RULE_UNDONE });
+    const measured = await page.evaluate(() => window.__oylHudMeasure?.());
+    if (measured === undefined) throw new Error('the HUD harness published no measurement');
+    expect(rows(deliveryStage(measured, 'none'))).toBe(2);
+    expect(rows(deliveryStage(measured, 'start'))).toBe(3);
+  });
+});
+
+test.describe('#1812 — the Delivery measurement can see a field on a ride control at all', () => {
+  test('finds Houses on Pause when it is moved there', async ({ page }) => {
+    const portrait = VIEWPORTS.find((viewport) => viewport.name === 'portrait');
+    if (portrait === undefined) throw new Error('no portrait viewport to control at');
+    await measure(page, portrait);
+    // Move the start stage's Houses field onto its own Pause button.
+    await page.evaluate(() => {
+      const stage = document.querySelector('[data-oyl-delivery-stage="start"]');
+      const houses = [...(stage?.querySelectorAll<HTMLElement>('.oyl-hud__field') ?? [])].find(
+        (each) => each.querySelector('.oyl-hud__label')?.textContent?.trim() === 'Houses',
+      );
+      const pause = [...(stage?.querySelectorAll('.oyl-hud__actions button') ?? [])].find(
+        (each) => each.textContent?.trim() === 'Pause',
+      );
+      if (houses === undefined || pause === undefined) throw new Error('no Houses or no Pause');
+      const from = houses.getBoundingClientRect();
+      const to = pause.getBoundingClientRect();
+      houses.style.transform = `translate(${String(to.left - from.left)}px, ${String(to.top - from.top)}px)`;
+    });
+    const measured = await page.evaluate(() => window.__oylHudMeasure?.());
+    if (measured === undefined) throw new Error('the HUD harness published no measurement');
+    const start = deliveryStage(measured, 'start');
+    const houses = start.fields.find((each) => each.label === 'Houses');
+    if (houses === undefined) throw new Error('no Houses field on the start stage');
+    expect(onARideControl(houses.box, start)).toEqual(
+      expect.arrayContaining(['the ride controls', 'Pause']),
+    );
+  });
+});

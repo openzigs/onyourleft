@@ -2,9 +2,16 @@
 
 import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
+  accountErase,
   backup,
   CommandError,
+  instanceKey,
+  loadAccountsAdd,
+  loadAccountsErase,
   migrate,
+  modelKeyClear,
+  modelKeySet,
+  modelKeyStatus,
   restore,
   roomOpen,
   verify,
@@ -17,6 +24,13 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   restore <snapshot directory> [--force]
   verify
   room-open <roomId> --kind ride|race --length <metres> [--grade <percent>] [--position hoods|drops|upright] [--countdown <ms>]
+  model-key set --url https://… --model <name>   (the key on standard input)
+  model-key status
+  model-key clear
+  instance-key init | show | rotate [--drop-old] [--serial-above <n>] | rotate-identity [--compromised] | reset
+  load-accounts add     (the public keys \`race-load keys\` printed, on standard input)
+  load-accounts erase
+  account-erase [--confirm]   (the rider's recovery code on standard input)
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -37,7 +51,18 @@ function has(args: string[], name: string): boolean {
 /** Runs one command, prints its JSON report, and answers the exit code. */
 export async function runCommand(
   argv: readonly string[],
-  env: { readonly database?: string | undefined; readonly blobs?: string | undefined },
+  env: {
+    readonly database?: string | undefined;
+    readonly blobs?: string | undefined;
+    /** `OYL_INSTANCE_SECRET_KEY`, for `model-key` (#1097). */
+    readonly secret?: string | undefined;
+    /** `OYL_INSTANCE_OWNER_KEY`: whose athlete `model-key set` holds the key for (#1097). */
+    readonly ownerKey?: string | undefined;
+    /** `OYL_INSTANCE_ORIGIN`: what the instance's own keys are bound to (#1189). */
+    readonly origin?: string | undefined;
+    /** Standard input, read whole: where `model-key set` takes the key from. */
+    readonly readStandardInput?: () => Promise<string>;
+  },
 ): Promise<number> {
   const paths: DataPaths = {
     database: env.database?.trim() || DEFAULT_DATABASE_PATH,
@@ -66,7 +91,10 @@ export async function runCommand(
         const force = has(args, '--force');
         const snapshot = args[0];
         if (snapshot === undefined) throw new CommandError(USAGE);
-        report = await restore(paths, snapshot, { force });
+        report = await restore(paths, snapshot, {
+          force,
+          keys: { secret: env.secret, origin: env.origin },
+        });
         break;
       }
       case 'verify':
@@ -86,6 +114,96 @@ export async function runCommand(
           ...(grade === undefined ? {} : { gradePercent: Number(grade) }),
           ...(position === undefined ? {} : { position }),
           ...(countdown === undefined ? {} : { countdownMs: Number(countdown) }),
+        });
+        break;
+      }
+      case 'model-key': {
+        const action = args.shift();
+        if (action === 'set') {
+          const url = flag(args, '--url');
+          const model = flag(args, '--model');
+          // Anything else on the line is refused, and never echoed: it may be
+          // the key itself, which belongs on standard input (#1097).
+          if (args.length > 0) {
+            throw new CommandError(
+              'model-key set reads the key from standard input, never from the command line. Nothing was written.',
+            );
+          }
+          if (url === undefined || model === undefined) throw new CommandError(USAGE);
+          report = await modelKeySet(paths, {
+            url,
+            model,
+            input: await (env.readStandardInput ?? (() => Promise.resolve('')))(),
+            secret: env.secret,
+            ownerKey: env.ownerKey,
+          });
+        } else if (action === 'status' && args.length === 0) {
+          report = await modelKeyStatus(paths, env.secret);
+        } else if (action === 'clear' && args.length === 0) {
+          report = await modelKeyClear(paths);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'instance-key': {
+        const action = args.shift();
+        const keys = { secret: env.secret, origin: env.origin };
+        if (action === 'rotate') {
+          const dropOld = has(args, '--drop-old');
+          const above = flag(args, '--serial-above');
+          if (args.length > 0) throw new CommandError(USAGE);
+          report = await instanceKey(
+            paths,
+            {
+              action,
+              dropOld,
+              ...(above === undefined
+                ? {}
+                : { serialAbove: /^[0-9]+$/.test(above) ? Number(above) : Number.NaN }),
+            },
+            keys,
+          );
+        } else if (action === 'rotate-identity') {
+          const compromised = has(args, '--compromised');
+          if (args.length > 0) throw new CommandError(USAGE);
+          report = await instanceKey(paths, { action, compromised }, keys);
+        } else if (
+          (action === 'init' || action === 'show' || action === 'reset') &&
+          args.length === 0
+        ) {
+          report = await instanceKey(paths, { action }, keys);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'load-accounts': {
+        const action = args.shift();
+        if (action === 'add' && args.length === 0) {
+          report = await loadAccountsAdd(
+            paths,
+            await (env.readStandardInput ?? (() => Promise.resolve('')))(),
+          );
+        } else if (action === 'erase' && args.length === 0) {
+          report = await loadAccountsErase(paths);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'account-erase': {
+        const confirm = has(args, '--confirm');
+        // Anything else on the line is refused, and never echoed: it may be
+        // the rider's recovery code, which belongs on standard input (#1802).
+        if (args.length > 0) {
+          throw new CommandError(
+            'account-erase reads the recovery code from standard input, never from the command line. Nothing was erased.',
+          );
+        }
+        report = await accountErase(paths, {
+          input: await (env.readStandardInput ?? (() => Promise.resolve('')))(),
+          confirm,
         });
         break;
       }

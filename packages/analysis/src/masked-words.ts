@@ -14,14 +14,19 @@
  * ## On the athlete row
  *
  * For ADR 0020 D-2's reason (`packages/store`'s `unit-system.ts`, `kit-colour.ts`): it is the
- * rider's, not the machine's, so it is on the athlete row and #776's sync can
- * carry it when it lands — the device copy canonical until then, and after.
- * An erase takes it with the row (`deleteAthlete`).
+ * rider's, not the machine's, so it is on the athlete row. An erase takes it
+ * with the row (`deleteAthlete`). The device copy is canonical.
  *
- * ⚠️ **It is NOT in the account export** (`apps/web/src/transfer/export-everything.ts`
- * names every field it copies, and this is not one of them). It is a list of
- * the most identifying words the rider knows about themselves — the same kind
- * of thing as a privacy zone, which is never exported either.
+ * ⚠️ **Since #1101 the instance holds a synced copy** (ADR 0046 D-10, the
+ * owner's ruling reversing this file's old "device only" note): masking runs
+ * on the instance, over every hosted request, so the list and the privacy
+ * zones are one sync item of kind `masking` there
+ * (`apps/instance/src/analysis/hosted.ts`), pushed and pulled only sealed
+ * (ADR 0047 D-7), scoped and erased with the athlete, and carried in the
+ * INSTANCE's account export. ⚠️ The DEVICE's account export
+ * (`apps/web/src/transfer/export-everything.ts`) does not carry it yet, nor a
+ * privacy zone: that, and the device pushing the item, come with the client's
+ * half (#1102, #1195).
  *
  * ## What a stored list may hold
  *

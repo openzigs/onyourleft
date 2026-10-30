@@ -49,6 +49,7 @@
  * room would seat a rider who came back later as somebody new at 0 m.
  */
 
+import { fieldDraftFactors } from '@onyourleft/physics';
 import {
   decodeRoomMessage,
   encodeMessage,
@@ -57,6 +58,7 @@ import {
   type Finish,
   type RefuseReason,
   type RoomConfig,
+  type Standings,
 } from '@onyourleft/protocol';
 
 import {
@@ -104,10 +106,18 @@ const FINAL_CLOSE_CODES: ReadonlySet<number> = new Set([4001, 4002, 4004, 4005, 
  * - `no-such-room` — 404: the instance has no room by that id;
  * - `no-declared-mass` — the rider has declared no weight, so no ticket is
  *   asked for at all (ADR 0028 D-1: a default is not a declaration);
- * - `instance-refused` — any other 4xx but 429.
+ * - `instance-refused` — any other 4xx but 429;
+ * - `cannot-seal` — the ticket route is sealed-only (#1210, ADR 0047 D-7
+ *   phase 2) and this device cannot seal to its instance now: no card, a copy
+ *   a website served, or keys refused. Nothing was asked of the room.
  */
 export type TicketRefusal =
-  'not-signed-in' | 'not-eligible' | 'no-such-room' | 'no-declared-mass' | 'instance-refused';
+  | 'not-signed-in'
+  | 'not-eligible'
+  | 'no-such-room'
+  | 'no-declared-mass'
+  | 'instance-refused'
+  | 'cannot-seal';
 
 /** A ticket, or why there is none. */
 export type TicketAnswer =
@@ -117,10 +127,41 @@ export type TicketAnswer =
   /** Nothing answered: try again later. */
   | { readonly kind: 'unreachable' };
 
+/**
+ * The short fixed list a rider reports another from inside a ride by — #789.
+ * The instance's own list is `apps/instance` §`ROOM_REPORT_REASONS`, and
+ * `room-port.test.ts` holds the two equal: a key the instance does not know
+ * would be refused as `validation_failed` on every press.
+ */
+export const ROOM_REPORT_REASON_KEYS = ['display-name', 'cheating', 'other'] as const;
+export type RoomReportReason = (typeof ROOM_REPORT_REASON_KEYS)[number];
+
+/**
+ * What became of an in-ride report — #789:
+ *
+ * - `reported` — 204: filed for the moderators;
+ * - `rate-limited` — 429: this rider's hourly allowance of reports is spent;
+ * - `gone` — 404: the rider is no longer in that seat, or this rider is no
+ *   longer in the room, so there was nobody to file it about;
+ * - `refused` — no session, a device that cannot seal, or any other refusal;
+ * - `unreachable` — nothing answered.
+ */
+export type RoomReportAnswer =
+  | { readonly kind: 'reported' }
+  | { readonly kind: 'rate-limited' }
+  | { readonly kind: 'gone' }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'unreachable' };
+
 /** How a session reaches a room. `room-port.ts` builds the production one. */
 export interface RoomLink {
   ticket(roomId: string): Promise<TicketAnswer>;
   open(roomId: string, events: InstanceSocketEvents): InstanceSocket;
+  /**
+   * Report the rider in seat `riderId` of `roomId` — #789, the instance's
+   * `POST /v1/rooms/{roomId}/reports`. By SEAT: the room says who sits there.
+   */
+  report(roomId: string, riderId: number, reason: RoomReportReason): Promise<RoomReportAnswer>;
 }
 
 /** The timers a session schedules on. The platform's own in production. */
@@ -151,7 +192,40 @@ export type RoomRace =
   | { readonly kind: 'waiting' }
   | { readonly kind: 'counting'; readonly endsAtLocalMs: number }
   | { readonly kind: 'running' }
-  | { readonly kind: 'finished'; readonly order: readonly number[] };
+  | {
+      readonly kind: 'finished';
+      readonly order: readonly number[];
+      /**
+       * This rider's place in the room's order, 1 for the winner, or `null`
+       * when they are not in it (#785) — read off the room's order, never
+       * worked out here.
+       */
+      readonly place: number | null;
+    };
+
+/**
+ * One row of a race's standings, as the room sent it — #1347, ADR 0051. Every
+ * number is the ROOM's: the gap it took from its own positions, to this rider,
+ * and the W/kg it simulated. Nothing here is computed on this device.
+ */
+export interface RoomStandingsRow {
+  readonly riderId: number;
+  /** The rider's public name, once the room has named them; `undefined` until then. */
+  readonly displayName: string | undefined;
+  /** Whether this row is this rider's own. */
+  readonly you: boolean;
+  /** Seconds behind this rider, positive; ahead, negative; 0 on the own row. */
+  readonly gapSeconds: number;
+  readonly wattsPerKilogram: number;
+  /** `@onyourleft/protocol`'s `FLAG_*`, or'd. */
+  readonly flags: number;
+}
+
+/** A race's standings, in the room's order, and the tick they are of. */
+export interface RoomStandings {
+  readonly tick: number;
+  readonly rows: readonly RoomStandingsRow[];
+}
 
 /** Where a session is. */
 export type RoomSessionStatus =
@@ -226,6 +300,10 @@ export class RoomSession {
   #lostSince: number | undefined;
   #snapshots: SnapshotBuffer | undefined;
   #finish: Finish | undefined;
+  /** A race's riders' public names, by rider id (#1347). */
+  readonly #names = new Map<number, string>();
+  /** A race's newest standings (#1347). */
+  #standings: Standings | undefined;
   /** The room's countdown, and the local instant it arrived (#785). */
   #countdown: { readonly startsInMs: number; readonly atLocalMs: number } | undefined;
   /** Whether the room has sent a frame: a race is on from its first (#785). */
@@ -270,13 +348,58 @@ export class RoomSession {
   /** Where a race is, as the room has said — see {@link RoomRace}. */
   race(): RoomRace {
     if (this.#kind !== 'race') return { kind: 'not-a-race' };
-    if (this.#finish !== undefined) return { kind: 'finished', order: this.#finish.order };
+    if (this.#finish !== undefined) {
+      const order = this.#finish.order;
+      const at = this.#riderId === undefined ? -1 : order.indexOf(this.#riderId);
+      return { kind: 'finished', order, place: at === -1 ? null : at + 1 };
+    }
     if (this.#framed) return { kind: 'running' };
     const countdown = this.#countdown;
     if (countdown !== undefined) {
       return { kind: 'counting', endsAtLocalMs: countdown.atLocalMs + countdown.startsInMs };
     }
     return { kind: 'waiting' };
+  }
+
+  /**
+   * A race's newest standings, joined with the names the room sent — #1347.
+   * `undefined` before the first, and in a group ride, which has none.
+   */
+  standings(): RoomStandings | undefined {
+    const standings = this.#standings;
+    if (standings === undefined) return undefined;
+    const own = this.#riderId;
+    return {
+      tick: standings.tick,
+      rows: standings.riders.map((rider) => ({
+        riderId: rider.riderId,
+        displayName: this.#names.get(rider.riderId),
+        you: rider.riderId === own,
+        gapSeconds: rider.gapDeciseconds / 10,
+        wattsPerKilogram: rider.wattsPerKilogramTenths / 10,
+        flags: rider.flags,
+      })),
+    };
+  }
+
+  /**
+   * The draft multiplier `k` this client predicts for its own rider — #787,
+   * ADR 0038 D-4: from the room's NEWEST frame, every rider where the room
+   * held them on one tick, through the same `fieldDraftFactors` the room
+   * runs, so it is the `k` the room will ride this rider at on its next tick.
+   * The room corrects the rest (`correction.ts`). `1` — riding alone — in a
+   * room with drafting off, before a frame, and while the room is not joined.
+   * Only riders the room holds are counted: a bot pacer or a ghost is never
+   * in a frame, so neither shelters nor is sheltered (#327).
+   */
+  draftFactor(): number {
+    const status = this.#status;
+    const own = this.#riderId;
+    if (status.kind !== 'joined' || status.config.drafting !== 'on' || own === undefined) return 1;
+    const riders = this.#snapshots?.newestRiders() ?? [];
+    const index = riders.findIndex((rider) => rider.riderId === own);
+    if (index === -1) return 1;
+    return fieldDraftFactors(riders.map((rider) => rider.distanceMetres))[index] as number;
   }
 
   /** Every OTHER rider, drawn at `localMs` less the render delay. @see SnapshotBuffer.at */
@@ -390,6 +513,9 @@ export class RoomSession {
             this.#snapshots ??= new SnapshotBuffer(message.roomConfig.frameIntervalMs);
             this.#riderId = message.riderId;
             this.#kind = message.roomConfig.kind;
+            // #1347: standings from before a loss are gaps that stopped
+            // moving; the room's next ones replace them within a tick.
+            this.#standings = undefined;
             this.#startReporting(message.roomConfig.reportIntervalMs);
             this.#setStatus({
               kind: 'joined',
@@ -409,6 +535,14 @@ export class RoomSession {
           case 'countdown':
             this.#countdown = { startsInMs: message.startsInMs, atLocalMs: this.#options.now() };
             this.#options.onChange?.();
+            return;
+          case 'name':
+            this.#names.set(message.riderId, message.displayName);
+            return;
+          case 'standings':
+            // The browser gate's control turns these off with the frames.
+            if (this.#options.acceptFrame?.() === false) return;
+            this.#standings = message;
             return;
           case 'finish':
             this.#finish = message;

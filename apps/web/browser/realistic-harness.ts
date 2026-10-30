@@ -9,7 +9,7 @@
  * ## What it is, and what it is not
  *
  * It rides the **product's own renderer** — `three-renderer.ts`, the same
- * `threeGameRenderer` `main.tsx` hands `GameView` — along `realistic/route.ts`
+ * `threeGameRenderer` `main.tsx` hands `GameView` — along `src/demo/synthetic-road.ts`
  * at 9 m/s, with the cranks turning at the pacer's gear, and lets the product's
  * own two-ladder policy (`quality.ts` §`nextWorldQuality`) move the rung from
  * the frame times, as `GameView` does with `nextQuality`. So what the owner
@@ -56,38 +56,101 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
+import { mappedTown } from '../src/game/footprint-buildings';
+import {
+  // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
+  // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
+  cityStreetscapeFixture,
+  countrysideFixture,
+  houseStreetFixture,
+  mixedTownFixture,
+  richmondStreetFixture,
+  terraceStreetFixture,
+} from '../src/game/footprint-fixtures-testing';
+import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
+import { mappedBuildingsOf } from '../src/game/mapped-buildings';
+import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
+import { villageDrawCallCeiling } from '../src/game/realistic-budget';
+import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
+import { deviceToday } from '../src/game/season';
+import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
   drawnWorldOf,
   atmosphereOf,
+  decorationBeltOf,
+  decorationKindTriangles,
+  decorationKindsOf,
+  deliveryDrawnOf,
+  facadeTrimsOf,
+  facadeWreathOf,
+  firDepthPrepassOf,
   foliageOrderedOf,
+  groundBlendOf,
   loadRealisticWorld,
   loadSceneryModels,
+  mappedBlobsShownOf,
+  overhangShadowsOf,
+  realisticSurfacesOf,
   realisticTextureReport,
+  setRealisticTrees,
   threeGameRenderer,
+  villageHouseStatsOf,
+  villageModelsShownOf,
+  weatheringOf,
+  windowRevealsOf,
+  type VillageHouseStats,
 } from '../src/game/three-renderer';
 import {
   configQuery,
+  decorationsWithConfig,
+  facadeWreathWithLevers,
   parseConfig,
   percentiles,
   rungWithLevers,
+  seasonWithLevers,
+  firPrepassWithLevers,
+  surfacesWithLevers,
+  treesWithLevers,
+  windowRevealsWithLevers,
+  overhangShadowsWithLevers,
+  weatheringWithLevers,
+  facadeTrimsWithLevers,
+  countrysideWithLevers,
   type Layer,
   type Lever,
   type Percentiles,
 } from './realistic/config';
+import { deliveryAhead } from './realistic/delivery';
 import { drawCounter } from './realistic/draws';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
-import { realisticRoute } from './realistic/route';
+import {
+  placeLatitude,
+  realisticRoute,
+  routeDigest,
+  villageRoute,
+} from '../src/demo/synthetic-road';
+import { plannedTown } from './realistic/town';
+import { frameCensus, type FrameCensus } from './realistic/village';
 
+/** #1627: one village-square tree's triangles, as the belt counts them. */
+const VILLAGE_TREE_KIND = HOLIDAY_DECORATIONS['winter-lights']?.find(
+  (kind) => kind.item === VILLAGE_TREE,
+);
+const VILLAGE_TREE_TRIANGLES =
+  VILLAGE_TREE_KIND === undefined ? 0 : decorationKindTriangles(VILLAGE_TREE_KIND);
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
 /** Where a long ride starts, wraps back to, and how much road it rides before it does. */
 const START_METRES = 2_550;
 const LOOP_FROM_METRES = 300;
 const LOOP_METRES = 3_500;
+/** #1581's `town=mixed`: from 100 m short of the town to its far end, and round again. */
+const TOWN_FROM_METRES = 900;
+const TOWN_METRES = 1_200;
 
 /** One window's numbers. */
 export interface RealisticSample {
@@ -100,6 +163,22 @@ export interface RealisticSample {
   readonly frameCap: 'display' | number;
   /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
+  /**
+   * Draw calls per drawn frame over the window, a MEAN, rounded: the window
+   * is the frames drawn after the warm-up, the ones the clock samples.
+   *
+   * ⚠️ **Until #1294 it also counted the warm-up's frames, the page's very
+   * first render among them, and so read higher the fewer frames there were.**
+   * Read frame by frame on 2026-10-12 in the pinned Chromium, held at
+   * `at=2550`: the first render made 60 calls and every later frame 31, in
+   * the warm-up and after it. The first published figure was therefore
+   * `(60 + 31·n) / (n + 1)` for `n` later frames, 32 to 35 for one unchanged
+   * frame depending on how busy the machine was, which is what #1289 saw
+   * move. The counts are now reset when the warm-up ends, so a held frame's
+   * mean is its own count and equals {@link lastFrame}'s `calls`. A soak's
+   * later windows never held the first render. What the first render's other
+   * 29 calls are was not looked for (#1293).
+   */
   readonly drawCalls: number;
   /**
    * Triangles submitted per drawn frame over the window, counted at the WebGL
@@ -115,6 +194,8 @@ export interface RealisticSample {
   readonly lastFrame: {
     readonly triangles: number;
     readonly rendererTriangles: number | undefined;
+    /** Its draw calls, counted at the WebGL draw calls — #1294. @see drawCalls */
+    readonly calls: number;
   };
   /** The layers switched off for this run — #616. Empty for an ordinary ride. */
   readonly layersOff: readonly Layer[];
@@ -199,6 +280,54 @@ declare global {
       readonly soak: readonly (RealisticSample & { readonly minute: number })[];
       /** What the layer switch found in the scene, by layer — #616. @see LayerCensus */
       readonly layers: LayerCensus | undefined;
+      /**
+       * #1559: `route.ts` §`routeDigest` of the road ridden, so a gate can see
+       * the default URL ride the road every Part Z and Part AH row was taken
+       * on, and `route=village` another. Absent until the road is built.
+       */
+      readonly routeDigest?: string;
+      /**
+       * #1559: what the frame drawn last before the result was published holds
+       * of a village — its structures, streets and furniture, carried and in
+       * the camera's view. Absent with the result. @see frameCensus
+       */
+      readonly census?: FrameCensus;
+      /**
+       * #1624: the decoration belt of the world drawn, read off its mesh when
+       * the result was published — its triangles (nought where it is not
+       * drawn) and how many times its geometry was built. Absent with the result.
+       */
+      readonly decorations?: {
+        readonly triangles: number;
+        readonly rebuilds: number;
+        /** #1627: the village-square trees the belt draws. */
+        readonly trees: number;
+        /**
+         * #1627: one tree's triangles, from the product's own count, so the
+         * spec can hold the lights to their share beside the trees.
+         */
+        readonly treeTriangles: number;
+      };
+      /**
+       * #1566: the village models drawn on the last frame before the result
+       * was published — houses, triangles and the structure items they took.
+       * Absent with the result, or before a realistic frame.
+       */
+      readonly villageHouses?: VillageHouseStats;
+      /**
+       * #1815: what the view's Delivery belt drew on the last frame before the
+       * result was published, read back off its instances
+       * (`three-renderer.ts` §`deliveryDrawnOf`). Absent unless `?delivery=`
+       * asked for a round. @see realistic/delivery.ts
+       */
+      readonly delivery?: Readonly<Record<'parcels' | 'markers' | 'obstacles', number>>;
+      /**
+       * #1815: the village ceiling that same frame is held to,
+       * `realistic-budget.ts` §`villageDrawCallCeiling` of the frame the page
+       * drew — the Delivery one while it carries a round, the frozen 50
+       * otherwise. Absent with the result.
+       */
+      readonly villageCeiling?: number;
     };
   }
 }
@@ -270,14 +399,58 @@ async function run(): Promise<void> {
   await loadSceneryModels();
   let outcome: RealisticWorldOutcome | undefined;
   if (config.world === 'realistic') {
+    // #1283: the generated broadleaves, or the scans with that lever off —
+    // chosen before the load, because it decides which files are fetched.
+    setRealisticTrees(treesWithLevers(config.leversOff));
     outcome = await loadRealisticWorld();
   }
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
   publish({ outcome, notice });
 
-  // #702: turned towards the sun or away from it only when the URL asks.
-  const profile = realisticRoute(config.facing);
-  const origin = corridorOrigin(profile);
+  // #702: turned towards the sun or away from it only when the URL asks. #1581:
+  // or the mixed town's straight road, with its corridor, land and buildings
+  // built once, as `GameView` builds a ride's at the press.
+  // #1585: or the Richmond street, its narrow lots drawn as house models.
+  // #1623: each at `place`, for the route's own season.
+  const latitude = placeLatitude(config.place);
+  const mixed =
+    config.town === 'mixed'
+      ? mixedTownFixture(latitude)
+      : config.town === 'richmond'
+        ? richmondStreetFixture(latitude)
+        : config.town === 'countryside'
+          ? countrysideFixture(latitude)
+          : config.town === 'terrace'
+            ? terraceStreetFixture(latitude)
+            : config.town === 'city'
+              ? cityCentreFixture(latitude)
+              : config.town === 'city-street'
+                ? cityStreetscapeFixture(latitude)
+                : config.town === 'houses'
+                  ? houseStreetFixture(latitude)
+                  : undefined;
+  // #1559: or the level road through two villages, for validation 0002 AE2.
+  const profile =
+    mixed?.profile ??
+    (config.route === 'village'
+      ? villageRoute(config.facing, config.place)
+      : realisticRoute(config.facing, config.place));
+  const origin = mixed?.origin ?? corridorOrigin(profile);
+  publish({ routeDigest: routeDigest(profile) });
+  const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
+    if (mixed === undefined) return undefined;
+    // #1634's urban class and #1660's split roofs, as the press builds them, unless a lever is off.
+    const { land, plans, urban } = plannedTown(mixed, config.leversOff);
+    return {
+      corridor: mixed.corridor,
+      land,
+      buildings: mappedBuildingsOf(plans),
+      lots: mappedTown(mixed.corridor, plans, urban),
+    };
+  })();
+  const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;
+  const loopLength = town === undefined ? LOOP_METRES : TOWN_METRES;
+  const startAt = town === undefined ? START_METRES : TOWN_FROM_METRES;
   document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
   const canvas = document.createElement('canvas');
   canvas.style.cssText = 'display:block;width:100vw;height:100vh';
@@ -293,14 +466,61 @@ async function run(): Promise<void> {
   // taken back out; the label, cap and scenery the page reports are the rung's.
   const drawnRung = (at: WorldQualityState) => rungWithLevers(worldRung(at), config.leversOff);
   const view = threeGameRenderer.create(canvas, drawnRung(state));
+  // #1622: the URL's `date`, or this device's day, told once as a ride's start
+  // tells it — in either world; `-decorations` drops the holiday.
+  view.setSeason(
+    seasonWithLevers(
+      config,
+      { hemisphere: routeHemisphere(profile), absLatitude: routeLatitudeMagnitude(profile) },
+      deviceToday,
+    ),
+  );
   // #619 lever 1's control. The view builds its realistic belts when a rung
   // first asks for them, so it is applied again after every rung change.
   const foliageOrdered = !config.leversOff.includes('foliage-order');
   foliageOrderedOf(view, foliageOrdered);
+  // #1523's before/after pair for the firs' depth pre-pass, on one build. The
+  // fir meshes are the realistic belts', so it too is applied again after a
+  // rung change.
+  const firPrepass = firPrepassWithLevers(config.leversOff);
+  firDepthPrepassOf(view, firPrepass);
+  // #1523's cost pairs: the ground without #627's blend, the road without
+  // #628's wear — the code out of the program, not a uniform at zero. A
+  // setting of the view's, so it survives a rung change; and set BEFORE the
+  // crag below, because a ground rebuilt with its blend starts at every share.
+  realisticSurfacesOf(view, surfacesWithLevers(config.leversOff));
+  // #1659's cost pair: the mapped windows without their reveals, the term out
+  // of the facade's program. A setting of the module's, read at every compile.
+  windowRevealsOf(view, windowRevealsWithLevers(config.leversOff));
+  // #1658's cost pair: the mapped walls without the sun's shadow under their
+  // eaves, the term out of the facade's program, as the reveals' is.
+  overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));
+  // #1661's cost pair: the mapped facades without their weathering, the term
+  // out of both of the facade's programs, as the shadows' is.
+  weatheringOf(view, weatheringWithLevers(config.leversOff));
+  // #1663's cost pair: the mapped facades without their lintels, quoins and
+  // string courses, the term out of the facade's program, as the weathering's is.
+  facadeTrimsOf(view, facadeTrimsWithLevers(config.leversOff));
+  // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
+  // off — in the scree's photograph, as it was. The ground's material is built
+  // with the realistic belts, so this too is applied again after a rung change.
+  const crag = config.leversOff.includes('crag') ? 0 : 1;
+  groundBlendOf(view, 1, 1, 1, crag);
   // #622's by-eye pair: the air as the product breathes it, or as it was
   // before #622. A setting of the view's, so it survives a rung change.
   const airOn = !config.leversOff.includes('air');
   atmosphereOf(view, { table: airOn ? 'directional' : 'flattened', valley: airOn });
+  // #1657's cost and by-eye pair: the mapped buildings grounded, or as they
+  // were before it. A setting of the view's, so it survives a rung change.
+  mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
+  // #1566's by-eye and cost pair: the villages' houses as #1585's models, or
+  // as their procedural buildings. A setting of the view's, as the blobs' is.
+  villageModelsShownOf(view, !config.leversOff.includes('village-models'));
+  // #1624: the product's decorations, or with `decorations=probe` the probe.
+  decorationKindsOf(view, decorationsWithConfig(config));
+  // #1626's cost pair: the mapped doors' winter wreath, or never. A setting
+  // of the module's, applied to the season told above.
+  facadeWreathOf(view, facadeWreathWithLevers(config.leversOff));
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);
@@ -314,8 +534,11 @@ async function run(): Promise<void> {
   let trianglesInWindow = 0;
   let framesInWindow = 0;
   let lastFrameTriangles = 0;
+  let lastFrameCalls = 0;
   let lastFrameRendererTriangles: number | undefined;
   let shownAt = 0;
+  /** The frame handed to `view.render` last — #1559's census reads it. */
+  let drawn: SceneFrame | undefined;
   const soak: (RealisticSample & { minute: number })[] = [];
 
   const sample = (frames: readonly number[], stalls: number): RealisticSample => ({
@@ -325,7 +548,11 @@ async function run(): Promise<void> {
     frameMs: percentiles(frames),
     drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
     trianglesPerFrame: framesInWindow === 0 ? 0 : Math.round(trianglesInWindow / framesInWindow),
-    lastFrame: { triangles: lastFrameTriangles, rendererTriangles: lastFrameRendererTriangles },
+    lastFrame: {
+      triangles: lastFrameTriangles,
+      rendererTriangles: lastFrameRendererTriangles,
+      calls: lastFrameCalls,
+    },
     layersOff: config.layersOff,
     leversOff: config.leversOff,
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
@@ -353,6 +580,8 @@ async function run(): Promise<void> {
       if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
         view.setQuality(drawnRung(next));
         foliageOrderedOf(view, foliageOrdered);
+        firDepthPrepassOf(view, firPrepass);
+        groundBlendOf(view, 1, 1, 1, crag);
       }
       state = next;
     }
@@ -360,23 +589,42 @@ async function run(): Promise<void> {
     // Only drawn frames reach the clock, so what it publishes is the time
     // between frames a rider SEES — at a capped rung, at least the cap.
     const { elapsedSeconds: elapsed } = clock.frame(now);
+    const warmBefore = warmedUp;
     warmedUp = elapsed > WARM_UP_SECONDS;
+    // #1294: the counts start where the clock's samples do. The warm-up's
+    // frames are not the window's, and the page's very first render makes
+    // about twice a frame's calls. @see RealisticSample.drawCalls
+    if (warmedUp && !warmBefore) {
+      callsInWindow = 0;
+      trianglesInWindow = 0;
+      framesInWindow = 0;
+    }
     const distance =
       config.at ??
-      LOOP_FROM_METRES +
-        ((START_METRES - LOOP_FROM_METRES + elapsed * RIDE_METRES_PER_SECOND) % LOOP_METRES);
+      loopFrom + ((startAt - loopFrom + elapsed * RIDE_METRES_PER_SECOND) % loopLength);
     // The rung the ladder is on decides how much scenery the frame carries, as
     // it does in `GameView` — #478. @see rideFrame
-    view.render(
-      rideFrame({
-        profile,
-        origin,
-        distance,
-        elapsed: config.at === undefined ? elapsed : 0,
-        rung: worldRung(state),
-      }),
-    );
-    callsInWindow += counter.takeCalls();
+    drawn = rideFrame({
+      profile,
+      origin,
+      distance,
+      elapsed: config.at === undefined ? elapsed : 0,
+      rung: worldRung(state),
+      // #1534's pair: the villages' ground left wooded.
+      settlementsWooded: config.leversOff.includes('settlement-clearing'),
+      // #1541's pair: the people off.
+      peopleOff: config.leversOff.includes('people'),
+      // #1542's three, each off on its own.
+      countrysideOff: countrysideWithLevers(config.leversOff),
+      ...(town === undefined ? {} : { town }),
+    });
+    // #1815: a Delivery round's worst case on the road ahead, or no round at all.
+    if (config.delivery !== undefined) {
+      drawn = { ...drawn, delivery: deliveryAhead(drawn, distance, config.delivery) };
+    }
+    view.render(drawn);
+    lastFrameCalls = counter.takeCalls();
+    callsInWindow += lastFrameCalls;
     lastFrameTriangles = counter.takeTriangles();
     trianglesInWindow += lastFrameTriangles;
     // three resets its own count at the start of every `render`, so after the
@@ -398,7 +646,40 @@ async function run(): Promise<void> {
       trianglesInWindow = 0;
       framesInWindow = 0;
       const layers = layerSwitch.census();
-      publish({ result, layers });
+      const census =
+        drawn === undefined
+          ? undefined
+          : frameCensus(drawn, canvas.clientWidth / Math.max(1, canvas.clientHeight));
+      const belt = decorationBeltOf(view);
+      const decorations =
+        belt === undefined
+          ? undefined
+          : {
+              triangles: belt.triangles,
+              rebuilds: belt.rebuilds,
+              trees: belt.itemsDrawn(VILLAGE_TREE),
+              treeTriangles: VILLAGE_TREE_TRIANGLES,
+            };
+      const villageHouses = villageHouseStatsOf(view);
+      const delivery =
+        config.delivery === undefined
+          ? undefined
+          : {
+              parcels: deliveryDrawnOf(view, 'parcels').length,
+              markers: deliveryDrawnOf(view, 'markers').length,
+              obstacles: deliveryDrawnOf(view, 'obstacles').length,
+            };
+      publish({
+        result,
+        layers,
+        census,
+        decorations,
+        ...(villageHouses === undefined ? {} : { villageHouses }),
+        ...(delivery === undefined ? {} : { delivery }),
+        ...(drawn === undefined ? {} : { villageCeiling: villageDrawCallCeiling(drawn) }),
+      });
+      // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
+      if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
       console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);
       // #616: a share read with something the switch could not place still on
       // is a share of an unknown thing, so a run that switched a layer off says so.

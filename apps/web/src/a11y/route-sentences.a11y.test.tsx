@@ -66,6 +66,15 @@
  * The record's Segments line is that sentence; the "below" one is still in
  * the source, for a device that has a ride to cut from.
  *
+ * ⚠️ **Edited by #1244 (its third review), awaiting the owner's approval with
+ * that pull request's wording.** Two sentences are REWORDED in the record, in
+ * the same commit, because each had become false: the Ride screen's note,
+ * "Everything stays on this device.", is "Recorded on this device. Nothing is
+ * sent unless you switched that on." (a rider can now switch on re-plans a
+ * few lines above it); and the footer under every screen, "… No account, no
+ * server: everything here stays on this device.", is "… Your rides are kept
+ * on this device." (there has been an account and a server since ADR 0036).
+ *
  * ⚠️ **Edited by #1009, the owner's rulings of 2026-10-02.** Camera's note was
  * "Nothing is sent anywhere, and a picture is thrown away once it has been
  * looked at." — false on a screen that offers to send pictures to the rider's
@@ -88,6 +97,13 @@
  * now, above the switch rather than under it, so it names the switch — "Turn
  * on “This route is a loop” for a circuit…".
  *
+ * ⚠️ **Re-recorded by #1106**, for one added line and nothing else: Files →
+ * Erase's list of what an erase cannot reach gains *"a photograph your
+ * instance sent on to a hosted service you agreed to, which is a copy that
+ * service holds"* (ADR 0029 D-4's second line, true since the side camera's
+ * pictures may go on from the rider's instance). No sentence is dropped or
+ * reworded.
+ *
  * ⚠️ **Re-recorded by #1041**, when Activities became a card per ride at every
  * width and its table went. Nothing was added, and six lines of the populated
  * walk went with the table, none of them a lost word: its column headings
@@ -97,6 +113,58 @@
  * and the bare cells "123.5" and "234", which are said as the readings
  * "123.5 km" and "234 W" on the card and in the selected ride's summary, both
  * recorded.
+ *
+ * ⚠️ **Re-recorded by #1312** (its third pass), when the populated ride's
+ * laps became laps of a course: five with every figure a lap can state, the
+ * third the best and the last a part lap, where there were twelve identical
+ * ones. The ride's page gains the six headings a course lap adds, each lap's
+ * figures, "3 · Best lap", "5 · Part lap" and the note under the table. What
+ * went is the old fixture's own figures and nothing a rider is told: the
+ * numbers of laps six to twelve, "1 · Best lap" (the first of twelve equal
+ * laps), and the "—" of a lap with no power.
+ *
+ * ⚠️ **Re-recorded by #1431**, for one added line and nothing else: Files →
+ * Erase's list of what goes gains *"every ride in Recently deleted, which
+ * cannot be brought back afterwards"*, since a deleted ride is held for 30
+ * days. No sentence is dropped or reworded.
+ *
+ * ⚠️ **Edited by #1442, awaiting the owner's approval with that pull
+ * request's wording** (repetition trimmed). The Ride screen had three ways to
+ * Devices with nothing paired: the banner's "Pair a sensor" is "Pair a trainer
+ * or a sensor", the Trainer card's "No trainer: Pair a smart trainer to
+ * control it from here. Pairing is on Devices." and its "Devices" button are
+ * one sentence, "No trainer: Pair a smart trainer on Devices to control it
+ * from here.", and the Sensors group's "Pair a trainer or a sensor on
+ * Devices." link is gone (its "Nothing is paired yet." stays). Activities'
+ * line under its title, "Rides recorded on this device, newest first.", is
+ * "Your rides, newest first.", because the line under its list says where the
+ * rides are. And Routes' "Before you share a route" section, with its ⓘ and
+ * its warning, is said beside a CHOSEN route only, where *Who can see it* is:
+ * it leaves the empty walk, and moves after "Delete" on the populated one.
+ *
+ * ⚠️ **Re-recorded by #1439, awaiting the owner's approval with that pull
+ * request's wording.** History's chosen ride IS the ride's page now, so the
+ * Activities populated walk gains every sentence `activity-detail` has, and
+ * loses the summary's own: its "Where" term and "Outdoors, with a track" (the
+ * page says "Position" and "Recorded with a GPS track"), and "Open ride
+ * details". Both routes gain the chart's axes ("Power (W)", its top, middle
+ * and bottom values, "Time into the ride" and three times), each table's
+ * "… : the readings as a table" and "Help with A write-up by your model".
+ * Two sentences are DROPPED as false or said twice: "This version of the app
+ * does not race another rider’s ghost yet. Your answer is kept for when one
+ * does." (#331 races one), and the write-up's "It is sent this ride’s
+ * numbers, never a picture, and only when you press the button." (the
+ * approved paragraph beside the press says it in full). "A finished write-up
+ * replaces …" moves behind the section's ⓘ, and is still recorded.
+ *
+ * ⚠️ **Re-recorded by #664**, when Credits stopped linking the third-party
+ * notices (a link opened them over the app in the Android WebView, with no
+ * way back) and shows them on the screen instead. One line is ADDED, the
+ * disclosure "Read the full notices", and one is REWORDED, in the record in the
+ * same commit: "That document ships inside this app, so it opens without a
+ * network." is "They ship inside this app, so they open here without a
+ * network.", because there is no document to open any more, only the
+ * notices on the screen. Nothing is dropped.
  *
  * ## What it does not check
  *

@@ -15,7 +15,7 @@ From the layout tree of CLAUDE.md §2, from `packages/`:
 ```
 packages/             Apache-2.0, without exception
   analysis/           the platform-free core of a model-written ride write-up
-                      (#1094, ADR 0046 D-4, D-5) — the runner, the templates,
+                      (#1094, ADR 0046 D-4, D-5) — the templates,
                       the input builder, the history passages, the write-up
                       screen and the angle matchers it shares with
                       `apps/web`'s source scan, the pose summary's shape, the
@@ -28,16 +28,21 @@ packages/             Apache-2.0, without exception
                       imports `MAXIMUM_WRITE_UP_CHARACTERS` and
                       `parseMaskedWords` from HERE, never the reverse. Two
                       tsconfigs, as `fit`'s: `tsconfig.platform-free.json` is
-                      the one that enforces, over everything but the tests,
-                      and `src/abort.d.ts` declares the one non-ES2024 global
-                      the runner uses, `AbortController`. `sealStep` is in
-                      `./testing`, never in the barrel
+                      the one that enforces, over everything but the tests.
+                      No runner since #1103: the device's own run went with
+                      its write-up paths, and with it `src/abort.d.ts`
   domain/             units, core types, validation, signing, analysis (#25)
     analysis/           the power-duration curve and the critical-power fit (#75),
                         the training zones (#78), the per-ride load metrics
                         (#76) and the fitness/fatigue series (#77) — whose
                         NAMES are a trademark question, see §6
     identity/           the record format, the canonical bytes, verification (#61)
+    hpke/               HPKE, RFC 9180 X25519/HKDF-SHA256/AES-128-GCM base mode,
+                        and ADR 0047 D-2's reply keys (#1188), over a six-member
+                        primitives port that `packages/store/src/hpke-web-crypto.ts`
+                        and `apps/instance/src/auth/crypto.ts` implement. ⚠️ The
+                        injectable ephemeral key is `@onyourleft/domain/hpke-testing`
+                        only, which lint refuses outside a test
     recording/          the recording session state machine and stream merge (#45)
     route/              the route profile (#89) — elevation and gradient as a
                         function of distance, the three windows it is built
@@ -91,6 +96,16 @@ packages/             Apache-2.0, without exception
                         since #14 the ERG writer, which cannot send a Reset
                         because the method is not on the type it holds
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
+  map-features/       one z15 Protomaps v4 tile, already decompressed, into
+                      bounded, typed features in the corridor's local metres,
+                      and the corridor's tile cover, simplification, clipping,
+                      triangulation and rasterisation (#1544, ADR 0054).
+                      ⚠️ A tile is UNTRUSTED input: every limit is a refusal,
+                      never a throw, and a refusal names no coordinate and no
+                      tile x/y. It fetches nothing and holds no map data; it
+                      restates terrain.ts' projection, which
+                      `apps/web/src/game/map-features-projection.test.ts`
+                      holds equal. Platform-free, as `fit`'s two tsconfigs
   physics/            cycling power/speed model, Martin et al. 1998 (#88), and
                       the synthetic rider that composes #92's rule with it; and
                       since #487 the coefficient set a ride runs (`riding.ts`,
@@ -146,7 +161,8 @@ packages/             Apache-2.0, without exception
 **`apps/web`, `apps/mobile`, `apps/instance`, `packages/domain`, `packages/sensors`, `packages/fit`,
 `packages/store`, `packages/physics`, — since [#768](https://github.com/openzigs/onyourleft/issues/768)
 — `packages/protocol` and — since [#1094](https://github.com/openzigs/onyourleft/issues/1094) —
-`packages/analysis` exist.** `apps/instance` was created by
+`packages/analysis` and — since [#1544](https://github.com/openzigs/onyourleft/issues/1544) —
+`packages/map-features` exist.** `apps/instance` was created by
 [#767](https://github.com/openzigs/onyourleft/issues/767) on 2026-09-29, the first package that
 listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the

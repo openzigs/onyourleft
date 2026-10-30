@@ -53,6 +53,13 @@ import { StoreValidationError } from './errors';
 import type { AthleteId } from './ids';
 import type { DeviceKeyRecord } from './identity';
 
+/**
+ * The HPKE primitives (#1188, ADR 0047 D-3), beside the Ed25519 ones. A file
+ * of its own because the instance's DOM-less program compiles it for the
+ * interop test; `hpke-web-crypto.ts` says why.
+ */
+export { webCryptoHpkePrimitives } from './hpke-web-crypto';
+
 /** The algorithm identifier both `subtle.sign` and `subtle.generateKey` take. */
 const ED25519 = { name: SIGNATURE_ALGORITHM } as const;
 

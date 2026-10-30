@@ -61,9 +61,9 @@ const row = (page: Page, kind: string) =>
  * seconds on the step that is missing.
  */
 async function walkHomeToPaired(page: Page): Promise<void> {
-  await page
-    .getByRole('link', { name: 'Pair a sensor or a smart trainer' })
-    .click({ timeout: STEP_MS });
+  // #1429: Home's one link to Devices — the Trainer card's, or the empty
+  // state's where there is no ride controller and so no Trainer card.
+  await page.locator('main a[href="#/devices"]').click({ timeout: STEP_MS });
   await expect(page).toHaveURL(/#\/devices$/, { timeout: STEP_MS });
   // With nothing paired there are TWO: the empty garage's one action and the
   // trainer row's own, one name for one function since #987's review. The
@@ -135,7 +135,7 @@ test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairi
   page,
 }) => {
   await open(page);
-  await page.getByRole('link', { name: 'Pair a sensor or a smart trainer' }).click();
+  await page.locator('main a[href="#/devices"]').click();
   await expect(page).toHaveURL(/#\/devices$/);
   // The hash moves before the route renders; measure the screen, not the gap.
   // `toBeVisible` does not scroll, so this also says nothing about the fold.

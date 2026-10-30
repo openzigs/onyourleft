@@ -156,6 +156,98 @@ export function nominalTcx(track: TrackSpecification | undefined, count: number)
   };
 }
 
+/**
+ * A TCX v2 activity whose laps carry the figures and the kind a head unit
+ * writes — #1321. Two laps: a whole one ended by distance, with every figure
+ * TCX has an element for, and a resting one ended by hand with no power. The
+ * figures sit among the elements a Garmin export also writes and this package
+ * does not read (`MaximumSpeed`, `Calories`, `LX/AvgSpeed`, `LX/MaxBikeCadence`),
+ * so a reader that keyed on position, or on the last `<Value>` it saw, gets
+ * them wrong — and a `<Cadence>` sits on the lap as well as on every point.
+ */
+export function lapFiguresTcx(track: TrackSpecification, count: number): XmlFixture {
+  const points = trackPoints(track, count);
+  const half = Math.floor(count / 2);
+  const laps = [points.slice(0, half), points.slice(half)];
+  const mean = (values: readonly number[]) =>
+    Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  const lapLines = (lap: readonly TrackPoint[], index: number): readonly string[] => {
+    const first = lap[0];
+    const last = lap.at(-1);
+    if (!first || !last) throw new Error('a lap needs at least one point');
+    const whole = index === 0;
+    return [
+      `      <Lap StartTime="${isoInstant(first.unixSeconds)}">`,
+      `        <TotalTimeSeconds>${decimal(last.unixSeconds - first.unixSeconds, 1)}</TotalTimeSeconds>`,
+      `        <DistanceMeters>${decimal(last.distanceMetres - first.distanceMetres, 1)}</DistanceMeters>`,
+      '        <MaximumSpeed>9.9</MaximumSpeed>',
+      '        <Calories>12</Calories>',
+      '        <AverageHeartRateBpm>',
+      `          <Value>${String(mean(lap.map((point) => point.heartRate)))}</Value>`,
+      '        </AverageHeartRateBpm>',
+      '        <MaximumHeartRateBpm>',
+      `          <Value>${String(Math.max(...lap.map((point) => point.heartRate)))}</Value>`,
+      '        </MaximumHeartRateBpm>',
+      `        <Intensity>${whole ? 'Active' : 'Resting'}</Intensity>`,
+      `        <Cadence>${String(mean(lap.map((point) => point.cadence)))}</Cadence>`,
+      `        <TriggerMethod>${whole ? 'Distance' : 'Manual'}</TriggerMethod>`,
+      '        <Track>',
+      ...lap.flatMap((point) => [
+        '          <Trackpoint>',
+        `            <Time>${isoInstant(point.unixSeconds)}</Time>`,
+        '            <Position>',
+        `              <LatitudeDegrees>${degrees(point.position.latitude)}</LatitudeDegrees>`,
+        `              <LongitudeDegrees>${degrees(point.position.longitude)}</LongitudeDegrees>`,
+        '            </Position>',
+        `            <DistanceMeters>${decimal(point.distanceMetres, 1)}</DistanceMeters>`,
+        '            <HeartRateBpm>',
+        `              <Value>${String(point.heartRate)}</Value>`,
+        '            </HeartRateBpm>',
+        `            <Cadence>${String(point.cadence)}</Cadence>`,
+        ...(whole
+          ? [
+              '            <Extensions>',
+              '              <ns3:TPX>',
+              `                <ns3:Watts>${String(point.power)}</ns3:Watts>`,
+              '              </ns3:TPX>',
+              '            </Extensions>',
+            ]
+          : []),
+        '          </Trackpoint>',
+      ]),
+      '        </Track>',
+      '        <Extensions>',
+      '          <ns3:LX>',
+      '            <ns3:AvgSpeed>7.5</ns3:AvgSpeed>',
+      '            <ns3:MaxBikeCadence>99</ns3:MaxBikeCadence>',
+      ...(whole
+        ? [
+            `            <ns3:AvgWatts>${String(mean(lap.map((point) => point.power)))}</ns3:AvgWatts>`,
+            `            <ns3:MaxWatts>${String(Math.max(...lap.map((point) => point.power)))}</ns3:MaxWatts>`,
+          ]
+        : []),
+      '          </ns3:LX>',
+      '        </Extensions>',
+      '      </Lap>',
+    ];
+  };
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}" xmlns:ns3="${TCX_ACTIVITY_EXTENSION_NAMESPACE}">`,
+    '  <Activities>',
+    '    <Activity Sport="Biking">',
+    `      <Id>${isoInstant(RIDE_START_UNIX_SECONDS)}</Id>`,
+    ...laps.flatMap(lapLines),
+    `      <Creator xsi:type="Device_t" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`,
+    `        <Name>${CREATOR}</Name>`,
+    '      </Creator>',
+    '    </Activity>',
+    '  </Activities>',
+    '</TrainingCenterDatabase>',
+  ];
+  return { text: document(lines), positions: points.map((point) => point.position) };
+}
+
 // Only ever used to generate the non-position channels of an indoor TCX; its
 // coordinates are never written into a document.
 const NO_TRACK_PLACEHOLDER: TrackSpecification = {

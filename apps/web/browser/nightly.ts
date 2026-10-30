@@ -23,7 +23,7 @@
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
  * recorded here and in docs/agents/ci.md §4c.
- * Four of the ten describes below draw the REALISTIC world, which is a rung
+ * Eight of the fourteen describes below draw the REALISTIC world, which is a rung
  * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
  * measure the owner's instruments for it. The other six are the DEFAULT
  * world, every rider's, and each is an owner's exception. One is #1076's: the
@@ -96,15 +96,22 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'moved pending the owner’s explicit acknowledgement (#878’s review). The stylised ' +
       'road’s gradient contrast stays required (#242). Since #870 (R2) (3) also holds #628’s ' +
       'floor, 3.5 : 1 with the road’s wear on; the rest of R2 here (#627’s ground, #629’s ' +
-      'water, #679’s gantries) is appearance and cost.',
+      'water, #679’s gantries) is appearance and cost, and so is #1274’s crag on a steep ' +
+      'bank, read on #627’s own frame. Since #1541 it also holds the people — realistic only — ' +
+      'off the carriageway as DRAWN, with its control; the rule itself is required, in ' +
+      '`people.test.ts` through `sceneFrame`, control included.',
   },
   {
     spec: 'game.browser.spec.ts',
     describe: 'the trees’ levels of detail in the realistic world — #617',
-    seconds: '82 s: the `?realistic&trees` load',
+    seconds:
+      '82 s to 105 s: the `?realistic&trees` load, and since #1283 about 8 s to 13 s more for the scans’ frame',
     why:
       'triangle and draw-call budgets and a hand-over with no pop, in the realistic world; ' +
-      'since #870, #630’s far-band light and foliage breeze, which are appearance.',
+      'since #870, #630’s far-band light and foliage breeze, which are appearance. Since #1283 ' +
+      'the trees it measures are the GENERATED ones a ride draws — since #1294 the firs with ' +
+      'the broadleaves — and the same wooded frame is counted again with every tree a scan ' +
+      'as the control.',
   },
   {
     spec: 'realistic.browser.spec.ts',
@@ -113,6 +120,117 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     why:
       'the owner’s measuring instruments (a triangle counter and a layer switch) for the ' +
       'realistic world; `realistic.html` is not a gate and ships in no build.',
+  },
+  {
+    spec: 'realistic-trees.browser.spec.ts',
+    describe: 'the realistic page’s tree levers — #1283, #1294',
+    seconds: 'about 54 s: three more loads of the owner’s page',
+    why:
+      'the owner’s page’s levers for the generated trees (#1283, #1294): that ' +
+      '`-generated-trees` fetches every tree’s scan instead, `-generated-conifers` the ' +
+      'scanned firs alone, and never both makings of a tree, with each frame’s triangles ' +
+      'and draw calls. An instrument of a page that ships in no build; which files the ' +
+      'PRODUCT asks for is held in the required suite by `realistic-renderer.test.ts` ' +
+      '§"asks for the generated broadleaves".',
+  },
+  {
+    spec: 'realistic-wreath.browser.spec.ts',
+    describe: 'the realistic page’s mapped doors’ wreath — #1626',
+    seconds: 'two loads of the owner’s page',
+    why:
+      'the mapped doors’ winter wreath in the REALISTIC world, on the owner’s page in the ' +
+      'mixed town: the same draw calls and triangles with it forced off (`-facade-wreath`), ' +
+      'so the wreath costs no call. Cost, in a world a rider chooses; what the wreath draws, ' +
+      'and that it follows the ride’s holiday, is held in the required suite by ' +
+      '`mapped-building-belt.test.ts` §"#1626" and `winter-lights-wiring.test.tsx`.',
+  },
+  {
+    spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s village road — #1559',
+    seconds: 'one more load of the owner’s page, about 18 s on a Mac',
+    why:
+      'the owner’s page’s `route=village`, for validation 0002 AE2: that its hold puts a ' +
+      'church, a row of shops, pavements and furniture in the frame it drew. An instrument of ' +
+      'a page that ships in no build; the village road itself is held in the required suite ' +
+      'by `realistic/route.test.ts` §"the village road".',
+  },
+  {
+    spec: 'realistic-mapped.browser.spec.ts',
+    describe: 'the realistic page’s city centre — #1636',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the owner’s page’s `town=city`, for #1636’s screenshots: that a city centre’s shop ' +
+      'fronts and tower stay inside the page’s 35 calls. An instrument of a page that ships ' +
+      'in no build; the shop fronts and the curtain wall are held in the required suite by ' +
+      '`city-centre.test.ts`, and the belt’s six calls by the same.',
+  },
+  {
+    spec: 'realistic-mapped.browser.spec.ts',
+    describe: 'the realistic page’s mapped-blobs lever — #1657',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the owner’s page’s `-mapped-blobs` lever, for #1657’s cost and by-eye pairs: that it ' +
+      'takes the mapped buildings’ ground blobs out of the frame it drew, and nothing else. ' +
+      'An instrument of a page that ships in no build; the blobs themselves are held in the ' +
+      'required suite by `mapped-blobs.test.ts`.',
+  },
+  {
+    spec: 'realistic-delivery.browser.spec.ts',
+    describe: 'the realistic page’s village frame, delivering — #1815',
+    seconds: 'one more load of the owner’s page',
+    why:
+      'Delivery’s own village ceiling (#1815, DL6b): the decorated village hold with a ' +
+      'round’s worst case drawn inside `DELIVERY_VILLAGE_DRAW_CALLS`. Cost, in a world a rider ' +
+      'chooses, read off a page that ships in no build. Still required: that an ordinary ' +
+      'frame is never held to it (`realistic-budget-village.test.ts`), and the belt’s three ' +
+      'calls whatever the count in both worlds’ materials (`delivery.browser.spec.ts`).',
+  },
+  {
+    spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s holiday decorations — #1624',
+    seconds: 'three more loads of the owner’s page',
+    why:
+      'the decoration belt’s cost in the REALISTIC world, on the owner’s page on Halloween and ' +
+      '(#1626) in the winter lights: ' +
+      'the frame at or under `REALISTIC_WOODED_DRAW_CALLS`, exactly one call for the belt ' +
+      'against `levers=-decorations`, and its triangles inside `REALISTIC_DECORATION_TRIANGLES`. ' +
+      'Cost, in a world a rider chooses. Still required: the same one-call delta in the ' +
+      'stylised world on the same page (`the realistic page’s holiday decorations, stylised — ' +
+      '#1624`), and the belt’s one call, glow and steadiness in `decoration.browser.spec.ts`.',
+  },
+  {
+    spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s village frame, frozen — #1689',
+    seconds: 'one more load of the owner’s page, about 14 s on a Mac',
+    why:
+      'the owner’s freeze of the realistic village frame (#1689): the decorated village hold ' +
+      'drawn in exactly `REALISTIC_VILLAGE_DRAW_CALLS` calls. Cost, in a world a rider ' +
+      'chooses, read off a page that ships in no build; the furniture merge it counts is held ' +
+      'in the required suite by `realistic-renderer.test.ts` §"the street furniture" and the ' +
+      'stylised world’s one call a surface by `game.browser.spec.ts` §"#1536".',
+  },
+  {
+    spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s village house models — #1566',
+    seconds: 'one more load of the owner’s page',
+    why:
+      'the owner’s page’s `-village-models` lever, for #1566’s cost and by-eye pairs: that ' +
+      'the village hold drawn with its houses as their kinds makes more calls than the frozen ' +
+      'figure the models hold it to. Cost, in a world a rider chooses, read off a page that ' +
+      'ships in no build; the models’ choice, placement and term are held in the required ' +
+      'suite by `village-house-belt.test.ts`, and the plots by `settlements-variety.test.ts`.',
+  },
+  {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the route’s own season, in the realistic world — #1623',
+    seconds: 'four more loads of the owner’s page, about 60 s on a Mac',
+    why:
+      'the owner’s page’s `date` and `place`, for #1623’s cost and by-eye pairs: that the ' +
+      'route’s autumn and winter change the frame and not its draw calls, triangles or ' +
+      'fetched files. The season itself is held in the required suite by ' +
+      '`seasonal-nature.test.ts`, `world.test.ts` §"#1623", ' +
+      '`mapped-building-belt.test.ts` §"#1623", and the view’s own staging of it by ' +
+      '`realistic-textures.test.ts` §"#1623".',
   },
   {
     spec: 'reflow.browser.spec.ts',

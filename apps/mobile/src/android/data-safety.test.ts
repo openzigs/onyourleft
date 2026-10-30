@@ -28,9 +28,12 @@ import { describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
 
 import { endpointDecision } from '../../../web/src/camera/analysis-endpoint';
-import { hostedModelDecision } from '../../../web/src/camera/hosted-model';
 import { instanceAddress } from '../../../web/src/instance/address';
+import { ACCOUNT_DELETION_PATH, ACCOUNT_DELETION_URL } from '../../../web/src/privacy/policy';
+import { ERASE_ACCOUNT_TEXT } from '../../../web/src/views/erase-account-text';
 import {
+  ACCOUNT_DELETION_IN_APP,
+  ACCOUNT_DELETION_WEB_PAGE,
   DATA_PATHS,
   DATA_SAFETY_SECTION_ANSWERS,
   DELETION_REQUEST_EMAIL,
@@ -181,6 +184,9 @@ describe('the declaration filed on Play', () => {
     expect(name?.why).toContain('each time the rider presses Connect with a name typed');
     expect(name?.why).toContain('only when it has not seen this device before');
     expect(name?.why).toContain('each earlier name');
+    // #906 item 2: the app changes it, so the answer says so.
+    expect(name?.why).toContain('The rider can change it from the app');
+    expect(name?.why).not.toContain('later changed on the instance');
     expect(name?.why).not.toContain(
       'sent to that instance when it has not seen this device before',
     );
@@ -231,8 +237,13 @@ describe('the declaration filed on Play', () => {
     expect(DATA_SAFETY_SECTION_ANSWERS.deletionRequests.why).toContain(
       'which erasing the account ends the room and deletes',
     );
-    // And still never the device's own location: no GPS fix, and a ride's positions never.
-    expect(precise?.why).toContain('requests no GPS fix and never transmits a ride’s positions');
+    // Still never the device's own location: no GPS fix. A ride's positions
+    // leave only by a sync the rider presses (#778, #1195).
+    expect(precise?.why).toContain('the app requests no GPS fix');
+    expect(precise?.why).toContain(
+      'A ride’s positions leave the device only when the rider syncs with an instance',
+    );
+    expect(precise?.why).not.toContain('never transmits a ride’s positions');
   });
 
   it('gives every collected row a purpose, and no uncollected row one', () => {
@@ -256,11 +267,11 @@ describe('the declaration filed on Play', () => {
     expect(health.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('answers both health rows as collected, optional and SHARED — #804, #803', () => {
-    // #804's press sends a ride's heart rate, power and cadence, as numbers,
-    // to the rider's own computer — collected. #803 sends the same to a hosted
-    // model on the rider's own key, a third party the rider chose — shared
-    // (the owner's ruling 4 on #795), re-filed in the same pull request.
+  it('answers both health rows as collected, optional and SHARED — #1102, #1251', () => {
+    // #804 made them collected and #803 shared, by the device's own paths.
+    // #1103 removed both; a write-up asked of the rider's instance (#1102)
+    // keeps them collected, and the instance's hosted path (#1251), a third
+    // party the rider agreed to by name, keeps them shared.
     for (const dataType of [
       'Health and fitness — health info',
       'Health and fitness — fitness info',
@@ -271,10 +282,13 @@ describe('the declaration filed on Play', () => {
       expect(answer?.shared, dataType).toBe(true);
       expect(answer?.optional, dataType).toBe(true);
       expect(answer?.purposes, dataType).toStrictEqual(['App functionality']);
-      expect(answer?.why, dataType).toContain('#804');
-      expect(answer?.why, dataType).toContain('their own network');
-      expect(answer?.why, dataType).toContain('#803');
-      expect(answer?.why, dataType).toContain('hosted model service the rider chose');
+      expect(answer?.why, dataType).toContain('#1102');
+      expect(answer?.why, dataType).toContain('#1251');
+      expect(answer?.why, dataType).toContain('That service is a third party, hence shared');
+      // The two device paths #1103 removed are not described as live.
+      expect(answer?.why, dataType).not.toContain('off again whenever the app is opened');
+      expect(answer?.why, dataType).not.toContain('is sent to the source they chose');
+      expect(answer?.why, dataType).not.toContain('are sent as numbers to the source they chose');
     }
   });
 
@@ -287,10 +301,10 @@ describe('the declaration filed on Play', () => {
     );
     expect(fitness?.why).toContain('total climb (the height gained over the section');
     expect(fitness?.why).toContain('a difference between two heights and never an altitude');
-    expect(fitness?.why).toContain('No position, altitude, date or identifier is sent');
+    expect(fitness?.why).toContain('no position, altitude, date or identifier is in the numbers');
   });
 
-  it('answers the photos row as collected, optional and not shared — #387', () => {
+  it('answers the photos row as collected and optional — #387 — and, since #1106, shared', () => {
     // ⚠️ **Re-filed in the same pull request as the first byte**, which is
     // #377's epic criterion: the declaration is true of the shipped app at
     // every point, not only at the end. `apps/web/src/privacy/no-network.test.ts`
@@ -300,9 +314,11 @@ describe('the declaration filed on Play', () => {
     expect(photos, 'the app has a camera and the form has no Photos row').toBeDefined();
     expect(photos?.collected).toBe(true);
     expect(photos?.optional).toBe(true);
-    // Not a third party: the rider's own machine, on a press. A hosted path
-    // would make this `true`, and is not built.
-    expect(photos?.shared).toBe(false);
+    // #387's own path is not a third party: the rider's own machine, on a
+    // press. *"A hosted path would make this `true`"*, this comment used to
+    // say, *"and is not built"*. #1106 built one — through the rider's
+    // instance, on their own key, by name — so it is `true`.
+    expect(photos?.shared).toBe(true);
     expect(photos?.why).toContain('#387');
   });
 
@@ -323,7 +339,23 @@ describe('the declaration filed on Play', () => {
     expect(photos?.why).toContain('about five a second');
     expect(photos?.why).toContain('off by default');
     expect(photos?.collected).toBe(true);
-    expect(photos?.shared).toBe(false);
+  });
+
+  it('names the side camera’s pictures to the rider’s instance, and on to a hosted service by name — #1106', () => {
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    expect(photos).toMatchObject({ collected: true, shared: true, optional: true });
+    const why = photos?.why ?? '';
+    expect(why).toContain('#1106');
+    // To the instance: sealed, and not stored there.
+    expect(why).toContain('sealed on the device for that instance alone');
+    expect(why).toContain('does not store it — not in its database, a file or a log');
+    // On to a third party: its own switch, by name, on the rider's own key.
+    expect(why).toContain('a consent that names the service');
+    expect(why).toContain('a third party, hence shared');
+    expect(why).toContain('the rider holds their own key for');
+    expect(why).toContain('Without the sealed connection no picture is sent at all');
+    // And what #387 said of its own picture is still said of that picture alone.
+    expect(why).toContain('That picture is not sent to this project or to an instance');
   });
 
   it('collects nothing else — the map, the camera, the post-ride ask, an instance and its rooms, and nothing more', () => {
@@ -338,15 +370,29 @@ describe('the declaration filed on Play', () => {
       'Health and fitness — fitness info',
       'Personal info — Name',
       'Personal info — User IDs',
+      // #778, #1195: what a sync sends.
+      'Files and docs',
+      'App activity — Other user-generated content',
       'Photos and videos',
       'Device or other IDs',
     ]);
-    // Shared: the health rows alone, since #803. Photos and videos, and every
-    // location row, stay `shared: false` — the hosted path is never sent a
-    // picture and nothing it is sent carries a coordinate.
+    // Shared: the health rows since #803, the rider's own text since #1251
+    // (#1104 B8: parts of it can be looked up and sent on to a hosted service
+    // the rider agreed to), and Photos and videos since #1106,
+    // whose instance path can send a side-camera picture on to a hosted
+    // service the rider agreed to by name. Every location row stays
+    // `shared: false`: nothing sent to a hosted service carries a coordinate,
+    // and a picture is stripped of its metadata before it leaves the device.
     expect(
       DATA_SAFETY_DECLARATION.filter((answer) => answer.shared).map((answer) => answer.dataType),
-    ).toStrictEqual(['Health and fitness — health info', 'Health and fitness — fitness info']);
+    ).toStrictEqual([
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      // #1104: a document's text can reach a hosted service, masked.
+      'Files and docs',
+      'App activity — Other user-generated content',
+      'Photos and videos',
+    ]);
   });
 
   it('adding the camera permission leaves the location claim untouched', () => {
@@ -399,7 +445,7 @@ describe('the declaration filed on Play', () => {
     expect(ids?.why).toContain('Discord id');
   });
 
-  it('sends an instance a position only as the route of a room the rider makes — #777, #784', () => {
+  it('sends an instance a position only as a room’s route or a synced ride — #777, #784, #778', () => {
     // #778: the location rule must pass with the new declaration, not be
     // deleted. Connecting sends no position; making a room sends its route.
     const precise = DATA_SAFETY_DECLARATION.find(
@@ -411,6 +457,55 @@ describe('the declaration filed on Play', () => {
     const instance = DATA_PATHS.find((path) => path.id === 'instance');
     expect(instance?.dataTypes).toContain('Location — precise location');
     expect(instance?.encryptedInTransit).toBe(true);
+  });
+
+  it('answers what a sync sends before the build that offers it — #778, #1195', () => {
+    // #1195 is blocked by #778: Play must never be told less than the app
+    // does, so every row a sync moves is answered here, before Sync ships.
+    const row = (dataType: string) =>
+      DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+    const instance = DATA_PATHS.find((path) => path.id === 'instance');
+    for (const dataType of [
+      'Location — precise location',
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'Files and docs',
+      'App activity — Other user-generated content',
+    ]) {
+      const answer = row(dataType);
+      expect(answer?.collected, dataType).toBe(true);
+      expect(answer?.optional, dataType).toBe(true);
+      expect(answer?.why, dataType).toContain('#1195');
+      expect(answer?.why, dataType).toContain('sealed on the device for that instance alone');
+      expect(answer?.why, dataType).toContain('which needs the instance’s card');
+      expect(instance?.dataTypes, dataType).toContain(dataType);
+    }
+    // The rider's own copy on an instance they chose is not a third party.
+    // Files and docs is shared since #1104 (the owner's ruling of
+    // 2026-10-26), by the hosted service the documents' text can reach
+    // through `history_search`, not by the sync.
+    expect(row('Files and docs')?.shared).toBe(true);
+    expect(row('Files and docs')?.why).toContain('those parts are sent to it, masked first');
+    expect(row('Files and docs')?.why).toContain('that service is a third party, hence shared');
+    expect(row('App activity — Other user-generated content')?.why).toContain(
+      'The instance keeps a searchable copy',
+    );
+    expect(row('Files and docs')?.why).not.toContain('Nothing is uploaded');
+    expect(row('Health and fitness — health info')?.why).not.toContain(
+      'sends none of it to an instance',
+    );
+    expect(DATA_SAFETY_SECTION_ANSWERS.deletionRequests.why).toContain(
+      'everything the rider synced to it',
+    );
+    // #1215's review: a ride is sent as a FIT file this app writes, and its
+    // signed record carries the ride's name and date.
+    for (const dataType of ['Location — precise location', 'Files and docs']) {
+      const why = row(dataType)?.why ?? '';
+      expect(why, dataType).not.toContain('as the file it was recorded or imported as');
+      expect(why, dataType).toContain('a FIT file the app writes from the ride');
+    }
+    // And the location rule still passes with the new declaration (#778).
+    expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
   });
 
   it('names what a room sends and what a race publishes in the fitness row — #784, #785', () => {
@@ -547,7 +642,14 @@ describe('the section-level answers filed on Play — #562', () => {
     expect(deletionRequests.answer).toBe(true);
     expect(DELETION_REQUEST_EMAIL).toBe('matt@openzigs.ai');
     expect(deletionRequests.how).toContain(DELETION_REQUEST_EMAIL);
+    // #906: the in-app path, by the label its button carries, and the web page.
     expect(deletionRequests.how).toContain('#906');
+    expect(ACCOUNT_DELETION_IN_APP).toBe(ERASE_ACCOUNT_TEXT.erase);
+    expect(deletionRequests.how).toContain(ACCOUNT_DELETION_IN_APP);
+    expect(ACCOUNT_DELETION_WEB_PAGE).toBe(ACCOUNT_DELETION_URL);
+    expect(deletionRequests.how).toContain(ACCOUNT_DELETION_WEB_PAGE);
+    expect(deletionRequests.how).not.toContain('until');
+    expect(deletionRequests.why).not.toContain('until #906');
     for (const answer of [encryptedInTransit, deletionRequests]) {
       expect(answer.why).toContain('2026-09-30');
     }
@@ -582,14 +684,11 @@ describe('each path’s encryption answer is the one the client enforces — #56
     expect(pathById('own-computer').encryptedInTransit).toBe(plain.endpoint === undefined);
   });
 
-  it('a hosted model refuses a plain http address, so that path is encrypted', () => {
-    const plain = hostedModelDecision({
-      address: 'http://models.example',
-      model: 'a-model',
-      key: 'a-key',
-    });
-    expect(plain.refusal).toBe('not-https');
-    expect(pathById('hosted-model').encryptedInTransit).toBe(plain.model === undefined);
+  it('names no path to a hosted model from the device — #1103', () => {
+    // The device sends a hosted model nothing since #1103; the rider's
+    // instance does, and that leg is the instance's.
+    expect(DATA_PATHS.map((path) => path.id)).not.toContain('hosted-model');
+    expect(pathById('own-computer').dataTypes).toStrictEqual(['Photos and videos']);
   });
 
   it('an instance refuses plain http across a network, and admits it only to this device', () => {
@@ -622,7 +721,8 @@ describe('the privacy policy agrees with the section-level answers — #562', ()
     expect(policySection('Pictures sent to your own computer')).toContain(
       'not encrypted on the way',
     );
-    expect(policySection('A ride sent to your own computer')).toContain('not encrypted on the way');
+    // #1103 removed *A ride sent to your own computer*, and the path with it.
+    expect(POLICY).not.toContain('## A ride sent to your own computer');
   });
 
   it('says everything else travels encrypted, naming the one exception', () => {
@@ -630,6 +730,14 @@ describe('the privacy policy agrees with the section-level answers — #562', ()
     expect(leaves).toContain('encrypted on the way');
     expect(leaves).toContain('except');
     expect(leaves).toContain('your own computer');
+  });
+
+  it('the web page for requesting deletion gives the same address — #906', () => {
+    const page = readFileSync(
+      new URL(`../../../../${ACCOUNT_DELETION_PATH}`, import.meta.url),
+      'utf8',
+    );
+    expect(page).toContain(DELETION_REQUEST_EMAIL);
   });
 
   it('names the deletion address where it says how to delete, and in Contact', () => {
@@ -701,5 +809,146 @@ describe('the manifest the app actually ships supports the declaration', () => {
         locationClaimFaults(permissions.map((one) => ({ ...one, maxSdkVersion: null }))).length,
       ).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('a hosted service on the rider’s own key, sent to by their instance (#1251, #1104 B8)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each(['Health and fitness — health info', 'Health and fitness — fitness info'])(
+    'the %s row says the instance sends the numbers on, masked, to the address the consent names',
+    (dataType) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain(
+        'the instance sends those numbers, masked, to that service at the https address the rider’s consent names',
+      );
+      expect(why).toContain('That service is a third party, hence shared.');
+      expect(why).toContain('is withdrawn when the address changes');
+      expect(why).toContain('the key is always the rider’s own, never the operator’s');
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('the rider’s own text is SHARED: parts of it can be sent on, masked, and masking promises nothing', () => {
+    const answer = row('App activity — Other user-generated content');
+    expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
+    expect(answer?.why).toContain('those parts are sent to it, masked first');
+    expect(answer?.why).toContain(
+      'Masking cannot guarantee that nothing personal in free text gets through',
+    );
+    // Analytics is still not collected: the split row is what moved.
+    expect(row('App activity')).toMatchObject({ collected: false, shared: false });
+  });
+
+  it('says the privacy zones go to the instance and not to the service, and no location row is shared', () => {
+    const why = row('Location — precise location')?.why ?? '';
+    expect(why).toContain(
+      'their privacy zones — each one’s name, centre and radius — go to that instance',
+    );
+    expect(why).toContain('the zones are not sent to the service');
+    expect(row('Location — precise location')?.shared).toBe(false);
+    expect(row('Location — approximate location')?.shared).toBe(false);
+  });
+});
+
+describe('a write-up asked of the rider’s instance (#1102, #1104 B8)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each(['Health and fitness — health info', 'Health and fitness — fitness info'])(
+    'the %s row says a ride’s numbers go to the instance, sealed, never a picture or a position',
+    (dataType) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain('asks the instance they connected for a write-up (#1102)');
+      expect(why).toContain('sealed on the device for that instance alone (ADR 0047)');
+      expect(why).toContain('no position, altitude, date or identifier is in the numbers');
+      expect(why).toContain('no picture is ever sent');
+      // The rider's own instance is not a third party: the answers do not move.
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+});
+
+describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-10)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each([
+    [
+      'Health and fitness — health info',
+      'its mean and highest heart rate, and how long the heart rate was inside the range the rider chose',
+    ],
+    [
+      'Health and fitness — fitness info',
+      'its mean power as a share of the rider’s threshold power, its mean cadence and how many times the target was eased',
+    ],
+  ])(
+    'the %s row says what a summary carries, when it is sent, to whom, and that it is off per ride',
+    (dataType, carries) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain(carries);
+      expect(why).toContain(
+        'With re-plans during the ride switched on for a ride (#1245; off at the start of every ride)',
+      );
+      expect(why).toContain(
+        'is sent during the ride, as a block begins and never more often than every 3 minutes, to the instance the rider connected',
+      );
+      expect(why).toContain('which keeps each request for 7 days');
+      // No hosted source: #1244 asks only the instance's own model, so a re-plan shares nothing.
+      expect(why).toContain(
+        'the app asks for no hosted service for a re-plan, so a re-plan sends nothing to a third party and does not add to shared',
+      );
+      expect(why).not.toContain('the instance sends them on');
+      expect(why).not.toContain('effort check-in');
+      expect(why).toContain(
+        'No position, date, name or identifier is in a summary, and no second-by-second recording is sent',
+      );
+      // Collected and shared before this: the answers filed on Play do not move.
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('the rider’s own text row names the workout goals and what a re-plan’s model may look up', () => {
+    const answer = row('App activity — Other user-generated content');
+    expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
+    expect(answer?.why).toContain(
+      'go to their instance with each block summary, sealed, and the model on the instance’s own machine or its own private network may look up',
+    );
+    expect(answer?.why).toContain(
+      'what the rider wrote about their goals and the blocks of their saved workouts, if synced',
+    );
+    expect(answer?.why).toContain(
+      'but not the time they want to spend in their range, which the app leaves out',
+    );
+    expect(answer?.why).toContain(
+      'the app asks for no hosted service for a re-plan, so none of it is sent to a third party',
+    );
+    expect(answer?.why).not.toContain('those are sent to it, masked first');
+  });
+
+  it('the rider’s own text row names each ride’s re-plan record, which a sync sends (#1315)', () => {
+    expect(row('App activity — Other user-generated content')?.why).toContain(
+      'each ride’s write-up, side-camera report and record of the re-plans accepted or refused during it (#1315), stay on the device until the rider syncs',
+    );
+  });
+
+  it('the health info row names the heart-rate numbers the rider chose, which travel too', () => {
+    const why = row('Health and fitness — health info')?.why ?? '';
+    expect(why).toContain(
+      'the range of each heart-rate-hold block of the workout, in beats per minute',
+    );
+    expect(why).toContain(
+      'from their workout goals the heart-rate range and the heart rate they chose not to go above',
+    );
+  });
+
+  it('moves no other row: location, photos and identifiers say nothing of a re-plan', () => {
+    const others = DATA_SAFETY_DECLARATION.filter((answer) => answer.why.includes('re-plan'));
+    expect(others.map((answer) => answer.dataType)).toStrictEqual([
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'App activity — Other user-generated content',
+    ]);
   });
 });

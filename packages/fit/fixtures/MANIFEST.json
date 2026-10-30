@@ -1,8 +1,8 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 116181,
-  "totalPositionCount": 973,
+  "totalBytes": 133435,
+  "totalPositionCount": 1003,
   "fixtures": [
     {
       "name": "nominal-outdoor-ride.fit",
@@ -179,6 +179,14 @@
       "sha256": "3ae15bc793dc7dcd2cde8714ff31a8446e6f9eb86fa767e399082d6a57c2411b",
       "positionCount": 0,
       "purpose": "A TCX whose trackpoints carry no Position element at all. The indoor case again, in the format where \"no position\" is an absent child rather than an undeclared field — a reader that dereferences Position unconditionally throws on the first point."
+    },
+    {
+      "name": "lap-figures.tcx",
+      "format": "tcx",
+      "bytes": 17254,
+      "sha256": "093e376b7e329d33c80a166bae6cf5e2a480b66985bbb9e6ccbe9e07c596b419",
+      "positionCount": 30,
+      "purpose": "Two laps carrying the figures and the kind TCX has elements for (#1321): average and highest heart rate, the lap cadence, the LX extension’s average and highest watts, Intensity and TriggerMethod — a whole lap ended by distance and a resting one ended by hand with no power. Among them sit elements a head unit also writes and this package does not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the last Value it saw reads the wrong figure."
     },
     {
       "name": "xxe-external-entity.tcx",

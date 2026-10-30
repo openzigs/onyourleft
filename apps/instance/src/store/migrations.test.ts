@@ -76,7 +76,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   activity_record: `INSERT INTO activity_record (athlete_id, content_sha256, signed_record, received_at) VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
   room: `INSERT INTO room VALUES ('room', 'race', 'private', '${'2'.repeat(64)}', 1)`,
   result: `INSERT INTO result (room_id, athlete_id, finish_ms, flags) VALUES ('room', 'a', 1000, 0)`,
-  private_room: `INSERT INTO private_room VALUES ('room', '${'c'.repeat(64)}', 0, 16, NULL)`,
+  // The columns named, so migration 0033's `starts_at` is NULL (#788).
+  private_room: `INSERT INTO private_room (room_id, code_sha256, route_loop, created_at, closed_at) VALUES ('room', '${'c'.repeat(64)}', 0, 16, NULL)`,
   room_member: `INSERT INTO room_member VALUES ('room', 'a', 'creator', 17)`,
   room_course: `INSERT INTO room_course (room_id, length_metres, grades, riding_position, capacity, countdown_ms, rejoin_window_ms, race_started_at) VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,
   auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
@@ -86,16 +87,39 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // row: with no id the autoincrement made one, and any migration after 0004
   // read that as its `down` adding a row (#780, the first such migration).
   display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
-  recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
-  email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
-  recovery_email_confirmation: `INSERT INTO recovery_email_confirmation VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
-  block: `INSERT INTO block VALUES ('a', 'b', 10)`,
+  // The columns named, so migration 0019's `confirmed_at` and `bound_by_key` are NULL (#1194).
+  recovery_email: `INSERT INTO recovery_email (athlete_id, address) VALUES ('a', 'a@example.org')`,
+  // The columns named, so migration 0019's `address` is NULL (#1194).
+  email_recovery_token: `INSERT INTO email_recovery_token (token_sha256, athlete_id, expires_at, used_at) VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
+  // The columns named, so migration 0018's `requested_by_key` is NULL (#1193).
+  recovery_email_confirmation: `INSERT INTO recovery_email_confirmation (token_sha256, athlete_id, address, expires_at, used_at) VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
+  // The columns named, so migration 0035's handle is its default and its name NULL (#1529).
+  block: `INSERT INTO block (athlete_id, blocked_athlete_id, created_at) VALUES ('a', 'b', 10)`,
   report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
   invite_code: `INSERT INTO invite_code VALUES ('${'8'.repeat(64)}', 'a', 13, NULL)`,
   sync_item: `INSERT INTO sync_item (seq, athlete_id, kind, item_key, digest, body, received_at, deleted_at) VALUES (1, 'a', 'write-up', 'ride-1', '${'9'.repeat(64)}', x'7b7d', 14, NULL)`,
   history_source: `INSERT INTO history_source VALUES ('a', 'write-up', 'ride-1', '${'9'.repeat(64)}', 'm', 'c', 'indexed', 1, 15)`,
   history_passage: `INSERT INTO history_passage VALUES ('a', 'write-up', 'ride-1', 0, 'A ride.', 'm', 2, 'c', x'0000803f00000000')`,
+  hosted_model_key: `INSERT INTO hosted_model_key VALUES (1, 'a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 18)`,
+  instance_key: `INSERT INTO instance_key VALUES ('0123456789abcdef', 'encryption', x'${'ab'.repeat(32)}', x'000102030405060708090a0b', x'ffee', 1790000000, 19, NULL)`,
+  instance_key_statement: `INSERT INTO instance_key_statement VALUES ('0123456789abcdef', 'key', 19, 172819, '{}', '${'cd'.repeat(64)}')`,
+  instance_key_lease: `INSERT INTO instance_key_lease VALUES ('keys', 'holder', 20)`,
+  sealed_replay: `INSERT INTO sealed_replay VALUES ('${'ef'.repeat(32)}', 20)`,
+  account_change: `INSERT INTO account_change (id, athlete_id, at, kind, actor_key, subject_key, via, address) VALUES (1, 'a', 21, 'key_added', 'key-a', 'key-a', 'link_code', NULL)`,
+  account_change_mark: `INSERT INTO account_change_mark VALUES ('a', 'key-a', 1, 22)`,
+  // The columns named, so migration 0022's `ride_id` is NULL (#1229).
+  analysis_job: `INSERT INTO analysis_job (id, athlete_id, status, source, template_version, input_json, candidate, failure, created_at, ended_at) VALUES ('job-a', 'a', 'succeeded', 'instance-local', '1', '{}', 'A ride.', NULL, 23, 24)`,
+  analysis_event: `INSERT INTO analysis_event VALUES ('job-a', 'a', 1, 'result', '{}', 24)`,
+  // The columns named, so migration 0023's `reasoning_tokens` is NULL (#1268).
+  athlete_hosted_key: `INSERT INTO athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at) VALUES ('a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 25)`,
+  athlete_hosted_consent: `INSERT INTO athlete_hosted_consent VALUES ('a', 'https://models.example', 26)`,
+  room_removal: `INSERT INTO room_removal VALUES ('room', 'a', 23)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
+  statement: `INSERT INTO statement VALUES (1, 'b', 'suspend', 'Facts', 'report', NULL, 'Terms 2', NULL, 0, NULL, 28)`,
+  appeal: `INSERT INTO appeal VALUES (1, 1, 'b', 'Grounds', 29, NULL, NULL, NULL, NULL, NULL)`,
+  notice: `INSERT INTO notice VALUES (1, 27, 'illegal_content', 'Why', '["room:0123456789abcdef0123456789abcdef"]', NULL, NULL, NULL, 0)`,
+  notice_step: `INSERT INTO notice_step VALUES (1, 1, 'decided', 'a', 'Not illegal', 1, 30)`,
+  hidden_item: `INSERT INTO hidden_item VALUES (1, 'room:0123456789abcdef0123456789abcdef', 'b', 31, NULL)`,
 };
 
 /**
@@ -106,6 +130,11 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
  */
 const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0007-moderation': 'moderation_log',
+  '0026-notices': 'notice',
+  '0027-statements': 'statement',
+  '0028-appeals': 'appeal',
+  '0029-notice-steps': 'notice_step',
+  '0030-hidden-items': 'hidden_item',
 };
 
 interface Snapshot {
@@ -283,6 +312,53 @@ describe('the migrations (#769)', () => {
     });
   });
 
+  it('refuses to undo 0026 while a notice has been received, and changes nothing (#907)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0026-notices') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const before = snapshot(path);
+    expect(before.rows.notice).toBe(1);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /has received notices/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0026-notices');
+    });
+  });
+
+  it('refuses to undo 0032 while a load-run account is held, and changes nothing (#1383)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0032-load-accounts') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO athlete (id, display_name, created_at, registration_state, load_run_at) VALUES ('load', 'Load 1', 32, 'active', 32)`,
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshot(path);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /throwaway accounts are held/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0032-load-accounts');
+    });
+  });
+
   it('ends every way-out session when 0012 is undone, so a rolled-back instance gives a suspended rider no more (#898)', async () => {
     const path = await freshPath();
     await withKysely(path, (db) => migrateToLatest(db));
@@ -313,6 +389,162 @@ describe('the migrations (#769)', () => {
     } finally {
       read.close();
     }
+  });
+
+  it('takes the account-change log, the marks and `requested_by_key` away with 0018, rows and all, and puts them back empty (#1193)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0018-account-changes') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const columns = (): string[] => {
+      const database = openDatabase(path);
+      try {
+        return (
+          database
+            .prepare(`SELECT name FROM pragma_table_info('recovery_email_confirmation')`)
+            .all() as {
+            name: string;
+          }[]
+        ).map((each) => each.name);
+      } finally {
+        database.close();
+      }
+    };
+    const seeded = snapshot(path);
+    expect(seeded.rows.account_change).toBe(1);
+    expect(seeded.rows.account_change_mark).toBe(1);
+    expect(columns()).toContain('requested_by_key');
+
+    await withKysely(path, (db) => migrateDownOne(db));
+    const undone = snapshot(path);
+    expect(undone.rows).not.toHaveProperty('account_change');
+    expect(undone.rows).not.toHaveProperty('account_change_mark');
+    expect(columns()).not.toContain('requested_by_key');
+    // Every other row stays, the confirmation the column was added to included.
+    expect(undone.rows.recovery_email_confirmation).toBe(1);
+    expect(undone.rows.device_key).toBe(seeded.rows.device_key);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    const redone = snapshot(path);
+    expect([redone.rows.account_change, redone.rows.account_change_mark]).toEqual([0, 0]);
+    expect(columns()).toContain('requested_by_key');
+  });
+
+  it('migrates three athletes’ single addresses to established with 0019, and back, and up again (#1194)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0018-account-changes') {
+        await migrateDownOne(db);
+      }
+    });
+    const rows = (query: string): unknown[] => {
+      const database = openDatabase(path);
+      try {
+        return database.prepare(query).all();
+      } finally {
+        database.close();
+      }
+    };
+    const exec = (statement: string): void => {
+      const database = openDatabase(path);
+      try {
+        database.exec(statement);
+      } finally {
+        database.close();
+      }
+    };
+    // Today's shape: one address each, a token mailed to it, one pending
+    // confirmation each.
+    for (const athlete of ['a', 'b', 'c']) {
+      exec(`
+        INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('${athlete}', 'A', 1, 'active');
+        INSERT INTO device_key (public_key, athlete_id, added_at, revoked_at) VALUES ('key-${athlete}', '${athlete}', 2, NULL);
+        INSERT INTO recovery_email VALUES ('${athlete}', '${athlete}@example.org');
+        INSERT INTO email_recovery_token VALUES ('${athlete.repeat(64)}', '${athlete}', 9, NULL);
+        INSERT INTO recovery_email_confirmation (token_sha256, athlete_id, address, expires_at, used_at, requested_by_key)
+          VALUES ('${athlete.toUpperCase().repeat(64)}', '${athlete}', 'new-${athlete}@example.org', 10, NULL, 'key-${athlete}');
+      `);
+    }
+    const before = snapshot(path);
+    const today = rows(`SELECT * FROM recovery_email ORDER BY athlete_id`);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    expect(rows(`SELECT * FROM recovery_email ORDER BY athlete_id`)).toEqual(
+      ['a', 'b', 'c'].map((athlete) => ({
+        athlete_id: athlete,
+        address: `${athlete}@example.org`,
+        confirmed_at: null,
+        bound_by_key: null,
+      })),
+    );
+    // Each token took its athlete's one address.
+    expect(
+      rows(`SELECT athlete_id, address FROM email_recovery_token ORDER BY athlete_id`),
+    ).toEqual(
+      ['a', 'b', 'c'].map((athlete) => ({
+        athlete_id: athlete,
+        address: `${athlete}@example.org`,
+      })),
+    );
+    const migrated = snapshot(path);
+
+    // The new shape holds what the old one cannot: a second address for `a`,
+    // which is the row documented as lost on `down`.
+    exec(`INSERT INTO recovery_email VALUES ('a', 'second-a@example.org', 50, 'key-a')`);
+    await withKysely(path, (db) => migrateDownOne(db));
+    const undone = snapshot(path);
+    expect(undone.schema).toEqual(before.schema);
+    expect(undone.rows).toEqual(before.rows);
+    // The address bound before 0019 is the one kept, and every row is today's.
+    expect(rows(`SELECT * FROM recovery_email ORDER BY athlete_id`)).toEqual(today);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    expect(snapshot(path)).toEqual(migrated);
+  });
+
+  it('takes both analysis tables away with 0020, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0020-analysis-jobs') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const named = (): string[] => {
+      const database = openDatabase(path);
+      try {
+        return (
+          database
+            .prepare(`SELECT name FROM sqlite_schema WHERE name LIKE 'analysis_%' ORDER BY name`)
+            .all() as { name: string }[]
+        ).map((each) => each.name);
+      } finally {
+        database.close();
+      }
+    };
+    expect(named()).toEqual([
+      'analysis_event',
+      'analysis_job',
+      'analysis_job_by_athlete',
+      'analysis_job_by_status',
+    ]);
+    const seeded = snapshot(path);
+    expect([seeded.rows.analysis_job, seeded.rows.analysis_event]).toEqual([1, 1]);
+
+    await withKysely(path, (db) => migrateDownOne(db));
+    expect(named()).toEqual([]);
+    expect(snapshot(path).rows.athlete).toBe(seeded.rows.athlete);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    const redone = snapshot(path);
+    expect(named()).toHaveLength(4);
+    expect([redone.rows.analysis_job, redone.rows.analysis_event]).toEqual([0, 0]);
   });
 
   it('refuses a migration with no down, rather than letting Kysely skip it', async () => {

@@ -65,9 +65,11 @@ import {
   createRecordingSession,
   restoreRecordingSession,
   seconds,
+  unixSeconds,
   type AutoPausePolicy,
   type RecordingOutcome,
   type RecordingSession,
+  type ReplanRecord,
   type Seconds,
   type UnixSeconds,
 } from '@onyourleft/domain';
@@ -77,10 +79,13 @@ import type {
   AthleteId,
   NewRecordingChunk,
   NewRecordingSession,
+  RecordedCourseLap,
+  RecordedWorkoutBlock,
   RecordingSessionId,
-  RecordingSessionRecord,
+  RecordingSessionListing,
   RecordingStoredState,
   RecoveredRecording,
+  RoomRaceFact,
   StreamChannelValue,
 } from '@onyourleft/store';
 
@@ -140,7 +145,7 @@ export const MAX_DATA_LOSS_SECONDS = maxDataLossSeconds();
 export interface RecordingCheckpointStore {
   putRecordingSession(record: NewRecordingSession): Promise<RecordingSessionId>;
   appendRecordingChunk(chunk: NewRecordingChunk): Promise<number>;
-  listRecordingSessions(owner: AthleteId): Promise<RecordingSessionRecord[]>;
+  readRecordingSessions(owner: AthleteId): Promise<RecordingSessionListing>;
   recoverRecording(
     owner: AthleteId,
     id: RecordingSessionId,
@@ -212,6 +217,91 @@ export interface Recorder {
   readonly flushedThrough: number;
   /** How many chunks this recorder has written. Also the next `seq`. */
   readonly checkpoints: number;
+  /** The grid spacing of the session's samples. */
+  readonly sampleInterval: Seconds;
+  /**
+   * The laps of a course completed during this recording, in order — #1312,
+   * `laps.ts`. A recorder rebuilt by {@link recoverRecorder} starts with the
+   * ones its checkpoint held, and with the lap that was in progress when the
+   * tab died as a part lap after them (#1322).
+   */
+  readonly courseLaps: readonly RecordedCourseLap[];
+  /**
+   * Keep a lap of a course that has just ended — #1312. It closes the lap in
+   * progress ({@link noteOpenCourseLap}).
+   *
+   * ⚠️ **The header is written at once** (#1322), as a pause is, rather than
+   * with the next flush: until #1322 a crash within one flush interval of the
+   * line lost the lap. Only the HEADER — never a chunk — because this is
+   * called from the game's frame and a second flush running beside a tick's
+   * would append two chunks under one sequence number. The lap's own samples
+   * still reach the disk with the next flush, as every sample does; a lap
+   * that ends past the last recovered sample is one `laps.ts` already
+   * handles. **Never throws**: a failure is a {@link storageState}, as for
+   * every write here.
+   */
+  noteCourseLap(lap: RecordedCourseLap): void;
+  /**
+   * How far round the lap in progress the rider has got, as a part lap from
+   * where it began to now — or `undefined` with no lap open — #1322.
+   *
+   * ⚠️ **Writes nothing itself**, and that is the bound it keeps: it goes out
+   * in the header every {@link flush} rewrites, so a recording recovered after
+   * the tab died saves the lap in progress as far as the last flush. A ride
+   * ended normally never needs it: the game says how far round it got then.
+   */
+  noteOpenCourseLap(lap: RecordedCourseLap | undefined): void;
+  /**
+   * The private races ridden during this recording, in the order they ended —
+   * #785. A recorder rebuilt by {@link recoverRecorder} starts with the ones
+   * its checkpoint held (#1360's review, B2).
+   */
+  readonly roomRaces: readonly RoomRaceFact[];
+  /**
+   * Keep a race that has just ended, beside any before it — #785.
+   *
+   * ⚠️ **Writes nothing itself**, for {@link noteCourseLap}'s reason: the
+   * races go out in the header every {@link Recorder.flush} rewrites, so one
+   * is on disk within one flush interval, and a race the store would not read
+   * back is left out of that header rather than refusing it.
+   */
+  noteRoomRace(race: RoomRaceFact): void;
+  /**
+   * The blocks of the workouts ridden during this recording, in order, the one
+   * being ridden last and held as cut short — #1319, `workout-blocks.ts`. A
+   * recorder rebuilt by {@link recoverRecorder} starts with the ones its
+   * checkpoint held.
+   */
+  readonly workoutBlocks: readonly RecordedWorkoutBlock[];
+  /**
+   * Replace the recording's workout blocks with `blocks` — #1319.
+   *
+   * ⚠️ **Writes nothing itself**, for {@link noteRoomRace}'s reason: the
+   * blocks go out in the header every {@link Recorder.flush} rewrites, so a
+   * recording that dies is recovered with them as far as the last flush.
+   */
+  noteWorkoutBlocks(blocks: readonly RecordedWorkoutBlock[]): void;
+  /**
+   * The re-plan decisions made during this recording, oldest first — #1328,
+   * ADR 0048 P9. A recorder rebuilt by {@link recoverRecorder} starts with
+   * the ones its checkpoint held.
+   */
+  readonly replans: readonly ReplanRecord[];
+  /**
+   * How many re-plan records this recording's checkpoint could not keep or
+   * read back, as its store counted them — #1328. Absent when none was.
+   */
+  readonly replansDropped: number | undefined;
+  /**
+   * Replace the recording's re-plan decisions with `records` — #1328.
+   *
+   * ⚠️ **Writes nothing itself**, for {@link noteRoomRace}'s reason: they go
+   * out in the header every {@link Recorder.flush} rewrites, so a recording
+   * that dies is recovered with them as far as the last flush, and a record
+   * the store would not read back is left out of that header, and counted,
+   * rather than refusing it.
+   */
+  noteReplans(records: readonly ReplanRecord[]): void;
 
   /** Starts recording and writes the header, so a crash one second in is recoverable. */
   start(at: UnixSeconds): Promise<void>;
@@ -273,11 +363,16 @@ export function createRecorder(options: RecorderOptions): Recorder {
     lateToleranceSeconds: options.lateToleranceSeconds ?? DEFAULT_LATE_TOLERANCE_SECONDS,
     ...autoPauseOption(options),
   });
-  return recorderOver(options, session, {
-    flushedThrough: 0,
-    checkpoints: 0,
-    headerWritten: false,
-  });
+  return recorderOver(
+    options,
+    session,
+    { flushedThrough: 0, checkpoints: 0, headerWritten: false },
+    interval,
+    [],
+    [],
+    [],
+    { records: [], dropped: undefined },
+  );
 }
 
 /** What {@link recoverRecorder} found, and the recorder that continues it. */
@@ -287,12 +382,16 @@ export interface RecoveredRecorder {
   readonly recovered: RecoveredRecording;
 }
 
-/** Every recording on this device that could be continued or discarded. */
+/**
+ * Every recording on this device that could be continued or discarded, and
+ * every one whose header will not read (#1325) — which can only be discarded,
+ * and is reported rather than hiding the others.
+ */
 export async function listRecoverableRecordings(
   store: RecordingCheckpointStore,
   athleteId: AthleteId,
-): Promise<RecordingSessionRecord[]> {
-  return store.listRecordingSessions(athleteId);
+): Promise<RecordingSessionListing> {
+  return store.readRecordingSessions(athleteId);
 }
 
 /**
@@ -331,11 +430,27 @@ export async function recoverRecorder(
       pauses: recovered.pauses,
     },
   );
-  const recorder = recorderOver(options, session, {
-    flushedThrough: recovered.sampleCount,
-    checkpoints: recovered.chunks,
-    headerWritten: true,
-  });
+  const recorder = recorderOver(
+    options,
+    session,
+    { flushedThrough: recovered.sampleCount, checkpoints: recovered.chunks, headerWritten: true },
+    recovered.sampleInterval,
+    // #1312: or the next header this recorder writes would take them off disk.
+    // #1322: and the lap in progress when the tab died, CLOSED here as a part
+    // lap — the game ride that was riding it went with the tab, as a game ride
+    // that ends part-way round closes one. A continued ride starts a new game
+    // ride from the line, so its next lap is numbered after this one.
+    recovered.openCourseLap === undefined
+      ? recovered.courseLaps
+      : [...recovered.courseLaps, { ...recovered.openCourseLap, partial: true }],
+    // #785, for the same reason.
+    recovered.roomRaces,
+    // #1319, for the same reason. The block being ridden when the tab died
+    // is already held as cut short.
+    recovered.workoutBlocks ?? [],
+    // #1328, for the same reason.
+    { records: recovered.replans ?? [], dropped: recovered.replansDropped },
+  );
   return { recorder, recovered };
 }
 
@@ -368,8 +483,23 @@ function recorderOver(
   options: Pick<RecorderOptions, 'store' | 'athleteId' | 'sessionId' | 'flushIntervalSeconds'>,
   session: RecordingSession<StreamChannelValue>,
   cursor: RecorderCursor,
+  sampleInterval: Seconds,
+  lapsSoFar: readonly RecordedCourseLap[],
+  racesSoFar: readonly RoomRaceFact[],
+  blocksSoFar: readonly RecordedWorkoutBlock[],
+  replansSoFar: { readonly records: readonly ReplanRecord[]; readonly dropped: number | undefined },
 ): Recorder {
   const { store, athleteId, sessionId } = options;
+  /** @see Recorder.courseLaps */
+  let courseLaps = lapsSoFar;
+  /** @see Recorder.noteOpenCourseLap */
+  let openCourseLap: RecordedCourseLap | undefined;
+  /** @see Recorder.roomRaces */
+  let roomRaces = racesSoFar;
+  /** @see Recorder.workoutBlocks */
+  let workoutBlocks = blocksSoFar;
+  /** @see Recorder.replans */
+  let replans = replansSoFar.records;
   const flushInterval = options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS;
 
   let storageState: RecorderStorageState = 'ok';
@@ -387,10 +517,35 @@ function recorderOver(
       startedAt,
       sampleInterval: series.sampleInterval,
       state: storedState(),
-      updatedAt: at,
+      // ⚠️ Never earlier than the last lap's end (#1312). The store reads a
+      // lap that ends after its header was written as a lap outside its
+      // recording, and drops the list. A recorder rebuilt from a checkpoint
+      // restarts its clock at its last RECOVERED slot, which is a second or
+      // two before a lap that ended inside the late tolerance — so until its
+      // clock moves on, `at` is earlier than a lap it already holds.
+      // #1319: nor than the block being ridden has been run on to, for the
+      // same reason — a list with a block past its header is dropped whole.
+      updatedAt: unixSeconds(Math.max(at, courseLaps.at(-1)?.to.at ?? at, lastBlockEnd())),
       pauses: series.pauses,
       ...(savedAs === undefined ? {} : { savedAs }),
+      ...(courseLaps.length === 0 ? {} : { courseLaps }),
+      ...(openCourseLap === undefined ? {} : { openCourseLap }),
+      ...(roomRaces.length === 0 ? {} : { roomRaces }),
+      ...(workoutBlocks.length === 0 ? {} : { workoutBlocks }),
+      ...(replans.length === 0 ? {} : { replans }),
+      // A count the checkpoint carried when this recorder was rebuilt from it:
+      // written on, so a second recovery says the record has a gap.
+      ...(replansSoFar.dropped === undefined ? {} : { replansDropped: replansSoFar.dropped }),
     };
+  }
+
+  /** The latest instant any workout block has been run on to, or nought with none. */
+  function lastBlockEnd(): number {
+    let latest = 0;
+    for (const block of workoutBlocks) {
+      if (block.outcome !== 'skipped') latest = Math.max(latest, block.to.at);
+    }
+    return latest;
   }
 
   function storedState(): RecordingStoredState {
@@ -464,6 +619,44 @@ function recorderOver(
     },
     get checkpoints() {
       return cursor.checkpoints;
+    },
+    sampleInterval,
+    get courseLaps() {
+      return courseLaps;
+    },
+    noteCourseLap(lap: RecordedCourseLap): void {
+      courseLaps = [...courseLaps, lap];
+      openCourseLap = undefined;
+      const startedAt = session.startedAt;
+      if (startedAt === undefined || !cursor.headerWritten) {
+        // No header on disk yet: the next flush writes one, laps and all.
+        return;
+      }
+      void attempt(async () => store.putRecordingSession(header(startedAt, session.timeline)));
+    },
+    noteOpenCourseLap(lap: RecordedCourseLap | undefined): void {
+      openCourseLap = lap;
+    },
+    get roomRaces() {
+      return roomRaces;
+    },
+    noteRoomRace(race: RoomRaceFact): void {
+      roomRaces = [...roomRaces, race];
+    },
+    get workoutBlocks() {
+      return workoutBlocks;
+    },
+    noteWorkoutBlocks(blocks: readonly RecordedWorkoutBlock[]): void {
+      workoutBlocks = blocks;
+    },
+    get replans() {
+      return replans;
+    },
+    get replansDropped() {
+      return replansSoFar.dropped;
+    },
+    noteReplans(records: readonly ReplanRecord[]): void {
+      replans = records;
     },
 
     async start(at: UnixSeconds): Promise<void> {

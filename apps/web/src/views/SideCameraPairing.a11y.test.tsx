@@ -90,7 +90,7 @@ function agreedController(codePixels?: () => ReturnType<typeof photographedCode>
     port: camera.port,
     schedule: manualSchedule().schedule,
   });
-  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   return controller;
 }
 

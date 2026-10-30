@@ -67,6 +67,7 @@ import type {
   SideAnalysisPort,
   SideAnalysisState,
   SideFramingState,
+  SideUnavailableReason,
 } from '../camera/side-analysis-port';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { PAIRING_READER_UNLOADED, usePairingScan } from '../camera/usePairingScan';
@@ -265,6 +266,9 @@ export function sidePicturesText(state: SideAnalysisState): string {
   if (state.place === 'computer') {
     return computerPicturesText(state, looked);
   }
+  if (state.place === 'instance') {
+    return instancePicturesText(state, looked);
+  }
   switch (state.model) {
     case 'waiting':
       return 'The phone’s pictures are looked at on this tablet as they arrive, shown here until the next one replaces them, and then thrown away. None has arrived yet.';
@@ -301,6 +305,54 @@ function computerPicturesText(state: SideAnalysisState, looked: number): string 
         `with you in ${String(state.posed)} of them. ` +
         `Skipped because your computer was busy: ${String(state.skipped)}.` +
         computerNobodyText(state)
+      );
+  }
+}
+
+/**
+ * Why the rider's instance stopped looking at pictures, in words — #1106. The
+ * owner's ruling: a model that takes no picture *"is refused cleanly, with a
+ * message that says why"*, and so is every other stop. ⚠️ **Each says no more
+ * pictures are sent**, because that is what the rider needs to know first.
+ */
+export const SIDE_INSTANCE_STOPPED_TEXT: Readonly<Record<SideUnavailableReason, string>> = {
+  'instance-without-pictures':
+    'Your instance does not take pictures: it runs a version from before this. No more pictures are being sent to it.',
+  'pictures-off':
+    'Your instance has no model that takes pictures: its operator has not named one. No more pictures are being sent to it, and none was kept.',
+  'no-hosted-service':
+    'Your instance could not use the service you agreed to: it holds no key of yours for it, or your key is now for another service. No more pictures are being sent. On the Camera page, ask your instance which service your key is for.',
+  'model-without-pictures':
+    'The model answered that it does not take pictures, so it cannot look at the side camera’s. No more pictures are being sent. Choose a model that takes pictures.',
+  'not-sealed':
+    'The sealed connection to your instance is not available, or this device is no longer signed in, so no picture is being sent.',
+  'switched-off':
+    'Sending the side camera’s pictures to your instance was switched off, so none is being sent.',
+  'not-answering':
+    'Your instance gave no usable answer about several pictures in a row, so no more are being sent to it.',
+};
+
+/**
+ * The same, when the rider switched the side camera over to their instance
+ * (#1106). ⚠️ **Every sentence says the pictures go to the instance**, because
+ * that is the promise the switch changed; none says what the model found.
+ */
+function instancePicturesText(state: SideAnalysisState, looked: number): string {
+  switch (state.model) {
+    case 'waiting':
+      return 'The phone’s pictures are sealed and sent on to your instance, about one a second, and not kept on this tablet. None has arrived yet.';
+    case 'loading':
+      return 'Sending the first picture to your instance, sealed. Pictures arriving meanwhile wait, one at a time.';
+    case 'unavailable':
+      return (
+        `${SIDE_INSTANCE_STOPPED_TEXT[state.unavailableBecause ?? 'not-answering']} ` +
+        'Pictures are still thrown away here as they arrive.'
+      );
+    case 'ready':
+      return (
+        `Pictures sealed and sent to your instance, and not kept here: ${String(looked)}, ` +
+        `with you in ${String(state.posed)} of them. ` +
+        `Not sent, because one was already with your instance: ${String(state.skipped)}.`
       );
   }
 }

@@ -17,7 +17,8 @@ which.
 | `.github/workflows/release.yml` | **Run, and green.** Two `workflow_dispatch` runs on 2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner — [35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484) and, with the verification step below, [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363) — and a third on 2026-09-17, after §10's alias migration, did the same on `main`: [35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600). ⚠️ **Never run on a tag**: there is no `v*` tag and no GitHub Release (`gh run list --workflow release.yml`, read 2026-09-30: every run is a `workflow_dispatch`) |
 | The signing key | **In CI secrets, and used.** Nothing about the key is in this repository, which is `REL001`'s whole job |
 | The key alias | **A repository VARIABLE, set, and the secret deleted** — both on 2026-09-17. `release.yml` stopped reading `secrets.ANDROID_KEY_ALIAS` in [#338](https://github.com/openzigs/onyourleft/issues/338) — a secret's value is redacted from every log line that contains it and that one was the word `upload`. A `workflow_dispatch` run on `main` after the change, [35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600), signed and verified with the same certificate as before. ⚠️ **This row used to say the variable was "not set yet" and that "the next release run fails"; a reader who remembers that is reading the old file** (corrected 2026-09-30, #955). §9 is why, §10 is the procedure and its results |
-| The Play account decision | **Not taken.** It is an owner decision and §3 is what it needs |
+| The App Bundle (`.aab`) Play needs | **Built, signed with the upload key, verified, and kept as the `android-aab` workflow artefact** ([#958](https://github.com/openzigs/onyourleft/issues/958)). Never uploaded to Play from CI, and never a GitHub Release asset. §11 |
+| The Play account decision | **Taken, 2026-09-30**: an **organization** account under Zylos Labs LLC, D-U-N-S verified, so the 12-tester closed test does not apply. §3. The app entry in Play Console is not created yet; §11 lists what the owner enters |
 | A published privacy policy | **Written and linked.** [`docs/privacy-policy.md`](../../docs/privacy-policy.md), reachable from the app's About page. §4 |
 | The Health apps declaration | **Not filed.** It is a Play Console form and needs an account, which is §3 |
 | The Data Safety form | **Answered, not filed.** The answers are `src/android/data-safety.ts` and the "no location" one is asserted against the merged manifest. §4 |
@@ -73,6 +74,14 @@ number. Whoever takes it writes the outcome and the date below this line.
      the date each opted in, because the 14 days are consecutive and a list
      nobody wrote down is a list that restarts. -->
 
+**Taken on 2026-09-30, by the owner** (recorded from
+[#958](https://github.com/openzigs/onyourleft/issues/958)): a Google Play
+developer account registered as an **organization**, Zylos Labs LLC, verified
+with a D-U-N-S number. The closed-test rule above is for new **personal**
+accounts, so it does not apply and no tester list is needed. ⚠️ The paragraph
+above saying the decision "has not been taken" is the old state, kept because
+this section's history is the reason the account is an organization one.
+
 ## 4. Health policy, the privacy policy, and the Data Safety form
 
 Play's Health Content and Services policy covers apps that are _not primarily_
@@ -124,11 +133,26 @@ both on 2026-09-30 and enters them in Play Console:
   can be plain `http:` without being named as an exception (`DATA_PATHS`, each
   held to the address rule in `apps/web` that decides it).
 - **Do you provide a way for users to request that their data is deleted? Yes**:
-  by email to `DELETION_REQUEST_EMAIL` (matt@openzigs.ai), named in the privacy
-  policy, until in-app deletion on an instance
-  ([#906](https://github.com/openzigs/onyourleft/issues/906)) ships. ⚠️ Play's
-  separate **account-deletion** requirement — a web link as well as an in-app
-  path, for an app that lets a rider create an account — is #906's, not this.
+  in the app, with *Delete my account on this instance* on the Instance screen
+  ([#906](https://github.com/openzigs/onyourleft/issues/906)), or by email to
+  `DELETION_REQUEST_EMAIL` (matt@openzigs.ai), named in the privacy policy.
+  ⚠️ **This used to say "by email, until in-app deletion ships"; a reader who
+  remembers that is reading the old file** (#906, 2026-10-27).
+
+**Play's account-deletion requirement is met by #906**, separately from that
+answer: an app that lets a rider create an account — this one does, on an
+instance, at *Connect* — must offer both an in-app path and a web link.
+
+- **In the app:** *Delete my account on this instance*, on the Instance screen
+  while signed in (`apps/web/src/views/EraseAccount.tsx`). It calls
+  `DELETE /v1/account` with the step-up the instance requires, a statement
+  signed just then by the device's key, and deletes nothing on the device.
+- **The web link:** `ACCOUNT_DELETION_URL` from
+  `apps/web/src/privacy/policy.ts`, derived from the path of
+  [`docs/delete-your-account.md`](../../docs/delete-your-account.md) as the
+  policy's URL is, so `policy.test.ts` fails if the page moves. It names the
+  app, the in-app path, the email route, and what is deleted and kept, and
+  needs no paid service: it is a page of this public repository.
 
 #95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
 the "no location collection" claim — since #558, the claim that the app does
@@ -148,6 +172,31 @@ loudly where no Gradle build has been run, which includes CI — docs/agents/ci.
 so they are a local gate rather than a pull-request one. And only the **debug**
 variant's merge has ever been produced; `merged-manifest.ts` looks for the
 release variant too and has never found one.
+
+### The wording checklist for the listing, the README and release notes
+
+[ADR 0048](../../docs/adr/0048-workouts-that-change-during-the-ride.md) D-12 (the
+owner's Q12 on #1233) bans a list of words from everything this project says
+about a workout, because a regulator reads intended purpose from what a product
+says about itself. `apps/web/src/privacy/no-medical-wording.test.ts` scans the
+client's source for them ([#1245](https://github.com/openzigs/onyourleft/issues/1245)).
+**No scan reaches the Play listing, the README or release notes**
+([spike 0008](../../docs/spikes/0008-eu-uk-medical-device-read.md) §8), so a
+person reads those, before every release and whenever one of them changes:
+
+- [ ] None of them says _cardiac_, _heart condition_, _rehabilitation_,
+      _patient_, _therapy_, _safe heart rate_, _protects your heart_, _medical_
+      or _clinical_, in any form. The list is `BANNED_WORDS` in
+      `apps/web/src/privacy/no-medical-wording.ts`; read it from there.
+- [ ] No heart-rate number is called a limit for health or safety. It is _the
+      range you chose_.
+- [ ] Nothing claims to prevent, treat or reduce the risk of anything, and
+      nothing says the app does not (ADR 0030 R5, its negative form included).
+- [ ] The purpose given is training: _to help you ride at the effort you
+      chose_.
+- [ ] The features are called _heart-rate hold_ and _re-plan during the ride_,
+      and none of the names ADR 0048 D-13 lists is used.
+- [ ] Screenshots in the listing show no sentence that breaks the rules above.
 
 ## 5. Android developer verification — re-checked 2026-09-16
 
@@ -228,6 +277,30 @@ Every run uploads the APK as a workflow artefact, so the pipeline can be
 exercised and the result installed **without cutting a tag** — which is what §8
 is for. The GitHub Release step still runs only on a tag.
 
+**It builds an Android App Bundle too** ([#958](https://github.com/openzigs/onyourleft/issues/958)),
+because Play accepts a new app only as an `.aab`. Since
+[#1745](https://github.com/openzigs/onyourleft/issues/1745) `bundleRelease` runs
+in a second Gradle invocation after `assembleRelease`, through the one shell
+function that adds the injected signing properties, so both are signed; an
+unsigned run builds `bundleDebug` after `assembleDebug`. Two invocations
+because the two carry different web assets: the web client is built once per
+channel (`VITE_OYL_RELEASE_CHANNEL`, `direct` for the APK and `play` for the
+bundle), so the app's About page can name the channel it came from (§11). A
+second step verifies the bundle as the first verifies the
+APK: signed (`jarsigner -verify`, whose verdict is read from what it prints,
+because ⚠️ **it exits 0 on an unsigned file**, and since #1745 also refused when
+it warns of **unsigned entries**, which it prints beside `jar verified.` with
+exit 0; `-strict` is not used because the upload key's self-signed and
+no-timestamp warnings would fail every run), not with the Android debug
+certificate (`keytool -printcert -jarfile`), and targeting at least the `REL002`
+floor, read out of the bundle's own manifest with
+[bundletool](https://github.com/google/bundletool) `dump manifest`. `aapt2 dump
+badging` reads only an APK. bundletool is fetched from Google's release, pinned
+by version and SHA-256. The bundle is uploaded as the `android-aab` workflow
+artefact and **nowhere else**: not to Play, which would need a Play
+service-account credential (a separate decision), and not to the GitHub
+Release, because nobody can install an `.aab` directly.
+
 ## 7. The target API level, and where the floor is stated
 
 Google Play requires new apps and updates to target **Android 16 (API 36)**.
@@ -261,6 +334,7 @@ gh workflow run release.yml --ref <branch>
 gh run list --workflow=release.yml --limit 1
 gh run download <run-id> --name android-apk    # the APK, signed if the secrets are set
 adb install -r <the .apk>
+gh run download <run-id> --name android-aab    # the App Bundle, for Play Console (§11)
 ```
 
 That is the path to #95's definition of done. It needs no tag, creates no
@@ -520,4 +594,100 @@ neither is here.
 distribution means every existing installation can no longer be updated in
 place — §9's last paragraph. Stop and work out what touched the keystore before
 publishing anything.
+
+## 11. Google Play: the App Bundle, Play App Signing, and what the owner enters
+
+[#958](https://github.com/openzigs/onyourleft/issues/958). §6 says how the
+workflow builds and verifies the `.aab`; this section is what it is for.
+
+### Play App Signing: the `oyl-upload` key is the upload key
+
+The app uses **Play App Signing**. Google generates and holds the **app signing
+key**, and that is the key every install from Play is signed with. The existing
+key in CI, alias `oyl-upload` (§9), is the **upload key**: it signs the `.aab`
+this repository uploads, and Play checks that signature and then re-signs what
+it serves. Nothing about Google's key is, or ever will be, in this repository
+or in its secrets.
+
+⚠️ **So a Play install and a direct-download install cannot update each other.**
+The APK on a GitHub Release, and the `android-apk` workflow artefact, are signed
+with the **upload key**, not Play's key. Android refuses an update whose
+signature differs from the installed app's, so:
+
+- a rider who installed from Play cannot update to a GitHub-Release APK, and a
+  rider who installed a GitHub-Release APK cannot update from Play;
+- moving from one to the other means **uninstalling first**, which deletes the
+  app's data, and the device is where a rider's rides are (CLAUDE.md §1). Export
+  or sync before switching.
+
+Both channels remain, and since [#1745](https://github.com/openzigs/onyourleft/issues/1745)
+each place a rider meets the app says which channel it is and that they do not
+mix: the README's *Installing the Android app*, every GitHub Release's notes
+(`apps/mobile/release-notes.md`, the release step's `body_path`), the Play
+listing's full description (the paragraph below), and the app's own About page,
+which reads the channel from the build (`VITE_OYL_RELEASE_CHANNEL`, §6) rather
+than from any typed string. `release-pipeline.test.ts` pins the sentence in the
+first three. A lost upload key can be reset through
+Play Console support, because Google holds the signing key; a lost upload key
+still ends direct-APK updates for good, which is §9's last paragraph.
+
+### The first signed bundle
+
+| Run | What |
+| --- | --- |
+| [40420499350](https://github.com/openzigs/onyourleft/actions/runs/40420499350), 2026-10-26, `workflow_dispatch` on `feature/issue-958-play-app-bundle` | Built `app-release.aab`; `jarsigner` printed `jar verified.`; signer `CN=On Your Left, OU=Development, O=openzigs, C=US`, SHA-256 `1E:92:06:A0:…:AD:93:69`, **the same key** as §10's APK digest; *"Bundle signed as required, targeting API 36."*; uploaded as `android-aab` |
+| [40420566672](https://github.com/openzigs/onyourleft/actions/runs/40420566672), 2026-10-26, throwaway branch (deleted) | The red demonstration: `bundleRelease` run in a second Gradle invocation without the injected signing properties. The APK step still passed; the bundle step printed `jar is unsigned.` and failed with *"The release App Bundle does not verify as signed."* |
+
+To get one: `gh run download <run-id> --name android-aab` (§8). That file goes
+to Play Console by hand.
+
+### The privacy policy against Play's User Data policy
+
+Read on 2026-10-26 from `support.google.com/googleplay/android-developer/answer/10144311`:
+
+> _"The entity (for example, developer, company) named in the app's Google Play
+> store listing must appear in the privacy policy or the app must be named in
+> the privacy policy."_
+
+and the policy must carry _"developer information and a privacy point of contact
+or a mechanism to submit inquiries."_ [`docs/privacy-policy.md`](../../docs/privacy-policy.md)
+opens by naming the app (_"the policy for the On Your Left Android app
+(`dev.openzigs.onyourleft`)"_) and has a **Contact** section giving
+matt@openzigs.ai. That meets both, so **no wording change is made**. The owner
+ruled on 2026-09-30 that the policy does **not** name Zylos Labs LLC; any change
+to its wording is held for the owner's approval.
+
+### What the owner enters in Play Console (no pull request)
+
+- [ ] Create the app: name _On Your Left_, default language, **app** (not game), **free**.
+- [ ] Store listing: short and full description, 512 px icon, 1024×500 feature
+      graphic, phone and tablet screenshots. Hold every word and screenshot to
+      §4's wording checklist. The full description carries this paragraph
+      (#1745), word for word:
+
+      > This is the Google Play copy of On Your Left. The app is also offered as
+      > a direct download from its releases on GitHub, and the two copies cannot
+      > update each other. Moving from one to the other means uninstalling the
+      > app first, and uninstalling deletes the rides on the device: export
+      > them, or sync them with an instance, before you switch.
+- [ ] Privacy policy URL: `PRIVACY_POLICY_URL` from `apps/web/src/privacy/policy.ts`,
+      never one typed by hand (§4).
+- [ ] Data Safety: the answers in `src/android/data-safety.ts`, with the two
+      section answers of 2026-09-30 (§4): **encrypted in transit: Yes**, except a
+      picture or a ride's numbers sent to the rider's own computer; **deletion:
+      Yes, in the app or by email to matt@openzigs.ai** (#906).
+- [ ] Data Safety, account deletion: the app lets a rider create an account (on
+      an instance), so answer that it does, and paste `ACCOUNT_DELETION_URL`
+      from `apps/web/src/privacy/policy.ts` into the delete-account URL field,
+      never one typed by hand (§4, #906).
+- [ ] Health apps declaration (§4).
+- [ ] Content rating questionnaire.
+- [ ] Target audience: **adults; not likely to be accessed by children** (owner ruling).
+- [ ] App access: the core app needs no sign-in; features behind an instance
+      sign-in need the rider's own instance, which a reviewer does not have.
+- [ ] Opt in to Play App Signing (the default for a new app) and upload the first
+      `.aab` to the **internal testing** track, not production.
+
+Not in scope here: uploading to Play from CI (a Play service-account
+credential, a separate decision), iOS, and a public release.
 

@@ -69,9 +69,13 @@ export interface DataSafetyAnswer {
 /**
  * The declaration filed for this app.
  *
- * ⚠️ Every row but seven is `collected: false` (four until #777), and that is
- * a statement about the PRODUCT, not a convenience: no analytics, and nothing
- * sent anywhere a rider did not choose. ⚠️ "Phase 1 has no server" was the
+ * ⚠️ Every collected row is OPTIONAL and leaves only by a path the rider
+ * chose (`DATA_PATHS`), and that is a statement about the PRODUCT, not a
+ * convenience: no analytics, and nothing sent anywhere a rider did not
+ * choose. A reviewer who remembers "every row but seven is `collected:
+ * false`" is reading the old file: since #778 answered sync (#1195), ten
+ * rows are collected and three — Email address, App activity and Audio —
+ * are not; `data-safety.test.ts` lists them. ⚠️ "Phase 1 has no server" was the
  * reason this line gave until ADR 0036 lifted owner decision D6; an instance is
  * now something a rider may connect to, and the three rows #777 moved say
  * what that sends. Play's definition of
@@ -103,7 +107,10 @@ export interface DataSafetyAnswer {
  * remembers "every row but two" is reading the old file: the post-ride ask
  * sends a ride's numbers to the rider's own computer on a press. See the rows.
  * ⚠️ **Since #803 they are SHARED as well**: the same ask can go to a hosted
- * model on the rider's own key, which is a third party.
+ * model on the rider's own key, which is a third party. ⚠️ **#1103 removed
+ * both device paths**, and the rows did not move: a write-up asked of the
+ * rider's instance (#1102) keeps them collected, and the instance's hosted
+ * path (#1251) keeps them shared.
  *
  * ⚠️ **Since #777 the device's public key and the rider's display name are
  * collected too**, when the rider connects to an instance: see the Device or
@@ -187,6 +194,14 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //   was already `collected: true` for the tiles, so the answer does not
     //   change; the words name both.
     //
+    // - **The realistic world's corridor (#1539, ADR 0054 D-6.5 (b))**: a
+    //   route chosen or saved for the realistic world has its z15 tiles read
+    //   from the same host, once. The answer does not change, because both
+    //   facts it rests on hold: every request is a byte range of the ONE
+    //   archive file (`apps/web/src/world-data/corridor-source.ts` never
+    //   builds a `z/x/y` URL), and the retained record has no `Range` field.
+    //   The words name it.
+    //
     // ⚠️ `apps/mobile/RELEASE.md` §8 re-checks before every tag that the
     // retention is still what this row and the privacy policy say — the plan
     // decides the period, and a Business plan keeps 31 days.
@@ -197,7 +212,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account. Connecting to an instance (#777), which a rider chooses to do, also sends the IP address with each request to it: this project’s own instance does not write the address to its log or its database and holds it in memory only, for at most an hour, to limit how many requests one address can make; Cloudflare, which carries that instance’s traffic through Cloudflare Tunnel, keeps the same record of each request — the IP address, the time, and the device or browser type — that this project’s Cloudflare account can see for up to 7 days. This project does not use or share that record either, and does not link it to the rider’s account there',
+    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). With the realistic world chosen, choosing or saving a route also requests that route’s tiles from the same host, once for that route, as byte ranges of the same file, and never the tiles near the rider’s privacy zones (#1539). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account. Connecting to an instance (#777), which a rider chooses to do, also sends the IP address with each request to it: this project’s own instance does not write the address to its log or its database and holds it in memory only, for at most an hour, to limit how many requests one address can make; Cloudflare, which carries that instance’s traffic through Cloudflare Tunnel, keeps the same record of each request — the IP address, the time, and the device or browser type — that this project’s Cloudflare account can see for up to 7 days. This project does not use or share that record either, and does not link it to the rider’s account there',
   },
   {
     // ⚠️ **Re-answered by #784, and the answer CHANGED — collected: true.** A
@@ -212,12 +227,23 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // maker chose to give the code to — a user-initiated transfer. Optional:
     // nothing is sent until the rider presses *Make a room*, and a route in a
     // privacy zone is refused before anything is sent.
+    //
+    // ⚠️ **Re-read by #778 for sync (#1195), and the answer is unchanged —
+    // the WORDS changed.** A reviewer who remembers "never transmits a ride's
+    // positions" is reading the old file: a sync sends each ride as a FIT
+    // file the app writes from the ride (even an imported GPX or TCX), positions included and untrimmed (it is
+    // the rider's own copy), to the instance the rider connected to — sealed
+    // for that instance alone (ADR 0047 D-7), and shown by it to nobody else.
+    // Still `shared: false` and optional: nothing syncs until the rider
+    // presses Sync, which needs the instance's card. The row is answered for
+    // the build that ships Sync before that build exists, so Play is never
+    // told less than the app does (#1195 is blocked by #778 for this).
     dataType: 'Location — precise location',
     collected: true,
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a ride’s positions. The one route that leaves the device is one the rider chooses to make a private room on (#784): its positions and heights — not its name, and no times — go to the instance the rider connected to, which shows it to the riders the maker shares the room’s code with and deletes it when the room is over: a race finished, a group ride empty for a minute, a race interrupted by the instance restarting, nobody riding in it a day after it was made, or the maker erasing their account there. A route that starts, ends or passes inside one of the rider’s privacy zones is refused before anything is sent. Connecting to an instance (#777) sends no position of its own. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The map tile request is the other location signal: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix. A ride’s positions leave the device only when the rider syncs with an instance they connected to (#1195): the ride goes to that instance as a FIT file the app writes from the ride, positions included and not trimmed by privacy zones, because it is the rider’s own copy, with a signed record carrying the ride’s name, start time and time zone, times, distance and average power, sealed on the device for that instance alone (ADR 0047), which shows it to no other rider. Nothing syncs until the rider presses Sync, which needs the instance’s card. The one route that leaves the device is one the rider chooses to make a private room on (#784): its positions and heights — not its name, and no times — go to the instance the rider connected to, which shows it to the riders the maker shares the room’s code with and deletes it when the room is over: a race finished, a group ride empty for a minute, a race interrupted by the instance restarting, nobody riding in it a day after it was made, or the maker erasing their account there. A route that starts, ends or passes inside one of the rider’s privacy zones is refused before anything is sent. Connecting to an instance (#777) sends no position of its own. When the rider agrees to a hosted model service on their instance, and each time they ask for an analysis by it (#1251), their privacy zones — each one’s name, centre and radius — go to that instance, sealed on the device for that instance alone, so that it can mask what it sends on; the zones are not sent to the service, and coordinates and the zones’ names are among what the instance masks before anything is. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The map tile request is the other location signal: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -241,12 +267,24 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // as shared rather than arguing Play's user-initiated exemption for a
     // third party. Still optional: off by default,
     // separately consented, and off again whenever the app is opened.
+    //
+    // ⚠️ **#1103 removed both of those device paths** (ADR 0046 D-1): the
+    // write-up asked of the rider's own computer and the hosted model on a key
+    // kept on the device. The answers do not move — the instance path (#1102)
+    // keeps this row collected, and the instance's hosted path (#1251) keeps
+    // it shared — and the `why` loses the two device clauses (#1104 §3).
     dataType: 'Health and fitness — health info',
     collected: true,
     shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to the source they chose: one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row; or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, and this build sends none of it to an instance the rider connects to (#777)',
+    // #1245 adds a re-plan during the ride (ADR 0048 D-10): block summaries to
+    // the rider's own instance, with the heart-rate numbers the rider chose
+    // (a hold block's range, the goals' range and "do not go above"). Only the
+    // instance's own model is asked (#1244), so a re-plan shares nothing.
+    // Already `collected: true` and `shared: true` for other reasons, so the
+    // answers do not move; the `why` says what is sent and when.
+    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider syncs with an instance they connected to (#1195), each ride’s heart rate goes to that instance inside the ride’s file, sealed on the device for that instance alone (ADR 0047), which shows it to no other rider; nothing syncs until the rider presses Sync, which needs the instance’s card. That is the rider’s own copy on an instance they chose — their own, or this project’s, whose traffic Cloudflare carries for us without being able to read what is sealed — not a third party, so it does not add to shared. When the rider presses the button on a ride’s page that asks the instance they connected for a write-up (#1102), that ride’s numbers, section by section, are sent to that instance, sealed on the device for that instance alone (ADR 0047), which writes the analysis with a model on its own machine or its own private network and may read what the rider already synced there; no position, altitude, date or identifier is in the numbers, and no picture is ever sent. That is the rider’s own copy on an instance they chose, not a third party, so it does not add to shared. If the rider stored their own key for a hosted model service on that instance and agreed to that service (#1251), the instance sends those numbers, masked, to that service at the https address the rider’s consent names. That service is a third party, hence shared. The consent is recorded on the instance, names the address, and is withdrawn when the address changes; the key is always the rider’s own, never the operator’s. No position, altitude, date or identifier is in the numbers, and a ride analysis never sends that service a picture. With re-plans during the ride switched on for a ride (#1245; off at the start of every ride), a summary of each block ridden — its mean and highest heart rate, and how long the heart rate was inside the range the rider chose — is sent during the ride, as a block begins and never more often than every 3 minutes, to the instance the rider connected, with the heart-rate numbers the rider chose: the range of each heart-rate-hold block of the workout, in beats per minute, and from their workout goals the heart-rate range and the heart rate they chose not to go above; sealed on the device for that instance alone (ADR 0047), which keeps each request for 7 days. A model on the instance’s own machine or its own private network reads them: the app asks for no hosted service for a re-plan, so a re-plan sends nothing to a third party and does not add to shared. No position, date, name or identifier is in a summary, and no second-by-second recording is sent',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -261,12 +299,28 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // the health-info row's reasoning: the hosted model on the rider's own key
     // is now sent these numbers when the rider asks for an analysis on the
     // hosted source (ruling 4 on #795; ADR 0035 D-9 C).
+    //
+    // #1102 adds the instance path, on #1104's B8 (approved by the owner on
+    // 2026-10-09, Play's definitions re-read 2026-10-09): a ride's
+    // numbers to the rider's own instance, which is not a third party, so the
+    // answers do not move.
+    //
+    // #1251 ships the hosted instance path, and B8's hosted sentence with it
+    // (Play's definitions re-read on 2026-10-12, as ADR 0040 D-11 requires:
+    // *Fitness info*, *Other user-generated content* and *Sharing* read as B8
+    // quotes them). Already `shared: true` since #803, so the answers do not
+    // move; the `why` now says who else is sent the numbers.
+    //
+    // #1103 removed the two device paths, as on the health-info row: the
+    // answers do not move, and the `why` loses those clauses.
     dataType: 'Health and fitness — fitness info',
     collected: true,
     shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude), section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project. No position, altitude, date or identifier is sent on either path. In a private room the rider makes or joins on an instance they connected to (#784, #785): their power and cadence twice a second while they ride in it, and the weight they declare once as they join, for the room to simulate them — never shown to anybody; the other riders see where they are on the room’s road. After a race, the instance keeps each rider’s result — place, time, power-to-weight (W/kg) over the race and any plausibility flag — shown to that race’s riders only, until the rider’s account there is erased; beside another rider it is power-to-weight and never watts',
+    // #1245: the same re-plan sentence as the health-info row, for the
+    // fitness numbers a block summary carries. The answers do not move.
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. In a private room the rider makes or joins on an instance they connected to (#784, #785): their power and cadence twice a second while they ride in it, and the weight they declare once as they join, for the room to simulate them — never shown to anybody; the other riders see where they are on the room’s road, and in a race (#1347) their name and, every second while it runs, their power-to-weight (W/kg) and how many seconds ahead or behind they are; never their watts or weight, though from their speed and power-to-weight another rider’s software can work out the weight to within a few kilograms, and from it the watts, which the app tells the rider before they make a race or ride in one. After a race, the instance keeps each rider’s result — place, time, power-to-weight (W/kg) over the race and any plausibility flag — shown to that race’s riders only, until the rider’s account there is erased; beside another rider it is power-to-weight and never watts. When the rider syncs with an instance they connected to (#1195), each ride goes to that instance whole — power, cadence, speed and distance with the rest of its file — with its write-up, its side-camera report and the summary of how the rider’s position changed (differences, never a picture), and a short summary the device writes from the ride’s numbers for a later analysis to look back at, with no position, date or name in it. All of it is sealed on the device for that instance alone (ADR 0047), and the instance shows none of it to another rider, with one exception the rider makes: a ride they ticked May be raced on, on a saved route none of their privacy zones comes near (#331), may be sent to another rider on that instance who holds the same route and asks to race a ghost on it — the rider’s display name and speed, second by second, one ghost at a time, never a position, date, heart rate or power. That is a transfer the rider asked for, so it does not add to shared. Nothing syncs until the rider presses Sync, which needs the instance’s card. When the rider presses the button on a ride’s page that asks the instance they connected for a write-up (#1102), that ride’s numbers — its power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude) — section by section, are sent to that instance, sealed on the device for that instance alone (ADR 0047), which writes the analysis with a model on its own machine or its own private network and may read what the rider already synced there; no position, altitude, date or identifier is in the numbers, and no picture is ever sent. That is the rider’s own copy on an instance they chose, not a third party, so it does not add to shared. If the rider stored their own key for a hosted model service on that instance and agreed to that service (#1251), the instance sends those numbers, masked, to that service at the https address the rider’s consent names. That service is a third party, hence shared. The consent is recorded on the instance, names the address, and is withdrawn when the address changes; the key is always the rider’s own, never the operator’s. No position, altitude, date or identifier is in the numbers, and a ride analysis never sends that service a picture. With re-plans during the ride switched on for a ride (#1245; off at the start of every ride), a summary of each block ridden — how long it lasted, its mean power as a share of the rider’s threshold power, its mean cadence and how many times the target was eased — is sent during the ride, as a block begins and never more often than every 3 minutes, to the instance the rider connected, with the workout’s blocks (each one’s kind, length, repeats and power targets as shares of threshold power) and, from the rider’s workout goals, the length and the most power as a share of threshold power; sealed on the device for that instance alone (ADR 0047), which keeps each request for 7 days. A model on the instance’s own machine or its own private network reads them: the app asks for no hosted service for a re-plan, so a re-plan sends nothing to a third party and does not add to shared. No position, date, name or identifier is in a summary, and no second-by-second recording is sent',
   },
   {
     // ⚠️ **Split by #777, and the Name answer CHANGED — collected: true.** A
@@ -275,8 +329,9 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // connect to an instance and type the name other riders will see; it is
     // sent to that instance on every Connect with a name typed, and kept only
     // when the instance has not seen the device before (#892's review: this
-    // said it was SENT only then, which `sign-in.ts` never did). A rename on
-    // the instance keeps each earlier name for moderation (migration 0004). Collected on #387's reasoning even for an instance the rider
+    // said it was SENT only then, which `sign-in.ts` never did). A rename,
+    // which the app offers since #906 item 2, sends the new name, and the
+    // instance keeps each earlier name for moderation (migration 0004). Collected on #387's reasoning even for an instance the rider
     // runs themselves, and plainly so for the project's own instance, which is
     // ours. `shared: false`: the instance is the rider's or ours, and the
     // project's traffic passes through Cloudflare as our service provider.
@@ -287,7 +342,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality', 'Account management'],
-    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance each time the rider presses Connect with a name typed, and kept by it with the rider’s account only when it has not seen this device before. If the name is later changed on the instance, the instance also keeps each earlier name, and when it changed, with the account, for moderation. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
+    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance each time the rider presses Connect with a name typed, and kept by it with the rider’s account only when it has not seen this device before. The rider can change it from the app, on the Instance screen (#906), which sends the new name to that instance; the instance also keeps each earlier name, and when it changed, with the account, for moderation. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
   },
   {
     // #777: the account an instance gives a rider, and the session that
@@ -310,16 +365,70 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'the app has no email field anywhere. An instance’s operator may offer email recovery of an account, but this app sends no email address to an instance (#773, #777)',
   },
   {
+    // ⚠️ **Re-answered by #778 for sync (#1195), and the answer CHANGED —
+    // collected: true.** A reviewer who remembers "Nothing is uploaded" is
+    // reading the old file. A sync sends each ride as its original activity
+    // file, and the documents the rider added for the analysis (#836), to the
+    // instance the rider connected to, sealed for it alone (ADR 0047 D-7).
+    // Collected on #387's reasoning even for an instance the rider runs;
+    // `shared: false` (the rider's instance or ours); optional (nothing syncs
+    // until the press). Answered before the build that ships Sync, so Play is
+    // never told less than the app does.
+    //
+    // ⚠️ **Re-answered by #1104, and the answer CHANGED — shared: true** (the
+    // owner's ruling of 2026-10-26; Play's definitions re-read that day). A
+    // reviewer who remembers `shared: false` is reading the old file. The text
+    // of a document the rider added is cut into the instance's history index
+    // (`apps/instance` §`history/passages.ts`), and `history_search` can
+    // return it during an analysis; on a hosted job it is sent on, masked, to
+    // the service the rider agreed to — a third party. It was declared under
+    // Other user-generated content only, but Play's *Files and docs* is "a
+    // user's files or documents", so it is declared here too rather than
+    // under-declared.
     dataType: 'Files and docs',
-    collected: false,
-    shared: false,
-    why: 'FIT, GPX and TCX files are read and written on the device at the athlete’s own request (#51). Nothing is uploaded',
+    collected: true,
+    shared: true,
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'FIT, GPX and TCX files are read and written on the device at the athlete’s own request (#51). When the rider syncs with an instance they connected to (#1195), each ride’s file — a FIT file the app writes from the ride, with a signed record carrying its name and date — and the documents the rider added for the analysis (#836) go to that instance, sealed on the device for that instance alone (ADR 0047), which keeps them with the rider’s account and shows them to no other rider. Nothing syncs until the rider presses Sync, which needs the instance’s card. The instance cuts the documents’ text into a searchable copy, computed by a model on its own machine or its own private network, never a service, and deletes it with its source. During an analysis the rider asked their instance for, the model may look up parts of that text; if the rider stored their own key for a hosted model service on that instance and agreed to that service (#1251), those parts are sent to it, masked first — that service is a third party, hence shared. Masking cannot guarantee that nothing personal in free text gets through',
   },
   {
     dataType: 'App activity',
     collected: false,
     shared: false,
-    why: 'no analytics SDK, no crash reporter and no telemetry of any kind is linked into this app',
+    why: 'no analytics SDK, no crash reporter and no telemetry of any kind is linked into this app. What the rider writes is answered on its own row, Other user-generated content',
+  },
+  {
+    // #778 for sync (#1195), ADR 0040 D-11: the rider's own text is Play's
+    // "Other user-generated content" (an App activity type), and it needs a
+    // row of its own. A sync sends the rider's goals, ride notes and
+    // documents (#836), and each ride's write-up and side-camera report, to
+    // the instance they connected to, sealed for it alone. Collected,
+    // optional, not shared — the Files and docs row's reasoning.
+    //
+    // ⚠️ **Re-answered by #1251, and the answer CHANGED — shared: true.** A
+    // reviewer who remembers `shared: false` is reading the old file. #1104's
+    // B8 (approved by the owner on 2026-10-09; Play's definitions re-read on
+    // 2026-10-12): during an analysis the instance's model may look up parts
+    // of this text, and since #1251 a rider who stored their own key for a
+    // hosted service and agreed to it has those parts sent on to that
+    // service, masked first. That service is a third party, so it is SHARING
+    // in Play's sense — filed as shared on the health rows' reasoning (#803)
+    // rather than arguing the user-initiated exemption for a third party.
+    dataType: 'App activity — Other user-generated content',
+    collected: true,
+    shared: true,
+    optional: true,
+    purposes: ['App functionality'],
+    // #1100 adds the rider's saved workouts (name, description and blocks),
+    // synced both ways like the rest: the owner's wording of 2026-10-10.
+    // #1237 adds their typed workout goals: the owner's wording of 2026-10-10.
+    // A change to this answer is re-filed on Play when it ships.
+    // #1245: a re-plan sends the typed workout goals, and its model may look
+    // up the free-text goals and saved workouts. Already shared since #1251.
+    // #1315 adds each ride's record of its re-plan decisions, synced with the
+    // ride (ADR 0048 D-10) — wording for the owner's approval.
+    why: 'the rider’s goals, notes on their rides and the documents they added for the analysis (#836), their saved workouts (#1100), their workout goals (#1237), and each ride’s write-up, side-camera report and record of the re-plans accepted or refused during it (#1315), stay on the device until the rider syncs with an instance they connected to (#1195): then they go to that instance, sealed on the device for that instance alone (ADR 0047), which keeps them with the rider’s account so a later analysis can look back at them, and shows them to no other rider. The instance keeps a searchable copy of the synced write-ups, ride summaries, goals, notes and documents, computed by a model on its own machine or its own private network, never a service; it is deleted with its source, and erasing the device does not reach it: it goes when the rider’s account on the instance is erased. A sync also brings them, saved workouts included, back to the rider’s other devices that sync with the same instance. Nothing syncs until the rider presses Sync, which needs the instance’s card. During an analysis the rider asked their instance for, the model may look up parts of the goals, notes, documents and saved workouts synced there, and earlier write-ups; if the rider stored their own key for a hosted model service on that instance and agreed to that service (#1251), those parts are sent to it, masked first — that service is a third party, hence shared. Masking cannot guarantee that nothing personal in free text gets through. When the rider agrees, and each time they ask for an analysis by that service, their list of words to mask goes to their instance, sealed, so that it can mask; it is not sent on to the service. With re-plans during the ride switched on for a ride (#1245; off at the start of every ride), the rider’s workout goals — but not the time they want to spend in their range, which the app leaves out — go to their instance with each block summary, sealed, and the model on the instance’s own machine or its own private network may look up what the rider wrote about their goals and the blocks of their saved workouts, if synced; the app asks for no hosted service for a re-plan, so none of it is sent to a third party',
   },
   {
     // ⚠️ **Re-answered by #387, and the answer CHANGED — collected: true.**
@@ -345,9 +454,9 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // ruled on 2026-09-28 (ADR 0029's amendment of that date): a hosted model
     // on the rider's own key, *"NUMBERS ONLY and never a picture"*, and in
     // terms that Photos and videos stays `shared: false`.
-    // `apps/web/src/camera/hosted-transport.test.ts` §"a picture cannot reach
-    // it" holds that by type, at run time and by what the modules can name, so
-    // this row is unchanged by the hosted path, and its `why` says so.
+    // `apps/web/src/camera/no-picture-reachable.test.ts` holds that by what
+    // the modules can import, so this row is unchanged by the hosted path,
+    // and its `why` says so.
     //
     // **`optional: true`**: off until the rider sets up a computer and
     // switches it on, and the app works in full without it.
@@ -388,12 +497,36 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // Inside the shell the request is Capacitor's native HTTP rather than the
     // WebView's (the owner's 2026-09-26 ruling), which changes how it
     // travels and nothing about what this row answers.
+    //
+    // ⚠️ **Re-answered by #1106, and the answer CHANGED — shared: true.** A
+    // reviewer who remembers `shared: false` is reading #553's file. The side
+    // camera's pictures may now go, sealed, to the rider's instance, and from
+    // there — only with a second consent that names the service — to a hosted
+    // model on the rider's OWN key (the owner's ruling of 2026-10-12, ruling
+    // 3). Two transfers, answered apart:
+    //
+    // - **To the instance.** Sealed on the device to the instance's key (ADR
+    //   0047), so nobody between them can read a picture, Cloudflare included.
+    //   The rider's own instance is the rider's; the project's instance is
+    //   OURS, so Play's end-to-end exemption (*"unreadable by you or anyone
+    //   other than the sender and recipient"*) does not cover it there: the
+    //   recipient is us. `collected: true` already; the instance keeps none.
+    // - **On to a hosted service.** A third party — not the rider's machine,
+    //   not ours. That is SHARING in Play's sense, and it is filed as shared on
+    //   #803's reasoning for the health rows rather than by arguing Play's
+    //   user-initiated exemption for a third party. Still `optional: true`:
+    //   two switches, both off by default, the second naming the service.
+    //
+    // ⚠️ **Accepted by the owner on 2026-10-12** (#1106, ADR 0050 D-7: *"Play
+    // Data Safety: the Photos and videos row becomes shared."*). Flipping
+    // this row is what changes the listing's face (ADR 0029 §"What
+    // `docs/privacy-policy.md` and Play Data Safety would have to say").
     dataType: 'Photos and videos',
     collected: true,
-    shared: false,
+    shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key (#518) is never sent a picture, nor anything made from one',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. That picture is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key in the app (#518) is never sent a picture by the app, nor anything made from one. Since #1106 there is one way a picture reaches an instance, and one way it reaches a third party, both off by default: with a switch on the Camera page ticked beside a sentence saying so, the side camera’s pictures — about one a second while it films — go to the instance the rider is signed in to instead of being analysed on the tablet, sealed on the device for that instance alone (ADR 0047), so that Cloudflare, which carries a home instance’s and this project’s instance’s traffic, cannot read them; the instance shows each to a model on its own machine or its own private network and does not store it — not in its database, a file or a log. With a SECOND switch, also off by default and ticked beside a consent that names the service, the instance sends each picture on to a hosted model service the rider holds their own key for — a third party, hence shared — with one fixed question and nothing else; what that service keeps is under its own terms. Without the sealed connection no picture is sent at all',
   },
   {
     // ⚠️ **Re-answered by #777, and the answer CHANGED — collected: true.** A
@@ -466,26 +599,27 @@ export const DATA_PATHS: readonly DataPath[] = [
       'Personal info — Name',
       'Personal info — User IDs',
       'Device or other IDs',
+      // #778, #1195: what a sync sends — a ride's file, positions and heart
+      // rate included, the rider's documents and their own text. Sealed
+      // inside the TLS connection as well (ADR 0047 D-7).
+      'Health and fitness — health info',
+      'Files and docs',
+      'App activity — Other user-generated content',
     ],
     encryptedInTransit: true,
     why: 'an instance is reached over https:// and wss:// only; a plain http:// address is refused unless it is this device’s own loopback (localhost), where nothing crosses a network (apps/web/src/instance/address.ts §instanceAddress). The project’s own instance is reached through Cloudflare Tunnel: TLS to Cloudflare’s edge, and an encrypted tunnel from there',
   },
   {
+    // Pictures only since #1103, which removed a ride's numbers from this path
+    // (#804) with the device's own write-up.
     id: 'own-computer',
-    dataTypes: [
-      'Photos and videos',
-      'Health and fitness — health info',
-      'Health and fitness — fitness info',
-    ],
+    dataTypes: ['Photos and videos'],
     encryptedInTransit: false,
-    why: 'a picture (#387, #553) or a ride’s numbers (#804) go to a computer the rider named on their own network, and the address may be plain http:// (apps/web/src/camera/analysis-endpoint.ts §endpointDecision). It is encrypted only when the rider’s address starts with https://',
+    why: 'a picture (#387, #553) goes to a computer the rider named on their own network, and the address may be plain http:// (apps/web/src/camera/analysis-endpoint.ts §endpointDecision). It is encrypted only when the rider’s address starts with https://',
   },
-  {
-    id: 'hosted-model',
-    dataTypes: ['Health and fitness — health info', 'Health and fitness — fitness info'],
-    encryptedInTransit: true,
-    why: 'a hosted model on the rider’s own key is reached over https:// only; an http:// address is refused before anything is sent (apps/web/src/camera/hosted-model.ts §hostedModelDecision, #803)',
-  },
+  // No `hosted-model` path since #1103: the app sends a hosted model nothing.
+  // A hosted model on the rider's own key is reached by their INSTANCE, over
+  // https:// only, and that leg is the instance's, not this device's.
   {
     id: 'side-camera',
     dataTypes: ['Photos and videos'],
@@ -510,6 +644,18 @@ export const SECTION_ANSWERS_PLAY_HELP = {
 
 /** Where a rider sends a request to delete what this project holds. #562. */
 export const DELETION_REQUEST_EMAIL = 'matt@openzigs.ai';
+
+/**
+ * The web page for requesting account deletion (#906 item 4), which Play
+ * Console's account-deletion field takes. `data-safety.test.ts` holds it equal
+ * to `ACCOUNT_DELETION_URL` in `apps/web/src/privacy/policy.ts`, where it is
+ * derived from the page's path.
+ */
+export const ACCOUNT_DELETION_WEB_PAGE =
+  'https://github.com/openzigs/onyourleft/blob/main/docs/delete-your-account.md';
+
+/** The label of the press that deletes the account on an instance (#906 item 3). */
+export const ACCOUNT_DELETION_IN_APP = 'Delete my account on this instance';
 
 /** Play's *"Is all of the user data collected by your app encrypted in transit?"* */
 export interface EncryptedInTransitAnswer {
@@ -547,20 +693,20 @@ export interface DataSafetySectionAnswers {
  * no place to state the exception.** #562's own body expected No, because the
  * rider's own computer can be a plain `http:` address. The owner chose Yes and
  * to disclose the exception, which the privacy policy does (**Pictures sent to
- * your own computer**, **A ride sent to your own computer**). The owner's
- * words named *"a picture"*; the same path carries a ride's numbers since
- * #804, so the exception is the PATH, and both are named.
+ * your own computer**). The owner's words named *"a picture"*; from #804 to
+ * #1103 the same path carried a ride's numbers as well, and the exception
+ * named both. Since #1103 it is pictures only again.
  */
 export const DATA_SAFETY_SECTION_ANSWERS: DataSafetySectionAnswers = {
   encryptedInTransit: {
     answer: true,
     exceptions: ['own-computer'],
-    why: 'the owner’s decision of 2026-09-30 (#562): Yes, with one stated exception. Map tile requests, an instance and a hosted model are reached over https:// (or wss://) only, and a side camera’s pictures travel over an encrypted WebRTC channel. The exception is a picture or a ride’s numbers the rider sends to a computer on their own home network, which can travel over plain http:// — the privacy policy says so where it describes that computer. Play’s form is Yes or No and cannot carry the exception',
+    why: 'the owner’s decision of 2026-09-30 (#562): Yes, with one stated exception. Map tile requests and an instance are reached over https:// (or wss://) only, and a side camera’s pictures travel over an encrypted WebRTC channel. The exception is a picture the rider sends to a computer on their own home network, which can travel over plain http:// — the privacy policy says so where it describes that computer. Play’s form is Yes or No and cannot carry the exception',
   },
   deletionRequests: {
     answer: true,
-    how: `by email to ${DELETION_REQUEST_EMAIL}, until in-app deletion on an instance (#906) ships`,
-    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id, which private rooms they made or joined and their results in any race they rode there, and, while a room they made is open, its route, which erasing the account ends the room and deletes — and a request to ${DELETION_REQUEST_EMAIL} is how it is deleted until #906 adds deletion in the app. Cloudflare’s record of map and instance requests (the IP address, the time, and the device or browser type) is Cloudflare’s, not this project’s: this project can see it for up to 7 days and cannot delete it on request, and how long Cloudflare itself keeps it is not something this project controls or can confirm. This answer rests on the deletion requests this project can act on, not on that record. A picture or a ride’s numbers sent to the rider’s own computer is held by that computer, and anything sent to a hosted service on the rider’s own key is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
+    how: `in the app, with “${ACCOUNT_DELETION_IN_APP}” on the Instance screen (#906), or by email to ${DELETION_REQUEST_EMAIL}; the web page ${ACCOUNT_DELETION_WEB_PAGE} says both`,
+    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id, which private rooms they made or joined and their results in any race they rode there, and, while a room they made is open, its route, which erasing the account ends the room and deletes — and everything the rider synced to it (#1195): their rides and their files, write-ups, side-camera reports, ride summaries, goals, notes, documents and saved workouts, the searchable copy the instance computed from them, and the analyses it wrote — and the rider deletes it in the app (#906), with “${ACCOUNT_DELETION_IN_APP}” on the Instance screen, or by a request to ${DELETION_REQUEST_EMAIL}, which is also the way for a rider who no longer has the app. Cloudflare’s record of map and instance requests (the IP address, the time, and the device or browser type) is Cloudflare’s, not this project’s: this project can see it for up to 7 days and cannot delete it on request, and how long Cloudflare itself keeps it is not something this project controls or can confirm. This answer rests on the deletion requests this project can act on, not on that record. A picture sent to the rider’s own computer, or a ride’s numbers this app sent there before #1103, is held by that computer, and anything the rider’s instance sent to a hosted service on the rider’s own key, or this app sent to one before #1103, is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
   },
 };
 

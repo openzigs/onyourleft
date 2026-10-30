@@ -16,6 +16,7 @@ import {
   type IdentityInstance,
 } from '../auth/identity-testing.ts';
 import { createRoom } from '../room/core/room.ts';
+import { planFor, settingsFromPlan } from '../room/room-plan.ts';
 import { roomSettings } from '../room/core/settings.ts';
 import { helloText, reportText } from '../room/core/room-testing.ts';
 import { finalResults } from '../room/node/room-host.ts';
@@ -109,6 +110,51 @@ describe('making a room — #784', () => {
   });
 });
 
+describe('a room’s drafting — #787, the owner’s ruling of 2026-09-30', () => {
+  it('drafts unless its maker turned it off, tells a joiner which before the start, and opens the room so', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const bea = await rider(w);
+    const drafted = await madeRoom(w, anna.token);
+    const undrafted = await madeRoom(w, anna.token, { drafting: false });
+    for (const [room, drafting] of [
+      [drafted, true],
+      [undrafted, false],
+    ] as const) {
+      const joined = await w.call('POST', '/v1/rooms/join', {
+        token: bea.token,
+        body: { code: room.code },
+      });
+      expect(joined.status).toBe(200);
+      expect((joined.body as { drafting: unknown }).drafting).toBe(drafting);
+      // Read back as the room is opened: the store, on a fresh connection,
+      // into the plan and the core's settings.
+      await w.freshRead(async (store) => {
+        const plan = planFor(
+          (await store.getRoom(room.roomId))!,
+          await store.getRoomCourse(room.roomId),
+          'any-seated-rider',
+        );
+        expect(plan?.drafting).toBe(drafting);
+        expect(plan === undefined ? undefined : settingsFromPlan(plan).drafting).toBe(drafting);
+      });
+    }
+  });
+
+  it('refuses a drafting that is not true or false, naming the field', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const answer = await w.call('POST', '/v1/rooms', {
+      token: anna.token,
+      body: roomBody({ drafting: 'off' }),
+    });
+    expect(answer.status).toBe(400);
+    expect((answer.body as { error: { fields: { field: string }[] } }).error.fields[0]?.field).toBe(
+      'drafting',
+    );
+  });
+});
+
 describe('what one athlete may hold open — #784', () => {
   it('refuses a sixth room that is not over, and makes one again once one is over', async () => {
     const w = await open();
@@ -154,7 +200,10 @@ describe('the room code is a bearer secret — #784', () => {
       expect(await w.databaseBytes()).not.toContain(secret);
     }
     // The log did see the requests: a check over no lines would pass anything.
-    expect(w.instance.lines.filter((line) => line.includes('/v1/rooms/join')).length).toBe(2);
+    // Since #1210 the room routes are sealed-only, so what the log sees of each
+    // is a `/v1/sealed` line: two sign-ins, the make and the two joins.
+    expect(w.instance.lines.filter((line) => line.includes('/v1/sealed')).length).toBe(5);
+    expect(w.instance.lines.filter((line) => line.includes('/v1/rooms')).length).toBe(0);
   });
 
   it('answers a wrong code, a code nobody made and garbage alike', async () => {
@@ -382,7 +431,8 @@ describe('a room whose creator erases their account is over — #784', () => {
 });
 
 describe('a room nobody rides is over within a day — #784', () => {
-  const nobodyIn = (): boolean => false;
+  /** A router that holds no room: every claim is granted (`SweepGuard`). */
+  const nobodyIn = { claim: (): boolean => true, release: (): void => undefined };
 
   it('ends a room nobody is riding a day after it was made, whether or not anybody joined it, and lets its route go', async () => {
     const w = await open();
@@ -417,7 +467,9 @@ describe('a room nobody rides is over within a day — #784', () => {
     const anna = await rider(w);
     const room = await madeRoom(w, anna.token, { kind: 'group' });
     w.clock.ms += 2 * UNRIDDEN_ROOM_LIFETIME_MS;
-    expect(await w.rooms.sweep((roomId) => roomId === room.roomId)).toBe(0);
+    expect(
+      await w.rooms.sweep({ claim: (roomId) => roomId !== room.roomId, release: () => undefined }),
+    ).toBe(0);
     expect(w.roomRoutes.has(room.routeSha256)).toBe(true);
   });
 
@@ -467,10 +519,15 @@ async function ridden(
       ridingPosition: 'hoods',
       course: { sha256: 'a'.repeat(64), lengthMetres: 20_000, gradePercentAt: () => 0 },
       countdownMs: 0,
+      // The order these fixtures read is by power alone (#787's draft would
+      // let a wheel-sucker in): what is under test is the result, not the race.
+      drafting: false,
     }),
     (ticket) => {
       const athleteId = byTicket.get(ticket);
-      return athleteId === undefined ? undefined : { athleteId, declaredMassKilograms: 70 };
+      return athleteId === undefined
+        ? undefined
+        : { athleteId, declaredMassKilograms: 70, displayName: athleteId };
     },
   );
   riders.forEach((_, index) => room.receive(index + 1, helloText(`ticket-${String(index)}`), 0));

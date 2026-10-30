@@ -49,7 +49,7 @@ async function liveController(): Promise<CameraController> {
     port: camera.port,
     schedule: manualSchedule().schedule,
   });
-  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   await controller.turnOn();
   return controller;
 }

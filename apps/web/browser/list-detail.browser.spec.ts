@@ -51,7 +51,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { paletteColours, THEMES } from '../src/design/tokens';
-import { ALL_ROUTES, hrefFor, hrefForSelection, type RouteDefinition } from '../src/shell/routes';
+import {
+  ALL_ROUTES,
+  hrefFor,
+  hrefForSelection,
+  routeById,
+  type RouteDefinition,
+} from '../src/shell/routes';
 
 import {
   applyInsets,
@@ -150,16 +156,18 @@ const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
  * (`shell/ListDetail.tsx` §`CreateLink`).
  *
  * Held at the two-pane tablet, where the insets are the shell's, for all
- * three; and for Activities on one pane too, where *Open ride details* ends
- * 665 px above the upright tablet's fold and 180 px above a phone's (measured
- * on #670's review branch, on a Mac). On one pane the list is hidden with an
- * item chosen, so Routes and Workouts have NO primary on screen: the item's
- * own actions — download, change, export, delete — are all secondary (#668),
- * and the way back to the form is the one-pane back link to the list. That is
- * published as "no primary on screen", not held.
+ * three. On one pane the list is hidden with an item chosen, so Routes and
+ * Workouts have NO primary on screen: the item's own actions — download,
+ * change, export, delete — are all secondary (#668), and the way back to the
+ * form is the one-pane back link to the list. That is published as "no
+ * primary on screen", not held. ⚠️ **So is Activities on one pane since
+ * #1439**, and a reviewer who remembers it held upright and on a phone is
+ * reading the old file: the chosen ride's pane was a summary whose primary was
+ * *Open ride details*, and it is the ride's page now, whose controls are
+ * toggles and secondaries.
  */
 const PRIMARY_WHEN_SELECTED: Readonly<Record<string, readonly string[]>> = {
-  activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
+  activities: [TABLET_IN_THE_SHELL.name],
   routes: [TABLET_IN_THE_SHELL.name],
   workouts: [TABLET_IN_THE_SHELL.name],
 };
@@ -447,6 +455,46 @@ test.describe('#670 — one pane below 840 px', () => {
       }
     });
   }
+});
+
+/**
+ * #1512: the same walk with Android's back, pressed the way `MainActivity.java`
+ * presses it — the page's `__oylAndroidBack`, handed the WebView's
+ * `canGoBack()` — rather than the browser's own button. `?shell=android` is
+ * the shell inside Android with no ride on (`reflow-harness.tsx`).
+ */
+async function androidBack(page: Page, canGoBack: boolean): Promise<unknown> {
+  return page.evaluate((can) => {
+    const handler = (window as unknown as Record<string, unknown>)['__oylAndroidBack'];
+    return typeof handler === 'function' ? (handler as (c: boolean) => unknown)(can) : 'absent';
+  }, canGoBack);
+}
+
+test.describe('#1512 — Android back, on one pane', () => {
+  test(`back from a selected item returns to the list with it focused, at ${TABLET_UPRIGHT.name}`, async ({
+    page,
+  }) => {
+    await open(page, TABLET_UPRIGHT, 'data=populated&shell=android');
+    for (const route of LIST_DETAIL) {
+      await visit(page, route, hrefFor(route));
+      const id = await selectionOf(page, route);
+      const item = page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`);
+      await item.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#oyl-selected-heading')).toBeFocused();
+
+      expect(await androidBack(page, true), `${route.id}: back left the app`).toBe(true);
+      await expect(item, `${route.id}: back did not return focus to the item`).toBeFocused();
+      expect(page.url()).toContain(hrefFor(route));
+    }
+    await visit(page, routeById('home'), hrefFor(routeById('home')));
+    expect(await androidBack(page, true), 'Home is the top level: back leaves').toBe(false);
+  });
+
+  test('the control — a browser page installs no Android back', async ({ page }) => {
+    await open(page, TABLET_UPRIGHT);
+    expect(await androidBack(page, true)).toBe('absent');
+  });
 });
 
 test.describe('#670 — a selection in the URL', () => {
@@ -1749,4 +1797,198 @@ test.describe('#1072 — a card is not carried under reduced motion', () => {
     const moved = await framesOffRest(page, await press(page, second));
     expect(moved.length, 'the control did not move: the reading is blind').toBeGreaterThan(0);
   });
+});
+
+/**
+ * #1312 — the ride page's lap table, scrolled to its last column.
+ *
+ * A ride with every figure a lap can state has eleven columns, which is wider
+ * than the ride page's column, so the table is read scrolled sideways inside
+ * its region (`design/ScrollTable.tsx`). Scrolled, the Lap column used to be
+ * gone, and with it which lap a figure is and which lap is the best (#1316's
+ * second pass saw it in a screenshot; no gate case laid the table out). Its
+ * first column is sticky now (`theme.css` §`.oyl-table--laps`).
+ *
+ * The fixture is `testing/populated-shell.tsx` §`POPULATED_LAPS`: five laps,
+ * the third the best and the last a part lap. In light and in dark, because a
+ * sticky cell is only as good as its own background: a transparent one shows
+ * the figures through the lap's number.
+ *
+ * ⚠️ **The control is in the case**: the same table with the class taken off
+ * has its Lap column scrolled out of the region, which is what makes "it is
+ * still on screen" a finding about the class and not about the table.
+ */
+test.describe('#1312 — the lap table keeps its Lap column when it is scrolled', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    test.describe(theme, () => {
+      test.use({ colorScheme: theme });
+
+      test(`scrolled to its last column at ${TABLET_IN_THE_SHELL.name}, every lap’s name is still on screen`, async ({
+        page,
+      }) => {
+        await open(page, TABLET_IN_THE_SHELL);
+        await page.evaluate(() => {
+          window.location.hash = '#/activities/ride-0';
+        });
+        const table = page.locator('table.oyl-table--laps');
+        await expect(table).toBeVisible();
+        // ⚠️ #1439: the traces above the laps are a `React.lazy` chunk, and
+        // since their axes they are taller. On the CI runner the chunk
+        // arrived AFTER the table was scrolled to, pushed it down, and laps
+        // 4 and 5 were read off the bottom of the screen — a reading of a
+        // layout shift, not of the sticky column. So: every chart drawn
+        // first, and the table scrolled to inside the same task that reads
+        // it (`measure`), where nothing can move it in between.
+        const shown = await page
+          .locator('button[aria-pressed="true"]', { hasText: /^Show / })
+          .count();
+        expect(shown, 'the ride’s page shows no trace').toBeGreaterThan(0);
+        await expect(page.locator('.oyl-trace-chart')).toHaveCount(shown);
+
+        const measure = async () =>
+          table.evaluate((element) => {
+            // The whole table in view, its middle at the viewport's: five
+            // rows are far shorter than the 800 px viewport.
+            element.scrollIntoView({ block: 'center' });
+            const region = element.closest<HTMLElement>('.oyl-scroll-region');
+            if (region === null) {
+              throw new Error('the lap table is in no scroll region');
+            }
+            region.scrollLeft = region.scrollWidth;
+            const frame = region.getBoundingClientRect();
+            const inside = (cell: Element): boolean => {
+              const box = cell.getBoundingClientRect();
+              return box.left >= frame.left - 0.5 && box.right <= frame.right + 0.5;
+            };
+            /** Whether the cell is what is painted at its own middle: nothing scrolled over it. */
+            const onTop = (cell: Element): boolean => {
+              const box = cell.getBoundingClientRect();
+              const hit = document.elementFromPoint(
+                box.left + box.width / 2,
+                box.top + box.height / 2,
+              );
+              return hit !== null && cell.contains(hit);
+            };
+            const names = [...element.querySelectorAll('tbody th')];
+            const headings = [...element.querySelectorAll('thead th')];
+            const plain = names[0]?.getBoundingClientRect().height ?? 0;
+            return {
+              wider: region.scrollWidth - region.clientWidth,
+              scrolled: region.scrollLeft,
+              names: names.map((cell) => ({
+                text: cell.textContent,
+                seen: inside(cell) && onTop(cell),
+                // One line: no taller than the row of a lap with no mark.
+                oneLine: cell.getBoundingClientRect().height <= plain + 0.5,
+                background: getComputedStyle(cell).backgroundColor,
+                edge: getComputedStyle(cell).boxShadow,
+              })),
+              lapHeading: headings[0] !== undefined && inside(headings[0]) && onTop(headings[0]),
+              lastHeading: {
+                text: headings.at(-1)?.textContent,
+                seen: headings.at(-1) !== undefined && inside(headings.at(-1) as Element),
+              },
+            };
+          });
+
+        const seen = await measure();
+        // The premise: the table is wider than its region, and was scrolled.
+        expect(seen.wider).toBeGreaterThan(20);
+        expect(seen.scrolled).toBeGreaterThan(20);
+        expect(seen.lastHeading).toEqual({ text: 'Climb (m)', seen: true });
+        // Every lap's name, the best lap's and the part lap's among them, on
+        // screen beside the last column — and each on one line at this width.
+        expect(seen.names.map((name) => name.text)).toEqual([
+          '1',
+          '2',
+          '3 · Best lap',
+          '4',
+          '5 · Part lap',
+        ]);
+        expect(seen.names.filter((name) => !name.seen).map((name) => name.text)).toEqual([]);
+        expect(seen.names.filter((name) => !name.oneLine).map((name) => name.text)).toEqual([]);
+        expect(seen.lapHeading).toBe(true);
+        // A background of its own that is wholly opaque — `rgb(r, g, b)`, with
+        // no alpha in it at all — or the figures show through the number; and
+        // an edge, so a figure cut off under the column reads as cut off.
+        for (const name of seen.names) {
+          expect(name.background).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+          expect(name.edge).not.toBe('none');
+        }
+        console.log(
+          `#1312 lap table, ${theme} — ${TABLET_IN_THE_SHELL.name} — ${String(seen.wider)} px wider than its region`,
+        );
+
+        // The control: without the class the Lap column scrolls away.
+        await table.evaluate((element) => {
+          element.classList.remove('oyl-table--laps');
+        });
+        const control = await page
+          .locator('table.oyl-table')
+          .first()
+          .evaluate((element) => {
+            const region = element.closest<HTMLElement>('.oyl-scroll-region');
+            if (region === null) return [];
+            region.scrollLeft = region.scrollWidth;
+            const frame = region.getBoundingClientRect();
+            return [...element.querySelectorAll('tbody th')].map(
+              (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
+            );
+          });
+        expect(control).toEqual([false, false, false, false, false]);
+      });
+    });
+  }
+});
+
+/**
+ * PR #1477's review (#1442): at two panes, choosing a row must not move the
+ * list's rows under the pointer that chose it. #1442 stopped SHOWING the
+ * list's create link (*Import a route*, *Build a workout*) with nothing
+ * chosen, where the form it leads to is beside it; returning `null` there made
+ * the first tap on a row insert the ~44 px button above the list and push
+ * every row down. Neither `scrollY` nor the list's `scrollTop` sees that —
+ * content inserted above the rows moves them without scrolling anything — so
+ * this measures each row's own top, before and after a click on the first.
+ */
+test.describe('#1442 — choosing a row does not move the list', () => {
+  for (const viewport of TWO_PANES) {
+    test(`every row stays where it was at ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport);
+      const faults: string[] = [];
+      const lines: string[] = [];
+      const rows = page.locator('[data-oyl-pane="list"] a[data-oyl-select]');
+      const rowTops = (): Promise<number[]> =>
+        rows.evaluateAll((links) => links.map((link) => link.getBoundingClientRect().top));
+      for (const route of LIST_DETAIL) {
+        await visit(page, route, hrefFor(route));
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        await settleScroll(page);
+        const before = await rowTops();
+        expect(before.length, `${route.id}: no row to choose`).toBeGreaterThan(0);
+        // A pointer's choice — the tablet rider's tap — not Enter.
+        await rows.first().click();
+        await expect(
+          page.locator('[data-oyl-pane="detail"] #oyl-selected-heading'),
+          `${route.id}: the chosen row's detail did not open`,
+        ).toBeVisible();
+        await settleScroll(page);
+        const after = await rowTops();
+        const moved = before.map((top, index) => (after[index] ?? Number.NaN) - top);
+        const most = Math.max(...moved.map((delta) => Math.abs(delta)));
+        const said = `${moved[0]?.toFixed(1) ?? '—'} (the most: ${most.toFixed(1)})`;
+        lines.push(
+          `${route.id}: ${String(before.length)} rows, the first at ` +
+            `${before[0]?.toFixed(1) ?? '—'}; moved by ${said} px`,
+        );
+        if (after.length !== before.length || !(most <= 0.5)) {
+          faults.push(`${route.id}: choosing the first row moved the list's rows by ${said} px`);
+        }
+      }
+      console.log(`[#1442] rows on choosing @ ${viewport.name}\n  ${lines.join('\n  ')}`);
+      expect(faults).toEqual([]);
+    });
+  }
 });

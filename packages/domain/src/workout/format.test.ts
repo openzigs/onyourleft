@@ -9,6 +9,7 @@ import {
   decodeWorkoutFile,
   encodeWorkoutFile,
   MAXIMUM_WORKOUT_FILE_CHARACTERS,
+  WORKOUT_FILE_FIRST_VERSION,
   WORKOUT_FILE_VERSION,
 } from './format';
 import { thresholdShare, type Workout, type WorkoutBlock } from './workout';
@@ -87,8 +88,11 @@ describe('a workout survives the round trip through a file', () => {
     expect('label' in back.blocks[0]!).toBe(false);
   });
 
-  it('writes the version key, and writes it as the number it reads', () => {
-    expect(documentOf()['onYourLeftWorkout']).toBe(WORKOUT_FILE_VERSION);
+  it('writes the version key, as the lowest version that carries the workout', () => {
+    // #1239: a workout with no heart-rate hold is still a version-1 file, so a
+    // build that reads only version 1 still opens it.
+    expect(documentOf()['onYourLeftWorkout']).toBe(WORKOUT_FILE_FIRST_VERSION);
+    expect(WORKOUT_FILE_VERSION).toBe(2);
   });
 
   it('writes something a person can read and edit', () => {
@@ -161,7 +165,7 @@ describe('what the decoder refuses, and what it calls each refusal', () => {
 
   it('tells a rider with a newer file that they need a newer program', () => {
     const error = refusal(() =>
-      decodeWorkoutFile(reserialised({ ...documentOf(), onYourLeftWorkout: 2 })),
+      decodeWorkoutFile(reserialised({ ...documentOf(), onYourLeftWorkout: 3 })),
     );
     expect(error.code).toBe('unsupported-version');
     expect(error.message).toContain('newer version');
@@ -174,9 +178,9 @@ describe('what the decoder refuses, and what it calls each refusal', () => {
   });
 
   it('reads the version before it complains about anything else', () => {
-    // A v2 file will carry v2 fields. Reporting the unknown field first would
+    // A v3 file will carry v3 fields. Reporting the unknown field first would
     // tell a rider their file is malformed when it is merely newer.
-    const future = { ...documentOf(), onYourLeftWorkout: 2, cooldownStrategy: 'gentle' };
+    const future = { ...documentOf(), onYourLeftWorkout: 3, cooldownStrategy: 'gentle' };
     expect(refusedWith(reserialised(future))).toBe('unsupported-version');
   });
 });

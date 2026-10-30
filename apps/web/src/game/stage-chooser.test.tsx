@@ -8,7 +8,7 @@
  * words through `units/format.ts`, the drawing hidden from assistive
  * technology, the radio group, the ghost for the chosen route, a refused *Ride*
  * that starts nothing — and the module graph, which must reach no renderer and
- * no map (`stage-chooser-imports.test.ts`). Where *Ride* lands on a screen is `browser/ride.browser.spec.ts`
+ * no map (`stage-chooser-imports.test.ts`). Where *Ride* lands on a screen is `browser/pre-ride.browser.spec.ts`
  * §"#940"; the refusals' own wiring through `GameView` is `picker.a11y.test.tsx`.
  */
 
@@ -31,7 +31,14 @@ import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { pacerChoice } from './pacer-choice';
 import { DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
-import { LOADOUT_HELP, RoutePicker, steepestClimbPercent, type RidableRoute } from './StageChooser';
+import {
+  DELIVERY_CHOICE_TEXT,
+  deliveryWeekText,
+  LOADOUT_HELP,
+  RoutePicker,
+  steepestClimbPercent,
+  type RidableRoute,
+} from './StageChooser';
 import { windChoice } from './wind-choice';
 
 function ridable(id: string, name: string, attempts: number, rise: number): RidableRoute {
@@ -66,7 +73,11 @@ interface Options {
   readonly notices?: boolean;
   readonly intensity?: string;
   readonly onIntensity?: (value: string) => void;
-  readonly onStart?: (route: RidableRoute, ghost: boolean) => Promise<void>;
+  readonly onStart?: (route: RidableRoute, ghost: boolean, delivery?: boolean) => Promise<void>;
+  /** #1818: the week a Delivery offer carries; absent, no offer is handed over. */
+  readonly week?: { readonly day: number; readonly houses: number };
+  /** #1818: the switch already on, as a rider's earlier choice leaves it once the world is off. */
+  readonly switchedOn?: boolean;
 }
 
 /** The chooser with its own state, as `GameView` holds it. */
@@ -74,6 +85,7 @@ function Chooser(options: Options): JSX.Element {
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const [withGhost, setWithGhost] = useState(false);
   const [position, setPosition] = useState<RidingPosition>(DEFAULT_RIDING_POSITION);
+  const [withDelivery, setWithDelivery] = useState(options.switchedOn === true);
   const units = options.units ?? 'metric';
   const withPacer = options.intensity !== undefined;
   const intensity = options.intensity ?? '2.5';
@@ -107,8 +119,13 @@ function Chooser(options: Options): JSX.Element {
         position={position}
         onPosition={setPosition}
         worldChosen={options.worldChosen ?? false}
-        onStart={async (route, ghost) => {
-          await options.onStart?.(route, ghost);
+        delivery={
+          options.week === undefined
+            ? undefined
+            : { chosen: withDelivery, onChoose: setWithDelivery, week: options.week }
+        }
+        onStart={async (route, ghost, _pacer, _air, _position, _riderGhost, delivery) => {
+          await options.onStart?.(route, ghost, delivery);
         }}
       />
     </main>
@@ -447,4 +464,93 @@ describe('#1011 — tiles, the loadout behind an ⓘ, and the realistic world in
     expect(more?.open).toBe(false);
     expect(more?.textContent).toContain('the ride is in the standard world instead');
   });
+});
+
+describe('#1818 — a Delivery round in the loadout', () => {
+  const WEEK = { day: 2, houses: 9 } as const;
+
+  function deliverySwitch(root: ParentNode): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(root, 'input[role="switch"]').find((box) =>
+      (box.closest('label')?.textContent ?? '').includes(DELIVERY_CHOICE_TEXT.label),
+    );
+  }
+
+  /** What a screen reader reads after the switch's name: each `aria-describedby` target, in order. */
+  function description(box: HTMLInputElement): string {
+    return (box.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent ?? `(missing ${id})`)
+      .join(' ');
+  }
+
+  it('is offered with the realistic world chosen, the week’s day and houses beside it', async () => {
+    const tree = await render({ worldChosen: true, week: WEEK });
+    const box = deliverySwitch(tree.container);
+    expect(box?.type).toBe('checkbox');
+    expect(box?.checked).toBe(false);
+    // In the loadout, and last in it.
+    expect(box?.closest('.oyl-chooser__loadout')).not.toBeNull();
+    const loadout = queryAll(tree.container, '.oyl-chooser__loadout > div');
+    expect(loadout.at(-1)?.classList.contains('oyl-game__delivery')).toBe(true);
+    expect(tree.container.textContent).toContain('Day 2 of 7 · up to 9 houses on the round');
+    if (box === undefined) throw new Error('no Delivery switch');
+    expect(description(box)).toBe(
+      `Day 2 of 7 · up to 9 houses on the round ${DELIVERY_CHOICE_TEXT.hint}`,
+    );
+  });
+
+  it('is not offered with the standard world, whatever the week (DL6)', async () => {
+    const tree = await render({ worldChosen: false, week: WEEK });
+    expect(deliverySwitch(tree.container)).toBeUndefined();
+    expect(tree.container.querySelector('.oyl-game__delivery')).toBeNull();
+    expect(tree.container.textContent).not.toContain('on the round');
+  });
+
+  it('says one house in the singular', () => {
+    expect(deliveryWeekText({ day: 7, houses: 1 })).toBe('Day 7 of 7 · up to 1 house on the round');
+    expect(deliveryWeekText({ day: 1, houses: 8 })).toBe(
+      'Day 1 of 7 · up to 8 houses on the round',
+    );
+  });
+
+  it('starts a ride with a round only once it is switched on', async () => {
+    const asked: (boolean | undefined)[] = [];
+    const tree = await render({
+      worldChosen: true,
+      week: WEEK,
+      onStart: async (_route, _ghost, delivery) => {
+        asked.push(delivery);
+        await Promise.resolve();
+      },
+    });
+    await activateWithKeyboard(rideButton(tree.container));
+    deliverySwitch(tree.container)?.click();
+    await settle();
+    expect(deliverySwitch(tree.container)?.checked).toBe(true);
+    await activateWithKeyboard(rideButton(tree.container));
+    expect(asked).toEqual([false, true]);
+  });
+
+  it('asks for no round while the realistic world is not chosen, though the switch was left on (DL6)', async () => {
+    const asked: (boolean | undefined)[] = [];
+    const tree = await render({
+      worldChosen: false,
+      week: WEEK,
+      switchedOn: true,
+      onStart: async (_route, _ghost, delivery) => {
+        asked.push(delivery);
+        await Promise.resolve();
+      },
+    });
+    await activateWithKeyboard(rideButton(tree.container));
+    expect(asked).toEqual([false]);
+  });
+
+  it('names no other game in anything it says', async () => {
+    const tree = await render({ worldChosen: true, week: WEEK });
+    const words = tree.container.querySelector('.oyl-game__delivery')?.textContent ?? '';
+    expect(words).not.toMatch(/paper|subscriber|newspaper/i);
+  });
+
+  // The audit is `delivery-chooser.a11y.test.tsx`'s, inside `test:a11y`.
 });

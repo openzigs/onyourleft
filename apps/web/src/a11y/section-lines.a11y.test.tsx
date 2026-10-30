@@ -61,6 +61,9 @@ const DOCUMENTS: Partial<Record<RouteId, string>> = {
 const READINGS: Record<string, string> = {
   'activity-detail Side camera':
     'the side camera’s saved report: its summary sentence is the report’s own, stored with it (#388) and worded by ADR 0030’s rules, not an explanation of a control',
+  // #1439: the ride's page is History's detail pane too, so the same report.
+  'activities Side camera':
+    'the chosen ride’s page in History’s detail pane (#1439) — the side camera’s saved report, as on activity-detail',
   'segment-detail The long drag up past the reservoir, the farm and the old quarry':
     'a segment’s own facts (its length, its efforts, what it is ranked by) and the one line that says what to do with them',
   'home Streaks and badges':

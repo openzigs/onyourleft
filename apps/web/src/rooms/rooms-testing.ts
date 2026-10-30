@@ -103,6 +103,22 @@ export interface SeenRequest {
 }
 
 /**
+ * An instance with no keys in front of `send` (#1210): `/v1/instance/keys`
+ * answers `unavailable`, as one with no operator secret does, and every other
+ * request reaches `send` — so a test that counts what a no-card device sends
+ * about a room counts only that. A device with no card reads the keys before
+ * a phase-2 call, and sends nothing more to an instance that serves them.
+ */
+export function keylessInstance<T extends InstanceSend>(send: T): InstanceSend {
+  return (url, init) =>
+    new URL(url).pathname === '/v1/instance/keys'
+      ? Promise.resolve(
+          Response.json({ error: { code: 'unavailable', message: 'No keys.' } }, { status: 503 }),
+        )
+      : send(url, init);
+}
+
+/**
  * An instance that answers the rooms routes — scripted, with the answers a
  * test may change — and keeps every request it saw.
  */
@@ -120,12 +136,71 @@ export class ScriptedInstance {
     status: 200,
     body: { ticket: 'the-ticket', expiresAt: 1 },
   };
+  /** #788: `GET /v1/rooms/public`. */
+  listing: { status: number; body: unknown } = { status: 200, body: { rooms: [] } };
+  /** #788: `POST /v1/rooms/{roomId}/join`. */
+  joinedPublic: { status: number; body: unknown } = { status: 404, body: null };
+  /** #789: `POST /v1/rooms/{roomId}/reports`. */
+  reported: { status: number; body: unknown } = { status: 204, body: null };
+  /** #1516: `POST /v1/rooms/{roomId}/blocks`. */
+  blocked: { status: number; body: unknown } = { status: 204, body: null };
 
-  /** The room joined by code is `routeSha256`'s, and its route is `gpx`. */
-  offer(roomId: string, kind: 'group' | 'race', gpx: string, sha256: string): void {
+  /**
+   * #788: a public room listed as `listed`, joined from the listing, its route
+   * `gpx`. The listing answers it and nothing else.
+   */
+  list(
+    listed: {
+      readonly roomId: string;
+      readonly kind: 'group' | 'race';
+      readonly startsAt: number;
+      readonly lengthMetres: number;
+      readonly climbMetres: number;
+    },
+    gpx: string,
+    sha256: string,
+  ): void {
+    this.listing = {
+      status: 200,
+      body: { rooms: [{ ridingPosition: 'hoods', drafting: true, loop: false, ...listed }] },
+    };
+    this.joinedPublic = {
+      status: 200,
+      body: {
+        roomId: listed.roomId,
+        kind: listed.kind,
+        ridingPosition: 'hoods',
+        drafting: true,
+        loop: false,
+        routeSha256: sha256,
+      },
+    };
+    this.route = { status: 200, body: { sha256, gpx } };
+  }
+
+  /**
+   * The room joined by code is `routeSha256`'s, and its route is `gpx`; it
+   * drafts unless told, and the joiner did not make it unless told (#948).
+   */
+  offer(
+    roomId: string,
+    kind: 'group' | 'race',
+    gpx: string,
+    sha256: string,
+    drafting = true,
+    creator = false,
+  ): void {
     this.joined = {
       status: 200,
-      body: { roomId, kind, ridingPosition: 'hoods', loop: false, routeSha256: sha256 },
+      body: {
+        roomId,
+        kind,
+        ridingPosition: 'hoods',
+        drafting,
+        loop: false,
+        routeSha256: sha256,
+        creator,
+      },
     };
     this.route = { status: 200, body: { sha256, gpx } };
   }
@@ -135,8 +210,17 @@ export class ScriptedInstance {
     this.results = { status: 200, body: { rows } };
   }
 
+  /** How often `/v1/instance/keys` was read: answered `unavailable`, as an instance with no keys does (#1210). */
+  keysReads = 0;
+
   send: InstanceSend = (url, init) => {
     const path = url.slice(ROOMS_ORIGIN.length);
+    if (path === '/v1/instance/keys') {
+      this.keysReads += 1;
+      return Promise.resolve(
+        Response.json({ error: { code: 'unavailable', message: 'No keys.' } }, { status: 503 }),
+      );
+    }
     const headers = new Headers(init.headers);
     const body: unknown = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : null;
     this.seen.push({
@@ -148,21 +232,31 @@ export class ScriptedInstance {
     const answer =
       path === '/v1/rooms'
         ? this.created
-        : path === '/v1/rooms/join'
-          ? this.joined
-          : path.endsWith('/route')
-            ? this.route
-            : path.endsWith('/start')
-              ? this.started
-              : path.endsWith('/results')
-                ? this.results
-                : path.endsWith('/ticket')
-                  ? this.ticket
-                  : { status: 404, body: null };
+        : path === '/v1/rooms/public'
+          ? this.listing
+          : path === '/v1/rooms/join'
+            ? this.joined
+            : path.endsWith('/join')
+              ? this.joinedPublic
+              : path.endsWith('/reports')
+                ? this.reported
+                : path.endsWith('/blocks')
+                  ? this.blocked
+                  : path.endsWith('/route')
+                    ? this.route
+                    : path.endsWith('/start')
+                      ? this.started
+                      : path.endsWith('/results')
+                        ? this.results
+                        : path.endsWith('/ticket')
+                          ? this.ticket
+                          : { status: 404, body: null };
     return Promise.resolve(
-      new Response(answer.body === null ? '' : JSON.stringify(answer.body), {
-        status: answer.status,
-      }),
+      // A 204 carries no body at all: a `Response` refuses even an empty one.
+      new Response(
+        answer.body === null ? (answer.status === 204 ? null : '') : JSON.stringify(answer.body),
+        { status: answer.status },
+      ),
     );
   };
 }

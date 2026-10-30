@@ -31,6 +31,8 @@ import {
   metres,
   metresPerSecond,
   revolutionsPerMinute,
+  seconds,
+  thresholdShare,
   unixSeconds,
   watts,
 } from '@onyourleft/domain';
@@ -93,7 +95,34 @@ function busyRide(): StubDetail {
   return stubDetail(
     ATHLETE,
     {
-      activity: stubActivity({ hasPosition: true, averagePower: watts(212) }),
+      // #1319: and a workout's blocks, so the audit reads the second table
+      // beside the laps — a ridden, an eased and a skipped block.
+      activity: stubActivity({
+        hasPosition: true,
+        averagePower: watts(212),
+        rideFacts: {
+          workoutBlocks: [
+            {
+              outcome: 'ridden',
+              block: { kind: 'steady', seconds: seconds(120), target: thresholdShare(0.6) },
+              startedAt: unixSeconds(1_760_000_000),
+              elapsedTime: seconds(120),
+              movingTime: seconds(120),
+              averagePower: watts(150),
+              maxHeartRate: beatsPerMinute(140),
+            },
+            {
+              outcome: 'cut-short',
+              eased: true,
+              block: { kind: 'steady', seconds: seconds(600), target: thresholdShare(1.05) },
+              startedAt: unixSeconds(1_760_000_120),
+              elapsedTime: seconds(280),
+              movingTime: seconds(280),
+            },
+            { outcome: 'skipped', block: { kind: 'free-ride', seconds: seconds(300) } },
+          ],
+        },
+      }),
       channels: {
         power: powerSeries(count, 100, 120),
         heartRate: Array.from({ length: count }, () => beatsPerMinute(142)),
@@ -106,7 +135,21 @@ function busyRide(): StubDetail {
         ),
         longitude: Array.from({ length: count }, () => degreesLongitude(HOME.longitude)),
       },
-      laps: [stubLap(0), stubLap(1), stubLap(2)],
+      // #1312: a best lap, a part lap and every figure's column, so the
+      // audit reads the table as a course ride draws it.
+      laps: [
+        stubLap(0),
+        stubLap(1, {
+          distance: metres(7_400),
+          averagePower: watts(203),
+          maxPower: watts(618),
+          averageHeartRate: beatsPerMinute(151),
+          maxHeartRate: beatsPerMinute(173),
+          averageCadence: revolutionsPerMinute(91),
+          ascent: metres(48),
+        }),
+        stubLap(2, { partial: true }),
+      ],
     },
     [zone],
   );

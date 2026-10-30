@@ -27,18 +27,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   routeProfile,
+  seconds,
+  thresholdShare,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
+
+import type { UnitSystem } from '@onyourleft/store';
 
 import { AppShell } from '../../shell/AppShell';
 import type { CapabilityProbe } from '../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import type { GamePort, RidableRoute } from '../GameView';
+import { auditAccessibility, formatViolations } from '../../a11y/audit';
+import type { WorkoutHold } from '../../workout/hold-text';
+import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import type { GameRenderer } from '../port';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 
@@ -124,6 +133,7 @@ const RENDERER: GameRenderer = {
     render: () => undefined,
     setQuality: () => undefined,
     setRiderKit: () => undefined,
+    setSeason: () => undefined,
     resize: () => undefined,
     destroy: () => undefined,
   }),
@@ -184,11 +194,12 @@ async function press(element: HTMLElement | undefined): Promise<void> {
   await settle();
 }
 
-async function startRide(trainer?: GameTrainerPort): Promise<void> {
+async function startRide(trainer?: GameTrainerPort, units?: UnitSystem): Promise<void> {
   globalThis.location.hash = '#/game';
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
+      {...(units === undefined ? {} : { units })}
       game={PORT}
       gameRenderer={() => Promise.resolve(RENDERER)}
       {...(trainer === undefined ? {} : { gameTrainer: trainer })}
@@ -310,6 +321,33 @@ describe('the road ahead, through the same region — #399', () => {
     expect(offered).toContain('climb-ahead');
   });
 
+  it('says it at the nearest imperial step to an imperial rider — #1440', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 250,
+    });
+    await startRide(undefined, 'imperial');
+    const said = await pumpUntil(/^Climb/, 400);
+    // 250 m stored is 1000 ft for an imperial rider, not 820.
+    expect(said).toMatch(/^Climb in 1000 feet, [5-7] percent$/);
+  });
+
+  it('says a climb at the 0.5 mi step in miles, not 2640 feet — #1440’s review', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 1000,
+    });
+    await startRide(undefined, 'imperial');
+    const said = await pumpUntil(/^Climb/, 400);
+    // 1000 m stored is the 0.5 mi step for an imperial rider; the climb is
+    // 1 km into the route, so it is first seen 0.5 mi ahead.
+    expect(said).toMatch(/^Climb in 0\.5 miles, [5-7] percent$/);
+  });
+
   // ⚠️ **14 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
   // for this case: under coverage on CI it took 2.1 s to 4.4 s over thirteen green `main` runs on
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
@@ -402,5 +440,367 @@ describe('the trainer’s sentences go through the same ONE region — #445', ()
     await startRide(trainerPort(true));
     const said = await pumpUntil(/^Trainer: /, 40);
     expect(said).toMatch(/^Trainer: /);
+  });
+});
+
+describe('the heart-rate hold, through the game — #1240', () => {
+  let hold: WorkoutHold | undefined;
+
+  /** A trainer a running workout owns, whose hold the test changes between frames. */
+  function holdingPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutHold: () => hold,
+    };
+  }
+
+  const range = { low: beatsPerMinute(130), high: beatsPerMinute(140) };
+
+  beforeEach(() => {
+    hold = { reason: 'settling', range, target: 100 };
+  });
+
+  it('shows the hold on the HUD’s trainer line, and the line follows the target', async () => {
+    await startRide(holdingPort());
+    await pump(2);
+    expect(document.body.textContent).toContain('Hold 130–140 bpm: 100 W');
+    hold = { reason: 'raised', range, target: 115 };
+    await pump(2);
+    expect(document.body.textContent).toContain('Hold 130–140 bpm: 115 W');
+    expect(document.body.textContent).not.toContain('Hold 130–140 bpm: 100 W');
+    hold = undefined;
+    await pump(2);
+    expect(document.body.textContent).not.toContain('Hold 130–140 bpm');
+  });
+
+  it('draws the running workout on the HUD where the route plan is, from the port — #1307', async () => {
+    const workout: WorkoutGraphInput = {
+      elapsedSeconds: 450,
+      timeline: expandWorkout({
+        name: 'Hold',
+        blocks: [{ kind: 'steady', seconds: seconds(1800), target: thresholdShare(0.4) }],
+      }),
+      holdingWatts: 100,
+      thresholdWatts: 250,
+      trace: [{ at: 450, target: 100, power: 104, heartRate: 128, range: { low: 130, high: 140 } }],
+    };
+    let running: WorkoutGraphInput | undefined = workout;
+    await startRide({ ...holdingPort(), runningWorkout: () => running });
+    await pump(2);
+    const strip = document.querySelector('.oyl-hud__route [data-oyl-workout-graph="hud"]');
+    expect(strip?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(strip?.getAttribute('aria-label')).toContain(
+      'Heart rate: 128 bpm, with a chosen range of 130–140 bpm.',
+    );
+    expect(strip?.querySelector('.oyl-workout-strip__range')).not.toBeNull();
+    expect(strip?.querySelector('p')?.textContent).toBe('128 bpm, range 130–140 · Target 100 W');
+    expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    // The workout ends: the route plan has its place back.
+    running = undefined;
+    await pump(2);
+    expect(document.querySelector('[data-oyl-workout-graph]')).toBeNull();
+    expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).not.toBeNull();
+  });
+
+  it('says a CHANGED sentence through the one region with announcements on, and never the first one', async () => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+    await startRide(holdingPort());
+    await pump(6);
+    expect(region()?.textContent).not.toContain('Heart-rate hold');
+    expect(offered).not.toContain('hold-changed');
+
+    hold = { reason: 'raised', range, target: 115 };
+    const said = await pumpUntil(/Heart-rate hold/, 10);
+    expect(said).toBe(
+      'Heart-rate hold: Target raised to bring your heart rate into the range you chose.',
+    );
+    expect(offered).toContain('hold-changed');
+  });
+
+  it('says nothing about the hold with announcements off', async () => {
+    await startRide(holdingPort());
+    await pump(4);
+    hold = { reason: 'raised', range, target: 115 };
+    await pump(10);
+    expect(region()?.textContent).not.toContain('Heart-rate hold');
+  });
+});
+
+describe('a re-plan during the ride, through the game — #1244', () => {
+  const SENTENCE = 'Next block shortened by 2 minutes, to fit the duration you chose.';
+  let change: { waiting: { revision: number; sentence: string }; quiet: boolean } | undefined;
+  let discarded: number | undefined;
+  let kept: number;
+
+  /** A trainer a running workout owns, whose waiting re-plan the test changes between frames. */
+  function replanPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutPlanChange: () => change,
+      workoutPlanDiscarded: () => discarded,
+      keepThePlan: () => {
+        kept += 1;
+        // As the controller does: the move is dropped, and nothing waits.
+        change = undefined;
+      },
+    };
+  }
+
+  const keepButton = (): HTMLButtonElement | undefined =>
+    queryAll<HTMLButtonElement>(document, '.oyl-hud__actions button').find(
+      (each) => each.textContent === 'Keep the plan',
+    );
+
+  const quietRide = (): void => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+  };
+
+  beforeEach(() => {
+    change = undefined;
+    discarded = undefined;
+    kept = 0;
+  });
+
+  it('puts Keep the plan on the HUD only while a move waits, and the press reaches the port', async () => {
+    quietRide();
+    await startRide(replanPort());
+    await pump(4);
+    expect(keepButton()).toBeUndefined();
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pumpUntil(/Plan change/, 10);
+    await settle();
+    const button = keepButton();
+    expect(button).toBeDefined();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    expect(kept).toBe(1);
+    await pump(4);
+    await settle();
+    // Nothing waits any more, so there is nothing to keep the plan from.
+    expect(keepButton()).toBeUndefined();
+  });
+
+  it('offers it while the sentence is being held above threshold power: the control does not wait to be said', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(6);
+    await settle();
+    expect(offered).not.toContain('plan-changed');
+    expect(keepButton()).toBeDefined();
+  });
+
+  it('says once that a pause or a lost trainer discarded the waiting move', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pumpUntil(/Plan change/, 10);
+    change = undefined;
+    discarded = 1;
+    expect(await pumpUntil(/dropped/, 20)).toBe(
+      'Plan change: That change was dropped because the ride paused or lost the trainer, so the plan stays as it was.',
+    );
+    await pump(20);
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(2);
+  });
+
+  it('takes away in silence a move that was held above threshold power and never said', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(6);
+    change = undefined;
+    discarded = 1;
+    await pump(20);
+    // Nothing was announced, so nothing is said to have been dropped.
+    expect(offered).not.toContain('plan-changed');
+    expect(region()?.textContent).not.toContain('dropped');
+  });
+
+  it('does not say a discard that already stood when the ride began', async () => {
+    quietRide();
+    discarded = 4;
+    await startRide(replanPort());
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+  });
+
+  it('says an accepted move through the one region, once, with announcements on', async () => {
+    quietRide();
+    await startRide(replanPort());
+    await pump(4);
+    expect(offered).not.toContain('plan-changed');
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+    await pump(10);
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(1);
+  });
+
+  it('holds it while the workout is above threshold power, and says it after', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+  });
+
+  it('does not say a move that was already waiting when the ride began', async () => {
+    quietRide();
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await startRide(replanPort());
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+    // A second move is said.
+    change = { waiting: { revision: 2, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+  });
+
+  it('says nothing about it with announcements off', async () => {
+    await startRide(replanPort());
+    await pump(4);
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pump(10);
+    expect(region()?.textContent).not.toContain('Plan change');
+  });
+
+  it('shows the waiting move’s sentence beside Keep the plan with announcements off, and no voice says it — #1324', async () => {
+    const shown = (): string | null | undefined =>
+      document.querySelector('.oyl-hud__actions .oyl-hud__plan-change')?.textContent;
+    await startRide(replanPort());
+    await pump(4);
+    expect(shown()).toBeUndefined();
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pump(4);
+    await settle();
+    expect(shown()).toBe(SENTENCE);
+    expect(keepButton()).toBeDefined();
+    // Neither the HUD's region nor any other voice on the stage holds it.
+    expect(region()?.textContent).not.toContain(SENTENCE);
+    expect(voicesOnTheStage().filter((each) => each.textContent?.includes(SENTENCE))).toEqual([]);
+
+    await press(keepButton());
+    await pump(4);
+    await settle();
+    expect(shown()).toBeUndefined();
+  });
+});
+
+describe('Switch re-plans off, in the game — #1329', () => {
+  let on: boolean;
+  let switched: number;
+
+  /** A trainer a running workout owns, with re-plans on until the rider switches them off. */
+  function replansPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutReplansOn: () => on,
+      switchReplansOff: () => {
+        switched += 1;
+        // As the controller does: off for the rest of the workout.
+        on = false;
+      },
+    };
+  }
+
+  const offButton = (): HTMLButtonElement | undefined =>
+    queryAll<HTMLButtonElement>(document, '.oyl-hud__actions button').find(
+      (each) => each.textContent === 'Switch re-plans off',
+    );
+
+  beforeEach(() => {
+    on = true;
+    switched = 0;
+  });
+
+  it('is on the HUD while re-plans are on, reaches the controller, goes, and the region says so once', async () => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+    await startRide(replansPort());
+    await pump(4);
+    await settle();
+    const button = offButton();
+    expect(button).toBeDefined();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    await press(button);
+    expect(switched).toBe(1);
+    expect(await pumpUntil(/Re-plans are off/, 10)).toBe(
+      'Plan change: Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.',
+    );
+    // Owed until said, and never offered again once it has been.
+    const offeredWhenSaid = offered.filter((kind) => kind === 'plan-changed').length;
+    await pump(20);
+    await settle();
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(offeredWhenSaid);
+    expect(offButton()).toBeUndefined();
+  });
+
+  it('is not on the HUD while re-plans are off', async () => {
+    on = false;
+    await startRide(replansPort());
+    await pump(4);
+    await settle();
+    expect(offButton()).toBeUndefined();
+  });
+
+  it('says nothing about it with announcements off: the control going is the answer', async () => {
+    await startRide(replansPort());
+    await pump(4);
+    await settle();
+    await press(offButton());
+    expect(switched).toBe(1);
+    await pump(10);
+    await settle();
+    expect(region()?.textContent).not.toContain('Re-plans are off');
+    expect(offButton()).toBeUndefined();
   });
 });

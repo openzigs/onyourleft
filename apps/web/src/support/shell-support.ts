@@ -36,7 +36,13 @@ import { seconds, type Seconds } from '@onyourleft/domain';
 import type { PermissionAction, PermissionNotice } from '@onyourleft/mobile';
 import type { TransportAvailability } from '@onyourleft/sensors';
 
-import type { ShellNotice, ShellSupport, ShellSupportPort } from './shell-support-port';
+import type {
+  SettingsLink,
+  ShellNotice,
+  ShellSupport,
+  ShellSupportPort,
+} from './shell-support-port';
+import type { SettingsPage } from './system-settings-port';
 
 /**
  * How long the Devices screen waits for the plugin before it says so (#322).
@@ -190,8 +196,27 @@ function shellNotice(notice: PermissionNotice | null): ShellNotice | null {
     // second list of recoverable kinds here could disagree with that one, and
     // the disagreement would be a button on a screen it was removed from.
     recoverable: notice.action !== null,
+    // #1436: the page the action names, as a button. From the action, for the
+    // reason `recoverable` above is.
+    settings: notice.action === null ? null : settingsFor(notice.action),
   };
 }
+
+/** Which settings page a notice's action opens, with its own words — #1436. */
+function settingsFor(action: PermissionAction): SettingsLink | null {
+  const page = SETTINGS_PAGE[action.kind];
+  return page === null ? null : { page, label: action.label };
+}
+
+/**
+ * The page behind each action. Total, as {@link INSTRUCTION} is: `retry` opens
+ * nothing.
+ */
+const SETTINGS_PAGE: Record<PermissionAction['kind'], SettingsPage | null> = {
+  'open-settings': 'app',
+  'open-bluetooth-settings': 'bluetooth',
+  retry: null,
+};
 
 /** {@link ShellSupportPort}, over the Capacitor transport. */
 export function capacitorShellSupport(source: ShellSupportSource): ShellSupportPort {

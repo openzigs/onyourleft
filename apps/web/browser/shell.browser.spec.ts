@@ -782,6 +782,329 @@ for (const viewport of HEADER_VIEWPORTS) {
   });
 }
 
+/**
+ * The band over the gesture bar, and focus that stops above it — #1441.
+ *
+ * ## What was wrong
+ *
+ * On the owner's Pixel Tablet, edge-to-edge, the gesture handle was drawn over
+ * the page at the bottom of every screen: over a sentence on Home, over table
+ * rows on a ride's page. `body`'s padding (#439) keeps the END of a page clear
+ * of the inset, but everything that scrolled past the bottom edge before the
+ * end passed under the handle.
+ *
+ * ## What is measured, and the control that makes it mean something
+ *
+ * At #671's viewports, with the insets applied to the ENGINE and read back:
+ *
+ * - the pixel in the middle of the 32 px bottom inset, below the middle of
+ *   `main`, with the page scrolled into its long spacer and everything in
+ *   `main` positioned and painted {@link CONTENT_PAINT} — it must be the
+ *   canvas (or, where the phone's navigation bar already sat there, the bar's
+ *   surface), never the content;
+ * - two screens of buttons walked with Tab from the top — the lowest bottom
+ *   edge any of them is focused at must be above the inset, not inside it.
+ *
+ * ⚠️ **Which viewports prove the band itself** (#1472's review nit): 320×256,
+ * 844×390 and both tablets, where nothing else is fixed over the inset, so the
+ * canvas pixel is the band's own paint and the control's content pixel is
+ * what it hides. At **390×844** the phone's navigation BAR is fixed over the
+ * inset, so the pixel reads the bar's surface with the band and without it:
+ * that viewport proves only that the band is ordered UNDER the bar (it would
+ * read the canvas if it painted over it), and its control asserts the focus
+ * half alone. Focus against the TOP of that bar is §"#1472" below.
+ *
+ * ⚠️ **The control takes the two rules off** (`theme.css` §`.oyl-shell::after`
+ * and the root's `scroll-padding-bottom`) and the same page must then FAIL
+ * both: the content's paint in the inset wherever no bar covers it, and a
+ * focused button's bottom inside the inset. Without it a page that never applied its
+ * insets would pass as readily as a correct one.
+ *
+ * ## What this does NOT prove
+ *
+ * Anything on the owner's tablet or phone: that is #1441's device check, done
+ * on the devices before merge. The upright tablet's insets are assumed
+ * (`insets.ts`), and the phones here borrow the tablet's.
+ */
+const CONTENT_PAINT = '#ff00ff';
+
+const WITHOUT_1441 = `
+  .oyl-shell::after { content: none !important; }
+  :root { scroll-padding-bottom: 0 !important; }
+`;
+
+interface GestureBandReading {
+  readonly inset: string;
+  readonly barCovers: boolean;
+  readonly focusedBottom: number;
+  readonly fold: number;
+}
+
+/**
+ * Two screens of buttons prepended to `main`, walked with Tab from the first;
+ * the lowest bottom edge any of them was focused at. Close together, because
+ * Chromium scrolls a control that is NEAR the viewport just far enough to
+ * reach its edge — the edge #1441 and #1472 are about — and centres one that
+ * is far from it.
+ */
+async function lowestFocusedBottom(page: Page, viewportHeight: number): Promise<number> {
+  await page.evaluate((height) => {
+    const main = document.querySelector('.oyl-main');
+    if (main === null) throw new Error('no .oyl-main');
+    const probe = document.createElement('div');
+    probe.dataset['oylProbe'] = 'column';
+    const count = Math.ceil((height * 2) / 60);
+    for (let index = 0; index < count; index += 1) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `Probe ${String(index)}`;
+      button.style.display = 'block';
+      button.style.marginBlock = '16px';
+      probe.append(button);
+    }
+    main.prepend(probe);
+    window.scrollTo(0, 0);
+    probe.querySelector('button')?.focus({ preventScroll: true });
+  }, viewportHeight);
+  const presses = await page.evaluate(
+    () => document.querySelectorAll('[data-oyl-probe="column"] button').length - 1,
+  );
+  let focusedBottom = Number.NEGATIVE_INFINITY;
+  for (let press = 0; press < presses; press += 1) {
+    await page.keyboard.press('Tab');
+    const bottom = await page.evaluate(() => {
+      const focused = document.activeElement;
+      if (focused?.closest('[data-oyl-probe="column"]') == null) {
+        throw new Error('Tab left the probe column');
+      }
+      return focused.getBoundingClientRect().bottom;
+    });
+    focusedBottom = Math.max(focusedBottom, bottom);
+  }
+  return focusedBottom;
+}
+
+async function readGestureBand(
+  page: Page,
+  viewport: (typeof HEADER_VIEWPORTS)[number],
+  path: (name: string) => string,
+  control: boolean,
+): Promise<GestureBandReading> {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await applyInsets(page, viewport.insets);
+  await openShell(page);
+  // The insets must be the ones the page resolved, or this measured nothing.
+  expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  if (control) await page.addStyleTag({ content: WITHOUT_1441 });
+
+  const focusedBottom = await lowestFocusedBottom(page, viewport.height);
+
+  // Content scrolled under the inset, painted, and positioned with the
+  // largest `z-index` the page's own content uses (the lap table's sticky
+  // column, 1), so that a band without one of its own would lose to it.
+  await page.addStyleTag({
+    content: `.oyl-main * { position: relative; z-index: 1; background: ${CONTENT_PAINT} !important; }`,
+  });
+  // Into the spacer, so that what is under the inset is the painted spacer
+  // and not an illustration that keeps its own colours.
+  await page.evaluate(() => {
+    const spacer = document.querySelector('[data-oyl-spacer]');
+    if (spacer === null) throw new Error('no spacer');
+    window.scrollTo(0, spacer.getBoundingClientRect().top + window.scrollY + 200);
+  });
+  await settled(page);
+  expect(await page.evaluate(() => window.scrollY), 'the page did not scroll').toBeGreaterThan(0);
+  const point = await page.evaluate((bottomInset) => {
+    const main = document.querySelector('.oyl-main');
+    if (main === null) throw new Error('no .oyl-main');
+    const box = main.getBoundingClientRect();
+    const x = Math.floor(box.left + box.width / 2);
+    const y = Math.floor(window.innerHeight - bottomInset / 2);
+    // From the bar's BOX, not a hit test: a band painted over the bar would
+    // be what a hit test found, and would then be expected to be the canvas.
+    const bar = document.querySelector('.oyl-nav')?.getBoundingClientRect();
+    const barCovers =
+      bar !== undefined && bar.left <= x && x < bar.right && bar.top <= y && y < bar.bottom;
+    return { x, y, barCovers };
+  }, viewport.insets.bottom);
+  const file = path('inset.png');
+  await page.screenshot({ path: file, clip: { x: point.x, y: point.y, width: 1, height: 1 } });
+  const png = decodePng(file);
+  const inset = `#${[0, 1, 2]
+    .map((channel) => (png.data[channel] ?? 0).toString(16).padStart(2, '0'))
+    .join('')}`;
+  return {
+    inset,
+    barCovers: point.barCovers,
+    focusedBottom,
+    fold: viewport.height - viewport.insets.bottom,
+  };
+}
+
+for (const viewport of HEADER_VIEWPORTS) {
+  test.describe(`#1441 — the gesture bar at ${viewport.name}`, () => {
+    test('content passes beneath a band in the inset, and Tab stops above it', async ({
+      page,
+    }, info) => {
+      const read = await readGestureBand(page, viewport, (name) => info.outputPath(name), false);
+      const published =
+        `inset pixel ${read.inset}${read.barCovers ? ' (the bar)' : ''}; ` +
+        `lowest focused bottom ${read.focusedBottom.toFixed(1)} of fold ${String(read.fold)}`;
+      console.log(`#1441 ${viewport.name}: ${published}`);
+      info.annotations.push({ type: 'gesture bar', description: published });
+      expect(
+        read.inset,
+        'content scrolled into the gesture bar’s inset instead of passing beneath a band ' +
+          '(theme.css §`.oyl-shell::after`)',
+      ).toBe(read.barCovers ? COLOUR_TOKENS.surfaceOverlay : COLOUR_TOKENS.canvas);
+      expect(
+        read.focusedBottom,
+        'a control reached by Tab stopped inside the gesture bar’s inset (theme.css §`html` ' +
+          '`scroll-padding-bottom`)',
+      ).toBeLessThanOrEqual(read.fold + 0.5);
+    });
+
+    test('the control — without the band and the padding it fails both', async ({ page }, info) => {
+      const read = await readGestureBand(page, viewport, (name) => info.outputPath(name), true);
+      console.log(
+        `#1441 control ${viewport.name}: inset ${read.inset}, lowest focused bottom ` +
+          `${read.focusedBottom.toFixed(1)} of fold ${String(read.fold)}`,
+      );
+      if (!read.barCovers) {
+        expect(
+          read.inset,
+          'the inset shows no content without the band, so the pixel assertion cannot fail',
+        ).toBe(CONTENT_PAINT);
+      }
+      expect(
+        read.focusedBottom,
+        'Tab stops above the inset without the padding, so the focus assertion cannot fail',
+      ).toBeGreaterThan(read.fold + 0.5);
+    });
+  });
+}
+
+/**
+ * Focus that stops above the phone's navigation BAR — #1472 (WCAG 2.2 SC
+ * 2.4.11, Focus Not Obscured).
+ *
+ * ## What was wrong
+ *
+ * On a compact window the bar is fixed over the bottom of the page (4.5 rem
+ * and the inset, `theme.css` §BAR). #1441's `scroll-padding-bottom` held a
+ * focused control above the INSET only, and only the game chooser added the
+ * bar's height, so on every other route Tab could stop on a control drawn
+ * entirely under the bar. §"#1441" measured against the viewport less the
+ * inset, which is why 390×844 passed with the focused button hidden.
+ *
+ * ## What is measured
+ *
+ * The same Tab walk as §"#1441", at phone viewports with the tablet's insets
+ * applied to the engine. The fold is the TOP of the bar where the page lays
+ * out a bar fixed to the bottom edge, and the viewport less the inset where it
+ * does not. **Upright** (360×740, 390×844, 412×915) the bar is there and the
+ * fold is its top. **On their side** (740×360, 844×390, 915×412) the window
+ * is wider than the bar's 37.5 rem and the navigation is the RAIL, so there is
+ * no bar to obscure anything: those cases hold that it is the rail — so a
+ * future bar on a sideways phone cannot slip past — and that focus clears the
+ * inset.
+ *
+ * ⚠️ **The control** puts back #1441's padding alone (the inset, not the bar)
+ * on the upright phones and must then see a focused control's bottom below the
+ * bar's top. Without it a walk that never reached the bottom edge would pass.
+ */
+const PHONE_VIEWPORTS: readonly {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly bar: boolean;
+}[] = [
+  { name: '360×740 upright', width: 360, height: 740, bar: true },
+  { name: '390×844 upright', width: 390, height: 844, bar: true },
+  { name: '412×915 upright', width: 412, height: 915, bar: true },
+  { name: '740×360 on its side', width: 740, height: 360, bar: false },
+  { name: '844×390 on its side', width: 844, height: 390, bar: false },
+  { name: '915×412 on its side', width: 915, height: 412, bar: false },
+];
+
+/** #1441's padding and nothing more: the scroll area ends at the inset, under the bar. */
+const WITHOUT_1472 = `
+  html:has(.oyl-nav) { scroll-padding-bottom: var(--oyl-safe-bottom) !important; }
+`;
+
+async function readFocusAboveBar(
+  page: Page,
+  viewport: (typeof PHONE_VIEWPORTS)[number],
+  control: boolean,
+): Promise<{
+  readonly barTop: number | null;
+  readonly focusedBottom: number;
+  readonly fold: number;
+}> {
+  const insets = PIXEL_TABLET_LANDSCAPE_INSETS;
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await applyInsets(page, insets);
+  await openShell(page);
+  expect(await resolvedInsets(page)).toEqual(insets);
+  if (control) await page.addStyleTag({ content: WITHOUT_1472 });
+  // A bar is a fixed `.oyl-nav` whose box reaches the bottom edge and spans
+  // the window; the rail is fixed too but stands on the left.
+  const barTop = await page.evaluate(() => {
+    const nav = document.querySelector('.oyl-nav');
+    if (nav === null) throw new Error('no .oyl-nav');
+    const box = nav.getBoundingClientRect();
+    const isBar =
+      getComputedStyle(nav).position === 'fixed' &&
+      Math.abs(box.bottom - window.innerHeight) < 1 &&
+      box.width >= window.innerWidth - 1;
+    return isBar ? box.top : null;
+  });
+  const focusedBottom = await lowestFocusedBottom(page, viewport.height);
+  return { barTop, focusedBottom, fold: barTop ?? viewport.height - insets.bottom };
+}
+
+for (const viewport of PHONE_VIEWPORTS) {
+  test.describe(`#1472 — focus and the navigation bar at ${viewport.name}`, () => {
+    test(`Tab stops above ${viewport.bar ? 'the bar’s top' : 'the inset, with no bar'}`, async ({
+      page,
+    }, info) => {
+      const read = await readFocusAboveBar(page, viewport, false);
+      const published =
+        `bar top ${read.barTop === null ? 'none (the rail)' : read.barTop.toFixed(1)}; ` +
+        `lowest focused bottom ${read.focusedBottom.toFixed(1)} of fold ${read.fold.toFixed(1)}`;
+      console.log(`#1472 ${viewport.name}: ${published}`);
+      info.annotations.push({ type: 'focus above the bar', description: published });
+      expect(
+        read.barTop !== null,
+        viewport.bar
+          ? 'no navigation bar at a phone held upright: this case measured nothing'
+          : 'a navigation bar on a phone held sideways, which this case does not hold focus above',
+      ).toBe(viewport.bar);
+      expect(
+        read.focusedBottom,
+        'a control reached by Tab stopped under the navigation bar or in the inset (theme.css ' +
+          '§BAR `html:has(.oyl-nav)` `scroll-padding-bottom`)',
+      ).toBeLessThanOrEqual(read.fold + 0.5);
+    });
+
+    if (viewport.bar) {
+      test('the control — with only the inset’s padding, Tab stops under the bar', async ({
+        page,
+      }) => {
+        const read = await readFocusAboveBar(page, viewport, true);
+        console.log(
+          `#1472 control ${viewport.name}: lowest focused bottom ` +
+            `${read.focusedBottom.toFixed(1)} of bar top ${String(read.barTop)}`,
+        );
+        expect(
+          read.focusedBottom,
+          'Tab stops above the bar without its padding, so the assertion cannot fail',
+        ).toBeGreaterThan(read.fold + 0.5);
+      });
+    }
+  });
+}
+
 test.describe('#671 — the app’s name on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -1697,10 +2020,12 @@ test.describe('#397 — the announcement controls', () => {
     // each "never" and an interval, where they were four selects — #400's
     // Sounds panel, which carries the same class so its switch and its volume
     // slider are held to the same floor, and #475's Game world switch, which
-    // carries it for the same reason and shipped without it.
+    // carries it for the same reason and shipped without it. Twenty-seven
+    // since #787's Draft switch, which carries it too. Twenty-eight since
+    // #1622's Holiday decorations switch, in the Game world panel.
     expect(seen.filter((each) => each.name === 'LABEL')).toHaveLength(22);
     expect(seen.filter((each) => each.name === 'SELECT')).toHaveLength(0);
-    expect(seen.length).toBe(26);
+    expect(seen.length).toBe(28);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
@@ -2113,7 +2438,7 @@ async function openControls(page: Page, url = CONTROLS_PAGE, theme?: Theme): Pro
   expect(
     await page.locator('[data-oyl-native-control]').count(),
     'the native control specimens did not render — see shell-harness.tsx §NativeControls',
-  ).toBe(8);
+  ).toBe(9);
 }
 
 /** The control specimens, as {@link sharedShell} loads them. */
@@ -2256,6 +2581,82 @@ test.describe('#667 — the row target is declared, and nothing else holds it', 
       expect(row.height, `a ${row.markup} row with no floor`).toBeGreaterThan(0);
       expect(row.height, `a ${row.markup} row with no floor`).toBeLessThan(TOUCH_TARGET_PIXELS);
     }
+  });
+});
+
+/**
+ * #1207 — the instance card box (#1190) declares its 44 px target in
+ * `theme.css` (§`.oyl-instance__card-box`), and `InstanceKeys.target.a11y.test.ts`
+ * reads that declaration. This is the measured half, #316's three ways. Its
+ * three rows make it taller than 44 px as it first renders, so what the floor
+ * holds is the box a rider DRAGS smaller (`resize: vertical`): measured dragged
+ * to nothing, with the floor and without.
+ */
+async function cardBox(
+  page: Page,
+  { dragged, stripped }: { readonly dragged: boolean; readonly stripped: boolean },
+): Promise<{ readonly height: number; readonly width: number; readonly minHeight: string }> {
+  return page.evaluate(
+    ({ drag, strip }) => {
+      const box = document.querySelector<HTMLTextAreaElement>(
+        '[data-oyl-native-control="card-box"]',
+      );
+      if (box === null) throw new Error('no card box specimen — see shell-harness.tsx');
+      const before = box.style.cssText;
+      if (drag) box.style.height = '0px';
+      if (strip) box.style.minHeight = '0px';
+      const rect = box.getBoundingClientRect();
+      const measured = {
+        height: rect.height,
+        width: rect.width,
+        minHeight: getComputedStyle(box).minHeight,
+      };
+      box.style.cssText = before;
+      return measured;
+    },
+    { drag: dragged, strip: stripped },
+  );
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`#1207 — ${viewport.name} — the instance card box`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('is at least a 44×44 target as rendered, and when dragged as small as it goes', async ({
+      browser,
+    }) => {
+      const page = await sharedShell(browser, viewport, SHARED_CONTROLS);
+      for (const dragged of [false, true]) {
+        const box = await cardBox(page, { dragged, stripped: false });
+        const what = dragged ? 'dragged to nothing' : 'as rendered';
+        expect(box.height, `${what}: ${box.height.toFixed(1)}px tall`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+        expect(box.width, `${what}: ${box.width.toFixed(1)}px wide`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+      }
+    });
+  });
+}
+
+test.describe('#1207 — the card box’s target is declared, and the floor is what holds it', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('declares a 44 px minimum height', async ({ browser }) => {
+    const page = await sharedShell(browser, { width: 1280, height: 800 }, SHARED_CONTROLS);
+    const box = await cardBox(page, { dragged: false, stripped: false });
+    expect(Number.parseFloat(box.minHeight)).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+  });
+
+  test('dragged to nothing with the floor stripped off, it falls short', async ({ browser }) => {
+    // The control: without the declaration a dragged box is its padding and
+    // border, so a green case above was the floor's doing and nothing else's.
+    const page = await sharedShell(browser, { width: 1280, height: 800 }, SHARED_CONTROLS);
+    const box = await cardBox(page, { dragged: true, stripped: true });
+    expect(box.minHeight, 'the floor was not taken off, so this measures it').toBe('0px');
+    expect(box.height).toBeGreaterThan(0);
+    expect(box.height).toBeLessThan(TOUCH_TARGET_PIXELS);
   });
 });
 

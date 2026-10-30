@@ -8,15 +8,25 @@
  * Kept out of `GameView.tsx` so that the rule is one function a test can call
  * with numbers: which riders are drawn (`net/interest.ts`), where
  * (`net/snapshots.ts`, through the connection), whether the rider is corrected
- * (`net/correction.ts`), and what the HUD says — a count and one chosen gap,
- * never a list (ADR 0021 D-6, ADR 0028 D-7.7, ruling Q8).
+ * (`net/correction.ts`), and what the HUD says — a count and one chosen gap
+ * (#783) and, in a race, the room's standings ({@link raceStandings}, #1347,
+ * [ADR 0051](../../../../docs/adr/0051-live-race-standings.md), which
+ * supersedes ADR 0028 D-7.7 on the owner's ruling of 2026-10-14). A group ride
+ * still has no list: nobody leads one (ADR 0028 D-7.2).
  */
 
 import { pacerGap } from '@onyourleft/domain';
+import { FLAG_COASTING, FLAG_FINISHED, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
+import type { RoomRaceFact } from '@onyourleft/store';
 
 import type { AnnouncementEvent } from './hud/announce';
 import type { RoomConnection } from '../net/room-port';
-import type { RoomRace, RoomSessionStatus } from '../net/room-session';
+import type {
+  RoomRace,
+  RoomSessionStatus,
+  RoomStandings,
+  RoomStandingsRow,
+} from '../net/room-session';
 import { InterestSet } from '../net/interest';
 import { roomErrorMetres } from '../net/correction';
 import type { RemoteRiderInput } from './scene';
@@ -65,6 +75,10 @@ export const ROOM_REFUSED_TEXT: Readonly<
     'Set your weight in Settings to ride in a room: a room rides you at the weight you declare. ' +
     'You are riding on your own.',
   'invalid-room': 'That is not a room this app can join, so you are riding on your own.',
+  // #1210: ⚠️ draft wording for the owner (ADR 0047 D-14 Q6).
+  'cannot-seal':
+    'This device cannot reach the room’s instance encrypted right now, so you are riding on ' +
+    'your own. The Instance screen says why.',
   'not-the-rooms-route':
     'The room is not riding the route this device fetched for it, so you are riding on your own.',
 };
@@ -87,9 +101,36 @@ export function roomNotice(status: RoomSessionStatus | undefined): string | unde
 }
 
 /**
- * What a seat is called on the HUD while no room publishes a name — #783.
- * ⚠️ A seat and not a person: names come from the room's public projection
- * only (#774), and no room message carries one yet (#784, #785).
+ * Said while the recording under a ride in a room is PAUSED — #785, #1360's
+ * review (N1). A ride in a room always records (the owner's ruling of
+ * 2026-10-14), but a paused recording is left paused: only the rider's own
+ * *Resume* resumes one (#516), and the game has no *Resume* of the recording —
+ * the Ride screen does, and going there leaves the room. The likeliest way
+ * here is a recovered ride, which comes back paused. ⚠️ Draft wording
+ * awaiting the owner's approval.
+ */
+export const ROOM_RECORDING_PAUSED_TEXT =
+  'Recording paused: this ride is not being recorded, and resuming it on the Ride screen leaves ' +
+  'the room.';
+
+/**
+ * The room's notice with the recording's state beside it — #1360's review
+ * (N1): the room's own word first (lost, gone, refused), and else, while the
+ * recording under the ride is paused, {@link ROOM_RECORDING_PAUSED_TEXT}.
+ */
+export function roomRideNotice(
+  status: RoomSessionStatus | undefined,
+  recordingPaused: boolean,
+): string | undefined {
+  if (status === undefined) return undefined;
+  return roomNotice(status) ?? (recordingPaused ? ROOM_RECORDING_PAUSED_TEXT : undefined);
+}
+
+/**
+ * What a seat is called on the HUD where the room publishes no name — #783: a
+ * group ride, and a race's rider before the room has named them. ⚠️ A seat and
+ * not a person: names come from the room's public projection only (#774), and
+ * only a race sends them (#1347, `raceStandings`).
  */
 export function seatLabel(riderId: number): string {
   return `Rider ${String(riderId + 1)}`;
@@ -106,6 +147,117 @@ export const NEARBY_METRES = 200;
 export interface RoomFrame {
   readonly remoteRiders: readonly RemoteRiderInput[];
   readonly hud: RoomHud;
+  /** A race's standings, while the room is sending them (#1347). @see raceStandings */
+  readonly standings: RaceStandingsView | undefined;
+}
+
+/**
+ * The most lines of a race's standings the HUD shows at once — #1347: the
+ * rider's own line and up to three either side of it, so the list is the
+ * same height in a race of eight as in a race of a hundred, and it is the
+ * part of the field the rider is racing. Chosen. Each line keeps its place
+ * number, so a rider who is 31st reads that from the line itself.
+ */
+export const STANDINGS_LINES = 7;
+
+/** One line of a race's standings, in words. ⚠️ Draft wording awaiting the owner's approval. */
+export interface StandingsLine {
+  /** The room's rider id: a stable key, never shown. */
+  readonly riderId: number;
+  /** 1 for the furthest up the road (or the first over the line). */
+  readonly place: number;
+  /** "You", the rider's public name, or "A rider" before the room names them. */
+  readonly who: string;
+  /** The room's time gap to this rider — "+12 s" behind, "−8 s" ahead — or `''` on the own line. */
+  readonly gap: string;
+  /** Live W/kg, "Finished" or "Coasting" — never watts (ruling Q17). */
+  readonly figure: string;
+  /** The room's plausibility rule has flagged them (ADR 0028 D-2 rule 3): "Flagged". */
+  readonly flagged: boolean;
+  readonly you: boolean;
+}
+
+/** A race's standings on the HUD. */
+export interface RaceStandingsView {
+  /** At most {@link STANDINGS_LINES}, around the rider's own. */
+  readonly lines: readonly StandingsLine[];
+  /** The rider's own place, and how many are in the race — "4th of 12". */
+  readonly place: number | undefined;
+  readonly of: number;
+}
+
+/** What the list says, ⚠️ draft wording for the owner. */
+export const STANDINGS_TEXT = {
+  you: 'You',
+  unnamed: 'A rider',
+  finished: 'Finished',
+  coasting: 'Coasting',
+  flagged: 'Flagged',
+  /** The sentence above the lines, which a screen reader meets first. */
+  summary: (place: number | undefined, of: number): string =>
+    place === undefined
+      ? `${String(of)} rider${of === 1 ? '' : 's'} racing.`
+      : `You are ${String(place)} of ${String(of)}.`,
+} as const;
+
+/** A gap as the list says it: "+12 s", "−1:05", "0 s". */
+export function gapText(seconds: number): string {
+  const whole = Math.round(Math.abs(seconds));
+  if (whole === 0) return '0 s';
+  const sign = seconds > 0 ? '+' : '\u2212';
+  if (whole < 60) return `${sign}${String(whole)} s`;
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = String(whole % 60).padStart(2, '0');
+  return hours > 0
+    ? `${sign}${String(hours)}:${String(minutes).padStart(2, '0')}:${rest}`
+    : `${sign}${String(minutes)}:${rest}`;
+}
+
+function standingsLine(row: RoomStandingsRow, place: number): StandingsLine {
+  const finished = (row.flags & FLAG_FINISHED) !== 0;
+  const coasting = (row.flags & FLAG_COASTING) !== 0;
+  return {
+    riderId: row.riderId,
+    place,
+    who: row.you ? STANDINGS_TEXT.you : (row.displayName ?? STANDINGS_TEXT.unnamed),
+    gap: row.you ? '' : gapText(row.gapSeconds),
+    figure: finished
+      ? STANDINGS_TEXT.finished
+      : coasting
+        ? STANDINGS_TEXT.coasting
+        : `${row.wattsPerKilogram.toFixed(1)} W/kg`,
+    flagged: (row.flags & FLAG_PLAUSIBILITY) !== 0,
+    you: row.you,
+  };
+}
+
+/**
+ * A race's standings for the HUD — #1347, ADR 0051: the ROOM's rows in the
+ * room's order, put into words, and windowed around the rider's own line.
+ * Nothing is computed here but the window: the order, the gaps and the W/kg
+ * are the room's (`net/room-session.ts` §`RoomStandings`).
+ *
+ * `undefined` — no list on the HUD — in a group ride, before the room's first
+ * standings, and while the room's connection is lost: a gap that has stopped
+ * moving is a gap that is wrong, so the list goes with the room and the
+ * notice says why (`ROOM_LOST_TEXT`).
+ */
+export function raceStandings(room: RoomConnection): RaceStandingsView | undefined {
+  const status = room.status().kind;
+  if (status !== 'joined') return undefined;
+  const standings = room.standings();
+  if (standings === undefined || standings.rows.length === 0) return undefined;
+  const all = standings.rows.map((row, index) => standingsLine(row, index + 1));
+  const own = all.findIndex((line) => line.you);
+  const centre = own === -1 ? 0 : own;
+  const half = Math.floor(STANDINGS_LINES / 2);
+  const first = Math.max(0, Math.min(centre - half, all.length - STANDINGS_LINES));
+  return {
+    lines: all.slice(first, first + STANDINGS_LINES),
+    place: own === -1 ? undefined : own + 1,
+    of: all.length,
+  };
 }
 
 /** A room ride's memory between frames. */
@@ -133,6 +285,9 @@ export function roomFrame(
 ): RoomFrame {
   const own = room.own();
   const local = simulation.state.ride.distance as number;
+  // #787, ADR 0038 D-4: ride at the draft the room will give this rider on
+  // its next tick, predicted from its newest frame; the room corrects the rest.
+  simulation.draftWith(room.draftFactor());
   if (own !== undefined && own.atLocalMs !== memory.correctedFrom) {
     // The frame before, or — on the first — when the ride began: how long the
     // two could have been coming apart for (#922).
@@ -161,20 +316,35 @@ export function roomFrame(
       nowMs,
     ),
   );
+  if (memory.following !== undefined && !drawn.has(memory.following)) memory.following = undefined;
+  // #1347: in a race, each rider by the name the room sent — its public
+  // projection (#774) and nothing else; a group ride's room names nobody.
+  const names = new Map<number, string>();
+  for (const row of room.standings()?.rows ?? []) {
+    if (row.displayName !== undefined) names.set(row.riderId, row.displayName);
+  }
   const remoteRiders = others
     .filter((rider) => drawn.has(rider.riderId))
-    .map((rider) => ({
-      riderId: rider.riderId,
-      distanceMetres: rider.distanceMetres,
-      speedMetresPerSecond: rider.speedMetresPerSecond,
-    }));
-  if (memory.following !== undefined && !drawn.has(memory.following)) memory.following = undefined;
+    .map((rider) => {
+      // #783: the name on the road is the name the HUD gives them — the
+      // room's, or the seat label of the one rider followed — or none.
+      const label =
+        names.get(rider.riderId) ??
+        (rider.riderId === memory.following ? seatLabel(rider.riderId) : undefined);
+      return {
+        riderId: rider.riderId,
+        distanceMetres: rider.distanceMetres,
+        speedMetresPerSecond: rider.speedMetresPerSecond,
+        ...(label === undefined ? {} : { label }),
+        ...(rider.riderId === memory.following ? { followed: true } : {}),
+      };
+    });
   const followed = remoteRiders.find((rider) => rider.riderId === memory.following);
   const chosen: ChosenRider | undefined =
     followed === undefined
       ? undefined
       : {
-          label: seatLabel(followed.riderId),
+          label: followed.label ?? seatLabel(followed.riderId),
           gap: pacerGap(gapAgainst(simulation.state, followed.distanceMetres)),
         };
   return {
@@ -184,8 +354,71 @@ export function roomFrame(
         (rider) => Math.abs(rider.distanceMetres - local) <= NEARBY_METRES,
       ).length,
       ...(chosen === undefined ? {} : { chosen }),
+      draft: draftReading(room),
     },
+    standings: raceStandings(room),
   };
+}
+
+/**
+ * The HUD's draft — #787, ADR 0038 D-5: the share of this rider's aerodynamic
+ * drag the ROOM's draft removed on its last tick, from the room's own frame
+ * (`FrameRider.draftPercent`) — never this client's prediction, and never
+ * watts. `'off'` in a room made with drafting off; `undefined` before the
+ * room has sent this rider a frame.
+ */
+export function draftReading(room: RoomConnection): RoomHud['draft'] {
+  const status = room.status();
+  if (status.kind === 'joined' && status.config.drafting === 'off') return 'off';
+  return room.own()?.rider.draftPercent;
+}
+
+/**
+ * A rider is "in the draft" from this share of drag on — #787's spoken cue.
+ * ⚠️ **Unsourced — the author's choice**, like ADR 0038's reach: about 21 m
+ * behind one rider in the model, well past where a rider would say they were on
+ * a wheel, and above the leading rider's own 1–2 %, so the front of a line is
+ * never told it is drafting.
+ */
+export const DRAFT_IN_PERCENT = 10;
+
+/**
+ * …and "out of the draft" below this. Lower than {@link DRAFT_IN_PERCENT} on
+ * purpose: a rider holding a gap right at one threshold would otherwise be told
+ * "in" and "out" on alternate frames. Unsourced, the author's choice.
+ */
+export const DRAFT_OUT_PERCENT = 5;
+
+/** What the rider hears — ⚠️ draft wording for the owner. */
+export const DRAFT_SPOKEN = {
+  into: (percent: number): string =>
+    `In the draft: ${String(Math.round(percent))} percent less drag.`,
+  outOf: 'Out of the draft.',
+} as const;
+
+/**
+ * Whether the rider has just gone into or out of the room's draft — #787,
+ * #327's spoken cue (`announce.ts` rank 5f). Pure: the caller keeps `inDraft`
+ * between frames, as `riderEvents` has its caller keep the riders seen.
+ *
+ * From the HUD's own figure ({@link draftReading}: the ROOM's frame, never this
+ * client's prediction), so what is said is what the field shows. A room with
+ * drafting off, and the time before the room's first frame, are never "in":
+ * a rider who was is put out without a sentence, because nothing about their
+ * riding changed.
+ */
+export function draftEvent(
+  inDraft: boolean,
+  draft: RoomHud['draft'],
+): { readonly inDraft: boolean; readonly event?: AnnouncementEvent } {
+  if (typeof draft !== 'number' || !Number.isFinite(draft)) return { inDraft: false };
+  if (!inDraft && draft >= DRAFT_IN_PERCENT) {
+    return { inDraft: true, event: { kind: 'room-draft', text: DRAFT_SPOKEN.into(draft) } };
+  }
+  if (inDraft && draft < DRAFT_OUT_PERCENT) {
+    return { inDraft: false, event: { kind: 'room-draft', text: DRAFT_SPOKEN.outOf } };
+  }
+  return { inDraft };
 }
 
 /**
@@ -219,7 +452,7 @@ export const RACE_NOTICE_LABEL = 'Race';
 /**
  * What the HUD says about a race while there is anything to say — ⚠️ draft
  * wording awaiting the owner's approval, like every sentence in the room work.
- * Nothing here ranks anybody: ADR 0028 D-7.7 and ruling Q8, no live standings.
+ * Nothing here ranks anybody: the standings are {@link raceStandings}'.
  */
 export const RACE_TEXT = {
   /**
@@ -290,6 +523,83 @@ export function raceEvent(
       return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.finished } };
     default:
       return { said: kind };
+  }
+}
+
+/**
+ * Whether the ROOM has this rider across the line — #1360's re-review (R1):
+ * the room's own last word on their distance (`own().rider.distanceMetres`,
+ * floored to decimetres by the room, so it never overstates), against the
+ * line. ADR 0028 D-2: the room's position wins, so the device's odometer —
+ * corrected toward the room's but able to lead it by a little — is never
+ * asked. `false` with no word from the room on this rider.
+ */
+export function acrossTheRoomsLine(
+  room: Pick<RoomConnection, 'own'> | undefined,
+  lineMetres: number | undefined,
+): boolean {
+  const own = room?.own();
+  if (own === undefined || lineMetres === undefined) return false;
+  return own.rider.distanceMetres >= lineMetres;
+}
+
+/** This rider's place among the riders across the line, and how many were — #1364. */
+export interface PlaceAcross {
+  readonly place: number;
+  readonly across: number;
+}
+
+/**
+ * Where the ROOM's newest standings have this rider among the riders already
+ * across the line — #1364, from #1347's standings: the rows the room flags
+ * {@link FLAG_FINISHED}, which it puts first, by their finish (ADR 0051).
+ * The room's word and its order; nothing is worked out here but the count.
+ * `undefined` with no standings, or where they do not have this rider across.
+ */
+export function placeAcrossOf(standings: RoomStandings | undefined): PlaceAcross | undefined {
+  if (standings === undefined) return undefined;
+  const across = standings.rows.filter((row) => (row.flags & FLAG_FINISHED) !== 0);
+  const own = across.findIndex((row) => row.you);
+  return own === -1 ? undefined : { place: own + 1, across: across.length };
+}
+
+/**
+ * What the race this ride was in comes to on this device — #785, the owner's
+ * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word
+ * where it has said it: its finish order and this rider's place in it. For a
+ * race the rider left while it ran, that it was ridden and no order was heard
+ * — and, when `crossedTheLine`, that the rider was across the line on this
+ * room first (#1360's review, N2, and its re-review R1: the room's `finish` waits for every
+ * rider, and a winner who ends their ride straight after the line did not
+ * leave the race). No place then: nothing tells this device one before the
+ * room's `finish`. `undefined` for a group ride, and for a race that never
+ * left its start line: nothing was raced.
+ */
+export function raceFactOf(
+  roomId: string | undefined,
+  race: RoomRace | undefined,
+  crossedTheLine: boolean,
+  placeAcross?: PlaceAcross,
+): RoomRaceFact | undefined {
+  if (roomId === undefined || race === undefined) return undefined;
+  switch (race.kind) {
+    case 'finished':
+      // The room's order is the word on who finished, whatever this device saw.
+      return { roomId, place: race.place, finishers: race.order.length };
+    case 'running':
+      if (!crossedTheLine) return { roomId, place: null, finishers: null };
+      // #1364: and where the room's standings had them among those across.
+      return {
+        roomId,
+        place: null,
+        finishers: null,
+        crossedTheLine: true,
+        ...(placeAcross === undefined
+          ? {}
+          : { placeAcross: placeAcross.place, across: placeAcross.across }),
+      };
+    default:
+      return undefined;
   }
 }
 

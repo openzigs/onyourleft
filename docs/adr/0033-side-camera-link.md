@@ -822,3 +822,41 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   WireGuard-class overlay, never through the Cloudflare tunnel (ADR 0029 D-6)."* D-3's never-sent
   list holds on the instance: a job's input carries the pose summary only with camera consent, and
   no instance tool returns it (ADR 0046 D-6, D-14(d)). The body above is not edited.
+- **2026-10-12** — **The path the 2026-10-07 entry said was due to move now exists on the rider's
+  instance, beside D-11's, and D-6's *"never … sent anywhere else"* has a second exception.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision; no decision of this ADR is reversed, and its D-10 says what holds of D-3, D-6 and D-11.
+  The body above is not edited. (#1106)
+- **2026-10-16** — **D-3's phone-to-tablet list has a fourth row, the phone's tilt, and the
+  2026-10-04 entry's ADR 0044 is accepted.**
+  [ADR 0052](0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md), accepted on
+  the owner's rulings of 2026-10-03 and 2026-10-04, is the decision: it supersedes D-3's closing
+  *"and nothing else"* to admit one tilt message (the gravity direction in the picture's axes, keyed
+  by the picture's sequence number, on `control`, only while filming) and says what the tablet
+  refuses. Every other row of D-3, its never-sent list and its join rule stand, and so does D-4.
+  ADR 0052 D-5 records ADR 0044's acceptance, so the 2026-10-04 entry's *"until the owner accepts
+  it, this entry is a pointer and D-6 governs"* no longer holds: ADR 0044 D-1 governs what of D-6
+  stands. The body above is not edited. (#1122)
+- **2026-10-20** — **The offer's code also says when the offer runs out.** D-1's table lists what
+  the QR code carries: the fields a peer needs to connect, and D-4's one-time secret. The offer now
+  carries one more field, `e`. It is the moment the tablet stops accepting an answer, in whole
+  seconds since 1970 on the tablet's clock, rounded down. The phone uses it to bound its wait for
+  the tablet to read the answer (#1108's two minutes). Without it, a phone that scanned four and a
+  half minutes into the offer's five counted down past the end of the offer, then told the rider
+  to scan a code that was already gone. If a phone reads an offer that has already run out by its
+  own clock, it refuses that offer at the scan, before any connection is made, and the words it
+  shows name the date and time. The field is a time and nothing else: it carries no address, it
+  authenticates nothing, and the tablet's own five-minute expiry still decides whether an answer
+  is accepted.
+  - **What stands.** The answer's fields are unchanged. The decoder still refuses any field outside
+    its set, and an offer without `e` is now outside it. D-4's single use and the tablet's own
+    expiry are unchanged too.
+  - **Cost.** A tablet and a phone on builds either side of this change cannot pair: an older phone
+    refuses a newer offer as malformed. The prefix `OYLSIDE1` is not bumped. The 2026-10-05 entry
+    leaves that call to the owner, and this entry does not make it.
+  - **Clocks.** The two devices' clocks are compared. A phone whose clock is behind the tablet's
+    waits two minutes at most, as before. A phone whose clock is ahead counts down short. If it is
+    ahead by more than the offer has left, it refuses the code as run out.
+  `apps/web/src/camera/side-link-code.ts` §`e` and `side-link.ts`
+  §`PhoneSideLink.waitForTabletRead` are the record. (#1110)

@@ -12,7 +12,7 @@ import { REFUSAL_CLOSE, ROOM_LOST, type CloseFrame } from '../close-codes.ts';
 import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { FromWorker, ToWorker, UpgradeRequest, WorkerSettings } from './ipc.ts';
-import type { HostMetrics, RoomResult } from './room-host.ts';
+import type { HostMetrics, RoomFlagRaised, RoomResult, RoomSeat } from './room-host.ts';
 
 /**
  * The self-hosted room server's front half (#780): one room-worker process
@@ -63,6 +63,10 @@ import type { HostMetrics, RoomResult } from './room-host.ts';
  *   it is in flight reaches a worker that has let the room go, and that
  *   worker refuses it `room-closed` rather than opening a lobby (#897,
  *   `room-host.ts` §`accept`).
+ * - **A room the rooms' sweep is ending** (#948, `rooms/rooms.ts` §`sweep`):
+ *   refused `room-closed` the same way, even when its lookup read it as open
+ *   just before the sweep closed it — so a rider is never placed in a room
+ *   whose route is being deleted.
  * - A ticket that is missing, wrong or spent is the ROOM's refusal, at hello
  *   (`room-host.ts`, `close-codes.ts`).
  */
@@ -93,6 +97,8 @@ export interface RouterOptions {
   /** The HTTP process's ticket book (`auth/tickets.ts`), asked once per hello. */
   readonly admit: (roomId: string, ticket: string) => Admission | undefined;
   readonly onResult?: (roomId: string, result: RoomResult) => Promise<void>;
+  /** A room raised a plausibility flag (#789): filed as a report. */
+  readonly onFlag?: (roomId: string, flag: RoomFlagRaised) => Promise<void>;
   readonly onRaceStarted?: (roomId: string) => Promise<void>;
   /** A race is over (#785): its results may be read from now. */
   readonly onRaceFinished?: (roomId: string) => Promise<void>;
@@ -211,6 +217,18 @@ export class RoomRouter {
     number,
     { readonly slot: Slot; readonly resolve: (ok: boolean) => void }
   >();
+  readonly #seatsWaiting = new Map<
+    number,
+    { readonly slot: Slot; readonly resolve: (seat: RoomSeat | undefined) => void }
+  >();
+  /**
+   * Rooms the rooms' sweep is ending (#948), each `true` once the sweep is
+   * done with it and kept only until no lookup that began before that is
+   * still in flight: such a lookup may have read the room as open.
+   */
+  readonly #ending = new Map<string, boolean>();
+  /** How many sockets' lookups of each room are in flight. */
+  readonly #lookingUp = new Map<string, number>();
   /** Completes the handshake for a refusal the router gives itself. Never compresses. */
   readonly #refuser = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   #nextSocket = 0;
@@ -255,6 +273,40 @@ export class RoomRouter {
     return this.#placement.get(roomId)?.alive === true;
   }
 
+  /**
+   * For the rooms' sweep (#948): `false` when a live worker holds `roomId`;
+   * else `true`, and from now until {@link releaseEnding} no socket places it
+   * — one whose lookup read the room as open before the sweep closed it is
+   * refused `room-closed`, as a room that is over is.
+   */
+  claimForEnding(roomId: string): boolean {
+    if (this.holds(roomId)) return false;
+    this.#ending.set(roomId, false);
+    return true;
+  }
+
+  /** The sweep is done with `roomId`: forgotten once no lookup that might have read it open is in flight. */
+  releaseEnding(roomId: string): void {
+    if ((this.#lookingUp.get(roomId) ?? 0) === 0) this.#ending.delete(roomId);
+    else if (this.#ending.has(roomId)) this.#ending.set(roomId, true);
+  }
+
+  /** `lookup`, counted in flight, and whether the sweep was ending the room as it answered. */
+  async #lookUp(roomId: string): Promise<{ found: RoomLookup; ending: boolean }> {
+    this.#lookingUp.set(roomId, (this.#lookingUp.get(roomId) ?? 0) + 1);
+    try {
+      const found = await this.#options.lookup(roomId);
+      return { found, ending: this.#ending.has(roomId) };
+    } finally {
+      const left = (this.#lookingUp.get(roomId) ?? 1) - 1;
+      if (left > 0) this.#lookingUp.set(roomId, left);
+      else {
+        this.#lookingUp.delete(roomId);
+        if (this.#ending.get(roomId) === true) this.#ending.delete(roomId);
+      }
+    }
+  }
+
   /** Which worker holds a room, by process id, or `undefined` if it is not placed. */
   placementOf(roomId: string): number | undefined {
     return this.#placement.get(roomId)?.child.pid;
@@ -273,6 +325,34 @@ export class RoomRouter {
       const id = this.#nextRequest;
       this.#startsWaiting.set(id, { slot, resolve });
       this.#post(slot, { type: 'start', id, roomId, athleteId });
+    });
+  }
+
+  /**
+   * Takes a rider out of a room on the worker holding it, for the room's life
+   * (#789). `false` when no live worker holds it: there is nobody to take out,
+   * and the instance's own record refuses them a ticket from now on.
+   */
+  removeFromRoom(roomId: string, athleteId: string): Promise<boolean> {
+    const slot = this.#placement.get(roomId);
+    if (slot === undefined || !slot.alive) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      this.#nextRequest += 1;
+      const id = this.#nextRequest;
+      this.#startsWaiting.set(id, { slot, resolve });
+      this.#post(slot, { type: 'remove', id, roomId, athleteId });
+    });
+  }
+
+  /** Who sits in `riderId`'s seat of a room a live worker holds, and its tick (#789). */
+  seatOf(roomId: string, riderId: number): Promise<RoomSeat | undefined> {
+    const slot = this.#placement.get(roomId);
+    if (slot === undefined || !slot.alive) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      this.#nextRequest += 1;
+      const id = this.#nextRequest;
+      this.#seatsWaiting.set(id, { slot, resolve });
+      this.#post(slot, { type: 'seat', id, roomId, riderId });
     });
   }
 
@@ -325,7 +405,7 @@ export class RoomRouter {
       refuseHttp(socket, 503, 'Service Unavailable');
       return;
     }
-    const found = await this.#options.lookup(roomId);
+    const { found, ending } = await this.#lookUp(roomId);
     if (found.kind === 'unknown') {
       refuseHttp(socket, 404, 'Not Found');
       return;
@@ -334,7 +414,8 @@ export class RoomRouter {
     // started race no live worker holds is never opened again as a lobby.
     const live = this.#placement.get(roomId);
     const running = found.kind === 'started' && live?.alive === true;
-    if (found.kind === 'ended' || (found.kind === 'started' && !running)) {
+    // #948: a room the sweep is ending is over, whatever the lookup read of it.
+    if (ending || found.kind === 'ended' || (found.kind === 'started' && !running)) {
       resumeReading(socket);
       this.#refuser.handleUpgrade(request, socket, head, (ws) => {
         ws.send(encodeMessage({ type: 'refuse', reason: 'room-closed' }));
@@ -432,6 +513,9 @@ export class RoomRouter {
       case 'result':
         this.#track(this.#options.onResult?.(message.roomId, message.result));
         return;
+      case 'flag':
+        this.#track(this.#options.onFlag?.(message.roomId, message.flag));
+        return;
       case 'race-started':
         this.#track(this.#options.onRaceStarted?.(message.roomId));
         return;
@@ -448,16 +532,33 @@ export class RoomRouter {
         copy?.destroy();
         return;
       }
+      case 'protocol-close':
+        // So an operator's log shows why a room let sockets go (#1400): the
+        // room, the close reason and how many so far — no athlete, no name.
+        this.#options.event?.('room-socket-closed', {
+          worker: slot.index,
+          room: message.roomId,
+          reason: message.reason,
+          count: message.count,
+        });
+        return;
       case 'metrics': {
         const waiting = this.#metricsWaiting.get(message.id);
         this.#metricsWaiting.delete(message.id);
         waiting?.resolve({ ...message.metrics, index: slot.index, rssBytes: message.rssBytes });
         return;
       }
-      case 'started': {
+      case 'started':
+      case 'removed': {
         const waiting = this.#startsWaiting.get(message.id);
         this.#startsWaiting.delete(message.id);
         waiting?.resolve(message.ok);
+        return;
+      }
+      case 'seated': {
+        const waiting = this.#seatsWaiting.get(message.id);
+        this.#seatsWaiting.delete(message.id);
+        waiting?.resolve(message.seat ?? undefined);
         return;
       }
       case 'stopped':
@@ -483,6 +584,11 @@ export class RoomRouter {
     for (const [id, waiting] of this.#metricsWaiting) {
       if (waiting.slot !== slot) continue;
       this.#metricsWaiting.delete(id);
+      waiting.resolve(undefined);
+    }
+    for (const [id, waiting] of this.#seatsWaiting) {
+      if (waiting.slot !== slot) continue;
+      this.#seatsWaiting.delete(id);
       waiting.resolve(undefined);
     }
     if (this.#stopping) {

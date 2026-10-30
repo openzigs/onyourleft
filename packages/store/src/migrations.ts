@@ -52,7 +52,7 @@ import type {
   PersistedActivity,
   PersistedActivityV14,
   PersistedCameraFrame,
-  PersistedCameraFrameV17,
+  PersistedCameraFrameV20,
   PersistedSideCameraReport,
   PersistedSideCameraReportV12,
 } from './persisted';
@@ -197,19 +197,22 @@ export const ACTIVITY_MAY_BE_RACED: RecordMigration<PersistedActivityV14, Persis
 };
 
 /**
- * Version 18 — #1063: every camera frame gains its `source`, its ride and its
+ * Version 21 — #1063: every camera frame gains its `source`, its ride and its
  * outline ([ADR 0044](../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
  * D-3).
  *
- * `up` makes every frame written at version 17 or before a `'kept'` frame
+ * `up` makes every frame written at version 20 or before a `'kept'` frame
  * with no ride and no outline. That is not a guess: a snapshot did not exist
- * before version 18, so every row on disk is #384's per-ride keep, which never
- * named a ride.
+ * before version 21, so every row on disk is #384's per-ride keep, which never
+ * named a ride. ⚠️ **A row that already says what it is keeps it**: the only
+ * way one reaches this upgrade is a version-21 row re-imported raw into an
+ * older database (`migrations.test.ts` §"version 20 rolls back"), and making
+ * that snapshot a kept frame would cut it from its ride for no reason.
  *
- * `down` removes the three fields. ⚠️ **A snapshot written at version 18
- * comes back as a version-17 kept frame**, which is the only kind that version
+ * `down` removes the three fields. ⚠️ **A snapshot written at version 21
+ * comes back as a version-20 kept frame**, which is the only kind that version
  * knows: its ride and its outline are lost on the way back, and its picture is
- * not. A version-17 build would count it, export it and delete it with the
+ * not. A version-20 build would count it, export it and delete it with the
  * rest, so nothing is stranded; what is lost is that it would no longer go
  * with its ride. The account export names each snapshot's ride, so export →
  * downgrade → re-import keeps the record of it.
@@ -217,20 +220,20 @@ export const ACTIVITY_MAY_BE_RACED: RecordMigration<PersistedActivityV14, Persis
  * Total over whatever is on disk (#815's review): it copies every key and never
  * throws, so one odd row cannot stop the database opening.
  */
-export const CAMERA_FRAME_SOURCE: RecordMigration<PersistedCameraFrameV17, PersistedCameraFrame> = {
-  toVersion: 18,
+export const CAMERA_FRAME_SOURCE: RecordMigration<PersistedCameraFrameV20, PersistedCameraFrame> = {
+  toVersion: 21,
   table: TABLE.cameraFrames,
   description:
     'gave every camera frame a source, a ride and an outline: kept, none and none for every frame written before; down drops a snapshot’s ride and outline',
-  up(before: PersistedCameraFrameV17): PersistedCameraFrame {
-    return { ...before, source: 'kept', activityId: null, outline: null };
+  up(before: PersistedCameraFrameV20): PersistedCameraFrame {
+    return { source: 'kept', activityId: null, outline: null, ...before };
   },
-  down(after: PersistedCameraFrame): PersistedCameraFrameV17 {
+  down(after: PersistedCameraFrame): PersistedCameraFrameV20 {
     const before: Partial<PersistedCameraFrame> = { ...after };
     delete before.source;
     delete before.activityId;
     delete before.outline;
-    return before as PersistedCameraFrameV17;
+    return before as PersistedCameraFrameV20;
   },
 };
 

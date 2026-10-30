@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { TEST_STATEMENT } from './moderation/moderation-testing.ts';
 import { readFileSync } from 'node:fs';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -14,8 +15,25 @@ import {
   type TestDevice,
 } from './auth/identity-testing.ts';
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
+import { createInstanceKeys } from './keys/instance-keys.ts';
+import { secretBytes } from './keys/instance-keys-testing.ts';
+import { openSqlStore } from './store/open-sql-store.ts';
+import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
+import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
-import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
+import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
+import {
+  adultIn,
+  madePublicRoom,
+  madeRoom,
+  PUBLIC_ROOMS_ON,
+  riderIn,
+  roomBody,
+} from './rooms/rooms-testing.ts';
+import { jobBody } from './analysis/jobs-testing.ts';
+import { replanBody } from './analysis/replan-testing.ts';
+import type { AnalysisEngine } from './analysis/jobs.ts';
+import type { ScreenedWriteUp } from '@onyourleft/analysis';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
@@ -62,7 +80,7 @@ function violations(value: unknown, schema: Schema, at = '$'): string[] {
       violations(item, schema.items, `${at}[${String(index)}]`),
     );
   }
-  if (schema.type === 'object' && 'properties' in schema) {
+  if (actual === 'object' && 'properties' in schema) {
     const record = value as Record<string, unknown>;
     const found: string[] = [];
     for (const key of schema.required) if (!(key in record)) found.push(`${at}.${key}: missing`);
@@ -114,6 +132,18 @@ async function signedIn(world: IdentityInstance): Promise<{ device: TestDevice; 
   return { device, token: session.body.sessionToken as string };
 }
 
+/** A rider's own hosted key and consent, both set (#1199). */
+async function hostedBoth(world: IdentityInstance, token: string): Promise<void> {
+  await send(world, 'POST', '/v1/analysis/hosted/key', token, {
+    url: 'https://models.example/v1',
+    model: 'a-model',
+    key: 'sk-0123456789',
+  });
+  await send(world, 'POST', '/v1/analysis/hosted/consent', token, {
+    endpoint: 'https://models.example',
+  });
+}
+
 function send(
   world: IdentityInstance,
   method: string,
@@ -121,13 +151,11 @@ function send(
   token?: string,
   body?: unknown,
 ) {
-  return fetch(`${world.url}${path}`, {
-    method,
-    headers: {
-      ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  // A sealed route (#1192) is called sealed, and its INNER answer is what the
+  // route's entry declares: `IdentityInstance.request` seals and opens it.
+  return world.request(method, path, {
+    ...(token === undefined ? {} : { token }),
+    ...(body === undefined ? {} : { body }),
   });
 }
 
@@ -143,6 +171,26 @@ async function anotherAthlete(world: IdentityInstance): Promise<string> {
   return (await world.signIn(await testDevice())).body.athleteId as string;
 }
 
+/** A rider whose display name a moderator hid, with the statement it came with (#911). */
+async function restricted(
+  world: IdentityInstance,
+): Promise<{ token: string; statementId: number }> {
+  const { token } = await signedIn(world);
+  const me = (await (await send(world, 'GET', '/v1/auth/session', token)).json()) as {
+    athleteId: string;
+  };
+  const hidden = (await (
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${me.athleteId}/hide-display-name`,
+      await moderatorToken(world),
+      { reason: 'Slur in the name', statement: TEST_STATEMENT },
+    )
+  ).json()) as { logId: number };
+  return { token, statementId: hidden.logId };
+}
+
 async function moderatorAction(world: IdentityInstance, path: string): Promise<Response> {
   const target = await anotherAthlete(world);
   return send(
@@ -150,9 +198,7 @@ async function moderatorAction(world: IdentityInstance, path: string): Promise<R
     'POST',
     `/v1/moderation/athletes/${target}/${path}`,
     await moderatorToken(world),
-    {
-      reason: 'Checked against the rules',
-    },
+    { reason: 'Checked against the rules', statement: TEST_STATEMENT },
   );
 }
 
@@ -175,7 +221,95 @@ async function pendingAthlete(world: IdentityInstance): Promise<string> {
   return athleteId;
 }
 
+/**
+ * A sealed-only route's call (#1191): sealed, signed by the session's key, and
+ * the INNER answer handed back as a plain response, so its body is checked
+ * against the route's own schema rather than the envelope's.
+ */
+async function sealedSend(
+  world: IdentityInstance,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  const { device, token } = await signedIn(world);
+  const answer = await sealedCall(world, {
+    method,
+    path,
+    token,
+    signer: device.signingKey,
+    ...(body === undefined ? {} : { body }),
+  });
+  if (answer.reply === undefined) throw new Error(`not sealed: ${answer.raw}`);
+  return new Response(JSON.stringify(answer.body), {
+    status: answer.reply.status,
+    headers: { 'content-type': answer.reply.contentType },
+  });
+}
+
+/** An engine that writes every ride up at once (#1095): the routes' shapes, not the agent's, are checked here. */
+const INSTANT_ENGINE: AnalysisEngine = {
+  run: (_job, _signal, emit) => {
+    emit({ type: 'progress', step: 1 });
+    return Promise.resolve({ kind: 'written', writeUp: 'A steady ride.' as ScreenedWriteUp });
+  },
+};
+
+/** A rider with a job that has run to its end: their session and the job's id. */
+async function finishedJob(
+  world: IdentityInstance,
+): Promise<{ device: TestDevice; token: string; jobId: string }> {
+  const rider = await signedIn(world);
+  const answer = await world.call('POST', '/v1/analysis/jobs', {
+    token: rider.token,
+    body: jobBody(),
+  });
+  await world.analysis?.idle();
+  return { ...rider, jobId: (answer.body as { jobId: string }).jobId };
+}
+
+/** Who sits in a room's seat, by `roomId:riderId`, for the #789 probes below. */
+const SEATS = new Map<string, string>();
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  lookAtSidePicture: async (world) =>
+    send(world, 'POST', '/v1/camera/side-pose', (await signedIn(world)).token, {
+      picture: base64Of(testPicture()),
+      source: 'instance-local',
+    }),
+  startAnalysisJob: async (world) =>
+    send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
+  startReplanJob: async (world) =>
+    send(world, 'POST', '/v1/analysis/replans', (await signedIn(world)).token, replanBody()),
+  getAnalysisJob: async (world) => {
+    const { token, jobId } = await finishedJob(world);
+    return send(world, 'GET', `/v1/analysis/jobs/${jobId}`, token);
+  },
+  streamAnalysisJob: async (world) => {
+    const { device, token, jobId } = await finishedJob(world);
+    const sealed = await sealFor(world, {
+      path: `/v1/analysis/jobs/${jobId}/events`,
+      token,
+      signer: device.signingKey,
+    });
+    const response = await sendEnvelope(world.url, sealed.envelope, token);
+    const opened = await openFrames(sealed, frames(await response.text()));
+    return new Response(opened.events.map((each) => each.kind).join('\n'), {
+      status: response.status,
+      headers: { 'content-type': response.headers.get('content-type') ?? '' },
+    });
+  },
+  cancelAnalysisJob: async (world) => {
+    const { token, jobId } = await finishedJob(world);
+    return send(world, 'POST', `/v1/analysis/jobs/${jobId}/cancel`, token, {});
+  },
+  acknowledgeAnalysisJob: async (world) => {
+    const { token, jobId } = await finishedJob(world);
+    return send(world, 'POST', `/v1/analysis/jobs/${jobId}/ack`, token, {});
+  },
+  listAccountChanges: (world) => sealedSend(world, 'GET', '/v1/auth/account-changes'),
+  acknowledgeAccountChanges: (world) =>
+    sealedSend(world, 'POST', '/v1/auth/account-changes/acknowledge', { through: 0 }),
   getAccount: async (world) =>
     send(world, 'GET', '/v1/auth/account', (await signedIn(world)).token),
   confirmAdult: async (world) =>
@@ -205,6 +339,14 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       reason: 'For the Tuesday group',
     }),
   listBlocks: async (world) => send(world, 'GET', '/v1/blocks', (await signedIn(world)).token),
+  // #1529: with a block in it, so the answer's items are checked against the schema.
+  listBlockHandles: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, token);
+    return send(world, 'GET', '/v1/blocks/handles', token);
+  },
+  unblockByHandle: async (world) =>
+    send(world, 'DELETE', `/v1/blocks/handles/${'0'.repeat(32)}`, (await signedIn(world)).token),
   blockAthlete: async (world) =>
     send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, (await signedIn(world)).token),
   unblockAthlete: async (world) =>
@@ -219,6 +361,55 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       athleteId: await anotherAthlete(world),
       reason: 'Abusive display name',
     }),
+  // #907: the notice page and its form, for anybody — no session.
+  getNoticePage: async (world) => fetch(`${world.url}/report`),
+  submitNotice: async (world) =>
+    fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        kind: 'illegal_content',
+        explanation: 'A threat in a room’s route.',
+        location: 'The Sunday group ride',
+      }).toString(),
+    }),
+  listNotices: async (world) =>
+    send(world, 'GET', '/v1/moderation/notices', await moderatorToken(world)),
+  // #912: a step recorded on a notice, and the record read back.
+  recordNoticeStep: async (world) => {
+    await fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        kind: 'illegal_content',
+        explanation: 'A threat in a room’s route.',
+        location: 'The Sunday group ride',
+      }).toString(),
+    });
+    const token = await moderatorToken(world);
+    const queue = (await (await send(world, 'GET', '/v1/moderation/notices', token)).json()) as {
+      notices: { noticeId: number }[];
+    };
+    const noticeId = queue.notices.at(-1)?.noticeId ?? 0;
+    return send(world, 'POST', `/v1/moderation/notices/${String(noticeId)}/steps`, token, {
+      step: 'decided',
+      decision: 'Not illegal: the route is an ordinary loop.',
+    });
+  },
+  // #913: the route of a room a rider made, hidden.
+  hideItem: async (world) => {
+    const { token } = await signedIn(world);
+    const made = (await (await send(world, 'POST', '/v1/rooms', token, roomBody())).json()) as {
+      roomId: string;
+    };
+    return send(world, 'POST', '/v1/moderation/items/hide', await moderatorToken(world), {
+      item: `route:${made.roomId}`,
+      reason: 'From a notice',
+      statement: TEST_STATEMENT,
+    });
+  },
+  getModerationRecord: async (world) =>
+    send(world, 'GET', '/v1/moderation/record', await moderatorToken(world)),
   listOpenReports: async (world) =>
     send(world, 'GET', '/v1/moderation/reports', await moderatorToken(world)),
   dismissReport: async (world) => {
@@ -248,6 +439,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const token = await moderatorToken(world);
     await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     return send(world, 'POST', `/v1/moderation/athletes/${target}/unsuspend`, token, {
       reason: 'Appeal upheld',
@@ -259,8 +451,53 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const token = await moderatorToken(world);
     await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     return send(world, 'GET', '/v1/moderation/suspended', token);
+  },
+  // #910: a rider whose name a moderator hid reads why.
+  listStatements: async (world) => {
+    const { token } = await signedIn(world);
+    const me = (await send(world, 'GET', '/v1/auth/session', token).then((r) => r.json())) as {
+      athleteId: string;
+    };
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${me.athleteId}/hide-display-name`,
+      await moderatorToken(world),
+      { reason: 'Slur in the name', statement: TEST_STATEMENT },
+    );
+    return send(world, 'GET', '/v1/statements', token);
+  },
+  // #911: a rider appeals the statement about them, and the moderator decides it.
+  appealStatement: async (world) => {
+    const { token, statementId } = await restricted(world);
+    return send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+      grounds: 'The name is a family name, not a slur.',
+    });
+  },
+  listOpenAppeals: async (world) => {
+    const { token, statementId } = await restricted(world);
+    await send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+      grounds: 'The name is a family name, not a slur.',
+    });
+    return send(world, 'GET', '/v1/moderation/appeals', await moderatorToken(world));
+  },
+  decideAppeal: async (world) => {
+    const { token, statementId } = await restricted(world);
+    const filed = (await (
+      await send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+        grounds: 'The name is a family name, not a slur.',
+      })
+    ).json()) as { appealId: number };
+    return send(
+      world,
+      'POST',
+      `/v1/moderation/appeals/${String(filed.appealId)}/decide`,
+      await moderatorToken(world),
+      { outcome: 'reversed', decision: 'It is a family name. Restored.' },
+    );
   },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
@@ -285,7 +522,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       'POST',
       `/v1/moderation/athletes/${athleteId}/suspend`,
       await moderatorToken(world),
-      { reason: 'Checked against the rules' },
+      { reason: 'Checked against the rules', statement: TEST_STATEMENT },
     );
     world.clock.ms += 60_000;
     return send(
@@ -337,6 +574,15 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
     return send(world, 'POST', `/v1/auth/devices/${second.publicKey}/revoke`, token, {});
   },
+  sealedRequest: async (world) => {
+    const { device, token } = await signedIn(world);
+    const sealed = await sealFor(world, {
+      path: '/v1/auth/session',
+      token,
+      signer: device.signingKey,
+    });
+    return sendEnvelope(world.url, sealed.envelope, token);
+  },
   createLinkCode: async (world) =>
     send(world, 'POST', '/v1/auth/link-codes', (await signedIn(world)).token),
   linkDevice: async (world) => {
@@ -357,10 +603,38 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
         purpose: RECOVER_PURPOSE,
       })),
       recoveryCode: code,
+      // The full reset (#1194), so the answer's optional new codes are checked too.
+      reset: true,
     });
   },
   startRoom: async (world) =>
     send(world, 'POST', '/v1/rooms/room-1/start', (await signedIn(world)).token),
+  reportInRoom: async (world) => {
+    const { token } = await signedIn(world);
+    const room = await madeRoom(world, token);
+    SEATS.set(`${room.roomId}:1`, await anotherAthlete(world));
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/reports`, token, {
+      riderId: 1,
+      reason: 'cheating',
+    });
+  },
+  removeFromMyRoom: async (world) => {
+    const { token } = await signedIn(world);
+    const room = await madeRoom(world, token);
+    SEATS.set(`${room.roomId}:1`, await anotherAthlete(world));
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/remove`, token, {
+      riderId: 1,
+      reason: 'Abusive in the lobby',
+    });
+  },
+  removeFromRoom: async (world) =>
+    send(
+      world,
+      'POST',
+      `/v1/moderation/rooms/room-1/athletes/${await anotherAthlete(world)}/remove`,
+      await moderatorToken(world),
+      { reason: 'Cheating, from a flag', statement: TEST_STATEMENT },
+    ),
   createRoom: async (world) =>
     send(world, 'POST', '/v1/rooms', (await signedIn(world)).token, roomBody()),
   joinRoom: async (world) => {
@@ -368,6 +642,16 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     return send(world, 'POST', '/v1/rooms/join', (await signedIn(world)).token, {
       code: room.code,
     });
+  },
+  // #788: a public room listed, and joined from the listing, by adults.
+  listPublicRooms: async (world) => {
+    const { token } = await adultIn(world);
+    await madePublicRoom(world, token);
+    return send(world, 'GET', '/v1/rooms/public', token);
+  },
+  joinPublicRoom: async (world) => {
+    const room = await madePublicRoom(world, (await adultIn(world)).token);
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/join`, (await adultIn(world)).token);
   },
   getRoomRoute: async (world) => {
     const { token } = await signedIn(world);
@@ -392,6 +676,29 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await world.freshRead((store) => store.markRaceFinished(room.roomId, 1_790_000_100));
     return send(world, 'GET', `/v1/rooms/${room.roomId}/results`, rider.token);
   },
+  blockFromRaceResult: async (world) => {
+    const rider = await riderIn(world, await testDevice());
+    const other = await riderIn(world, await testDevice());
+    const room = await madeRoom(world, rider.token);
+    for (const [athleteId, place] of [
+      [rider.athleteId, 1],
+      [other.athleteId, 2],
+    ] as const) {
+      await world.freshRead((store) =>
+        store.putResult({
+          roomId: room.roomId,
+          athleteId,
+          finishMs: 61_000 * place,
+          flags: 0,
+          place,
+          wattsPerKilogram: 4,
+          flaggedDurationsSeconds: [],
+        }),
+      );
+    }
+    await world.freshRead((store) => store.markRaceFinished(room.roomId, 1_790_000_100));
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/blocks`, rider.token, { row: 2 });
+  },
   requestEmailRecovery: (world) =>
     send(world, 'POST', '/v1/auth/recover/email', undefined, { address: 'anna@example.org' }),
   setRecoveryEmail: async (world) =>
@@ -407,7 +714,72 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const mailed = world.confirmations.at(-1)?.token;
     return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
   },
+  clearRecoveryEmail: async (world) => {
+    const { token } = await signedIn(world);
+    await world.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'dee@example.org' },
+    });
+    const mailed = world.confirmations.at(-1)?.token;
+    await world.call('POST', '/v1/auth/recovery-email/confirm', { token, body: { token: mailed } });
+    // Held, and cleared by the key that bound it (#1194).
+    return send(world, 'POST', '/v1/auth/recovery-email/clear', token, {
+      address: 'dee@example.org',
+    });
+  },
+  resetRecovery: async (world) => {
+    const session = await world.signIn(await testDevice());
+    const [code] = session.body.recoveryCodes as string[];
+    return send(world, 'POST', '/v1/auth/recovery/reset', session.body.sessionToken as string, {
+      recoveryCode: code,
+    });
+  },
   ...SYNC_HAPPY_CALLS,
+  // #1199: a rider's own hosted key and consent — each with both set, so the
+  // nullable objects are read as objects.
+  getHostedModelSettings: async (world) => {
+    const { token } = await signedIn(world);
+    await hostedBoth(world, token);
+    return send(world, 'GET', '/v1/analysis/hosted', token);
+  },
+  setHostedModelKey: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', '/v1/analysis/hosted/consent', token, {
+      endpoint: 'https://models.example',
+    });
+    return send(world, 'POST', '/v1/analysis/hosted/key', token, {
+      url: 'https://models.example/v1',
+      model: 'a-model',
+      key: 'sk-0123456789',
+    });
+  },
+  clearHostedModelKey: async (world) => {
+    const { token } = await signedIn(world);
+    await hostedBoth(world, token);
+    return send(world, 'DELETE', '/v1/analysis/hosted/key', token);
+  },
+  recordHostedConsent: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', '/v1/analysis/hosted/key', token, {
+      url: 'https://models.example/v1',
+      model: 'a-model',
+      key: 'sk-0123456789',
+    });
+    return send(world, 'POST', '/v1/analysis/hosted/consent', token, {
+      endpoint: 'https://models.example',
+    });
+  },
+  withdrawHostedConsent: async (world) => {
+    const { token } = await signedIn(world);
+    await hostedBoth(world, token);
+    return send(world, 'DELETE', '/v1/analysis/hosted/consent', token);
+  },
+  // #1251: nothing is held, so the answer is `not-ready` and nothing is sent
+  // anywhere — still the route's own 200 and its declared shape.
+  sendHostedTestQuestion: async (world) => {
+    const { token } = await signedIn(world);
+    return send(world, 'POST', '/v1/analysis/hosted/test', token);
+  },
   searchHistory: async (world) => {
     const { token } = await signedIn(world);
     await send(world, 'POST', '/v1/sync/items/note/note-1', token, {
@@ -425,6 +797,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
 describe('every route answers with the shape its entry declares', () => {
   let instance: TestInstance;
   let world: IdentityInstance;
+  let keysStore: StoreHarness;
+  let keysClose: () => Promise<void> = () => Promise.resolve();
   beforeAll(async () => {
     // Probes that answer as a healthy instance with metrics on, so /ready and
     // /metrics answer their success; a probe-less instance is the other half.
@@ -438,18 +812,49 @@ describe('every route answers with the shape its entry declares', () => {
       metrics: (authorization: string | null) =>
         Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
       startRoom: () => Promise.resolve('started' as const),
+      // #789: the seats a room holds, as the happy calls above set them.
+      seatOf: (roomId: string, riderId: number) => {
+        const athleteId = SEATS.get(`${roomId}:${String(riderId)}`);
+        return Promise.resolve(athleteId === undefined ? undefined : { athleteId, tick: 42 });
+      },
+      removeFromRoom: () => Promise.resolve(true),
     };
-    instance = await startTestInstance({ probes });
+    // The instance's own keys (#1189), over a store of their own, so
+    // `/v1/instance/keys` answers its success.
+    keysStore = await createStoreHarness();
+    const store = await openSqlStore(keysStore.path);
+    keysClose = () => store.close();
+    instance = await startTestInstance({
+      probes,
+      instanceKeys: createInstanceKeys({
+        store,
+        secret: secretBytes(3),
+        origin: 'https://ride.example',
+        now: () => 1_790_000_000,
+      }),
+    });
     moderator = await testDevice();
     world = await startIdentityInstance({
       emailRecovery: true,
       probes,
       moderators: { owner: moderator.publicKey },
+      // #788: public rooms on, so their routes answer their success.
+      ...PUBLIC_ROOMS_ON,
+      analysis: {
+        engine: INSTANT_ENGINE,
+        // #1243: a re-plan that keeps the workout at once.
+        replan: { run: () => Promise.resolve({ kind: 'proposed', proposal: null }) },
+        available: () => true,
+      },
+      // #1106: a picture model that answers at once, as the engine above does.
+      pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
     });
   });
   afterAll(async () => {
     await instance.listening.close();
     await world.close();
+    await keysClose();
+    await keysStore.destroy();
   });
 
   const metadata = ROUTES.filter((route) => route.identity !== true);
@@ -489,22 +894,36 @@ describe('every route answers with the shape its entry declares', () => {
       if (route.response.contentType === 'none') {
         expect(response.status, await response.clone().text()).toBe(204);
         expect(await response.text()).toBe('');
-      } else if (route.response.contentType === 'application/json') {
+      } else if (
+        route.response.contentType === 'application/json' ||
+        route.response.contentType === 'sealed'
+      ) {
         const body: unknown = await response.json();
-        expect(response.status, JSON.stringify(body)).toBe(200);
+        expect(response.status, JSON.stringify(body)).toBe(route.accepted === true ? 202 : 200);
         expect(violations(body, route.response.schema)).toEqual([]);
       } else if (route.response.contentType === 'application/octet-stream') {
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('application/octet-stream');
         expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      } else if (route.response.contentType === 'text/html') {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+        expect(await response.text()).toMatch(/^<!doctype html>/);
+      } else if (route.response.contentType === 'text/event-stream') {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('text/event-stream');
+        // The opened events' kinds, in order: the stream ran to its result.
+        expect((await response.text()).split('\n')).toEqual(['progress', 'result', 'end']);
       } else {
-        throw new Error('an identity route answers JSON, bytes or nothing');
+        throw new Error('an identity route answers JSON, bytes, a stream or nothing');
       }
     },
   );
 
   it('answers `unavailable` from every identity route on an instance with no accounts', async () => {
-    for (const route of identity) {
+    // A sealed-only route is not reachable in plaintext at all (#1191): on an
+    // instance with no accounts it is `/v1/sealed` that answers `unavailable`.
+    for (const route of identity.filter((each) => each.sealed !== 'only')) {
       const response = await fetch(`${instance.url}${route.path.replace(/\{[A-Za-z]+\}/g, 'x')}`, {
         method: route.method,
         headers: { 'content-type': 'application/json' },

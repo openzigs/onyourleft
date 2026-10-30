@@ -28,6 +28,7 @@ import {
   degreesBearing,
   gradePercent,
   metres,
+  revolutionsPerMinute,
   seconds,
   unixSeconds,
   watts,
@@ -36,12 +37,20 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  readReplanRecord,
+  readWorkoutGoals,
   validateWorkout,
   WorkoutError,
 } from '@onyourleft/domain';
 
 import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analysis';
-import type { GeographicPosition, RouteProfile, Workout, WorkoutBlock } from '@onyourleft/domain';
+import type {
+  GeographicPosition,
+  ReplanRecord,
+  RouteProfile,
+  Workout,
+  WorkoutBlock,
+} from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
 import {
@@ -57,6 +66,7 @@ import {
 import type {
   ActivityRecord,
   RideFacts,
+  RoomRaceFact,
   AthleteRecord,
   CameraFrameRecord,
   CameraFrameSource,
@@ -75,6 +85,7 @@ import type {
   SegmentRecord,
   RouteElevationRecord,
   RouteRecord,
+  WorkoutGoalsRecord,
   WorkoutRecord,
 } from './records';
 import {
@@ -89,6 +100,7 @@ import {
 import { parseKitColour } from './kit-colour';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
+import { workoutBlockFactsOf } from './workout-block-persisted';
 
 // --- On-disk shapes ---------------------------------------------------------
 
@@ -144,6 +156,17 @@ export interface PersistedRideFacts {
   bestPower?: { duration: number; power: number }[];
   workoutFinished?: boolean;
   ghostRaced?: boolean;
+  /** @see RideFacts.replans — plain JSON, read back by `readReplanRecord`. */
+  replans?: unknown[];
+  /** @see RideFacts.replansDropped */
+  replansDropped?: number;
+  /** @see RideFacts.races — #785. Each re-read on the way out: @see racesOf */
+  races?: PersistedRoomRace[];
+  /**
+   * @see RideFacts.workoutBlocks — #1319. Plain JSON in the record's own
+   * shape, re-read whole on the way in and out: @see workoutBlockFactsOf
+   */
+  workoutBlocks?: unknown[];
 }
 
 /**
@@ -163,6 +186,14 @@ export interface PersistedLap {
   movingTime: number;
   distance: number;
   averagePower?: number;
+  // #1312. Optional and unindexed, so no schema version: a row written before
+  // them is already a valid row.
+  maxPower?: number;
+  averageHeartRate?: number;
+  maxHeartRate?: number;
+  averageCadence?: number;
+  ascent?: number;
+  partial?: true;
 }
 
 /**
@@ -282,11 +313,11 @@ export interface PersistedWorkout {
  * gain.
  */
 /**
- * A kept camera frame as it sat on disk at schema versions 10 to 17, before
+ * A kept camera frame as it sat on disk at schema versions 10 to 20, before
  * #1063 gave a row its source, its ride and its outline. What
  * `migrations.ts` §`CAMERA_FRAME_SOURCE` reads and `down` writes back.
  */
-export interface PersistedCameraFrameV17 {
+export interface PersistedCameraFrameV20 {
   id: string;
   athleteId: string;
   capturedAt: number;
@@ -296,8 +327,8 @@ export interface PersistedCameraFrameV17 {
   bytes: Uint8Array;
 }
 
-/** A camera frame as it sits on disk since schema version 18 (#1063). */
-export interface PersistedCameraFrame extends PersistedCameraFrameV17 {
+/** A camera frame as it sits on disk since schema version 21 (#1063). */
+export interface PersistedCameraFrame extends PersistedCameraFrameV20 {
   source: string;
   /** `null` for a kept frame — and so not in the `[athleteId+activityId]` index. */
   activityId: string | null;
@@ -573,7 +604,169 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   }
   if (facts.workoutFinished !== undefined) row.workoutFinished = facts.workoutFinished;
   if (facts.ghostRaced !== undefined) row.ghostRaced = facts.ghostRaced;
+  // Through the reader on the way IN as well: what is written is a copy
+  // holding only the keys a record has.
+  //
+  // ⚠️ **A record that does not read is DROPPED and COUNTED; it never stops
+  // the ride being saved** (#1244's review). This is an audit trail beside a
+  // ride, and the ride is worth more than its audit trail: refusing the write
+  // would lose an hour's recording to one entry nothing can show anyway.
+  const kept = replanRecordsOf(facts.replans, facts.replansDropped);
+  if (kept.replans !== undefined) row.replans = [...kept.replans];
+  if (kept.replansDropped !== undefined) row.replansDropped = kept.replansDropped;
+  // Through the reader on the way in too, so only a race that reads back is
+  // written — and, as for a re-plan record, one that does not is dropped,
+  // never the ride (#785).
+  const races = racesOf(facts.races);
+  if (races !== undefined) row.races = races.map(toPersistedRoomRace);
+  // #1319: through the reader on the way in too, so only a list that reads
+  // back is written — and one that does not is left out, never the ride.
+  const blocks = workoutBlockFactsOf(facts.workoutBlocks);
+  if (blocks !== undefined) row.workoutBlocks = [...blocks];
   return row;
+}
+
+/**
+ * A room's id as the client takes one (`apps/web` §`instance-transport.ts`
+ * `isRoomId`): an instance's own are 32 hex characters, an operator's may be
+ * any short name of letters, digits, `_` and `-`.
+ */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A place or a count: a whole number of at least `minimum`, `null`, or `undefined` for neither. */
+function placeOrNull(value: unknown, minimum: number): number | null | undefined {
+  if (value === null) return null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
+    ? value
+    : undefined;
+}
+
+/** A race as it is written: @see RoomRaceFact. Shared with a recording's header. */
+export interface PersistedRoomRace {
+  roomId: string;
+  place: number | null;
+  finishers: number | null;
+  crossedTheLine?: true;
+  placeAcross?: number;
+  across?: number;
+}
+
+/** Field by field, so a key that is not the fact's is never written. */
+export function toPersistedRoomRace(race: RoomRaceFact): PersistedRoomRace {
+  return {
+    roomId: race.roomId,
+    place: race.place,
+    finishers: race.finishers,
+    ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+    ...acrossOf(race),
+  };
+}
+
+/** A race's place among the riders across (#1364): both, or nothing. */
+function acrossOf(race: RoomRaceFact): { placeAcross?: number; across?: number } {
+  return race.placeAcross === undefined || race.across === undefined
+    ? {}
+    : { placeAcross: race.placeAcross, across: race.across };
+}
+
+/**
+ * One race as it is kept — #785: the fact whole, or `undefined` when it does
+ * not read. ⚠️ **Never a throw**: like a re-plan record, a race that does not
+ * read (a later build's, or edited by hand) is dropped, and the ride — or the
+ * recording's header — is written and read all the same.
+ */
+function raceOf(value: unknown): RoomRaceFact | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const race = value as {
+    roomId?: unknown;
+    place?: unknown;
+    finishers?: unknown;
+    crossedTheLine?: unknown;
+    placeAcross?: unknown;
+    across?: unknown;
+  };
+  if (typeof race.roomId !== 'string' || !ROOM_ID.test(race.roomId)) return undefined;
+  const place = placeOrNull(race.place, 1);
+  const finishers = placeOrNull(race.finishers, 0);
+  if (place === undefined || finishers === undefined) return undefined;
+  // A place is a place in the order: never past its end, never without one.
+  if (place !== null && (finishers === null || place > finishers)) return undefined;
+  // Crossing the line is said only where the room's order was not heard: once
+  // it is, the order is the room's word on who finished (#1360's review, N2).
+  if (race.crossedTheLine !== undefined && (race.crossedTheLine !== true || finishers !== null)) {
+    return undefined;
+  }
+  // #1364: a place among the riders across, said only of a rider across the
+  // line before the order came, and only with how many were across — both or
+  // neither, and never a place past that count.
+  if (race.placeAcross !== undefined || race.across !== undefined) {
+    const placeAcross = placeOrNull(race.placeAcross, 1);
+    const across = placeOrNull(race.across, 1);
+    if (
+      race.crossedTheLine !== true ||
+      typeof placeAcross !== 'number' ||
+      typeof across !== 'number' ||
+      placeAcross > across
+    ) {
+      return undefined;
+    }
+  }
+  return {
+    roomId: race.roomId,
+    place,
+    finishers,
+    ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+    ...(typeof race.placeAcross === 'number' && typeof race.across === 'number'
+      ? { placeAcross: race.placeAcross, across: race.across }
+      : {}),
+  };
+}
+
+/**
+ * A ride's or a recording's races as they are kept — each that reads, in
+ * order, or `undefined` for none. ⚠️ **Never a throw**, for {@link raceOf}'s
+ * reason: a list that is not a list is no races, and a race in it that does not
+ * read is dropped and the others kept.
+ */
+export function racesOf(value: unknown): readonly RoomRaceFact[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const races = (value as unknown[]).flatMap((each) => {
+    const race = raceOf(each);
+    return race === undefined ? [] : [race];
+  });
+  return races.length === 0 ? undefined : races;
+}
+
+/**
+ * A ride's re-plan records as they are kept: each one that reads, in order,
+ * and a count of those that did not. Used on the way in and on the way out,
+ * so a record no build can read is skipped at both and stops neither.
+ * Whatever is not a list holds no record, and is counted as one.
+ *
+ * It names nothing of an unreadable record: not its text, not its place.
+ */
+export function replanRecordsOf(
+  replans: unknown,
+  droppedBefore: unknown,
+): { readonly replans?: readonly ReplanRecord[]; readonly replansDropped?: number } {
+  const before =
+    typeof droppedBefore === 'number' && Number.isSafeInteger(droppedBefore) && droppedBefore > 0
+      ? droppedBefore
+      : 0;
+  if (replans === undefined) {
+    return before === 0 ? {} : { replansDropped: before };
+  }
+  const listed: readonly unknown[] = Array.isArray(replans) ? replans : [replans];
+  const read = listed.flatMap((each) => {
+    const record = readReplanRecord(each);
+    return record === undefined ? [] : [record];
+  });
+  const dropped = before + (listed.length - read.length);
+  return {
+    // The key stays for a ride that had records, even when none could be read.
+    replans: read,
+    ...(dropped === 0 ? {} : { replansDropped: dropped }),
+  };
 }
 
 /** @throws {StoreDecodeError} */
@@ -586,6 +779,13 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   if (best !== undefined && !Array.isArray(best)) {
     throw new StoreDecodeError('activity.rideFacts.bestPower: expected a list');
   }
+  // ⚠️ Never a throw: an unreadable re-plan record must not make the ride
+  // unreadable. @see replanRecordsOf
+  const replans = replanRecordsOf(facts.replans, facts.replansDropped);
+  // #785: never a throw either. @see racesOf
+  const races = racesOf(facts.races);
+  // #1319: never a throw either. @see workoutBlockFactsOf
+  const workoutBlocks = workoutBlockFactsOf(facts.workoutBlocks);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -629,6 +829,9 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...(facts.ghostRaced === undefined
       ? {}
       : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
+    ...replans,
+    ...(races === undefined ? {} : { races }),
+    ...(workoutBlocks === undefined ? {} : { workoutBlocks }),
   };
 }
 
@@ -740,7 +943,44 @@ export function toPersistedLap(record: LapRecord): PersistedLap {
   if (record.averagePower !== undefined) {
     row.averagePower = record.averagePower;
   }
+  if (record.maxPower !== undefined) {
+    row.maxPower = record.maxPower;
+  }
+  if (record.averageHeartRate !== undefined) {
+    row.averageHeartRate = record.averageHeartRate;
+  }
+  if (record.maxHeartRate !== undefined) {
+    row.maxHeartRate = record.maxHeartRate;
+  }
+  if (record.averageCadence !== undefined) {
+    row.averageCadence = record.averageCadence;
+  }
+  if (record.ascent !== undefined) {
+    row.ascent = record.ascent;
+  }
+  if (record.partial === true) {
+    row.partial = true;
+  }
   return row;
+}
+
+/**
+ * One of a lap's optional figures, decoded through its unit — #1312. Absent
+ * stays absent; a present value that its unit refuses is a decode error that
+ * names the field.
+ */
+function optionalLapFigure<Key extends string, Value>(
+  key: Key,
+  value: unknown,
+  construct: (value: number) => Value,
+): Partial<Record<Key, Value>> {
+  if (value === undefined) {
+    return {};
+  }
+  const field = `lap.${key}`;
+  return { [key]: decoded(field, decodedNumber(field, value), construct) } as Partial<
+    Record<Key, Value>
+  >;
 }
 
 /** @throws {StoreDecodeError} */
@@ -762,6 +1002,13 @@ export function fromPersistedLap(row: PersistedLap): LapRecord {
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('lap.averagePower', averagePower, watts) }),
+    ...optionalLapFigure('maxPower', row.maxPower, watts),
+    ...optionalLapFigure('averageHeartRate', row.averageHeartRate, beatsPerMinute),
+    ...optionalLapFigure('maxHeartRate', row.maxHeartRate, beatsPerMinute),
+    ...optionalLapFigure('averageCadence', row.averageCadence, revolutionsPerMinute),
+    ...optionalLapFigure('ascent', row.ascent, metres),
+    // Only `true` is a part lap; anything else stored there is a whole one.
+    ...(row.partial === true ? { partial: true as const } : {}),
   };
 }
 
@@ -1834,7 +2081,7 @@ export function rideWriteUpProblem(writeUp: {
     }
   }
   if (!(RIDE_WRITE_UP_SOURCES as readonly unknown[]).includes(writeUp.source)) {
-    return 'rideWriteUp.source: must be computer or hosted';
+    return 'rideWriteUp.source: must be computer, hosted, instance-local or instance-hosted';
   }
   if (typeof writeUp.includedPose !== 'boolean') {
     return 'rideWriteUp.includedPose: must be true or false';
@@ -1989,4 +2236,38 @@ export function trustedDeviceKeyProblem(row: {
     return 'trustedDeviceKey.admittedAt: must be whole Unix seconds';
   }
   return undefined;
+}
+
+// --- Workout goals (#1236) -----------------------------------------------------
+
+/**
+ * A workout goals row as a record, or why it is not one — for the write and
+ * for a row read off disk alike, so a hand-edited row is refused on the way
+ * out as a bad one is on the way in. The goals are re-read by
+ * `@onyourleft/domain` §`readWorkoutGoals`, which copies only the keys it
+ * knows, so the record returned holds nothing the row smuggled in. Names the
+ * field and the constraint only.
+ */
+export function checkedWorkoutGoals(row: {
+  readonly athleteId: unknown;
+  readonly goals: unknown;
+  readonly savedAt: unknown;
+}): { readonly record: WorkoutGoalsRecord } | { readonly problem: string } {
+  if (typeof row.athleteId !== 'string' || row.athleteId.length === 0) {
+    return { problem: 'workoutGoals.athleteId: must be an athlete id' };
+  }
+  if (typeof row.savedAt !== 'number' || !Number.isSafeInteger(row.savedAt) || row.savedAt < 0) {
+    return { problem: 'workoutGoals.savedAt: must be whole Unix seconds' };
+  }
+  const reading = readWorkoutGoals(row.goals);
+  if (!reading.ok) {
+    return { problem: reading.fault.message };
+  }
+  return {
+    record: {
+      athleteId: athleteId(row.athleteId),
+      goals: reading.goals,
+      savedAt: unixSeconds(row.savedAt),
+    },
+  };
 }

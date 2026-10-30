@@ -25,6 +25,12 @@ import { athleteId, type AthleteRecord, type KitColour } from '@onyourleft/store
 
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { AthleteMassPort } from '../athlete/store-port';
+import { SIDE_INSTANCE_WHAT_IS_SENT } from '../camera/instance-pose';
+import { browserSecureWindow } from '../camera/secure-window-testing';
+import { CameraController } from '../camera/session';
+import { scriptedInstance } from '../instance/testing';
+import { stubLibrary } from '../library/testing';
+import { manualSchedule, scriptedCamera } from '../camera/testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import type { ThermalPort } from '../game/thermal-port';
@@ -35,7 +41,16 @@ import type { ShellSupport } from '../support/shell-support-port';
 import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
 
 import { AppShell } from './AppShell';
-import { hrefFor, routeById } from './routes';
+import {
+  ALL_ROUTES,
+  groupDestination,
+  hrefFor,
+  moreMenuRoutes,
+  ROUTES,
+  routeById,
+  routesInGroup,
+  type RouteId,
+} from './routes';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 /** A browser that can pair: the chooser is never reached in these tests. */
@@ -68,6 +83,90 @@ async function open(path: string): Promise<void> {
   mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
   await settle();
 }
+
+describe('the More tab — #1429', () => {
+  const MENU: readonly RouteId[] = [
+    'devices',
+    'transfer',
+    'camera',
+    'settings',
+    'instance',
+    'about',
+  ];
+
+  it('opens a page titled More, which lists every page under the tab with Instance', async () => {
+    await open('/');
+    const more = [
+      ...document.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Primary"] a'),
+    ].find((link) => link.textContent === 'More');
+    await activateWithKeyboard(more as HTMLAnchorElement);
+    // The tab goes where its label says.
+    expect(document.querySelector('h1')?.textContent).toBe('More');
+    expect(more?.getAttribute('aria-current')).toBe('page');
+    // The page lists the pages itself, so no section row repeats them above it.
+    expect(document.querySelector('nav[aria-label="More pages"]')).toBeNull();
+    const listed = [...document.querySelectorAll('main .oyl-more a')].map((link) => [
+      link.textContent,
+      link.getAttribute('href'),
+    ]);
+    expect(listed).toEqual(MENU.map((id) => [routeById(id).navLabel, hrefFor(routeById(id))]));
+  });
+
+  it('every page under the tab is on the menu, and each link opens the page it names', async () => {
+    const underMore = ROUTES.filter((route) => route.group === 'more').map((route) => route.id);
+    expect(moreMenuRoutes().map((route) => route.id)).toEqual(
+      expect.arrayContaining([...underMore, 'instance']),
+    );
+    expect(groupDestination('more')).toBe(routeById('more'));
+    for (const page of moreMenuRoutes()) {
+      mounted?.unmount();
+      await open('/more');
+      const link = document.querySelector<HTMLAnchorElement>(
+        `main .oyl-more a[href="${hrefFor(page)}"]`,
+      );
+      expect(link?.textContent, page.id).toBe(page.navLabel);
+      await activateWithKeyboard(link as HTMLAnchorElement);
+      expect(document.querySelector('h1')?.textContent, page.id).toBe(page.title);
+      // And the More tab still says where the rider is.
+      expect(
+        document
+          .querySelector('nav[aria-label="Primary"] a[href="#/more"]')
+          ?.getAttribute('aria-current'),
+        page.id,
+      ).toBe('true');
+    }
+  });
+});
+
+describe('the More area’s pages each show its section row — #1442', () => {
+  // Every page the More tab holds, the ones in ROUTES and the ones reached
+  // from them (Instance from Settings, Moderation from Instance, Credits from
+  // About, the side camera from Camera), but not the menu page itself, which
+  // lists the pages in its own body (#1429).
+  const UNDER_MORE = ALL_ROUTES.filter((route) => route.group === 'more' && route.id !== 'more');
+  const ROW = routesInGroup('more').map((route) => [route.navLabel, hrefFor(route)]);
+
+  it('covers every page under the tab, Settings among them', () => {
+    expect(UNDER_MORE.map((route) => route.id)).toEqual(
+      expect.arrayContaining(['devices', 'transfer', 'camera', 'settings', 'about', 'instance']),
+    );
+  });
+
+  for (const route of UNDER_MORE) {
+    it(`${route.id}: the row of More’s pages, with this one marked when it is in the row`, async () => {
+      await open(route.path);
+      expect(document.querySelector('h1')?.textContent).toBe(route.title);
+      const row = document.querySelector('nav[aria-label="More pages"]');
+      expect(row, `${route.id} shows no section row`).not.toBeNull();
+      const links = [...(row?.querySelectorAll<HTMLAnchorElement>('a') ?? [])];
+      expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual(ROW);
+      const current = links.filter((link) => link.getAttribute('aria-current') === 'page');
+      expect(current.map((link) => link.textContent)).toEqual(
+        routesInGroup('more').includes(route) ? [route.navLabel] : [],
+      );
+    });
+  }
+});
 
 describe('the router', () => {
   it('renders the view the fragment selects, including on first load', async () => {
@@ -117,6 +216,71 @@ describe('the router', () => {
     // Generated from `ASSETS.toml`, so this is what the manifest says today
     // rather than a string in a view.
     expect(document.querySelector('main')?.textContent ?? '').toContain('Kenney');
+    // #1552: and the map data's entry, reached the same way.
+    const mapData = document.querySelector('main [data-terms="map-data"]')?.textContent ?? '';
+    expect(mapData).toContain('© OpenStreetMap contributors');
+    expect(mapData).toContain(
+      'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).',
+    );
+  });
+
+  it('hands the Camera page the rider’s instance, for the side camera’s pictures — #1106', async () => {
+    // An optional prop passed through two components: left out of either, the
+    // section silently is not there, and no other test mounts the shell with it.
+    const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: scriptedCamera().port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
+    globalThis.location.hash = '#/camera';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        camera={controller}
+        sidePictures={{
+          sideInstanceOrigin: () => 'https://rides.example',
+          askHostedPictureService: () => Promise.resolve({ kind: 'none' }),
+        }}
+      />,
+    );
+    await settle();
+    expect(document.querySelector('main')?.textContent ?? '').toContain(SIDE_INSTANCE_WHAT_IS_SENT);
+    expect(document.querySelector('[aria-labelledby="oyl-camera-instance"]')).not.toBeNull();
+  });
+
+  it('hands History the platform and the rider’s instance, for its footer — #1438', async () => {
+    // Two optional props passed through the shell: left out, History says
+    // the browser's wording in the app and no instance clause with one.
+    globalThis.location.hash = '#/activities';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        library={stubLibrary(athleteId('local'), [])}
+        nativeShell
+        instance={scriptedInstance({ connected: true }).port}
+      />,
+    );
+    await settle();
+    const text = document.querySelector('main')?.textContent ?? '';
+    expect(text).toContain('a ride you sync is also kept on your instance');
+    expect(text).toContain('clearing its storage in Android’s settings');
+  });
+
+  it('hands About the platform and the rider’s instance, for where the rides are — #1450', async () => {
+    globalThis.location.hash = '#/about';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        nativeShell
+        instance={scriptedInstance({ connected: true }).port}
+      />,
+    );
+    await settle();
+    const text = (document.querySelector('main')?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(text).toContain('a ride you sync is also kept on your instance');
+    expect(text).toContain('clearing its storage in Android’s settings');
+    expect(text).not.toContain('anywhere else');
   });
 
   it('stops listening for navigation once it is unmounted', async () => {
@@ -146,7 +310,8 @@ describe('the header', () => {
       '#/ride',
       '#/activities',
       '#/routes',
-      '#/devices',
+      // #1429: More opens its own menu page, not the first page under it.
+      '#/more',
     ]);
     expect(primary.map((a) => a.textContent)).toEqual([
       'Home',
@@ -730,6 +895,7 @@ describe('the kit colour reaches the ride (#623)', () => {
         setRiderKit: (chosen) => {
           handed.push(chosen);
         },
+        setSeason: () => undefined,
         resize: () => undefined,
         destroy: () => undefined,
       }),

@@ -26,9 +26,16 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GameView, type GamePort, type RidableRoute } from './GameView';
+import {
+  GameView,
+  RIDER_GHOST_REFUSAL_TEXT,
+  type GamePort,
+  type RidableRoute,
+  type RiderGhostLoad,
+} from './GameView';
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
+import type { CalendarDay, Season } from './season';
 import {
   FRAME_MS_REDUCE_ABOVE,
   QUALITY_LADDER,
@@ -41,7 +48,9 @@ import { SCATTER_KINDS, STRUCTURE_KINDS } from './scatter';
 import { NO_READING, type SensorReading } from './hud/fields';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { tap } from '../design/touch-lock-testing';
+import { TOUCH_LOCK_NAME } from '../design/TouchLockButton';
 import type { CameraThrottle } from '../camera/session';
 import type { ThermalPort } from './thermal-port';
 import {
@@ -159,6 +168,9 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       setRiderKit: (chosen: KitColour | undefined) => {
         kitsHanded.push({ chosen, framesBefore: frames.length });
       },
+      setSeason: (season: Season) => {
+        seasonsHanded.push(season);
+      },
       resize: () => undefined,
       destroy: () => undefined,
     }),
@@ -170,6 +182,8 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
  * drawn by then — #623. @see capturingRenderer
  */
 let kitsHanded: { readonly chosen: KitColour | undefined; readonly framesBefore: number }[] = [];
+/** Every season a view was told this test — #1622. @see capturingRenderer */
+let seasonsHanded: Season[] = [];
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -185,6 +199,7 @@ let sensorReads = 0;
 
 beforeEach(() => {
   kitsHanded = [];
+  seasonsHanded = [];
   pending = [];
   rungs = [];
   sensorReads = 0;
@@ -266,6 +281,8 @@ async function startRiding(options: {
   readonly camera?: CameraThrottle;
   /** The platform's thermal forecast — #247. */
   readonly thermal?: ThermalPort;
+  /** The rider's local day — #1622. @see GameViewProps.today */
+  readonly today?: () => CalendarDay;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
@@ -280,6 +297,7 @@ async function startRiding(options: {
       now={() => nowMs}
       camera={options.camera}
       thermal={options.thermal}
+      today={options.today}
     />,
   );
   await settle();
@@ -414,6 +432,166 @@ describe('riding against a pacer', () => {
     // rider under a label naming the bot.
     expect(hudField('Pacer')).toContain('behind you');
     expect(hudField('Pacer')).not.toContain('ahead');
+  });
+});
+
+describe('racing another rider’s ghost (#331)', () => {
+  /** A port offering another rider's ghost, with spies on both ghost reads. */
+  function riderPort(route: RidableRoute, answer: RiderGhostLoad) {
+    const loadGhost = vi.fn(() => Promise.resolve<GhostTrack | undefined>(FAST_GHOST));
+    const loadRiderGhost = vi.fn(() => Promise.resolve(answer));
+    const port: GamePort = {
+      ...pedallingPort(route, FAST_GHOST),
+      loadGhost,
+      riderGhostOffered: () => true,
+      loadRiderGhost,
+    };
+    return { port, loadGhost, loadRiderGhost };
+  }
+
+  const toggle = (text: string): HTMLInputElement | undefined =>
+    queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="checkbox"]').find(
+      (input) => (input.closest('label')?.textContent ?? '').includes(text),
+    );
+
+  async function rideWith(port: GamePort, frames: SceneFrame[], ownFirst = false): Promise<void> {
+    mounted = await mount(
+      <GameView
+        port={port}
+        renderer={() => Promise.resolve(capturingRenderer(frames))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    if (ownFirst) await clickThrough(toggle('Race your own'));
+    await clickThrough(toggle('Race another rider'));
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(2, 1000 / 30);
+    await settle();
+  }
+
+  const bea: RiderGhostLoad = { kind: 'ghost', rider: 'Bea', track: FAST_GHOST };
+
+  it('races ONE ghost, labelled with whose it is, in place of the rider’s own', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    const { port, loadGhost, loadRiderGhost } = riderPort(route, bea);
+    const frames: SceneFrame[] = [];
+    // The rider's own best first, then another rider's: the second replaces it.
+    await rideWith(port, frames, true);
+    await pump(60);
+
+    expect(loadRiderGhost).toHaveBeenCalledTimes(1);
+    expect(loadGhost).not.toHaveBeenCalled();
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['ghost', 'rider']);
+    expect(hudField('Bea')).toContain('ahead of you');
+    expect(hudField('Your best')).toBe('');
+  });
+
+  it('hands the recording no outcome for another rider’s ghost, even when the rider beats it', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    const hopeless = buildGhostTrack({ elapsedSeconds: [0, 4], distanceMetres: [0, 3] });
+    const { port } = riderPort(route, { kind: 'ghost', rider: 'Bea', track: hopeless });
+    const handed: (string | undefined)[] = [];
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: (outcome) => {
+        handed.push(outcome);
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+    };
+    mounted = await mount(<GameView port={port} trainer={trainer} now={() => nowMs} />);
+    await settle();
+    await clickThrough(toggle('Race another rider'));
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+    await pump(60);
+    expect(hudField('Bea')).toBe('Beaten by you');
+    await clickThrough(endRideButton());
+    pending = [];
+    // A comparison with another rider is never a result about the rider's own best.
+    expect(handed).toEqual([undefined]);
+  });
+
+  it('turns the rider’s own ghost off when another rider’s is turned on', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    mounted = await mount(
+      <GameView
+        port={riderPort(route, bea).port}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+      />,
+    );
+    await settle();
+    await clickThrough(toggle('Race your own'));
+    expect(toggle('Race your own')?.checked).toBe(true);
+    await clickThrough(toggle('Race another rider'));
+    expect(toggle('Race another rider')?.checked).toBe(true);
+    expect(toggle('Race your own')?.checked).toBe(false);
+    await clickThrough(toggle('Race your own'));
+    expect(toggle('Race another rider')?.checked).toBe(false);
+  });
+
+  it('stops racing it when the rider says so: off the road and off the HUD', async () => {
+    const { port } = riderPort(testRoute(), bea);
+    const frames: SceneFrame[] = [];
+    await rideWith(port, frames);
+    await pump(10);
+    expect(hudField('Bea')).not.toBe('');
+
+    const stop = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+      (button) => button.textContent === 'Stop ghost of Bea',
+    );
+    expect(stop).toBeDefined();
+    await clickThrough(stop);
+    await pump(10);
+
+    expect(hudField('Bea')).toBe('');
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind)).toEqual(['rider']);
+  });
+
+  it('does not start the ride, and says why, when nobody who agreed has ridden the route', async () => {
+    const { port } = riderPort(testRoute(), { kind: 'none' });
+    const frames: SceneFrame[] = [];
+    await rideWith(port, frames);
+
+    expect(mounted?.container.textContent).toContain(RIDER_GHOST_REFUSAL_TEXT.none);
+    expect(frames).toEqual([]);
+    expect(
+      queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').some((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not start the ride when the instance did not answer with a ghost', async () => {
+    const { port } = riderPort(testRoute(), { kind: 'unavailable' });
+    const frames: SceneFrame[] = [];
+    await rideWith(port, frames);
+
+    expect(mounted?.container.textContent).toContain(RIDER_GHOST_REFUSAL_TEXT.unavailable);
+    expect(frames).toEqual([]);
+  });
+
+  it('offers no such choice on a device with no instance', async () => {
+    mounted = await mount(
+      <GameView
+        port={{ ...pedallingPort(testRoute()), riderGhostOffered: () => false }}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+      />,
+    );
+    await settle();
+    expect(toggle('Race another rider')).toBeUndefined();
   });
 });
 
@@ -1120,6 +1298,78 @@ describe('the ride is in the athlete’s own kit colour (#623)', () => {
 });
 
 /**
+ * The ride's season reaches the renderer — #1622. Read through what the
+ * renderer double was HANDED, which is the path `three-renderer.ts`
+ * §`ThreeGameView.setSeason` keeps and #1623 to #1627 draw from.
+ */
+describe('the ride’s season is the rider’s day at ride start (#1622)', () => {
+  it('holds Halloween for a ride started on 1 Nov after the clock crosses into 2 Nov', async () => {
+    let day: CalendarDay = { year: 2026, month: 11, day: 1 };
+    let reads = 0;
+    const today = (): CalendarDay => {
+      reads += 1;
+      return day;
+    };
+    await startRiding({ pacer: false, today });
+    await pump(10);
+    expect(seasonsHanded.map((season) => season.holiday)).toEqual(['halloween']);
+
+    // Local midnight passes mid-ride.
+    day = { year: 2026, month: 11, day: 2 };
+    await pump(40);
+
+    expect(reads).toBe(1);
+    expect(seasonsHanded).toHaveLength(1);
+    expect(seasonsHanded[0]?.holiday).toBe('halloween');
+  });
+
+  it('reads the day again for the NEXT ride, and only then', async () => {
+    let day: CalendarDay = { year: 2026, month: 11, day: 1 };
+    await startRiding({ pacer: false, today: () => day });
+    await pump(5);
+    await clickThrough(endRideButton());
+    day = { year: 2026, month: 12, day: 1 };
+    await clickThrough(rideButton());
+    await pump(2, 1000 / 30);
+    await settle();
+    await pump(5);
+
+    expect(seasonsHanded.map((season) => season.holiday)).toEqual(['halloween', 'winter-lights']);
+  });
+
+  it('never takes the day from a ghost: a 31 Oct attempt ridden on 15 Jul is no holiday', async () => {
+    // A recorded attempt that carries the day it was ridden, as a stored
+    // activity does. Nothing in the ride may read it.
+    const recordedOnHalloween = {
+      ...FAST_GHOST,
+      startedAt: '2026-10-31T09:00:00Z',
+      start: new Date('2026-10-31T09:00:00Z'),
+    } as GhostTrack;
+    const asked: unknown[][] = [];
+    const today = (...args: unknown[]): CalendarDay => {
+      asked.push(args);
+      return { year: 2026, month: 7, day: 15 };
+    };
+    const frames = await startRiding({
+      pacer: false,
+      ghost: true,
+      track: recordedOnHalloween,
+      today,
+    });
+    await pump(10);
+
+    // The ghost IS on the road, so the test is not vacuous…
+    expect(frames.at(-1)?.markers.some((marker) => marker.kind === 'ghost')).toBe(true);
+    // …and the day came from `today`, asked with nothing.
+    expect(asked).toEqual([[]]);
+    expect(seasonsHanded).toHaveLength(1);
+    expect(seasonsHanded[0]?.holiday).toBeUndefined();
+    // Mid-July on a northern route: summer, not the ghost's autumn.
+    expect(seasonsHanded[0]?.nature).toEqual({ autumn: 0, winter: 0 });
+  });
+});
+
+/**
  * #245's wiring, driven the way a rider on a hot phone would produce it.
  *
  * ⚠️ **Both halves or neither.** `quality.test.ts` proves the ladder carries a
@@ -1714,5 +1964,85 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
     // The renderer is told a rung only when it changes, so "no rung at all" is
     // "never left the top one" — the same reading the threshold test above makes.
     expect(rungs).toEqual([]);
+  });
+});
+
+/**
+ * #1482 — the HUD's touch lock, through the real game: what a tap on the
+ * HUD's *Pause* or *End ride* does to the ride while it is on, read off the
+ * HUD and the trainer port as a rider and the Ride screen would see them.
+ * `hud/HudPanel.touch-lock.test.tsx` holds the rest of the HUD's controls and
+ * the held release.
+ */
+describe('the touch lock on the HUD — #1482', () => {
+  function hudButton(name: string): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+      (button) => button.textContent === name,
+    );
+  }
+
+  async function tapThrough(element: HTMLElement | undefined): Promise<void> {
+    if (element === undefined) {
+      throw new Error('no such control on the HUD');
+    }
+    tap(element);
+    await settle();
+  }
+
+  function countingTrainer(ended: { count: number }): GameTrainerPort {
+    return {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => {
+        ended.count += 1;
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+    };
+  }
+
+  it('ignores a tap on Pause while it is on, and a key still pauses', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4);
+
+    await tapThrough(hudButton(TOUCH_LOCK_NAME));
+    expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('true');
+    await tapThrough(hudButton('Pause'));
+    expect(hudButton('Resume')).toBeUndefined();
+
+    const pause = hudButton('Pause');
+    if (pause === undefined) throw new Error('no Pause on the HUD');
+    await activateWithKeyboard(pause);
+    await settle();
+    expect(hudButton('Resume')).toBeDefined();
+  });
+
+  it('lets a tap on End ride end the game ride while it is on, and the next ride starts unlocked', async () => {
+    const ended = { count: 0 };
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(testRoute())}
+        trainer={countingTrainer(ended)}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4);
+    await tapThrough(hudButton(TOUCH_LOCK_NAME));
+
+    await tapThrough(endRideButton());
+    pending = [];
+
+    expect(ended.count).toBe(1);
+    expect(endRideButton()).toBeUndefined();
+    expect(rideButton()).toBeDefined();
+
+    await clickThrough(rideButton());
+    expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('false');
   });
 });

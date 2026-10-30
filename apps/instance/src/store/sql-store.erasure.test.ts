@@ -26,6 +26,7 @@ import {
   ATHLETE_B,
   ATHLETE_C,
   createStoreHarness,
+  registrationFixture,
   seedWorld,
   type StoreHarness,
 } from './testing/index.ts';
@@ -101,13 +102,27 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   // Neither of the next two can carry a foreign key even in principle: since
   // #891's review each may name an id NOBODY ever held, stored so that a
   // rider's own block list and report allowance say nothing about who exists.
-  'block.blocked_athlete_id': { erased: true },
+  'block.blocked_athlete_id': {
+    kept: 'the block is the BLOCKER’s row: deleting it would tell them the id was a real account (#899)',
+  },
   'report.target_athlete_id': {
     kept: 'the report is the REPORTER’s row, and a moderator still decides it',
   },
   'report.closed_by_athlete_id': { kept: 'who decided a report is part of the audit trail' },
   'moderation_log.actor_athlete_id': {
     kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
+  },
+  'hidden_item.owner_athlete_id': {
+    kept: 'a hidden item stays hidden, and its record stays, when its owner erases their account (#913)',
+  },
+  'notice_step.actor_athlete_id': {
+    kept: 'the record of how a notice was handled is evidence of what was done and when (#912)',
+  },
+  'appeal.appellant_athlete_id': {
+    kept: 'an appeal and its decision are part of the audit trail its statement is (#911)',
+  },
+  'statement.target_athlete_id': {
+    kept: 'a statement of reasons is what the rider was told, kept with the append-only log it explains (#910)',
   },
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
@@ -135,11 +150,22 @@ function namedWithoutForeignKey(path: string): string[] {
   }
 }
 
+/**
+ * An athlete-scoped table that holds ONE row on the whole instance, so the
+ * three-athlete world cannot seed it for all three — and the case of its own
+ * that erases it instead. A table named here without that case is a test that
+ * never runs; the last case below holds the two together.
+ */
+const ONE_ROW_TABLES: Readonly<Record<string, string>> = {
+  hosted_model_key:
+    'the instance holds one hosted model key, for the operator (#1097, ADR 0046 Q9): “takes the hosted model key with the athlete it is held for”',
+};
+
 describe('erasing an athlete (#769, #35)', () => {
   it('empties every athlete-scoped table the schema has of that athlete, and only that athlete', async () => {
     harness = await createStoreHarness();
     await harness.write(seedWorld);
-    const tables = athleteScopedTables(harness.path);
+    const tables = athleteScopedTables(harness.path).filter((table) => !(table in ONE_ROW_TABLES));
     expect(tables.length).toBeGreaterThan(0);
 
     for (const table of tables) {
@@ -216,6 +242,15 @@ describe('erasing an athlete (#769, #35)', () => {
         reportId: report!.id,
         reason: 'Seen',
         at: 1_790_001_000,
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
       });
       await store.moderate({
         action: 'hide_display_name',
@@ -224,6 +259,59 @@ describe('erasing an athlete (#769, #35)', () => {
         reportId: null,
         reason: 'Seen',
         at: 1_790_001_000,
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
+      });
+      // #912: B, as a moderator, records a step on a notice.
+      const noticeId = await store.putNotice({
+        receivedAt: 1_790_001_050,
+        kind: 'illegal_content',
+        explanation: 'Seen',
+        items: [],
+        location: 'Seen',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+      });
+      await store.putNoticeStep({
+        noticeId,
+        step: 'decided',
+        actorAthleteId: ATHLETE_B,
+        decision: 'Seen',
+        logId: null,
+        at: 1_790_001_060,
+      });
+      // #913: a moderator hid an item of B's.
+      await store.hideItem({
+        item: 'room:0123456789abcdef0123456789abcdef',
+        ownerAthleteId: ATHLETE_B,
+        actorAthleteId: ATHLETE_A,
+        reason: 'Seen',
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
+        at: 1_790_001_070,
+      });
+      // #911: B appeals the statement about their hidden name.
+      const [statement] = await store.listStatements(ATHLETE_B);
+      await store.putAppeal({
+        statementLogId: statement!.logId,
+        appellantAthleteId: ATHLETE_B,
+        grounds: 'Seen',
+        filedAt: 1_790_001_100,
       });
     });
     for (const column of columns) {
@@ -253,6 +341,14 @@ describe('erasing an athlete (#769, #35)', () => {
       // Migration 0010's history index (#835, ADR 0040 D-10): found the same way.
       expect(order).toContain('history_source');
       expect(order).toContain('history_passage');
+      // Migration 0018's account-change log and marks (#1193): found the same way.
+      expect(order).toContain('account_change');
+      expect(order).toContain('account_change_mark');
+      // Migration 0020's analysis jobs and their events (#1095): found the
+      // same way, the events before the jobs they reference.
+      expect(order).toContain('analysis_job');
+      expect(order.indexOf('analysis_event')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('analysis_event')).toBeLessThan(order.indexOf('analysis_job'));
       const scoped = new Set<string>(order);
       for (const reference of references(harness.path)) {
         if (!scoped.has(reference.table) || !scoped.has(reference.parent)) continue;
@@ -277,5 +373,37 @@ describe('erasing an athlete (#769, #35)', () => {
     const erased = await harness.write((store) => store.eraseAthlete(ATHLETE_B));
     expect([...erased].sort()).toEqual(held);
     expect(await harness.write((store) => store.eraseAthlete(ATHLETE_B)), 'idempotent').toEqual([]);
+  });
+
+  it('takes the hosted model key with the athlete it is held for, and no other athlete (#1097)', async () => {
+    harness = await createStoreHarness();
+    await harness.write(async (store) => {
+      await store.registerAthlete(registrationFixture(ATHLETE_A));
+      await store.registerAthlete(registrationFixture(ATHLETE_B));
+      const put = await store.putHostedModelKey(ATHLETE_A, {
+        url: 'https://models.example/v1',
+        model: 'a-model',
+        iv: new Uint8Array(12),
+        ciphertext: new Uint8Array([1, 2, 3]),
+        setAt: 1_790_000_000,
+      });
+      expect(put).toEqual({ outcome: 'stored' });
+    });
+    expect(rowsOf(harness.path, 'hosted_model_key', 'athlete_id', ATHLETE_A)).toBe(1);
+
+    await harness.write((store) => store.eraseAthlete(ATHLETE_B));
+    expect(rowsOf(harness.path, 'hosted_model_key', 'athlete_id', ATHLETE_A), 'not B’s').toBe(1);
+
+    await harness.write((store) => store.eraseAthlete(ATHLETE_A));
+
+    expect(rowsOf(harness.path, 'hosted_model_key', 'athlete_id', ATHLETE_A)).toBe(0);
+    expect(await harness.read((store) => store.getHostedModelKey())).toBeUndefined();
+  });
+
+  it('exempts from the three-athlete case only athlete-scoped tables, each with a case of its own', async () => {
+    harness = await createStoreHarness();
+    await harness.write(() => Promise.resolve());
+    const scoped = athleteScopedTables(harness.path);
+    for (const table of Object.keys(ONE_ROW_TABLES)) expect(scoped).toContain(table);
   });
 });

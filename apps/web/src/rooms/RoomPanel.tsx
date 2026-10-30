@@ -3,7 +3,9 @@
 /**
  * **Ride with others** — #784's private group ride and #785's private race,
  * on the game's route picker: make a room on one of your own routes and share
- * its code, or join one by the code a friend shared.
+ * its code, or join one by the code a friend shared — and #788's public
+ * rooms: list one you make for any adult rider on your instance, or join one
+ * from the listing (`PublicRooms.tsx`).
  *
  * ## What it asks for first
  *
@@ -33,7 +35,7 @@
 
 import { useState, type JSX } from 'react';
 
-import type { RouteProfile } from '@onyourleft/domain';
+import { formatModerationItem, type RouteProfile } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
@@ -42,11 +44,14 @@ import type {
   CreateRoomAnswer,
   EnteredRoom,
   JoinRoomAnswer,
+  PublicRoomsAnswer,
   RoomRidingPosition,
   RoomsPort,
   RoomsRefusal,
 } from '../net/rooms-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { NoticePageLink } from '../views/InstancePages';
+import { PUBLIC_ROOMS_TEXT, PublicRooms, publicRoomStartText } from './PublicRooms';
 import { ROOM_ROUTE_REFUSAL_TEXT, type RoomRouteRefusal } from './share';
 
 /** One of the rider's own routes, as the panel offers it for a room. */
@@ -55,6 +60,18 @@ export interface RoomRouteChoice {
   readonly name: string;
   readonly profile: RouteProfile;
 }
+
+/**
+ * What the references under an entered room are for (#913): each is an
+ * identifier the instance's notice page takes, so a rider can report the room
+ * or its route alone. ⚠️ Draft wording awaiting the owner's approval. Since
+ * #1381 the page itself is linked after them (`views/InstancePages.tsx`
+ * §`NoticePageLink`), where About's sentence pointing to it used to be.
+ */
+export const ROOM_REFERENCES_SUMMARY = 'References, to report something in this room';
+export const ROOM_REFERENCES_TEXT =
+  'To tell the instance’s moderator about this room or its route, copy its reference into the ' +
+  'instance’s notice page.';
 
 /** What a room's kind is called on this screen. */
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
@@ -72,20 +89,82 @@ export const ROOMS_REFUSAL_TEXT: Readonly<Record<RoomsRefusal, string>> = {
   'not-the-rooms-route':
     'The room’s route did not arrive as the room made it, so it was not used. Try joining again.',
   'instance-refused': 'The instance would not do that. Try again later.',
+  // #788.
+  'not-eligible':
+    'Your account cannot use public rooms yet: they are for adults whose account is ready for ' +
+    'them. The Instance screen says what is missing — confirming you are 18 or over, for one.',
+  'no-public-rooms':
+    'Your instance does not offer public rooms. Whether it does is its operator’s choice.',
+  // #1210 (ADR 0047 D-14 Q6).
+  'cannot-seal':
+    'Rooms on your instance are reached only encrypted, and this device cannot do that right ' +
+    'now. The Instance screen says why.',
 };
+
+/**
+ * A room's drafting, in words — #787, the owner's ruling of 2026-09-30: said
+ * to every rider in the room before the start, and offered to the rider
+ * making one. ⚠️ Draft wording awaiting the owner's approval.
+ */
+export const ROOM_DRAFTING_TEXT = {
+  choice: 'Drafting',
+  choiceDetail: ' — riding close behind another rider takes less effort, as on the road',
+  on: 'Drafting is on: riding close behind another rider takes less effort.',
+  off: 'Drafting is off: every rider pushes the same air, whoever is in front.',
+} as const;
+
+/**
+ * #788: listing a room the rider makes — ⚠️ draft wording awaiting the
+ * owner's approval. A start no further ahead than the instance takes (twelve
+ * hours, `apps/instance` §`PUBLIC_ROOM_START_AHEAD_MS`).
+ */
+export const LIST_ROOM_TEXT = {
+  choice: 'List it as a public room',
+  choiceDetail: ' — for any adult rider on your instance to find and join; it has no code',
+  startsIn: 'Starts in',
+  tooMany:
+    'You have reached a limit on making rooms: three public rooms a day, ten rooms an hour, or five open at once. Wait, or close one, and try again.',
+  listed: (start: string): string =>
+    `It is listed on your instance as a public room, starting at ${start}. Any adult rider ` +
+    'there can join it.',
+} as const;
+
+/** When a listed room starts, from the moment it is made: minutes, and how each is said. */
+export const LIST_ROOM_STARTS: readonly { readonly minutes: number; readonly label: string }[] = [
+  { minutes: 15, label: '15 minutes' },
+  { minutes: 30, label: '30 minutes' },
+  { minutes: 60, label: 'an hour' },
+  { minutes: 120, label: '2 hours' },
+  { minutes: 240, label: '4 hours' },
+  { minutes: 480, label: '8 hours' },
+];
 
 /** What the rider is told when nothing answered. */
 export const ROOMS_UNREACHABLE_TEXT =
   'The instance did not answer. Check this device’s connection and try again.';
+
+/**
+ * The race's weight disclosure — the owner's ruling of 2026-10-15 on #1354
+ * (ADR 0051 D-1): live W/kg stays, and a rider is told, before they make a
+ * race or ride one they joined, that the others can estimate their weight from
+ * it. Shown for a race only; a group ride sends no W/kg to anybody. ⚠️ Draft
+ * wording awaiting the owner's approval.
+ */
+export const RACE_WEIGHT_DISCLOSURE =
+  'In a race, everyone in it sees your watts per kilogram live, so they can work out roughly ' +
+  'what you weigh.';
 
 /** What leaves the device when a room is made or joined — kept visible, never tucked away. */
 export const ROOMS_WHAT_IS_SENT =
   'Making a room sends the route you choose — its roads and heights, not its name — to your ' +
   'instance, for the riders you share its code with. Anyone with the code can join. In the ' +
   'room, your power and cadence go to the instance twice a second while you ride, and your ' +
-  'weight once as you join; the other riders see your name and where you are on the road, ' +
-  'and after a race its result: your name, place, time, watts per kilogram and any flag the ' +
-  'room raised for a figure past its limit. The route is deleted from the instance when the ' +
+  'weight once as you join; the other riders see where you are on the road; in a race they ' +
+  'also see your name and, every second, your watts per kilogram — which, with your speed, ' +
+  'lets them work out roughly what you weigh — and how many seconds ahead ' +
+  'or behind them you are, and after it its result: your name, place, time, watts per ' +
+  'kilogram and any flag the room raised for a figure past its limit. The route is deleted ' +
+  'from the instance when the ' +
   'room is over — within about a day of being made, unless somebody is riding in it then.';
 
 export interface RoomPanelProps {
@@ -106,7 +185,9 @@ export interface RoomPanelProps {
 
 type Busy = 'making' | 'joining' | undefined;
 
-function refusalText(answer: CreateRoomAnswer | JoinRoomAnswer): string | undefined {
+function refusalText(
+  answer: CreateRoomAnswer | JoinRoomAnswer | PublicRoomsAnswer,
+): string | undefined {
   if (answer.kind === 'unreachable') return ROOMS_UNREACHABLE_TEXT;
   if (answer.kind !== 'refused') return undefined;
   const reason = answer.reason;
@@ -118,6 +199,11 @@ function refusalText(answer: CreateRoomAnswer | JoinRoomAnswer): string | undefi
 export function RoomPanel(props: RoomPanelProps): JSX.Element {
   const [routeId, setRouteId] = useState<string | undefined>(undefined);
   const [kind, setKind] = useState<'group' | 'race'>('group');
+  // #787: on by default, the maker's to turn off, and fixed for the room.
+  const [drafting, setDrafting] = useState(true);
+  // #788: private unless the maker lists it, and then from when it starts.
+  const [listed, setListed] = useState(false);
+  const [startsIn, setStartsIn] = useState(30);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<Busy>(undefined);
   const [problem, setProblem] = useState<string | undefined>(undefined);
@@ -160,17 +246,26 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
 
   const entered = props.entered;
   if (entered !== undefined) {
+    // #1381: the page the references below are pasted into.
+    const noticePage = props.rooms.noticePage();
     return (
       <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
         {heading}
         <StatusMessage tone="info" label={ROOM_KIND_LABEL[entered.kind]} live>
           You are in a {entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.
           {entered.kind === 'race'
-            ? entered.code === undefined
+            ? !entered.madeIt
               ? ' The race starts when the rider who made the room starts it.'
               : ' You start the race, from the ride, when your riders are on the line.'
-            : ' Ride whenever you like; there is no leader and no result.'}
+            : ' Ride whenever you like; there is no leader and no result.'}{' '}
+          {entered.drafting ? ROOM_DRAFTING_TEXT.on : ROOM_DRAFTING_TEXT.off}
         </StatusMessage>
+        {entered.kind === 'race' ? (
+          <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p>
+        ) : undefined}
+        {entered.listed === undefined ? undefined : (
+          <p>{LIST_ROOM_TEXT.listed(publicRoomStartText(entered.listed.startsAt))}</p>
+        )}
         {entered.code === undefined ? undefined : (
           <p>
             Its code is <strong className="oyl-rooms__code">{entered.code}</strong>. Share it with
@@ -195,6 +290,23 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
             Leave the room
           </Button>
         </div>
+        {/* #913: the room and its route, by the identifiers the instance's
+            notice page takes, so either can be reported alone. */}
+        <details className="oyl-rooms__references">
+          <summary>{ROOM_REFERENCES_SUMMARY}</summary>
+          <p>{ROOM_REFERENCES_TEXT}</p>
+          <ul>
+            <li>
+              This room:{' '}
+              <code>{formatModerationItem({ kind: 'room', roomId: entered.roomId })}</code>
+            </li>
+            <li>
+              Its route:{' '}
+              <code>{formatModerationItem({ kind: 'route', roomId: entered.roomId })}</code>
+            </li>
+          </ul>
+          {noticePage === undefined ? undefined : <NoticePageLink href={noticePage} />}
+        </details>
       </section>
     );
   }
@@ -246,6 +358,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
           {busy === 'joining' ? 'Joining…' : 'Join the room'}
         </Button>
       </form>
+      <PublicRooms rooms={rooms} onEnter={props.onEnter} refusalText={refusalText} />
       <div className="oyl-rooms__make">
         <h3>Make a room</h3>
         {chosen === undefined ? (
@@ -286,6 +399,47 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 </label>
               ))}
             </fieldset>
+            <label>
+              <input
+                type="checkbox"
+                checked={drafting}
+                onChange={(event) => {
+                  setDrafting(event.target.checked);
+                }}
+              />
+              {ROOM_DRAFTING_TEXT.choice}
+              {ROOM_DRAFTING_TEXT.choiceDetail}
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={listed}
+                onChange={(event) => {
+                  setListed(event.target.checked);
+                }}
+              />
+              {LIST_ROOM_TEXT.choice}
+              {LIST_ROOM_TEXT.choiceDetail}
+            </label>
+            {listed ? <p data-oyl-kept-visible="">{PUBLIC_ROOMS_TEXT.sent}</p> : undefined}
+            {listed ? (
+              <label>
+                {LIST_ROOM_TEXT.startsIn}
+                <select
+                  value={startsIn}
+                  onChange={(event) => {
+                    setStartsIn(Number(event.target.value));
+                  }}
+                >
+                  {LIST_ROOM_STARTS.map((each) => (
+                    <option key={each.minutes} value={each.minutes}>
+                      {each.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : undefined}
+            {kind === 'race' ? <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p> : undefined}
             <Button
               variant="secondary"
               unavailable={busy !== undefined}
@@ -293,12 +447,27 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 if (busy !== undefined) return;
                 setBusy('making');
                 setProblem(undefined);
+                const startsAt = listed ? Math.floor(Date.now() / 1000) + startsIn * 60 : undefined;
                 void rooms
-                  .create({ kind, ridingPosition: props.position, route: chosen })
+                  .create({
+                    kind,
+                    ridingPosition: props.position,
+                    drafting,
+                    route: chosen,
+                    startsAt,
+                  })
                   .then((answer) => {
                     setBusy(undefined);
                     if (answer.kind === 'created') props.onEnter(answer.room);
-                    else setProblem(refusalText(answer));
+                    else if (
+                      startsAt !== undefined &&
+                      answer.kind === 'refused' &&
+                      answer.reason === 'rate-limited'
+                    ) {
+                      // #788: the server's limits on a create are three public a day, ten an hour
+                      // and five open, and it answers all three alike — so say all three.
+                      setProblem(LIST_ROOM_TEXT.tooMany);
+                    } else setProblem(refusalText(answer));
                   });
               }}
             >

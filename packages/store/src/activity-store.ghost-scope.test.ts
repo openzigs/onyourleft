@@ -23,6 +23,25 @@
  * that is the mutation recorded in this branch's pull request. Delete the red
  * half instead and nothing tells you whether the green half was ever capable of
  * failing.
+ *
+ * ## Since #331: what this file guards, and what it no longer has to
+ *
+ * ADR 0039 reversed ADR 0007 D4's first ban **on consent**: a rider may now race
+ * ONE other rider's ghost, when that rider said the ride may be raced. This
+ * file was the patent control that kept "a plurality of other users" false,
+ * and it is replaced, not deleted, by two controls that each go red:
+ *
+ * 1. **The rider's own ghost stays the rider's own** — this file, unchanged in
+ *    every assertion, and with one more below: a stranger's ride that IS
+ *    consented, on the same route, is still not an attempt of the rider's.
+ *    Consent opens a separate read; it never widens this one.
+ * 2. **Another rider's ghost comes only through a consent-bearing path** —
+ *    `activity-store.race-consent.test.ts` (#793, the consent flag, red
+ *    against `consentIgnoredStoreFactory`) on the device, and on the instance
+ *    `apps/instance/src/sync/race-ghost.test.ts` (#331: the consent, the
+ *    route, never the requester's own, and the choke point), which is where
+ *    a cross-rider ghost is read from (ADR 0039 D-2.5). Nothing here reads
+ *    another rider's ride, consented or not.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -103,6 +122,36 @@ describe('a ghost can only come from the rider who rode it', () => {
 
     expect(leaked.map((ride) => ride.id)).toContain('b-only');
     expect(leaked.some((ride) => ride.athleteId === ATHLETE_B)).toBe(true);
+  });
+});
+
+describe('a consent opens another read, never this one (#331)', () => {
+  it('does not return a stranger’s ride on the same route that they agreed may be raced', async () => {
+    harness = createStoreHarness();
+    const SHARED_ROUTE = await seedTwoRidersOnOneRoute(harness);
+    await harness.write(async (store) => {
+      await store.setActivityMayBeRaced(ATHLETE_B, activityId('b-only'), true);
+    });
+
+    const mine = await harness.read(async (store) =>
+      store.listRouteAttempts(ATHLETE_A, SHARED_ROUTE),
+    );
+
+    expect(mine.map((ride) => ride.id).sort()).toEqual(['a-first', 'a-second']);
+  });
+
+  it('would return it to a read that forgets the rider, consent or not', async () => {
+    harness = createStoreHarness({ factory: unscopedAttemptStoreFactory() });
+    const SHARED_ROUTE = await seedTwoRidersOnOneRoute(harness);
+    await harness.write(async (store) => {
+      await store.setActivityMayBeRaced(ATHLETE_B, activityId('b-only'), true);
+    });
+
+    const leaked = await harness.read(async (store) =>
+      store.listRouteAttempts(ATHLETE_A, SHARED_ROUTE),
+    );
+
+    expect(leaked.map((ride) => ride.id)).toContain('b-only');
   });
 });
 

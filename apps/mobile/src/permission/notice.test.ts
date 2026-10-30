@@ -55,13 +55,18 @@ describe('the action is the one thing worth doing next', () => {
 });
 
 describe('what the denial message may and may not say', () => {
-  it('says the app does not ask for location', () => {
+  it('says the app does not READ location — not that it never asks', () => {
     // The manifest bounds ACCESS_FINE_LOCATION at API 30 and declares
-    // BLUETOOTH_SCAN neverForLocation precisely so this sentence is true. If
+    // BLUETOOTH_SCAN neverForLocation, so from API 31 nothing asks. Below it
+    // a scan needs the location permission and the plugin's `initialize()`
+    // asks for it (`BluetoothLe.kt` §`initialize`, minSdk 24) — so until #1436
+    // this sentence said "never asks", which was false on Android 7 to 11.
+    // What is true on every version is that nothing here reads a location. If
     // the override is ever lost, this assertion becomes a lie the tests still
     // pass -- which is why the manifest has its own case in manifest.test.ts.
-    expect(permissionNotice({ kind: 'not-permitted' })?.explanation).toContain('never asks');
-    expect(permissionNotice({ kind: 'not-permitted' })?.explanation).toContain('location');
+    const explanation = permissionNotice({ kind: 'not-permitted' })?.explanation ?? '';
+    expect(explanation).toContain('never reads your location');
+    expect(explanation).not.toContain('never asks');
   });
 
   it('names the sensors a rider recognises rather than the Android permission', () => {

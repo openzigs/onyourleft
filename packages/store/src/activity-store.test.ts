@@ -3,6 +3,7 @@
 import Dexie from 'dexie';
 import {
   beatsPerMinute,
+  revolutionsPerMinute,
   metres,
   seconds,
   unixSeconds,
@@ -24,7 +25,7 @@ import {
   type PrivacyZoneRecord,
 } from './index';
 import { activityId, athleteId, lapId, privacyZoneId } from './ids';
-import { StoreReferentialError } from './errors';
+import { StoreConflictError, StoreReferentialError } from './errors';
 import { createStoreHarness } from './testing';
 import { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 import type { PersistedActivity } from './persisted';
@@ -494,6 +495,52 @@ describe('persistence — the write must be visible to a reader that was not the
     }
   });
 
+  it('setActivityRideFacts with a condition writes only over facts it accepts (#1315)', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide({ rideFacts: { workoutFinished: true } });
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+      const seen: unknown[] = [];
+
+      await expect(
+        harness.write(async (fresh) =>
+          fresh.setActivityRideFacts(
+            ATHLETE_A,
+            ride.id,
+            { ascent: metres(1) },
+            {
+              onlyIf: (held) => {
+                seen.push(held);
+                return false;
+              },
+            },
+          ),
+        ),
+      ).rejects.toBeInstanceOf(StoreConflictError);
+      // Asked about the facts held, and nothing was written.
+      expect(seen).toEqual([{ workoutFinished: true }]);
+      expect(
+        (await harness.read(async (fresh) => fresh.getActivity(ATHLETE_A, ride.id)))?.rideFacts,
+      ).toEqual({ workoutFinished: true });
+
+      // Accepted, it writes.
+      const read = await harness.roundTrip(
+        async (fresh) =>
+          fresh.setActivityRideFacts(
+            ATHLETE_A,
+            ride.id,
+            { ascent: metres(1) },
+            { onlyIf: () => true },
+          ),
+        async (fresh) => fresh.getActivity(ATHLETE_A, ride.id),
+      );
+      expect(read?.rideFacts).toEqual({ ascent: 1 });
+    } finally {
+      await harness.destroy();
+    }
+  });
+
   it('keeps facts worked out to nothing as `{}`, not as absent (#947)', async () => {
     const harness = createStoreHarness();
     try {
@@ -569,6 +616,42 @@ describe('persistence — the write must be visible to a reader that was not the
 
       expect(laps.map((each) => each.ordinal)).toEqual([0, 1, 2]);
       expect(laps[0]?.athleteId).toBe(ATHLETE_A);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  // #1312: the figures a course lap states, read back by a connection that
+  // did not write them — and a part lap is still a part lap after a reload.
+  it("a lap's power, heart rate, cadence, climb and part-lap mark survive a close and reopen", async () => {
+    const harness = createStoreHarness();
+    try {
+      const ride = indoorRide();
+      await harness.write(async (fresh) => {
+        await fresh.putAthlete(athlete());
+        await fresh.putActivity(ride);
+      });
+      const figures = {
+        averagePower: watts(203),
+        maxPower: watts(618),
+        averageHeartRate: beatsPerMinute(151),
+        maxHeartRate: beatsPerMinute(173),
+        averageCadence: revolutionsPerMinute(91),
+        ascent: metres(48),
+      };
+
+      const laps = await harness.roundTrip(
+        async (fresh) => {
+          await fresh.putLap(lap(ride, 0, figures));
+          await fresh.putLap(lap(ride, 1, { partial: true }));
+        },
+        async (fresh) => fresh.listLaps(ATHLETE_A, ride.id),
+      );
+
+      expect(laps[0]).toMatchObject(figures);
+      expect(laps[0]).not.toHaveProperty('partial');
+      expect(laps[1]?.partial).toBe(true);
+      expect(laps[1]).not.toHaveProperty('maxPower');
     } finally {
       await harness.destroy();
     }
@@ -712,6 +795,9 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       syncBases: 0,
       riderTexts: 0,
       trustedDeviceKeys: 0,
+      workoutGoals: 0,
+      recentlyDeleted: 0,
+      worldCorridors: 0,
     });
 
     // Re-create the athlete before reading. If the cascade had left the rows
@@ -775,6 +861,9 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       syncBases: 0,
       riderTexts: 0,
       trustedDeviceKeys: 0,
+      workoutGoals: 0,
+      recentlyDeleted: 0,
+      worldCorridors: 0,
     });
   });
 

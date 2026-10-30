@@ -24,6 +24,7 @@
 
 import {
   beatsPerMinute,
+  metres,
   metresPerSecond,
   revolutionsPerMinute,
   seconds,
@@ -31,6 +32,7 @@ import {
   watts,
   type BeatsPerMinute,
   type MetresPerSecond,
+  type ReplanRecord,
   type UnixSeconds,
   type Watts,
 } from '@onyourleft/domain';
@@ -41,7 +43,13 @@ import {
   type FitRecord,
 } from '@onyourleft/fit';
 import { deviceId, WEB_BLUETOOTH, type SensorMeasurement } from '@onyourleft/sensors';
-import { athleteId, recordingSessionId, type RecordingSessionId } from '@onyourleft/store';
+import {
+  athleteId,
+  recordingSessionId,
+  type RecordedCourseLap,
+  type RecordedWorkoutBlock,
+  type RecordingSessionId,
+} from '@onyourleft/store';
 import {
   assertRecordingRecovers,
   ATHLETE_A,
@@ -96,8 +104,8 @@ function harnessStore(): RecordingCheckpointStore {
       harness.write(async (store) => store.putRecordingSession(record)),
     appendRecordingChunk: async (chunk) =>
       harness.write(async (store) => store.appendRecordingChunk(chunk)),
-    listRecordingSessions: async (owner) =>
-      harness.write(async (store) => store.listRecordingSessions(owner)),
+    readRecordingSessions: async (owner) =>
+      harness.write(async (store) => store.readRecordingSessions(owner)),
     recoverRecording: async (owner, id) =>
       harness.write(async (store) => store.recoverRecording(owner, id)),
     deleteRecordingSession: async (owner, id) =>
@@ -216,8 +224,9 @@ describe('a whole ride survives the tab being killed', () => {
 
     await harness.discard();
     const listed = await listRecoverableRecordings(harnessStore(), ATHLETE_A);
-    expect(listed.map((row) => row.id)).toEqual([recorder.sessionId]);
-    expect(listed[0]?.state).toBe('recording');
+    expect(listed.sessions.map((row) => row.id)).toEqual([recorder.sessionId]);
+    expect(listed.sessions[0]?.state).toBe('recording');
+    expect(listed.unreadable).toEqual([]);
   });
 });
 
@@ -543,6 +552,139 @@ describe('a recovered ride can be continued, not merely read', () => {
   });
 });
 
+describe('#1419 — a lap that ends closes the lap in progress', () => {
+  function courseLap(from: number, to: number): RecordedCourseLap {
+    return {
+      from: { at: at(from), movingTime: seconds(from) },
+      to: { at: at(to), movingTime: seconds(to) },
+      distance: metres(100 * (to - from)),
+    };
+  }
+
+  /**
+   * Thirty seconds ridden, then the lap in progress noted, `then` run, and the
+   * recording stopped: what the header on disk holds.
+   *
+   * ⚠️ The lap in progress is placed AFTER the completed lap noted below, so
+   * the store's own read rule (a lap in progress that began before the last
+   * completed lap ended is dropped) cannot hide a recorder that forgot to
+   * clear it.
+   */
+  async function headerAfter(then: (recorder: Recorder) => void) {
+    const recorder = newRecorder();
+    await recorder.start(at(0));
+    for (let t = 0; t < 30; t += 1) {
+      recorder.observeReading(powerReading(t, 200));
+      recorder.observeReading(speedReading(t, 9));
+      await recorder.tick(at(t));
+    }
+    recorder.noteOpenCourseLap({ ...courseLap(20, 25), partial: true });
+    then(recorder);
+    await recorder.stop(at(30));
+    await harness.discard();
+    return harness.read(async (store) => store.recoverRecording(ATHLETE_A, recorder.sessionId));
+  }
+
+  it('keeps the lap in progress on the header while no lap has ended', async () => {
+    const recovered = await headerAfter(() => undefined);
+    expect(recovered?.openCourseLap).toStrictEqual({ ...courseLap(20, 25), partial: true });
+  });
+
+  it('writes no lap in progress once a lap has ended', async () => {
+    const recovered = await headerAfter((recorder) => {
+      recorder.noteCourseLap(courseLap(0, 10));
+    });
+    expect(recovered?.courseLaps).toStrictEqual([courseLap(0, 10)]);
+    expect(recovered).not.toHaveProperty('openCourseLap');
+  });
+});
+
+describe('#1319 — the workout blocks go out on the header', () => {
+  const block = { kind: 'free-ride', seconds: seconds(60) } as const;
+  const ridden = (from: number, to: number): RecordedWorkoutBlock => ({
+    outcome: 'cut-short',
+    block,
+    from: { at: at(from), movingTime: seconds(from) },
+    to: { at: at(to), movingTime: seconds(to) },
+  });
+
+  it('are on disk after a flush, and a recorder rebuilt from it starts with them', async () => {
+    const recorder = newRecorder();
+    await recorder.start(at(0));
+    for (let t = 0; t < 10; t += 1) {
+      recorder.observeReading(powerReading(t, 200));
+      await recorder.tick(at(t));
+    }
+    // ⚠️ Run on to a mark AHEAD of the instant the header is written: the
+    // session's clock can be, and a header stamped before its last block's
+    // end would have the store drop the list.
+    recorder.noteWorkoutBlocks([ridden(2, 5), { outcome: 'skipped', block }, ridden(5, 13)]);
+    await recorder.stop(at(10));
+    await harness.discard();
+
+    const rebuilt = await recoverRecorder({
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      sessionId: recorder.sessionId,
+    });
+    expect(rebuilt?.recovered.workoutBlocks).toStrictEqual([
+      ridden(2, 5),
+      { outcome: 'skipped', block },
+      ridden(5, 13),
+    ]);
+    expect(rebuilt?.recorder.workoutBlocks).toStrictEqual(rebuilt?.recovered.workoutBlocks);
+  });
+});
+
+describe('#1328 — a re-plan record the checkpoint could not keep stays counted', () => {
+  const REFUSED: ReplanRecord = { decision: 'refused', rule: 'P4', at: seconds(T0 + 5) };
+  /** A record from a build that knew a move this one does not: the store drops it, and counts it. */
+  const FROM_A_LATER_BUILD = {
+    decision: 'accepted',
+    move: { kind: 'set-watts', watts: 400 },
+    reason: 'heart-rate-high',
+    revision: 2,
+    at: T0 + 6,
+  } as unknown as ReplanRecord;
+
+  it('through a ride continued after one crash, and recovered after a second', async () => {
+    const first = newRecorder();
+    await first.start(at(0));
+    for (let t = 0; t < 10; t += 1) {
+      first.observeReading(powerReading(t, 200));
+      first.observeReading(speedReading(t, 9));
+      await first.tick(at(t));
+    }
+    first.noteReplans([REFUSED, FROM_A_LATER_BUILD]);
+    await first.flush();
+    const sessionId = first.sessionId;
+    await harness.discard();
+
+    const once = await recoverRecorder({ store: harnessStore(), athleteId: ATHLETE_A, sessionId });
+    const continued = once?.recorder;
+    if (continued === undefined) throw new Error('the recovered recorder is the subject');
+    expect(continued.replans).toStrictEqual([REFUSED]);
+    expect(continued.replansDropped).toBe(1);
+
+    // Continued, written again — the record it still holds reads, so only the
+    // count it carried can say there was a second — and the tab dies again.
+    await continued.resume(at(60));
+    for (let t = 60; t < 70; t += 1) {
+      continued.observeReading(powerReading(t, 200));
+      continued.observeReading(speedReading(t, 9));
+      await continued.tick(at(t));
+    }
+    await continued.flush();
+    await harness.discard();
+
+    const twice = await recoverRecorder({ store: harnessStore(), athleteId: ATHLETE_A, sessionId });
+    expect(twice?.recovered.sampleCount).toBeGreaterThan(60);
+    expect(twice?.recovered.replans).toStrictEqual([REFUSED]);
+    expect(twice?.recovered.replansDropped).toBe(1);
+    expect(twice?.recorder.replansDropped).toBe(1);
+  });
+});
+
 describe('two tabs recording at once', () => {
   it('does not let a second tab destroy the first tab’s ride', async () => {
     const first = newRecorder();
@@ -588,7 +730,10 @@ describe('two tabs recording at once', () => {
         sessionId: mine.sessionId,
       }),
     ).resolves.toBeUndefined();
-    await expect(listRecoverableRecordings(harnessStore(), ATHLETE_B)).resolves.toEqual([]);
+    await expect(listRecoverableRecordings(harnessStore(), ATHLETE_B)).resolves.toEqual({
+      sessions: [],
+      unreadable: [],
+    });
   });
 });
 

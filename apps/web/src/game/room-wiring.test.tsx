@@ -28,11 +28,13 @@ import {
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { roomPortOver, type RoomPort } from '../net/room-port';
-import { flush, frameRider, ManualClock, ScriptedRoom } from '../net/testing';
+import { flush, frameRider, ManualClock, ScriptedRoom, standingsRider } from '../net/testing';
 import { REJOIN_GIVE_UP_MS } from '../net/room-session';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
-import { ROOM_LOST_SPOKEN, ROOM_LOST_TEXT, ROOM_REFUSED_TEXT } from './room-ride';
+import { DRAFT_READING_STORAGE_KEY } from './draft-preference';
+import { ANNOUNCEMENTS_STORAGE_KEY } from './hud/announce-preference';
+import { DRAFT_SPOKEN, ROOM_LOST_SPOKEN, ROOM_LOST_TEXT, ROOM_REFUSED_TEXT } from './room-ride';
 
 /** Five level kilometres. */
 function levelRoute(): RidableRoute {
@@ -72,6 +74,7 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       },
       setQuality: () => undefined,
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),
@@ -274,6 +277,115 @@ describe('a ride in a room — #782, #783', () => {
     expect(queryAll(mounted?.container ?? document, 'ol')).toHaveLength(0);
   });
 
+  describe('other riders’ names on the road — #783', () => {
+    // jsdom lays nothing out, so the world's canvas is given the size a
+    // 16 : 9 stage would: the names are placed from it.
+    beforeEach(() => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'clientWidth', {
+        configurable: true,
+        get: () => 1280,
+      });
+      Object.defineProperty(HTMLCanvasElement.prototype, 'clientHeight', {
+        configurable: true,
+        get: () => 720,
+      });
+    });
+    afterEach(() => {
+      Reflect.deleteProperty(HTMLCanvasElement.prototype, 'clientWidth');
+      Reflect.deleteProperty(HTMLCanvasElement.prototype, 'clientHeight');
+    });
+
+    const namesOnTheRoad = (): readonly string[] =>
+      queryAll(mounted?.container ?? document, '.oyl-game__name').map(
+        (name) => name.textContent ?? '',
+      );
+
+    let lastRoom: ScriptedRoom | undefined;
+
+    async function ride(race: boolean): Promise<readonly SceneFrame[]> {
+      const room = new ScriptedRoom();
+      lastRoom = room;
+      const { drawn } = await rideInRoom(room);
+      room.accept();
+      room.welcome(0, race ? 'race' : 'ride');
+      if (race) {
+        room.name(1, 'Bea');
+        room.name(2, 'Cai');
+      }
+      for (let tick = 1; tick <= 4; tick += 1) {
+        // Two riders level with each other, so drawn side by side and their
+        // names clear of each other (`name-tags.ts` keeps one of two that meet).
+        room.frame(tick, [
+          frameRider(0, tick * 8),
+          frameRider(1, 14 + tick * 8),
+          frameRider(2, 14 + tick * 8),
+        ]);
+        if (race) {
+          room.standings(tick, [
+            standingsRider(2, -3, 3),
+            standingsRider(1, -1, 3),
+            standingsRider(0, 0, 3),
+          ]);
+        }
+        await pump(4);
+      }
+      return drawn;
+    }
+
+    it('writes over the world the names a race’s room sent, as text, and hides them from a screen reader', async () => {
+      const drawn = await ride(true);
+      const labelled = (drawn.at(-1)?.markers ?? []).map((marker) => marker.label);
+      expect(labelled.filter((label) => label !== undefined).sort()).toEqual(['Bea', 'Cai']);
+      expect([...namesOnTheRoad()].sort()).toEqual(['Bea', 'Cai']);
+      const layer = mounted?.container.querySelector('.oyl-game__names');
+      expect(layer?.getAttribute('aria-hidden')).toBe('true');
+      // The layer is put over the canvas it was measured from.
+      expect((layer as HTMLElement | null)?.style.width).toBe('1280px');
+      // Nothing but the name: no figure beside it on the road (ruling Q17).
+      for (const name of namesOnTheRoad()) expect(name).not.toMatch(/\d/);
+    });
+
+    it('writes no name in a group ride, whose room names nobody — until the rider follows one, by seat', async () => {
+      await ride(false);
+      expect(namesOnTheRoad()).toEqual([]);
+      const follow = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+        (button) => (button.textContent ?? '').startsWith('Follow'),
+      );
+      await act(async () => {
+        follow?.click();
+        await Promise.resolve();
+      });
+      await pump(2);
+      expect(namesOnTheRoad()).toEqual(['Rider 2']);
+    });
+
+    it('takes the last name off the road when the followed rider leaves the drawn set', async () => {
+      await ride(false);
+      const follow = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+        (button) => (button.textContent ?? '').startsWith('Follow'),
+      );
+      await act(async () => {
+        follow?.click();
+        await Promise.resolve();
+      });
+      await pump(2);
+      expect(namesOnTheRoad()).toEqual(['Rider 2']);
+      // The followed rider (seat "Rider 2") is last placed well ahead, where
+      // their name is still on the road when the room stops sending them ...
+      const room = lastRoom;
+      room?.frame(5, [frameRider(0, 40), frameRider(1, 175)]);
+      await pump(46);
+      expect(namesOnTheRoad()).toEqual(['Rider 2']);
+      // ... then they leave the drawn set, the follow is let go and no marker
+      // has a label: the name must not stay frozen over the road.
+      for (let tick = 6; tick <= 8; tick += 1) {
+        room?.frame(tick, [frameRider(0, tick * 8)]);
+        await pump(30);
+      }
+      expect(namesOnTheRoad()).toEqual([]);
+    });
+  });
+
   it('says in words that the room is lost, keeps riding, and rejoins by itself with a fresh ticket — #782', async () => {
     const room = new ScriptedRoom();
     const { drawn } = await rideInRoom(room);
@@ -344,5 +456,199 @@ describe('a ride in a room — #782, #783', () => {
     await clock.advance(REJOIN_GIVE_UP_MS + 10_000);
     await pump(2);
     expect(hudText()).toContain('riding on your own');
+  });
+});
+
+describe('the draft indicator on a ride in a room — #787, #327', () => {
+  /** Announcements on, with every reading and optional row silenced, so only events speak. */
+  function announcementsOn(): void {
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({
+        enabled: true,
+        powerEverySeconds: 'never',
+        distanceEvery: 'never',
+        intervalLeadSeconds: 'never',
+        climbLeadMetres: 'never',
+      }),
+    );
+  }
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  const field = (label: string): string | undefined => {
+    const term = queryAll(mounted?.container ?? document, 'dt').find(
+      (dt) => dt.textContent === label,
+    );
+    return term === undefined ? undefined : (term.nextElementSibling?.textContent ?? '');
+  };
+  const spoken = (): string =>
+    mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+
+  let room: ScriptedRoom;
+
+  /**
+   * `count` frames from the room with this rider (seat 0) at the room's
+   * `draftPercent` and one other rider just ahead, pumping a second of game
+   * between each; what the HUD's region held after each.
+   */
+  async function frames(from: number, count: number, draftPercent: number): Promise<string[]> {
+    const heard: string[] = [];
+    for (let tick = from; tick < from + count; tick += 1) {
+      room.frame(tick, [
+        frameRider(0, 100 + tick * 8, 10, draftPercent),
+        frameRider(1, 101 + tick * 8),
+      ]);
+      await pump(4);
+      heard.push(spoken());
+    }
+    return heard;
+  }
+
+  it('shows the room’s draft with its gauge, and says going into and out of it, by default — the owner, 2026-10-15', async () => {
+    announcementsOn();
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const into = await frames(1, 6, 30);
+    expect(field('Draft')).toBe('30 % of drag at most 59 %');
+    expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
+    expect(into).toContain(DRAFT_SPOKEN.into(30));
+    const out = await frames(7, 8, 0);
+    expect(field('Draft')).toBe('0 % of drag at most 59 %');
+    expect(out.at(-1)).toBe(DRAFT_SPOKEN.outOf);
+  });
+
+  it('shows and says nothing about a draft once the rider turned it off, while the room drafts the rider just the same', async () => {
+    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    announcementsOn();
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const heard = [...(await frames(1, 6, 30)), ...(await frames(7, 8, 0))];
+    expect(field('Nearby')).toBeDefined();
+    expect(field('Draft')).toBeUndefined();
+    expect(mounted?.container.querySelector('.oyl-hud__gauge')).toBeNull();
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+
+  it('says nothing about a draft with announcements off, though the field is shown', async () => {
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const heard = await frames(1, 6, 30);
+    expect(field('Draft')).toBe('30 % of drag at most 59 %');
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+});
+
+describe('reporting a rider from inside the ride — #789', () => {
+  const buttons = (): HTMLButtonElement[] =>
+    queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button');
+  /** A control by its accessible name as a screen reader reads it: the text, hidden parts too. */
+  const named = (name: string): HTMLButtonElement | undefined =>
+    buttons().find((button) => (button.textContent ?? '').replace(/\s+/g, ' ').trim() === name);
+  let presses = 0;
+  async function press(button: HTMLButtonElement | undefined): Promise<void> {
+    expect(button, 'the control is on the HUD').toBeDefined();
+    presses += 1;
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    await flush();
+    await pump(1);
+  }
+
+  /** A race whose room has named its riders, and this rider following Bea. */
+  async function followingBea(room: ScriptedRoom): Promise<void> {
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0, 'race');
+    room.name(1, 'Bea');
+    room.name(2, 'Cai');
+    for (let tick = 1; tick <= 4; tick += 1) {
+      room.frame(tick, [
+        frameRider(0, tick * 8),
+        frameRider(1, 30 + tick * 8),
+        frameRider(2, 60 + tick * 8),
+      ]);
+      // The names reach the HUD with the race's standings (#1347).
+      room.standings(tick, [
+        standingsRider(2, -3, 3),
+        standingsRider(1, -1, 3),
+        standingsRider(0, 0, 3),
+      ]);
+      await pump(4);
+    }
+    // No report with nobody followed: there is no name to report.
+    expect(buttons().some((button) => (button.textContent ?? '').startsWith('Report'))).toBe(false);
+    await press(named('Follow the next rider near you'));
+    // The followed rider's name is on the HUD — the gap field's label.
+    expect(
+      queryAll(mounted?.container ?? document, 'dt').some((dt) => dt.textContent === 'Bea'),
+    ).toBe(true);
+    presses = 0;
+  }
+
+  it('files a report on the followed rider’s name in two presses, by seat and reason, and says so', async () => {
+    const room = new ScriptedRoom();
+    await followingBea(room);
+    await press(named('Report Bea'));
+    const group = mounted?.container.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('Report Bea for');
+    await press(named('Cheating, or riding that cannot be real'));
+    await flush();
+    await pump(1);
+    expect(presses).toBe(2);
+    // Filed through the room's link: this room, Bea's seat, the reason — and nothing else.
+    expect(room.reports).toEqual([{ roomId: 'room-1', riderId: 1, reason: 'cheating' }]);
+    expect(hudText()).toContain('Reported. A moderator will look at it.');
+    // The reasons are gone, and focus went to what became of the report.
+    expect(mounted?.container.querySelector('[role="group"]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe('Reported. A moderator will look at it.');
+    // The ride went on: nothing about a report pauses or ends it.
+    expect(named('Pause')).toBeDefined();
+  });
+
+  it('files nothing when the rider follows somebody else before choosing a reason', async () => {
+    const room = new ScriptedRoom();
+    await followingBea(room);
+    await press(named('Report Bea'));
+    expect(mounted?.container.querySelector('[role="group"]')).not.toBeNull();
+    await press(named('Follow the next rider near you'));
+    // Now following Cai: the reasons for Bea are closed, and nothing was filed.
+    expect(mounted?.container.querySelector('[role="group"]')).toBeNull();
+    expect(named('Report Cai')).toBeDefined();
+    expect(room.reports).toEqual([]);
+  });
+
+  it('closes the reasons on a second press of Report, filing nothing', async () => {
+    const room = new ScriptedRoom();
+    await followingBea(room);
+    await press(named('Report Bea'));
+    expect(named('Report Bea')?.getAttribute('aria-expanded')).toBe('true');
+    await press(named('Report Bea'));
+    expect(named('Report Bea')?.getAttribute('aria-expanded')).toBe('false');
+    expect(mounted?.container.querySelector('[role="group"]')).toBeNull();
+    expect(room.reports).toEqual([]);
+  });
+
+  it('says why a report was not sent when the rider’s allowance is spent', async () => {
+    const room = new ScriptedRoom();
+    room.reportAnswer = () => ({ kind: 'rate-limited' });
+    await followingBea(room);
+    await press(named('Report Bea'));
+    await press(named('Name: an offensive display name'));
+    await flush();
+    await pump(1);
+    expect(room.reports).toEqual([{ roomId: 'room-1', riderId: 1, reason: 'display-name' }]);
+    expect(hudText()).toContain('Not sent: you have sent as many reports as an hour allows.');
+    expect(hudText()).not.toContain('Reported.');
   });
 });

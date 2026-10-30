@@ -12,16 +12,23 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DELIVERY_HOUSES_KEY,
+  DELIVERY_SCORE_KEY,
   MOVING_TIME_KEY,
   NO_READING,
   gapAgainst,
+  givesWayToTheRoom,
   hudReadings,
+  isDeliveryReading,
+  isRoomReading,
   profileReading,
   readingTier,
   trainerLine,
   type HudInput,
 } from './fields';
+import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
 import { atStartLine } from '../simulation';
+import { FRESH_WEEK, recordDelivery, recordMiss, startRound } from '../delivery/round';
 import {
   MAX_SIMULATED_GRADE_PERCENT,
   SIMULATION_SETPOINT_INTERVAL_SECONDS,
@@ -841,6 +848,10 @@ describe('what the wind is doing to the rider (#335)', () => {
 });
 
 describe('the trainer status line — #373', () => {
+  it('carries a running workout’s heart-rate hold in the trainer line’s place — #1240', () => {
+    expect(trainerLine({ hold: 'Hold 130–140 bpm: 160 W' })).toBe('Hold 130–140 bpm: 160 W');
+  });
+
   it('says simulating, with the gradient to a tenth and the write count', () => {
     expect(trainerLine({ gradePercent: -3.42, writes: 17 })).toBe(
       'Trainer: simulating -3.4% (17 sent)',
@@ -1030,6 +1041,63 @@ describe('the room on the HUD — #783', () => {
     const text = `${reading?.value ?? ''} ${reading?.unit ?? ''} ${reading?.detail ?? ''}`;
     expect(text).not.toMatch(/\d\s*W(?!\/kg)\b/);
   });
+
+  it('shows this rider’s draft as a share of drag, Off in a room without drafting, and a dash before a frame — #787', () => {
+    const draft = (value: number | 'off' | undefined) =>
+      hudReadings({ ...baseInput(), room: { nearby: 1, draft: value, draftShown: true } }).find(
+        (r) => r.key === 'room-draft',
+      );
+    expect(draft(34)).toMatchObject({ label: 'Draft', value: '34', unit: '% of drag' });
+    expect(draft(0)).toMatchObject({ value: '0', unit: '% of drag' });
+    expect(draft('off')).toMatchObject({ label: 'Draft', value: 'Off', unit: '', word: true });
+    expect(draft(undefined)).toMatchObject({ label: 'Draft', value: NO_READING, unit: '' });
+    // Never watts, in any state: a share of drag is the whole reading (ADR 0038 D-5).
+    for (const each of [34, 0, 'off', undefined] as const) {
+      const reading = draft(each);
+      const text = `${reading?.label ?? ''} ${reading?.value ?? ''} ${reading?.unit ?? ''} ${reading?.detail ?? ''}`;
+      expect(text).not.toMatch(/\bW\b|watt/i);
+    }
+  });
+
+  it('has no draft on a ride with no room — absent, not 0 %', () => {
+    expect(hudReadings(baseInput()).map((reading) => reading.key)).not.toContain('room-draft');
+  });
+
+  it('has no draft field in a room unless the ride says the rider’s setting shows it — ADR 0038 D-5', () => {
+    const keys = (draftShown: boolean | undefined) =>
+      hudReadings({
+        ...baseInput(),
+        room: { nearby: 1, draft: 34, ...(draftShown === undefined ? {} : { draftShown }) },
+      }).map((reading) => reading.key);
+    expect(keys(undefined)).not.toContain('room-draft');
+    expect(keys(false)).not.toContain('room-draft');
+    expect(keys(true)).toContain('room-draft');
+    // The room's other fields are there either way, at the same indexes.
+    expect(keys(false)).toEqual(keys(true).filter((key) => key !== 'room-draft'));
+  });
+
+  it('gauges the draft toward the model’s most, and says that is the full scale — #327', () => {
+    const draft = (value: number | 'off' | undefined) =>
+      hudReadings({ ...baseInput(), room: { nearby: 1, draft: value, draftShown: true } }).find(
+        (r) => r.key === 'room-draft',
+      );
+    expect(DRAFT_FULL_SCALE_PERCENT).toBe(59);
+    expect(draft(34)?.detail).toBe('at most 59 %');
+    expect(draft(34)?.gauge).toBeCloseTo(34 / 59, 12);
+    expect(draft(0)?.gauge).toBe(0);
+    // At the model's most the bar is full, and past it (it cannot be) never overfull.
+    expect(draft(59)?.gauge).toBe(1);
+    expect(draft(80)?.gauge).toBe(1);
+    // No gauge where there is nothing to measure.
+    expect(draft('off')?.gauge).toBeUndefined();
+    expect(draft(undefined)?.gauge).toBeUndefined();
+    // …and no other field carries one.
+    const others = hudReadings({
+      ...baseInput(),
+      room: { nearby: 1, draft: 34, draftShown: true },
+    }).filter((r) => r.key !== 'room-draft');
+    expect(others.every((r) => r.gauge === undefined)).toBe(true);
+  });
 });
 
 describe('the ride’s moving time — #1111', () => {
@@ -1088,5 +1156,200 @@ describe('the ride’s moving time — #1111', () => {
     expect(keys.indexOf(MOVING_TIME_KEY)).toBe(keys.indexOf('remaining') + 1);
     const field = movingTime({ ...baseInput(), movingSeconds: 1 });
     expect(field === undefined ? undefined : readingTier(field)).toBe('secondary');
+  });
+});
+
+describe('the lap in progress — #1312', () => {
+  const onLap = (lap: number): HudInput => {
+    const input = loopInput();
+    const total: number = input.profile.totalDistance;
+    return {
+      ...input,
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(8), distance: metres(total * (lap - 1) + 100) },
+      },
+    };
+  };
+  const strip = (input: HudInput) => profileReading(input.state, input.profile, input.lapSeconds);
+
+  it('says the lap’s time beside which lap the rider is on, in the strip’s own sentence', () => {
+    const first = strip({ ...onLap(1), lapSeconds: 65 });
+    expect(first.text).toMatch(/^\d+% of lap 1 · 1:05$/);
+    expect(first.label).toMatch(/^Route profile, \d+ per cent of lap 1, lap time 1:05$/);
+    expect(strip({ ...onLap(3), lapSeconds: 7 }).text).toMatch(/of lap 3 · 0:07$/);
+    // An hour-long lap keeps its hour.
+    expect(strip({ ...onLap(2), lapSeconds: 3_725 }).text).toMatch(/of lap 2 · 1:02:05$/);
+  });
+
+  it('states no lap time, and never a nought, when nothing is being recorded', () => {
+    const reading = strip(onLap(2));
+    expect(reading.text).toMatch(/^\d+% of lap 2$/);
+    expect(reading.label).toMatch(/^Route profile, \d+ per cent of lap 2$/);
+  });
+
+  it('states none on a route that is not a loop: there is no lap to be on', () => {
+    const reading = strip({ ...baseInput(), lapSeconds: 65 });
+    expect(reading.text).toBe('0% complete');
+    expect(reading.label).toBe('Route profile, 0 per cent complete');
+  });
+
+  it('adds no field: a ride on a loop has the readings every other ride has, in their places', () => {
+    const looped = hudReadings({ ...onLap(2), lapSeconds: 65 }).map((reading) => reading.key);
+    expect(looped).toEqual(hudReadings(baseInput()).map((reading) => reading.key));
+  });
+});
+
+describe('what gives way to a room’s readings on a phone — #1356', () => {
+  const gap = pacerGap({
+    botDistance: metres(200),
+    riderDistance: metres(100),
+    referenceSpeed: metresPerSecond(10),
+  });
+  const base = baseInput();
+  const widestRoomRide: HudInput = {
+    ...base,
+    state: { ...base.state, headwindMetresPerSecond: metresPerSecond(4) },
+    chases: [
+      { to: 'bot', gap },
+      { to: 'ghost', gap },
+    ],
+    room: { nearby: 3, draft: 34, draftShown: true },
+  };
+
+  it('names the room’s three readings, and the pacer’s, the ghost’s and the wind as what gives way', () => {
+    const readings = hudReadings(widestRoomRide);
+    expect(readings.filter(isRoomReading).map((each) => each.key)).toEqual([
+      'room-rider',
+      'room-nearby',
+      'room-draft',
+    ]);
+    expect(readings.filter(givesWayToTheRoom).map((each) => each.key)).toEqual([
+      'gap-bot',
+      'gap-ghost',
+      'wind',
+    ]);
+  });
+
+  it('leaves a phone six secondary readings beside the moving time, the room’s among them', () => {
+    // A phone's secondary tier is three tracks wide, and two rows of it are
+    // all the height there is (`theme.css` §"A ROOM RIDE ON A PHONE").
+    const shown = hudReadings(widestRoomRide)
+      .filter((each) => readingTier(each) === 'secondary')
+      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .map((each) => each.key);
+    expect(shown).toEqual([
+      'speed',
+      'gradient',
+      'remaining',
+      'room-rider',
+      'room-nearby',
+      'room-draft',
+    ]);
+  });
+
+  it('gives way with the dashed field that stands in for a pacer, on a room ride with nobody chased', () => {
+    const readings = hudReadings({ ...base, room: { nearby: 0 } });
+    expect(readings.filter(givesWayToTheRoom).map((each) => each.key)).toEqual(['gap']);
+  });
+
+  it('names nothing on a ride with no room as the room’s', () => {
+    const solo: HudInput = { ...widestRoomRide, room: undefined };
+    expect(hudReadings(solo).filter(isRoomReading)).toEqual([]);
+  });
+});
+
+describe('a Delivery round on the HUD — #1812', () => {
+  const base = baseInput();
+  const round = recordMiss(recordDelivery(recordDelivery(startRound(8), 0), 1), 2);
+  const delivery = { round, week: { day: 3, houses: 8, score: 11 }, score: 2 };
+
+  it('shows the houses left, with the delivered and missed counts, and the round’s score with its day', () => {
+    const shown = hudReadings({ ...base, delivery }).filter(isDeliveryReading);
+    expect(shown).toEqual([
+      {
+        key: DELIVERY_HOUSES_KEY,
+        label: 'Houses',
+        value: '5',
+        unit: 'left',
+        stale: false,
+        detail: '2\u00a0delivered, 1\u00a0missed',
+      },
+      {
+        key: DELIVERY_SCORE_KEY,
+        label: 'Score',
+        value: '2',
+        unit: '',
+        stale: false,
+        detail: 'Day 3 of 7',
+      },
+    ]);
+  });
+
+  it('shows the round’s score it is handed, a crash in it, rather than the deliveries counted — #1816', () => {
+    // Two delivered and one crash: the round's score is 1 (`obstacles.ts` §`scoreAfter`).
+    const shown = hudReadings({ ...base, delivery: { ...delivery, score: 1 } });
+    expect(shown.find((each) => each.key === DELIVERY_SCORE_KEY)?.value).toBe('1');
+  });
+
+  it('follows the round as a parcel lands', () => {
+    const before = hudReadings({ ...base, delivery });
+    const after = hudReadings({
+      ...base,
+      delivery: { ...delivery, round: recordDelivery(round, 5) },
+    });
+    const houses = (readings: typeof before) =>
+      readings.find((each) => each.key === DELIVERY_HOUSES_KEY);
+    expect([houses(before)?.value, houses(before)?.detail]).toEqual([
+      '5',
+      '2\u00a0delivered, 1\u00a0missed',
+    ]);
+    expect([houses(after)?.value, houses(after)?.detail]).toEqual([
+      '4',
+      '3\u00a0delivered, 1\u00a0missed',
+    ]);
+  });
+
+  it('puts them last, after the wind, so every other field keeps its index, and in the secondary tier', () => {
+    // A ride with a wind set, so its field — the one that was last — is on it.
+    const windy: HudInput = { ...base, state: { ...base.state, headwindMetresPerSecond: 4 } };
+    const ordinary = hudReadings(windy).map((each) => each.key);
+    expect(ordinary.at(-1)).toBe('wind');
+    const keys = hudReadings({ ...windy, delivery }).map((each) => each.key);
+    expect(keys).toEqual([...ordinary, DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+    for (const each of hudReadings({ ...base, delivery }).filter(isDeliveryReading)) {
+      expect(readingTier(each)).toBe('secondary');
+    }
+  });
+
+  it('is absent from an ordinary ride, whose HUD is unchanged', () => {
+    expect(hudReadings(base).filter(isDeliveryReading)).toEqual([]);
+    expect(hudReadings({ ...base, delivery: undefined })).toEqual(hudReadings(base));
+  });
+
+  it('shows a fresh round on day one as nothing delivered yet', () => {
+    const fresh = hudReadings({
+      ...base,
+      delivery: { round: startRound(FRESH_WEEK.houses), week: FRESH_WEEK, score: 0 },
+    }).filter(isDeliveryReading);
+    expect(fresh.map((each) => [each.value, each.detail])).toEqual([
+      ['8', '0\u00a0delivered, 0\u00a0missed'],
+      ['0', 'Day 1 of 7'],
+    ]);
+  });
+
+  it('leaves a phone six secondary readings beside the moving time, the round’s among them', () => {
+    // `theme.css` §"A ROOM RIDE ON A PHONE": the pacer's dashed field gives way.
+    const shown = hudReadings({ ...base, delivery })
+      .filter((each) => readingTier(each) === 'secondary')
+      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .map((each) => each.key);
+    expect(shown).toEqual([
+      'speed',
+      'gradient',
+      'remaining',
+      DELIVERY_HOUSES_KEY,
+      DELIVERY_SCORE_KEY,
+    ]);
   });
 });

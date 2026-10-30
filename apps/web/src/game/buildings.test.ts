@@ -36,7 +36,7 @@ import {
 } from './buildings';
 import { northRoute } from './route-fixtures-testing';
 import { scatterSeed, type ScatterItem } from './scatter';
-import { STRUCTURE_FOOTPRINTS, structuresAt } from './settlements';
+import { LOT_PORCH_FOOTPRINT, STRUCTURE_FOOTPRINTS, structuresAt } from './settlements';
 import { corridorOrigin } from './terrain';
 
 const VARIANTS = Array.from({ length: BUILDING_VARIANTS }, (_, variant) => variant);
@@ -510,8 +510,10 @@ describe('what the detail may cost, and where it may stand — #500', () => {
     // Which is why the arrangement does not move: a shape that outgrew its
     // footprint would stand its eaves over ground the placement never checked.
     for (const plan of PLANS) {
-      const footprint = STRUCTURE_FOOTPRINTS[plan.kind];
       for (const role of BUILDING_ROLES) {
+        // #1589: a lot's porch reaches its own, wider footprint, which `lotsAt` checks for it.
+        const porch = role === 'porch' || role === 'porch-roof';
+        const footprint = porch ? LOT_PORCH_FOOTPRINT : STRUCTURE_FOOTPRINTS[plan.kind];
         for (const [x, , z] of trianglesOf(plan, role).flat()) {
           const label = `${plan.kind} ${String(plan.variant)} ${role}`;
           expect(Math.abs(x), label).toBeLessThanOrEqual(footprint.x + 1e-9);

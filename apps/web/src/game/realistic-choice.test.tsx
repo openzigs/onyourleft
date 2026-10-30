@@ -41,9 +41,18 @@ import {
   realisticWorldNotice,
   type RealisticWorldOutcome,
 } from './realistic-assets';
+import { PEOPLE_NEAR_MAX } from './people';
 import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { STRUCTURE_KINDS } from './scatter';
+import { sceneFrame } from './scene';
 import { REALISTIC_WORLD_STORAGE_KEY } from './world-preference';
+
+// #1541: `sceneFrame` itself, watched — what `GameView` asks it for. It still
+// builds every frame: the spy passes each call through.
+vi.mock('./scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./scene')>();
+  return { ...actual, sceneFrame: vi.fn(actual.sceneFrame) };
+});
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -91,6 +100,7 @@ const RENDERER: GameRenderer = {
         told.push(next);
       },
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     };
@@ -242,6 +252,38 @@ describe('which world a ride draws — #475', () => {
     await frames(1000 / 60, 5);
     expect(told.at(-1)).toEqual(REALISTIC_LADDER[0]);
     expect(structuresIn(rendered.at(-1))).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('asks for the rung’s people: sixteen on the realistic top rung, none on a stylised one — #1541', async () => {
+    // The consumer of `QualitySettings.people`: `GameView` hands the rung's
+    // figure to `sceneFrame`, which places nobody when it is absent or 0 —
+    // so a `GameView` that forgot it would draw no people, with every
+    // `people.test.ts` case green. This route's village is beyond the
+    // people's reach of the start, so what is read is what was ASKED for;
+    // `people.test.ts` §"people in a ride's frame" places them from it.
+    const asked = (): readonly (number | undefined)[] =>
+      vi.mocked(sceneFrame).mock.calls.map(([input]) => input.people);
+    vi.mocked(sceneFrame).mockClear();
+    await ride();
+    await frames(1000 / 60, 5);
+    expect(told.every((each) => each.world === 'stylised')).toBe(true);
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([0]));
+    for (const frame of rendered) {
+      expect((frame.people?.near.length ?? 0) + (frame.people?.far.length ?? 0)).toBe(0);
+    }
+    mounted?.unmount();
+    mounted = undefined;
+    rendered = [];
+
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    await settleLoad({ loaded: true });
+    vi.mocked(sceneFrame).mockClear();
+    await frames(1000 / 60, 5);
+    expect(told.at(-1)).toEqual(REALISTIC_LADDER[0]);
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([PEOPLE_NEAR_MAX]));
   });
 
   it('falls back to the stylised top and says so when the load fails — ADR 0026 D-7', async () => {

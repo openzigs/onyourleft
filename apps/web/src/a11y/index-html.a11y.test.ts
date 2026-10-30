@@ -15,9 +15,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-const indexHtml = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8');
+/** The two pages Vite builds that a person reads: the app, and the demo (#1645). */
+const PAGES = ['../../index.html', '../../demo/index.html'].map((path) => ({
+  name: path.replace('../../', ''),
+  html: readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
+}));
 
-describe('index.html', () => {
+describe.each(PAGES)('$name', ({ html: indexHtml }) => {
   it('declares a language, which no rendered test can assert for it', () => {
     expect(indexHtml).toMatch(/<html[^>]*\slang="[a-z]{2}(-[A-Za-z0-9]+)?"/);
   });

@@ -48,9 +48,11 @@ import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDuration } from '../../format';
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
+import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
+import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
 import { planLap, planProgress } from './plan';
 
 /** What a HUD shows where it has no trustworthy number. An em dash. */
@@ -132,6 +134,14 @@ export interface HudReading {
    * field renders at is not this issue's to do.
    */
   readonly word?: boolean | undefined;
+  /**
+   * A gauge drawn under the value — #787, the draft's (#327's indicator
+   * criteria): how far toward its full scale the value is, from 0 to 1.
+   * ⚠️ **Never the only carrier**: the value is the number and {@link detail}
+   * says what full scale is, so the gauge is `aria-hidden` and a rider who
+   * cannot see it loses nothing. Absent on every other field.
+   */
+  readonly gauge?: number | undefined;
 }
 
 /**
@@ -192,6 +202,12 @@ export function readingTier(reading: HudReading): ReadingTier {
 export interface ChasedGap {
   /** Which of the two this is. Decides the label, and nothing else. */
   readonly to: 'bot' | 'ghost';
+  /**
+   * Whose ghost, when it is ANOTHER rider's — #331: their display name, which
+   * labels the field in place of "Your best". Still one participant, read as
+   * a distance and a direction word (ADR 0039 D-3, D-4.2): never a place.
+   */
+  readonly who?: string | undefined;
   /** Signed the way `pacer/gap.ts` signs it: positive when they are ahead. */
   readonly gap: PacerGap;
   /**
@@ -214,24 +230,41 @@ export interface ChasedGap {
 
 /**
  * The room, on the HUD — #783: how many other riders are near, and the gap to
- * ONE rider the rider chose. **Never a list, and never an order**: ADR 0021
- * D-6 and ADR 0028 D-7.7 forbid a ranked list during a ride, and ruling Q8
- * (2026-09-28) is "only the gap to one chosen rider". A count says nothing
- * about who is ahead of whom.
+ * ONE rider the rider chose. **Never a list, and never an order, in these
+ * fields**: ADR 0021 D-6 and ruling Q8 (2026-09-28) made it "only the gap to
+ * one chosen rider". A race's list is its own panel since #1347
+ * (ADR 0051, superseding ADR 0028 D-7.7: `room-ride.ts` §`raceStandings`), and
+ * a group ride has none.
  */
 export interface RoomHud {
   /** How many other riders are drawn near this one — the interest set's size. */
   readonly nearby: number;
   /** The one rider the rider chose to follow, or `undefined` until they choose. */
   readonly chosen?: ChosenRider | undefined;
+  /**
+   * This rider's draft — #787: the share of their aerodynamic drag the room's
+   * draft removed on its last tick, in percent; `'off'` in a room made with
+   * drafting off; `undefined` before the room's first frame. ⚠️ **A share of
+   * drag, never watts** (ADR 0038 D-5): a watt figure moves with speed and
+   * gradient and means nothing on a descent, and there is no field here that
+   * could carry one.
+   */
+  readonly draft?: number | 'off' | undefined;
+  /**
+   * Whether the rider shows their draft — `game/draft-preference.ts`, on by
+   * default since the owner's ruling of 2026-10-15 (ADR 0038's amendment). ⚠️ Not the ROOM's switch: that
+   * one is {@link draft} reading `'off'`. Without this the field is absent,
+   * and the rider is drafted exactly the same.
+   */
+  readonly draftShown?: boolean | undefined;
 }
 
 /** The one rider followed. @see RoomHud */
 export interface ChosenRider {
   /**
    * What they are called on the HUD. ⚠️ Only ever the room's public projection
-   * of the athlete (#774, ADR 0028 D-6.5) — and until a room publishes one
-   * (#784, #785), `Rider N`, which names a seat and no person.
+   * of the athlete (#774, ADR 0028 D-6.5) — which a race sends (#1347) — and
+   * where the room sends none, `Rider N`, which names a seat and no person.
    */
   readonly label: string;
   /** Signed as `pacer/gap.ts` signs it: positive when they are ahead. */
@@ -244,6 +277,27 @@ export interface ChosenRider {
    * the whole of what the HUD may say about another rider.
    */
   readonly wattsPerKilogram?: number | undefined;
+}
+
+/**
+ * A Delivery round, on the HUD — #1812 (epic #1803, the owner's rulings DL2
+ * and DL10 of 2026-10-27). The round as `delivery/round.ts` holds it and the
+ * week it is ridden in: **counts only**, because a house is a position on the
+ * round and nothing here knows which house in the town stands for it (DL11).
+ * There is no field on this type that could carry a name, an address or a
+ * place, and {@link deliveryReadings} reads only the two it declares.
+ */
+export interface DeliveryHud {
+  readonly round: Round;
+  /** The week the round is ridden in: its `day` is the round's day. */
+  readonly week: WeekProgress;
+  /**
+   * The round's score with every crash in it, never below nought — #1816,
+   * from `delivery/ride-round.ts` §`DeliveryRide.score`. Not
+   * `round.ts` §`RoundTally.score`, which counts deliveries only: the owner's
+   * ruling of 2026-10-28 on #1811 takes a crash off the round's score.
+   */
+  readonly score: number;
 }
 
 /** Everything the HUD needs. */
@@ -271,6 +325,13 @@ export interface HudInput {
    * held for it, so its fields never appear or vanish mid-ride.
    */
   readonly room?: RoomHud | undefined;
+  /**
+   * The Delivery round, on a Delivery ride — #1812. Absent on every other
+   * ride, so an ordinary ride's HUD reads exactly as it did. Chosen at the
+   * start of the ride and held for it, as {@link room} is, so its fields never
+   * appear or vanish mid-ride.
+   */
+  readonly delivery?: DeliveryHud | undefined;
   /**
    * Which units the rider reads in (#238).
    *
@@ -304,6 +365,16 @@ export interface HudInput {
    * the rider has not moved.
    */
   readonly movingSeconds?: number | undefined;
+  /**
+   * The moving time of the lap in progress, in seconds — #1312. **The
+   * recorder's again** ({@link movingSeconds} says why there is no other
+   * clock): `RideSnapshot.courseLapSeconds`, its moving time since the rider
+   * last crossed the line, read through `trainer-port.ts`
+   * §`GameTrainerPort.rideLapSeconds`. `undefined` where nothing is being
+   * recorded, and then no lap time is stated. {@link profileReading} is where
+   * it is shown, and says why it is not a field of its own.
+   */
+  readonly lapSeconds?: number | undefined;
 }
 
 /**
@@ -402,11 +473,30 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
+    // #1812: after the wind, so a Delivery ride agrees with every other ride
+    // about where each field is, and an ordinary ride has none of these.
+    ...deliveryReadings(input.delivery),
   ];
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */
 export const MOVING_TIME_KEY = 'movingTime';
+
+/** Whether a reading is one of the room's — #783, #787. @see roomReadings */
+export function isRoomReading(reading: HudReading): boolean {
+  return reading.key.startsWith('room-');
+}
+
+/**
+ * Whether a reading gives way to the room's on a phone — #1356: the pacer's
+ * gap, the ghost's gap (and the dashed field that stands in for both) and the
+ * wind. `theme.css` §"A ROOM RIDE ON A PHONE" hides them while a room's
+ * readings are on the HUD, and says what that costs. Since #1812 they give way
+ * to a Delivery round's readings the same way.
+ */
+export function givesWayToTheRoom(reading: HudReading): boolean {
+  return reading.key === 'gap' || reading.key.startsWith('gap-') || reading.key === 'wind';
+}
 
 /**
  * The moving-time field — #1111.
@@ -470,7 +560,90 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       unit: room.nearby === 1 ? 'rider' : 'riders',
       stale: false,
     },
+    ...(room.draftShown === true ? [draftField(room.draft)] : []),
   ];
+}
+
+/** The key of the Delivery round's houses field — #1812. @see deliveryReadings */
+export const DELIVERY_HOUSES_KEY = 'delivery-houses';
+
+/** The key of the Delivery round's score field — #1812. @see deliveryReadings */
+export const DELIVERY_SCORE_KEY = 'delivery-score';
+
+/** Whether a reading is one of a Delivery round's — #1812. */
+export function isDeliveryReading(reading: HudReading): boolean {
+  return reading.key.startsWith('delivery-');
+}
+
+/**
+ * The Delivery round's two fields — #1812: the houses still to deliver, with
+ * the round's delivered and missed counts under them, and the round's score,
+ * with the day of the week under it. Two fields rather than five, because on
+ * a phone the secondary tier has height for two rows, and `theme.css`
+ * §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind give way to
+ * these as they do to a room's. Words are this project's own (DL1): a house
+ * is counted, never named, and nothing here names a place (DL11, ADR 0055).
+ */
+function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReading[] {
+  if (delivery === undefined) return [];
+  const tally = roundTally(delivery.round);
+  return [
+    {
+      key: DELIVERY_HOUSES_KEY,
+      label: 'Houses',
+      value: String(tally.expecting),
+      unit: 'left',
+      stale: false,
+      // A no-break space binds each count to its word, so a narrow track
+      // breaks the phrase after the comma and never between "2" and "missed".
+      detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
+    },
+    {
+      key: DELIVERY_SCORE_KEY,
+      label: 'Score',
+      value: String(delivery.score),
+      unit: '',
+      stale: false,
+      detail: `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+    },
+  ];
+}
+
+/** What the draft field is called (#787). */
+export const DRAFT_LABEL = 'Draft';
+
+/**
+ * The room's draft on this rider, as a share of aerodynamic drag — #787,
+ * ADR 0038 D-5. The unit says what it is a share of, so a small number on a
+ * climb, where there is little air to push, reads as a fact and not a fault
+ * (#327's indicator criteria). Only on a ride in a room, like every room
+ * field: absent everywhere else, on the `NO_READING` precedent — and only
+ * when the rider's setting shows it ({@link RoomHud.draftShown}).
+ *
+ * A number carries a gauge toward {@link DRAFT_FULL_SCALE_PERCENT}, and the
+ * phrase under it says what that full scale is (#327: *"the full-scale mark is
+ * drawn … If the scale is instead the theoretical maximum, the gauge says
+ * so"*). `'Off'` and the dash carry none: there is nothing to measure.
+ */
+function draftField(draft: RoomHud['draft']): HudReading {
+  const base = { key: 'room-draft', label: DRAFT_LABEL, stale: false } as const;
+  if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
+  if (draft === undefined || !Number.isFinite(draft)) {
+    return { ...base, value: NO_READING, unit: '' };
+  }
+  const percent = Math.max(0, Math.min(100, Math.round(draft)));
+  return {
+    ...base,
+    value: String(percent),
+    unit: '% of drag',
+    detail: draftScaleText(DRAFT_FULL_SCALE_PERCENT),
+    gauge: Math.min(1, percent / DRAFT_FULL_SCALE_PERCENT),
+  };
+}
+
+/** What the gauge's full scale is, in words under the number (#787). ⚠️ Draft wording for the owner. */
+function draftScaleText(fullScalePercent: number): string {
+  return `at most ${String(fullScalePercent)} %`;
 }
 
 /**
@@ -487,6 +660,12 @@ function withPowerToWeight(reading: HudReading, wattsPerKilogram: number | undef
 }
 
 /**
+ * The key of the dashed gap field a ride with nobody to chase shows. The demo
+ * (#1650) leaves it out: it has no pacer to chase, ever. @see HudCoreProps.withoutPacer
+ */
+export const EMPTY_GAP_KEY = 'gap';
+
+/**
  * The gap fields: one per rider being chased, or a single dashed one.
  *
  * ⚠️ The placeholder carries the **pacer's** label rather than no label,
@@ -496,7 +675,7 @@ function withPowerToWeight(reading: HudReading, wattsPerKilogram: number | undef
 function gapReadings(input: HudInput): readonly HudReading[] {
   const chases = input.chases ?? [];
   if (chases.length === 0) {
-    return [{ key: 'gap', label: LABELS.bot, value: NO_READING, unit: '', stale: false }];
+    return [{ key: EMPTY_GAP_KEY, label: LABELS.bot, value: NO_READING, unit: '', stale: false }];
   }
   return chases.map((chase) => gapReading(chase));
 }
@@ -531,7 +710,7 @@ function gapReading(chase: ChasedGap): HudReading {
   // Keyed by who it is about, so two of them can sit beside each other and a
   // test can name the one it means. `HudPanel` uses the key as its React key.
   const key = `gap-${chase.to}`;
-  const label = LABELS[chase.to];
+  const label = chase.who ?? LABELS[chase.to];
   // ⚠️ The outcome before every other branch, including the stationary one. A
   // rider who has stopped pedalling still gets a settled result, where the
   // live gap would be a dash — the result does not depend on anybody's current
@@ -791,8 +970,27 @@ export interface ProfileReading {
  * past its end exactly as it did before, because there the rider really has
  * finished. `plan.ts` §`planLap` is where "which lap" is decided, and it returns
  * nothing at all for a route that is not a loop.
+ *
+ * ⚠️ **The lap's TIME is said here too, and not in a field of its own — #1312,
+ * measured rather than chosen.** As an eighth secondary field it put the
+ * secondary panel over the rider at 736×360 on the widest ride a picker can
+ * start (a pacer, a ghost, a wind and a loop — in the pinned Chromium on a
+ * Mac, with the ride harness's `?lap=ended` fixture, the panel was 182 px
+ * tall there): the layout has no row left to give. This sentence already
+ * said which lap the rider is on, so the lap's time joins the lap's number:
+ * `25% of lap 2 · 4:12`. It costs no cell, and it is where a rider already
+ * looks to see how far round they are. The time is the RECORDER's
+ * ({@link HudInput.lapSeconds}), `m:ss` as every duration read once is
+ * (`format.ts` §`DurationHours`); with nothing recording there is no lap
+ * time, and the sentence is the one it always was.
+ *
+ * @param lapSeconds {@link HudInput.lapSeconds}.
  */
-export function profileReading(state: GameState, profile: RouteProfile): ProfileReading {
+export function profileReading(
+  state: GameState,
+  profile: RouteProfile,
+  lapSeconds?: number,
+): ProfileReading {
   const distance = state.ride.distance as number;
   const position = planProgress(profile, distance);
   const lap = planLap(profile, distance);
@@ -801,10 +999,16 @@ export function profileReading(state: GameState, profile: RouteProfile): Profile
   // different rides. `per cent` is spelled out in the label because a screen
   // reader announcing `%` is the one place the two audiences differ.
   const where = lap === undefined ? 'complete' : `of lap ${String(lap)}`;
+  const time =
+    lap === undefined || lapSeconds === undefined || !Number.isFinite(lapSeconds)
+      ? undefined
+      : formatDuration(lapSeconds);
   return {
     position,
-    text: `${percent}% ${where}`,
-    label: `Route profile, ${percent} per cent ${where}`,
+    text: `${percent}% ${where}${time === undefined ? '' : ` · ${time}`}`,
+    label: `Route profile, ${percent} per cent ${where}${
+      time === undefined ? '' : `, lap time ${time}`
+    }`,
   };
 }
 
@@ -878,14 +1082,24 @@ export function gapAgainst(state: GameState, theirDistance: number): GapInput {
  * ⚠️ **The count is the half that catches #362**, where a gradient was computed
  * and never sent. A percentage with `(0 sent)` beside it is the defect.
  */
-export interface TrainerLine {
-  /** The gradient last asked for, as a signed percentage. */
-  readonly gradePercent: number;
-  /** How many writes have been attempted. */
-  readonly writes: number;
-}
+export type TrainerLine =
+  | {
+      /** The gradient last asked for, as a signed percentage. */
+      readonly gradePercent: number;
+      /** How many writes have been attempted. */
+      readonly writes: number;
+    }
+  /**
+   * A running workout's heart-rate hold, in its short line (#1240,
+   * `workout/hold-text.ts` §`holdHudLine`). A workout owns the trainer, so
+   * the game is not simulating and the line's place is free.
+   */
+  | { readonly hold: string };
 
 /** {@link TrainerLine} as the one sentence the HUD renders. */
 export function trainerLine(line: TrainerLine): string {
+  if ('hold' in line) {
+    return line.hold;
+  }
   return `Trainer: simulating ${line.gradePercent.toFixed(1)}% (${String(line.writes)} sent)`;
 }

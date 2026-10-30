@@ -1021,3 +1021,160 @@ Until 2026-10-07 this section was §"Owner questions left open".
 - **A hosted job runs for a rider who never agreed to that service.** If Share mode ships without
   the consent the owner's Q10 ruling requires, or with one that does not name the endpoint, ADR 0029
   D-B and ADR 0031 D-4 are broken for every rider but the operator.
+
+## Amendments
+
+- **2026-10-08** — **The SDK is installed, and D-8's table is read against the install.**
+  [#1096](https://github.com/openzigs/onyourleft/issues/1096) pinned `ai` **7.0.130** and
+  `@ai-sdk/openai-compatible` **3.0.65** (each more than a day old, §8's `minimumReleaseAge`), and
+  pnpm resolved `@ai-sdk/provider` 4.0.24, `@ai-sdk/provider-utils` 5.0.56, `@ai-sdk/gateway`
+  4.0.106, `@vercel/oidc` 3.2.0, `zod` 4.6.5, `undici` 7.30.0, `eventsource-parser` 3.1.1,
+  `@standard-schema/spec` 1.1.0, `@workflow/serde` 4.1.0 and `json-schema` 0.4.0. The packages and
+  their licences are the table's; only the versions moved since it was read on 2026-10-04, and
+  `execa` is still not in the closure (`@vercel/oidc` is still 3.2.0). `pnpm run check:licences`
+  passed and `apps/instance/third-party.txt` lists all fourteen. **One fact the table did not
+  record**: `@ai-sdk/provider-utils` 5.0.56 ships **no licence file**, so its notice comes from a
+  reviewed entry in `apps/instance/third-party-notices.json` (the repository's own `LICENSE` at
+  the commit its tag names), which `scripts/check-third-party-notices.mjs` now reads for a server
+  as it reads `apps/web/third-party-notices.json` for the app. (#1096)
+- **2026-10-08** — **D-7's figures stand; #1098 replaced none of them, and measured no real
+  model.** The agent ([#1098](https://github.com/openzigs/onyourleft/issues/1098)) runs with 24
+  model turns, 16 tool calls, ten minutes and 40 000 tokens. Two facts about them that the table
+  does not say: under these figures the **tool-call budget binds before the step budget** — every
+  turn but the last calls a tool, so 16 calls allow at most 18 turns — and the token budget is
+  counted as what is **sent as well as answered**, because a tool-calling run re-sends the whole
+  conversation every turn (the chain's `RUN_TOKEN_BUDGET` counts only `max_tokens`).
+  `apps/instance/src/analysis/agent.ts` §`AGENT_TOKEN_BUDGET` says so; the owner may rule the
+  other reading. No figure was measured against a model an operator runs; that is still owed.
+  (#1098)
+- **2026-10-09** — **D-9's "until #1179 ships" clause has stopped applying.** As of
+  [#1192](https://github.com/openzigs/onyourleft/issues/1192), every phase-1 route of
+  [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-7 that exists in
+  the route table is reached only sealed on an instance that holds keys
+  (`apps/instance/src/sealed/phase-one.ts`). The rest of D-7's phase 1 —
+  `POST /v1/auth/recovery-email/clear`, `POST /v1/auth/recovery/reset`, the two account-changes
+  routes, and D-8's semantics — is still owed by
+  [#1193](https://github.com/openzigs/onyourleft/issues/1193) and
+  [#1194](https://github.com/openzigs/onyourleft/issues/1194), and those routes arrive sealed-only.
+  None of them carries a key, so ADR 0047 D-13's lift — the owner's D-14 Q2 ruling — holds now: a
+  pasted key may come from anywhere, but
+  only sealed, signed by a device key, from a device whose pin came from a card, and no plaintext
+  key route may exist, on the home network or anywhere else. **Nothing was removed to make that
+  so, and that is a fact of the tree, not an omission**: [#1097](https://github.com/openzigs/onyourleft/issues/1097)
+  built the operator command and no app key route, so there was no plaintext key route and no
+  home-network placement check to take off; the key routes still owed ([#1199](https://github.com/openzigs/onyourleft/issues/1199),
+  whose fourth part this lifts) are born sealed-only and are added to that list. The operator
+  command stays. (#1192)
+- **2026-10-09** — **D-7's "nothing reaches a trainer control point … nothing runs during a ride"
+  no longer holds for one job type, the re-plan during the ride.** The owner ruled on
+  [#1233](https://github.com/openzigs/onyourleft/issues/1233) (Q2, 2026-10-09): *"Only as
+  enumerated moves, only for future blocks, checked by the device (which computes the watts), off
+  unless switched on for the ride. ADR 0046 D-7 is amended for the re-plan job type."* A re-plan
+  job runs during a ride, starts when the rider has switched re-plans on for that ride (the press
+  D-7 requires), and answers with one move from a closed list and one reason from a closed list. No
+  tool it is given writes anything or reaches a trainer, and its answer reaches a setpoint only
+  through the device's validator and the workout player
+  ([ADR 0048](0048-workouts-that-change-during-the-ride.md) D-4 to D-8). **For every other job type D-7 stands as written.** (#1233)
+- **2026-10-09** — **D-9's Share mode is withdrawn by the owner, and a hosted model runs only on the
+  rider's own key.** The owner ruled on #1233 on 2026-10-09, *"Operator key is not shared with
+  riders. If it is hosted they need to bring their own key"*, and, asked whether that reached
+  post-ride analysis too, *"yes share mode should go for post ride analysis"* ([recorded on #1092](https://github.com/openzigs/onyourleft/issues/1092#issuecomment-6091274039)). So D-9's
+  *"**Share**: the operator sets one key, and every permitted rider's analysis uses it"* no longer
+  holds, for post-ride analysis and for re-plans alike: **a hosted model runs only on a key the
+  rider brought themselves** (bring-your-own,
+  [#1199](https://github.com/openzigs/onyourleft/issues/1199)), under that rider's recorded consent
+  naming the endpoint, masked as [#1101](https://github.com/openzigs/onyourleft/issues/1101) does.
+  The operator's own analyses may still use the operator's key **for the operator's own account**:
+  that is the operator as a rider bringing their own key, not a key shared with anyone. D-9's
+  source 1 (the instance's local model) and every rule D-9 states for a key (held on the instance,
+  encrypted at rest, never logged, erased with its athlete) are unchanged.
+  [ADR 0048](0048-workouts-that-change-during-the-ride.md) D-11 records it. (#1233)
+- **2026-10-11** — **D-7's four figures stand; a turn's allowance, which the table does not list,
+  grows for a model that reasons.** A server counts a model's reasoning and its answer against one
+  `max_tokens`, and the agent asked for 1 024 a turn, so a reasoning model failed jobs
+  `model-cut-off` by how long it thought: 7 of 31 through the owner's instance, and all three
+  direct calls of [#1268](https://github.com/openzigs/onyourleft/issues/1268) (847, 1 024 and
+  1 024 of the 1 024 tokens spent reasoning). Now, once a turn of a run shows the model reasons —
+  the server reports reasoning tokens or sends reasoning beside the answer, or a turn ends on its
+  limit with no answer and no tool call — every later turn of that run is asked for **1 024 +
+  3 072** tokens, and a turn that showed it at its limit is asked again once, counted as a model
+  call like any other. **24 turns, 16 tool calls, ten minutes and 40 000 tokens are unchanged**,
+  and the token budget is checked against whichever allowance a turn is given, so a reasoning
+  model reaches `out-of-tokens` sooner and never spends past 40 000. A run that never shows
+  reasoning is asked for 1 024 a turn, as before. The answer keeps its own 1 024: a turn in the
+  larger allowance whose server reports more answer tokens than that keeps nothing, and where the
+  server does not count reasoning apart (Ollama), the screen's 16 000 characters bound it. A turn
+  that ends on its limit with no answer text now fails `model-no-answer`, apart from
+  `model-cut-off`. No request option that turns reasoning off is sent (the spellings are each
+  service's own, and a server may refuse a field it does not know). Per the owner's ruling on the
+  issue, a rider or an operator can also say the model reasons, in one field: `reasoningTokens`
+  (1 to 16 384, the tokens a turn may spend reasoning beside the answer's own 1 024), stored with
+  the rider's hosted key (`POST /v1/analysis/hosted/key`) or read from
+  `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS` for the local model; every turn of such a model is
+  given that room from the first, and the budget check above applies to it unchanged. Detection
+  covers a server that reports reasoning apart from the answer (a token count,
+  `reasoning_content`, `reasoning`) and the empty-at-limit case; a server that leaves reasoning
+  inline in the answer shows neither sign, and its rider or operator sets the field. **3 072 is the
+  author's draft, not a measurement** — the three calls were capped at 1 024 — and it and the
+  `model-no-answer` sentence are the owner's to rule on. (#1268)
+- **2026-10-12** — **D-1's *"pictures do not leave the room"* and D-14(d)'s closing paragraph (Q3,
+  *"never through the Cloudflare tunnel"*) are superseded for ONE path: the side camera's pictures,
+  sealed, to the rider's instance, when the rider has switched it on.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision, and its D-10 says what stays: D-1's rule for analysis, the tablet's own pose model as
+  the default, and D-8, D-9 and D-14(d) otherwise. The body above is not edited. (#1106)
+- **2026-10-12** — **D-9's hosted source is reachable from the app, on the rider's own key only, and
+  three things about it are decided here that D-9 left open.**
+  [#1251](https://github.com/openzigs/onyourleft/issues/1251) built the app half of #1199: the
+  Instance screen's section where a rider stores their own key (sealed, padded to D-9's 1 KiB),
+  records and withdraws the consent that names the endpoint (Q10), and has the instance send a test
+  question. The owner withdrew D-9's Share mode on 2026-10-09, so **there is no shared key and no
+  operator's switch**: a hosted job runs on the athlete's own key or not at all. The wording a
+  rider reads is #1104's B1 and B2, quoted in that pull request for the owner's approval and held
+  word for word by `apps/web/src/ride-analysis/hosted-consent.test.ts`; it is not quoted here, so
+  that this record does not fix a wording the owner has yet to approve. What is decided:
+  1. **The masking list reaches the instance with the consent, not with a sync.** D-10 has the
+     instance mask with its own copy, one sync item of kind `masking`, and until #1251 nothing in
+     the app sent one, so every hosted job would have ended `hosted_unavailable`. The device now
+     writes that item, sealed, before a consent is recorded and again before every hosted job, so
+     the instance never masks with a list older than the press. A list that cannot be sent means no
+     job is started. ⚠️ This is the author's choice, not a ruling: #1104's B6 row, as the owner
+     approved it on 2026-10-09, says the list is copied *"when it syncs"*.
+  2. **A test question (Q2 of #1104's B1, ruled 2026-10-09: *"sent by the instance with none of the
+     rider's data"*)** is `POST /v1/analysis/hosted/test`, sealed-only: two fixed sentences, on the
+     rider's own key, through `source.ts` §`modelForSource` exactly as a job goes. So it is refused,
+     with nothing sent, wherever a job would be — no key, no consent naming the key's origin, no
+     masking list — and it returns a closed word for how it went and never a word of the
+     service's. Its bounds (64 answer tokens, 30 seconds) are the author's, not measurements.
+  3. **The app offers the hosted press from a note on the device, not from a request.** Opening a
+     ride's page sends nothing (ADR 0035 D-8), so whether `instance-hosted` is offered is read from
+     what the instance last answered on the Instance screen — a key AND a consent naming that key's
+     origin — and the instance still checks all of it for every job.
+
+  Two sentences of B1 as drafted on #1104 are not in what ships, because they are not true of this
+  build: *"Your instance keeps a record of what was actually sent, and you can read it on the
+  ride's page afterwards"* (nothing keeps or shows one), and the unqualified *"It is never sent a
+  picture"* (since ADR 0050 the same service can be sent the side camera's pictures, under that
+  feature's own consent; the consent says *"A ride analysis never sends it a picture"*). The
+  device-held hosted path of ADR 0035 D-9 C still ships beside this one until #1103 removes it, so
+  ADR 0029's entry quoting that consent still governs it. The body above is not edited. (#1251)
+- **2026-10-26** — **D-12's job-row retention is what the code does, and the *"what was sent"*
+  log is deferred.** The owner's rulings on [#1104](https://github.com/openzigs/onyourleft/issues/1104):
+  1. **Retention.** On `main`, `pruneAnalysisJobs` deletes every ended job's events after 7 days, and
+     the job row only of a job that holds no write-up. A finished job keeps its row, its whole input
+     with it (the side-camera pose summary included when one was sent), until the athlete is
+     erased. D-12 said the job rows are kept 7 days, and Q2 said the pose summary is *"not kept with
+     the result"*. The owner ruled to **change the policy to match the code, not the code**: a
+     succeeded job keeps its input, pose summary included, with the account until the account is
+     erased; deleting the ride does not remove it; the account export carries the write-up and not
+     the input. The privacy policy says so in *A ride analysed on your instance* and the instance
+     table. This supersedes D-12's 7 days for a succeeded job's row and Q2's *"not kept with the
+     result"* for the job's input. A job that ends without a write-up still has its row deleted after 7
+     days, and every job's events are deleted after 7 days.
+  2. **The *"what was sent"* log** (D-10, D-12) is **built after launch**, as
+     [#1741](https://github.com/openzigs/onyourleft/issues/1741). Nothing keeps or shows one today,
+     and until #1741 ships nothing the app or the policy says promises one. D-12's paragraph on how
+     long the log is kept, and Q2's *"records only that one was sent"*, apply when #1741 builds it.
+
+  The body above is not edited. (#1104)

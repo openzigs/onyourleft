@@ -13,7 +13,8 @@
 import type React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { HudPanel, CONTROL_MINIMUM_PIXELS } from './HudPanel';
+import { CONTROL_MINIMUM_PIXELS } from './HudCore';
+import { HudPanel } from './HudPanel';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { NO_READING, type HudInput } from './fields';
 import { atStartLine } from '../simulation';
@@ -381,6 +382,96 @@ describe('the mid-ride controls are usable with gloves on', () => {
       (each) => each.textContent === 'Resume',
     );
     expect(resume?.classList.contains(RIDE_SIZE_CLASS), resume?.outerHTML).toBe(true);
+  });
+});
+
+describe('Keep the plan, in the game — #1244', () => {
+  const controlNames = (): (string | null)[] =>
+    [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].map(
+      (each) => each.textContent,
+    );
+
+  it('is not on the HUD when no re-plan is waiting', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props()} />));
+    expect(controlNames()).toEqual(['Pause', 'End ride']);
+  });
+
+  it('is a ride-time control after Pause and End ride while one waits, and audits clean', async () => {
+    let pressed = 0;
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...props()}
+          keepPlan={{
+            sentence: 'Next block shortened by 2 minutes, to fit the duration you chose.',
+            onKeep: () => {
+              pressed += 1;
+            },
+          }}
+        />,
+      ),
+    );
+    // After the two a rider presses every ride, which keep their places.
+    expect(controlNames()).toEqual(['Pause', 'End ride', 'Keep the plan']);
+    const keep = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].at(-1);
+    expect(keep?.tagName).toBe('BUTTON');
+    expect(keep?.classList.contains(RIDE_SIZE_CLASS), keep?.outerHTML).toBe(true);
+    // On a row of its own: not in the row whose width Pause and End ride share.
+    expect(keep?.closest('.oyl-hud__controls')).toBeNull();
+    expect(keep?.closest('.oyl-hud__actions')).not.toBeNull();
+    expect(tabbableElements(document).map((element) => element.textContent)).toContain(
+      'Keep the plan',
+    );
+    keep?.click();
+    expect(pressed).toBe(1);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('shows the waiting move’s sentence, and only it, above the control and outside any live region — #1324', async () => {
+    const sentence =
+      'Next block swapped for one from your saved workouts, because your heart rate stayed above the range you chose.';
+    mounted = await mount(
+      inRideScreen(<HudPanel {...props()} keepPlan={{ sentence, onKeep: () => undefined }} />),
+    );
+    const actions = document.querySelector<HTMLElement>('.oyl-hud__actions');
+    const line = actions?.querySelector<HTMLElement>('.oyl-hud__plan-change');
+    expect(line?.textContent).toBe(sentence);
+    // Read before the control it explains, in the document's order.
+    const keep = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].at(-1);
+    expect(keep?.textContent).toBe('Keep the plan');
+    expect(line?.nextElementSibling).toBe(keep);
+    // #445: not a second live region, nor inside one.
+    expect(line?.closest('[aria-live], [role="status"], [role="alert"], [role="log"]')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('puts Switch re-plans off on a row of its own, last, as a ride-time control — #1329', async () => {
+    let pressed = 0;
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...props()}
+          keepPlan={{ sentence: 'Next block shortened by 2 minutes.', onKeep: () => undefined }}
+          onReplansOff={() => {
+            pressed += 1;
+          }}
+        />,
+      ),
+    );
+    expect(controlNames()).toEqual(['Pause', 'End ride', 'Keep the plan', 'Switch re-plans off']);
+    const off = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].at(-1);
+    expect(off?.tagName).toBe('BUTTON');
+    expect(off?.classList.contains(RIDE_SIZE_CLASS), off?.outerHTML).toBe(true);
+    expect(off?.closest('.oyl-hud__controls')).toBeNull();
+    expect(off?.closest('.oyl-hud__actions')).not.toBeNull();
+    off?.click();
+    expect(pressed).toBe(1);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('shows no sentence while nothing waits — #1324', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props()} />));
+    expect(document.querySelector('.oyl-hud__plan-change')).toBeNull();
   });
 });
 

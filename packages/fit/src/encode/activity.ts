@@ -792,7 +792,14 @@ export function encodeActivity(input: FitEncodeInput): FitEncodeResult {
     (record) => record.developerFields,
   );
   writeMessages(writer, GLOBAL_MESSAGE.hr, input.heartRateEvents ?? [], HR_SPECS, faults);
-  writeMessages(writer, GLOBAL_MESSAGE.lap, input.laps ?? [], LAP_SPECS, faults);
+  writeMessages(
+    writer,
+    GLOBAL_MESSAGE.lap,
+    input.laps ?? [],
+    LAP_SPECS,
+    faults,
+    (lap) => lap.developerFields,
+  );
   writeMessages(writer, GLOBAL_MESSAGE.session, input.sessions ?? [], SESSION_SPECS, faults);
   writeMessages(
     writer,

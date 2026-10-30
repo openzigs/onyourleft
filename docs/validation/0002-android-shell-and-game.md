@@ -2625,7 +2625,7 @@ riding at 9 m/s, first reported seeing no buildings at all; they are on screen f
 by the owner**: fine horizontal banding in the water, a hard straight edge with no bank where water
 meets grass, a light seam across the road where the deck begins, and plain grey block parapets.
 ⚠️ **There is no lake on this route**: `waterways()` returns `lakes: []`, although
-`realistic/route.ts` says its valley floor is there for one. All five are
+`src/demo/synthetic-road.ts` says its valley floor is there for one. All five are
 [#501](https://github.com/openzigs/onyourleft/issues/501).
 
 **`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
@@ -2881,7 +2881,7 @@ route as Part Z (§"Build and install"), from a `main` that has #506 in it.
 | Step | What to do | What should happen |
 |---|---|---|
 | AE1 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0`, held beside the first farmstead as AA3 was | Draw calls and GPU p50 / p90 / p99 against AA3's **35 calls and GPU 5 / 8 / 12 ms**. Triangles, if the page reports them |
-| AE2 | The same row in a **village**, with the church and the shops in frame | The same figures. This is the view the 35 structure meshes are justified against |
+| AE2 | The same row in a **village**, with the church and the shops in frame: since [#1559](https://github.com/openzigs/onyourleft/issues/1559), `?world=realistic&panel=0&ladder=0&at=820&route=village` — the owner's page on its village road (`src/demo/synthetic-road.ts` §`villageRoute`), held 45 m short of the first village's row of shops with its church about 125 m up the road. Record the page's `census` beside the row (`window.__oylRealistic.census`: each structure kind carried and in the camera's view, the streets, the pavement's triangles and the furniture), so the row says what was in frame | The same figures. This is the view the 35 structure meshes are justified against |
 | AE3 | Ride the realistic world past a village and on into fields, at your usual speed | Is every house there? Do the **field walls, hedges and fences** end where they did not before — and does that read as wrong from a saddle? |
 
 ### AE results
@@ -2900,6 +2900,95 @@ against AA3's GPU 5 / 8 / 12 ms held at one farmstead.
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
 **Build:** debug, `main` at `cfa8956`, 2026-09-25
+
+### AE4 — a mapped town in frame ([#1553](https://github.com/openzigs/onyourleft/issues/1553))
+
+**Added 2026-10-26** by #1553, phase B's tablet row (#1533). Checked with `grep 'AE4'` for a
+duplicate id first: AE3 is taken (the village ride above), so this step is AE4. #733 lists it as
+A37. It changes no resistance, so no trainer is needed.
+
+**Why it has two halves.** #1553 asked for one committed `realistic:stage` US route whose corridor
+holds a town with footprints. **No such route exists.** The staged page (`realistic.html`) rides
+only synthetic roads. Its towns (`?town=`) are fixtures with no OpenStreetMap data in them, as every
+test's are. They are planned, levelled, drawn and lotted by the code a ride's corridor goes through
+(#1547, #1549, #1550, `browser/realistic/town.ts`). The product rides real corridors, but it
+publishes no draw calls or triangles, it cannot hold the rider at `at=`, and it has no levers. So:
+
+- **AE4a** measures the page's mapped town. It gives the numbers and the 5-minute Part AH run,
+  with the levers as the control.
+- **AE4b** rides a real town from the US archive in the product, offline. It gives the by-eye check
+  and the screenshots, with the Map tiles switch as the control.
+
+**The control.** Phase B merged on 2026-10-22/23, so there is no pre-B `main` to take a "before" on
+(the revision of 2026-10-23 on #1553). Both rows come from **one build**: `main` at the time it is
+run, staged as for the AH runs (Part AH §"Build and install"). #1547's levelling, #1549's merged
+buildings and #1550's lots have no lever. So AE4a's control has two rows on the same build. One has
+every later phase-B lever off. The other is AE2's procedural village hold, which stands for the
+world with no map data.
+
+**The hard limit is #1523's.** The top rung stays off the GPU ceiling: in AE4a's 5-minute run with
+everything on, **GPU p50 below 848 MHz** and **frames over 20 ms at most 0.2 %**. If it fails, the
+change that broke it is reverted or levered off, and the owner rules. `MAPPED_BUILDING_MAX` and
+`REALISTIC_STRUCTURE_ITEMS` (#1549) are not raised to make it pass.
+
+**The route is named by its id and a distance in metres, and by nothing else.** Write no
+coordinates, no place name and no screenshot of the map into this file, the issue or a commit.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AE4a1 | **The town, held.** AE1's procedure (§"#506's AE1 and AE2 in the same session"), at `realistic.html?world=realistic&panel=0&ladder=0&town=mixed&at=1300&levers=-people`. That is `town=mixed` (`footprint-fixtures-testing.ts` §`mixedTownFixture`) at **1 300 m**, in its residential stretch, the hold `realistic-mapped.browser.spec.ts` §"the mapped-blobs lever" takes. `-people` because Part AJ measures the people on their own | Draw calls, triangles (the `OYL-REALISTIC` line) and Z6's `dumpsys` block. Draw calls within the page's 35 (`REALISTIC_WOODED_DRAW_CALLS`) |
+| AE4a2 | **The same hold, the phase-B levers off**: AE4a1's URL with `&levers=-people,-urban-class,-split-roofs,-window-reveals,-overhang-shadows,-weathering,-mapped-blobs,-facade-wreath` | The same readings. The difference from AE4a1 is what #1634, #1660, #1659, #1658, #1661, #1657 and #1626 add |
+| AE4a3 | **The world with no map data**: AE2's hold, `&route=village&at=820&levers=-people` | The same readings. The difference from AE4a1 is what a mapped town costs over a procedural village |
+| AE4a4 | **5 minutes held at the town**: AH1–AH7, with AH4's URL as `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=6&town=mixed&at=1300&levers=-people` and the sampler run for **300 s** (`realistic-sampler.sh 300 …`), not 1 200. `RUN=1553-town` | One row of `realistic-summary.mjs`. **The hard limit is read here** |
+| AE4a5 | **Cool again (AH3, 25–26 °C)**, same build: AE4a4 with AE4a2's levers. `RUN=1553-town-levers-off` | One row. A row inside the limit while AE4a4 is outside it names the levered changes as the cost |
+| AE4b1 | **Choose a route once, online.** In the product, Settings: the realistic world, and Map tiles **on**. Pick one of your own saved routes that passes through a town (houses, not fields) that is outside **every** privacy zone on the device; the read skips a tile that touches a zone (P-7). Choose it on the ride screen and start a ride. **"© OpenStreetMap contributors"** on the ride screen means its corridor was read and stored (#1539, #1552). End the ride | The credit is shown. Without it there is no map data in the ride, and AE4b measures nothing |
+| AE4b2 | **Record the route by id**: with the route open on the Routes screen, `node apps/mobile/tools/webview-probe.mjs "location.pathname"` prints `/routes/selected/<id>`. Write the id and the distance in metres from the route's start to the town's first house | An id and a number of metres. No name and no coordinate |
+| AE4b3 | **Aeroplane mode on**, then ride the route through the town in the product at your usual speed, with `dumpsys gfxinfo` reset at the start and read at the end, as AE3's ride was | The credit is still shown offline, because the stored corridor is used. The by-eye check: **no building in a wood, none on the road, none floating** above the ground or sunk into it. **Three screenshots**: the town ahead, a street side at walking distance, and the edge where the town meets the fields |
+| AE4b4 | **The control, offline**: Settings, Map tiles **off**, and the same stretch again | No credit, and today's procedural world (a village if the seed lays one). This is the "no data" picture beside AE4b3's |
+
+```bash
+# AE4a4: the 5-minute run. Part AH's block, with these three lines in place of theirs.
+RUN=1553-town
+node apps/mobile/tools/webview-probe.mjs \
+  "location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=6&town=mixed&at=1300&levers=-people'"
+"$ADB" shell "nohup sh /data/local/tmp/realistic-sampler.sh 300 'VRI-dev\.openzigs\.onyourleft/' /data/local/tmp/oyl/$RUN $PID > /dev/null 2>&1 &"
+```
+
+⚠️ **Do not pair a `?layers=` with `town=`** as a shortcut to the town's share. The mapped buildings'
+belt (`three-renderer.ts` §`MappedBuildingBelt`) is not in `layers.ts` §`LAYER_OWNERS`. With a layer
+switched off the page may refuse the run as "could not place". That was read from the source and
+not run, so the levers are the control here.
+
+The columns are #1523's, as `realistic-summary.mjs` prints them. #1553 asked for GPU p50 / p90 / p99.
+The summary prints the Mali clock's mean / p50 / p90, as #1523's own table does, and so does this
+table. In a 300-second run the sampler takes `dumpsys meminfo` at half its length (150 s), not at
+minute 10. The summary's `skin min 20 °C` column is the last block, about minute 5.
+
+#### AE4 results
+
+| Reading | AE4a1 / AE4a4: town, all on | AE4a2 / AE4a5: phase-B levers off | AE4a3: procedural village |
+|---|---|---|---|
+| Draw calls at the hold | | | |
+| Triangles at the hold | | | |
+| GPU mean / p50 / p90, MHz (5 min) | | | — |
+| Present p99, ms (5 min) | | | — |
+| Frames over 20 ms, % (5 min) | | | — |
+| CPU both, % (5 min) | | | — |
+| GL mtrack, MiB (5 min) | | | — |
+| Skin before → at minute 5, °C | | | — |
+| **Hard limit** (p50 < 848 MHz, > 20 ms ≤ 0.2 %) | | | — |
+
+| Step | As described? | What was seen, or measured |
+|---|---|---|
+| AE4b1 | | |
+| AE4b2 | | Route id: · town at: m |
+| AE4b3 | | `gfxinfo`: frames, janky, frame and GPU percentiles. By eye: woods / road / floating. Screenshots: 1 · 2 · 3 |
+| AE4b4 | | |
+
+**Phone (OEM, model, Android, WebView):**
+**Build:** debug, `main` at
+
+Post both tables on #1553 and on #733 (A37). #1553 is closed by hand once they are in.
 
 ---
 
@@ -3151,12 +3240,20 @@ does not disturb a cool-down, and before the tablet is restored:
   `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=1045'` (AA2's hold),
   wait 30 s, and take Z6's `dumpsys` block. Record draw calls, triangles (the page's `OYL-REALISTIC`
   line) and GPU p50 / p90 / p99 against AA3's 35 calls and 5 / 8 / 12 ms.
-- ⚠️ **AE2 cannot be taken on this page.** Its route has no village. `structuresAt` over the whole
-  route, run on `f91a5fb`, finds buildings at only two places: a house, a barn and a shed at
-  1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with no church
-  and no shops. AE2 needs a route with a village in the product, ridden with the realistic world
-  chosen in Settings, or a harness route that has one. That is a change to the page, not something
-  a session can do.
+- ⚠️ **AE2 could not be taken on this page until #1559.** Its route has no village. `structuresAt`
+  over the whole route, run on `f91a5fb`, finds buildings at only two places: a house, a barn and a
+  shed at 1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with
+  no church and no shops. The default URL still rides that route, unchanged.
+- **AE2 since [#1559](https://github.com/openzigs/onyourleft/issues/1559)**: the page has a second
+  road, `&route=village` (`src/demo/synthetic-road.ts` §`villageRoute`): the same meander, level at
+  30 m, from a start 0.05° east, so its seed lays two villages beside it (their rows of shops at
+  about 865 m and 3 445 m, their churches at about 945 m and 3 495 m). Hold it with
+  `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=820&route=village'`,
+  wait 30 s, and take Z6's `dumpsys` block as for AE1. Read the page's census too (the log's
+  `OYL-REALISTIC-CENSUS` line, or `window.__oylRealistic.census`). It must show `church` and `shop-row` with `inView` of at least 1, or
+  the row is not of a village in frame. The browser gate (`realistic-town.browser.spec.ts` §"the
+  realistic page's village road — #1559", nightly) and `realistic/route.test.ts` §"the village
+  road" hold that hold to both, on the desktop and on the tablet's 16 : 10 frame.
 
 ### What each column is
 
@@ -3218,6 +3315,23 @@ published figures (its run predates `oyl.txt`).
 | #624 | after (the drawn maps) | #624's merge | — | | | | | | | | |
 | #639 | before (a call a material) | the first parent of #639's merge | — | | | | | | | | |
 | #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
+| #1274 | before (one photograph for rock and scree) | the first parent of #1274's merge | — | | | | | | | | |
+| #1274 | after (ambientCG's rock face on a steep bank) | #1274's merge | — | | | | | | | | |
+| #1283 | before (the scanned broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-trees` | | | | | | | | |
+| #1283 | after (the generated broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
+| #1294 | before (the scanned firs, beside the generated broadleaves) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
+| #1294 | after (the generated firs) | #1294's merge | — | | | | | | | | |
+| #1523 | control (every lever on) | `main` with #1523's levers | — | | | | | | | | |
+| #1523 | ground blend out (#627, #1274) | the same build | — ; `levers=-ground-blend` | | | | | | | | |
+| #1523 | road wear out (#628, #879) | the same build | — ; `levers=-road-wear` | | | | | | | | |
+| #1523 | bounds before (the wear's loop and the ground's twelve derivatives, as they were) | `main` with #1523's bounds | — ; `levers=-surface-bounds` | | | | | | | | |
+| #1523 | bounds after (the product) | the same build | — | | | | | | | | |
+| #1523 | fir pre-pass before (the firs as #1294 drew them) | `main` with #1523's fir pre-pass | — ; `levers=-fir-prepass` | | | | | | | | |
+| #1523 | fir pre-pass after (the product) | the same build | — | | | | | | | | |
+| #1534 | cleared (the villages' ground, 5 min) | `main` with #1534 | — | | | | | | | | |
+| #1534 | wooded (as before #1534, 5 min) | the same build | — ; `levers=-settlement-clearing` | | | | | | | | |
+| #1537 | before phase A (AE2's village, 5 min) | the build AH-1537-1 names | — ; `route=village&at=820` | | | | | | | | |
+| #1537 | after each phase-A merge (AE2's village, 5 min, one row each) | that merge, with #1559's page | — ; `route=village&at=820` | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3454,7 +3568,7 @@ page's route, measured for #622 at every 50 m from 300 to 3 800 m, heads between
 away from it — so the page showed only the side AWAY from the sun, and this paragraph sent the side
 TOWARDS it to a stretch of the owner's own saved route that runs south-west, ridden in the product.
 `facing=sun` now turns the page's route about its first point so it meanders about the sun's own
-azimuth, and `facing=away` about the opposite one (`browser/realistic/route.ts` §"Which way it
+azimuth, and `facing=away` about the opposite one (`src/demo/synthetic-road.ts` §"Which way it
 faces"); without `facing` the route is unturned, byte for byte the one every Part Z and AH row was
 taken on. AH-622-5 is taken on the page that way.
 
@@ -3464,7 +3578,7 @@ taken on. AH-622-5 is taken on the page that way.
 | AH-622-2 | **Cool again (AH3, 25–26 °C)**, install #622's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=622-after` |
 | AH-622-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all between them (the page's draw-call column is `calls / frames` over a window, rounded, so read it beside the browser gate's `#616 all layers on` line, which printed **38 on both `main` and #622's head** in CI; if the two builds' columns differ here, say so rather than explain it); the measured columns against #616's spread |
 | AH-622-4 | **By eye, away from the sun**, on the after build, before the tablet is restored: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550` and look at the distant ground and hills ahead and to either side; then add `&levers=-air` (the fog as it was before #622, one colour for every direction and no valley haze) and look again. Then hold at `&at=1650`, on the route's valley floor, and compare the two the same way. ⚠️ That floor is only 15 m below the middle of the route's elevation, so the haze there is 1.075×, not the full 1.25× — the valley half of this step is weak on this route, and so is AH-622-5's, which rides the same route turned; AH-622-6 is the test of the valley haze |
-| AH-622-5 | **By eye, towards the sun**, on the page since [#702](https://github.com/openzigs/onyourleft/issues/702): hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550&facing=sun` — the same route turned about its start so it meanders about the sun's azimuth, 225°, the south-west (`browser/realistic/route.ts` §"Which way it faces") — and look at the horizon ahead and to either side; then add `&levers=-air` and look again. Then the same pair with `facing=away`, which turns the route to face directly away from the sun (the page without `facing` already looks 110° to 160° away, which is AH-622-4). Then both at `&at=1650`, on the valley floor. ⚠️ `facing` turns the route and the world beside it together: the sun and the sky stay where they are, and the scenery is the same seeded world — the same valley, lake, bridge and walls — turned with the road. Without it the page is byte for byte the route every Part Z and AH row was taken on (`route.test.ts` pins its digest) |
+| AH-622-5 | **By eye, towards the sun**, on the page since [#702](https://github.com/openzigs/onyourleft/issues/702): hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550&facing=sun` — the same route turned about its start so it meanders about the sun's azimuth, 225°, the south-west (`src/demo/synthetic-road.ts` §"Which way it faces") — and look at the horizon ahead and to either side; then add `&levers=-air` and look again. Then the same pair with `facing=away`, which turns the route to face directly away from the sun (the page without `facing` already looks 110° to 160° away, which is AH-622-4). Then both at `&at=1650`, on the valley floor. ⚠️ `facing` turns the route and the world beside it together: the sun and the sky stay where they are, and the scenery is the same seeded world — the same valley, lake, bridge and walls — turned with the road. Without it the page is byte for byte the route every Part Z and AH row was taken on (`route.test.ts` pins its digest) |
 | AH-622-6 | **By eye, the valley haze on a flat route with one big climb**, in the product: a saved route that is mostly flat with a single climb of 150 m or more. Ride the flat and look at the distance, then ride the same stretch on a local build with `REALISTIC_VALLEY_HAZE` set to 1 (the product has no lever for it; the page's `-air` has one, but the page's route is not this shape). Because the haze starts below the MIDPOINT of the elevation range (above), the whole flat is hazed at the full 1.25× |
 
 | #622 by eye | Answer |
@@ -3503,3 +3617,431 @@ material's maps unconditionally; and a tree's bark is now drawn in the canopy's 
 | #639 by eye | Answer |
 |---|---|
 | Do the trees look the same as before #639 (AH-639-4)? | |
+
+### #1274's rows — a steep bank's rock face, from ambientCG
+
+[#1274](https://github.com/openzigs/onyourleft/issues/1274) is the first asset the pipeline takes
+from ambientCG, which ADR 0026 D-4 has admitted from the start: `Rock026`, a fractured rock face,
+CC0, made by surface photogrammetry, as two 512 px KTX2 maps. Where the landform is steeper than
+28° the ground's stone wears it, and `rocks_ground_05` — loose stones on earth, which until now
+wore the banks too — keeps the scree above the tree line
+(`apps/web/src/game/ground-blend.ts` §`stoneBlend`). No triangle and no draw call is added.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-10-11: texture memory estimated
+**70.1 → 70.6 MiB** of the 160 MiB ceiling (`realistic-budget.test.ts`), the build
+**36 608 346 → 37 025 627 bytes** of the 40 MiB ceiling, transcoder included; and in the gate's own
+frame of a steep bank the crag changes 141 379 of the rock's 146 070 pixels, and not one pixel of
+the frame with the slope's rock off (`game.browser.spec.ts` §"#1274").
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
+mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost GPU time, and only this
+row can say whether it does**: the ground's shader holds two more samplers and takes one more pair
+of texture-coordinate derivatives on every ground fragment, steep or not. On a bank it reads the
+crag's two maps where it read the scree's two, so the samples a frame makes do not grow.
+
+⚠️ **On this page's route there is almost no steep ground to see**, and that is measured, not
+assumed: read every 50 m along it, no ground past 40° is in the chase camera's view within 120 m,
+the nearest past 28° is 96 m off at `at=1350`, and there the crag changes **215 of 1 024 000
+pixels** at 1280 × 800.
+So the page's by-eye pair shows a strip on the far hillside and nothing else, and the look is
+judged in the product, on a route with a bank beside the road.
+
+| Step | What to do |
+|---|---|
+| AH-1274-1 | **Before**: build the first parent of #1274's merge with the owner's page staged, and run AH1–AH7 with AH4's URL unchanged. `RUN=1274-before` |
+| AH-1274-2 | **Cool again (AH3, 25–26 °C)**, install #1274's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1274-after` |
+| AH-1274-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all; the measured columns against #616's spread |
+| AH-1274-4 | **By eye, on the page**, on the after build: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1350`, then add `&levers=-crag` (the bank in the scree's photograph, as it was) and compare the far hillside on the left |
+| AH-1274-5 | **By eye, in the product**, with *Game world* on: ride a saved route that has a steep bank or cutting beside the road. Does the bank read as a rock face, or as a pattern that repeats? |
+
+| #1274 by eye | Answer |
+|---|---|
+| On the page (AH-1274-4): can the two be told apart at all, and if so which looks more like a hillside? | |
+| In the product (AH-1274-5): does a steep bank read as rock, and is its 3 m repeat visible? | |
+| Is it worth its 0.4 MiB of build, or should the bank go back to one photograph? | |
+
+### #1283's rows — the broadleaf trees, generated to their budget
+
+[#1283](https://github.com/openzigs/onyourleft/issues/1283) is the first adoption under
+[ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1: a ride's broadleaf trees
+are no longer two photoscans cut down to a triangle budget but **four trees generated at their
+size** — two oaks and two hornbeams, each a seed of its species — by the pinned EZ-Tree 1.1.0
+from numbers committed in `apps/web/tools/realistic/generated-trees.ts`, wearing ambientCG bark and
+leaves cut from ambientCG's scanned leaf atlases. Full level, middle level and impostor are each
+made to a size rather than decimated. **The conifers are still scans**: ambientCG publishes no
+needle atlas the pipeline may take (both are made by "Approximation").
+
+ADR 0049 D-1 keeps a generated tree *"only where the tablet measurement says it should"*, so **the
+scans are still in the build and one lever away** — and unlike every pair above, **both rows are one
+build**: `levers=-generated-trees` loads the scans instead, and only the set asked for is fetched.
+
+**Since [#1294](https://github.com/openzigs/onyourleft/issues/1294) that lever loads every tree's
+scan, the firs' too**, and the bare URL draws generated firs. So this pair is run with a lever on
+both rows, which holds the firs at their scans and changes the broadleaves alone:
+`levers=-generated-trees` (before) against `levers=-generated-conifers` (after). The steps below
+say so. The figures in the table below are that pair's: its "Generated" column is the generated
+broadleaves beside the scanned firs.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-10-12, the scans first:
+
+| | Scanned | Generated |
+|---|--:|--:|
+| This page held at `at=2550`: triangles a frame | 199 676 | **195 692** |
+| The same: draw calls, as the page read then | 31, and 32 in one run of seven | **33** in seven runs of seven |
+| The same frame's own draw calls, which the page reports since #1294 | 29 | **31** |
+| The same: bytes of texture the load holds (`textures.bytes`) | 31 393 488 | **26 173 344** |
+| The gate's wooded view (`game.browser.spec.ts` §"#1283"): triangles / draw calls | 181 232 / 27 | **169 482 / 29** |
+| Texture memory estimated on the tablet's formats (`realistic-budget.test.ts`) | 70.56 MiB | **65.58 MiB** |
+| One broadleaf at full detail / at the middle level, triangles | 28 000 / 5 998 | **6 692 / 2 208** |
+
+The build is **39 836 999 bytes** of the 40 MiB ceiling (41 943 040) with the transcoder, where it
+was 37 025 627: it carries both sets until this row is in, and the four generated trees are
+2 811 372 of them. The scanned broadleaves are 10 616 301 of
+those bytes, and deleting them or going back to them after this row is
+[#1293](https://github.com/openzigs/onyourleft/issues/1293).
+
+**Two seeds a species, where #1283 was first written with three.** With six shapes this page made
+35 draw calls on a Mac and 34 on the CI runner — #639's ceiling itself, on a held frame whose count
+moves by one between runs — so its review took a seed of each species out again. The triangles did
+not move, because every tree of a species is the same count; the calls, the texture bytes and the
+build above are the four trees'.
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
+mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost, and only this row can
+say whether it does**: the frame makes **two more draw calls**, a call a tree shape a level, and
+this page is at 31 of #639's 35 (33 as it read before #1294). The triangles and the texture memory both fall. ⚠️ **On this
+page's route most trees are conifers**, which did not change, so the page's triangles fall by 2 %
+where a broadleaf wood's would fall by two thirds: the by-eye half matters more than the cost half
+here, and the product on a lowland route is where the difference is largest.
+
+| Step | What to do |
+|---|---|
+| AH-1283-1 | **Before**: build #1294's merge with the owner's page staged (the build AH-1294-1 uses), and run AH1–AH7 with `&levers=-generated-trees` added to AH4's URL: every tree a scan. `RUN=1283-before` |
+| AH-1283-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7 with `&levers=-generated-conifers` added to AH4's URL instead: the generated broadleaves beside the scanned firs. ⚠️ Not the bare URL, which draws the generated firs as well. `RUN=1283-after`. This run is also AH-1294-1's, and need not be made twice |
+| AH-1283-3 | Write both rows into the table above. **Triangles / frame** should fall by about 2 % (199 676 to 195 692) and **draw calls** rise by two, from 29 to 31; the measured columns against #616's spread |
+| AH-1283-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1950&levers=-generated-conifers`, then change the lever to `-generated-trees`, and compare the broadleaves behind the wall on the right and the one at the far left. Then the same pair at `at=1100` (one left of the road, one against the hedge), `at=150` and `at=3150`. Most of this route's trees are conifers: these four are where its broadleaves stand nearest |
+| AH-1283-5 | **By eye, in the product**, with *Game world* on: ride a saved lowland route with broadleaf trees beside the road. Do neighbouring trees differ in shape? Does a tree change visibly as it is passed (the hand-over between its three levels)? |
+
+| #1283 by eye | Answer |
+|---|---|
+| On the page (AH-1283-4): which set reads more like trees in leaf, and do the generated ones sit in the same light as the conifers beside them, or lighter, darker, yellower? | |
+| In the product (AH-1283-5): do the trees along a road read as different trees, and is any level's change visible? | |
+| Up close: do the leaf cards read as foliage, or as flat cards? | |
+| Keep the generated broadleaves and delete the scans (10.6 MB of build back), or go back to the scans? | |
+
+### #1294's rows — the firs, generated to their budget
+
+[#1294](https://github.com/openzigs/onyourleft/issues/1294) generates the conifers as #1283
+generated the broadleaves: a ride's firs are no longer two photoscans cut down to 24 000 triangles —
+which keeps about 1 900 of a scan's 84 000 needles and draws the tree nearly bare — but **two firs
+generated at their size**, the pinned EZ-Tree 1.1.0's evergreen from numbers committed in
+`apps/web/tools/realistic/generated-trees.ts`, each bough carrying cards cut from **Poly Haven's
+photographed fir sprigs** (`fir_tree_01`, CC0, its own page read on 2026-10-12) and wearing the same
+asset's bark. The owner's ruling that a generated tree's needles and bark may come from Poly Haven
+is [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)'s amendment of 2026-10-12.
+
+**The scanned firs are still in the build and one lever away**, and as with #1283 **both rows are
+one build**: `levers=-generated-conifers` loads the scanned firs instead, beside the generated
+broadleaves, and only the set asked for is fetched.
+
+**`levers=-generated-trees` loads EVERY tree's scan, the firs' too**, so #1283's pair above is
+`levers=-generated-trees` against `levers=-generated-conifers`, and this pair is
+`levers=-generated-conifers` against the bare URL. Three runs make both pairs: every tree a scan,
+the generated broadleaves beside the scanned firs, every tree generated.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-10-12, nothing on a device:
+
+| | Scanned firs (`-generated-conifers`) | Generated firs |
+|---|--:|--:|
+| This page held at `at=2550`: triangles a frame | 195 692 | **131 684** |
+| The same frame: draw calls | 31 | **31** |
+| This page held at `at=700`: triangles a frame | 161 227 | **135 627** |
+| The same frame: draw calls | 38 | **38** |
+| At `at=150`, `1100`, `1950`, `2350`, `3150`: triangles a frame | 173 458, 171 794, 172 108, 194 106, 168 784 | **133 774, 112 910, 132 426, 130 100, 129 100** |
+| The same five frames: draw calls | 31, 30, 30, 30, 30 | **31, 30, 30, 30, 30** |
+| Bytes of texture the load holds (`textures.bytes`) | 26 173 344 | **19 838 224** |
+| The gate's wooded view (`game.browser.spec.ts` §"#1283"): triangles / draw calls | 169 482 / 29 | **115 718 / 29** |
+| Texture memory estimated on the tablet's formats (`realistic-budget.test.ts`) | 65.58 MiB | **59.54 MiB** |
+| One fir at full detail / at the middle level, triangles | 23 996 / 5 998 | **4 792 / 878** |
+| One fir's cut-out cards at full detail / at the middle level, square metres | none: its needles are geometry | **196 / 129** |
+
+⚠️ **The draw calls above are one frame's, and since #1294 they are also what the page reports.**
+The page's `drawCalls` is a mean over its window. Until #1294 that window also held the warm-up
+and the page's very first render, which makes about twice the calls of every later frame (60 and
+then 31 at `at=2550`, read frame by frame). So the page said 33 where the frame made 31, and 32 to
+35 as a busier machine drew fewer frames before its sample — which is the count #1283 saw "move by
+one between runs". The page now counts from the end of the warm-up: held at `at=2550` it reads 31
+with either set of firs and 29 with every tree a scan, and at `at=700` 38, 38 and 35, the same as
+`result.lastFrame.calls` in every run (pinned Chromium, 2026-10-12). Either figure may be written
+down. ⚠️ A row taken on a build before #1294 has the old mean in it.
+
+The build is **41 144 981 bytes** of the 40 MiB ceiling (41 943 040) with the transcoder, where it
+was 39 836 999: **798 059 bytes spare**. It carries every set until these rows are in: the two
+generated firs are 1 307 982 of those bytes, the scanned firs 8 681 763 and the scanned broadleaves
+10 616 301 ([#1293](https://github.com/openzigs/onyourleft/issues/1293)).
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
+mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost, and only this row can
+say whether it does: the cut-out.** The triangles fall by a third and the texture memory by 6 MiB,
+and the draw calls do not move. But a scanned fir's needles are geometry and a generated fir's are
+1 100 alpha-tested cards, under a quarter of each covered — 196 m² of card to a tree at full detail
+and 129 m² at the middle level — and a GPU shades a card's fragments up to the cut before it
+discards them. Nothing in this repository measures that: the browser gate's rasteriser is
+software, and its frame times for the two sets were inside each other's run-to-run spread. **If the
+GPU DVFS mean or present p95 rises on the after row, that is this, and the scans are the answer
+until the cards are fewer.**
+
+| Step | What to do |
+|---|---|
+| AH-1294-1 | **Before**: build #1294's merge with the owner's page staged, and run AH1–AH7 with `&levers=-generated-conifers` added to AH4's URL. `RUN=1294-before`. This is AH-1283-2's run: one run fills both rows |
+| AH-1294-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1294-after` |
+| AH-1294-3 | Write both rows into the table above. **Triangles / frame** should fall by about a third and **draw calls** should not move (31 on both, `drawCalls` and `result.lastFrame.calls` alike); the measured columns against #616's spread — the GPU's most of all |
+| AH-1294-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550`, then add `&levers=-generated-conifers`, and compare the firs down both sides of the road and the two at the right. Then the same pair at `at=2350`, `at=1950`, `at=700` and `at=150`. This route is mostly conifers, so every one of these frames is the difference |
+| AH-1294-5 | **By eye, in the product**, with *Game world* on: ride a saved route through conifers. Do the firs read as trees in needle, near and far? Does one change visibly as it is passed (full level to middle at about 20 m, middle to its impostor at about 60 m)? Do the needles shimmer or crawl as the camera moves? |
+
+| #1294 by eye | Answer |
+|---|---|
+| On the page (AH-1294-4): which set reads more like firs, and do the generated ones sit in the same light and colour as the trees beside them, or darker, greener, flatter? | |
+| In the product (AH-1294-5): is any level's change visible, and do the needles shimmer at a distance? | |
+| Up close: do the sprig cards read as boughs, or as flat cards? Is the top of the tree a fir's, or a blob? | |
+| Keep the generated firs and delete the scanned ones (8.7 MB of build back), or go back to the scans? | |
+
+### #1523's rows — the ground blend and the road wear, on one build
+
+[#1523](https://github.com/openzigs/onyourleft/issues/1523): the realistic top rung on `main` runs
+the tablet's GPU at its 848 MHz ceiling. Its triage named the generated firs (#1294) for the
+dropped frames, and left about 90 MHz above #616's baseline that the `surfaces` layer holds the
+largest share of. The prime suspects there are #627's ground blend (with #1274's crag) and #628's
+road wear (with #879's), and until #1523 neither had a switch that changed what the GPU runs:
+`levers=-crag` and the browser gate's wear switch set uniforms on the SAME program.
+
+**Two levers now take the code out of the program**, on one build (`realistic/config.ts`
+§`LEVERS`):
+
+- `levers=-ground-blend` — the ground as #425's near and far photograph and #460's patchwork, with
+  none of the verge, rock, scree or crag in its program and none of their six maps bound.
+- `levers=-road-wear` — the road with no wheel track, dust, patch loop or track roughness and
+  relief in its program.
+
+Each changes the picture, so neither is a by-eye pair: the row is the cost. **The product always
+draws both**; nothing a rider reaches turns either off. The browser gate holds each lever to the
+uniforms the GPU linked, with the default load as the control (`game.browser.spec.ts` §"#1523").
+
+| Step | What to do |
+|---|---|
+| AH-1523-1 | **Control**: build `main` with #1523's levers and the owner's page staged, and run AH1–AH7, AH4's URL unchanged. `RUN=1523-control` |
+| AH-1523-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 with `&levers=-ground-blend` added to AH4's URL. `RUN=1523-ground-blend` |
+| AH-1523-3 | **Cool again**, same build: AH1–AH7 with `&levers=-road-wear` added instead. `RUN=1523-road-wear` |
+| AH-1523-4 | Write the three rows into the table above. Triangles and draw calls should not move between them; the GPU DVFS mean and present p99 are what each lever's share is read from, against #616's spread |
+
+#### The bounds — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), fixes 1 and 3)
+
+Triage 2 (2026-10-21, on #1523) put about 25 MHz on the road wear and 16 MHz on the ground blend.
+The fix changes what each costs a fragment and **not what it draws**:
+
+- **Road wear:** a fragment runs #628's patch loop only on a triangle a patch can reach — the
+  view writes, each frame, which of the eight patches can reach each road vertex's triangles
+  (`road-wear.ts` §`writeRoadPatchReach`), and the shader reads it as a `flat` varying, so a
+  triangle no patch reaches has no loop at all. The paint's fading noise runs only on paint.
+- **Ground blend:** each surface's derivative pair is taken once, where the shares are, and the
+  normal reads it, instead of taking the same three pairs again (six derivatives where there were
+  twelve). The surfaces were already sampled only where their share is above zero.
+- **Anisotropy, reviewed and kept at 8:** the verge, rock and crag lie beside the road at the same
+  grazing angle that #425's shimmer is about. A lower ceiling there would be a visible change, and
+  no browser read-back can show shimmer.
+
+`levers=-surface-bounds` builds both shaders as they were before, on the same build, so the pair
+is one APK. The browser gate draws a road frame (with a patch 8–14 m ahead) and #458's steep bank
+both ways and requires **every pixel identical** (`game.browser.spec.ts` §"#1523", nightly). In
+the same run it requires `-road-wear` and `-ground-blend` to move thousands of pixels each.
+
+| Step | What to do |
+|---|---|
+| AH-1523-5 | **Before**: build `main` with #1523's bounds, owner's page staged, AH1–AH7 with `&levers=-surface-bounds` added to AH4's URL. `RUN=1523-bounds-before` |
+| AH-1523-6 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-bounds-after` |
+| AH-1523-7 | Write both rows. The after row's GPU mean should fall towards triage 2's `-road-wear` and `-ground-blend` rows (−25 and −16 MHz) without either lever's change to the picture |
+
+#### The firs' depth pre-pass — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), fix 2)
+
+Triage 1 (2026-10-21, on #1523) put the dropped frames on #1294's generated firs: with only the
+firs reverted to the scans, frames over 20 ms fell from 2.1 % to 0.2 %. A fir is about 1 100 sprig
+cards with under a quarter of each covered by needles, and a card fragment is lit whenever it
+passes the depth test: every cut-away part of a card in front of the needle a pixel finally shows,
+and every card behind it drawn first. Rasterised on a CPU from the committed `generated_fir_a.glb`
+and its own decoded sprig, the full level seen from 9 m on three sides passes the depth test in
+**198 404** 2×2 quads to show 58 582 pixels.
+
+The fix draws each fir mesh twice, at the full and the middle level
+(`three-renderer.ts` §`withDepthPrepass`): a **pre-pass** that runs the mesh's own program only as
+far as its alpha cut and writes depth and no colour, then the mesh itself with an **EQUAL** depth
+test, so the lit shader runs on the one fragment each pixel keeps — **39 353** quads in the same
+model, a fifth. Both passes are one compiled program, so every kept fragment lands on exactly the
+depth its pre-pass wrote. No look is meant to change, and nothing about the firs' files does.
+
+**Its cost is draw calls**: one more for each fir mesh a frame draws, at most four (two shapes, two
+levels). The browser gate's wooded frame makes **32** where it made **29**, inside #639's 35. #615's
+rule 1 says draw calls may not rise; these are depth-only calls of a program the frame already
+uses, traded for most of the firs' lit fragments, and the rows below are what says whether the
+trade is worth it. It is the owner's to rule on.
+
+`levers=-fir-prepass` draws the firs as they were before, on the same build. The browser gate draws
+its wooded frame both ways and requires **every pixel identical** (0 of 230 400 on 2026-10-24), and
+as its control draws the EQUAL test with no pre-pass, which must take the firs out (6 444 pixels
+moved) (`game.browser.spec.ts` §"#1523", nightly).
+
+| Step | What to do |
+|---|---|
+| AH-1523-8 | **Before**: build `main` with #1523's fir pre-pass, owner's page staged, AH1–AH7 with `&levers=-fir-prepass` added to AH4's URL. `RUN=1523-firs-before` |
+| AH-1523-9 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-firs-after` |
+| AH-1523-10 | Write both rows. Draw calls should rise by up to four and triangles by the firs' own. The after row's GPU mean should fall towards triage 1's `-generated-conifers` row, and its frames over 20 ms towards 0.2 %, without a change to the firs a rider can see |
+
+### #1534's rows — the villages' ground cleared of trees, shrubs and rocks
+
+[#1534](https://github.com/openzigs/onyourleft/issues/1534) clears every tree, shrub and rock off a
+settlement's ground — its plots, built on or not, its front gardens and 6 m past the back of each
+building (`settlements.ts` §`SettlementFootprint`) — so no house stands in a wood. It only takes
+instances away, so its cost claim is that **draw calls are unchanged and triangles and overdraw can
+only fall**. One lever on one build gives the pair: `levers=-settlement-clearing` leaves the ground
+wooded, as every frame was before #1534. It is the owner's by-eye pair too. The browser gate holds
+the rule to the vegetation instances drawn beside a village: 0 of 130 on its ground, against 38 of
+168 with the lever's control (`game.browser.spec.ts` §"#1534", measured 2026-10-21).
+
+| Step | What to do |
+|---|---|
+| AH-1534-1 | **After #1523's fix has landed**: build `main` with #1534 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL unchanged. `RUN=1534-cleared` |
+| AH-1534-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&levers=-settlement-clearing` added to AH4's URL. `RUN=1534-wooded` |
+| AH-1534-3 | Write both rows into the table above. Draw calls should match; triangles in `1534-cleared` at or below `1534-wooded`. By eye, at a village (`&at=` its odometer): no tree in a garden or between a house and the road |
+
+### #1537's rows — a village on the tablet, before and after phase A
+
+[#1537](https://github.com/openzigs/onyourleft/issues/1537) measures phase A of
+[#1533](https://github.com/openzigs/onyourleft/issues/1533) (#1534's cleared ground, #1535's
+pavements, #1536's street furniture), which changes villages only, so its rows are taken at **AE2's
+hold** on the page's village road (#1559). Its hard limit is #1523's: the top rung off the GPU
+ceiling, GPU p50 below 848 MHz and frames over 20 ms at most 0.2 %.
+
+⚠️ **Phase A has merged** (#1534, #1535 and #1536 are closed), so the before row is either a build
+of `main` from before the first of them with #1559's page cherry-picked in, or today's `main` with
+#1534's `levers=-settlement-clearing` for the one change that has a lever. #1535 and #1536 have no
+lever on the owner's page. Which of the two the before row is, is #1537's call, and the row says
+which.
+
+| Step | What to do |
+|---|---|
+| AH-1537-1 | **AE2**: AE1's procedure (§"#506's AE1 and AE2 in the same session") at `&route=village&at=820`, on the build the row names. Record draw calls, triangles, GPU p50 / p90 / p99 and the page's `census` |
+| AH-1537-2 | AH1–AH7 for **5 minutes**, held at the village: AH4's URL with `&route=village&at=820` added. `RUN=1537-before`, or `RUN=1537-after-<issue>` for each phase-A merge |
+| AH-1537-3 | Write the rows into the table above and post them on #1537 and #733 |
+
+### #1542's rows — the countryside planted and bounded by land class
+
+[#1542](https://github.com/openzigs/onyourleft/issues/1542) reads #1546's land-class mask for three
+changes, each with a lever on the owner's page: a wood planted throughout with a broadleaf and scrub edge,
+hedgerow trees and open pasture on farmland and specimen trees in a park (`-land-planting`); field
+boundaries along farmland's edges instead of the procedural field spacing (`-land-boundaries`); and
+stones on pasture and a wood's floor (`-ground-clutter`). Off, each is the countryside before #1542.
+Since the owner's ruling of 2026-10-24 two more: mapped farmland's roadside hedge low and broken by
+gaps, a gate, fence and open verge (`-hedge-breaks`), and rocks on farmland and a wood smaller and
+back from the road (`-small-stones`); each changes nothing with `-land-boundaries` or
+`-ground-clutter` and `-land-planting` off, so AH-1542-2's URL is still the world before #1542.
+They change only land a corridor covers, so **`route.ts`' road, which has none, draws the same
+picture with or without them**: every row below is on `&town=countryside`
+(`footprint-fixtures-testing.ts` §`countrysideFixture`, 900 m to 2 100 m).
+
+**What they cost, stated before the tablet row.** No new kind, shape, material or mesh: the trees
+are held by `REALISTIC_TREE_LEVELS`, shrubs and rocks by `REALISTIC_NEAR_MESHES` (the clutter's
+rocks at most 12 × 2 500 triangles), the boundaries by `REALISTIC_STRUCTURE_ITEMS` (36). A frame's
+calls are a call a shape a level, so they follow which shapes the nearest trees happen to be. On
+the pinned Chromium, 24 holds 50 m apart (2026-10-24): **draw calls most 36 and mean 31.0 with the
+levers on, most 36 and mean 32.8 with all three off** (4 holds rose by 1–2 and 16 fell); triangles
+mean 137 775 on and 143 388 off. The clutter alone adds 16 000–19 000 triangles and no call; the
+planting takes more away. The scene's build in Node: 0.54 ms a frame with them, 0.51 ms without.
+These were read with a throwaway spec on the owner's page, not a gate: the nightly job had
+no room for twelve more loads of it (#1542's PR). ⚠️ None of that is the tablet: #1523 put its GPU at its ceiling, so the row
+below is what decides whether this stays on.
+
+| Step | What to do |
+|---|---|
+| AH-1542-1 | **After #1523's fix has landed**: build `main` with #1542 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL with `&town=countryside` added. `RUN=1542-on` |
+| AH-1542-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&town=countryside&levers=-ground-clutter,-land-boundaries,-land-planting` added to AH4's URL. `RUN=1542-off` |
+| AH-1542-3 | Only if `1542-on` is over #1523's limit (GPU p50 at or above 848 MHz, or frames over 20 ms above 0.2 %) and `1542-off` is not: one more 5-minute run each with `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks` and `-small-stones` alone, cooling between, to name the change to switch off. `RUN=1542-no-<lever>` |
+| AH-1542-4 | Write the rows into the table above. Draw calls in `1542-on` at or below `1542-off`, triangles below. By eye, the panel off (`&panel=0&at=`): at 1 150 hedgerow trees along the fields and open pasture beyond, and on one side the gap between two fields left open; at 1 500 a wood's scrubby edge on one side and a fenced wood behind a strip of field on the other; at 1 780 a park's specimen trees. Post the rows on #1542 and #733 |
+
+## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
+
+**Added 2026-10-04** by #1112. Checked with `grep '^## Part'` for a duplicate letter first — AH was
+the last, and AI was free. It changes no resistance: no trainer is needed, only the phone on its
+tripod paired to the tablet.
+
+On `main` at `a9c7f3ff` the phone sent **197 pictures in 10 minutes** (about 0.3 a second) where
+ADR 0033 D-3 asks for about five. #1112 moved the phone's JPEG encode off the page's main thread
+(`apps/web/src/camera/side-picture-encoder.ts` says why: Chromium encodes a main-thread `toBlob`
+in idle time and waits up to 4 s on Android for it) and records every picture tick on the phone in
+`window.__oylSideCameraTimings` (`apps/web/src/camera/side-picture-timings.ts`) — numbers and words
+only, no picture. What this Part settles is whether that was the phone's cause.
+
+| Step | What to do |
+|---|---|
+| AI1 | Install a **debug** APK of #1112's merge on the phone (`webview-probe.mjs` attaches only to a debug build). Pair it with the tablet and start filming from the tablet, as #554 does |
+| AI2 | With the filming sign up for **at least 2 minutes**, forward the phone's WebView (the `adb forward` lines in `apps/mobile/tools/webview-probe.mjs`' header, with the PHONE's `pidof`) and read the rate since filming began and how long that was: `node apps/mobile/tools/webview-probe.mjs 'JSON.stringify({ rate: window.__oylSideCameraTimings?.summary().sentPerSecondSinceStart, filmingMs: window.__oylSideCameraTimings?.summary().lastTickAt })'` — then the whole summary: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().summary'` |
+| AI3 | Read the last minute of ticks too, for the table below: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().records.slice(-60)'` |
+| AI4 | On the tablet, count the pictures it received over the same session (the #554 reading) |
+
+| Reading (AI2) | Value |
+|---|---|
+| `sentPerSecondSinceStart` (designed: about 5) — **the criterion**: every accepted picture over the whole session, read with `lastTickAt` at 120 000 ms or more | |
+| `lastTickAt`, ms (how long it had been filming) | |
+| `sentPerSecond` — the last 10 seconds only, so it says what the session was doing at the end, not over 2 minutes | |
+| `ticksPerSecond` (the timer itself: 5 unless it is throttled) | |
+| `encoder` (`worker` expected; `main-thread` means the fallback ran) | |
+| `outcomes` — `still-taking`, `busy`, `no-link`, `link-not-ready`, `dropped` counts | |
+| `capture` p50 / p95, ms | |
+| `encode` p50 / p95, ms | |
+| `draw` p50 / p95, ms | |
+| `maxBufferedBefore`, bytes | |
+| `repeatedVideoFrames` (a video that stopped advancing) | |
+| `visibility` | |
+| Pictures the tablet received, and over how long (AI4) | |
+
+**Reading it.** A `sentPerSecondSinceStart` near 5 over at least 2 minutes (`lastTickAt` ≥ 120 000)
+with `encoder: worker` is #1112 confirmed. ⚠️ **Not `sentPerSecond`**: that is a 10-second window,
+so a good last ten seconds after a slow start reads as five. Many
+`still-taking` with a long `encode` is the encode still waiting. Many `busy` with a large
+`maxBufferedBefore` is the `frames` channel (ADR 0033 D-3), not the encode. A `ticksPerSecond`
+well under 5 is the timer being throttled (power management), and `visibility: hidden` says the
+WebView thinks the page is not shown. A large `repeatedVideoFrames` is a camera video that stopped
+advancing while pictures were still sent.
+
+## Part AJ — is there room on the tablet for people? ([#1541](https://github.com/openzigs/onyourleft/issues/1541))
+
+**Added 2026-10-24** by #1541. Checked with `grep '^## Part'` for a duplicate letter first — AI was
+the last, and AJ was free. It changes no resistance: no trainer is needed.
+
+The owner ruled on 2026-10-24 that the people are built **before** #1553's tablet room row, inside
+the issue's budget — at most 16 bodies within 60 m (about 2 000 triangles each, 32 000 in all), one
+draw call for them and one for the impostors beyond, about 1 MiB of animation texture — with a lever
+of their own, and that **if the tablet shows no room, people stay off by default until there is**.
+This Part is that measurement. The product draws them on the top realistic rung only
+(`quality.ts` §`QualitySettings.people`); the owner's page's `levers=-people` places nobody, so one
+build gives the pair. Its hard limit is #1523's: the top rung off the GPU ceiling, GPU p50 below
+848 MHz and frames over 20 ms at most 0.2 %.
+
+| Step | What to do |
+|---|---|
+| AJ1 | Build `main` with #1541's merge and the owner's page staged. **AE2's hold** on the village road: AE1's procedure (§"#506's AE1 and AE2 in the same session") at `&route=village&at=820`, people on. Record draw calls, triangles, GPU p50 / p90 / p99 and the page's `census` |
+| AJ2 | The same hold with `&levers=-people` added. The draw calls should fall by 1 or 2, and the triangles by the bodies in view at about 2 000 each |
+| AJ3 | AH1–AH7 for **5 minutes**, held at the village: AH4's URL with `&route=village&at=820` added. `RUN=1541-people` |
+| AJ4 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&route=village&at=820&levers=-people`. `RUN=1541-no-people` |
+| AJ5 | By eye, at the hold and riding through the village (drop `&at=`): nobody on the road; walkers on the pavements and front paths; nobody sliding, floating or sunk; the far figures readable as people and not flickering. A picture of each |
+
+| Reading | People on (AJ1, AJ3) | `levers=-people` (AJ2, AJ4) |
+|---|---|---|
+| Draw calls at the hold | | |
+| Triangles at the hold | | |
+| GPU p50 / p90 / p99, MHz | | |
+| Frames over 20 ms, % | | |
+| Skin at minute 5, °C | | |
+
+**Reading it.** People on inside #1523's limit is **room**: the default stays as it ships. Over the
+limit with people on and inside it with `-people` is **no room**: `QualitySettings.people` goes to
+0 on the top realistic rung too, until there is — the owner's ruling. Post the table on #1541 and
+#733.

@@ -667,6 +667,43 @@ generate
 assert_exit 'a server dependency with no licence file fails closed' 1
 assert_says 'as NOT003, naming the server' 'has no reviewed list saying where its notice comes from'
 
+# The server's own reviewed list (#1096): a package that ships no licence
+# file is noticed from the entry naming it, with the pinned licence text once.
+SERVER_REVIEWED='{"noLicenceFile":{"bare-server-dep@1.0.0":{"why":"x","upstream":{"url":"https://example.invalid/LICENSE","read":"2026-10-08","text":"Copyright 2023 Bare Server Dep\nUpstream fixture text\n"},"licenceText":"Apache-2.0"}}}'
+
+new_fixture
+BARE="$(package bare-server-dep 1.0.0)"
+closure @onyourleft/instance "{$(entry Apache-2.0 bare-server-dep 1.0.0 "${BARE}")}"
+printf '%s\n' "${SERVER_REVIEWED}" > "${tmp}/apps/instance/third-party-notices.json"
+generate
+assert_exit "a server dependency with no licence file and a reviewed entry generates" 0
+if grep -qF 'Upstream fixture text' "${tmp}/${INSTANCE_DOCUMENT}" &&
+  grep -qF 'Appendix: Apache-2.0' "${tmp}/${INSTANCE_DOCUMENT}"; then
+  ok "its notice is the reviewed upstream text, and the Apache-2.0 text is appended once"
+else
+  bad "its notice is the reviewed upstream text, and the Apache-2.0 text is appended once" "$(cat "${tmp}/${INSTANCE_DOCUMENT}")"
+fi
+run --assume-installed
+assert_exit 'and the check agrees with what it wrote' 0
+
+new_fixture
+BARE="$(package bare-server-dep 1.0.1)"
+closure @onyourleft/instance "{$(entry Apache-2.0 bare-server-dep 1.0.1 "${BARE}")}"
+printf '%s\n' "${SERVER_REVIEWED}" > "${tmp}/apps/instance/third-party-notices.json"
+generate
+assert_exit 'a version bump of a reviewed server dependency fails closed' 1
+assert_says 'as NOT003 for the new version' 'NOT003 bare-server-dep@1.0.1 ships no LICENSE'
+assert_says 'and NOT004 for the stale entry' 'NOT004 bare-server-dep@1.0.0 has a reviewed entry in apps/instance/third-party-notices.json'
+
+new_fixture
+BARE="$(package bare-server-dep 1.0.0)"
+printf 'MIT -- it ships one now\n' > "${BARE}/LICENSE"
+closure @onyourleft/instance "{$(entry Apache-2.0 bare-server-dep 1.0.0 "${BARE}")}"
+printf '%s\n' "${SERVER_REVIEWED}" > "${tmp}/apps/instance/third-party-notices.json"
+generate
+assert_exit 'a reviewed server entry for a package that ships its own licence now fails' 1
+assert_says 'as NOT004' 'NOT004 bare-server-dep@1.0.0 ships its own licence file now'
+
 new_fixture
 printf '[{"name":"root","path":"%s"},{"name":"@onyourleft/web","path":"%s/apps/web"},{"name":"@onyourleft/store","path":"%s/packages/store"}]\n' \
   "${tmp}" "${tmp}" "${tmp}" > "${tmp}/fake/workspace.json"

@@ -92,7 +92,9 @@ import {
 import type { RideViewControl, RideViewMeasurement, RideViewNotice } from './rideview-harness';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
 
+import { AA_TEXT, contrastRatio } from '../src/design/contrast';
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
+import { ZOOMED_DIGIT_FLOOR_PIXELS } from '../src/ride/MetricGrid';
 
 /** Sub-pixel layout, not slack. @see ride.browser.spec.ts */
 const SUBPIXEL_TOLERANCE = 1;
@@ -663,8 +665,16 @@ for (const viewport of EASED_VIEWPORTS) {
     // ⚠️ Landscape only since #692. Upright, the trainer group is its own
     // column now, so *End workout* last is still 300 px clear of the fold
     // there and the control cannot fail; the ORDER it guards is the same
-    // component at every size, and the four landscape tablets hold it.
-    if (viewport.width > viewport.height) {
+    // component at every size, and the landscape tablets hold it.
+    //
+    // ⚠️ In the shell only since #1329, and a reviewer who remembers four
+    // landscape tablets here is reading the old file. The trimmed trainer
+    // card gave the column 24 px in every state, so at the two BARE displays,
+    // which no rider has (this file's header), #585's order would now clear
+    // the floor on a Mac's fonts: 33.5 px became 57.5 at 1280×800 and 26.3 px
+    // became 50.3 at 1024×768. Inside the shell it is still under it (-34.5
+    // px became -10.5, and -21.7 px became 2.3), which is where it is held.
+    if (viewport === TABLET_IN_THE_SHELL || viewport === SMALL_TABLET_IN_THE_SHELL) {
       test('the control — as #585 shipped it, End workout is under the floor', async ({
         page,
       }, testInfo) => {
@@ -779,6 +789,84 @@ for (const viewport of EASED_VIEWPORTS) {
 }
 
 /**
+ * #647 on a phone. The acceptance criteria ask for the notice's layout at the
+ * phone viewports as well as the tablets, and the Ride tab is one column
+ * there. The rule is the tablets': the sentence whole, in no disclosure, on
+ * top at its centre, inside the width, and its bottom and *Pause* / *Stop*
+ * clear of the fold by {@link FOLD_MARGIN_PIXELS}. Below that the page
+ * scrolls on a phone, as it always did; what may not scroll away is the
+ * safety sentence or the controls that end the ride.
+ */
+const KEEP_ALIVE_PHONES: readonly Viewport[] = [
+  { name: 'the narrowest phone — 320×568', width: 320, height: 568 },
+  { name: 'a phone — 360×800', width: 360, height: 800 },
+  { name: 'a phone — 390×844', width: 390, height: 844 },
+  { name: 'a phone — 412×915', width: 412, height: 915 },
+];
+
+for (const viewport of KEEP_ALIVE_PHONES) {
+  test(`a ride that may stop with the screen off, on a phone — #647 — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, KEEP_ALIVE_FAILED);
+    const seen = await measure(page);
+    const notice = seen.keepScreenOn;
+    expect(notice?.text).toBe(KEEP_SCREEN_ON_TEXT);
+    expect(notice?.inDisclosure).toBe(false);
+    expect(notice?.onTop).toBe(true);
+    expect(seen.scrollY).toBe(0);
+    expect(notice?.box.left ?? -1).toBeGreaterThanOrEqual(0);
+    expect(notice?.box.right ?? Infinity).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
+
+    const ending = seen.controls.filter((each) => each.name === 'Pause' || each.name === 'Stop');
+    expect(ending.map((each) => each.name).sort()).toEqual(['Pause', 'Stop']);
+    const lowest = lowestOf(ending);
+    const controlMargin = foldMargin(lowest.box.bottom, viewport);
+    const noticeMargin = foldMargin(notice?.box.bottom ?? Infinity, viewport);
+    const note =
+      `Pause / Stop ${controlMargin.toFixed(1)} px; the notice ${noticeMargin.toFixed(1)} px, ` +
+      `${(notice?.box.height ?? 0).toFixed(0)} px tall — at ${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({
+      type: 'keep the screen on, phone, margin to the fold',
+      description: note,
+    });
+    console.log(`keep the screen on, on a phone — ${viewport.name} — ${note}`);
+    expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+}
+
+/**
+ * #647, under #654's ruling 2: the notice is an existing `StatusMessage` tone,
+ * and its pair must pass in both palettes. Measured here as painted: the
+ * sentence's ink and its label's against the notice's own surface, at
+ * {@link AA_TEXT}. The game HUD's copy needs no dark run, because the HUD
+ * declares no dark token (`tokens.test.ts`, "declares no HUD token").
+ */
+for (const scheme of ['light', 'dark'] as const) {
+  test(`#647 — the keep-the-screen-on notice meets AA for text — ${scheme}`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await open(page, TABLET_IN_THE_SHELL, KEEP_ALIVE_FAILED);
+    const notice = (await measure(page)).keepScreenOn;
+    if (notice === undefined) throw new Error('no keep-the-screen-on notice on the page');
+    const sentence = contrastRatio(hexOf(notice.colour), hexOf(notice.background));
+    const label = contrastRatio(hexOf(notice.labelColour), hexOf(notice.background));
+    const note = `sentence ${notice.colour} and label ${notice.labelColour} on ${notice.background}: ${sentence.toFixed(2)}:1 and ${label.toFixed(2)}:1 — ${scheme}`;
+    testInfo.annotations.push({ type: '#647 contrast', description: note });
+    console.log(`#647 — the keep-the-screen-on notice — ${note}`);
+    // The apparatus: the two schemes paint two different surfaces, so the
+    // dark case is not the light one measured twice.
+    expect(notice.background, note).toBe(
+      scheme === 'dark' ? 'rgb(51, 40, 15)' : 'rgb(251, 239, 218)',
+    );
+    expect(sentence, note).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(label, note).toBeGreaterThanOrEqual(AA_TEXT);
+  });
+}
+
+/**
  * #692 — room for a standing notice at in-shell tablet sizes.
  *
  * ## What was wrong, measured
@@ -840,6 +928,9 @@ for (const viewport of EASED_VIEWPORTS) {
  * must fall under the floor at every in-shell tablet. Without it, "every
  * control clears the fold" is as true of a page that rendered no notice.
  */
+/** `workout/replan-text.ts` §`REPLAN_OFF_BUTTON`. */
+const SWITCH_REPLANS_OFF = 'Switch re-plans off';
+
 const STANDING_NOTICES: readonly {
   readonly name: string;
   readonly query: string;
@@ -850,13 +941,49 @@ const STANDING_NOTICES: readonly {
   { name: 'no notification', query: '?notification=refused', labels: ['No notification:'] },
   { name: 'device full', query: '?storage=full', labels: ['Device full:'] },
   { name: 'side camera lost', query: '?side=lost', labels: ['Side camera:'] },
+  // #1318: the lap taken by hand that ended last, at its widest.
+  { name: 'a lap just taken', query: '?lap=ended', labels: ['Lap 12:'] },
   { name: 'a workout eased', query: '?workout=eased', labels: ['Eased:'] },
+  // #1240: a workout's heart-rate hold — its notice, with the longest sentence
+  // `workout/hold-text.ts` can produce, in the running workout's section.
+  { name: 'a heart-rate hold', query: '?workout=hold', labels: ['Heart-rate hold:'] },
+  // #1244: an accepted re-plan waiting for the next block — its sentence, the
+  // longest `workout/replan-text.ts` can produce, and *Keep the plan* under
+  // it, which is a ride control and so is held to the floor with the rest.
+  { name: 'a re-plan waiting', query: '?workout=replan', labels: ['Plan change:'] },
+  // #1244: the two lines that can follow it in the same place — the answer to
+  // *Keep the plan*, and the one sentence for a move a pause or a lost
+  // trainer discarded. Neither has a control of its own.
+  {
+    name: 'a re-plan the rider kept the plan from',
+    query: '?workout=replan-kept',
+    labels: ['Plan change:'],
+  },
+  {
+    name: 'a re-plan a pause discarded',
+    query: '?workout=replan-discarded',
+    labels: ['Plan change:'],
+  },
 ];
 
 const EVERY_NOTICE = {
   name: 'every standing notice at once',
-  query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost',
-  labels: STANDING_NOTICES.flatMap((each) => each.labels),
+  query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost&lap=ended',
+  // One workout on the stub: eased, not also holding (#1240's hold has its own case).
+  labels: STANDING_NOTICES.filter(
+    // #1244's re-plan has its own case too, for the same reason.
+    (each) =>
+      each.query !== '?workout=hold' &&
+      !each.query.startsWith('?workout=replan') &&
+      // #1318: the lap's notice is ON this page, so every control below is
+      // held with it standing; it is not held to start on the screen. It is
+      // the last notice in the column, and with all six at once it is the
+      // sentence that goes past the fold — "the last sentence, never a
+      // control" (the note above). Measured 64.7 px under the fold at
+      // 1024×720 in the shell, on a Mac; alone, it clears the floor at every
+      // tablet (its own case).
+      each.query !== '?lap=ended',
+  ).flatMap((each) => each.labels),
 };
 
 /** Live-group notices that are not standing IN the column. @see the #692 case */
@@ -886,11 +1013,30 @@ for (const viewport of EASED_VIEWPORTS) {
         expect(seen.notices.map((each) => each.label)).toEqual(
           expect.arrayContaining([...state.labels]),
         );
+        // #1318: and the lap's, which every notice at once stands but does not
+        // hold to the screen (`EVERY_NOTICE`).
+        if (state.query.includes('lap=ended')) {
+          expect(seen.notices.map((each) => each.label)).toContain('Lap 12:');
+        }
 
         const during = seen.controls.filter((each) => each.group !== 'sensors');
         expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
         if (state.query.includes('side=lost')) {
           expect(during.map((each) => each.name)).toContain('Stop side camera');
+        }
+        // #1244: the apparatus. *Keep the plan* is on the page, so the lowest
+        // control's margin below is taken over a screen that has it.
+        if (state.query === '?workout=replan') {
+          expect(during.map((each) => each.name)).toContain('Keep the plan');
+        } else if (state.query.startsWith('?workout=replan')) {
+          // Kept or discarded: nothing is left to keep the plan from.
+          expect(during.map((each) => each.name)).not.toContain('Keep the plan');
+        }
+        // #1244's review: a workout with re-plans on always carries the
+        // control that switches them off, so every margin of these states is
+        // taken over a screen that has it.
+        if (state.query.startsWith('?workout=replan')) {
+          expect(during.map((each) => each.name)).toContain(SWITCH_REPLANS_OFF);
         }
 
         // Published BEFORE anything below is asserted, so a red run still says
@@ -1004,6 +1150,616 @@ for (const viewport of IN_THE_SHELL) {
     });
   });
 }
+
+/**
+ * #1244, #1245, #1329: **the re-plan switch, ABOVE the list, with its
+ * disclosure present.**
+ *
+ * The workout chooser of a rider who is signed in to an instance and has both
+ * their own thresholds shows *Re-plan during the ride* ABOVE the list of
+ * workouts (the owner's ruling of 2026-10-13, #1329), with the disclosure's
+ * headline under it: what switching it on does, in one sentence. The other
+ * eight sentences of `workout/replan-disclosure.ts` are under the list. It is
+ * what leaves the device, so all nine are on the page before the switch is on
+ * and in no disclosure widget. `?replans=available` is the only state that
+ * renders it.
+ *
+ * ## What is held
+ *
+ * At every tablet, both ways up, inside the shell with the #439 insets on the
+ * engine: the SWITCH, its HEADLINE and the control that starts a workout are
+ * on the screen with no scrolling and clear of {@link FOLD_MARGIN_PIXELS},
+ * the same floor as every other ride control, with all nine sentences in the
+ * document, in order. The 1280×800 claim is {@link TABLET_IN_THE_SHELL}'s:
+ * insets 36/32, a fold at 768.
+ *
+ * ⚠️ A reviewer who remembers a lower floor for the first *Ride* (a constant
+ * of its own, 0 and then 15) is reading the old file. The owner ruled the
+ * trainer card trimmed instead (2026-10-13, on #1332), and §"#1329 — the
+ * trainer card, trimmed" below holds what was trimmed.
+ *
+ * ## What is only published
+ *
+ * Where the rest of the disclosure ENDS: a rider scrolls to read to the end.
+ *
+ * ## The control
+ *
+ * `restOfDisclosureAboveTheList()` moves the eight sentences up under the
+ * headline on the live elements, and the first *Ride* must fall under the
+ * floor at {@link TABLET_IN_THE_SHELL}. Without it, "the first *Ride* clears
+ * the fold" is as true of a page whose disclosure is one line long.
+ */
+const REPLANS_AVAILABLE = '?replans=available';
+/**
+ * #1244, restored by the owner's ruling of 2026-10-14 on #1332: *"Re-plans
+ * on"* is on the chooser heading's row — inside its box, at its end, to the
+ * right of the heading's words — and the heading is still named
+ * *Ride a workout*.
+ */
+function expectBadgeOnTheHeadingRow(seen: RideViewMeasurement, viewport: Viewport): void {
+  const badge = seen.replansOnLine;
+  const row = seen.trainerCard?.chooserHeading;
+  if (badge === undefined || row === undefined) {
+    throw new Error('no "Re-plans on" beside the chooser heading');
+  }
+  const note = `"${badge.text}" y ${badge.box.top.toFixed(1)}–${badge.box.bottom.toFixed(1)}, the heading's row y ${row.top.toFixed(1)}–${row.bottom.toFixed(1)} — ${viewport.name}`;
+  expect(badge.text).toBe('Re-plans on');
+  expect(badge.box.top, note).toBeGreaterThanOrEqual(row.top - SUBPIXEL_TOLERANCE);
+  expect(badge.box.bottom, note).toBeLessThanOrEqual(row.bottom + SUBPIXEL_TOLERANCE);
+  expect(badge.box.right, note).toBeLessThanOrEqual(row.right + SUBPIXEL_TOLERANCE);
+  expect(seen.chooserHeadingName, note).toBe('Ride a workout');
+}
+
+const REPLAN_SWITCH = 'Re-plan during the ride';
+const REPLAN_HEADLINE =
+  'This sends a summary of each block you ride to your instance, during the ride.';
+
+for (const viewport of EASED_VIEWPORTS) {
+  test.describe(`#1244 — the re-plan switch and its disclosure — ${viewport.name}`, () => {
+    test('the switch, its headline and the control that starts a workout clear the fold, with the disclosure present', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const seen = await measure(page);
+      expect(seen.scrollY).toBe(0);
+
+      // The apparatus: the disclosure is on the page, whole, before the
+      // switch is on, and in no disclosure widget.
+      const disclosure = seen.replanDisclosure;
+      expect(disclosure, 'no re-plan disclosure on the page').toBeDefined();
+      expect(disclosure?.switchedOn).toBe(false);
+      expect(disclosure?.inDisclosure).toBe(false);
+      expect(disclosure?.sentences).toHaveLength(9);
+      expect(disclosure?.sentences[0]).toBe(REPLAN_HEADLINE);
+      expect(disclosure?.sentences.at(-1)).toMatch(/^This is off\./);
+      expect(disclosure?.rest.height ?? 0).toBeGreaterThan(200);
+
+      const trainer = seen.controls.filter((each) => each.group === 'trainer');
+      const theSwitch = trainer.find((each) => each.name === REPLAN_SWITCH);
+      const starts = trainer.find((each) => each.name === STARTS_A_WORKOUT);
+      expect(theSwitch, 'no re-plan switch on the page').toBeDefined();
+      expect(starts, 'no control that starts a workout on the page').toBeDefined();
+
+      const switchMargin = foldMargin(theSwitch?.box.bottom ?? Infinity, viewport);
+      const startsMargin = foldMargin(starts?.box.bottom ?? Infinity, viewport);
+      const headlineMargin = foldMargin(disclosure?.headline?.bottom ?? Infinity, viewport);
+      const endMargin = foldMargin(disclosure?.rest.bottom ?? Infinity, viewport);
+      const note =
+        `the switch ${switchMargin.toFixed(1)} px above the fold ` +
+        `(y ${theSwitch?.box.top.toFixed(0) ?? '?'}–${theSwitch?.box.bottom.toFixed(0) ?? '?'}); ` +
+        `its headline ends ${headlineMargin.toFixed(1)} px above the fold; ` +
+        `"${STARTS_A_WORKOUT}" ${startsMargin.toFixed(1)} px; ` +
+        `the rest of the disclosure (${disclosure?.rest.height.toFixed(0) ?? '?'} px tall) ends ` +
+        `${endMargin.toFixed(1)} px above it — at ${String(viewport.width)}×${String(viewport.height)}`;
+      testInfo.annotations.push({ type: '#1244 the re-plan switch', description: note });
+      console.log(`#1244 — the re-plan switch — ${viewport.name} — ${note}`);
+
+      for (const control of [theSwitch, starts]) {
+        if (control === undefined) continue;
+        expect(onScreen(control, viewport), describeControl(control)).toBe(true);
+      }
+      expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(startsMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      // #1329: the switch is ABOVE the control that starts a workout, its
+      // headline under the switch, and the rest of the disclosure under the list.
+      expect(theSwitch?.box.bottom ?? Infinity).toBeLessThanOrEqual(
+        (starts?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
+      expect(disclosure?.headline?.top ?? 0).toBeGreaterThanOrEqual(
+        (theSwitch?.box.top ?? Infinity) - SUBPIXEL_TOLERANCE,
+      );
+      expect(disclosure?.headline?.bottom ?? Infinity).toBeLessThanOrEqual(
+        (starts?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
+      expect(disclosure?.rest.top ?? 0).toBeGreaterThanOrEqual(
+        (starts?.box.bottom ?? Infinity) - SUBPIXEL_TOLERANCE,
+      );
+      // And every other ride control is where it was: on the screen.
+      const during = seen.controls.filter(
+        (each) => each.group !== 'sensors' && each.name !== REPLAN_SWITCH,
+      );
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+    });
+
+    test('switched on, it says so and stops saying it is off, and nothing above it has moved', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const before = await measure(page);
+      await page.evaluate(() => {
+        window.__oylRideView?.pressReplanSwitch();
+      });
+      const after = await measure(page);
+      expect(after.replanDisclosure?.switchedOn).toBe(true);
+      expect(after.replanDisclosure?.sentences).toHaveLength(8);
+      // #1244, restored on #1332: "Re-plans on" beside the heading while it is
+      // on, and not while it is off; on the heading's own row.
+      expect(before.replansOnLine).toBeUndefined();
+      expectBadgeOnTheHeadingRow(after, viewport);
+      expect(after.replanDisclosure?.sentences.join(' ')).not.toContain('This is off');
+      expect(after.replanDisclosure?.sentences.slice(0, 8)).toEqual(
+        before.replanDisclosure?.sentences.slice(0, 8),
+      );
+      const find = (seen: RideViewMeasurement, name: string) =>
+        seen.controls.find((each) => each.group === 'trainer' && each.name === name);
+      expect(find(after, REPLAN_SWITCH)?.box.top).toBe(find(before, REPLAN_SWITCH)?.box.top);
+      // ⚠️ The first Ride is exactly where it was: the line that goes is under
+      // it, and the badge that comes is on the heading's row.
+      expect(find(after, STARTS_A_WORKOUT)?.box.top).toBe(find(before, STARTS_A_WORKOUT)?.box.top);
+      expect(after.trainerCard?.chooserHeading).toEqual(before.trainerCard?.chooserHeading);
+      expect(after.replanDisclosure?.headline).toEqual(before.replanDisclosure?.headline);
+      const startsMargin = (seen: RideViewMeasurement): number =>
+        foldMargin(find(seen, STARTS_A_WORKOUT)?.box.bottom ?? Infinity, viewport);
+      const note = `the first Ride ${startsMargin(before).toFixed(1)} px above the fold with the switch off, ${startsMargin(after).toFixed(1)} px with it on and "Re-plans on" shown`;
+      testInfo.annotations.push({ type: '#1329 the badge', description: note });
+      console.log(`#1329 — the badge — ${viewport.name} — ${note}`);
+      expect(startsMargin(after), note).toBe(startsMargin(before));
+      expect(startsMargin(after), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    });
+  });
+}
+
+/**
+ * #1244's third review: **the control that switches re-plans off while a
+ * workout runs** (ADR 0048 D-7), and what the screen says once it has.
+ *
+ * `?workout=replan-on` is a workout with re-plans on and nothing waiting,
+ * which is most of one; `?workout=replan` adds a waiting move, its sentence
+ * and *Keep the plan* (the #692 case above holds every control of that state
+ * to the floor, this one among them); `?workout=replan-off` is after the
+ * press. Held at every tablet, both ways up, in the shell with the insets:
+ * the control on the screen, uncovered, clear of the fold floor, at #669's
+ * 48 px, and 8 px or more from *End workout*, whose row it shares where the
+ * column is wide enough for both.
+ */
+for (const viewport of EASED_VIEWPORTS) {
+  test.describe(`#1244 — switching re-plans off mid-workout — ${viewport.name}`, () => {
+    test('the control is beside End workout, a 48 px ride-time control, clear of the fold', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, '?workout=replan-on');
+      const seen = await measure(page);
+      expect(seen.scrollY).toBe(0);
+      const trainer = seen.controls.filter((each) => each.group === 'trainer');
+      const off = trainer.find((each) => each.name === SWITCH_REPLANS_OFF);
+      const end = trainer.find((each) => each.name === 'End workout');
+      if (off === undefined || end === undefined) {
+        throw new Error('no Switch re-plans off or End workout on the page');
+      }
+      const margin = foldMargin(off.box.bottom, viewport);
+      const sameRow = Math.abs(off.box.top - end.box.top) <= SUBPIXEL_TOLERANCE;
+      const apart = sameRow ? off.box.left - end.box.right : off.box.top - end.box.bottom;
+      const note =
+        `${SWITCH_REPLANS_OFF} ${off.box.width.toFixed(1)}×${off.box.height.toFixed(1)}, ` +
+        `${margin.toFixed(1)} px above the fold, ${sameRow ? 'on the row of' : 'UNDER'} End workout, ` +
+        `${apart.toFixed(1)} px from it — at ${String(viewport.width)}×${String(viewport.height)}`;
+      testInfo.annotations.push({ type: '#1244 switching off', description: note });
+      console.log(`#1244 — switching re-plans off — ${viewport.name} — ${note}`);
+
+      expect(onScreen(off, viewport), describeControl(off)).toBe(true);
+      expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(off.box.height).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+      expect(off.box.width).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+      expect(apart, note).toBeGreaterThanOrEqual(8 - SUBPIXEL_TOLERANCE);
+      // Not before the control that ends the workout, which keeps its place.
+      expect(off.box.top).toBeGreaterThanOrEqual(end.box.top - SUBPIXEL_TOLERANCE);
+      expect(seen.replansOffLine).toBeUndefined();
+      // Every other ride control is on the screen with it.
+      const during = seen.controls.filter((each) => each.group !== 'sensors');
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+    });
+
+    test('once off, the line that says so is where the control was, and there is no way back', async ({
+      page,
+    }) => {
+      await open(page, viewport, '?workout=replan-off');
+      const seen = await measure(page);
+      const names = seen.controls.map((each) => each.name);
+      expect(names).toContain('End workout');
+      expect(names).not.toContain(SWITCH_REPLANS_OFF);
+      expect(names).not.toContain('Keep the plan');
+      expect(names).not.toContain(REPLAN_SWITCH);
+      expect(seen.replansOffLine?.text).toContain(
+        'Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.',
+      );
+      expect(
+        foldMargin(seen.replansOffLine?.box.bottom ?? Infinity, viewport),
+      ).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    });
+  });
+}
+
+/**
+ * #1244's third review, #1329: **a rider with many saved workouts.** The
+ * switch used to follow the list, so with twelve workouts it was about 740 px
+ * below the fold. The owner ruled it ABOVE the list (2026-10-13): with twelve
+ * workouts the switch, its headline and the first *Ride* are all on the
+ * screen. The "Re-plans on" badge beside the heading was removed with the
+ * move and the owner ruled it BACK (2026-10-14, on #1332): it is shown on
+ * the heading's row while the switch is on, and the first *Ride*'s margin is
+ * the same number with it as without it. `?workouts=many` is that library.
+ *
+ * ⚠️ The badge is on the heading's row, which scrolls with the page: a rider
+ * who has scrolled past the top of a long list sees neither it nor the
+ * switch. Nothing here holds otherwise.
+ */
+for (const viewport of EASED_VIEWPORTS) {
+  test(`#1329 — many saved workouts — the switch, its headline and the first Ride are on the screen — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, `${REPLANS_AVAILABLE}&workouts=many`);
+    const off = await measure(page);
+    const rides = (seen: RideViewMeasurement) =>
+      seen.controls.filter((each) => each.group === 'trainer' && each.name.startsWith('Ride '));
+    const theSwitch = (seen: RideViewMeasurement) =>
+      seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH);
+    expect(rides(off)).toHaveLength(12);
+    const first = rides(off)[0];
+    const the = theSwitch(off);
+    const headline = off.replanDisclosure?.headline;
+    if (first === undefined || the === undefined || headline === undefined) {
+      throw new Error('no re-plan switch, headline or Ride control on the page');
+    }
+    expect(first.name).toBe(STARTS_A_WORKOUT);
+    const switchMargin = foldMargin(the.box.bottom, viewport);
+    const headlineMargin = foldMargin(headline.bottom, viewport);
+    const firstMargin = foldMargin(first.box.bottom, viewport);
+    const note =
+      `the switch ${switchMargin.toFixed(1)} px above the fold, its headline ` +
+      `${headlineMargin.toFixed(1)} px, the first Ride ${firstMargin.toFixed(1)} px — at ` +
+      `${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({ type: '#1329 many workouts', description: note });
+    console.log(`#1329 — many saved workouts — ${viewport.name} — ${note}`);
+
+    expect(onScreen(the, viewport), describeControl(the)).toBe(true);
+    expect(onScreen(first, viewport), describeControl(first)).toBe(true);
+    expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(firstMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    // The switch is above every workout, and the headline between.
+    expect(the.box.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
+    expect(headline.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
+    await page.evaluate(() => {
+      window.__oylRideView?.pressReplanSwitch();
+    });
+    const on = await measure(page);
+    expect(on.replanDisclosure?.switchedOn).toBe(true);
+    expect(on.replanDisclosure?.sentences).toHaveLength(8);
+    expect(rides(on)[0]?.box.top).toBe(first.box.top);
+    expect(theSwitch(on)?.box.top).toBe(the.box.top);
+    // #1244's badge, restored on #1332: shown once, on the heading's row, and
+    // the first Ride's margin is the same number with it as without it.
+    expect(off.replansOnLine).toBeUndefined();
+    expect(await page.getByText('Re-plans on', { exact: true }).count()).toBe(1);
+    expectBadgeOnTheHeadingRow(on, viewport);
+    const onMargin = foldMargin(rides(on)[0]?.box.bottom ?? Infinity, viewport);
+    expect(onMargin, note).toBe(firstMargin);
+    expect(onMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+}
+
+test(`#1329 — the control — the rest of the disclosure above the list puts the first Ride under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, REPLANS_AVAILABLE);
+  const marginOf = (seen: RideViewMeasurement): number =>
+    foldMargin(
+      seen.controls.find((each) => each.group === 'trainer' && each.name === STARTS_A_WORKOUT)?.box
+        .bottom ?? Infinity,
+      viewport,
+    );
+  const fixed = marginOf(await measure(page));
+  await page.evaluate(() => {
+    window.__oylRideView?.restOfDisclosureAboveTheList();
+  });
+  const moved = await measure(page);
+  const reverted = marginOf(moved);
+  const note = `the first Ride ${fixed.toFixed(1)} px above the fold → ${reverted.toFixed(1)} px with the rest of the disclosure above the list`;
+  testInfo.annotations.push({ type: '#1329 control', description: note });
+  console.log(`#1329 — the control — ${viewport.name} — ${note}`);
+  // The apparatus: the control did move the text above the list.
+  const starts = moved.controls.find(
+    (each) => each.group === 'trainer' && each.name === STARTS_A_WORKOUT,
+  );
+  expect(moved.replanDisclosure?.rest.bottom ?? Infinity).toBeLessThanOrEqual(
+    (starts?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+  );
+  // The fold is at 768 here: 800 less the 32 px bar.
+  expect(viewport.height - insetsOf(viewport).bottom).toBe(768);
+  expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+});
+
+/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+function hexOf(rgb: string): string {
+  const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
+  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
+  return `#${channels
+    .slice(1, 4)
+    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/** `theme.css` §`--oyl-space-sm`: the gap the trimmed card keeps between its lines. */
+const TRIMMED_GAP_PIXELS = 8;
+/** `design/tokens.ts` §`FONT_SIZE_TOKENS.sm`, in rem. */
+const SMALL_SIZE_REM = 0.8;
+/** `theme.css`: the line height of the range sentence and of the headline. */
+const CLOSE_SET = 1.3;
+
+/**
+ * #1329, the owner's ruling of 2026-10-13 on #1332: **the trainer card,
+ * trimmed**, so that the first *Ride* clears the fold by the full
+ * {@link FOLD_MARGIN_PIXELS} with the switch and its headline above the list
+ * and the headline at the body size.
+ *
+ * ## What is held, and why not by the fold alone
+ *
+ * The floor is one number for five rules, and on a Mac's fonts the first
+ * *Ride* has 34.8 px to spare over it (13.2 px on the CI runner's): put any
+ * ONE trim back and it still clears on a Mac. The first review of #1332 found
+ * exactly that, a listed mutation that left every case green. So each trim is
+ * held by what it IS, which no font changes:
+ *
+ * - the control sentence 8 px under *Trainer*, the ERG line 8 px under it,
+ *   the form 8 px under the ERG line;
+ * - the range sentence at `--oyl-font-size-sm`, close-set, and its ink at
+ *   WCAG AA for text against what is painted behind it, light and dark;
+ * - the chooser's heading straight on top of the switch's row, the headline
+ *   straight under it, and the list 8 px under the headline;
+ * - the headline at the size of the sentences under the list.
+ *
+ * ## The controls
+ *
+ * `trainerCardUntrimmed(which)` puts ONE trim back on the live elements, and
+ * the first *Ride* must come down by what that trim is worth; with no
+ * argument it puts all of them back, and the first *Ride* must fall under the
+ * floor at {@link TABLET_IN_THE_SHELL}. A trim that a later change removes
+ * from `theme.css` fails twice: its own number, and a control that then moves
+ * nothing.
+ */
+test.describe(`#1329 — the trainer card, trimmed — ${TABLET_IN_THE_SHELL.name}`, () => {
+  const viewport = TABLET_IN_THE_SHELL;
+  const firstRide = (seen: RideViewMeasurement): number =>
+    foldMargin(
+      seen.controls.find((each) => each.group === 'trainer' && each.name === STARTS_A_WORKOUT)?.box
+        .bottom ?? Infinity,
+      viewport,
+    );
+
+  test('its three gaps are 8 px, the range sentence is small and close-set, and the headline is the body size', async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, REPLANS_AVAILABLE);
+    const seen = await measure(page);
+    const card = seen.trainerCard;
+    const hint = card?.rangeHint;
+    if (card?.ergLine === undefined || card.form === undefined || hint === undefined) {
+      throw new Error('no trainer card with an ERG form and its range sentence on the page');
+    }
+    const headline = seen.replanDisclosure?.headline;
+    if (
+      card.chooserHeading === undefined ||
+      card.switchRow === undefined ||
+      card.chooserList === undefined ||
+      headline === undefined
+    ) {
+      throw new Error('no chooser heading, re-plan switch, headline and list on the page');
+    }
+    const gaps = {
+      underHeading: card.controlSentence.top - card.heading.bottom,
+      underControlSentence: card.ergLine.top - card.controlSentence.bottom,
+      underErgLine: card.form.top - card.ergLine.bottom,
+      headingToSwitch: card.switchRow.top - card.chooserHeading.bottom,
+      switchToHeadline: headline.top - card.switchRow.bottom,
+      headlineToList: card.chooserList.top - headline.bottom,
+    };
+    const lineHeight = hint.box.height / hint.lines;
+    const note =
+      `Trainer → control sentence ${gaps.underHeading.toFixed(1)} px → ERG line ` +
+      `${gaps.underControlSentence.toFixed(1)} px → form ${gaps.underErgLine.toFixed(1)} px; the range ` +
+      `sentence ${hint.fontPixels.toFixed(1)} px on ${String(hint.lines)} lines of ` +
+      `${lineHeight.toFixed(1)} px (${hint.box.height.toFixed(1)} px tall); Ride a workout → the switch's row ` +
+      `${gaps.headingToSwitch.toFixed(1)} px → the headline ${gaps.switchToHeadline.toFixed(1)} px → ` +
+      `the list ${gaps.headlineToList.toFixed(1)} px; the headline ` +
+      `${(seen.replanDisclosure?.headlineFontPixels ?? 0).toFixed(1)} px, ` +
+      `${headline.height.toFixed(1)} px tall; the first Ride ` +
+      `${firstRide(seen).toFixed(1)} px above the fold`;
+    testInfo.annotations.push({ type: '#1329 the trainer card', description: note });
+    console.log(`#1329 — the trainer card — ${viewport.name} — ${note}`);
+
+    expect(hint.text).toMatch(/^This trainer accepts /);
+    expect(Math.abs(gaps.underHeading - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    expect(Math.abs(gaps.underControlSentence - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    expect(Math.abs(gaps.underErgLine - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    expect(Math.abs(gaps.headingToSwitch), note).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    // The chooser's own spacing (#1329's first pass): the headline straight
+    // under the switch's row, and the list 8 px under the headline.
+    expect(Math.abs(gaps.switchToHeadline), note).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    expect(Math.abs(gaps.headlineToList - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    // The small size is the token's, a step under the body and no smaller.
+    expect(hint.fontPixels, note).toBeCloseTo(SMALL_SIZE_REM * hint.rootFontPixels, 1);
+    expect(lineHeight, note).toBeCloseTo(CLOSE_SET * hint.fontPixels, 0);
+    // The headline is what the eight sentences under the list are: the body.
+    expect(seen.replanDisclosure?.headlineFontPixels, note).toBe(hint.rootFontPixels);
+    expect(seen.replanDisclosure?.headlineFontPixels, note).toBe(
+      seen.replanDisclosure?.restFontPixels,
+    );
+    // Nothing in the card lies over anything else in it.
+    expect(card.form.bottom).toBeLessThanOrEqual(card.chooserHeading.top + SUBPIXEL_TOLERANCE);
+    expect(hint.box.bottom).toBeLessThanOrEqual(card.form.bottom + SUBPIXEL_TOLERANCE);
+  });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`the small range sentence meets AA for text against its background — ${scheme}`, async ({
+      page,
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const hint = (await measure(page)).trainerCard?.rangeHint;
+      if (hint === undefined) throw new Error('no range sentence on the page');
+      const ratio = contrastRatio(hexOf(hint.colour), hexOf(hint.background));
+      const note = `${hint.colour} on ${hint.background}, ${ratio.toFixed(2)}:1 at ${hint.fontPixels.toFixed(1)} px — ${scheme}`;
+      testInfo.annotations.push({ type: '#1329 the range sentence', description: note });
+      console.log(`#1329 — the range sentence — ${note}`);
+      // The apparatus: the two schemes are two palettes, and what is painted
+      // behind the sentence is the trainer group's own background in each.
+      expect(hint.background).toBe(scheme === 'dark' ? 'rgb(18, 24, 22)' : 'rgb(255, 255, 255)');
+      expect(ratio, note).toBeGreaterThanOrEqual(AA_TEXT);
+    });
+  }
+
+  /** What each trim is worth to the first *Ride*, at least, on any fonts. */
+  const TRIMS = [
+    // 12 px over the control sentence, 4 px under it, 8 px under the ERG line.
+    { which: 'gaps', atLeast: 24 - SUBPIXEL_TOLERANCE },
+    // Three lines of 24.8 px to two of 16.6 px on both measured font sets;
+    // three of 16.6 px, were it ever three, is still 24.5 px.
+    { which: 'hint', atLeast: 24 },
+    { which: 'chooser-heading', atLeast: 8 - SUBPIXEL_TOLERANCE },
+    // 4 px a line: two lines on a Mac's fonts, three on the CI runner's.
+    { which: 'headline', atLeast: 8 - SUBPIXEL_TOLERANCE },
+  ] as const;
+
+  for (const { which, atLeast } of TRIMS) {
+    test(`the control — the ${which} trim put back alone lowers the first Ride`, async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const trimmed = firstRide(await measure(page));
+      await page.evaluate((trim) => {
+        window.__oylRideView?.trainerCardUntrimmed(trim);
+      }, which);
+      const untrimmed = firstRide(await measure(page));
+      const note = `the first Ride ${trimmed.toFixed(1)} px above the fold → ${untrimmed.toFixed(1)} px with the ${which} trim put back`;
+      testInfo.annotations.push({ type: '#1329 trim control', description: note });
+      console.log(`#1329 — the control — ${which} — ${note}`);
+      expect(trimmed - untrimmed, note).toBeGreaterThanOrEqual(atLeast);
+    });
+  }
+
+  test('the control — the card untrimmed puts the first Ride under the floor', async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, REPLANS_AVAILABLE);
+    const trimmed = firstRide(await measure(page));
+    await page.evaluate(() => {
+      window.__oylRideView?.trainerCardUntrimmed();
+    });
+    const untrimmed = firstRide(await measure(page));
+    const note = `the first Ride ${trimmed.toFixed(1)} px above the fold → ${untrimmed.toFixed(1)} px with the trainer card untrimmed`;
+    testInfo.annotations.push({ type: '#1329 trim control', description: note });
+    console.log(`#1329 — the control — untrimmed — ${note}`);
+    expect(viewport.height - insetsOf(viewport).bottom).toBe(768);
+    expect(trimmed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(untrimmed, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+  });
+});
+
+/**
+ * #1329 (the review of #1332): **the saved workouts could not be read, with
+ * the list still on the page.** `WorkoutPanel` then says so in a warning
+ * between the re-plan switch and the list, where on `main` it was between the
+ * heading and the list. `?workouts=fault` is that state.
+ *
+ * Held at {@link TABLET_IN_THE_SHELL}: the switch, its headline and the
+ * warning are on the screen with no scrolling, in that order, none over
+ * another, and the list starts under the warning.
+ *
+ * ⚠️ **The first *Ride* is NOT held to the floor here, and it does not clear
+ * it.** The warning is 106 px tall on a Mac's fonts with a paragraph's margin
+ * under it, and it pushes the first *Ride* below the fold. What is held is
+ * that the page scrolls far enough to reach it, and the margin is published.
+ * A rider in this state has just been told their workouts could not be read;
+ * the control that starts one is a scroll away, and the trainer's own
+ * controls above it are where they were.
+ */
+test(`#1329 — saved workouts could not be read — the switch, its headline and the warning are on the screen — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, `${REPLANS_AVAILABLE}&workouts=fault`);
+  const seen = await measure(page);
+  expect(seen.scrollY).toBe(0);
+  const trainer = seen.controls.filter((each) => each.group === 'trainer');
+  const theSwitch = trainer.find((each) => each.name === REPLAN_SWITCH);
+  const starts = trainer.find((each) => each.name === STARTS_A_WORKOUT);
+  const headline = seen.replanDisclosure?.headline;
+  const warning = seen.loadFaultLine;
+  if (
+    theSwitch === undefined ||
+    starts === undefined ||
+    headline === undefined ||
+    warning === undefined
+  ) {
+    throw new Error('no re-plan switch, headline, warning or Ride control on the page');
+  }
+  expect(warning.text).toContain(
+    'Your saved workouts could not be read on this device. You can still ride without one.',
+  );
+  const switchMargin = foldMargin(theSwitch.box.bottom, viewport);
+  const headlineMargin = foldMargin(headline.bottom, viewport);
+  const warningMargin = foldMargin(warning.box.bottom, viewport);
+  const startsMargin = foldMargin(starts.box.bottom, viewport);
+  const note =
+    `the switch ${switchMargin.toFixed(1)} px above the fold, its headline ` +
+    `${headlineMargin.toFixed(1)} px, the warning (${warning.box.height.toFixed(0)} px tall) ` +
+    `${warningMargin.toFixed(1)} px; the first Ride ${startsMargin.toFixed(1)} px ` +
+    `(${startsMargin >= 0 ? 'on the screen' : 'BELOW the fold, a scroll away'}); the page scrolls ` +
+    `${seen.pageOverflow.toFixed(0)} px`;
+  testInfo.annotations.push({ type: '#1329 the load fault', description: note });
+  console.log(`#1329 — saved workouts could not be read — ${viewport.name} — ${note}`);
+
+  expect(onScreen(theSwitch, viewport), describeControl(theSwitch)).toBe(true);
+  expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  // The warning is whole on the screen and nothing is drawn over it.
+  expect(warning.onTop, note).toBe(true);
+  expect(warning.box.top).toBeGreaterThanOrEqual(insetsOf(viewport).top);
+  expect(warningMargin, note).toBeGreaterThanOrEqual(0);
+  // In order, and none over another: switch, headline, warning, list.
+  expect(theSwitch.box.bottom).toBeLessThanOrEqual(headline.top + SUBPIXEL_TOLERANCE);
+  expect(headline.bottom).toBeLessThanOrEqual(warning.box.top + SUBPIXEL_TOLERANCE);
+  expect(warning.box.bottom).toBeLessThanOrEqual(starts.box.top + SUBPIXEL_TOLERANCE);
+  // The first Ride is reachable: the page scrolls at least as far as it lies
+  // under the fold. It is not held to the floor in this state (see above).
+  expect(seen.pageOverflow, note).toBeGreaterThanOrEqual(-startsMargin);
+  // Every other ride control is on the screen: the warning moved none of them.
+  const during = seen.controls.filter(
+    (each) => each.group !== 'sensors' && !each.name.startsWith('Ride '),
+  );
+  expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+});
 
 /**
  * #740 (#655's review, N1): a HAND-SET target the stall rescue has eased, with
@@ -1317,7 +2073,7 @@ for (const viewport of [
   TABLET_IN_THE_SHELL,
   TABLET_UPRIGHT_IN_THE_SHELL,
 ] as const) {
-  test(`#1012 — nothing paired: ONE banner and one Pair a sensor, on the screen — ${viewport.name}`, async ({
+  test(`#1012 — nothing paired: ONE banner and one Pair a trainer or a sensor, on the screen — ${viewport.name}`, async ({
     page,
   }, testInfo) => {
     await open(page, viewport, '?sensors=none');
@@ -1327,7 +2083,8 @@ for (const viewport of [
     expect(seen.readings, 'the four tiles are still there').toEqual([]);
     expect(banner?.links).toBe(1);
     // #1021: named for what it pairs (WCAG 2.4.4).
-    expect(banner?.link.name).toBe('Pair a sensor');
+    // #1442: and the screen's one way to Devices, so it names the trainer too.
+    expect(banner?.link.name).toBe('Pair a trainer or a sensor');
     expect(banner?.link.onTop, 'Pair is covered').toBe(true);
     expect(banner?.link.box.height ?? 0).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
     // After every ride control in its column (#692): it stands where the
@@ -1608,4 +2365,969 @@ test(`#1042 — the control — the card after the readings puts Done under the 
   console.log(`#1042 — the control — ${note}`);
   expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+});
+
+/**
+ * #1307 — the running workout's graph on the Ride screen.
+ *
+ * Since the owner's ruling of 2026-10-12 the graph is a group of its own,
+ * after the trainer group in the document, and `theme.css` §"THE WORKOUT'S
+ * GRAPH ON THE RIDE SCREEN" decides where it is drawn:
+ *
+ * - landscape: under the readings — across the Live group's two columns at
+ *   1280×800, across the whole width under both groups at 1024×768 — with
+ *   its lanes SIDE BY SIDE;
+ * - upright: under the trainer group in its column, lanes stacked.
+ *
+ * It is in the page's own flow at every size. Two claims need a browser:
+ *
+ * 1. **At 1280×800 the whole graph is on screen without scrolling**, in the
+ *    states whose notice used to push it under the fold.
+ * 2. **At 1024×768 it lies over NO text** — no control, no notice, no trainer
+ *    or workout sentence — and the page scrolls to it. It may be under the
+ *    fold there. ⚠️ A third pass pinned it to the bottom of the screen
+ *    (`position: sticky`), and with the *Eased* notice standing it lay over
+ *    "Holding 0 W.": a picture must never cover a sentence that says what the
+ *    trainer holds.
+ *
+ * The fixtures (`rideview-harness.tsx` §`GRAPH_FIXTURES`): a hold that is
+ * running, a target raised to the trainer's minimum, a target that steps, and
+ * — `?workout=eased` — a trainer holding 0 W where the plan asks 225 W.
+ */
+interface GraphBox {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface GraphLane {
+  readonly name: string;
+  readonly box: GraphBox;
+  readonly caption: GraphBox;
+  readonly captionText: readonly string[];
+  readonly captionFontSize: number;
+  readonly svg: GraphBox;
+  readonly well: GraphBox;
+  readonly marks: readonly {
+    readonly name: string;
+    readonly box: GraphBox;
+    readonly paint: string;
+  }[];
+  readonly chips: readonly {
+    readonly text: string;
+    readonly box: GraphBox;
+    readonly fontSize: number;
+    readonly colour: string;
+  }[];
+}
+
+async function graphOnTheRideScreen(page: Page) {
+  return page.evaluate(() => {
+    const boxOf = (element: Element): GraphBox => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const group = document.querySelector('.oyl-ride__group--graph');
+    const frame = group?.querySelector('[data-oyl-workout-graph="panel"] [role="img"]');
+    const live = document.querySelector('.oyl-ride__group--live');
+    const trainer = document.querySelector('.oyl-ride__group--trainer');
+    const clock = document.querySelector('.oyl-ride__clock');
+    const end = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent === 'End workout',
+    );
+    if (!group || !frame || !live || !trainer || !clock || !end) return undefined;
+    const key = group.querySelector('.oyl-workout-graph__key');
+    /** How far down a group's own content reaches: its box is stretched to its grid row. */
+    const contentBottom = (element: Element): number =>
+      Math.max(...[...element.children].map((child) => child.getBoundingClientRect().bottom));
+    const lanes: GraphLane[] = [...frame.querySelectorAll('[data-oyl-lane]')].map((lane) => {
+      const caption = lane.querySelector('.oyl-workout-graph__caption');
+      const svg = lane.querySelector('svg');
+      const well = lane.querySelector('.oyl-workout-graph__well');
+      if (!caption || !svg || !well) throw new Error('a lane is missing a part');
+      return {
+        name: lane.getAttribute('data-oyl-lane') ?? '',
+        box: boxOf(lane),
+        caption: boxOf(caption),
+        captionText: [...caption.querySelectorAll('span')].map((each) => each.textContent ?? ''),
+        captionFontSize: Number.parseFloat(getComputedStyle(caption).fontSize),
+        svg: boxOf(svg),
+        well: boxOf(well),
+        marks: [...svg.querySelectorAll('path')].map((path) => {
+          const style = getComputedStyle(path);
+          return {
+            name: path.getAttribute('class') ?? '',
+            box: boxOf(path),
+            paint: style.stroke === 'none' ? style.fill : style.stroke,
+          };
+        }),
+        chips: [...well.querySelectorAll('.oyl-workout-graph__scale')].map((chip) => {
+          const style = getComputedStyle(chip);
+          return {
+            text: chip.textContent ?? '',
+            box: boxOf(chip),
+            fontSize: Number.parseFloat(style.fontSize),
+            colour: style.color,
+          };
+        }),
+      };
+    });
+    const groupBox = boxOf(group);
+    // Everything on the Ride screen that carries text of its own — a
+    // control, a notice, a sentence, a heading, a reading — and that the
+    // graph's group lies over by more than a pixel.
+    const overText = [...document.querySelectorAll('.oyl-ride *')]
+      .filter((element) => !group.contains(element))
+      .filter((element) =>
+        [...element.childNodes].some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+        ),
+      )
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          Math.min(rect.bottom, groupBox.bottom) - Math.max(rect.top, groupBox.top) > 1 &&
+          Math.min(rect.right, groupBox.right) - Math.max(rect.left, groupBox.left) > 1
+        );
+      })
+      .map((element) => (element.textContent ?? '').trim().slice(0, 40));
+    // How wide each LINE of the sentence under the graph is, top to bottom.
+    const keyLines: number[] = [];
+    if (key !== null) {
+      const range = document.createRange();
+      range.selectNodeContents(key);
+      for (const rect of range.getClientRects()) {
+        keyLines.push(rect.width);
+      }
+    }
+    const reading = frame.querySelector('.oyl-workout-graph__reading');
+    return {
+      name: frame.getAttribute('aria-label') ?? '',
+      group: groupBox,
+      groupText: group.textContent ?? '',
+      frame: boxOf(frame),
+      frameBackground: getComputedStyle(frame).backgroundColor,
+      readingColour: reading ? getComputedStyle(reading).color : '',
+      // Whether anything in the frame is wider than the frame.
+      frameOverflow: frame.scrollWidth - frame.clientWidth,
+      live: boxOf(live),
+      liveContentBottom: contentBottom(live),
+      clock: boxOf(clock),
+      trainer: boxOf(trainer),
+      trainerContentBottom: contentBottom(trainer),
+      end: boxOf(end),
+      key: key === null ? undefined : boxOf(key),
+      keyText: key?.textContent ?? '',
+      keyFontSize: key === null ? 0 : Number.parseFloat(getComputedStyle(key).fontSize),
+      lanes,
+      overText,
+      keyLines,
+      position: getComputedStyle(group).position,
+      // Document order: live, trainer, the graph, sensors.
+      order: [...document.querySelectorAll('.oyl-ride > .oyl-ride__group')].map((each) =>
+        [...each.classList].find((name) => name.startsWith('oyl-ride__group--')),
+      ),
+      // What the panel's own sentences say, to hold the graph to them.
+      trainerText: trainer.textContent ?? '',
+      rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      theme: document.documentElement.dataset.theme,
+      viewportHeight: window.innerHeight,
+      scrollY: window.scrollY,
+      sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+}
+
+type GraphSeen = NonNullable<Awaited<ReturnType<typeof graphOnTheRideScreen>>>;
+
+/** How tall `theme.css` makes each lane's drawing where the lanes are STACKED, in rem. */
+const LANE_REM: Readonly<Record<string, number>> = { plan: 3.5, 'heart-rate': 4, trace: 5.5 };
+
+/** Landscape puts the lanes side by side; `theme.css` draws that line at 60rem. */
+const lanesSideBySide = (viewport: Viewport): boolean => viewport.width >= 960;
+
+/** What holds of the graph in EVERY state: where it is, and that each lane is legible. */
+function expectGraphLaidOut(seen: GraphSeen, viewport: Viewport): void {
+  expect(seen.name).toContain('Workout graph.');
+  // After the trainer group in the document, wherever it is drawn.
+  expect(seen.order).toEqual([
+    'oyl-ride__group--live',
+    'oyl-ride__group--trainer',
+    'oyl-ride__group--graph',
+    'oyl-ride__group--sensors',
+  ]);
+  // No wider than the screen, and nothing in it wider than it.
+  expect(seen.frame.width).toBeGreaterThan(200);
+  expect(seen.frame.left).toBeGreaterThanOrEqual(seen.group.left - 1);
+  expect(seen.frame.right).toBeLessThanOrEqual(seen.group.right + 1);
+  expect(seen.frame.right).toBeLessThanOrEqual(viewport.width);
+  expect(seen.sideways).toBeLessThanOrEqual(0);
+  expect(seen.frameOverflow).toBeLessThanOrEqual(0);
+  // ⚠️ The paragraph that walked the lanes top to bottom is gone (the owner's
+  // ruling): the lanes carry titles.
+  expect(seen.groupText).not.toMatch(/Top:|Middle:|Bottom:/);
+  // In the page's own flow, at every size: never pinned over what is above it.
+  expect(seen.position).toBe('static');
+  // What is said under the graph, when anything is, is under it and legible.
+  if (seen.keyLines.length > 1) {
+    // Two lines of a length, not one line and a last "W." on its own.
+    expect(seen.keyLines.at(-1) ?? 0).toBeGreaterThan((seen.keyLines[0] ?? 0) * 0.4);
+  }
+  if (seen.key !== undefined) {
+    if (viewport.width >= 1216) {
+      // ⚠️ Three columns: BESIDE the frame, in a column of its own, so that it
+      // adds nothing to the group's height however many lines it takes.
+      expect(seen.key.left).toBeGreaterThanOrEqual(seen.frame.right);
+      expect(seen.key.right).toBeLessThanOrEqual(seen.group.right + 1);
+      expect(Math.abs(seen.key.top - seen.frame.top)).toBeLessThanOrEqual(1);
+      expect(seen.key.width).toBeGreaterThan(150);
+    } else {
+      expect(seen.key.top).toBeGreaterThanOrEqual(seen.frame.bottom);
+    }
+    expect(seen.key.bottom).toBeLessThanOrEqual(seen.group.bottom + 1);
+    expect(seen.keyFontSize).toBeGreaterThanOrEqual(12);
+  }
+  const sideBySide = lanesSideBySide(viewport);
+  let above = seen.frame.top;
+  let before = seen.frame.left;
+  for (const lane of seen.lanes) {
+    // A caption — what the lane is and its numbers — then the drawing, in order.
+    expect(lane.captionText).toHaveLength(2);
+    expect(
+      lane.captionText.every((text) => text.length > 0),
+      lane.name,
+    ).toBe(true);
+    expect(lane.captionFontSize, lane.name).toBeGreaterThanOrEqual(12);
+    expect(lane.svg.top, lane.name).toBeGreaterThanOrEqual(lane.caption.bottom - 1);
+    expect(lane.caption.left, lane.name).toBeGreaterThanOrEqual(seen.frame.left);
+    expect(lane.caption.right, lane.name).toBeLessThanOrEqual(seen.frame.right);
+    expect(lane.caption.top, lane.name).toBeGreaterThanOrEqual(seen.frame.top);
+    // Wide enough to read as a drawing, in the narrowest lane of the fullest state.
+    expect(lane.svg.width, lane.name).toBeGreaterThan(100);
+    if (sideBySide) {
+      // Side by side, left to right, none over another, and every drawing the
+      // same height on one line — whatever a caption wraps to.
+      expect(lane.box.left, lane.name).toBeGreaterThanOrEqual(before - 1);
+      expect(
+        Math.abs(lane.svg.bottom - (seen.lanes[0]?.svg.bottom ?? 0)),
+        lane.name,
+      ).toBeLessThanOrEqual(1);
+      // 4rem where the fold is the owner's tablet's (three columns), 5rem at 1024.
+      expect(
+        Math.abs(lane.svg.height - (viewport.width >= 1216 ? 4 : 5) * seen.rem),
+        lane.name,
+      ).toBeLessThanOrEqual(1);
+      before = lane.box.right;
+    } else {
+      // Stacked: one above another, each its own height, sharing a left edge.
+      expect(lane.caption.top, lane.name).toBeGreaterThanOrEqual(above - 1);
+      expect(
+        Math.abs(lane.svg.height - (LANE_REM[lane.name] ?? 0) * seen.rem),
+        lane.name,
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(lane.svg.left - (seen.lanes[0]?.svg.left ?? 0)),
+        lane.name,
+      ).toBeLessThanOrEqual(0.5);
+      above = lane.svg.bottom;
+    }
+    for (const mark of lane.marks) {
+      expect(mark.box.left, mark.name).toBeGreaterThanOrEqual(lane.svg.left - 2);
+      expect(mark.box.right, mark.name).toBeLessThanOrEqual(lane.svg.right + 2);
+      expect(mark.box.top, mark.name).toBeGreaterThanOrEqual(lane.svg.top - 2);
+      expect(mark.box.bottom, mark.name).toBeLessThanOrEqual(lane.svg.bottom + 2);
+    }
+    for (const chip of lane.chips) {
+      expect(chip.fontSize, chip.text).toBeGreaterThanOrEqual(12);
+      // In the gutter LEFT of the drawing: a number never covers a mark.
+      expect(chip.box.left, chip.text).toBeGreaterThanOrEqual(lane.well.left - 1);
+      expect(chip.box.right, chip.text).toBeLessThanOrEqual(lane.svg.left);
+      expect(chip.box.top, chip.text).toBeGreaterThanOrEqual(lane.caption.bottom - 1);
+      expect(chip.box.bottom, chip.text).toBeLessThanOrEqual(seen.frame.bottom);
+    }
+    expect(lane.svg.bottom, lane.name).toBeLessThanOrEqual(seen.frame.bottom);
+  }
+  if (sideBySide) {
+    expect(before).toBeLessThanOrEqual(seen.frame.right + 1);
+  } else {
+    // Upright: under the trainer group, in its column, below *End workout*.
+    expect(seen.frame.left).toBeGreaterThanOrEqual(seen.trainer.left - 1);
+    expect(seen.frame.right).toBeLessThanOrEqual(seen.trainer.right + 1);
+    expect(seen.frame.top).toBeGreaterThanOrEqual(seen.trainerContentBottom - 1);
+    expect(seen.frame.top).toBeGreaterThanOrEqual(seen.end.bottom);
+    // DIRECTLY under it — its last margin and the grid’s gap, 40 px — and not pushed
+    // down the column by the taller Live group beside them.
+    expect(seen.frame.top - seen.trainerContentBottom).toBeLessThanOrEqual(3 * seen.rem);
+  }
+}
+
+const laneOf = (seen: GraphSeen, name: string): GraphLane => {
+  const lane = seen.lanes.find((each) => each.name === name);
+  if (lane === undefined) {
+    throw new Error(`no ${name} lane — drew: ${seen.lanes.map((each) => each.name).join(', ')}`);
+  }
+  return lane;
+};
+
+const markOf = (lane: GraphLane, name: string): GraphBox => {
+  const found = lane.marks.find((each) => each.name === name);
+  if (found === undefined) {
+    throw new Error(
+      `no ${name} in the ${lane.name} lane — drew: ${lane.marks.map((each) => each.name).join(', ')}`,
+    );
+  }
+  return found.box;
+};
+
+const namesOf = (lane: GraphLane): readonly string[] => lane.marks.map((each) => each.name);
+
+async function openGraph(page: Page, viewport: Viewport, state: string): Promise<GraphSeen> {
+  await open(page, viewport, `?workout=${state}`);
+  const seen = await graphOnTheRideScreen(page);
+  if (seen === undefined) {
+    throw new Error(`the Ride screen drew no workout graph for ?workout=${state}`);
+  }
+  return seen;
+}
+
+for (const viewport of EASED_VIEWPORTS) {
+  test(`the running workout’s graph is drawn, each lane with its numbers — #1307 — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const seen = await openGraph(page, viewport, 'running');
+    expectGraphLaidOut(seen, viewport);
+    expect(seen.name).toContain('Target the trainer last confirmed: 225 W.');
+    // Two lanes outside a hold, each with its numbers.
+    expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'trace']);
+    expect(laneOf(seen, 'plan').captionText).toEqual(['Whole workout', '5:12 of 12:00']);
+    expect(laneOf(seen, 'trace').captionText[0]).toBe('Last 5 min');
+    expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^Target 225 W · You \d+ W$/);
+    // Nothing needs explaining, so nothing is said under the graph.
+    expect(seen.key).toBeUndefined();
+    // Drawn: the plan ridden and to come, now, the target and the power.
+    const plan = laneOf(seen, 'plan');
+    const trace = laneOf(seen, 'trace');
+    expect(markOf(plan, 'oyl-workout-graph__done').height).toBeGreaterThan(2);
+    expect(markOf(plan, 'oyl-workout-graph__now').height).toBeGreaterThan(2);
+    expect(markOf(trace, 'oyl-workout-graph__target').height).toBeGreaterThan(2);
+    expect(markOf(trace, 'oyl-workout-graph__power').height).toBeGreaterThan(2);
+    // ⚠️ The plan's bars use the lane: this workout's only target is 90 % of
+    // threshold, and it is drawn 85 % of the lane tall — not 72 %, which is
+    // what the block chart's fixed 125 % scale made of it.
+    expect(markOf(plan, 'oyl-workout-graph__done').height / plan.svg.height).toBeGreaterThan(0.8);
+    // No unexplained mark: the threshold rule is not drawn, and nothing is held instead.
+    expect(namesOf(plan)).not.toContain('oyl-block-chart__rule');
+    expect(namesOf(plan).filter((name) => /asked|held/.test(name))).toEqual([]);
+    // The scale's two ends are written beside the last lane, top above bottom.
+    expect(trace.chips.map((chip) => chip.text)).toEqual(['280 W', '170 W']);
+    expect(trace.chips[0]?.box.bottom ?? 0).toBeLessThan(trace.chips[1]?.box.top ?? 0);
+    console.log(
+      `#1307 the workout graph — ${viewport.name}: ${seen.frame.width.toFixed(1)} × ${seen.frame.height.toFixed(1)} px at y = ${seen.frame.top.toFixed(1)}`,
+    );
+  });
+}
+
+/**
+ * The ruling: on the owner's tablet the whole graph is on screen, without
+ * scrolling — in the states whose notice used to push it under the fold, and
+ * in the four the third review added.
+ *
+ * ⚠️ **At `TABLET_IN_THE_SHELL`, not at a bare 1280×800.** This file's header
+ * records the device: 1280×800 with the system bars OVER the page, so the
+ * fold is `height − bottom inset`, 768. The fourth pass asserted this at the
+ * bare viewport, where the eased state passed with its sentence 8 px under
+ * the system bar and the raised one 28 px.
+ */
+const LANDSCAPE_STATES = [
+  'running',
+  'holding',
+  'hold',
+  'eased',
+  'raised',
+  'paused',
+  'paused-hold',
+  'refused',
+  'lost',
+] as const;
+
+for (const state of LANDSCAPE_STATES) {
+  test(`the whole graph is on screen without scrolling — #1307 — ?workout=${state} — ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    const viewport = TABLET_IN_THE_SHELL;
+    const insets = insetsOf(viewport);
+    const fold = viewport.height - insets.bottom;
+    const seen = await openGraph(page, viewport, state);
+    expect(seen.scrollY).toBe(0);
+    expect(seen.viewportHeight).toBe(viewport.height);
+    // The apparatus: this IS the device's fold, not the window's edge.
+    expect(fold).toBe(768);
+    // ⚠️ The GROUP: the frame, every lane in it, and the sentence beside it.
+    expect(seen.group.top).toBeGreaterThanOrEqual(insets.top);
+    expect(seen.group.bottom).toBeLessThanOrEqual(fold);
+    if (seen.key !== undefined) {
+      expect(seen.key.bottom).toBeLessThanOrEqual(fold);
+    }
+    for (const lane of seen.lanes) {
+      expect(lane.svg.bottom, lane.name).toBeLessThanOrEqual(fold);
+      if (seen.key === undefined) {
+        // Every caption on ONE line — in a hold too, where there are three.
+        // (Beside a sentence the lanes are narrower and a long caption wraps.)
+        expect(lane.caption.height, `${lane.name} caption`).toBeLessThanOrEqual(
+          1.7 * lane.captionFontSize,
+        );
+      }
+    }
+    // Larger than it was in the trainer's 360 px column.
+    expect(seen.group.width).toBeGreaterThan(700);
+    // Under the readings: from the Live group's left edge, under all of it,
+    // ending left of the trainer group — and over nothing.
+    expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
+    expect(seen.group.right).toBeLessThanOrEqual(seen.trainer.left);
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
+    expect(seen.overText).toEqual([]);
+    console.log(
+      `#1307 the graph on screen — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)}, ${(fold - seen.group.bottom).toFixed(1)} px clear of the fold at ${String(fold)}`,
+    );
+  });
+}
+
+/**
+ * ⚠️ On wider fonts. The three captions of a PAUSED hold are the longest
+ * there are, and what fits on a Mac did not fit on the CI runner, whose fonts
+ * are wider: one layout wrapped the plan lane's caption there, and another
+ * left the heart-rate lane 98 px of drawing. Both were green where they were
+ * written. So the same case is measured again and again with the captions'
+ * letters spaced further apart, until a caption wraps:
+ *
+ * - it must NOT wrap as it is, nor at 0.02em (about 4 % wider) — a margin;
+ * - at every width it fits, every lane must still have a drawing over 110 px
+ *   wide. That is the heart-rate lane's floor in `theme.css`, which only
+ *   binds once the other captions have taken the spare width.
+ *
+ * ⚠️ A SEARCH, not one fixed width. Three fixed widths were written first,
+ * and each was right for one machine's fonts and wrong for the other's.
+ * Measured on a Mac: the captions fit up to 0.09em and wrap at 0.11em.
+ */
+test(`a paused hold’s three captions stay on one line each on wider fonts — #1307 — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, '?workout=paused-hold');
+  const fitted: number[] = [];
+  let narrowest = Infinity;
+  for (const spacing of [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14]) {
+    await page.evaluate((em) => {
+      const id = 'oyl-test-wider-captions';
+      const style = document.getElementById(id) ?? document.createElement('style');
+      style.id = id;
+      style.textContent = `.oyl-workout-graph__caption { letter-spacing: ${String(em)}em; }`;
+      document.head.append(style);
+    }, spacing);
+    const seen = await graphOnTheRideScreen(page);
+    if (seen === undefined) throw new Error('no workout graph');
+    expect(seen.lanes).toHaveLength(3);
+    if (seen.lanes.some((lane) => lane.caption.height > 1.7 * lane.captionFontSize)) {
+      break;
+    }
+    fitted.push(spacing);
+    for (const lane of seen.lanes) {
+      expect(lane.svg.width, `${lane.name} at ${String(spacing)}em`).toBeGreaterThan(110);
+      narrowest = Math.min(narrowest, lane.svg.width);
+    }
+    expect(seen.frameOverflow).toBeLessThanOrEqual(0);
+    expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height - insetsOf(viewport).bottom);
+  }
+  // As it is, and 4 % wider. The search went on past that, or it found nothing.
+  expect(fitted.slice(0, 2)).toEqual([0, 0.02]);
+  expect(fitted.length).toBeLessThan(8);
+  console.log(
+    `#1307 a paused hold’s captions — ${viewport.name}: one line each up to ${String(fitted.at(-1))}em of letter-spacing; narrowest drawing ${narrowest.toFixed(1)} px`,
+  );
+});
+
+/**
+ * The same states at the 4:3 shell size this suite assumes (1024×720, fold
+ * 688): published, not asserted. Under the fold there is accepted — the
+ * owner's ruling is for 1280×800 — and this is here so that what "under the
+ * fold" means there is a number in every run and not a guess.
+ */
+test(`where the graph is at the 4:3 shell size, state by state — #1307 — ${SMALL_TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}) => {
+  const viewport = SMALL_TABLET_IN_THE_SHELL;
+  const fold = viewport.height - insetsOf(viewport).bottom;
+  for (const state of LANDSCAPE_STATES) {
+    const seen = await openGraph(page, viewport, state);
+    // In the flow and over nothing, here as everywhere.
+    expect(seen.overText).toEqual([]);
+    expect(seen.position).toBe('static');
+    console.log(
+      `#1307 the graph at the 4:3 shell — ?workout=${state}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)}, fold at ${String(fold)}: ${seen.group.top >= fold ? 'wholly under the fold' : `${(fold - seen.group.top).toFixed(1)} px of it on screen`}`,
+    );
+  }
+});
+
+/**
+ * 1024×768: two columns, and no room on screen for the graph once a notice
+ * stands. It is under both groups, in the flow, and may be under the fold.
+ * What is held is that it lies over nothing, and that it can be scrolled to.
+ */
+for (const state of LANDSCAPE_STATES) {
+  test(`the graph lies over no text, and the page scrolls to it — #1307 — ?workout=${state} — ${SMALL_TABLET.name}`, async ({
+    page,
+  }) => {
+    const viewport = SMALL_TABLET;
+    const seen = await openGraph(page, viewport, state);
+    expect(seen.scrollY).toBe(0);
+    // ⚠️ No control, no notice, no sentence, no heading, no reading.
+    expect(seen.overText).toEqual([]);
+    // Under BOTH groups — below the last thing either of them says — and
+    // across both columns.
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.trainerContentBottom);
+    expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(seen.group.right - seen.trainer.right)).toBeLessThanOrEqual(1);
+    expect(seen.group.width).toBeGreaterThan(700);
+    // The page scrolls to it: brought to the foot of the screen, all of it is on screen…
+    const scrolled = await page.evaluate(() => {
+      const group = document.querySelector('.oyl-ride__group--graph');
+      group?.scrollIntoView({ block: 'end' });
+      const rect = group?.getBoundingClientRect();
+      return { top: rect?.top ?? -1, bottom: rect?.bottom ?? Infinity, scrollY: window.scrollY };
+    });
+    expect(scrolled.top).toBeGreaterThanOrEqual(0);
+    expect(scrolled.bottom).toBeLessThanOrEqual(viewport.height + SUBPIXEL_TOLERANCE);
+    // …and, scrolled, it still lies over nothing.
+    expect((await graphOnTheRideScreen(page))?.overText).toEqual([]);
+    console.log(
+      `#1307 the graph in the flow — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)} of ${String(viewport.height)} (${seen.group.bottom > viewport.height ? `${(seen.group.bottom - viewport.height).toFixed(1)} px under the fold` : 'on screen'}); scrolled ${scrolled.scrollY.toFixed(0)} px to bring it on`,
+    );
+  });
+}
+
+/** The states, one by one, at the owner's tablet both ways up. */
+const GRAPH_STATE_VIEWPORTS: readonly Viewport[] = [
+  TABLET_IN_THE_SHELL,
+  TABLET_UPRIGHT_IN_THE_SHELL,
+];
+
+for (const viewport of GRAPH_STATE_VIEWPORTS) {
+  test.describe(`the running workout’s graph, state by state — #1307 — ${viewport.name}`, () => {
+    test('a trainer eased to 0 W: the plan’s height stays drawn, and 0 W is not on the lane’s bottom line', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'eased');
+      expectGraphLaidOut(seen, viewport);
+      const plan = laneOf(seen, 'plan');
+      const trace = laneOf(seen, 'trace');
+      // What the plan asks for the rest of the block: an outline, at the
+      // height of the part already ridden, from now to the end.
+      const asked = markOf(plan, 'oyl-workout-graph__asked');
+      const done = markOf(plan, 'oyl-workout-graph__done');
+      const now = markOf(plan, 'oyl-workout-graph__now');
+      expect(asked.height).toBeGreaterThan(plan.svg.height * 0.8);
+      expect(Math.abs(asked.top - done.top)).toBeLessThanOrEqual(1.5);
+      expect(asked.left).toBeGreaterThanOrEqual((now.left + now.right) / 2 - 2);
+      expect(asked.right).toBeGreaterThan(plan.svg.right - 3);
+      // At 0 W there is no step to shade.
+      expect(namesOf(plan).filter((name) => name.includes('held'))).toEqual([]);
+      // The 0 W target is a step with a height, its edge clear of the lane's bottom line.
+      const edge = markOf(trace, 'oyl-workout-graph__target-edge');
+      expect(trace.well.bottom - edge.bottom).toBeGreaterThanOrEqual(4);
+      expect(markOf(trace, 'oyl-workout-graph__target').height).toBeGreaterThanOrEqual(4);
+      expect(trace.captionText[1]).toMatch(/^Target 0 W \(plan asks 225 W\) · You \d+ W$/);
+      expect(trace.chips.at(-1)?.text).toBe('0 W');
+      // The one sentence under the graph, and nothing else.
+      expect(seen.keyText).toBe(
+        'At the line, the dashed outline is what the plan asks for now, 225\u00a0W. The trainer confirmed 0\u00a0W instead, so nothing is shaded.',
+      );
+    });
+
+    test('a target raised to the trainer’s minimum: what it holds, shaded, over what the plan asks, outlined — and the blocks to come as planned', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'raised');
+      expectGraphLaidOut(seen, viewport);
+      const plan = laneOf(seen, 'plan');
+      const asked = markOf(plan, 'oyl-workout-graph__asked');
+      const held = markOf(plan, 'oyl-workout-graph__held');
+      const edge = markOf(plan, 'oyl-workout-graph__held-edge');
+      // 100 W held where 75 W is asked: the shaded step is the taller, over the same stretch.
+      expect(held.height).toBeGreaterThan(asked.height + 2);
+      expect(Math.abs(held.left - asked.left)).toBeLessThanOrEqual(2);
+      expect(Math.abs(held.right - asked.right)).toBeLessThanOrEqual(2);
+      expect(Math.abs(edge.top - held.top)).toBeLessThanOrEqual(2);
+      // The block still to come is filled, as the plan asks, to the lane's end,
+      // and taller than either: 60 % against 30 %.
+      const toCome = plan.marks.filter((mark) => mark.name.startsWith('oyl-block-chart__band-'));
+      expect(toCome).toHaveLength(1);
+      expect(toCome[0]?.box.left ?? 0).toBeGreaterThanOrEqual(asked.right - 2);
+      expect(toCome[0]?.box.right ?? 0).toBeGreaterThan(plan.svg.right - 3);
+      expect(toCome[0]?.box.height ?? 0).toBeGreaterThan(held.height + 4);
+      expect(laneOf(seen, 'trace').captionText[1]).toMatch(
+        /^Target 100 W \(plan asks 75 W\) · You \d+ W$/,
+      );
+      expect(seen.name).toContain(
+        'Target the trainer last confirmed: 100 W, where the plan asks for 75 W.',
+      );
+      expect(seen.keyText).toBe(
+        'At the line, the dashed outline is what the plan asks for now, 75\u00a0W. The shaded step is what the trainer confirmed instead, 100\u00a0W.',
+      );
+    });
+
+    test('a target that steps: the steps use the lane, and the plan shows every interval', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'stepped');
+      expectGraphLaidOut(seen, viewport);
+      const trace = laneOf(seen, 'trace');
+      // 138 W and 263 W inside the window: the target's edge spans most of the lane.
+      const edge = markOf(trace, 'oyl-workout-graph__target-edge');
+      expect(edge.height / trace.svg.height).toBeGreaterThan(0.5);
+      expect(edge.width).toBeGreaterThan(trace.svg.width * 0.95);
+      expect(markOf(trace, 'oyl-workout-graph__power').height / trace.svg.height).toBeGreaterThan(
+        0.5,
+      );
+      expect(trace.captionText[1]).toMatch(/^Target 263 W · You \d+ W$/);
+      const [top, bottom] = trace.chips.map((chip) => Number.parseInt(chip.text, 10));
+      expect(top ?? 0).toBeGreaterThanOrEqual(263);
+      expect(bottom ?? Infinity).toBeLessThanOrEqual(138);
+      expect(bottom ?? 0).toBeGreaterThan(90);
+      // An ordinary block: nothing is marked as held instead, and nothing is said.
+      const plan = laneOf(seen, 'plan');
+      expect(namesOf(plan).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(seen.name).not.toContain('asks for');
+      expect(seen.key).toBeUndefined();
+      // The hardest interval is 85 % of the lane.
+      const bands = plan.marks.filter((mark) => mark.name.startsWith('oyl-block-chart__band-'));
+      expect(Math.max(...bands.map((mark) => mark.box.height)) / plan.svg.height).toBeGreaterThan(
+        0.8,
+      );
+    });
+
+    test('a heart-rate hold that is running: three lanes, heart rate against its range — and the hold’s own target is NOT marked as held instead', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'holding');
+      expectGraphLaidOut(seen, viewport);
+      expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'heart-rate', 'trace']);
+      const lane = laneOf(seen, 'heart-rate');
+      const band = markOf(lane, 'oyl-workout-graph__range');
+      const line = markOf(lane, 'oyl-workout-graph__heart-rate');
+      // The band is a band, not a hairline, and the line moves through it.
+      expect(band.height).toBeGreaterThanOrEqual(12);
+      expect(band.width).toBeGreaterThan(lane.svg.width * 0.95);
+      expect(line.height).toBeGreaterThan(band.height);
+      expect(markOf(lane, 'oyl-workout-graph__range-edge').height).toBeGreaterThanOrEqual(12);
+      expect(lane.captionText[0]).toBe('Heart rate');
+      expect(lane.captionText[1]).toMatch(/^1[34]\d bpm$/);
+      // The range's two edges, in bpm, each written beside its own edge of the band.
+      expect(lane.chips.map((chip) => chip.text)).toEqual(['140', '130']);
+      const middleOf = (chip: { readonly box: GraphBox } | undefined): number =>
+        ((chip?.box.top ?? 0) + (chip?.box.bottom ?? 0)) / 2;
+      expect(Math.abs(middleOf(lane.chips[0]) - band.top)).toBeLessThanOrEqual(2);
+      expect(Math.abs(middleOf(lane.chips[1]) - band.bottom)).toBeLessThanOrEqual(2);
+      expect(seen.name).toMatch(/Heart rate: 1[34]\d bpm, with a chosen range of 130–140 bpm\./);
+      // The target the hold set, easing in the lane underneath.
+      expect(
+        markOf(laneOf(seen, 'trace'), 'oyl-workout-graph__target-edge').height,
+      ).toBeGreaterThan(4);
+      // ⚠️ The owner's ruling. The hold holds 119 W where the block started at
+      // 125 W: that is the workout doing what it was asked. No dashed outline,
+      // no shaded step, no "(plan asks …)", no clause in the name, no sentence.
+      expect(namesOf(laneOf(seen, 'plan')).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^Target 119 W · You \d+ W$/);
+      expect(seen.name).toContain('Target the trainer last confirmed: 119 W.');
+      expect(seen.name).not.toContain('asks for');
+      expect(seen.key).toBeUndefined();
+    });
+
+    test('paused: the caption says what the trainer holds NOW, as the panel does, and nothing is marked', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'paused');
+      expectGraphLaidOut(seen, viewport);
+      // The panel's own sentence, and the graph's caption: one number.
+      expect(seen.trainerText).toContain('Holding 50 W.');
+      expect(laneOf(seen, 'trace').captionText[1]).toBe('Paused · Target 50 W · You 0 W');
+      // ⚠️ Not the newest sample's 225 W, which is what is still DRAWN.
+      expect(seen.groupText).not.toContain('225');
+      expect(markOf(laneOf(seen, 'trace'), 'oyl-workout-graph__target').height).toBeGreaterThan(2);
+      expect(seen.name).toContain('Workout graph. Paused.');
+      expect(seen.name).toContain('Target the trainer last confirmed: 50 W.');
+      expect(seen.name).not.toContain('asks for');
+      expect(namesOf(laneOf(seen, 'plan')).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(seen.key).toBeUndefined();
+    });
+
+    test('paused inside a heart-rate hold: the same, with the heart rate now', async ({ page }) => {
+      const seen = await openGraph(page, viewport, 'paused-hold');
+      expectGraphLaidOut(seen, viewport);
+      expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'heart-rate', 'trace']);
+      expect(seen.trainerText).toContain('Holding 50 W.');
+      expect(laneOf(seen, 'trace').captionText[1]).toBe('Paused · Target 50 W · You 0 W');
+      expect(laneOf(seen, 'heart-rate').captionText[1]).toBe('124 bpm');
+      expect(seen.name).not.toContain('asks for');
+      expect(namesOf(laneOf(seen, 'plan')).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(seen.key).toBeUndefined();
+    });
+
+    test('a block whose target was not sent: outlined at what the plan asks, nothing shaded, and said so', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'refused');
+      expectGraphLaidOut(seen, viewport);
+      // The panel's own sentence for it (#1305).
+      expect(seen.trainerText).toContain('so no target was sent for it');
+      const plan = laneOf(seen, 'plan');
+      expect(markOf(plan, 'oyl-workout-graph__asked').height).toBeGreaterThan(4);
+      expect(namesOf(plan).filter((name) => name.includes('held'))).toEqual([]);
+      // No confirmed target anywhere in the last lane either: only the power.
+      const trace = laneOf(seen, 'trace');
+      expect(namesOf(trace).filter((name) => name.includes('target'))).toEqual([]);
+      expect(markOf(trace, 'oyl-workout-graph__power').width).toBeGreaterThan(10);
+      expect(trace.captionText[1]).toMatch(/^No target sent \(plan asks 75 W\) · You \d+ W$/);
+      expect(seen.name).toContain('No target was sent for this block, which asks for 75 W.');
+      expect(seen.name).not.toContain('confirmed');
+      expect(seen.keyText).toBe(
+        'At the line, the dashed outline is what the plan asks for now, 75 W. No target was sent for it, so nothing is shaded.',
+      );
+    });
+
+    test('control lost: no target is stated, nothing is "confirmed instead", and the plan lane is the plan', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'lost');
+      expectGraphLaidOut(seen, viewport);
+      // The panel says it can no longer vouch for the number…
+      expect(seen.trainerText).toContain('The trainer was last set to 150 W.');
+      expect(seen.trainerText).not.toContain('Holding 150 W.');
+      // …and the graph states no target: 150 W where the plan asks 250 W is
+      // NOT drawn or said as something the trainer confirmed instead.
+      expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^No target · You \d+ W$/);
+      const plan = laneOf(seen, 'plan');
+      expect(namesOf(plan).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(
+        plan.marks.filter((mark) => mark.name.startsWith('oyl-block-chart__band-')).length,
+      ).toBe(1);
+      expect(seen.key).toBeUndefined();
+      expect(seen.name).toContain('Target the trainer last confirmed: 150 W.');
+      expect(seen.name).not.toContain('asks for');
+    });
+  });
+}
+
+test('the running workout’s graph in the dark theme: the frame, the numbers and the marks are the dark palette’s — #1307', async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const seen = await openGraph(page, TABLET, 'holding');
+  expect(seen.theme).toBe('dark');
+  expectGraphLaidOut(seen, TABLET);
+  // `tokens.ts` §DARK_COLOUR_TOKENS: surface, ink, inkMuted, accent, surfaceRaised.
+  const SURFACE = 'rgb(25, 32, 31)';
+  const INK = 'rgb(228, 235, 233)';
+  const INK_MUTED = 'rgb(169, 183, 181)';
+  expect(seen.frameBackground).toBe(SURFACE);
+  expect(seen.readingColour).toBe(INK);
+  const paints = new Map(
+    seen.lanes.flatMap((lane) => lane.marks.map((mark) => [mark.name, mark.paint] as const)),
+  );
+  expect(paints.get('oyl-workout-graph__now')).toBe(INK);
+  expect(paints.get('oyl-workout-graph__heart-rate')).toBe(INK);
+  expect(paints.get('oyl-workout-graph__target-edge')).toBe(INK);
+  expect(paints.get('oyl-workout-graph__range-edge')).toBe(INK_MUTED);
+  expect(paints.get('oyl-workout-graph__done')).toBe(INK_MUTED);
+  expect(paints.get('oyl-workout-graph__power')).toBe('rgb(108, 201, 189)');
+  expect(paints.get('oyl-workout-graph__range')).toBe('rgb(34, 42, 41)');
+  for (const chip of seen.lanes.flatMap((lane) => lane.chips)) {
+    expect(chip.colour, chip.text).toBe(INK_MUTED);
+  }
+});
+
+/*
+ * #1430 — Lap and Stop are never neighbours, and the confirmation is not
+ * where Stop was.
+ *
+ * Lap is pressed most often mid-ride, and until #1430 it stood between Pause
+ * and Stop. Measured here, at every width this screen is laid out at: the
+ * running row is Lap, then Pause (or Resume, paused), then Stop, on ONE line,
+ * with the middle control's box between the other two — so a row that wrapped
+ * Stop under Lap would fail rather than pass on document order alone. And the
+ * second step is not under the first: the centre of *Stop* is not inside *Yes,
+ * stop the ride* once the stop is armed, so a double tap on Stop does not
+ * confirm it.
+ */
+interface RowBox {
+  readonly name: string;
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+async function liveRow(page: Page): Promise<readonly RowBox[]> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '.oyl-ride__group--live .oyl-ride__actions button',
+      ),
+    ].map((each) => {
+      const box = each.getBoundingClientRect();
+      return {
+        name: (each.textContent ?? '').trim(),
+        left: box.left,
+        right: box.right,
+        top: box.top + window.scrollY,
+        bottom: box.bottom + window.scrollY,
+      };
+    }),
+  );
+}
+
+for (const viewport of READING_VIEWPORTS) {
+  for (const paused of [false, true]) {
+    test(`#1430 — Lap and Stop are never neighbours, ${paused ? 'paused' : 'recording'} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await open(page, viewport, paused ? '?ride=paused' : '');
+      const row = await liveRow(page);
+      console.log(
+        `#1430 ${paused ? 'paused' : 'recording'} — ${viewport.name}: ${row
+          .map(
+            (each) =>
+              `${each.name} ${each.left.toFixed(0)}–${each.right.toFixed(0)} @${each.top.toFixed(0)}`,
+          )
+          .join(', ')}`,
+      );
+      expect(row.map((each) => each.name)).toEqual(['Lap', paused ? 'Resume' : 'Pause', 'Stop']);
+      const [lap, middle, stop] = row;
+      if (lap === undefined || middle === undefined || stop === undefined) {
+        throw new Error('the row is not three controls');
+      }
+      // One line: a wrapped row could put Stop straight under Lap.
+      expect(Math.abs(stop.top - lap.top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(middle.top - lap.top)).toBeLessThanOrEqual(1);
+      // The middle control's box stands between them.
+      expect(middle.left).toBeGreaterThanOrEqual(lap.right);
+      expect(stop.left).toBeGreaterThanOrEqual(middle.right);
+    });
+  }
+
+  test(`#1430 — the confirmation is not where Stop was — ${viewport.name}`, async ({ page }) => {
+    await open(page, viewport, '?ride=paused');
+    const stop = (await liveRow(page)).find((each) => each.name === 'Stop');
+    await open(page, viewport, '?ride=armed');
+    const yes = await page.evaluate(() => {
+      const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+        (each) => (each.textContent ?? '').trim() === 'Yes, stop the ride',
+      );
+      if (button === undefined) return undefined;
+      const box = button.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top + window.scrollY,
+        bottom: box.bottom + window.scrollY,
+      };
+    });
+    if (stop === undefined || yes === undefined) {
+      throw new Error('no Stop on the paused ride, or no Yes, stop the ride once armed');
+    }
+    const x = (stop.left + stop.right) / 2;
+    const y = (stop.top + stop.bottom) / 2;
+    const under = x >= yes.left && x <= yes.right && y >= yes.top && y <= yes.bottom;
+    expect(under, 'a second tap on Stop would land on Yes, stop the ride').toBe(false);
+  });
+}
+
+/**
+ * #1433 — the zoom: the rider's top two readings at `--oyl-font-size-zoom`.
+ *
+ * The acceptance criterion is a size a rider can read in a glance of under
+ * two seconds, measured at a phone and a tablet. What is measured is the ink
+ * of a digit in the font the page loaded — `rideview-harness.tsx`
+ * §`digitHeightOf` — against `MetricGrid.tsx` §`ZOOMED_DIGIT_FLOOR_PIXELS`,
+ * ISO 15008's 20 arcmin at two metres. Each reading is at the widest it can
+ * be (`?readings=widest`, 1888 W) and must still fit its card, and the
+ * top-ranked one — the reading the zoom exists for — must be on the first
+ * screen, clear of the bars. The second is published, and on the shortest
+ * phone it is below the fold, where a rider scrolls to it.
+ *
+ * ⚠️ **Not the first at 320×568, where it is published and not held.** There
+ * the zoom has a line of its own under Lap, Pause and Stop, and the first card
+ * ended 2.6 px above the fold in the pinned Chromium on a Mac — a margin the
+ * CI runner's wider system fonts in the controls above it can take away.
+ */
+const ZOOM_VIEWPORTS: readonly Viewport[] = [
+  { name: 'the narrowest phone — 320×568', width: 320, height: 568 },
+  { name: 'a phone — 360×800', width: 360, height: 800 },
+  { name: 'a phone — 412×915', width: 412, height: 915 },
+  TABLET_UPRIGHT_IN_THE_SHELL,
+  SMALL_TABLET_IN_THE_SHELL,
+  TABLET_IN_THE_SHELL,
+];
+
+for (const viewport of ZOOM_VIEWPORTS) {
+  test(`#1433 — zoomed, the top two readings are drawn to the glance floor and fit their cards${viewport.height <= 568 ? '' : ', and the first is on the screen'} — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?readings=widest&zoom=on');
+    const seen = await measure(page);
+    const fold = viewport.height - insetsOf(viewport).bottom;
+    const note = seen.readings
+      .map(
+        (each) =>
+          `${each.label}: digit ${each.digitHeight.toFixed(1)} px (floor ${ZOOMED_DIGIT_FLOOR_PIXELS.toFixed(1)}), ` +
+          `${each.reading.width.toFixed(0)} px in ${each.card.width.toFixed(0)} px, ` +
+          `${(fold - each.card.bottom).toFixed(1)} px above the fold`,
+      )
+      .join('; ');
+    testInfo.annotations.push({ type: '#1433 zoomed readings', description: note });
+    console.log(`#1433 — zoomed — ${viewport.name} — ${note}`);
+
+    expect(
+      seen.readings.map((each) => each.label),
+      note,
+    ).toEqual(['Power', 'Cadence']);
+    for (const each of seen.readings) {
+      expect(each.digitHeight, note).toBeGreaterThanOrEqual(ZOOMED_DIGIT_FLOOR_PIXELS);
+      expect(each.spill, `${each.label} spills out of its card — ${note}`).toBeLessThanOrEqual(0);
+      expect(each.reading.right, `${each.label} — ${note}`).toBeLessThanOrEqual(
+        each.contentRight + SUBPIXEL_TOLERANCE,
+      );
+    }
+    if (viewport.height <= 568) return;
+    const first = seen.readings[0];
+    expect(first?.card.top ?? -1, note).toBeGreaterThanOrEqual(insetsOf(viewport).top);
+    expect(first?.card.bottom ?? Infinity, note).toBeLessThanOrEqual(fold + SUBPIXEL_TOLERANCE);
+  });
+}
+
+test('#1433 — the control — unzoomed, a reading’s digit is under the glance floor', async ({
+  page,
+}) => {
+  // The apparatus: the same measurement over the ordinary metric size must
+  // fail the floor, or "every zoomed digit clears it" would be as true of a
+  // measurement that returned anything large.
+  await open(page, { name: 'a phone — 412×915', width: 412, height: 915 }, '?readings=widest');
+  const seen = await measure(page);
+  expect(seen.readings).toHaveLength(4);
+  for (const each of seen.readings) {
+    expect(each.digitHeight).toBeGreaterThan(0);
+    expect(each.digitHeight).toBeLessThan(ZOOMED_DIGIT_FLOOR_PIXELS);
+  }
 });

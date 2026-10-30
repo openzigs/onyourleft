@@ -152,8 +152,15 @@ export const NOTICES_INPUTS = 'third-party-notices.json';
 /**
  * The plugin: `enforce: 'post'`, so every other plugin has emitted what it is
  * going to by the time this reads the bundle.
+ *
+ * `reportStale: false` is the demo build's (#1645): the list is the product's,
+ * and a build that ships less of it (no pose runtime; no renderer until the
+ * player arrives) still may not ship anything the list does not name.
  */
-export function copiedIntoBuild(root: string): Plugin {
+export function copiedIntoBuild(
+  root: string,
+  { reportStale = true }: { readonly reportStale?: boolean } = {},
+): Plugin {
   return {
     name: 'oyl-copied-into-build',
     apply: 'build',
@@ -178,7 +185,7 @@ export function copiedIntoBuild(root: string): Plugin {
           (file) =>
             `${file} is written out of a package and is not in ${NOTICES_INPUTS} §copiedIntoBuild`,
         ),
-        ...stale.map(
+        ...(reportStale ? stale : []).map(
           (file) =>
             `${file} is in ${NOTICES_INPUTS} §copiedIntoBuild and the build did not write it`,
         ),
@@ -187,7 +194,7 @@ export function copiedIntoBuild(root: string): Plugin {
             `${file} is somebody else's code its package vendors, bundled into a chunk, and is ` +
             `not in ${NOTICES_INPUTS} §vendoredIntoBundle`,
         ),
-        ...vendored.stale.map(
+        ...(reportStale ? vendored.stale : []).map(
           (file) =>
             `${file} is in ${NOTICES_INPUTS} §vendoredIntoBundle and the build did not bundle it`,
         ),

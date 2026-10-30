@@ -909,3 +909,20 @@ Following [ADR 0007](0007-patent-posture.md)'s model. None is *"are we safe"*.
   crank or position change, with no condition named, *"specific clinical action or medical
   management"* (D-11)? And under MDCG 2019-11, does recommending an equipment change from body
   angles move the product toward the musculoskeletal examples spike 0008 §7 names?
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-16** — **D-0's item 4 and its trunk precondition hold, by the one small ADR the owner
+  ruled for on 2026-10-04.**
+  [ADR 0052](0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md) D-5 records ADR
+  0044's acceptance, which is item 4, and its D-1 widens ADR 0033 D-3's phone-to-tablet list to
+  admit the phone's tilt message, which is the trunk precondition. Its D-2 to D-4 say what the
+  message carries (the gravity direction in the picture's axes, rounded to three places, keyed by
+  the picture's sequence number, and nothing else), its channel and rate, and what the tablet
+  refuses, all within D-4 above. **What still stands**: D-0 items 1 to 3, so no fit check ships;
+  and until [#1064](https://github.com/openzigs/onyourleft/issues/1064) builds the message, there is
+  no tilt to use, and the trunk reads *"not measured"* by D-4's own rules. (#1122)

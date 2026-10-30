@@ -6,6 +6,7 @@ import {
   ACTIVITY_DETAIL_ROUTE,
   ALL_ROUTES,
   CREDITS_ROUTE,
+  gameDeliveryFromHash,
   gameRouteFromHash,
   hrefFor,
   hrefForGameRoute,
@@ -203,6 +204,22 @@ describe('the trainer game with a route chosen — #1010', () => {
   });
 });
 
+describe('the trainer game’s developer route for a Delivery round — #1816', () => {
+  it('is still the game route, and asks for a round only with delivery=on', () => {
+    expect(routeForHash('#/game?delivery=on').id).toBe('game');
+    expect(gameDeliveryFromHash('#/game?delivery=on')).toBe(true);
+    expect(gameDeliveryFromHash('#/game?route=hill&delivery=on')).toBe(true);
+  });
+
+  it('asks for none with no query, another value, or another key', () => {
+    expect(gameDeliveryFromHash('#/game')).toBe(false);
+    expect(gameDeliveryFromHash('#/game?delivery=')).toBe(false);
+    expect(gameDeliveryFromHash('#/game?delivery=yes')).toBe(false);
+    expect(gameDeliveryFromHash('#/game?route=on')).toBe(false);
+    expect(gameDeliveryFromHash('')).toBe(false);
+  });
+});
+
 describe('routeById', () => {
   it.each(ALL_ROUTES)('finds $id', (route) => {
     expect(routeById(route.id)).toEqual(route);
@@ -231,6 +248,24 @@ describe('the table itself', () => {
         route.summary.length,
         `${route.id}: “${route.summary}” is longer than one line`,
       ).toBeLessThanOrEqual(MAXIMUM_SUMMARY_CHARACTERS);
+    }
+  });
+
+  it('promises of no route that everything stays on this device — #1244’s review', () => {
+    // The Ride screen's note said exactly that, and stopped being true of it
+    // when a rider could switch on re-plans a few lines above. A note is a
+    // privacy statement kept on the screen: none may say more than holds in
+    // every state of its screen.
+    const ride = ALL_ROUTES.find((route) => route.id === 'ride');
+    expect(ride?.notes).toStrictEqual([
+      'Recorded on this device. Nothing is sent unless you switched that on.',
+    ]);
+    for (const route of ALL_ROUTES) {
+      for (const note of route.notes ?? []) {
+        expect(note, `${route.id}: “${note}”`).not.toMatch(
+          /everything (here )?stays on this device/i,
+        );
+      }
     }
   });
 
@@ -346,5 +381,20 @@ describe('which routes are read and which are operated (#422)', () => {
     expect(ALL_ROUTES.filter((route) => route.layout === 'dashboard').map((r) => r.id)).toEqual([
       'home',
     ]);
+  });
+});
+
+describe("Settings' note does not claim nothing is sent — #1333", () => {
+  it('says each sending setting says so', () => {
+    expect(routeById('settings').notes ?? []).toEqual([
+      'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+    ]);
+  });
+
+  // Its own test (PR #1334's review): a later rewording of the sentence pinned
+  // above must not take the guard on the old claim with it.
+  it('never says that nothing here is sent anywhere, however it is reworded', () => {
+    const said = [routeById('settings').summary, ...(routeById('settings').notes ?? [])].join(' ');
+    expect(said).not.toMatch(/nothing( here)? is sent/i);
   });
 });

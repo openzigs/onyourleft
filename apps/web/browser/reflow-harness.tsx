@@ -67,6 +67,16 @@
  *
  * `?chooser=as-shipped` is #1028's: Analysis' ride chooser 8rem wide with its
  * name allowed to wrap, as it shipped ({@link applyChooserControl}).
+ *
+ * ## A refused release — #1133
+ *
+ * `?release=refused` hands the game a trainer whose last release was not
+ * confirmed ({@link REFUSED_RELEASE}), so the chooser draws its *Not released*
+ * notice — marked kept-visible, and above the first control on purpose (#940,
+ * #372). `&kept=unrelated` is that fixture's control: the chooser's
+ * *Your trainer* sentence, which is not safety text, marked kept-visible too
+ * ({@link markAnUnrelatedSentence}), which the controls-first gate must still
+ * fail.
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -76,7 +86,7 @@ import { flushSync } from 'react-dom';
 import { viewGroupsLoaded } from './views-loaded';
 
 import { unixSeconds } from '@onyourleft/domain';
-import { activityId, openActivityStore, routeId } from '@onyourleft/store';
+import { activityId, openActivityStore, routeId, type ActivityStore } from '@onyourleft/store';
 
 import { tabbableElements } from '../src/a11y/audit';
 import { Button } from '../src/design/Button';
@@ -95,6 +105,9 @@ import {
 } from '../src/shell/routes';
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
+import type { GameTrainerPort } from '../src/game/trainer-port';
+import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import { idleSnapshot, stubRideController } from '../src/ride/testing';
 import {
   AVAILABLE_BLUETOOTH,
   EMPTY_STATES,
@@ -195,6 +208,14 @@ export interface ReflowMeasurement {
     readonly shortestLink: number | null;
     /** The narrowest card link's width — a 44 px target both ways (#1041's review). */
     readonly narrowestLink: number | null;
+    /**
+     * Each card's *Delete* (#1431): drawn tertiary since a delete can be undone
+     * from Recently deleted, and still a 44 px target both ways — its smallest
+     * height and width, and how many are not tertiary.
+     */
+    readonly shortestDelete: number | null;
+    readonly narrowestDelete: number | null;
+    readonly deletesNotTertiary: number;
     /**
      * The most lines any card's facts reading's numerals are laid out on — 1
      * unless one wraps — and how far the furthest spills past its own fact's
@@ -387,10 +408,10 @@ async function realMap(): Promise<MapPort> {
  */
 const TRANSFER_RIDES = 3;
 
-function transferPort(populated: boolean): TransferPort {
+function transferPort(store: ActivityStore): TransferPort {
   const now = unixSeconds(Math.floor(Date.now() / 1000));
   return {
-    store: openActivityStore(`oyl-reflow-harness-${populated ? 'populated' : 'empty'}`),
+    store,
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(crypto.randomUUID()),
     newRouteId: () => routeId(crypto.randomUUID()),
@@ -400,17 +421,23 @@ function transferPort(populated: boolean): TransferPort {
     save: () => undefined,
     drafts: { forget: () => undefined },
     instance: { forget: () => undefined },
+    instanceAnalysis: { forget: () => undefined },
+    trainerTargets: { forget: () => undefined },
     theme: { forget: () => undefined },
-    hostedModel: { forget: () => undefined },
+    retiredHostedKey: { forget: () => undefined },
     athleteRow: localAthleteRecord(now),
   };
 }
 
-async function fillTransferStore(port: TransferPort): Promise<void> {
-  await port.store.ensureAthlete(port.athleteRow);
+/**
+ * Through the store itself rather than the port: the port is what the Files
+ * screen does to the store, and writing a ride with no samples is not that.
+ */
+async function fillTransferStore(store: ActivityStore, port: TransferPort): Promise<void> {
+  await store.ensureAthlete(port.athleteRow);
   for (let index = 0; index < TRANSFER_RIDES; index += 1) {
-    if ((await port.store.getActivity(port.athleteId, fixtureRide(index).id)) === undefined) {
-      await port.store.putActivity({ ...fixtureRide(index), athleteId: port.athleteId });
+    if ((await store.getActivity(port.athleteId, fixtureRide(index).id)) === undefined) {
+      await store.putActivity({ ...fixtureRide(index), athleteId: port.athleteId });
     }
   }
 }
@@ -576,16 +603,51 @@ const EXPECTATIONS: Record<RouteId, PopulatedExpectation> = {
   },
 };
 
+/**
+ * `?release=refused` — #1133. A ready trainer whose last release was not
+ * confirmed: the state in which the chooser stands *Not released* above
+ * *Ride*, so a rider sees the trainer may still hold a target before starting
+ * another ride. Nothing here is ever asked to control anything.
+ */
+const REFUSED_RELEASE: GameTrainerPort = {
+  askForControlOnRide: () => Promise.resolve(),
+  workoutRescue: () => undefined,
+  recordingMayStop: () => false,
+  gameRideEnded: () => undefined,
+  rideMovingSeconds: () => undefined,
+  watchRide: () => () => undefined,
+  readTrainer: () => ({
+    kind: 'ready',
+    releaseFault: RELEASE_INCOMPLETE,
+    control: {
+      setSimulationParameters: () => Promise.resolve(),
+      letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+    },
+  }),
+};
+
 function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   const bluetooth = new URLSearchParams(window.location.search).get('bluetooth') === 'available';
+  const release = new URLSearchParams(window.location.search).get('release');
+  if (release !== null && release !== 'refused') {
+    throw new Error(`reflow harness: ?release must be "refused", not ${release}`);
+  }
   // #945's control: the router as it was before #945, every change of fragment
   // applied outside `startTransition` (`shell/useRoute.ts` §`RouteUpdates`).
   const synchronous = new URLSearchParams(window.location.search).get('routes') === 'synchronous';
+  // #1512: the shell as it is inside Android — it answers `MainActivity`'s back
+  // press — with no ride on, because the populated fixture's ride is recording
+  // and back does nothing during one.
+  const android = new URLSearchParams(window.location.search).get('shell') === 'android';
   return (
     <PopulatedShell
       populated={populated}
+      {...(android
+        ? { nativeShell: true, rideController: stubRideController(idleSnapshot()).controller }
+        : {})}
       {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
       {...(synchronous ? { routeUpdates: 'synchronous' as const } : {})}
+      {...(release === 'refused' ? { gameTrainer: REFUSED_RELEASE } : {})}
       transfer={transfer}
       map={realMap}
       basemap={{
@@ -743,12 +805,23 @@ function libraryCards(): ReflowMeasurement['library'] {
     link.getBoundingClientRect(),
   );
   const values = [...library.querySelectorAll('.oyl-activity-card__facts .oyl-reading__value')];
+  const deletes = [
+    ...library.querySelectorAll<HTMLElement>('.oyl-activity-cards > li button'),
+  ].filter((button) => (button.textContent ?? '').startsWith('Delete'));
+  const deleteBoxes = deletes.map((button) => button.getBoundingClientRect());
   return {
     cards: library.querySelectorAll('.oyl-activity-cards > li').length,
     columns,
     tables: library.querySelectorAll('table').length,
     shortestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.height)),
     narrowestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.width)),
+    shortestDelete:
+      deleteBoxes.length === 0 ? null : Math.min(...deleteBoxes.map((box) => box.height)),
+    narrowestDelete:
+      deleteBoxes.length === 0 ? null : Math.min(...deleteBoxes.map((box) => box.width)),
+    deletesNotTertiary: deletes.filter(
+      (button) => !button.classList.contains('oyl-button--tertiary'),
+    ).length,
     ...readingFit(values),
   };
 }
@@ -1377,6 +1450,12 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   if (new URLSearchParams(window.location.search).get('line') === 'before993') {
     putTheLineBack(route);
   }
+  if (
+    route.id === 'game' &&
+    new URLSearchParams(window.location.search).get('kept') === 'unrelated'
+  ) {
+    markAnUnrelatedSentence();
+  }
   await nextFrame();
   visited.add(route.id);
   // Read through a `Partial` view on purpose: the spec's "no entry" fault has
@@ -1591,6 +1670,22 @@ function applyShapeControl(): void {
 }
 
 /**
+ * `&kept=unrelated` — #1133's control. The chooser's *Your trainer* sentence
+ * (#503's promise) is not safety text, and it stands above the first control;
+ * marked kept-visible, the controls-first gate must fail the game for it even
+ * though *Not released* beside it is allowed there.
+ */
+function markAnUnrelatedSentence(): void {
+  const promise = [...document.querySelectorAll('.oyl-chooser p')].find((each) =>
+    (each.querySelector('.oyl-status__label')?.textContent ?? '').startsWith('Your trainer'),
+  );
+  if (promise === undefined) {
+    throw new Error('reflow harness: the chooser shows no "Your trainer" sentence to mark');
+  }
+  promise.setAttribute('data-oyl-kept-visible', '');
+}
+
+/**
  * `?illustration=tall` — #943's control. Every empty state's drawing at half
  * the viewport's height rather than its declared 48 px, so the spec's "the
  * action starts above the fold" must FAIL — at least on Activities — or it is
@@ -1676,9 +1771,12 @@ async function main(): Promise<void> {
   if (window.location.hash === '') {
     window.location.hash = '#/';
   }
-  const transfer = transferPort(data === 'populated');
+  const transferStore = openActivityStore(
+    `oyl-reflow-harness-${data === 'populated' ? 'populated' : 'empty'}`,
+  );
+  const transfer = transferPort(transferStore);
   if (data === 'populated') {
-    await fillTransferStore(transfer);
+    await fillTransferStore(transferStore, transfer);
   }
   flushSync(() => {
     createRoot(host).render(<StrictMode>{shell(data === 'populated', transfer)}</StrictMode>);

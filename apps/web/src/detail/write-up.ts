@@ -26,8 +26,21 @@
 
 import type { RideWriteUpRecord, RideWriteUpSourceRecord } from '@onyourleft/store';
 
-import { HOSTED_CONSENT } from '../camera/hosted-model';
 import { passedScreen, screenSavedWriteUp, type ScreenedWriteUp } from '@onyourleft/analysis';
+
+/** The section's heading. */
+export const WRITE_UP_HEADING = 'A write-up by your model';
+
+/**
+ * What a new write-up does to the one a ride has — #1439: behind the
+ * section's ⓘ (`detail/RideWriteUpSection.tsx`), because it explains the
+ * press rather than saying what leaves the device.
+ */
+export const WRITE_UP_REPLACES =
+  'A finished write-up replaces the one this ride has; an attempt that fails leaves it as it was.';
+
+/** What the live region says once a write-up is saved. */
+export const WRITE_UP_SAVED = 'The write-up is saved with this ride.';
 
 /**
  * ADR 0035 D-9 A, the framing shown above every write-up — the owner's
@@ -39,48 +52,14 @@ export const WRITE_UP_FRAMING_REST =
   'This app did not write it and cannot check it. It can be wrong. It is not medical advice.';
 
 /**
- * ADR 0035 D-9 B, the own-computer paragraph as the privacy policy carries it
- * (#802), as ADR 0035's 2026-09-29 amendment completed it (#845) — shown beside the ask control when the rider's own computer is
- * offered, so what will be sent is said where the press is, in the approved
- * words. Pinned against the ADR by `write-up.test.ts`.
+ * The fallback (#805, reworded by #1103 as #1104 drafted it): shown only
+ * where this browser cannot hold an instance sign-in, so nothing here can ask
+ * for a write-up. No link — the Connect screen cannot help in that browser —
+ * and no vendor, model or body word (ADR 0030, ADR 0031 D-4).
  */
-export const COMPUTER_SENDS_LEAD =
-  'A ride sent to your own computer, when you ask for an analysis.';
-export const COMPUTER_SENDS =
-  "When you press the button on a ride's page, that ride's numbers go to the computer you set up: " +
-  'heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you ' +
-  "set one, how long the ride lasted, its distance, and each section's gradient and total " +
-  'climb, and how it went section by section. If the side camera ' +
-  'filmed the ride, and you agreed to the camera, it also gets how a few measurements of your ' +
-  'riding position changed between the start and the end of filming. Never a picture. Nothing is ' +
-  'sent until you press the button, and nothing is sent in the background.';
-
-/**
- * ADR 0035 D-9 C, the hosted consent, as it stands beside the hosted ask on a
- * ride's page (#803, carried from #838's review, where only its first sentence
- * stood there): the headline, the three paragraphs and *"You do not need
- * this"*, word for word from `camera/hosted-model.ts` §`HOSTED_CONSENT`.
- *
- * ⚠️ **All but C's last sentence, on purpose.** *"This is off. It stays off
- * until you turn it on…"* describes the switch on the Camera page, and the
- * hosted ask is offered only while that switch is ON — so on this page it
- * would be false. `write-up.test.ts` pins the rest against the ADR, in order
- * and with nothing between.
- */
-export const HOSTED_SENDS: readonly string[] = [
-  HOSTED_CONSENT.headline,
-  ...HOSTED_CONSENT.paragraphs,
-  HOSTED_CONSENT.notNeeded,
-];
-
-/**
- * The fallback (#805): no model set up. One sentence, a link to where one can
- * be, and no vendor or model name (ADR 0031 D-4).
- */
-export const WRITE_UP_SET_UP_BEFORE =
-  'A model of your own can write about this ride. Set up a computer or a service on the';
-export const WRITE_UP_SET_UP_LINK = 'Camera page';
-export const WRITE_UP_SET_UP_AFTER = 'to ask it.';
+export const WRITE_UP_CANNOT_ASK_HERE =
+  'This browser cannot connect to an instance, so it cannot ask for a write-up of this ride. ' +
+  'Everything else works, and the write-ups already saved here stay.';
 
 /** A model is set up and nothing has been kept for this ride. Must not read like a write-up. */
 export const WRITE_UP_NOT_ASKED = 'This ride has no write-up yet.';
@@ -117,11 +96,50 @@ export const WRITE_UP_EARLIER_READING =
 export const WRITE_UP_EARLIER_NOT_READ =
   'This is the earlier write-up of this ride. The new one is saved, and shows when you open this ride again.';
 
-/** Where the write-up was asked, in words — never by colour alone. */
+/**
+ * Where the write-up was asked, in words — never by colour alone. `computer`
+ * and `hosted` are kept since #1103 removed those paths: they describe
+ * write-ups saved before it, which still render.
+ */
 export const WRITE_UP_SOURCE_TEXT: Readonly<Record<RideWriteUpSourceRecord, string>> = {
   computer: 'It was written by the model on your own computer.',
   hosted: 'It was written by a service you chose, on your own key.',
+  // #1102: a write-up asked of the rider's instance (ADR 0046 D-1).
+  'instance-local': 'It was written by the model on your instance.',
+  'instance-hosted': 'It was written by a service your instance sent it to.',
 };
+
+/**
+ * #1104's B3, the instance paragraph — what a write-up asked of the rider's
+ * instance sends, said beside the press (ADR 0046 D-6, D-7). It replaced the
+ * own-computer paragraph (ADR 0035 D-9 B) when #1103 removed that path.
+ *
+ * Approved by the owner on #1104 on 2026-10-09, with "summaries of older
+ * rides" added to the list. `write-up.test.ts` pins it word for word.
+ */
+export const INSTANCE_SENDS_LEAD =
+  'A ride analysed on your instance, when you ask for an analysis.';
+export const INSTANCE_SENDS =
+  "When you press the button on a ride's page, that ride's numbers go to your instance: heart " +
+  'rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set ' +
+  "one, how long the ride lasted, its distance, and each section's gradient and total climb, and " +
+  'how it went section by section. If the side camera filmed the ride, and you agreed to the ' +
+  'camera, it also gets how a few measurements of your riding position changed between the start ' +
+  'and the end of filming. Never a picture. Your instance writes the analysis with a model on its ' +
+  'own machine or its own private network, and the model may look up what is already on your instance: short summaries of ' +
+  'your recent rides, summaries of older rides, what you wrote about your goals, your notes and ' +
+  'documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the ' +
+  'button. Once you have pressed it, the analysis can finish while the app is closed.';
+
+/**
+ * #1104's B4, the ride page's no-instance sentence (ADR 0046 D-2), around a
+ * link to the Connect screen whose words are that route's title. Approved by
+ * the owner on #1104 on 2026-10-09, as written.
+ */
+export const WRITE_UP_NO_INSTANCE_BEFORE =
+  'A write-up of this ride is written on an instance you connect in';
+export const WRITE_UP_NO_INSTANCE_AFTER =
+  ', and without one everything else in the app works as before and the write-ups already saved here stay.';
 
 /** Whether the side camera's summary was part of what the model was sent. */
 export const WRITE_UP_POSE_TEXT: Readonly<Record<'included' | 'left-out', string>> = {

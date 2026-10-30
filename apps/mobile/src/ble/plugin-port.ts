@@ -109,6 +109,21 @@ export interface CapacitorBlePort {
   isEnabled(): Promise<boolean>;
 
   /**
+   * Open this app's page in Android's Settings — #1436: the way back after a
+   * permanent denial, where Android no longer shows its own dialog and only
+   * that page can grant Nearby devices again.
+   *
+   * ⚠️ **Not guarded by initialisation**, unlike every other call here: the
+   * plugin starts an Intent and touches no Bluetooth (`BluetoothLe.kt`
+   * §`openAppSettings`), which is the point — it is offered exactly when the
+   * stack could not be brought up.
+   */
+  openAppSettings(): Promise<void>;
+
+  /** Open Android's Bluetooth settings — #1436. Not guarded, as above. */
+  openBluetoothSettings(): Promise<void>;
+
+  /**
    * Show the system chooser.
    *
    * Rejects when the rider cancels, which the transport translates into
@@ -153,6 +168,20 @@ export interface CapacitorBlePort {
    * no properties anybody needs to read.
    */
   getServices(deviceId: string): Promise<readonly PluginService[]>;
+
+  /**
+   * How strongly the connected device is heard, in dBm — #1435's signal
+   * strength on the Devices screen.
+   *
+   * ⚠️ **Sends nothing to the device.** Android's
+   * `BluetoothGatt.readRemoteRssi()` asks the phone's OWN controller what it
+   * measured on the link (HCI Read RSSI); no attribute is read or written on
+   * the trainer, which is why it may be asked of one at all (CLAUDE.md §6).
+   * ⚠️ It does take a place in the plugin's one queue, which is why
+   * `apps/web/src/ride/signal-strength.ts` asks only while nothing is driving
+   * a trainer.
+   */
+  readRssi(deviceId: string): Promise<number>;
 
   disconnect(deviceId: string): Promise<void>;
 

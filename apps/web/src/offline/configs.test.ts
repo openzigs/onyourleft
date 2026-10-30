@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 
 import browserConfig from '../../vite.browser.config';
 import productConfig from '../../vite.config';
+import demoConfig from '../../vite.demo.config';
 
 /** The plugin the worker is built by, named once. */
 const WORKER_PLUGIN = 'oyl-service-worker';
@@ -59,5 +60,27 @@ describe('which build gets a service worker', () => {
   it('keeps the harness on its own root, which is what makes them two builds', () => {
     expect(browserConfig.root).toBe('browser');
     expect(productConfig.root).toBeUndefined();
+  });
+});
+
+describe('the demo build (#1645), which is embedded in other people’s pages', () => {
+  it('builds no service worker, which would outlive the visit on a stranger’s device', () => {
+    expect(pluginNames(demoConfig.plugins)).not.toContain(WORKER_PLUGIN);
+  });
+
+  it('copies none of public/ wholesale, which would bring the manifest', () => {
+    expect(demoConfig.publicDir).toBe(false);
+    expect(pluginNames(demoConfig.plugins)).toContain('oyl-demo-output');
+  });
+
+  it('is its own root, relative from any path, and checked for what it bundles', () => {
+    expect(demoConfig.root).toMatch(/[\\/]apps[\\/]web[\\/]demo$/);
+    expect(demoConfig.base).toBe('./');
+    expect(pluginNames(demoConfig.plugins)).toContain('oyl-demo-forbidden-modules');
+    expect(pluginNames(demoConfig.plugins)).toContain('oyl-demo-csp');
+  });
+
+  it('and the product build checks that none of the demo reached it', () => {
+    expect(pluginNames(productConfig.plugins)).toContain('oyl-demo-stays-out');
   });
 });

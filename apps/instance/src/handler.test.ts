@@ -246,12 +246,15 @@ describe('GET /instance — #777', () => {
     const instance = await start({ config: { name: 'Lanes of the Weald' } });
     const response = await fetch(`${instance.url}/instance`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ name: 'Lanes of the Weald' });
+    expect(await response.json()).toEqual({ name: 'Lanes of the Weald', termsVersion: null });
   });
 
   it('answers null, never an invented name, when none is configured', async () => {
     const instance = await start();
-    expect(await (await fetch(`${instance.url}/instance`)).json()).toEqual({ name: null });
+    expect(await (await fetch(`${instance.url}/instance`)).json()).toEqual({
+      name: null,
+      termsVersion: null,
+    });
   });
 });
 

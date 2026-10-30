@@ -3,16 +3,24 @@
 import type { JSX } from 'react';
 
 import { FullLogo } from '../brand/Brand';
+import type { InstancePort } from '../instance/instance-port';
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
+import {
+  buildReleaseChannel,
+  releaseChannelText,
+  type ReleaseChannel,
+} from '../support/release-channel';
+import { InstancePages } from './InstancePages';
+import { useInstanceKnown, whereRidesAreText } from './where-rides-are';
 
 /**
  * What this is and what it is not, in one place a link can point at.
  *
  * The browser limitation is explained on the Devices page, where an athlete
- * meets it. This page carries the two things that are true everywhere: there is
- * no account and no server, and the data is on this device only.
+ * meets it. This page carries where the data is — on this device, and on an
+ * instance only if the rider connects one and syncs (#1450).
  *
  * ⚠️ **This page has now said three different things about the network, and a
  * reviewer who remembers either of the first two is reading an old file.**
@@ -69,8 +77,32 @@ import { hrefFor, routeById } from '../shell/routes';
  *
  * Since #965 the page opens with the owner's full logo (`brand/Brand.tsx`);
  * its words are text.
+ *
+ * ## Which copy of the app this is — #1745
+ *
+ * In the Android app only, a section names the channel the copy came from —
+ * Google Play or the direct download — read from the build
+ * (`support/release-channel.ts`), and says the two cannot update each other
+ * and that switching means an uninstall that deletes the rides on the device.
+ * A browser has neither channel, so it is not shown there.
  */
-export function AboutView(): JSX.Element {
+export function AboutView({
+  instance,
+  nativeShell = false,
+  releaseChannel = buildReleaseChannel(),
+}: {
+  /**
+   * The rider's instance, for its own pages (#907): none, and the section is
+   * not shown. Since #1450 also asked whether there is one, for where the
+   * rides are.
+   */
+  readonly instance?: InstancePort | undefined;
+  /** Running inside the Android app rather than a browser — #1450, as History's #1438. */
+  readonly nativeShell?: boolean | undefined;
+  /** The channel this build was released through — #1745. The build's own, unless a test says otherwise. */
+  readonly releaseChannel?: ReleaseChannel | undefined;
+}): JSX.Element {
+  const instanceKnown = useInstanceKnown(instance);
   return (
     <>
       <FullLogo />
@@ -85,9 +117,10 @@ export function AboutView(): JSX.Element {
           <h2>Where your data lives</h2>
           <p>
             On this device. There is no account to create and no server to sign in to unless you
-            choose to connect to an instance, and nothing is uploaded — rides are recorded, stored
-            and read back locally, and they leave this device only when you export them yourself.
-            That is a deliberate choice rather than a missing feature.
+            choose to connect to an instance, and nothing is uploaded unless you sync with one —
+            rides are recorded, stored and read back locally, and they leave this device only when
+            you export them yourself, or sync them with an instance you connected to. That is a
+            deliberate choice rather than a missing feature.
           </p>
           <p>
             Your data is local, and so is the app. The first visit needs a connection, because that
@@ -96,11 +129,18 @@ export function AboutView(): JSX.Element {
             reading your history all do. The exception is the map&rsquo;s background imagery, which
             is fetched from the web when you look at it.
           </p>
-          <p>
-            The consequence is the honest one: clearing this browser&rsquo;s site data removes your
-            rides, and there is no copy anywhere else to restore from.
-          </p>
+          {/* #1450: it said "clearing this browser's site data removes your rides,
+            and there is no copy anywhere else", in the Android app too and with an
+            instance too. Now History's own sentence, per platform and per instance. */}
+          <p>{whereRidesAreText(nativeShell, instanceKnown)}</p>
         </div>
+
+        {nativeShell ? (
+          <div>
+            <h2>Which copy of the app this is</h2>
+            <p>{releaseChannelText(releaseChannel)}</p>
+          </div>
+        ) : null}
 
         <div>
           <h2>If the app closes mid-ride</h2>
@@ -137,12 +177,12 @@ export function AboutView(): JSX.Element {
           <h2>Privacy</h2>
           <p>
             Nothing is sent to us unless you connect to this project&rsquo;s instance. There are no
-            analytics, and the app contains no code that transmits your rides, your heart rate or
-            your position anywhere. The one thing it can send is a picture from the camera, to a
-            computer of your own on your own network — and only if you set that computer up on the
-            Camera page, switch it on, and press the button that sends the picture. A side
-            camera&rsquo;s pictures go there too, as they are taken, only if you also switch that
-            on.
+            analytics, and the app sends your rides, your heart rate or your position nowhere unless
+            you connect to an instance, as described below. The one other thing it can send is a
+            picture from the camera, to a computer of your own on your own network — and only if you
+            set that computer up on the Camera page, switch it on, and press the button that sends
+            the picture. A side camera&rsquo;s pictures go there too, as they are taken, only if you
+            also switch that on.
           </p>
           {/* #777, #778: an instance is the one other place something goes, and only
             when the rider connects. ⚠️ Draft wording awaiting the owner's approval
@@ -151,7 +191,17 @@ export function AboutView(): JSX.Element {
             If you <a href={hrefFor(routeById('instance'))}>connect to an instance</a>, it is sent
             this device&rsquo;s public key, the name other riders will see if you type one, and your
             internet address and device or browser type, as any server sees them — and nothing else
-            of yours: no ride, route, position or heart rate.
+            of yours when you connect: no ride, route, position or heart rate.
+          </p>
+          {/* #778, second pass: rooms shipped (#784, #785), and so did sync (#1195),
+            whose disclosure was here before it was. #1327: the sentence no longer
+            says sync is not offered yet. `AboutView.test.tsx` pins it. */}
+          <p>
+            A private room you make or join sends that instance the route of a room you make, your
+            power and cadence while you ride, the weight you declare as you join, and a race&rsquo;s
+            result. Syncing with it sends your rides, whole, with their positions and heart rate (a
+            ride&rsquo;s name and date go with it), and what else goes with them, sealed on this
+            device for that instance alone; they stay on this device too.
           </p>
           <p>
             {/* target="_blank" so that following it inside the Android shell hands
@@ -164,6 +214,8 @@ export function AboutView(): JSX.Element {
             (opens in a new tab).
           </p>
         </div>
+
+        {instance === undefined ? null : <InstancePages instance={instance} />}
 
         <div>
           <h2>Licence</h2>

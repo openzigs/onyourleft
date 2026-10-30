@@ -57,15 +57,19 @@
 
 import {
   expandWorkout,
+  holdEligible,
+  type HeartRateHoldContext,
   type WorkoutTimeline,
   seconds,
   unixSeconds,
   type PlayerStatus,
+  type ReplanRecord,
   type Seconds,
   type UnixSeconds,
   type Watts,
   type WorkoutBlock,
   type WorkoutRescue,
+  type WorkoutSegment,
 } from '@onyourleft/domain';
 import {
   deviceProvides,
@@ -88,7 +92,15 @@ import type {
   TrainerControlChoice,
   TrainerRelease,
 } from '@onyourleft/sensors/protocol';
-import type { ActivityId, AthleteId, RecordingSessionId, WorkoutRecord } from '@onyourleft/store';
+import type {
+  ActivityId,
+  AthleteId,
+  LapId,
+  RecordedCourseLap,
+  RecordingSessionId,
+  RoomRaceFact,
+  WorkoutRecord,
+} from '@onyourleft/store';
 
 import {
   createRecorder,
@@ -98,8 +110,33 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
-import { recoverableRides, type RecoverableRide } from '../recording/recovery';
-import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
+import {
+  recoverableRides,
+  unreadableRecordings,
+  type RecoverableRide,
+} from '../recording/recovery';
+import {
+  rideToSave,
+  saveFinishedRide,
+  type FinishedRide,
+  type RideSaveStore,
+} from '../recording/finish';
+import {
+  blockLogFrom,
+  logEnd,
+  logTick,
+  NO_BLOCKS,
+  type BlockLog,
+} from '../recording/workout-blocks';
+import {
+  lapFiguresOf,
+  lapSlots,
+  recordedStretch,
+  riddenLap,
+  type CourseLineEvent,
+  type LapFigures,
+  type LapMark,
+} from '../recording/laps';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
 import { statedAverageHeartRate, type SavedRide } from './ride-result';
 
@@ -113,11 +150,18 @@ import {
 import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
+import type { TrainerTargetMemory } from './trainer-target-memory';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
+import { controlRefusalWords, pairingFailureWords, type PairingStep } from './pairing-words';
 import { blockText } from '../workouts/library';
+import type { HoldOff, WorkoutHold } from '../workout/hold-text';
+import type { ReplanPort } from '../workout/replan-port';
+import { createReplanSession, type ReplanSession } from '../workout/replan-session';
+import type { WaitingReplan } from '../workout/replan-text';
+import { withTraceSample, type WorkoutTraceSample } from '../workout/workout-graph';
 
 /** Which channel each metric on the screen reads from. */
 const METRIC_CAPABILITY: Readonly<Record<RideMetricId, MeasurementCapability>> = {
@@ -300,6 +344,12 @@ export interface RideWorkoutSnapshot {
   readonly totalSeconds: number;
   /** What the trainer last confirmed it holds, after quantisation. */
   readonly holdingWatts: number | undefined;
+  /**
+   * What the block asks for, when the target offered to the trainer is that
+   * ask raised to the trainer's minimum (#1297, #1305). `undefined` otherwise.
+   * The session's `raisedFrom`, unchanged.
+   */
+  readonly raisedFromWatts?: number | undefined;
   /** The block being ridden, in the words `library.ts` writes. */
   readonly nowRiding: string | undefined;
   /** Why the last workout write could not be made, if any. */
@@ -307,24 +357,186 @@ export interface RideWorkoutSnapshot {
   /**
    * The stall rescue holding the workout's target down, with its reason — or
    * `undefined` while the workout's own target stands (#585). The player's
-   * `PlayerState.rescue`, unchanged; `workout/rescue-text.ts` is the sentence.
+   * `PlayerState.rescue`, except that a relief that lowers nothing carries
+   * `reliefAtFloorReason` in place of its own (#1305, `WorkoutSessionState.rescue`);
+   * `workout/rescue-text.ts` is the sentence.
    */
   readonly rescue: WorkoutRescue | undefined;
+  /**
+   * The heart-rate hold running in this block, or `undefined` outside a hold
+   * block (#1240). The player's `PlayerState.hold`, with why a hold that is
+   * not running is off; `workout/hold-text.ts` is every word about it.
+   */
+  readonly hold?: WorkoutHold | undefined;
   /**
    * The plan itself, so a screen can look AHEAD in it — #398. The same
    * timeline the session plays; `segmentAt(timeline, elapsed + lead)` is the
    * whole lookahead, with {@link elapsedSeconds} as the one clock.
    */
   readonly timeline: WorkoutTimeline;
+  /**
+   * The threshold the workout was started with, in watts — #1307. What turns a
+   * segment's share into the watts the plan asks for, so the graph can tell a
+   * target the trainer holds from the one the plan asked
+   * (`workout/workout-graph.ts` §`heldInstead`). Optional, like {@link hold},
+   * so a fixture with no graph in it need not say.
+   */
+  readonly thresholdWatts?: number | undefined;
+  /**
+   * The last few minutes, one sample a second of the workout's own clock —
+   * #1307: the target the trainer ACKNOWLEDGED, the rider's power and heart
+   * rate where each is live, and a running hold's range. Kept HERE, above the
+   * router, so the Ride screen's graph and the game's are drawn from one
+   * record and neither loses it when the rider changes screen. Bounded
+   * (`workout-graph.ts` §`TRACE_MAX_SAMPLES`), read by the graph only, and it
+   * decides no write.
+   */
+  readonly trace?: readonly WorkoutTraceSample[] | undefined;
+  /**
+   * What a re-plan replaced, from its boundary on, for the graph to draw
+   * beside the plan that stands — #1307's seam, filled by #1244
+   * (`workout/replan-session.ts` §`ReplanState.replaced`). `undefined` until a
+   * move is accepted. While a move waits it is what THAT move replaces. When
+   * the rider keeps the plan, or a pause or a lost trainer discards the move,
+   * its outline goes with it — at the same moment as {@link timeline} goes
+   * back — and what is left is the outline of the last move that reached the
+   * plan, if one did: that plan did change, and stays drawn as changed for
+   * the rest of the workout.
+   */
+  readonly replaced?: readonly WorkoutSegment[] | undefined;
+  /**
+   * Re-plans during this ride — #1244, ADR 0048 D-7. `undefined` unless the
+   * rider switched them on for this workout and they could be set up.
+   *
+   * ⚠️ While {@link RideReplanSnapshot.waiting} is set, {@link timeline} and
+   * {@link totalSeconds} are already the REVISED plan, so the lookahead and
+   * the graph show what will be ridden; the block being ridden is the same in
+   * both, and the trainer is told nothing of the revision until that block
+   * ends (`packages/domain` §`player.ts` §`revise`).
+   */
+  readonly replan?: RideReplanSnapshot | undefined;
+  /**
+   * Whether this app has control of the trainer NOW — #1307. With
+   * {@link holdingWatts} it is the one source of "what the trainer holds":
+   * the two facts the panel's own "Holding … W." line is written from, read
+   * live, so the graph cannot state a target from a sample taken before a
+   * pause or a lost link. `false`: {@link holdingWatts} is only the last
+   * write, and the graph states no target.
+   */
+  readonly hasControl?: boolean | undefined;
+  /**
+   * Whether the control client says the trainer acknowledged
+   * {@link holdingWatts} and nothing since puts it in doubt (`confirmed`,
+   * that very number) — #1313. `false` for the tick or so after control is
+   * taken back, when the session's last write is from before the loss and the
+   * client knows of no target: the graph states none until the next write
+   * lands. @see vouchedHolding
+   */
+  readonly targetConfirmed?: boolean | undefined;
+  /**
+   * The rider's power and heart rate NOW, each `undefined` when its reading
+   * is not live — #1307. The numbers the graph writes beside its lanes; the
+   * trace is what it draws, and is not sampled while the ride is paused.
+   */
+  readonly live?:
+    | {
+        readonly power: number | undefined;
+        readonly heartRate: number | undefined;
+        /** The rider's cadence now, in rpm — #1434's ERG cue. */
+        readonly cadence?: number | undefined;
+      }
+    | undefined;
+  /**
+   * The rider's mean power through the block being ridden so far, in whole
+   * watts — #1434. Live readings only, sampled once a second of the workout's
+   * own clock, so a pause adds nothing and a dropped meter is not a zero.
+   * `undefined` until the block has one.
+   */
+  readonly blockAverageWatts?: number | undefined;
+  /**
+   * Whether no target is being sent for the block being ridden, because it
+   * would be a large raise (#1305) — the session's `raiseRefused`, the fact
+   * behind the sentence in {@link fault}. So the graph draws no confirmed
+   * target for a block the trainer was never sent (#1307).
+   */
+  readonly refused?: boolean | undefined;
 }
+
+/** Re-plans during the ride, as the screen reads them (#1244). */
+export interface RideReplanSnapshot {
+  /** An accepted move waiting for the next block: its sentence, and *Keep the plan*. */
+  readonly waiting: WaitingReplan | undefined;
+  /** The rider pressed *Keep the plan* in the block being ridden. */
+  readonly kept: boolean;
+  /** One short line after a request that failed (`replan-text.ts` §`REPLAN_UNAVAILABLE`). */
+  readonly notice: string | undefined;
+  /**
+   * The revision of a waiting move that a pause or a lost trainer discarded
+   * in this block (ADR 0048 D-8): the screen says `REPLAN_DISCARDED` and the
+   * announcers say it once. Set in the same snapshot in which
+   * {@link RideWorkoutSnapshot.timeline} goes back to the plan being ridden.
+   */
+  readonly discarded?: number | undefined;
+  /**
+   * The rider switched re-plans off for the rest of this workout
+   * ({@link RideController.switchReplansOff}). The screen says so in place
+   * of the control that did it, and nothing more is sent.
+   */
+  readonly off?: boolean | undefined;
+}
+
+/** What a rider chose for one workout as they started it. */
+export interface WorkoutChoices {
+  /**
+   * Re-plans during this ride (ADR 0048 D-6 P7): off unless `true`. Off,
+   * nothing about the ride is gathered for the instance and nothing is sent.
+   */
+  readonly replans?: boolean | undefined;
+}
+
+/**
+ * The most re-plan decisions one ride keeps (P9): one move in three minutes
+ * makes far fewer. The store's `RECORDING_REPLAN_RECORDS_LIMIT` is the same
+ * number, so a checkpoint keeps all of them (#1328; a test holds the two equal).
+ */
+export const RIDE_REPLAN_RECORDS_LIMIT = 200;
 
 /** Everything the view renders, and nothing it has to derive. */
 export interface RideSnapshot {
   readonly phase: RidePhase;
   /** Whether the rider has pressed Stop once. A second press is what stops. */
   readonly stopArmed: boolean;
+  /**
+   * Whether the ride screen's touch lock is on — #1432. Held HERE, above the
+   * router, rather than in the screen, so a rider who taps away from the Ride
+   * screen and back (a raindrop on the tab bar) comes back to it still locked.
+   * Only ever `true` while a ride is in progress: `lockTouch` refuses
+   * otherwise, and stopping or starting a new ride turns it off.
+   * `design/touch-lock.ts` is what it means on the screen.
+   */
+  readonly touchLocked: boolean;
   readonly elapsedSeconds: number;
   readonly movingSeconds: number;
+  /**
+   * The moving time of the course lap in progress, in seconds — #1312: the
+   * recorder's own moving time since the rider last crossed the line
+   * ({@link RideController.noteCourseLine}), so it stops with the ride's.
+   * `undefined` when no lap is open: no game ride on a course, or nothing
+   * recording under it.
+   */
+  readonly courseLapSeconds: number | undefined;
+  /**
+   * The ride screen's *Lap* — #1318. `available` exactly when
+   * {@link RideController.markLap} would take a lap: a ride recording or
+   * paused with no course under it. `last` is the lap it took most recently
+   * on this ride, numbered among every lap of the recording (course laps
+   * too), as the ride's page will list it — for the screen's notice and its
+   * one region. `undefined` until a lap is taken, and again for a new ride.
+   */
+  readonly manualLap: {
+    readonly available: boolean;
+    readonly last: { readonly number: number; readonly lap: LapFigures } | undefined;
+  };
   readonly sampleCount: number;
   readonly metrics: readonly RideMetric[];
   readonly sensors: readonly PairedSensor[];
@@ -387,6 +599,12 @@ export interface RideSnapshot {
    * controls from an interrupted one.
    */
   readonly recoverable: readonly RecoverableRide[];
+  /**
+   * Recordings this device holds whose header will not read — #1325. Each can
+   * only be discarded, through `discardRecovered`. Empty while riding, for
+   * {@link recoverable}'s reason.
+   */
+  readonly unreadableRecordings: readonly RecordingSessionId[];
   /** The last pairing attempt's failure, in words a rider can act on. */
   readonly pairingError: string | undefined;
   /** How many more devices this transport will connect. */
@@ -466,7 +684,7 @@ export const RIDE_NOTIFICATION_REFUSED =
  * ⚠️ **A safety sentence, so it is never behind a disclosure** — the owner's
  * ruling on #654's re-review of #647. It is short so that it fits where it is
  * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
- * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
+ * (`ride-notices.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
  *
  * ⚠️ **Shortened for the HUD's notice cell at 360 px** — #693's re-review,
  * B2. It used to be *"your ride may stop if the screen goes off."*, and beside
@@ -476,7 +694,7 @@ export const RIDE_NOTIFICATION_REFUSED =
  * just named. It is ONE line there on a Mac and still TWO on the CI runner,
  * whose fonts are wider — so on the runner the clearance comes from the cell's
  * tighter padding (`theme.css` §"Two notices in the one cell") rather than
- * from the sentence. `ride.browser.spec.ts` §"keep the screen on, beside every
+ * from the sentence. `ride-notices.browser.spec.ts` §"keep the screen on, beside every
  * notice that stays" publishes the clearance.
  */
 export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
@@ -717,6 +935,8 @@ export interface RideSavePort {
   readonly store: RideSaveStore;
   /** Generated by the caller, for `newSessionId`'s reason. */
   readonly newActivityId: () => ActivityId;
+  /** The same, for each lap of a course the ride completed — #1312. */
+  readonly newLapId: () => LapId;
   /** The IANA zone the ride was ridden in. Stored, never inferred later. */
   readonly timeZone: string;
 }
@@ -774,6 +994,12 @@ export interface RideControllerOptions {
    */
   readonly presence?: RiderPresencePort | undefined;
   /**
+   * Re-plans during the ride — #1244, ADR 0048. The rider's instance, their
+   * typed goals and their saved workouts, behind one port. Absent, a workout
+   * started with re-plans switched on rides its loaded plan and asks nothing.
+   */
+  readonly replan?: ReplanPort | undefined;
+  /**
    * Keep the process alive while a ride is active — #524. The Android
    * foreground service; absent in a browser. @see keep-alive-port.ts
    *
@@ -792,6 +1018,16 @@ export interface RideControllerOptions {
    * `shell-ride-controller.ts` for the same reason.
    */
   readonly notificationPermission?: RideNotificationPermissionPort | undefined;
+  /**
+   * The last ERG target each trainer acknowledged, kept on the device with
+   * its time so a page reload does not forget it — #1305. @see
+   * trainer-target-memory.ts and §`workoutsViewOfTheTarget`.
+   *
+   * ⚠️ An optional option, as {@link presence} is: dropping it from
+   * `main.tsx` is green in `check:wiring`. Absent, the controller remembers
+   * only while the page lives, which is what it did before.
+   */
+  readonly trainerTargets?: TrainerTargetMemory | undefined;
 }
 
 export interface RideController {
@@ -834,6 +1070,13 @@ export interface RideController {
   /** First press of Stop. Arms the confirmation; changes nothing else. */
   armStop(): void;
   cancelStop(): void;
+  /** #1432: turn the touch lock on. Refused unless a ride is in progress. */
+  lockTouch(): void;
+  /**
+   * #1432: turn it off. The deliberate release is the screen's
+   * (`design/TouchLockButton.tsx`).
+   */
+  unlockTouch(): void;
   /** Second press. Stops the recording and checkpoints it. */
   confirmStop(): Promise<void>;
   /**
@@ -849,6 +1092,65 @@ export interface RideController {
    * saved nowhere, so there is nothing to attach it to. Decides no write.
    */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * A game ride in a room is starting — #785, the owner's ruling of
+   * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
+   * is under it: a recording or paused ride carries on (a paused one stays
+   * paused until the rider resumes it, #516), an idle controller starts one, and a stopped ride whose save is
+   * done is put away and a new one started. Answers whether a recording is
+   * now running. ⚠️ Writes nothing to the trainer: recording is not
+   * resistance.
+   */
+  recordForRoom(): Promise<boolean>;
+  /**
+   * A game ride in a private race ended, and this is what its room said of
+   * the race — #785. Kept by the RECORDER (`Recorder.noteRoomRace`), beside
+   * any race before it in this recording, so it goes out on the recording's
+   * checkpoint and a ride recovered after the app closed before *Stop* is
+   * saved with it (#1360's review, B2, N3); saved as `RideFacts.races`. With
+   * no ride in progress it is saved with nothing, for
+   * {@link noteGameRideEnded}'s reason.
+   */
+  noteRoomRace(race: RoomRaceFact): void;
+  /**
+   * A game ride on a course left the line, crossed it, or ended part-way
+   * round — #1312. The laps of a course belong to the RECORDING: each is
+   * marked here on the recorder's own clock, kept by the recorder (and so in
+   * its checkpoint, for a ride recovered after a crash), and written with the
+   * ride when it is saved — its averages worked out then, from the samples
+   * the save writes (`recording/laps.ts`). What is answered here is the same
+   * lap worked out as its line is crossed, for the HUD.
+   *
+   * Answers every lap of this recording so far, the one that just ended last,
+   * when this call ended one — and `undefined` otherwise: a `started`, or a
+   * line crossed with nothing recording under it (a game ride with no
+   * recording is saved nowhere, so it has no laps to state).
+   */
+  noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined;
+  /**
+   * The ride screen's *Lap*, on a ride with no course under it — #1318. Ends
+   * the lap in progress here, on the recorder's own clock, and begins the
+   * next. The first lap began when the recording did, or where the last
+   * course under it ended. The lap is kept by the recorder with the course
+   * laps, in one list (`recording/laps.ts`), and written with the ride; its
+   * distance and climb are the recording's own (`laps.ts` §`recordedStretch`).
+   *
+   * ⚠️ **No lap while a course is under the ride** — the owner's ruling on
+   * #1318: then the laps are the course's. A lap taken by hand is in progress
+   * when a game ride on a course begins: it ends there, as if *Lap* had been
+   * pressed, and the course's laps follow it. When that game ride ends, the
+   * next lap taken by hand begins there.
+   *
+   * ⚠️ **Once *Lap* has been pressed, *Stop* ends the last lap**, so the
+   * laps of the ride cover it from the first lap's start to its end. A ride
+   * on which *Lap* was never pressed has no laps: one lap the length of the
+   * ride is the ride said twice.
+   *
+   * Answers whether a lap was taken: not with nothing recording, with a
+   * course under the ride, or a second press in the same instant (a lap of
+   * no time at all is a double tap, not a lap).
+   */
+  markLap(): boolean;
   /**
    * *Done* on the result card — #1042. The card is put away for good: the
    * snapshot's `savedRide` is cleared, so no screen mounted later shows it
@@ -884,7 +1186,36 @@ export interface RideController {
    * @returns whether the workout started. `false` when there is no controllable
    * trainer or control has not been granted; the screen says which.
    */
-  startWorkout(workout: WorkoutRecord, thresholdPower: Watts): boolean;
+  startWorkout(
+    workout: WorkoutRecord,
+    thresholdPower: Watts,
+    heartRateHold?: HeartRateHoldContext,
+    choices?: WorkoutChoices,
+  ): boolean;
+
+  /**
+   * Whether re-plans can be offered for a workout started now: this device
+   * is signed in to an instance (#1244). Read live, so a screen asks when it
+   * renders the switch.
+   */
+  replansAvailable(): boolean;
+
+  /**
+   * Switch re-plans off for the rest of the workout in progress — #1244's
+   * review, ADR 0048 D-7 (*"A per-ride switch turns re-plans off"*). From
+   * this call no request leaves for that workout, a job in flight is
+   * cancelled, and a move waiting for the next block is dropped. It cannot be
+   * switched back on until another workout is started with the switch on.
+   * It writes nothing to the trainer. A no-op with no re-plans running.
+   */
+  switchReplansOff(): void;
+
+  /**
+   * *Keep the plan* — #1244, ADR 0048 D-7: drop the accepted re-plan that is
+   * waiting for the next block, so the plan being ridden carries on. It
+   * writes nothing to the trainer. A no-op when none is waiting.
+   */
+  keepThePlan(): void;
 
   /**
    * Re-read the rides this device is still holding — #212. Call it on mount
@@ -1060,17 +1391,65 @@ export function createRideController(options: RideControllerOptions): RideContro
   /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
   let gameOutcome: GhostOutcome | undefined;
   /**
+   * The course laps of this recording as the HUD was told them, in order —
+   * each worked out as its line was crossed. What is SAVED is the recorder's
+   * `courseLaps`, worked out again from the samples the save writes.
+   * @see RideController.noteCourseLine
+   */
+  let courseLaps: readonly LapFigures[] = [];
+  /** Where the course lap in progress began, or `undefined` with none open — #1312. */
+  let lapFrom: LapMark | undefined;
+  /**
+   * A game ride on a course is under the ride — #1318: it left the line, and
+   * has not ended or finished a point-to-point course. Followed whether or
+   * not anything is recording, so a recording started part-way round a lap
+   * offers no *Lap*. @see RideController.markLap
+   */
+  let courseUnder = false;
+  /**
+   * Where the next lap taken by hand begins — #1318: the recording's start,
+   * the last press, or where the last course under the ride ended.
+   * `undefined` with nothing recording, and while a course is under it —
+   * which is the ONE thing that keeps a lap from being taken then.
+   */
+  let manualFrom: LapMark | undefined;
+  /** *Lap* was pressed on this recording, so *Stop* ends the last lap. */
+  let manualLapsTaken = false;
+  /** @see RideSnapshot.manualLap */
+  let lastManualLap: { readonly number: number; readonly lap: LapFigures } | undefined;
+  /**
    * A structured workout was ridden to its end during this recording — #947.
    * Latched when its session ends ({@link endWorkoutSession}), because the
    * workout is gone by the time the ride is saved; cleared with the game
    * outcome when a new ride starts.
    */
   let workoutFinishedInRide = false;
+  /**
+   * Every re-plan decision made during this recording — #1244, ADR 0048 P9.
+   * Collected when a workout's session ends ({@link endWorkoutSession}), for
+   * {@link workoutFinishedInRide}'s reason, and cleared with it.
+   */
+  let replanRecords: readonly ReplanRecord[] = [];
+  /**
+   * When this device last sent a re-plan request, on the ride's clock (the
+   * wall clock, `rideSeconds`) — kept here, above any one workout, so a
+   * second workout in the same ride waits out the first one's three minutes.
+   *
+   * ⚠️ **NOT cleared with {@link replanRecords} when a ride stops** (#1329):
+   * until then, stopping and starting a new ride started the count again, so
+   * a rider could be asked about twice inside three minutes. It outlives the
+   * ride for as long as this controller does; a reload of the page starts it
+   * again, and the instance's own 24 an hour still bounds that.
+   */
+  let replanLastAskedAt: Seconds | undefined;
   /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
   let leftover = false;
   let recoverable: readonly RecoverableRide[] = [];
+  let unreadable: readonly RecordingSessionId[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
+  /** @see RideSnapshot.touchLocked */
+  let touchLocked = false;
   /**
    * `confirmStop` is between setting `stopped` and its save settling — #548.
    * The phase says `stopped` and `saveState` still holds the LAST ride's value
@@ -1259,7 +1638,10 @@ export function createRideController(options: RideControllerOptions): RideContro
    * rescue writes relief below the target (#567), and refusing either would
    * leave a higher target on the machine under a rider who has stopped, which
    * is the ERG spiral this program exists to prevent. What waits is anything
-   * that RAISES: a new target, a workout's next interval, a rescue's restore.
+   * that RAISES: a new target, a workout's next interval above the trainer's
+   * minimum (one under it is raised to the floor, #1297, so it passes as an
+   * ease, or is not written at all when that could be a large raise, #1305),
+   * a rescue's restore.
    * A gradient has no floor and always waits.
    *
    * ⚠️ **"Below the confirmed target" trusts `targetPower()`, and that is
@@ -1309,8 +1691,74 @@ export function createRideController(options: RideControllerOptions): RideContro
     setTargetPower: (target) =>
       mustWaitForForget(client, { target, floor })
         ? Promise.reject(new TargetHeldBack('forget-running', TARGET_WAITS_FOR_FORGET))
-        : client.setTargetPower(target),
+        : client.setTargetPower(target).then((acknowledged) => {
+            const id = [...sensors.values()].find((entry) => entry.trainer?.control === client)
+              ?.device.identity.id;
+            if (id !== undefined) {
+              lastAcknowledgedTarget.set(id, acknowledged);
+              options.trainerTargets?.remember(id, acknowledged, options.now());
+            }
+            return acknowledged;
+          }),
   });
+  /**
+   * The last ERG target each trainer acknowledged to this app, by device —
+   * #1305's review. Every ERG target in the client is written through
+   * {@link gatedTargets}, a hand-set one and a workout's alike, so this is
+   * all of them.
+   *
+   * ⚠️ **Why it exists: the control client forgets.** A `0xFF` leaves
+   * `targetPower()` saying `none`, and a new pairing builds a new client that
+   * says `none` too, while the machine may be holding the 250 W this app wrote
+   * a minute ago. A workout started then judged its first block as if the
+   * trainer held nothing, refused a 150 W minimum for a 75 W block, and left
+   * the 250 W on (@see workoutsViewOfTheTarget).
+   *
+   * ⚠️ **By device, not by client, and never forgotten while the page
+   * lives.** Web Bluetooth has no silent reconnect, so after a dropped link
+   * the rider pairs the same trainer again and gets a NEW client: keyed by
+   * client, the one case the owner was told about ("after a lost link the
+   * trainer is assumed to have kept its target") would be the one this
+   * missed. It is only ever read to turn a refusal into a write of the
+   * machine's minimum, which is what `main` wrote before #1305, so a stale
+   * entry cannot raise a target above that. A different trainer has a
+   * different id and starts with nothing. A page reload starts with nothing
+   * too, here; since #1305's second pass the device's own copy
+   * ({@link RideControllerOptions.trainerTargets}) answers for a trainer this
+   * map has not heard from, while that copy is young enough to trust.
+   *
+   * ⚠️ **"The same trainer has the same id" is true of the simulator and
+   * not measured on a browser.** A dropped link keeps the grant, so the id
+   * should hold. A FORGET withdraws the grant, and on Web Bluetooth a device
+   * chosen again after that may come back under a new id (@see
+   * pairedAgainBeforeForgetLanded). Then nothing is found here, the block is
+   * refused and the trainer keeps what it held: a trainer no target is known
+   * on, which is no worse than before this map existed. There is no fallback
+   * by name, on purpose: a name is not an identity, and a wrong match would
+   * hand one trainer's target over for another.
+   */
+  const lastAcknowledgedTarget = new Map<DeviceId, Watts>();
+  /**
+   * What a workout is told the trainer's ERG target is — #1305. The client's
+   * own answer, except where the client says `none` and this app has had a
+   * target acknowledged by that trainer: then `unknown`, which is what it is.
+   * The machine may hold it still, or may not.
+   *
+   * Failing this page's own memory, the device's (#1305's second pass): a
+   * target that trainer acknowledged before a page reload, if it was at most
+   * `REMEMBERED_TARGET_MAX_AGE_SECONDS` ago (`trainer-target-memory.ts`).
+   *
+   * ⚠️ The workout's view only. The ride screen reads the client's answer
+   * unchanged, so it goes on saying no target is set after a `0xFF`.
+   */
+  const workoutsViewOfTheTarget = (client: TrainerControl, id: DeviceId): TargetPower => {
+    const target = client.targetPower();
+    const last =
+      lastAcknowledgedTarget.get(id) ?? options.trainerTargets?.recall(id, options.now());
+    return target.kind === 'none' && last !== undefined
+      ? { kind: 'unknown', attempted: last }
+      : target;
+  };
   /**
    * Note a forget's rejection — #718's review. Holds control back (@see
    * lateTrainerForgets) when the forget ran out of time on something that is,
@@ -1794,6 +2242,71 @@ export function createRideController(options: RideControllerOptions): RideContro
     return error instanceof Error ? error.message : String(error);
   };
 
+  /** Where the recording is now, on its own clock: both halves off the session. */
+  const markOf = (current: Recorder): LapMark => ({
+    at: current.session.timeline,
+    movingTime: current.session.movingTime,
+  });
+
+  /**
+   * A lap taken by hand from {@link manualFrom} to `to` — #1318: kept as the
+   * recorder keeps a course lap, and its figures worked out over the lap's
+   * OWN slots (`noteCourseLine`'s reason: never a copy of the whole ride).
+   * `undefined` with no lap in progress, or none of any length.
+   *
+   * ⚠️ **`figures` is worked out only when asked for** (#1318's review): the
+   * tick reads `kept` alone, every second, for the recorder's next header,
+   * and the lap's averages over every channel each second would be work the
+   * size of the lap, thrown away. Only a lap that ends asks for them.
+   */
+  const handLap = (
+    current: Recorder,
+    to: LapMark,
+    partial: boolean,
+  ): { readonly kept: RecordedCourseLap; readonly figures: () => LapFigures } | undefined => {
+    const from = manualFrom;
+    const startedAt = current.session.startedAt;
+    if (from === undefined || startedAt === undefined || !(to.at > from.at)) {
+      return undefined;
+    }
+    const grid = {
+      startedAt,
+      sampleInterval: current.sampleInterval,
+      sampleCount: current.session.sampleCount,
+    };
+    const slots = lapSlots(grid, from, to);
+    const own = current.session.slice(slots.first, slots.end);
+    const kept = riddenLap(
+      from,
+      to,
+      recordedStretch({ sampleInterval: current.sampleInterval, channels: own.channels }, partial),
+    );
+    return {
+      kept,
+      figures: () =>
+        lapFiguresOf(
+          { ...grid, sampleCount: own.sampleCount, channels: own.channels },
+          kept,
+          own.fromIndex,
+        ),
+    };
+  };
+
+  /** End the lap taken by hand that is in progress at `to`, and begin the next there. */
+  const endHandLap = (current: Recorder, to: LapMark): boolean => {
+    const lap = handLap(current, to, false);
+    if (lap === undefined) {
+      return false;
+    }
+    current.noteCourseLap(lap.kept);
+    const figures = lap.figures();
+    courseLaps = [...courseLaps, figures];
+    lastManualLap = { number: current.courseLaps.length, lap: figures };
+    manualFrom = to;
+    manualLapsTaken = true;
+    return true;
+  };
+
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
     const paired = pairedTrainerEntry();
@@ -1802,8 +2315,17 @@ export function createRideController(options: RideControllerOptions): RideContro
     return {
       phase,
       stopArmed,
+      touchLocked,
       elapsedSeconds: session?.elapsedTime ?? 0,
       movingSeconds: session?.movingTime ?? 0,
+      courseLapSeconds:
+        lapFrom === undefined || session === undefined
+          ? undefined
+          : Math.max(0, session.movingTime - lapFrom.movingTime),
+      manualLap: {
+        available: session !== undefined && rideInProgress(phase) && manualFrom !== undefined,
+        last: lastManualLap,
+      },
       sampleCount: session?.sampleCount ?? 0,
       metrics: RIDE_METRIC_IDS.map((id) => ({
         id,
@@ -1851,6 +2373,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       resultAnnounced,
       leftover,
       recoverable,
+      unreadableRecordings: unreadable,
       pairingError,
       connectionsRemaining: Math.max(
         0,
@@ -1913,6 +2436,16 @@ export function createRideController(options: RideControllerOptions): RideContro
       workout?.session.observeCadence(reading);
       // #567: a hand-set target gets the same rule, from the same stream.
       manual?.erg.observeCadence(reading);
+    }
+    // #1240: and heart rate, for the heart-rate hold — from the same call, for
+    // the recorder's reason. Only a reading that ARRIVED is passed: a strap
+    // that drops passes nothing, which the hold reads as silence and never as
+    // a zero (ADR 0048 H7).
+    if (measurement.capability === 'heart-rate') {
+      workout?.session.observeHeartRate({
+        at: seconds(measurement.at),
+        bpm: measurement.heartRate,
+      });
     }
     // The reading is what wakes an automatic pause, so the phase moves with it
     // rather than on the next tick: for that second the screen would otherwise
@@ -2068,6 +2601,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       const connection = attachment.connection;
       if (connection !== undefined) {
         entry.trainer = connection;
+        // A loss belongs to the connection it was reported on; a trainer paired
+        // afresh starts with none (#1435).
+        controlLost = undefined;
         entry.release.push(
           connection.control.onControlLost((reason) => {
             controlLost = reason;
@@ -2192,6 +2728,52 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
+   * The ride a recorder holds, as the store writes it — one place for a ride
+   * finished now, one recovered after a crash, and one a rider discards from
+   * the recovery offer (#1431), so the three cannot drift apart.
+   */
+  const finishedRideOf = (
+    port: RideSavePort,
+    current: Recorder,
+    workoutName: string | undefined,
+    outcomeInGame: GhostOutcome | undefined,
+    workoutFinished: boolean | undefined,
+    replans: readonly ReplanRecord[],
+  ): FinishedRide | undefined => {
+    const series = current.session.series();
+    return rideToSave({
+      id: port.newActivityId(),
+      athleteId: options.athleteId,
+      series,
+      elapsedTime: current.session.elapsedTime,
+      movingTime: current.session.movingTime,
+      timeZone: port.timeZone,
+      now: now(),
+      ...(workoutName === undefined ? {} : { workoutName }),
+      // #947: what only this ride knew. A recovered ride passes neither.
+      workoutFinished: workoutFinished === true,
+      ghostRaced: outcomeInGame !== undefined,
+      // #1312. The recorder's own, so a ride finished now and one recovered
+      // after a crash are saved with their laps by the one path — and worked
+      // out from `series`, the samples this save writes (`recording/laps.ts`).
+      laps: { ridden: current.courseLaps, newLapId: port.newLapId },
+      // #1244, P9: every re-plan decision made on this ride. None is no key.
+      ...(replans.length === 0 ? {} : { replans }),
+      // #1328: and how many its checkpoint lost, for a ride recovered from one.
+      ...(current.replansDropped === undefined ? {} : { replansDropped: current.replansDropped }),
+      // #785: the races this ride was ridden in, as each room said it — the
+      // recorder's own, so a ride recovered after a crash keeps them by the
+      // one path, as it keeps its laps (#1360's review, B2).
+      ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
+      // #1319: the recorder's own, so a recovered ride keeps them by this path.
+      ...(current.workoutBlocks.length === 0 ? {} : { workoutBlocks: current.workoutBlocks }),
+      // #1326: the store marks this checkpoint saved in the ride's own
+      // transaction, so a crash after the save cannot offer the ride again.
+      recordingSession: current.sessionId,
+    });
+  };
+
+  /**
    * Turn the finished recording into an activity, then let the checkpoint go.
    *
    * ⚠️ **The discard is last and is conditional, and that ordering is the whole
@@ -2209,6 +2791,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     workoutName: string | undefined,
     outcomeInGame: GhostOutcome | undefined,
     workoutFinished?: boolean,
+    replans: readonly ReplanRecord[] = [],
   ): Promise<void> => {
     const port = options.rideSave;
     if (port === undefined || current === undefined) {
@@ -2218,20 +2801,14 @@ export function createRideController(options: RideControllerOptions): RideContro
     saveError = undefined;
     changed();
 
-    const series = current.session.series();
-    const finished = rideToSave({
-      id: port.newActivityId(),
-      athleteId: options.athleteId,
-      series,
-      elapsedTime: current.session.elapsedTime,
-      movingTime: current.session.movingTime,
-      timeZone: port.timeZone,
-      now: now(),
-      ...(workoutName === undefined ? {} : { workoutName }),
-      // #947: what only this ride knew. A recovered ride passes neither.
-      workoutFinished: workoutFinished === true,
-      ghostRaced: outcomeInGame !== undefined,
-    });
+    const finished = finishedRideOf(
+      port,
+      current,
+      workoutName,
+      outcomeInGame,
+      workoutFinished,
+      replans,
+    );
     const outcome = await saveFinishedRide(port.store, finished);
 
     saveState = outcome.status;
@@ -2243,6 +2820,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       outcome.status === 'saved' && finished !== undefined
         ? {
             activityId: outcome.id,
+            movingTime: finished.activity.movingTime,
             elapsedTime: finished.activity.elapsedTime,
             distance: finished.activity.distance,
             averagePower: finished.activity.averagePower,
@@ -2259,7 +2837,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       // disk as a `stopped` row — which `recovery.ts` reads as "the save
       // failed", offers "Save this ride", and thereby writes a second copy of
       // the same ride under a fresh activity id with nothing deduplicating it.
-      // The link is what tells the two apart afterwards.
+      // The link is what tells the two apart afterwards. Since #1326 the store
+      // has already written it, in the ride's own transaction; `markSaved`
+      // keeps the recorder's copy of the header in step, so no later header
+      // write can take the link back out.
       if (outcome.status === 'saved') {
         await current.markSaved(outcome.id);
       }
@@ -2287,7 +2868,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     try {
-      const rows = await listRecoverableRecordings(store, athleteId);
+      const listing = await listRecoverableRecordings(store, athleteId);
       // Checked again after the read: *Start a new ride* re-renders the idle
       // screen before this settles, and a rider who presses Start in that gap
       // must not have the offer appear mid-ride (#565's review, item 4). Read
@@ -2296,12 +2877,15 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (rideInProgress(phase)) {
         return;
       }
-      recoverable = recoverableRides(rows, { excluding: recorder?.sessionId });
+      recoverable = recoverableRides(listing.sessions, { excluding: recorder?.sessionId });
+      unreadable = unreadableRecordings(listing.unreadable, { excluding: recorder?.sessionId });
     } catch {
       // A store that cannot be read is what "offline" looks like on this
       // device. Offering nothing is honest; throwing out of a refresh the
-      // screen calls on mount is not.
+      // screen calls on mount is not. (One header that will not read is no
+      // longer a throw here — #1325: it is in `listing.unreadable`.)
       recoverable = [];
+      unreadable = [];
     }
     changed();
   };
@@ -2325,6 +2909,45 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
   };
 
+  /**
+   * Write a ride the rider is discarding from the recovery offer as an
+   * activity, then move it straight to Recently deleted — #1431.
+   *
+   * - `kept`: it is in Recently deleted, and its recording can go.
+   * - `nothing`: there is nothing to keep — no samples, a recording that will
+   *   not rebuild (which could never be saved either, so it is discarded as
+   *   before), or a build with no store to keep it in.
+   * - `failed`: the save, or the move, did not go through. The recording must
+   *   stay. A save that worked and a move that did not leaves the ride in the
+   *   library, and its recording marked saved, so nothing is lost.
+   */
+  const keepInRecentlyDeleted = async (
+    id: RecordingSessionId,
+  ): Promise<'kept' | 'nothing' | 'failed'> => {
+    const port = options.rideSave;
+    const move = port?.store.moveActivityToRecentlyDeleted?.bind(port.store);
+    if (port === undefined || move === undefined) {
+      return 'nothing';
+    }
+    const found = await recoverOne(id);
+    if (found === undefined) {
+      return 'nothing';
+    }
+    const outcome = await saveFinishedRide(
+      port.store,
+      // #1328: with the re-plan record its checkpoint carried.
+      finishedRideOf(port, found, undefined, undefined, undefined, found.replans),
+    );
+    if (outcome.status === 'empty') {
+      return 'nothing';
+    }
+    if (outcome.status === 'failed') {
+      return 'failed';
+    }
+    const moved = await move(athleteId, outcome.id, now()).catch(() => false);
+    return moved ? 'kept' : 'failed';
+  };
+
   // --- The recorder ---------------------------------------------------------
 
   const recording = (): Recorder => {
@@ -2339,9 +2962,83 @@ export function createRideController(options: RideControllerOptions): RideContro
   interface WorkoutInProgress {
     readonly record: WorkoutRecord;
     readonly session: WorkoutSession;
-    /** Expanded once, and the same object the session plays. */
-    readonly timeline: WorkoutTimeline;
+    /**
+     * Re-plans for this workout (#1244): set once the rider's goals and
+     * library have been read, and only when they switched re-plans on.
+     */
+    replan: ReplanSession | undefined;
+    /** What the heart-rate hold was given, so the screen can say why one is off (#1240). */
+    readonly heartRateHold: HeartRateHoldContext | undefined;
+    /** The threshold the session was given, for the graph (#1307). */
+    readonly thresholdWatts: number;
+    /** The graph's last few minutes (#1307). @see RideWorkoutSnapshot.trace */
+    trace: readonly WorkoutTraceSample[];
+    /** This workout's blocks so far, for the ride's page (#1319). @see noteWorkoutBlocks */
+    blocks: BlockLog;
+    /**
+     * How many of the recorder's blocks are earlier workouts', counted when
+     * this one first hands its own over. @see noteWorkoutBlocks
+     */
+    blocksAfter: number | undefined;
+    /**
+     * The rider's power through the block being ridden so far — #1434: the
+     * block's start, and the sum and count of the live readings sampled in
+     * it. Kept beside the trace rather than read from it, because the trace
+     * is five minutes long and a block may be twenty. @see RideWorkoutSnapshot.blockAverageWatts
+     */
+    blockPower:
+      | {
+          readonly startsAt: number;
+          readonly sum: number;
+          readonly count: number;
+          /** The workout's clock at the last reading summed. */
+          readonly lastAt: number;
+        }
+      | undefined;
   }
+
+  /**
+   * Keep `log` as `current`'s blocks and hand the recording its blocks: the
+   * earlier workouts' as they were, then this one's — #1319. Nothing is
+   * handed over while the log has not changed, or with no recording.
+   */
+  const noteWorkoutBlocks = (current: WorkoutInProgress, log: BlockLog): void => {
+    const changedBlocks = log.blocks !== current.blocks.blocks;
+    current.blocks = log;
+    if (!changedBlocks || recorder === undefined) {
+      return;
+    }
+    current.blocksAfter ??= recorder.workoutBlocks.length;
+    recorder.noteWorkoutBlocks([
+      ...recorder.workoutBlocks.slice(0, current.blocksAfter),
+      ...log.blocks,
+    ]);
+  };
+
+  /**
+   * Hand the recording every re-plan decision made on it so far — #1328: the
+   * earlier workouts', then this one's — so a ride recovered after a crash is
+   * saved with them. Only when they have changed, and with no recording,
+   * nothing: the next call after one starts hands them over.
+   */
+  const noteReplans = (): void => {
+    if (recorder === undefined) {
+      return;
+    }
+    const live = workout?.replan?.records() ?? [];
+    const all =
+      live.length === 0
+        ? replanRecords
+        : [...replanRecords, ...live].slice(-RIDE_REPLAN_RECORDS_LIMIT);
+    const held = recorder.replans;
+    if (all.length !== held.length || all.at(-1) !== held.at(-1) || all[0] !== held[0]) {
+      recorder.noteReplans(all);
+    }
+  };
+
+  /** Whether a heart-rate strap is paired — in any state: a quiet strap is silence, not "none". */
+  const heartRateStrapPaired = (): boolean =>
+    [...sensors.values()].some((entry) => entry.device.capabilities.has('heart-rate'));
 
   /**
    * ⚠️ **The workout's clock is the ride's clock**, and that is the join this
@@ -2377,23 +3074,89 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     const state = workout.session.state();
     const segment = state.player.segment;
+    // #1244: a revision waiting for the next block is already the plan a
+    // screen shows. The block being ridden is the same in both, so `segment`
+    // indexes either. @see RideWorkoutSnapshot.replan
+    const plan = workout.session.plan();
+    const shown: WorkoutTimeline = plan.waiting ?? plan.riding;
+    const replan = workout.replan?.state();
     return {
       name: workout.record.name,
       status: state.player.status,
       elapsedSeconds: state.player.elapsed,
-      totalSeconds: workout.timeline.totalSeconds,
-      timeline: workout.timeline,
+      totalSeconds: shown.totalSeconds,
+      timeline: shown,
       holdingWatts: state.holding,
+      raisedFromWatts: state.raisedFrom,
+      // #1307: the graph's one source for what the trainer holds, and the
+      // readings it writes, all live — see each field.
+      hasControl: control()?.hasControl() === true,
+      targetConfirmed: vouchedHolding(state.holding) !== undefined,
+      live: {
+        power: liveReading('power', clock),
+        heartRate: liveReading('heart-rate', clock),
+        cadence: liveReading('cadence', clock),
+      },
+      blockAverageWatts: blockAverage(workout),
+      refused: state.raiseRefused,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
       // the library disagreeing about the same block.
       nowRiding:
         segment === undefined
           ? undefined
-          : blockText(workout.record.workout.blocks[segment.block] ?? EMPTY_BLOCK),
+          : blockText(shown.workout.blocks[segment.block] ?? EMPTY_BLOCK),
       fault: state.lastFault,
-      rescue: state.player.rescue,
+      // #1305's second pass: the session's, which words a relief that lowers
+      // nothing as such.
+      rescue: state.rescue,
+      hold: holdOf(workout, segment),
+      thresholdWatts: workout.thresholdWatts,
+      trace: workout.trace,
+      replaced: replan?.replaced,
+      replan:
+        replan === undefined
+          ? undefined
+          : {
+              waiting: replan.waiting,
+              kept: replan.kept,
+              notice: replan.notice,
+              discarded: replan.discarded,
+              off: replan.off,
+            },
     };
+  };
+
+  /**
+   * The rider's mean power in the block being ridden, from its start to now,
+   * in whole watts — #1434. `undefined` before a live reading has been
+   * sampled in it: the sum is dropped in the same tick as the player enters a
+   * block (`sampleForGraph`), so it is never another block's.
+   */
+  const blockAverage = (current: WorkoutInProgress): number | undefined =>
+    current.blockPower === undefined
+      ? undefined
+      : Math.round(current.blockPower.sum / current.blockPower.count);
+
+  /** The player's hold, with why it is off when it is (#1240). */
+  const holdOf = (
+    current: WorkoutInProgress,
+    segment: { readonly hold?: Parameters<typeof holdEligible>[0] | undefined } | undefined,
+  ): WorkoutHold | undefined => {
+    const hold = current.session.state().player.hold;
+    if (hold === undefined) {
+      return undefined;
+    }
+    let off: HoldOff | undefined;
+    if (hold.reason === 'ineligible') {
+      off =
+        current.heartRateHold === undefined
+          ? 'thresholds'
+          : segment?.hold !== undefined && !holdEligible(segment.hold, current.heartRateHold)
+            ? 'range'
+            : 'no-strap';
+    }
+    return { reason: hold.reason, range: hold.range, target: hold.target, off };
   };
 
   const workoutTick = (at: UnixSeconds): void => {
@@ -2401,6 +3164,186 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     workout.session.tick(rideSeconds(at));
+    sampleForGraph(workout, at);
+    logWorkoutBlock(workout);
+  };
+
+  /**
+   * Where the workout is, block by block, after its tick — #1319: on the
+   * recording's own clock and moving time ({@link markOf}), as a lap is.
+   * Only while recording: the tick is not run otherwise.
+   */
+  const logWorkoutBlock = (current: WorkoutInProgress): void => {
+    if (recorder === undefined) {
+      return;
+    }
+    const player = current.session.state().player;
+    noteWorkoutBlocks(
+      current,
+      logTick(current.blocks, {
+        status: player.status,
+        block: player.segment?.block,
+        elapsed: player.elapsed,
+        timeline: current.session.plan().riding,
+        eased: player.rescue !== undefined,
+        mark: markOf(recorder),
+      }),
+    );
+  };
+
+  /**
+   * `holding` if the trainer is known to hold it NOW: this app has control,
+   * and the control client says that very target is `confirmed` — #1313.
+   *
+   * ⚠️ Control alone is not enough. A workout's `holding` is the session's
+   * last acknowledged write, and it outlives a `0xFF`: once control is taken
+   * back the client says `none` until the session's next write lands, and
+   * for that tick the graph vouched for a target from before the loss.
+   */
+  const vouchedHolding = (holding: Watts | undefined): Watts | undefined => {
+    const client = control();
+    if (client?.hasControl() !== true) {
+      return undefined;
+    }
+    const said = client.targetPower();
+    return said.kind === 'confirmed' && said.target === holding ? holding : undefined;
+  };
+
+  /** A channel's reading if it is live at `at`, by the rule the metric grid shows it under. */
+  const liveReading = (capability: MeasurementCapability, at: UnixSeconds): number | undefined => {
+    const state = metricStateFor(latest.get(capability), true, at, staleAfterSeconds);
+    return state.kind === 'live' ? state.value : undefined;
+  };
+
+  /**
+   * One sample for the workout's graph — #1307. After the session's tick, so
+   * it is this second's state; only while the workout is running, so a
+   * finished workout adds nothing; and it READS: what the trainer
+   * acknowledged, never what was asked, and a reading that is not live as
+   * nothing rather than as a zero.
+   *
+   * ⚠️ The guard's `paused` half is a belt nothing exercises: a paused RIDE
+   * does not tick the workout at all, and a workout paused by a lost link is
+   * resumed by the tick before this reads it. `controller.test.ts` holds the
+   * `finished` half.
+   */
+  const sampleForGraph = (current: WorkoutInProgress, at: UnixSeconds): void => {
+    const state = current.session.state();
+    if (state.player.status !== 'running') {
+      return;
+    }
+    const hold = state.player.hold;
+    const power = liveReading('power', at);
+    // #1434: the block's running sum, dropped when a new block begins and
+    // begun on its first live reading — so there is never a sum of nothing. A
+    // reading that is not live is not a zero, so it is left out of the mean.
+    // A tick at the same instant of the workout's clock adds nothing, so the
+    // mean is the trace's one sample a second and not one per tick.
+    const segment = state.player.segment;
+    const elapsed = state.player.elapsed;
+    let summed = current.blockPower;
+    if (summed?.startsAt !== segment?.startsAt) {
+      summed = undefined;
+    }
+    if (segment !== undefined && power !== undefined && elapsed > (summed?.lastAt ?? -Infinity)) {
+      summed = {
+        startsAt: segment.startsAt,
+        sum: (summed?.sum ?? 0) + power,
+        count: (summed?.count ?? 0) + 1,
+        lastAt: elapsed,
+      };
+    }
+    current.blockPower = summed;
+    current.trace = withTraceSample(current.trace, {
+      at: state.player.elapsed,
+      // No control, no confirmed target: `holding` outlives a lost link (the
+      // panel says "last set to"), and the graph's lane is the confirmed one.
+      // #1313: nor for the tick after control is taken back.
+      target: vouchedHolding(state.holding),
+      power,
+      heartRate: liveReading('heart-rate', at),
+      range:
+        hold === undefined || hold.reason === 'ineligible'
+          ? undefined
+          : { low: hold.range.low, high: hold.range.high },
+      // What a running hold asked for this second — its own target, before
+      // any stall-rescue relief — so the graph can tell a target the hold set
+      // from one the trainer holds instead (`workout-graph.ts` §`heldInstead`).
+      asked: hold === undefined || hold.reason === 'ineligible' ? undefined : hold.target,
+    });
+  };
+
+  /**
+   * Set re-plans up for a workout that has just started — #1244. The rider's
+   * goals and saved workouts are read once, here: the validator bounds every
+   * move by the goals, and a swap may only name a workout in that library.
+   *
+   * ⚠️ **Any failure is no re-plans, and the workout is untouched** (ADR 0048
+   * D-9): goals that cannot be read, a library that cannot be listed, no
+   * sign-in. The workout was started before this was called and does not
+   * wait for it.
+   */
+  const beginReplans = async (
+    current: WorkoutInProgress,
+    port: ReplanPort,
+    athlete: Parameters<typeof createReplanSession>[0]['athlete'],
+    machine: SupportedPowerRange,
+  ): Promise<void> => {
+    if (!port.replanConnected()) {
+      return;
+    }
+    let goals: Awaited<ReturnType<ReplanPort['replanGoals']>>;
+    let library: Awaited<ReturnType<ReplanPort['replanLibrary']>>;
+    try {
+      [goals, library] = await Promise.all([port.replanGoals(), port.replanLibrary()]);
+    } catch {
+      return;
+    }
+    if (goals === 'unreadable') {
+      return;
+    }
+    // ⚠️ `current`, never `workout`: if the rider has started another workout
+    // by the time the store answered, this session belongs to the one that
+    // was replaced, which nothing ticks any more. It asks for nothing.
+    current.replan = createReplanSession({
+      loaded: current.record.workout,
+      athlete,
+      machine: { minimum: machine.minimum, maximum: machine.maximum },
+      goals,
+      library,
+      session: () => port.replanSession(),
+      ride: () => {
+        const state = current.session.state();
+        return {
+          // ⚠️ The RIDE's pause as well as the player's. `pause()` sets the
+          // phase at once and the workout's player is paused by the next
+          // tick; in the second between, an answer would be accepted, shown,
+          // and then discarded. A paused ride is paused for P6 from the press.
+          status: phase === 'paused' ? 'paused' : state.player.status,
+          elapsed: state.player.elapsed,
+          rescue: state.player.rescue !== undefined,
+          control: control()?.hasControl() === true,
+          heartRatePaired: heartRateStrapPaired(),
+          power: liveReading('power', clock),
+          heartRate: liveReading('heart-rate', clock),
+          cadence: liveReading('cadence', clock),
+        };
+      },
+      plan: () => current.session.plan(),
+      revise: (timeline) => current.session.revise(timeline),
+      keepPlan: () => current.session.keepPlan(),
+      clock: () => rideSeconds(now()),
+      // #1245's "never more often than every 3 minutes" is said of the ride:
+      // the last request's time outlives the workout that sent it.
+      asked: {
+        last: () => replanLastAskedAt,
+        note: (at) => {
+          replanLastAskedAt = at;
+        },
+      },
+      onChange: changed,
+    });
+    changed();
   };
 
   /**
@@ -2417,12 +3360,33 @@ export function createRideController(options: RideControllerOptions): RideContro
     if (workout.session.state().player.status === 'finished') {
       workoutFinishedInRide = true;
     }
+    // #1319: before the session ends too. The block being ridden is cut short
+    // and the rest of the plan skipped — as the screen showed it, a revision
+    // waiting for the next boundary included.
+    if (recorder !== undefined) {
+      const plan = workout.session.plan();
+      noteWorkoutBlocks(
+        workout,
+        logEnd(workout.blocks, plan.waiting ?? plan.riding, markOf(recorder)),
+      );
+    }
     if (handover === 'replace') {
       workout.session.supersede();
     } else {
       workout.session.stop();
     }
+    // #1244: AFTER the session has ended, so the release is already on its
+    // way and nothing here stands between a Stop and the trainer. A job in
+    // flight is cancelled, a waiting move is dropped, and what was decided is
+    // kept for the ride (P9).
+    if (workout.replan !== undefined) {
+      workout.replan.stop();
+      replanRecords = [...replanRecords, ...workout.replan.records()].slice(
+        -RIDE_REPLAN_RECORDS_LIMIT,
+      );
+    }
     workout = undefined;
+    noteReplans();
   };
 
   const controller: RideController = {
@@ -2445,10 +3409,16 @@ export function createRideController(options: RideControllerOptions): RideContro
       // chooser answers — #712. Read below, where the device is refused.
       const overlapped = new Set(forgetting.keys());
       choosing.add(overlapped);
+      // #1435: which half failed decides the sentence — a chooser that closed
+      // empty and a link that would not come up are different things to do.
+      let step: PairingStep = 'choosing';
+      let chosen = 'That device';
       try {
         const device = await transport.discover({
           capabilities: [...PAIRING_ROLE_CAPABILITIES[role]],
         });
+        step = 'linking';
+        chosen = device.name || chosen;
         const id = device.identity.id;
         // ⚠️ #712: REFUSED, not waited for. `unpair` takes the row away
         // before `transport.forget` has finished (#659's order), so the check
@@ -2512,7 +3482,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           askAgainIfRefused();
         }
       } catch (error) {
-        tell(describe(error));
+        tell(pairingFailureWords(error, step, chosen));
       } finally {
         choosing.delete(overlapped);
       }
@@ -2624,6 +3594,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       phase = 'recording';
       clock = now();
       await recorder.start(clock);
+      // #1318: the first lap taken by hand begins with the recording — or,
+      // with a course already under it, where that course ends.
+      manualFrom = courseUnder ? undefined : markOf(recorder);
       changed();
     },
 
@@ -2657,6 +3630,131 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
     },
 
+    async recordForRoom(): Promise<boolean> {
+      // A paused ride is a ride in progress and is LEFT paused: only the
+      // rider's own Resume resumes one (#516, `one-pauser.test.ts`).
+      if (phase === 'recording' || phase === 'paused') return true;
+      if (phase === 'stopped' && !(await controller.startNewRide())) return false;
+      await controller.start();
+      return rideInProgress(phase);
+    },
+
+    noteRoomRace(race: RoomRaceFact): void {
+      // No phase check: the race goes to the recorder, which only a recording
+      // in progress checkpoints and saves. Idle, there is none; stopped, its
+      // save has already read its races (`saveTheRide`), and the next ride
+      // starts a recorder of its own.
+      recorder?.noteRoomRace(race);
+    },
+
+    noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {
+      // #1318: whether a course is under the ride, followed with or without a
+      // recording: the game ride has left the line and not yet ended or
+      // finished a point-to-point course.
+      const wasUnder = courseUnder;
+      courseUnder =
+        event.kind === 'started' ||
+        event.kind === 'progress' ||
+        (event.kind === 'lap' && event.again);
+      if (recorder !== undefined && rideInProgress(phase) && courseUnder !== wasUnder) {
+        const at = markOf(recorder);
+        if (courseUnder) {
+          // A lap taken by hand is in progress: it ends where the course
+          // begins, as if *Lap* had been pressed. The course's laps follow.
+          if (manualLapsTaken) {
+            endHandLap(recorder, at);
+          }
+          manualFrom = undefined;
+        } else {
+          manualFrom = at;
+        }
+        changed();
+      }
+      const session = recorder?.session;
+      if (session === undefined || (phase !== 'recording' && phase !== 'paused')) {
+        // Nothing is being recorded, so there is no lap to state, and none is
+        // opened: a recording that starts later begins its first lap at the
+        // next line it sees crossed.
+        return undefined;
+      }
+      // ⚠️ Both halves off the SESSION's own clock, never `now()`: its
+      // timeline is the instant its moving time is counted to and its samples
+      // are slotted by, and it can run a second or two either side of the
+      // wall clock (a reading stamped ahead moves it on). A mark with one
+      // half from each would give a lap a moving time longer than its elapsed
+      // time.
+      const mark: LapMark = { at: session.timeline, movingTime: session.movingTime };
+      if (event.kind === 'progress') {
+        // #1322: kept by the recorder for its next header, so a recording that
+        // dies before the line saves this lap as a part lap. Nothing on the
+        // screen moves, so nothing is said to have changed.
+        if (lapFrom !== undefined) {
+          recorder?.noteOpenCourseLap(riddenLap(lapFrom, mark, { ...event, partial: true }));
+        }
+        return undefined;
+      }
+      if (event.kind !== 'lap') {
+        lapFrom = event.kind === 'started' ? mark : undefined;
+        // #1419: a game ride that starts again or ends has no lap in progress
+        // from before it — or the next header would still carry one.
+        recorder?.noteOpenCourseLap(undefined);
+        changed();
+        return undefined;
+      }
+      const from = lapFrom;
+      lapFrom = event.again ? mark : undefined;
+      if (from === undefined) {
+        // The recording began after the rider left the line: what was ridden
+        // of that lap before it is not on the record, so it is not a lap.
+        // (No lap is open here to clear: progress is noted only with a lap
+        // begun, and every way `lapFrom` is emptied clears it — #1419.)
+        changed();
+        return undefined;
+      }
+      const startedAt = session.startedAt;
+      if (recorder === undefined || startedAt === undefined) {
+        return undefined;
+      }
+      const lap = riddenLap(from, mark, event);
+      // Kept by the recorder: checkpointed with its next header, and what the
+      // save works the lap's row out from.
+      recorder.noteCourseLap(lap);
+      // ⚠️ For the HUD, over the lap's OWN slots and not `session.series()`:
+      // this runs inside the game's frame callback, and a copy of every
+      // channel of a five-hour ride on the frame the line is crossed is
+      // 18 000 slots a channel for a lap that has six hundred.
+      const grid = {
+        startedAt,
+        sampleInterval: recorder.sampleInterval,
+        sampleCount: session.sampleCount,
+      };
+      const slots = lapSlots(grid, from, mark);
+      const own = session.slice(slots.first, slots.end);
+      courseLaps = [
+        ...courseLaps,
+        lapFiguresOf(
+          { ...grid, sampleCount: own.sampleCount, channels: own.channels },
+          lap,
+          own.fromIndex,
+        ),
+      ];
+      changed();
+      return courseLaps;
+    },
+
+    markLap(): boolean {
+      // No lap begins while a course is under the ride (`manualFrom` is
+      // `undefined` then), so none can end: `endHandLap` refuses.
+      if (recorder === undefined || !rideInProgress(phase)) {
+        return false;
+      }
+      const taken = endHandLap(recorder, markOf(recorder));
+      if (taken) {
+        changed();
+      }
+      return taken;
+    },
+
     dismissResult(): void {
       if (savedRide === undefined) {
         return;
@@ -2686,6 +3784,22 @@ export function createRideController(options: RideControllerOptions): RideContro
       changed();
     },
 
+    lockTouch(): void {
+      if (phase !== 'recording' && phase !== 'paused') {
+        return;
+      }
+      touchLocked = true;
+      changed();
+    },
+
+    unlockTouch(): void {
+      if (!touchLocked) {
+        return;
+      }
+      touchLocked = false;
+      changed();
+    },
+
     async confirmStop(): Promise<void> {
       if (!stopArmed || (phase !== 'recording' && phase !== 'paused')) {
         // ⚠️ The guard, not a nicety. Without the `stopArmed` check a single
@@ -2695,6 +3809,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       stopArmed = false;
+      // #1432: the lock is for riding. A stopped ride's screen is the result
+      // card and *Start a new ride*, which a rider presses off the bike.
+      touchLocked = false;
       phase = 'stopped';
       const at = now();
       // The workout first, then the trainer, then the recording.
@@ -2725,8 +3842,16 @@ export function createRideController(options: RideControllerOptions): RideContro
         endWorkoutSession();
         await stopTrainer();
         await recording().stop(at);
+        // #1318: once *Lap* has been pressed, *Stop* ends the last lap, at the
+        // instant the recording ended on its own clock. The header the
+        // recorder writes for it is a transaction begun before the save's, on
+        // the same store, so it lands first and the save's `savedAs` stands
+        // (`controller.test.ts` §"#1318" asks for nothing offered back).
+        if (manualLapsTaken) {
+          endHandLap(recording(), markOf(recording()));
+        }
         changed();
-        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide);
+        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide, replanRecords);
       } catch (error: unknown) {
         // Fail closed (#565's second review). Nothing on today's paths throws
         // here, but if something did before `saveTheRide` set the outcome, the
@@ -2771,8 +3896,19 @@ export function createRideController(options: RideControllerOptions): RideContro
       // here (or a fresh controller), so `start` needs no second reset — two
       // would each be invisible to the suite.
       gameOutcome = undefined;
+      // #1312: and its laps, here and only here, for the same reason.
+      courseLaps = [];
+      lapFrom = undefined;
+      // #1318: the laps taken by hand, likewise. Whether a course is under
+      // the ride is the GAME's, and is not reset: `start` reads it.
+      manualFrom = undefined;
+      manualLapsTaken = false;
+      lastManualLap = undefined;
       // #947: the same place, for the same reason.
       workoutFinishedInRide = false;
+      // #1244: and the re-plan decisions that went with that ride.
+      replanRecords = [];
+      // ⚠️ But not `replanLastAskedAt` (#1329): the three minutes outlive the ride.
       leftover = false;
       clock = now();
       changed();
@@ -2805,6 +3941,22 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       recorder = found;
+      // #1328: the re-plan decisions made before the crash are this ride's
+      // still, so they are saved with it and the next ones follow them.
+      replanRecords = found.replans;
+      // #1312: the laps ridden before the crash are this recording's still, so
+      // the next one is numbered after them and compared with them. No lap is
+      // open: the game ride that was riding one went with the tab.
+      const ridden = found.session.series();
+      courseLaps = found.courseLaps.map((lap) => lapFiguresOf(ridden, lap));
+      lapFrom = undefined;
+      // #1318: a lap taken by hand begins where the ride carries on. The lap
+      // that was in progress at the crash is closed already (a part lap, by
+      // the recorder), so *Stop* adds a last lap only once *Lap* is pressed
+      // again.
+      manualFrom = courseUnder ? undefined : markOf(found);
+      manualLapsTaken = false;
+      lastManualLap = undefined;
       phase = 'paused';
       clock = now();
       saveState = 'unavailable';
@@ -2812,6 +3964,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       savedActivityId = undefined;
       savedRide = undefined;
       recoverable = [];
+      unreadable = [];
       changed();
       return true;
     },
@@ -2842,7 +3995,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         await refreshRecoverable();
         return 'failed';
       }
-      await saveTheRide(found, undefined, undefined);
+      // #1328: the re-plan decisions its checkpoint carried, which are all
+      // this ride has — the controller that made them went with the tab.
+      await saveTheRide(found, undefined, undefined, undefined, found.replans);
       await refreshRecoverable();
       return saveState;
     },
@@ -2858,6 +4013,21 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (phase !== 'idle') {
         return false;
       }
+      // #1431: a ride the rider throws away goes to Recently deleted, where it
+      // can be brought back for 30 days, rather than being destroyed. Only a
+      // ride that is not already an activity: an `already-saved` row is the
+      // working copy of a ride the library holds, and discarding it changes
+      // nothing about the ride.
+      const offered = recoverable.find((ride) => ride.id === id);
+      if (offered !== undefined && !offered.alreadySaved) {
+        const kept = await keepInRecentlyDeleted(id);
+        if (kept === 'failed') {
+          // Nothing is thrown away while the ride is not safely kept: the row
+          // stays on screen and the recording stays on disk.
+          await refreshRecoverable();
+          return false;
+        }
+      }
       // ⚠️ **Deletes the row directly rather than rebuilding a recorder for
       // it.** Rebuilding decodes every chunk, so a recording corrupt enough to
       // fail that decode could not be thrown away — which is the one thing a
@@ -2868,16 +4038,28 @@ export function createRideController(options: RideControllerOptions): RideContro
       return gone;
     },
 
-    startWorkout(record: WorkoutRecord, thresholdPower: Watts): boolean {
-      const connection = trainerEntry()?.trainer;
+    startWorkout(
+      record: WorkoutRecord,
+      thresholdPower: Watts,
+      heartRateHold?: HeartRateHoldContext,
+      choices?: WorkoutChoices,
+    ): boolean {
+      const paired = trainerEntry();
+      const connection = paired?.trainer;
       const client = connection?.control;
       // ⚠️ Both halves. A trainer that is paired but has not granted control
       // answers every setpoint `0x05 Control Not Permitted`, so starting here
       // would produce a workout that runs its clock and controls nothing —
       // which is the silent failure #14's revision block names.
-      if (connection === undefined || client === undefined || !client.hasControl()) {
+      if (
+        paired === undefined ||
+        connection === undefined ||
+        client === undefined ||
+        !client.hasControl()
+      ) {
         return false;
       }
+      const trainerId = paired.device.identity.id;
       // #718's second review: control this client took back by itself while
       // a trainer's forget is in progress or late is not control the rider
       // asked for. Checked here for the sentence; every write the workout
@@ -2903,12 +4085,61 @@ export function createRideController(options: RideControllerOptions): RideContro
           setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
           stop: () => client.stop(),
           letGo: () => releaseTrainer(client),
+          // #1305: a read. What the client believes the trainer holds, a
+          // hand-set target from before this workout included, and what
+          // this app last had acknowledged where the client has forgotten.
+          targetPower: () => workoutsViewOfTheTarget(client, trainerId),
         },
         // #441: what an ease writes — the machine's own reported minimum.
         powerFloor: connection.powerRange.minimum,
+        // #1240: H3's ceiling is never above the machine's own maximum.
+        powerCeiling: connection.powerRange.maximum,
+        heartRateHold,
+        heartRateStrap: heartRateStrapPaired,
         onChange: changed,
       });
-      workout = { record, session, timeline };
+      const started: WorkoutInProgress = {
+        record,
+        session,
+        replan: undefined,
+        heartRateHold,
+        thresholdWatts: thresholdPower,
+        trace: [],
+        // #1319: begun while recording, its first block is from now; begun
+        // before, from wherever the recording first finds it.
+        blocks:
+          recorder !== undefined && rideInProgress(phase)
+            ? blockLogFrom(markOf(recorder))
+            : NO_BLOCKS,
+        blocksAfter: undefined,
+        blockPower: undefined,
+      };
+      workout = started;
+      // #1244, P7: only when the rider switched re-plans on for THIS workout,
+      // and only with their own two thresholds (H1): `heartRateHold` is absent
+      // without them. Off, the port is not asked for anything.
+      if (
+        choices?.replans === true &&
+        options.replan !== undefined &&
+        heartRateHold !== undefined
+      ) {
+        // ⚠️ Caught: anything `beginReplans` throws after its two reads — a
+        // plan the session cannot load, a port that throws where it should
+        // answer — is "no re-plans for this ride", never an unhandled
+        // rejection. The workout started above and does not depend on it.
+        beginReplans(
+          started,
+          options.replan,
+          {
+            thresholdPower,
+            thresholdHeartRate: heartRateHold.thresholdHeartRate,
+            assumed: heartRateHold.assumed,
+          },
+          connection.powerRange,
+        ).catch(() => {
+          started.replan = undefined;
+        });
+      }
       // ⚠️ `now()`, NOT the cached `clock`. `clock` only moves on a tick, and
       // pairing and requesting control both advance the real clock without one
       // — so anchoring there started every workout already seconds old, and the
@@ -2921,6 +4152,20 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     endWorkout(): void {
       endWorkoutSession();
+      changed();
+    },
+
+    replansAvailable(): boolean {
+      return options.replan?.replanConnected() === true;
+    },
+
+    keepThePlan(): void {
+      workout?.replan?.keepThePlan();
+      changed();
+    },
+
+    switchReplansOff(): void {
+      workout?.replan?.switchOff();
       changed();
     },
 
@@ -2960,7 +4205,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         // now be describing a machine this client is driving.
         releaseFault = undefined;
       } catch (error) {
-        refusal = describe(error);
+        // #1435: a refusal a rider can act on, chosen by its code.
+        refusal = controlRefusalWords(error);
       }
       changed();
     },
@@ -3086,6 +4332,16 @@ export function createRideController(options: RideControllerOptions): RideContro
         // saying "recording". @see syncPhaseWithEngine for why this is not a
         // one-way copy.
         syncPhaseWithEngine();
+        // #1318: the lap taken by hand in progress, as far as it has got, for
+        // the recorder's next header — as the game says a course lap's
+        // (#1322) — so a ride recovered after a crash saves it as a part lap.
+        // Only once *Lap* has been pressed: before that the ride has no laps.
+        if (manualLapsTaken && recorder !== undefined) {
+          const open = handLap(recorder, markOf(recorder), true);
+          if (open !== undefined) {
+            recorder.noteOpenCourseLap(open.kept);
+          }
+        }
       }
       // ⚠️ After `syncPhaseWithEngine`, so the workout sees the phase the
       // recorder has just settled on rather than the one before it. A rider
@@ -3101,6 +4357,12 @@ export function createRideController(options: RideControllerOptions): RideContro
         }
         workoutTick(at);
       }
+      // #1244: after the workout's own tick, and in every phase — a paused
+      // ride is when a job in flight is dropped and a waiting move is seen to
+      // have been discarded (ADR 0048 D-8). It sends the trainer nothing.
+      workout?.replan?.tick(rideSeconds(at));
+      // #1328: and what it decided, for the recorder's next header.
+      noteReplans();
       // #567: a hand-set target is judged whatever the ride is doing — a rider
       // can hold ERG without recording, and a paused ride is exactly when
       // somebody stops pedalling. No control check here: losing control, a

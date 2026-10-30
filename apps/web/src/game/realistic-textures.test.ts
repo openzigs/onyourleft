@@ -34,12 +34,44 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { metres } from '@onyourleft/domain';
 import { KIT_COLOURS } from '@onyourleft/store';
 
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
 import { KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
-import { REALISTIC_REMOTE_RIDERS } from './realistic-budget';
+import { WOOD_SWAY_SHARE } from './foliage-light';
+import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from './decorations';
+import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
+import { mixedTownFixture } from './footprint-fixtures-testing';
+import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
+import { landClassMask } from './land-class';
+import { mappedBuildingsOf } from './mapped-buildings';
+import type { GameView } from './port';
+import { qualitySettings, REALISTIC_LADDER } from './quality';
+import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
+import { scatterSeed } from './scatter';
+import { siteAt, siteSpacing, type Site } from './settlements';
+import { streetsAt } from './streets';
+import { corridorOrigin } from './terrain';
+import { sceneFrame } from './scene';
+import { seasonOn, type Season } from './season';
+import { atStartLine } from './simulation';
+import {
+  groundColourIn,
+  roofSnowIn,
+  routeHemisphere,
+  routeLatitudeMagnitude,
+  type SunStyle,
+  vergeSlushIn,
+} from './world';
+import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
+import {
+  REALISTIC_REMOTE_RIDERS,
+  REALISTIC_STRUCTURE_ITEMS,
+  REALISTIC_TREE_LEVELS,
+} from './realistic-budget';
+import { treeSlots } from './tree-levels';
 import {
   albedoBytes,
   toldApartFaults,
@@ -53,8 +85,15 @@ import {
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
+  REALISTIC_SURFACES,
+  REALISTIC_TREE_SETS,
+  REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
+  realisticVegetation,
+  type RealisticTrees,
 } from './realistic-assets';
 import { modelFacts } from './realistic-bytes-testing';
 
@@ -214,10 +253,14 @@ const DESKTOP = ['EXT_texture_compression_bptc', 'WEBGL_compressed_texture_s3tc'
 
 type Renderer = typeof import('./three-renderer');
 
-/** A fresh renderer module — the world is module state — and the whole world loaded on `offered`. */
-async function loadedOn(offered: readonly string[]): Promise<Renderer> {
+/**
+ * A fresh renderer module — the world is module state — and the whole world
+ * loaded on `offered`, with the product's trees or — #1283 — the set named.
+ */
+async function loadedOn(offered: readonly string[], trees?: RealisticTrees): Promise<Renderer> {
   vi.resetModules();
   const renderer = await import('./three-renderer');
+  if (trees !== undefined) renderer.setRealisticTrees(trees);
   const inner = renderer.compressedRealisticLoaders(device(offered), `${ORIGIN}/basis/`);
   const at = (url: string): string => `${ORIGIN}${url}`;
   const outcome = await renderer.loadRealisticWorld({
@@ -277,14 +320,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const renderer = await loadedOn(TABLET);
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
-    // Non-vacuity: the whole set — eight surface maps (#627's verge and rock
-    // among them), fourteen structure maps,
+    // Non-vacuity: the whole set — two maps a surface (#627's verge and rock
+    // and #1274's crag among them: ten), twenty structure maps (#1548 added six),
     // the bicycle's four (#624), four impostors and every map inside a tree,
     // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
     // live and dead branches are two textures over one image, which three
     // uploads once.
     const images =
-      8 +
+      2 * Object.keys(REALISTIC_SURFACES).length +
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +
@@ -315,6 +358,17 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
+    // #1274: the road's two maps are the road's, and every other surface's —
+    // the grass, the verge, the rock and the crag — are the ground's, a colour
+    // map (ETC2) and a normal map (ASTC) each.
+    expect(worn.filter((each) => each.role === 'road')).toHaveLength(2);
+    const ground = worn.filter((each) => each.role === 'ground').map((each) => each.format);
+    const blended = Object.keys(REALISTIC_SURFACES).length - 1;
+    expect(blended).toBe(4);
+    expect(ground.sort()).toEqual([
+      ...Array.from({ length: blended }, () => 'ASTC 4x4'),
+      ...Array.from({ length: blended }, () => 'ETC2 RGB'),
+    ]);
     // #966: the wordmark is a cut-out over its board, ETC2 with its alpha.
     expect(worn.filter((each) => each.role === 'wordmark').map((each) => each.format)).toEqual([
       'ETC2 RGBA',
@@ -1034,4 +1088,852 @@ describe('the realistic riders’ bike-shaped shadow — #626', () => {
     expect(silhouettes.silhouetteThrow(riderFacing(0), { x: 1, y: 0, z: 0 }, thrown)).toBe(false);
     expect(thrown).toEqual({ x: 7, z: 7 });
   });
+});
+
+describe('the generated trees, loaded and drawn through the product’s own path — #1283', () => {
+  /** What this reads of an instanced mesh, without naming three (`three-seam.test.ts`). */
+  interface DrawnMesh {
+    readonly count: number;
+    readonly instanceMatrix: { readonly array: ArrayLike<number> };
+    readonly instanceColor: { readonly array: ArrayLike<number> } | null;
+    readonly geometry: {
+      readonly index: { readonly count: number } | null;
+      getAttribute(name: string): { readonly array: ArrayLike<number>; readonly count: number };
+      hasAttribute(name: string): boolean;
+    };
+    readonly material: {
+      readonly name: string;
+      readonly alphaTest: number;
+      readonly vertexColors: boolean;
+      readonly defines?: Readonly<Record<string, unknown>>;
+      readonly uniforms?: Readonly<Record<string, { readonly value: unknown }>>;
+      /** A strip's own shader, where the material is one this file wrote whole. */
+      readonly fragmentShader?: string;
+      onBeforeCompile(shader: unknown, renderer: unknown): void;
+    };
+  }
+
+  /** A lit material's shaders after its `onBeforeCompile`, over every include this file's splices need. */
+  function compiled(material: DrawnMesh['material']): {
+    readonly vertex: string;
+    readonly fragment: string;
+    readonly uniforms: Record<string, { value: unknown }>;
+  } {
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: [
+        '#include <common>',
+        '#include <uv_vertex>',
+        '#include <color_vertex>',
+        '#include <begin_vertex>',
+        '#include <project_vertex>',
+        '#include <fog_pars_vertex>',
+        '#include <fog_vertex>',
+      ].join('\n'),
+      fragmentShader: [
+        '#include <common>',
+        '#include <map_pars_fragment>',
+        '#include <normalmap_pars_fragment>',
+        '#include <fog_pars_fragment>',
+        '#include <clipping_planes_fragment>',
+        '#include <map_fragment>',
+        '#include <color_fragment>',
+        '#include <alphamap_fragment>',
+        '#include <alphatest_fragment>',
+        '#include <roughnessmap_fragment>',
+        '#include <normal_fragment_begin>',
+        '#include <normal_fragment_maps>',
+        '#include <lights_physical_fragment>',
+        '#include <fog_fragment>',
+      ].join('\n'),
+    };
+    material.onBeforeCompile(shader, undefined);
+    return {
+      vertex: shader.vertexShader,
+      fragment: shader.fragmentShader,
+      uniforms: shader.uniforms,
+    };
+  }
+
+  const POSE = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+  // Far first; with one full tree, four middle and a band at each hand-over,
+  // the six nearest are meshes and every one beyond is its impostor.
+  const DISTANCES = [95, 85, 75, 65, 55, 45, 35, 25, 18, 10];
+  const X = 12;
+
+  /**
+   * The generated trees of each kind — #1294: what #1283 holds of a generated
+   * broadleaf is held of a generated fir, read back the same way.
+   */
+  const GENERATED = [
+    ['tree-broadleaf', REALISTIC_BROADLEAVES.generated],
+    ['tree-conifer', REALISTIC_CONIFERS.generated],
+  ] as const;
+  type TreeKind = (typeof GENERATED)[number][0];
+
+  /** Ten trees of a kind down a verge, each variant in turn, nearest last. */
+  const trees = (variants: number, kind: TreeKind) =>
+    DISTANCES.map((z, at) => ({
+      kind,
+      x: X,
+      y: 0,
+      z,
+      rotation: 0,
+      scale: 1,
+      variant: at % variants,
+    }));
+
+  /** The z of every instance a mesh draws. */
+  const drawnAt = (mesh: DrawnMesh | undefined): number[] =>
+    mesh === undefined
+      ? []
+      : Array.from({ length: mesh.count }, (_, slot) =>
+          Math.round(mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN),
+        );
+
+  it('loads the generated broadleaves for a ride, and the scans only when told to', async () => {
+    expect(REALISTIC_TREES_DEFAULT).toBe('generated');
+    for (const set of [undefined, ...REALISTIC_TREE_SETS]) {
+      const renderer = await loadedOn(TABLET, set);
+      const expected = realisticVegetation(set ?? REALISTIC_TREES_DEFAULT);
+      const belt = renderer.realisticVegetationOfLoadedWorld();
+      if (belt === undefined) throw new Error('no world is loaded');
+      // One shape a model the set names, in its variant order — read off the
+      // belt a view would build, so a set that loaded the other's files is seen.
+      for (const kind of REALISTIC_VEGETATION_KINDS) {
+        expect(belt.levelsOf(kind).full, `${String(set)} ${kind}`).toHaveLength(
+          expected[kind].length,
+        );
+      }
+      // And the triangles drawn are the committed files', variant by variant
+      // — the broadleaves', and since #1294 the conifers', which differ
+      // between the sets too.
+      for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+        const full = belt.levelsOf(kind).full as unknown as readonly (readonly DrawnMesh[])[];
+        expected[kind].forEach((model, variant) => {
+          const drawn = (full[variant] ?? []).reduce(
+            (sum, mesh) => sum + (mesh.geometry.index?.count ?? 0) / 3,
+            0,
+          );
+          expect(drawn, `${String(set)} ${model.name}`).toBe(
+            modelFacts(join(PUBLIC, 'realistic', model.file)).triangles,
+          );
+        });
+      }
+      // Only the one set's textures are held: the other's are never fetched.
+      const models = renderer.realisticTextureReport().filter((each) => each.role === 'impostor');
+      expect(models).toHaveLength(
+        expected['tree-broadleaf'].length + expected['tree-conifer'].length,
+      );
+    }
+  }, 120_000);
+
+  it.each(GENERATED)(
+    'draws each generated %s at three levels, one draw call a level, and hands one over to the next',
+    async (kind, generated) => {
+      const renderer = await loadedOn(TABLET, 'generated');
+      const belt = renderer.realisticVegetationOfLoadedWorld();
+      if (belt === undefined) throw new Error('no world is loaded');
+      const levels = belt.levelsOf(kind) as unknown as {
+        readonly full: readonly (readonly DrawnMesh[])[];
+        readonly middle: readonly (readonly DrawnMesh[] | undefined)[];
+        readonly impostor: readonly (DrawnMesh | undefined)[];
+      };
+      const variants = generated.length;
+      expect(levels.full).toHaveLength(variants);
+      generated.forEach((model, variant) => {
+        const full = levels.full[variant] ?? [];
+        const middle = levels.middle[variant] ?? [];
+        // #639: bark and leaves are one material's two layers, so one call a level.
+        expect(full, model.name).toHaveLength(1);
+        expect(middle, model.name).toHaveLength(1);
+        expect(levels.impostor[variant], model.name).toBeDefined();
+        const [near] = full;
+        const [mid] = middle;
+        if (near === undefined || mid === undefined) throw new Error(`${model.name}: no mesh`);
+        // #617: the middle level wears the full level's own material, maps and all.
+        expect(mid.material).toBe(near.material);
+        expect(renderer.materialLayers(near.material as never), model.name).toBe(2);
+        // A leaf card is cut, and the baked occlusion is drawn.
+        expect(near.material.alphaTest, model.name).toBeGreaterThan(0);
+        expect(near.material.vertexColors, model.name).toBe(true);
+        expect(near.geometry.hasAttribute('color'), model.name).toBe(true);
+        expect(mid.geometry.hasAttribute('color'), model.name).toBe(true);
+        // The middle level is a real level: under half the full one's triangles.
+        expect((mid.geometry.index?.count ?? 0) * 2, model.name).toBeLessThan(
+          near.geometry.index?.count ?? 0,
+        );
+      });
+
+      belt.update(trees(variants, kind), POSE);
+      const slots = treeSlots(REALISTIC_TREE_LEVELS);
+      const full = levels.full.flatMap((meshes) => meshes.flatMap(drawnAt));
+      const middle = levels.middle.flatMap((meshes) => (meshes ?? []).flatMap(drawnAt));
+      const impostor = levels.impostor.flatMap(drawnAt);
+      // The nearest is the full mesh; the band tree behind it is drawn at both.
+      expect(full.sort((a, b) => a - b)).toEqual([10, 18]);
+      expect(full).toHaveLength(slots.full);
+      expect(middle.sort((a, b) => a - b)).toEqual([18, 25, 35, 45, 55, 65]);
+      expect(middle).toHaveLength(slots.middle);
+      // And every tree from the far band's edge outward is its impostor.
+      expect(impostor.sort((a, b) => a - b)).toEqual([65, 75, 85, 95]);
+      // Each in the mesh of ITS variant: the tree at 10 m is the tenth, variant 3.
+      const nearest = DISTANCES.indexOf(10) % variants;
+      expect(drawnAt(levels.full[nearest]?.[0])).toContain(10);
+    },
+    120_000,
+  );
+
+  it.each(GENERATED)(
+    'teaches a generated %s the breeze, its seeded tint and the world’s sun, and grounds it under its trunk',
+    async (kind, generated) => {
+      const renderer = await loadedOn(TABLET, 'generated');
+      const belt = renderer.realisticVegetationOfLoadedWorld();
+      if (belt === undefined) throw new Error('no world is loaded');
+      const levels = belt.levelsOf(kind) as unknown as {
+        readonly full: readonly (readonly DrawnMesh[])[];
+        readonly middle: readonly (readonly DrawnMesh[] | undefined)[];
+        readonly impostor: readonly (DrawnMesh | undefined)[];
+      };
+      const variants = generated.length;
+      // Non-vacuity for #1294: the conifers read here are the generated firs.
+      expect(generated.every((model) => model.name.startsWith('generated_'))).toBe(true);
+      belt.update(trees(variants, kind), POSE);
+
+      generated.forEach((model, variant) => {
+        const near = levels.full[variant]?.[0];
+        const strip = levels.impostor[variant];
+        if (near === undefined || strip === undefined) throw new Error(`${model.name}: no mesh`);
+
+        // #630, the breeze: the meshes sway, the leaves by all of it and the
+        // wood by its small share — bark is layer 0, as the file orders them.
+        const mesh = compiled(near.material);
+        expect(mesh.vertex, model.name).toContain('oylSwayWave(oylSwayPhase(');
+        expect(mesh.uniforms['oylSwayLayer']?.value, model.name).toEqual([WOOD_SWAY_SHARE, 1]);
+        expect(mesh.uniforms['oylWindTime'], model.name).toBeDefined();
+        // #621, the seeded tint: read by the meshes' material and by the strip's.
+        expect(renderer.readsInstanceTint(near.material as never), model.name).toBe(true);
+        expect(mesh.fragment, model.name).toContain('oylTinted');
+        // #1294: read AND applied — the function's own definition contains its
+        // name, so the line above stayed green with the tint never multiplied
+        // in (found by deleting that multiplication). The colour is tinted, from
+        // the varying the vertex stage fills from the instance's own colour.
+        expect(mesh.fragment, model.name).toContain(
+          'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+        );
+        expect(mesh.vertex, model.name).toContain('vOylTint = oylTintOf(instanceColor.z);');
+        // And the far band's strip tints its own texel the same way.
+        expect(strip.material.fragmentShader, model.name).toContain(
+          'oylTinted(texel.rgb, vOylTint)',
+        );
+        // #617: and it keeps its half of the hand-over's dither, from the same
+        // instance colour — a tree taught the tint alone would swap levels whole.
+        expect(mesh.vertex, model.name).toContain('vOylKeep = instanceColor.xy;');
+        // #630, the far band's light: the strip has its normals, and is relit by them.
+        expect(strip.material.defines, model.name).toHaveProperty('OYL_LIT_IMPOSTOR');
+        expect(strip.material.uniforms?.['stripNormals']?.value, model.name).toBeTruthy();
+        expect(strip.material.uniforms?.['strip']?.value, model.name).toBeTruthy();
+        expect(Number(strip.material.defines?.['FRAMES']), model.name).toBe(8);
+        // The quad is as tall as the strip's frame, in the tree's own units.
+        const facts = modelFacts(join(PUBLIC, 'realistic', model.file));
+        expect(Number(strip.material.defines?.['QUAD_H']), model.name).toBeCloseTo(
+          Number(facts.extras['oyl_impostor_scale']),
+          4,
+        );
+        expect(Number(strip.material.defines?.['TREE_HEIGHT']), model.name).toBeCloseTo(
+          Number(facts.extras['oyl_scan_height']),
+          4,
+        );
+
+        // #620: the trunk stands on the model's own origin, which is where the
+        // belt lays the blob — the lowest ring of the wood is centred on it.
+        const positions = near.geometry.getAttribute('position');
+        const layer = near.geometry.getAttribute('oylLayer');
+        const height = Number(facts.extras['oyl_scan_height']);
+        let [sumX, sumZ, foot] = [0, 0, 0];
+        for (let vertex = 0; vertex < positions.count; vertex += 1) {
+          if ((layer.array[vertex] ?? 1) !== 0) continue;
+          if ((positions.array[vertex * 3 + 1] ?? Infinity) > height * 0.002) continue;
+          sumX += positions.array[vertex * 3] ?? Number.NaN;
+          sumZ += positions.array[vertex * 3 + 2] ?? Number.NaN;
+          foot += 1;
+        }
+        expect(foot, model.name).toBeGreaterThanOrEqual(6);
+        expect(Math.abs(sumX / foot), model.name).toBeLessThan(height * 0.01);
+        expect(Math.abs(sumZ / foot), model.name).toBeLessThan(height * 0.01);
+      });
+
+      // #621: every instance, at every level, carries the tint of where it stands.
+      const everyMesh = [
+        ...levels.full.flat(),
+        ...levels.middle.flatMap((meshes) => meshes ?? []),
+        ...levels.impostor.filter((mesh): mesh is DrawnMesh => mesh !== undefined),
+      ];
+      let written = 0;
+      for (const mesh of everyMesh) {
+        for (let slot = 0; slot < mesh.count; slot += 1) {
+          const z = mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN;
+          expect(mesh.instanceColor?.array[slot * 3 + 2], String(z)).toBe(
+            Math.fround(packedInstanceTint(X, Math.round(z), FOLIAGE_TINT)),
+          );
+          written += 1;
+        }
+      }
+      expect(written).toBeGreaterThan(DISTANCES.length);
+
+      // #620: a ground blob under each tree drawn as a mesh, where it stands.
+      const blobs = belt.grounded.casters.slice(0, belt.grounded.count);
+      expect(blobs.map((blob) => blob.z).sort((a, b) => a - b)).toEqual([10, 18, 25, 35, 45, 55]);
+      for (const blob of blobs) {
+        expect(blob.x).toBe(X);
+        expect(blob.round).toBe(true);
+        expect(blob.halfAcross).toBeGreaterThan(0.5);
+        // No wider than the tree itself is drawn: a broadleaf 4.4 m at most,
+        // across, and a fir 7 m tall and about 4.1 m across.
+        expect(blob.halfAcross).toBeLessThan(2.5);
+        expect(blob.height).toBeGreaterThan(2);
+      }
+    },
+    120_000,
+  );
+
+  /** What this reads of a fir mesh and its depth pre-pass — #1523. */
+  interface PrepassedMesh extends DrawnMesh {
+    readonly parent: unknown;
+    readonly renderOrder: number;
+    readonly visible: boolean;
+    readonly children: readonly unknown[];
+    readonly material: DrawnMesh['material'] & {
+      depthFunc: number;
+      readonly colorWrite: boolean;
+      depthWrite: boolean;
+      customProgramCacheKey(): string;
+    };
+    onBeforeRender(...args: unknown[]): void;
+    onAfterRender(...args: unknown[]): void;
+  }
+
+  /** three's `LessEqualDepth` and `EqualDepth`, which this file may not import. */
+  const LESS_EQUAL_DEPTH = 3;
+  const EQUAL_DEPTH = 4;
+
+  it('draws each fir mesh after a depth pre-pass of its own program, and no broadleaf — #1523', async () => {
+    const renderer = await loadedOn(TABLET, 'generated');
+    const belt = renderer.realisticVegetationOfLoadedWorld();
+    if (belt === undefined) throw new Error('no world is loaded');
+    const levelsOf = (kind: TreeKind) =>
+      belt.levelsOf(kind) as unknown as {
+        readonly full: readonly (readonly PrepassedMesh[])[];
+        readonly middle: readonly (readonly PrepassedMesh[] | undefined)[];
+      };
+    const meshesOf = (kind: TreeKind): PrepassedMesh[] => {
+      const levels = levelsOf(kind);
+      return [...levels.full.flat(), ...levels.middle.flatMap((meshes) => meshes ?? [])];
+    };
+    const firs = meshesOf('tree-conifer');
+    const prepasses = belt.depthPrepasses as unknown as readonly {
+      readonly full: PrepassedMesh;
+      readonly prepass: PrepassedMesh;
+    }[];
+    // One pre-pass for every fir mesh at the full and the middle level — two
+    // shapes, two levels — and none for a broadleaf.
+    expect(firs).toHaveLength(2 * REALISTIC_CONIFERS.generated.length);
+    expect(prepasses).toHaveLength(firs.length);
+    prepasses.forEach((each, at) => expect(each.full).toBe(firs[at]));
+    for (const broadleaf of meshesOf('tree-broadleaf')) expect(broadleaf.children).toEqual([]);
+
+    for (const { full, prepass } of prepasses) {
+      // Drawn with the mesh: its child, its instances, its geometry, and
+      // ahead of it in three's order.
+      expect(prepass.parent).toBe(full);
+      expect(prepass.instanceMatrix).toBe(full.instanceMatrix);
+      expect(prepass.instanceColor).toBe(full.instanceColor);
+      expect(prepass.geometry).toBe(full.geometry);
+      expect(prepass.renderOrder).toBeLessThan(full.renderOrder);
+      expect(prepass.visible).toBe(true);
+      // Writing depth and no colour, from the mesh's own program.
+      expect(prepass.material).not.toBe(full.material);
+      expect(prepass.material.colorWrite).toBe(false);
+      expect(full.material.colorWrite).toBe(true);
+      expect(prepass.material.customProgramCacheKey()).toBe(full.material.customProgramCacheKey());
+      const own = compiled(full.material);
+      const twin = compiled(prepass.material);
+      expect(twin.fragment).toBe(own.fragment);
+      expect(twin.vertex).toBe(own.vertex);
+      // The one difference is the uniform: the pre-pass stops after the cut.
+      // It cuts by three's own alpha test, before the tint, and returns.
+      expect(own.fragment).toContain(
+        [
+          '#include <color_fragment>',
+          'if ( oylDepthOnly ) {',
+          '#include <alphatest_fragment>',
+          '  gl_FragColor = vec4( 0.0 );',
+          '  return;',
+          '}',
+          'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+        ].join('\n'),
+      );
+      expect(own.uniforms['oylDepthOnly']?.value).toBe(false);
+      expect(twin.uniforms['oylDepthOnly']?.value).toBe(true);
+    }
+
+    // The pre-pass draws what its mesh draws, read at the moment it is drawn.
+    belt.update(trees(REALISTIC_CONIFERS.generated.length, 'tree-conifer'), POSE);
+    const drawn = prepasses.filter(({ full }) => full.count > 0);
+    expect(drawn.length).toBeGreaterThan(1);
+    for (const { full, prepass } of drawn) {
+      prepass.onBeforeRender();
+      expect(prepass.count).toBe(full.count);
+    }
+
+    // The mesh is drawn with the EQUAL test, and its material put back after.
+    const each = drawn[0];
+    if (each === undefined) throw new Error('no fir drawn');
+    const material = each.full.material;
+    const drawWith = (): number => {
+      each.full.onBeforeRender();
+      const during = material.depthFunc;
+      const writing = material.depthWrite;
+      each.full.onAfterRender();
+      expect(material.depthFunc).toBe(LESS_EQUAL_DEPTH);
+      expect(material.depthWrite).toBe(true);
+      return during === EQUAL_DEPTH ? (writing ? -1 : EQUAL_DEPTH) : during;
+    };
+    expect(material.depthFunc).toBe(LESS_EQUAL_DEPTH);
+    expect(material.depthWrite).toBe(true);
+    // EQUAL and no depth write while drawn (-1 would mean it still wrote).
+    expect(drawWith()).toBe(EQUAL_DEPTH);
+    // Off: no pre-pass drawn and the mesh's own test, as before #1523.
+    belt.setDepthPrepass('off');
+    expect(prepasses.every(({ prepass }) => !prepass.visible)).toBe(true);
+    expect(drawWith()).toBe(LESS_EQUAL_DEPTH);
+    // The gate's control: the EQUAL test with no pre-pass drawn.
+    belt.setDepthPrepass('unprepared');
+    expect(prepasses.every(({ prepass }) => !prepass.visible)).toBe(true);
+    expect(drawWith()).toBe(EQUAL_DEPTH);
+    belt.setDepthPrepass('drawn');
+    expect(prepasses.every(({ prepass }) => prepass.visible)).toBe(true);
+
+    // And #619's order off keeps each pre-pass just ahead of its mesh.
+    belt.setFoliageOrdered(false);
+    for (const { full, prepass } of prepasses) {
+      expect(full.renderOrder).toBe(0);
+      expect(prepass.renderOrder).toBeLessThan(0);
+    }
+  }, 120_000);
+});
+
+describe('the mapped buildings’ blobs, through the drawing a view builds — #1657', () => {
+  /** A sun straight overhead: no throw, so a blob's middle is its caster's. */
+  const OVERHEAD: SunStyle = { x: 0, y: 1, z: 0, ambient: 0.4, direct: 0.6 };
+
+  it('grounds the drawn mapped buildings in `groundScenery`, after the procedural blobs, and none with the lever off', async () => {
+    // `RealisticDrawing.groundScenery` itself, not a copy of its steps
+    // (`mapped-blobs.test.ts` runs the belts): the drawing a view builds from
+    // the loaded world, handed #1581's mixed town as a ride's frame is, in the
+    // order `ThreeGameView.render` calls it. Read back off the blob belt's own
+    // mesh, which is what the GPU is handed.
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const rung = REALISTIC_LADDER[0];
+      if (rung === undefined) throw new Error('no realistic rung');
+      drawing.setBudget(rung.scatterItems + rung.structureItems, rung.structureItems);
+      const mixed = mixedTownFixture();
+      const land = landClassMask(mixed.corridor);
+      const buildings = mappedBuildingsOf(
+        footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin).plans,
+      );
+      const start = atStartLine(mixed.profile);
+      const frame = sceneFrame({
+        profile: mixed.profile,
+        origin: mixed.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+        worldCorridor: mixed.corridor,
+        landClass: land,
+        mappedBuildings: buildings,
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      const draw = (): { count: number; matrices: number[] } => {
+        drawing.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+        drawing.updateScenery(frame.scatter, frame.camera);
+        drawing.groundScenery(
+          frame.scatter,
+          frame.camera,
+          frame.corridor,
+          frame.terrain.mesh,
+          OVERHEAD,
+        );
+        const mesh = drawing.grounding.mesh;
+        return { count: mesh.count, matrices: Array.from(mesh.instanceMatrix.array) };
+      };
+
+      const grounded = draw();
+      const mapped = drawing.mapped;
+      if (mapped === undefined) throw new Error('the frame carried no mapped buildings');
+      // Non-vacuity: the town is drawn, and some procedural scenery is grounded too.
+      expect(mapped.stats.buildings).toBeGreaterThan(0);
+      drawing.mappedBlobsShown(false);
+      const off = draw();
+      expect(off.count).toBeGreaterThan(0);
+
+      // One blob a drawn mapped building on the ground the frame built, after
+      // the procedural ones. That ground starts at the corridor's first row,
+      // behind the rider: a blob whose middle is behind it has nothing to lie
+      // on (`GroundBlobBelt.update`'s rule, #620's), and none is drawn.
+      const [first, second] = frame.corridor.centre;
+      if (first === undefined || second === undefined) throw new Error('the frame has no road');
+      const middles: { x: number; z: number }[] = [];
+      for (let place = 0; ; place += 1) {
+        const drawn = mapped.drawnAt(place);
+        if (drawn === undefined) break;
+        const rectangle = minimumAreaRectangle(buildings.plans[drawn.plan]!.footprint);
+        const ahead =
+          (rectangle.cx - first.x) * (second.x - first.x) +
+          (rectangle.cz - first.z) * (second.z - first.z);
+        if (ahead > 0) middles.push({ x: rectangle.cx, z: rectangle.cz });
+      }
+      expect(middles.length).toBeGreaterThan(mapped.stats.buildings / 2);
+      expect(grounded.count - off.count).toBe(middles.length);
+      // The procedural blobs keep their slots: the first `off.count` are the same.
+      expect(grounded.matrices.slice(0, off.count * 16)).toEqual(
+        off.matrices.slice(0, off.count * 16),
+      );
+      // And each added blob is its building's, at its footprint's rectangle.
+      middles.forEach((middle, place) => {
+        const m = (at: number): number => grounded.matrices[(off.count + place) * 16 + at]!;
+        // The middle is lifted along the ground's normal (column 1).
+        const x = m(12) - m(4) * GROUND_BLOB_LIFT_METRES;
+        const z = m(14) - m(6) * GROUND_BLOB_LIFT_METRES;
+        expect(Math.hypot(x - middle.x, z - middle.z)).toBeLessThan(0.01);
+      });
+
+      // Shown again, the same frame grounds them again.
+      drawing.mappedBlobsShown(true);
+      expect(draw().count).toBe(grounded.count);
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+describe('the village models and the procedural belts, through the drawing a view builds — #1566', () => {
+  it('holds the procedural structures to what the models leave of the structure term', async () => {
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const profile = northRoute(20_000, () => 50);
+      const seed = scatterSeed(profile);
+      let village: Site | undefined;
+      for (let index = 0; village === undefined && index < siteSpacing(profile).sites; index += 1) {
+        const site = siteAt(profile, seed, index);
+        if (site?.kind === 'village') village = site;
+      }
+      if (village === undefined) throw new Error('the route has no village');
+      const start = atStartLine(profile);
+      const frame = sceneFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        state: {
+          ...start,
+          ride: { ...start.ride, distance: metres(village.centre - village.half - 40) },
+        },
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      // The control: with no model drawn, the belts draw every structure.
+      drawing.setBudget(10_000, 6);
+      drawing.updateScenery(frame.scatter, frame.camera);
+      expect(drawing.villageHouses.stats.houses).toBe(0);
+      const every = drawing.structures.drawnItems;
+      // The smallest term in which a model fits beside what no model stands
+      // for. It is read off the frame, not written down: it moves with every
+      // structure's price, and #1617's rounded hedge (274 triangles where the
+      // box was 12) took it from 8 to 12 on this frame.
+      let tightest = 0;
+      for (
+        let structureItems = 1;
+        structureItems <= REALISTIC_STRUCTURE_ITEMS;
+        structureItems += 1
+      ) {
+        drawing.setBudget(10_000, structureItems);
+        drawing.updateScenery(frame.scatter, frame.camera);
+        if (drawing.villageHouses.stats.houses > 0) {
+          tightest = structureItems;
+          break;
+        }
+      }
+      expect(tightest).toBeGreaterThan(0);
+      expect(tightest + 7).toBeLessThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+      // Terms the models take most of: the belts are held to what is left,
+      // read back off the structure belts' own drawn count.
+      for (const structureItems of [tightest, tightest + 3, tightest + 7]) {
+        drawing.setBudget(10_000, structureItems);
+        drawing.updateScenery(frame.scatter, frame.camera);
+        const modelled = drawing.villageHouses.stats;
+        expect(modelled.houses).toBeGreaterThan(0);
+        expect(Number.isFinite(modelled.procedural)).toBe(true);
+        expect(modelled.procedural).toBeLessThan(every);
+        expect(drawing.structures.drawnItems).toBe(modelled.procedural);
+      }
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+/**
+ * A WebGL 2 context that draws nothing, and answers what three's
+ * `WebGLRenderer` asks while it is built, prefilters a sky and binds a
+ * program — #1623's review. It is not a GPU. It lets a VIEW exist in Node, so
+ * the steps a view takes before it draws (`ThreeGameView.#stage`) run as a
+ * ride runs them. What the GPU then draws is the browser gate's business.
+ */
+function blindWebGl2(): unknown {
+  const names = new Map<string, number>();
+  const constant = (name: string): number => {
+    let value = names.get(name);
+    if (value === undefined) {
+      value = 0x8000 + names.size;
+      names.set(name, value);
+    }
+    return value;
+  };
+  return new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (typeof property !== 'string') return undefined;
+        if (/^[A-Z0-9_]+$/.test(property)) return constant(property);
+        return (...args: unknown[]): unknown => {
+          switch (property) {
+            case 'getParameter':
+              if (args[0] === constant('VERSION')) return 'WebGL 2.0';
+              if (args[0] === constant('SHADING_LANGUAGE_VERSION')) return 'WebGL GLSL ES 3.00';
+              if (args[0] === constant('SCISSOR_BOX') || args[0] === constant('VIEWPORT')) {
+                return new Int32Array([0, 0, 1, 1]);
+              }
+              return 16;
+            case 'getShaderPrecisionFormat':
+              return { precision: 23, rangeMin: 127, rangeMax: 127 };
+            case 'getSupportedExtensions':
+              return [];
+            case 'getContextAttributes':
+              return { alpha: false, antialias: false };
+            case 'getShaderParameter':
+              return true;
+            case 'getProgramParameter':
+              // Linked, with no active uniform or attribute to enumerate.
+              return args[1] === constant('LINK_STATUS') ? true : 0;
+            case 'getShaderInfoLog':
+            case 'getProgramInfoLog':
+              return '';
+            default:
+              return property.startsWith('create') ? {} : null;
+          }
+        };
+      },
+    },
+  );
+}
+
+/** A canvas as `WebGLRenderer` and a view use one, holding a {@link blindWebGl2}. */
+function blindCanvas(): HTMLCanvasElement {
+  const context = blindWebGl2();
+  return {
+    width: 1,
+    height: 1,
+    style: {},
+    getContext: () => context,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  } as unknown as HTMLCanvasElement;
+}
+
+/** What a three view holds that this reads: the ground mesh, and the mapped buildings' belt. */
+interface StagedView {
+  readonly terrainMesh: { readonly material: unknown };
+  readonly mappedBuildings: { materialOf(surface: 'roof-tiles'): unknown } | undefined;
+}
+
+describe('the route’s winter, staged by a view on the loaded world — #1623', () => {
+  it('snows the realistic ground and roofs from the frame, and leaves the stylised world season-free', async () => {
+    // `ThreeGameView.render` itself, on the loaded world: what `#stage` hands
+    // the terrain, read back off the ground mesh's own material, and what it
+    // writes for the roofs, read back through a mapped roof's own program as
+    // three binds it. A 61° N town on 20 January lies under a full winter.
+    const renderer = await loadedOn(TABLET);
+    const town = mixedTownFixture(61);
+    const land = landClassMask(town.corridor);
+    const start = atStartLine(town.profile);
+    const buildings = mappedBuildingsOf(
+      footprintPlans(town.corridor, land, town.profile, town.origin).plans,
+    );
+    // A fresh frame for each draw, since a frame's ground is lent and the next
+    // build reuses it, and built by the SAME module graph as the renderer
+    // `loadedOn` imported fresh, whose terrain checks that lease.
+    const scene = await import('./scene');
+    const framed = (): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile: town.profile,
+        origin: town.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+        worldCorridor: town.corridor,
+        landClass: land,
+        mappedBuildings: buildings,
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+    const frame = framed();
+    const on = (month: number, day: number): Season =>
+      seasonOn(
+        { year: 2026, month, day },
+        routeHemisphere(town.profile),
+        routeLatitudeMagnitude(town.profile),
+        true,
+      );
+    const winter = on(1, 20);
+    const summer = on(7, 15);
+    // Non-vacuity: a full winter here, which whitens the ground and the roofs.
+    expect(winter.nature.winter).toBe(1);
+    expect(summer.nature.winter).toBe(0);
+    const snowedGround = groundColourIn(frame.world, 1);
+    expect(snowedGround).not.toBe(frame.world.groundColour);
+    expect(roofSnowIn(frame.world, 1)).toBeGreaterThan(0.5);
+
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    // `WebGLRenderer`'s animation loop, which a view never starts, is stopped
+    // on `self` when it is disposed: Node has no frame clock to stop.
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    const realistic = renderer.threeGameRenderer.create(blindCanvas(), top);
+    const stylised = renderer.threeGameRenderer.create(blindCanvas(), qualitySettings(0));
+    try {
+      expect(renderer.drawnWorldOf(realistic)).toBe('realistic');
+      expect(renderer.drawnWorldOf(stylised)).toBe('stylised');
+      const groundOf = (view: GameView): number =>
+        (
+          (view as unknown as StagedView).terrainMesh.material as { color: { getHex(): number } }
+        ).color.getHex();
+      const roofSnow = (): unknown => {
+        const roof = (realistic as unknown as StagedView).mappedBuildings?.materialOf(
+          'roof-tiles',
+        ) as { onBeforeCompile(shader: unknown, renderer: unknown): void } | undefined;
+        if (roof === undefined) throw new Error('the frame drew no mapped roof');
+        const shader = {
+          uniforms: {} as Record<string, { value: unknown } | undefined>,
+          // The chunks the facade's splices anchor on, as three's own program holds them.
+          vertexShader:
+            '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+          fragmentShader:
+            '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+        };
+        roof.onBeforeCompile(shader, undefined);
+        return shader.uniforms['oylRoofSnow']?.value;
+      };
+      // #1692: the verge's slush, read back through the ground's own program.
+      const vergeSlush = (view: GameView): unknown => {
+        const ground = (view as unknown as StagedView).terrainMesh.material as {
+          onBeforeCompile(shader: unknown, renderer: unknown): void;
+        };
+        const shader = {
+          uniforms: {} as Record<string, { value: unknown } | undefined>,
+          vertexShader:
+            '#include <common>\n#include <fog_pars_vertex>\nvoid main() {\n#include <begin_vertex>\n#include <uv_vertex>\n#include <fog_vertex>\n}',
+          fragmentShader:
+            '#include <common>\n#include <normalmap_pars_fragment>\n#include <fog_pars_fragment>\nvoid main() {\n#include <map_fragment>\n#include <color_fragment>\n#include <alphamap_fragment>\n#include <normal_fragment_maps>\n#include <fog_fragment>\n}',
+          defines: {},
+        };
+        ground.onBeforeCompile(shader, undefined);
+        return shader.uniforms['oylVergeSlush']?.value;
+      };
+
+      realistic.setSeason(winter);
+      realistic.render(framed());
+      expect(groundOf(realistic)).toBe(snowedGround);
+      expect(roofSnow()).toBe(roofSnowIn(frame.world, 1));
+      expect(vergeSlushIn(frame.world, 1)).toBeGreaterThan(0.5);
+      expect(vergeSlush(realistic)).toBe(vergeSlushIn(frame.world, 1));
+
+      // The stylised world draws no season on the same snowy day: its own
+      // ground, and the roofs' uniform, which both worlds share, back to 0.
+      stylised.setSeason(winter);
+      stylised.render(framed());
+      expect(groundOf(stylised)).toBe(frame.world.groundColour);
+      expect(roofSnow()).toBe(0);
+      expect(vergeSlush(realistic)).toBe(0);
+
+      // And the realistic world's summer is today's ground, with bare roofs.
+      realistic.setSeason(summer);
+      realistic.render(framed());
+      expect(groundOf(realistic)).toBe(frame.world.groundColour);
+      expect(roofSnow()).toBe(0);
+      expect(vergeSlush(realistic)).toBe(0);
+    } finally {
+      stylised.destroy();
+      realistic.destroy();
+    }
+  }, 120_000);
+});
+
+describe('the village-square tree, in the realistic world: no depth pre-pass — #1627', () => {
+  /** three's `LessEqualDepth`, which this file may not import. */
+  const LESS_EQUAL_DEPTH = 3;
+
+  it('draws the decoration belt with its own depth test, outside the firs’ pre-pass set, whatever `-fir-prepass` says', async () => {
+    // The drawing a view builds from the loaded world, generated firs and
+    // all, so the pre-pass the tree must stay out of exists here. The
+    // stylised world builds none, and its `-fir-prepass` lever does nothing.
+    const renderer = await loadedOn(TABLET, 'generated');
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const firs = drawing.vegetation.depthPrepasses;
+      // Non-vacuity: this world draws firs after a pre-pass.
+      expect(firs.length).toBeGreaterThan(0);
+      const corner = plannerCornerRoute(150);
+      const streets = streetsAt(corner, corridorOrigin(corner), 2, 0, corner.totalDistance);
+      const anchor = streets[0]?.anchors[0];
+      if (anchor === undefined) throw new Error('the fixture has no village');
+      const belt = drawing.decorations;
+      belt.update(streets, { x: anchor.x, z: anchor.z }, 'winter-lights', HOLIDAY_DECORATIONS);
+      // Non-vacuity: the belt holds a tree.
+      expect(belt.itemsDrawn(VILLAGE_TREE)).toBeGreaterThanOrEqual(1);
+      const mesh = belt.mesh;
+      const material = mesh.material as unknown as {
+        depthFunc: number;
+        depthWrite: boolean;
+        readonly colorWrite: boolean;
+        customProgramCacheKey(): string;
+      };
+      // Not one of the firs' meshes, nor wearing a material they or their
+      // pre-passes wear.
+      // Booleans, since a failing identity check would print a three mesh.
+      expect(firs.some(({ full, prepass }) => full === mesh || prepass === mesh)).toBe(false);
+      expect(
+        firs.some(
+          ({ full, prepass }) =>
+            full.material === mesh.material || prepass.material === mesh.material,
+        ),
+      ).toBe(false);
+      // No pre-pass child, no pre-pass program, and it writes its colour.
+      expect(mesh.children.length).toBe(0);
+      expect(material.customProgramCacheKey()).not.toContain('oyl-depth-prepass');
+      expect(material.colorWrite).toBe(true);
+      // Drawn with its own test, with the pre-pass on, off and the gate's
+      // control alike: nothing the lever moves reaches the belt.
+      for (const mode of ['drawn', 'off', 'unprepared'] as const) {
+        drawing.vegetation.setDepthPrepass(mode);
+        (mesh.onBeforeRender as () => void)();
+        expect(material.depthFunc, mode).toBe(LESS_EQUAL_DEPTH);
+        expect(material.depthWrite, mode).toBe(true);
+        (mesh.onAfterRender as () => void)();
+        expect(mesh.children.length, mode).toBe(0);
+      }
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
 });

@@ -36,16 +36,36 @@ import {
   roadClip,
   type BlobCasters,
 } from './ground-blob';
+import { NO_LAND_CLASS } from './land-class';
 import { terrainCorridor } from './landform';
-import { hillRoute } from './route-fixtures-testing';
+import { hillRoute, northRoute } from './route-fixtures-testing';
+import {
+  BENCH_SETBACK_METRES,
+  BOLLARD_INSET_METRES,
+  FURNITURE_DRAW_METRES,
+  FURNITURE_KINDS,
+  FURNITURE_SURFACES,
+  LAMP_SETBACK_METRES,
+  DOOR_PATH_TRIANGLES_PER_VILLAGE,
+  PAVEMENT_TRIANGLES_PER_VILLAGE,
+  PAVEMENT_WIDTH_METRES,
+  streetsAt,
+  type FurnitureItem,
+  type FurnitureKind,
+  type FurnitureSurface,
+  type VillageStreet,
+} from './streets';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import { worldStyle } from './world';
 import {
   HARD_SWAP_TREE_LEVELS,
+  MAPPED_BUILDING_MAX,
   REALISTIC_BICYCLE_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
+  REALISTIC_STREET_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
@@ -73,15 +93,22 @@ import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
+  REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
   REALISTIC_BUILDING_SURFACES,
   REALISTIC_STRUCTURE_SURFACES,
+  REALISTIC_SURFACES,
+  REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
+  TOWN_STRUCTURE_SURFACES,
+  type RealisticModel,
   type StructureSurface,
 } from './realistic-assets';
+import { FOOTPRINT_SURFACES } from './footprint-buildings';
 import { HORIZON_AZIMUTH_BINS } from './realistic-light';
 import type { CameraPose } from './port';
 import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
@@ -94,6 +121,10 @@ import {
   evictRealisticWorldFromGpu,
   loadRealisticWorld,
   materialLayers,
+  PAVEMENT_COLOUR,
+  PavementBelt,
+  FurnitureBelt,
+  FURNITURE_CAPACITY,
   mergeShapeMaterials,
   photographicGroundMaterial,
   photographicRoadMaterial,
@@ -105,6 +136,7 @@ import {
   realisticBicycleTriangles,
   SCATTER_INSTANCE_CAPACITY,
   setRealisticTints,
+  setRealisticTrees,
   treeCanBeSeen,
   GroundBlobBelt,
   sceneryFitMetres,
@@ -1407,7 +1439,22 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
       ]),
     );
     const belt = new RealisticStructureBelts(textures);
-    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
+    // #1535: the paving is the pavements' (`PavementBelt`), and no structure's.
+    expect(belt.beltOf('paving')).toBeUndefined();
+    // #1548: the mapped towns' three have a belt and no mesh in it until the
+    // mapped buildings (#1540) are drawn by #1549 — the case below holds that.
+    const town = new Set<StructureSurface>(TOWN_STRUCTURE_SURFACES);
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      expect(belt.beltOf(surface), surface).toBeDefined();
+      expect(
+        STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []),
+        surface,
+      ).toEqual([]);
+    }
+    const worn = PHOTOGRAPHIC_STRUCTURE_SURFACES.filter(
+      (surface) => surface !== 'paving' && !town.has(surface),
+    );
+    for (const surface of [...worn, 'painted', 'glass'] as const) {
       const meshes = STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []);
       expect(meshes.length, surface).toBeGreaterThan(0);
       for (const mesh of meshes) {
@@ -1459,9 +1506,25 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
   });
 
   it('has no surface nothing wears, and wears no surface it has no maps for', () => {
-    const worn = new Set<StructureSurface>(STRUCTURE_KINDS.flatMap(realisticStructureSurfaces));
+    const procedural = new Set<StructureSurface>(
+      STRUCTURE_KINDS.flatMap(realisticStructureSurfaces),
+    );
+    // #1535: every photograph but the paving, which the pavements wear —
+    // §"the village pavements" holds `PavementBelt` to it.
+    // #1548's three are worn by the buildings planned from map data
+    // (`footprint-buildings.ts`, #1540; drawn by #1549), and by no procedural
+    // kind — that would change how every farmstead looks.
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      expect(procedural.has(surface), surface).toBe(false);
+      expect(FOOTPRINT_SURFACES, surface).toContain(surface);
+    }
+    const worn = new Set<StructureSurface>([...procedural, ...FOOTPRINT_SURFACES]);
     expect([...worn].sort()).toEqual(
-      [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'].sort(),
+      [
+        ...PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((surface) => surface !== 'paving'),
+        'painted',
+        'glass',
+      ].sort(),
     );
   });
 });
@@ -1587,6 +1650,70 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     for (const url of reading.asked) expect(url).toMatch(/^\/realistic\//);
   });
 
+  it('asks for the generated broadleaves, or the scans when told to, and never both — #1283', async () => {
+    const urlsOf = (models: readonly RealisticModel[]): string[] =>
+      models
+        .flatMap((model) => [model.file, model.middle, model.impostor, model.impostorNormals])
+        .filter((file): file is string => file !== undefined)
+        .map(realisticUrl);
+    const filesOf = (trees: 'generated' | 'scanned'): string[] =>
+      urlsOf(REALISTIC_BROADLEAVES[trees]);
+    // #1294: and the firs, generated or scanned.
+    const firsOf = (trees: 'generated' | 'scanned'): string[] => urlsOf(REALISTIC_CONIFERS[trees]);
+    // Non-vacuity: four files a tree, four trees and two; two firs of each making.
+    expect(filesOf('generated')).toHaveLength(16);
+    expect(filesOf('scanned')).toHaveLength(8);
+    expect(firsOf('generated')).toHaveLength(8);
+    expect(firsOf('scanned')).toHaveLength(8);
+    expect(firsOf('generated').some((url) => firsOf('scanned').includes(url))).toBe(false);
+
+    // What a ride loads, asked nothing: the generated trees, and no scan.
+    const product = loaders();
+    await expect(loadRealisticWorld(product)).resolves.toEqual({ loaded: true });
+    for (const url of filesOf('generated')) expect(product.asked, url).toContain(url);
+    for (const url of filesOf('scanned')) expect(product.asked, url).not.toContain(url);
+    for (const url of firsOf('generated')) expect(product.asked, url).toContain(url);
+    for (const url of firsOf('scanned')) expect(product.asked, url).not.toContain(url);
+
+    try {
+      // The owner's page with the lever off: the scans, and no generated tree.
+      setRealisticTrees('scanned');
+      const scans = loaders();
+      await expect(loadRealisticWorld(scans)).resolves.toEqual({ loaded: true });
+      for (const url of filesOf('scanned')) expect(scans.asked, url).toContain(url);
+      for (const url of filesOf('generated')) expect(scans.asked, url).not.toContain(url);
+      // Since #1294 the firs are scans in that set too, and no generated one.
+      for (const url of firsOf('scanned')) expect(scans.asked, url).toContain(url);
+      for (const url of firsOf('generated')) expect(scans.asked, url).not.toContain(url);
+      // #1294's own lever: the scanned firs beside the GENERATED broadleaves.
+      setRealisticTrees('scanned-conifers');
+      const firs = loaders();
+      await expect(loadRealisticWorld(firs)).resolves.toEqual({ loaded: true });
+      for (const url of firsOf('scanned')) expect(firs.asked, url).toContain(url);
+      for (const url of firsOf('generated')) expect(firs.asked, url).not.toContain(url);
+      for (const url of filesOf('generated')) expect(firs.asked, url).toContain(url);
+      for (const url of filesOf('scanned')) expect(firs.asked, url).not.toContain(url);
+      // The choice is the NEXT load's, and stays until it is changed back.
+      setRealisticTrees('generated');
+      const again = loaders();
+      await expect(loadRealisticWorld(again)).resolves.toEqual({ loaded: true });
+      for (const url of filesOf('generated')) expect(again.asked, url).toContain(url);
+      for (const url of filesOf('scanned')) expect(again.asked, url).not.toContain(url);
+      for (const url of firsOf('generated')) expect(again.asked, url).toContain(url);
+      for (const url of firsOf('scanned')) expect(again.asked, url).not.toContain(url);
+    } finally {
+      setRealisticTrees(REALISTIC_TREES_DEFAULT);
+    }
+
+    // A generated tree's file is as load-bearing as any other: without one
+    // strip's normals there is no world, never one with a tree missing.
+    for (const strip of ['generated_oak_c-impostor-normals', 'generated_fir_b-impostor-normals']) {
+      const outcome = await loadRealisticWorld(loaders(strip));
+      expect(outcome).toMatchObject({ loaded: false });
+      expect(outcome.loaded ? '' : outcome.detail).toMatch(new RegExp(strip));
+    }
+  });
+
   it('loads none of it when one file fails, and says why — never half a world', async () => {
     await expect(loadRealisticWorld(loaders())).resolves.toEqual({ loaded: true });
     // A second whole load replaces the first, releasing it after the swap.
@@ -1637,6 +1764,85 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     const outcome = await loadRealisticWorld(loaders('bicycle_rubber_nor_gl'));
     expect(outcome).toMatchObject({ loaded: false });
     expect(outcome.loaded ? '' : outcome.detail).toMatch(/bicycle_rubber_nor_gl/);
+  });
+
+  /**
+   * Loaders that keep each texture they make by its URL, and count how often
+   * each was let go of — #1274.
+   */
+  function keepingLoaders(): {
+    readonly loaders: RealisticLoaders;
+    readonly made: Map<string, Record<string, unknown>>;
+    readonly released: Map<string, number>;
+  } {
+    const reading = loaders();
+    const made = new Map<string, Record<string, unknown>>();
+    const released = new Map<string, number>();
+    return {
+      made,
+      released,
+      loaders: {
+        ...reading,
+        texture: (url) =>
+          reading.texture(url).then((loaded) => {
+            const kept = Object.assign(loaded, {
+              dispose: () => {
+                released.set(url, (released.get(url) ?? 0) + 1);
+              },
+            });
+            made.set(url, kept as unknown as Record<string, unknown>);
+            return kept;
+          }),
+      },
+    };
+  }
+
+  it('loads the crag’s two maps as it loads the rock’s — tiled, mipmapped, the colour as colour — and none of the world without them (#1274)', async () => {
+    const { loaders: keeping, made } = keepingLoaders();
+    await expect(loadRealisticWorld(keeping)).resolves.toEqual({ loaded: true });
+    const map = (file: string): Record<string, unknown> => {
+      const texture = made.get(realisticUrl(file));
+      if (texture === undefined) throw new Error(`${file} was never asked for`);
+      return texture;
+    };
+    const rock = REALISTIC_SURFACES.rock;
+    const crag = REALISTIC_SURFACES.crag;
+    // Non-vacuity: the rock's own settings are set, and its colour map is
+    // told from its normal map by the colour space.
+    expect(map(rock.colour)['wrapS']).toBeDefined();
+    expect(map(rock.colour)['minFilter']).toBeDefined();
+    expect(map(rock.colour)['colorSpace']).toBeDefined();
+    expect(map(rock.normal)['colorSpace']).toBeUndefined();
+    // A map left clamped is one photograph smeared over a hillside; one whose
+    // colour is read as data is a bank lit as if it were its own height map.
+    for (const key of ['wrapS', 'wrapT', 'minFilter', 'colorSpace']) {
+      expect(map(crag.colour)[key], `colour ${key}`).toBe(map(rock.colour)[key]);
+      expect(map(crag.normal)[key], `normal ${key}`).toBe(map(rock.normal)[key]);
+    }
+    for (const file of [crag.colour, crag.normal]) {
+      const outcome = await loadRealisticWorld(loaders(file));
+      expect(outcome, file).toMatchObject({ loaded: false });
+      expect(outcome.loaded ? '' : outcome.detail).toContain(file);
+    }
+  });
+
+  it('lets go of the crag’s maps with the world: once when it is replaced, and when it is evicted (#1274)', async () => {
+    const first = keepingLoaders();
+    await expect(loadRealisticWorld(first.loaders)).resolves.toEqual({ loaded: true });
+    const crag = [REALISTIC_SURFACES.crag.colour, REALISTIC_SURFACES.crag.normal].map((file) =>
+      realisticUrl(file),
+    );
+    for (const url of crag) expect(first.released.get(url), url).toBeUndefined();
+    // Replaced: the first world's are released, the second's are not.
+    const second = keepingLoaders();
+    await expect(loadRealisticWorld(second.loaders)).resolves.toEqual({ loaded: true });
+    for (const url of crag) {
+      expect(first.released.get(url), url).toBe(1);
+      expect(second.released.get(url), url).toBeUndefined();
+    }
+    // Evicted from the GPU: the world a view would draw lets its textures go.
+    evictRealisticWorldFromGpu();
+    for (const url of crag) expect(second.released.get(url), url).toBe(1);
   });
 
   it('says it was offline when the browser says so, which is the fallback D-7 names', async () => {
@@ -1769,10 +1975,49 @@ describe('a failed load releases everything it loaded, including what arrives la
     expect(outcome.loaded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const surfaces = held.filter((one) => one.url.includes('_512.ktx2'));
-    // The structures' maps, and since #627 the ground's verge and rock, which
-    // are made at the same size by the same script.
-    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length + 4);
+    // The structures' maps, and since #627 the ground's verge and rock — and
+    // since #1274 its crag — which are made at the same size by the same script.
+    // #1548's three are 1K, and the case below holds them.
+    expect(surfaces.length).toBe(
+      2 * (PHOTOGRAPHIC_STRUCTURE_SURFACES.length - TOWN_STRUCTURE_SURFACES.length) + 6,
+    );
+    expect(surfaces.map((one) => one.url).join(' ')).toContain(REALISTIC_SURFACES.crag.normal);
     expect(surfaces.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
+  });
+
+  it('waits for the mapped towns’ 1K maps too, however late they answer — #1548', async () => {
+    const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: '_1k.ktx2' });
+    const outcome = await loadRealisticWorld(loaders);
+    expect(outcome.loaded).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const late = held.filter((one) => one.url.includes('_1k.ktx2'));
+    // The town's six, and the road's and the grass's four, which are 1K too.
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      for (const file of [maps.colour, maps.normal]) {
+        expect(
+          late.map((one) => one.url),
+          file,
+        ).toContainEqual(expect.stringContaining(file));
+      }
+    }
+    expect(late.length).toBe(2 * TOWN_STRUCTURE_SURFACES.length + 4);
+    expect(late.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
+  });
+
+  it('waits for the crag’s two maps when they alone answer last — #1274', async () => {
+    // ⚠️ The case above cannot see the crag left out of the settled list: its
+    // maps answer with every other 512 px map, which the list does wait for,
+    // so they arrive in time by luck. Here ONLY the crag's are late.
+    for (const map of [REALISTIC_SURFACES.crag.colour, REALISTIC_SURFACES.crag.normal]) {
+      const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: map });
+      const outcome = await loadRealisticWorld(loaders);
+      expect(outcome.loaded).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const late = held.filter((one) => one.url.includes(map));
+      expect(late, map).toHaveLength(1);
+      expect(late[0]?.released, map).toBe(true);
+    }
   });
 
   it('releases the materials it had built for the trees before a later model failed', async () => {
@@ -2396,7 +2641,8 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     const treeKey = (
       tree.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
     ).customProgramCacheKey();
-    expect(treeKey).toMatch(/\|oyl-tree-dither$/);
+    // #1623: a broadleaf's, which also turns in autumn, by its own program.
+    expect(treeKey).toMatch(/\|oyl-tree-dither\|oyl-autumn$/);
   });
 
   it('refuses to teach one material as a tree and as something else', () => {
@@ -2641,7 +2887,10 @@ describe('the vegetation belt names what it drew as meshes, for the ground blobs
     expect(byKind(0)).toEqual([10, 18, 25, 35, 45, 55]);
     expect(byKind(6)).toEqual([23, 30, 37, 44, 51, 58, 65, 72]);
     expect(byKind(-6)).toEqual([10, 16, 22, 28, 34, 40, 46, 52, 58, 64, 70, 76]);
-    expect(list.count).toBe(REALISTIC_GROUND_BLOBS - 36);
+    // The belt's room less the structures' and, since #1657, the mapped buildings'.
+    expect(list.count).toBe(
+      REALISTIC_GROUND_BLOBS - REALISTIC_STRUCTURE_ITEMS - MAPPED_BUILDING_MAX,
+    );
     for (const caster of list.casters.slice(0, list.count)) {
       expect(caster.round).toBe(true);
       expect(caster.halfAlong).toBe(caster.halfAcross);
@@ -2774,7 +3023,7 @@ describe('the ground blob belt — #620', () => {
   const profile = hillRoute();
   const origin = corridorOrigin(profile);
   const corridor = roadCorridor(profile, origin, 900);
-  const terrain = terrainCorridor(profile, origin, corridor, scatterSeed(profile));
+  const terrain = terrainCorridor(profile, origin, corridor, scatterSeed(profile), NO_LAND_CLASS);
   const sun = worldStyle(profile).sun;
   /** Three trees beside the road, 7, 20 and 30 m out: the first a verge's width off the edge. */
   const casters = (): BlobCasters => {
@@ -3301,3 +3550,315 @@ function renderTargetsIn(source: string): readonly string[] {
   visit(file);
   return found;
 }
+
+describe('the village pavements — #1535', () => {
+  const farmland = northRoute(6_000, () => 40);
+  const streets = streetsAt(
+    farmland,
+    corridorOrigin(farmland),
+    scatterSeed(farmland),
+    0,
+    farmland.totalDistance,
+  );
+  const paving = { colour: aTexture(), normal: aTexture() };
+  // #1564: each street's front paths are merged into the same mesh.
+  const triangles = (list: readonly VillageStreet[]): number =>
+    list.reduce(
+      (sum, street) =>
+        sum +
+        street.pavement.indices.length / 3 +
+        street.doorPaths.reduce((paths, path) => paths + path.mesh.indices.length / 3, 0),
+      0,
+    );
+
+  it('wears the paving photograph in the realistic world, constructed and in the air', () => {
+    const belt = new PavementBelt('realistic', paving);
+    const material = belt.mesh.material as unknown as {
+      type: string;
+      map: unknown;
+      normalMap: unknown;
+    };
+    expect(material.type).toBe('MeshStandardMaterial');
+    expect(material.map).toBe(paving.colour);
+    expect(material.normalMap).toBe(paving.normal);
+    expect(isConstructedMaterial(belt.mesh.material as never)).toBe(true);
+    expect(breathesTheAir(belt.mesh.material as never)).toBe(true);
+    expect(readsTextureLodBias(belt.mesh.material as never)).toBe(true);
+    belt.dispose();
+  });
+
+  it('is the stylised world’s own grey there, lit or flat by the rung', () => {
+    const belt = new PavementBelt('stylised');
+    const colourOf = (): number =>
+      (belt.mesh.material as unknown as { color: { getHex: () => number } }).color.getHex();
+    expect(typeOf(belt.mesh)).toBe('MeshLambertMaterial');
+    expect(colourOf()).toBe(PAVEMENT_COLOUR);
+    belt.setShading('flat');
+    expect(typeOf(belt.mesh)).toBe('MeshBasicMaterial');
+    expect(colourOf()).toBe(PAVEMENT_COLOUR);
+    belt.dispose();
+  });
+
+  it('draws every street it is handed as one mesh, flags the photograph’s size', () => {
+    expect(streets.length).toBeGreaterThan(1);
+    const belt = new PavementBelt('realistic', paving);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(true);
+    const geometry = belt.mesh.geometry;
+    expect((geometry.index?.count ?? 0) / 3).toBe(triangles(streets));
+    // Texture coordinates in repeats of the photograph, from the street's metres.
+    const tile = REALISTIC_STRUCTURE_SURFACES.paving.tileMetres;
+    const uv = geometry.getAttribute('uv');
+    const first = (streets[0] as VillageStreet).pavement.uvs;
+    for (let at = 0; at < 8; at += 1) {
+      expect(uv.getX(at) * tile).toBeCloseTo(first[at * 2] as number, 4);
+      expect(uv.getY(at) * tile).toBeCloseTo(first[at * 2 + 1] as number, 4);
+    }
+    // The second street's indices point at its own vertices, after the first's.
+    const second = (streets[1] as VillageStreet).pavement;
+    const offset = (streets[0] as VillageStreet).pavement.positions.length / 3;
+    const start = (streets[0] as VillageStreet).pavement.indices.length;
+    expect(geometry.index?.getX(start)).toBe((second.indices[0] as number) + offset);
+    belt.dispose();
+  });
+
+  it('uploads nothing while the streets are the same, and empties when there are none', () => {
+    const belt = new PavementBelt('stylised');
+    belt.update(streets);
+    const built = belt.mesh.geometry;
+    belt.update([...streets]);
+    expect(belt.mesh.geometry).toBe(built);
+    belt.update(streets.slice(1));
+    expect(belt.mesh.geometry).not.toBe(built);
+    expect((belt.mesh.geometry.index?.count ?? 0) / 3).toBe(triangles(streets.slice(1)));
+    belt.update([]);
+    expect(belt.mesh.visible).toBe(false);
+    expect(belt.mesh.geometry.index?.count ?? 0).toBe(0);
+    belt.dispose();
+  });
+
+  it('draws nothing in the world not drawn, or with the browser gate’s control on', () => {
+    const belt = new PavementBelt('stylised');
+    belt.setShown(false);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(false);
+    belt.setShown(true);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(true);
+    belt.switchOn(false);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(false);
+    belt.dispose();
+  });
+});
+
+describe('the street furniture — #1536', () => {
+  const farmland = northRoute(6_000, () => 40);
+  const streets = streetsAt(
+    farmland,
+    corridorOrigin(farmland),
+    scatterSeed(farmland),
+    0,
+    farmland.totalDistance,
+  );
+  const planks = { colour: aTexture(), normal: aTexture() };
+  const trianglesOf = (mesh: { readonly geometry: ReturnType<typeof aGeometry> }): number =>
+    (mesh.geometry.index?.count ?? mesh.geometry.getAttribute('position').count) / 3;
+  /** The camera, stood on the first village's first piece of furniture. */
+  const first = (streets[0] as VillageStreet).furniture[0] as FurnitureItem;
+  const near = { x: first.x, z: first.z };
+
+  /** The pieces of `kind` within reach of `camera`. */
+  const inReach = (kind: FurnitureKind, camera: { x: number; z: number }): FurnitureItem[] =>
+    streets
+      .flatMap((street) => street.furniture)
+      .filter(
+        (item) =>
+          item.kind === kind &&
+          Math.hypot(item.x - camera.x, item.z - camera.z) <= FURNITURE_DRAW_METRES,
+      );
+  const kindsOf = (surface: FurnitureSurface): FurnitureKind[] =>
+    FURNITURE_KINDS.filter((kind) => (surface === 'planks' ? kind === 'bench' : kind !== 'bench'));
+
+  it('draws one merged mesh a surface, every piece within reach and none past it — #1689', () => {
+    for (const world of ['stylised', 'realistic'] as const) {
+      const belt = new FurnitureBelt(world, planks);
+      // Two meshes join the scene, so the frame draws two calls, not one a kind.
+      const added: unknown[] = [];
+      belt.addTo({ add: (object: unknown) => added.push(object) } as never);
+      expect(added).toEqual(FURNITURE_SURFACES.map((surface) => belt.meshOf(surface)));
+      expect(FURNITURE_SURFACES).toHaveLength(2);
+      belt.update(streets, near);
+      let drawn = 0;
+      for (const surface of FURNITURE_SURFACES) {
+        let triangles = 0;
+        for (const kind of kindsOf(surface)) {
+          const expected = inReach(kind, near).length;
+          expect(belt.drawnOf(kind), kind).toBe(expected);
+          // Non-vacuity: every kind in a village's worth.
+          expect(expected, kind).toBeGreaterThan(0);
+          triangles += expected * trianglesOf({ geometry: belt.shapeOf(kind) });
+          drawn += expected;
+        }
+        const mesh = belt.meshOf(surface);
+        expect(trianglesOf(mesh), surface).toBe(triangles);
+        expect(mesh.visible, surface).toBe(true);
+        // One material, so one call whatever it holds.
+        expect(Array.isArray(mesh.material), surface).toBe(false);
+      }
+      expect(drawn).toBeGreaterThan(10);
+      // Its level of detail: a camera a village away draws nothing at all.
+      belt.update(streets, { x: near.x, z: near.z - 2 * FURNITURE_DRAW_METRES - 400 });
+      for (const surface of FURNITURE_SURFACES) {
+        expect(belt.meshOf(surface).visible, surface).toBe(false);
+      }
+      for (const kind of FURNITURE_KINDS) expect(belt.drawnOf(kind), kind).toBe(0);
+      belt.dispose();
+    }
+  });
+
+  it('places each piece where the street says, turned to face the road', () => {
+    const belt = new FurnitureBelt('stylised');
+    belt.update(streets, near);
+    // `first` is the first piece of its surface in the street's order, so its
+    // vertices open the surface's mesh.
+    const shape = belt.shapeOf(first.kind);
+    const mesh = belt.meshOf(first.kind === 'bench' ? 'planks' : 'painted');
+    const [cos, sin] = [Math.cos(first.rotation), Math.sin(first.rotation)];
+    // Non-vacuity: a piece that is turned, so a missed turn cannot pass.
+    expect(Math.abs(sin)).toBeGreaterThan(0.1);
+    for (const name of ['position', 'normal'] as const) {
+      const from = shape.getAttribute(name);
+      const to = mesh.geometry.getAttribute(name);
+      const [dx, dy, dz] = name === 'position' ? [first.x, first.y, first.z] : [0, 0, 0];
+      for (let vertex = 0; vertex < from.count; vertex += 1) {
+        const [x, y, z] = [from.getX(vertex), from.getY(vertex), from.getZ(vertex)];
+        const at = `${name} ${String(vertex)}`;
+        // three's `makeRotationY`, then the piece's place.
+        expect(to.getX(vertex), at).toBeCloseTo(cos * x + sin * z + dx, 4);
+        expect(to.getY(vertex), at).toBeCloseTo(y + dy, 4);
+        expect(to.getZ(vertex), at).toBeCloseTo(-sin * x + cos * z + dz, 4);
+      }
+    }
+    // The colours ride along untouched.
+    expect(Array.from(mesh.geometry.getAttribute('color').array.slice(0, 9))).toEqual(
+      Array.from(shape.getAttribute('color').array.slice(0, 9)),
+    );
+    belt.dispose();
+  });
+
+  it('uploads nothing while the pieces in reach are the same, and rebuilds when they change — #1689', () => {
+    const belt = new FurnitureBelt('realistic', planks);
+    belt.update(streets, near);
+    const held = belt.meshOf('painted').geometry;
+    belt.update(streets, { x: near.x + 0.5, z: near.z });
+    expect(belt.meshOf('painted').geometry).toBe(held);
+    // A village away: the pieces in reach change, so the mesh is rebuilt.
+    belt.update(streets, { x: near.x, z: near.z - 2 * FURNITURE_DRAW_METRES - 400 });
+    expect(belt.meshOf('painted').geometry).not.toBe(held);
+    belt.dispose();
+  });
+
+  it('keeps every shape on the pavement, and a lantern over it, never over the road', () => {
+    const belt = new FurnitureBelt('stylised');
+    // How far each kind stands from the kerb's face, and from the back edge.
+    const fromKerb: Readonly<Record<FurnitureKind, number>> = {
+      'lamp-post': PAVEMENT_WIDTH_METRES - LAMP_SETBACK_METRES,
+      bollard: BOLLARD_INSET_METRES,
+      bench: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
+      bin: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
+    };
+    for (const kind of FURNITURE_KINDS) {
+      const geometry = belt.shapeOf(kind);
+      geometry.computeBoundingBox();
+      const box = geometry.boundingBox;
+      // +z is towards the road: the front must stop short of the kerb, the
+      // back short of the pavement's back edge, and the foot on the pavement.
+      expect(box?.max.z ?? Infinity, kind).toBeLessThan(fromKerb[kind]);
+      expect(-(box?.min.z ?? -Infinity), kind).toBeLessThan(PAVEMENT_WIDTH_METRES - fromKerb[kind]);
+      expect(box?.min.y ?? -1, kind).toBeCloseTo(0, 5);
+    }
+    belt.dispose();
+  });
+
+  it('holds the streets inside their stated triangles, each kind at its stated shape', () => {
+    const belt = new FurnitureBelt('realistic', planks);
+    const triangles = Object.fromEntries(
+      FURNITURE_KINDS.map((kind) => [kind, trianglesOf({ geometry: belt.shapeOf(kind) })]),
+    );
+    expect(triangles).toEqual({ 'lamp-post': 88, bollard: 64, bench: 108, bin: 64 });
+    const furniture = FURNITURE_KINDS.reduce(
+      (sum, kind) => sum + FURNITURE_CAPACITY * (triangles[kind] as number),
+      0,
+    );
+    expect(2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + furniture).toBe(
+      REALISTIC_STREET_TRIANGLES,
+    );
+    // The SAME triangles in both worlds: why the frame's figure leaves them out.
+    const stylised = new FurnitureBelt('stylised');
+    for (const kind of FURNITURE_KINDS) {
+      expect(trianglesOf({ geometry: stylised.shapeOf(kind) }), kind).toBe(triangles[kind]);
+    }
+    stylised.dispose();
+    belt.dispose();
+  });
+
+  it('wears physically based paint in the realistic world, and the bench Poly Haven’s planks', () => {
+    const belt = new FurnitureBelt('realistic', planks);
+    for (const surface of FURNITURE_SURFACES) {
+      const mesh = belt.meshOf(surface);
+      const material = mesh.material as unknown as {
+        type: string;
+        map: unknown;
+        normalMap: unknown;
+        vertexColors: boolean;
+      };
+      expect(material.type, surface).toBe('MeshStandardMaterial');
+      expect(material.vertexColors, surface).toBe(true);
+      expect(isConstructedMaterial(mesh.material as never), surface).toBe(true);
+      expect(breathesTheAir(mesh.material as never), surface).toBe(true);
+      if (surface === 'planks') {
+        expect(material.map).toBe(planks.colour);
+        expect(material.normalMap).toBe(planks.normal);
+        expect(readsTextureLodBias(mesh.material as never)).toBe(true);
+        // The slats in metres of the photograph, as a barn's boards are.
+        expect(belt.shapeOf('bench').getAttribute('uv')).toBeDefined();
+      } else {
+        expect(material.map ?? null, surface).toBeNull();
+      }
+    }
+    belt.dispose();
+  });
+
+  it('is painted in the stylised world, lit or flat by the rung', () => {
+    const belt = new FurnitureBelt('stylised');
+    for (const surface of FURNITURE_SURFACES)
+      expect(typeOf(belt.meshOf(surface)), surface).toBe('MeshLambertMaterial');
+    belt.setShading('flat');
+    for (const surface of FURNITURE_SURFACES)
+      expect(typeOf(belt.meshOf(surface)), surface).toBe('MeshBasicMaterial');
+    belt.dispose();
+  });
+
+  it('draws nothing in the world not drawn, or with the browser gate’s control on', () => {
+    const belt = new FurnitureBelt('stylised');
+    belt.setShown(false);
+    belt.update(streets, near);
+    for (const surface of FURNITURE_SURFACES) {
+      expect(belt.meshOf(surface).visible, surface).toBe(false);
+    }
+    belt.setShown(true);
+    belt.switchOn(false);
+    belt.update(streets, near);
+    for (const surface of FURNITURE_SURFACES) {
+      expect(belt.meshOf(surface).visible, surface).toBe(false);
+    }
+    for (const kind of FURNITURE_KINDS) expect(belt.drawnOf(kind), kind).toBe(0);
+    belt.switchOn(true);
+    belt.update(streets, near);
+    for (const surface of FURNITURE_SURFACES) {
+      expect(belt.meshOf(surface).visible, surface).toBe(true);
+    }
+    belt.dispose();
+  });
+});

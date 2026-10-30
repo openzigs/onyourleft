@@ -25,17 +25,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { kilograms, watts } from '@onyourleft/domain';
 import { encodeMessage, type RoomMessage } from '@onyourleft/protocol';
 
+import { NO_CARD_DEVICE } from '../instance/testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../game/hud/announce-preference';
 import { RACE_TEXT, ROOM_REFUSED_TEXT } from '../game/room-ride';
+import { gameTrainerPortOver, type GameTrainerPort } from '../game/trainer-port';
 import type { InstanceSocketEvents, OpenInstanceSocket } from '../instance/instance-transport';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import { createRoomPort } from '../net/room-port';
 import { createRoomsPort } from '../net/rooms-port';
 import { routeDigest } from './share';
-import { ASK_FOR_RESULT_LABEL, RACE_LEFT_EARLY_TEXT, RACE_NOT_OVER_TEXT } from './RaceResult';
+import {
+  ASK_FOR_RESULT_LABEL,
+  RACE_LEFT_EARLY_TEXT,
+  RACE_NO_RESULT_TEXT,
+  RACE_NOT_OVER_TEXT,
+} from './RaceResult';
+import { PUBLIC_ROOMS_TEXT, publicRoomStartText } from './PublicRooms';
+import { LIST_ROOM_TEXT, ROOMS_REFUSAL_TEXT } from './RoomPanel';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, submitForm, typeInto, type Mounted } from '../testing/mount';
@@ -74,6 +83,7 @@ const RENDERER: GameRenderer = {
     render: () => undefined,
     setQuality: () => undefined,
     setRiderKit: () => undefined,
+    setSeason: () => undefined,
     resize: () => undefined,
     destroy: () => undefined,
   }),
@@ -183,19 +193,23 @@ async function shell(
   instance: ScriptedInstance,
   sockets: ReturnType<typeof handPlayedSockets>,
   zones = [zoneNorth(50_000)],
+  gameTrainer?: GameTrainerPort,
 ) {
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
       game={GAME}
+      {...(gameTrainer === undefined ? {} : { gameTrainer })}
       gameRenderer={() => Promise.resolve(RENDERER)}
       riderMass={kilograms(70)}
       rooms={createRoomsPort({
+        ...NO_CARD_DEVICE,
         storage: localStorage,
         zones: () => Promise.resolve(zones),
         send: instance.send,
       })}
       room={createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: localStorage,
         send: instance.send,
         openSocket: sockets.open,
@@ -226,8 +240,13 @@ async function joinByCode(code: string): Promise<void> {
   const form = input.closest('form');
   if (form === null) throw new Error('the code box is in no form');
   await submitForm(form);
-  await settle();
-  await settle();
+  // Joining fetches the room's route and digests it with WebCrypto, which is
+  // not a microtask: settle until the room is entered, as `untilSaid` does,
+  // rather than a fixed count a loaded machine can outrun (#1388's CI).
+  for (let i = 0; i < 50 && button('Ride in the room') === undefined; i += 1) {
+    await settle();
+  }
+  if (button('Ride in the room') === undefined) throw new Error('the room was never entered');
 }
 
 describe('a group ride joined by its code — #784', () => {
@@ -269,6 +288,7 @@ describe('a group ride joined by its code — #784', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     await frame(2);
@@ -326,6 +346,7 @@ describe('a group ride joined by its code — #784', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     await sockets.say({ type: 'frame', tick: 1, riders: [rider(0, 10), rider(1, 12)] });
@@ -366,16 +387,19 @@ describe('making a room — #784', () => {
 });
 
 describe('a private race — #785', () => {
-  async function inARace(): Promise<{
+  async function inARace(
+    gameTrainer?: GameTrainerPort,
+    joinedAsItsMaker = false,
+  ): Promise<{
     instance: ScriptedInstance;
     sockets: ReturnType<typeof handPlayedSockets>;
     sha256: string;
   }> {
     const instance = new ScriptedInstance();
     const { gpx, sha256 } = await roomRoute(2_500);
-    instance.offer('room-race', 'race', gpx, sha256);
+    instance.offer('room-race', 'race', gpx, sha256, true, joinedAsItsMaker);
     const sockets = handPlayedSockets();
-    await shell(instance, sockets);
+    await shell(instance, sockets, undefined, gameTrainer);
     await joinByCode('ABCDE-FGHJK-MNPQR');
     await press('Ride in the room');
     await settle();
@@ -388,6 +412,7 @@ describe('a private race — #785', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     return { instance, sockets, sha256 };
@@ -423,6 +448,7 @@ describe('a private race — #785', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     return { instance, sockets };
@@ -434,6 +460,18 @@ describe('a private race — #785', () => {
     expect(document.body.textContent).toContain(RACE_TEXT.waitingForItsMaker);
     expect(button('Start the race')).toBeUndefined();
     expect(instance.seen.some((each) => each.path.endsWith('/start'))).toBe(false);
+  });
+
+  it('offers the start to its maker who joined their own race by its code — after a reload, or on another device (#948 N1)', async () => {
+    const { instance } = await inARace(undefined, true);
+    await frame(2);
+    expect(document.body.textContent).toContain(RACE_TEXT.waiting);
+    expect(document.body.textContent).not.toContain(RACE_TEXT.waitingForItsMaker);
+    await press('Start the race');
+    expect(instance.seen.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/v1/rooms/room-race/start',
+    });
   });
 
   it('holds the rider on the line until the room starts the race, whatever they pedal, and its maker starts it', async () => {
@@ -507,6 +545,24 @@ describe('a private race — #785', () => {
     expect(instance.seen.filter((each) => each.path.endsWith('/results'))).toHaveLength(2);
   });
 
+  it('says a race that is over with no result has none, rather than “ask again later” — #948 N-d', async () => {
+    const { instance, sockets } = await inARace();
+    await sockets.say({ type: 'frame', tick: 1, riders: [] });
+    await frame(3);
+    await press('End ride');
+    await settle();
+    // A restart interrupted the race: the instance says it is over, undecided.
+    instance.results = {
+      status: 409,
+      body: { error: { code: 'race_without_result', message: 'No result.' } },
+    };
+    await press(ASK_FOR_RESULT_LABEL);
+    await settle();
+    expect(document.body.textContent).toContain(RACE_NO_RESULT_TEXT);
+    expect(document.body.textContent).not.toContain(RACE_NOT_OVER_TEXT);
+    expect(document.querySelector('ol')).toBeNull();
+  });
+
   it('shows no ordered result while the race runs, and the room’s own after it — W/kg beside others, every flag to everyone', async () => {
     const { instance, sockets } = await inARace();
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
@@ -560,5 +616,283 @@ describe('a private race — #785', () => {
     expect(rows[2]).toMatch(/3rd You — 1:05:00, 3\.4 W\/kg, \d+ W/);
     for (const other of rows.slice(0, 2)) expect(other).not.toMatch(/\d W\b(?!\/kg)/);
     expect(instance.seen.at(-1)).toMatchObject({ path: '/v1/rooms/room-race/results' });
+  });
+
+  it('records the ride in the room, and keeps the room’s word on the race with it — #785, the owner’s ruling of 2026-10-14', async () => {
+    const asked: string[] = [];
+    const races: unknown[] = [];
+    const trainer: GameTrainerPort = {
+      ...gameTrainerPortOver(undefined),
+      recordRoomRide: () => {
+        asked.push('record');
+        return Promise.resolve(true);
+      },
+      roomRaceEnded: (race) => {
+        races.push(race);
+      },
+    };
+    const { sockets } = await inARace(trainer);
+    // #1360's review (N6): asked once the room has let the rider in — on the
+    // first frame after its welcome — and only once.
+    await frame(1);
+    expect(asked).toEqual(['record']);
+    await sockets.say({ type: 'frame', tick: 1, riders: [] });
+    await frame(2);
+    // This rider is seat 1, third in the room's order.
+    await sockets.say({ type: 'finish', order: [0, 2, 1] });
+    await frame(2);
+    expect(races).toEqual([]);
+    await press('End ride');
+    await settle();
+    expect(races).toEqual([{ roomId: 'room-race', place: 3, finishers: 3 }]);
+    expect(asked).toEqual(['record']);
+  });
+
+  it('starts no recording for a ride the room refuses — #1360’s review (N6)', async () => {
+    const asked: string[] = [];
+    const trainer: GameTrainerPort = {
+      ...gameTrainerPortOver(undefined),
+      recordRoomRide: () => {
+        asked.push('record');
+        return Promise.resolve(true);
+      },
+    };
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute(2_500);
+    instance.offer('room-race', 'race', gpx, sha256);
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets, undefined, trainer);
+    await joinByCode('ABCDE-FGHJK-MNPQR');
+    await press('Ride in the room');
+    await settle();
+    // Nothing is asked before the room answers…
+    await frame(2);
+    expect(asked).toEqual([]);
+    // …and nothing when it says no: a welcome to another route than the one
+    // fetched and checked is left (#784's review, N1).
+    await sockets.say({
+      type: 'welcome',
+      riderId: 1,
+      routeRef: { sha256: sha256.replace(/^./, sha256.startsWith('0') ? '1' : '0') },
+      roomConfig: {
+        kind: 'race',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+      },
+    });
+    await frame(3);
+    expect(document.body.textContent).toContain(ROOM_REFUSED_TEXT['not-the-rooms-route']);
+    // The rider rides on alone, unrecorded as any game ride with no recording
+    // is, and no saved ride is put away.
+    expect(asked).toEqual([]);
+  });
+});
+
+describe('public rooms — #788', () => {
+  const STARTS_AT = 1_790_001_800;
+  const LISTED = {
+    roomId: 'room-pub',
+    kind: 'group',
+    startsAt: STARTS_AT,
+    lengthMetres: 2_500,
+    climbMetres: 24,
+  } as const;
+
+  const startsWithText = (prefix: string): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
+      (each.textContent ?? '').replace(/\s+/g, ' ').trim().startsWith(prefix),
+    );
+
+  async function pressStartingWith(prefix: string): Promise<void> {
+    const found = startsWithText(prefix);
+    if (found === undefined) throw new Error(`no button starting “${prefix}”`);
+    await act(async () => {
+      found.click();
+      await Promise.resolve();
+    });
+    await settle();
+  }
+
+  async function check(labelStart: string): Promise<void> {
+    const box = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith(labelStart) === true,
+    );
+    if (box === undefined) throw new Error(`no “${labelStart}” box`);
+    await act(async () => {
+      box.click();
+      await Promise.resolve();
+    });
+  }
+
+  it('says public rooms are for adults, lists them, joins one, rides it, and reports a rider in it in two presses', async () => {
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute(2_500);
+    instance.list(LISTED, gpx, sha256);
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    expect(document.body.textContent).toContain(PUBLIC_ROOMS_TEXT.adults);
+    // Nothing is asked of the instance until the rider asks to see them.
+    expect(instance.seen).toEqual([]);
+    await press(PUBLIC_ROOMS_TEXT.show);
+    const start = publicRoomStartText(STARTS_AT);
+    await untilSaid(`Group ride, starts ${start} — 2.5 km, 24 m of climbing, drafting`);
+    await pressStartingWith(`Join the group ride starting at ${start}`);
+    for (let i = 0; i < 50 && button('Ride in the room') === undefined; i += 1) await settle();
+    expect(document.body.textContent).toContain(LIST_ROOM_TEXT.listed(start));
+    expect(document.body.textContent).not.toContain('Its code is');
+    await press('Ride in the room');
+    await settle();
+    expect(instance.seen.map((each) => `${each.method} ${each.path}`)).toEqual([
+      'GET /v1/rooms/public',
+      'POST /v1/rooms/room-pub/join',
+      'GET /v1/rooms/room-pub/route',
+      'POST /v1/rooms/room-pub/ticket',
+    ]);
+    expect(sockets.urls).toEqual(['wss://ride.example/v1/rooms/room-pub/socket']);
+
+    // #789's Report, in the public room: *Follow*, then two presses.
+    const rider = (riderId: number, decimetres: number) => ({
+      riderId,
+      decimetres,
+      centimetresPerSecond: 900,
+      draftPercent: 0,
+      flags: 0,
+    });
+    await sockets.say({
+      type: 'welcome',
+      riderId: 0,
+      routeRef: { sha256 },
+      roomConfig: {
+        kind: 'ride',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+      },
+    });
+    for (let tick = 1; tick <= 3; tick += 1) {
+      await sockets.say({
+        type: 'frame',
+        tick,
+        riders: [rider(0, tick * 10), rider(4, 40 + tick * 10)],
+      });
+      await frame(2);
+    }
+    await press('Follow the next rider near you');
+    await frame(2);
+    await pressStartingWith('Report');
+    await pressStartingWith('Cheating');
+    await settle();
+    expect(instance.seen.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/v1/rooms/room-pub/reports',
+      body: { riderId: 4, reason: 'cheating' },
+    });
+  });
+
+  it('says why the listing is refused: an account not eligible, and an instance offering none', async () => {
+    const instance = new ScriptedInstance();
+    instance.listing = { status: 403, body: { error: { code: 'not_eligible' } } };
+    await shell(instance, handPlayedSockets());
+    await press(PUBLIC_ROOMS_TEXT.show);
+    await untilSaid(ROOMS_REFUSAL_TEXT['not-eligible']);
+    instance.listing = { status: 404, body: { error: { code: 'not_found' } } };
+    await press(PUBLIC_ROOMS_TEXT.again);
+    await untilSaid(ROOMS_REFUSAL_TEXT['no-public-rooms']);
+    instance.listing = { status: 200, body: { rooms: [] } };
+    await press(PUBLIC_ROOMS_TEXT.again);
+    await untilSaid(PUBLIC_ROOMS_TEXT.none);
+
+    // Two rooms, shown in the instance's order and no other — a race that
+    // starts later than a group ride stays after it, whatever its kind.
+    const later = { ...LISTED, roomId: 'room-later', kind: 'race', startsAt: STARTS_AT + 3_600 };
+    instance.listing = {
+      status: 200,
+      body: {
+        rooms: [LISTED, later].map((each) => ({
+          ridingPosition: 'hoods',
+          drafting: true,
+          loop: false,
+          ...each,
+        })),
+      },
+    };
+    await press(PUBLIC_ROOMS_TEXT.again);
+    await untilSaid('Race, starts');
+    expect(
+      [...document.querySelectorAll('.oyl-rooms__listing li')].map(
+        (each) => (each.textContent ?? '').split(',')[0],
+      ),
+    ).toEqual(['Group ride', 'Race']);
+  });
+
+  it('makes a listed room: its start sent, no code shown, and its maker offered the start of its race', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_790_000_000_000);
+    const instance = new ScriptedInstance();
+    instance.created = { status: 200, body: { roomId: 'room-pub', routeSha256: 'x' } };
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    const race = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith('Race') === true,
+    );
+    await act(async () => {
+      race?.click();
+      await Promise.resolve();
+    });
+    await check(LIST_ROOM_TEXT.choice);
+    // What listing it sends, said before it is made.
+    expect(document.body.textContent).toContain(PUBLIC_ROOMS_TEXT.sent);
+    const select = [...document.querySelectorAll<HTMLSelectElement>('select')].find(
+      (each) => each.closest('label')?.textContent?.startsWith(LIST_ROOM_TEXT.startsIn) === true,
+    );
+    if (select === undefined) throw new Error('no start choice');
+    await act(async () => {
+      select.value = '60';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await press('Make a room');
+    const startsAt = 1_790_000_000 + 60 * 60;
+    await untilSaid(LIST_ROOM_TEXT.listed(publicRoomStartText(startsAt)));
+    expect(document.body.textContent).not.toContain('Its code is');
+    const sent = instance.seen.find((each) => each.path === '/v1/rooms')?.body as {
+      visibility: string;
+      startsAt: number;
+      gpx: string;
+    };
+    expect(sent.visibility).toBe('public');
+    expect(sent.startsAt).toBe(startsAt);
+    await press('Ride in the room');
+    await settle();
+    await sockets.say({
+      type: 'welcome',
+      riderId: 1,
+      routeRef: { sha256: await routeDigest(sent.gpx) },
+      roomConfig: {
+        kind: 'race',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+      },
+    });
+    await frame(2);
+    // Its maker starts it, as the maker of a room shared by its code does.
+    expect(button('Start the race')).toBeDefined();
+  });
+
+  it('names every limit a create can meet when a listed room is refused for one', async () => {
+    const instance = new ScriptedInstance();
+    instance.created = { status: 429, body: { error: { code: 'rate_limited' } } };
+    await shell(instance, handPlayedSockets());
+    await check(LIST_ROOM_TEXT.choice);
+    await press('Make a room');
+    await untilSaid(LIST_ROOM_TEXT.tooMany);
+    // The server answers three limits alike, so the text may not name only one.
+    expect(LIST_ROOM_TEXT.tooMany).toMatch(
+      /three public rooms a day.*ten rooms an hour.*five open/,
+    );
   });
 });

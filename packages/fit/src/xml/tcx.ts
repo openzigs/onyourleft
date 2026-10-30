@@ -46,7 +46,14 @@ import { extensionChannelOf, TCX_ACTIVITY_EXTENSION_V2 } from './extensions';
 import { formatIsoInstant, parseIsoInstant } from './iso-time';
 import type { XmlStartElement } from './parse';
 import { parseXml } from './parse';
-import type { TrackActivity, TrackDecodeResult, TrackLap, TrackPoint } from './track';
+import type {
+  TcxIntensity,
+  TcxTriggerMethod,
+  TrackActivity,
+  TrackDecodeResult,
+  TrackLap,
+  TrackPoint,
+} from './track';
 import { finiteNumber, quantity } from './values';
 import { decimal, degrees, integer, XmlWriter } from './write';
 
@@ -75,7 +82,54 @@ interface PartialLap {
   startTime: TrackLap['startTime'];
   totalElapsedTime: TrackLap['totalElapsedTime'];
   totalDistance: TrackLap['totalDistance'];
+  averageHeartRate: TrackLap['averageHeartRate'];
+  maxHeartRate: TrackLap['maxHeartRate'];
+  averageCadence: TrackLap['averageCadence'];
+  averagePower: TrackLap['averagePower'];
+  maxPower: TrackLap['maxPower'];
+  intensity: TrackLap['intensity'];
+  triggerMethod: TrackLap['triggerMethod'];
   points: TrackPoint[];
+  characterOffset: number;
+}
+
+/** `Intensity_t`'s values, from the TCX v2 schema. */
+const TCX_INTENSITIES: readonly TcxIntensity[] = ['Active', 'Resting'];
+
+/** `TriggerMethod_t`'s values, from the TCX v2 schema. */
+const TCX_TRIGGER_METHODS: readonly TcxTriggerMethod[] = [
+  'Manual',
+  'Distance',
+  'Location',
+  'Time',
+  'HeartRate',
+];
+
+/**
+ * One of a schema enumeration's values, or nothing and a fault.
+ *
+ * A value the schema does not admit is dropped rather than kept: a lap's kind
+ * read from it would be a guess, and the import decides what a lap is from it.
+ */
+function enumerated<T extends string>(
+  value: string,
+  admitted: readonly T[],
+  what: string,
+  offset: number,
+  faults: ActivityXmlError[],
+): T | undefined {
+  const trimmed = value.trim();
+  const found = admitted.find((candidate) => candidate === trimmed);
+  if (found === undefined) {
+    faults.push(
+      new ActivityXmlError(
+        'invalid-value',
+        offset,
+        `${what} is not one of the values TCX v2 admits for it; the field is dropped`,
+      ),
+    );
+  }
+  return found;
 }
 
 function emptyPoint(): PartialPoint {
@@ -190,7 +244,15 @@ export function decodeTcx(text: string): TrackDecodeResult {
               : readInstant(started.value, 'Lap@StartTime', element.characterOffset, faults),
           totalElapsedTime: undefined,
           totalDistance: undefined,
+          averageHeartRate: undefined,
+          maxHeartRate: undefined,
+          averageCadence: undefined,
+          averagePower: undefined,
+          maxPower: undefined,
+          intensity: undefined,
+          triggerMethod: undefined,
           points: [],
+          characterOffset: element.characterOffset,
         };
       }
       if (element.local === 'Trackpoint') {
@@ -239,12 +301,20 @@ export function decodeTcx(text: string): TrackDecodeResult {
           lap.totalDistance = quantity(value, metres, 'Lap/DistanceMeters', 0, faults);
           return;
         }
+        if (readLapChild(lap, local, value, path, faults)) return;
         if (local === 'Lap') {
           laps.push({
             startTime: lap.startTime ?? lap.points[0]?.timestamp,
             totalElapsedTime: lap.totalElapsedTime,
             totalDistance: lap.totalDistance,
             points: lap.points,
+            averageHeartRate: lap.averageHeartRate,
+            maxHeartRate: lap.maxHeartRate,
+            averageCadence: lap.averageCadence,
+            averagePower: lap.averagePower,
+            maxPower: lap.maxPower,
+            intensity: lap.intensity,
+            triggerMethod: lap.triggerMethod,
           });
           lap = undefined;
           return;
@@ -272,6 +342,74 @@ export function decodeTcx(text: string): TrackDecodeResult {
     },
     faults,
   };
+}
+
+/**
+ * True when the element was one of the lap figures #1321 reads: a child of the
+ * `<Lap>` itself, or of its `LX` extension. `path` is the element's ancestors,
+ * so a `<Cadence>` whose parent is a `<Trackpoint>` never reaches here — the
+ * point's own reader has it first.
+ */
+function readLapChild(
+  lap: PartialLap,
+  local: string,
+  value: string,
+  path: readonly string[],
+  faults: ActivityXmlError[],
+): boolean {
+  const parent = path[path.length - 1];
+  const offset = lap.characterOffset;
+  if (parent === 'LX') {
+    if (local === 'AvgWatts') {
+      lap.averagePower = quantity(value, watts, 'Lap extension AvgWatts', offset, faults);
+      return true;
+    }
+    if (local === 'MaxWatts') {
+      lap.maxPower = quantity(value, watts, 'Lap extension MaxWatts', offset, faults);
+      return true;
+    }
+    return false;
+  }
+  if (local === 'Value' && parent === 'AverageHeartRateBpm') {
+    lap.averageHeartRate = quantity(
+      value,
+      beatsPerMinute,
+      'Lap/AverageHeartRateBpm/Value',
+      offset,
+      faults,
+    );
+    return true;
+  }
+  if (local === 'Value' && parent === 'MaximumHeartRateBpm') {
+    lap.maxHeartRate = quantity(
+      value,
+      beatsPerMinute,
+      'Lap/MaximumHeartRateBpm/Value',
+      offset,
+      faults,
+    );
+    return true;
+  }
+  if (parent !== 'Lap') return false;
+  switch (local) {
+    case 'Cadence':
+      lap.averageCadence = quantity(value, revolutionsPerMinute, 'Lap/Cadence', offset, faults);
+      return true;
+    case 'Intensity':
+      lap.intensity = enumerated(value, TCX_INTENSITIES, 'Lap/Intensity', offset, faults);
+      return true;
+    case 'TriggerMethod':
+      lap.triggerMethod = enumerated(
+        value,
+        TCX_TRIGGER_METHODS,
+        'Lap/TriggerMethod',
+        offset,
+        faults,
+      );
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** True when the element was one of a Trackpoint's own children. */
@@ -392,11 +530,25 @@ export function encodeTcx(activity: TrackActivity): string {
     if (lap.totalDistance !== undefined) {
       writer.leaf('DistanceMeters', decimal(lap.totalDistance, 1));
     }
-    writer.leaf('Intensity', 'Active');
-    writer.leaf('TriggerMethod', 'Manual');
+    // #1321. In the schema's order: the heart rate before `Intensity`, the
+    // cadence between it and `TriggerMethod`, the power in the lap's own
+    // `Extensions` after the track.
+    writeHeartRate(writer, 'AverageHeartRateBpm', lap.averageHeartRate);
+    writeHeartRate(writer, 'MaximumHeartRateBpm', lap.maxHeartRate);
+    writer.leaf('Intensity', lap.intensity ?? 'Active');
+    if (lap.averageCadence !== undefined) writer.leaf('Cadence', integer(lap.averageCadence));
+    writer.leaf('TriggerMethod', lap.triggerMethod ?? 'Manual');
     writer.open('Track');
     for (const point of lap.points) writeTrackpoint(writer, point);
     writer.close('Track');
+    if (lap.averagePower !== undefined || lap.maxPower !== undefined) {
+      writer.open('Extensions');
+      writer.open('ns3:LX');
+      if (lap.averagePower !== undefined) writer.leaf('ns3:AvgWatts', integer(lap.averagePower));
+      if (lap.maxPower !== undefined) writer.leaf('ns3:MaxWatts', integer(lap.maxPower));
+      writer.close('ns3:LX');
+      writer.close('Extensions');
+    }
     writer.close('Lap');
   }
 
@@ -408,6 +560,13 @@ export function encodeTcx(activity: TrackActivity): string {
   writer.close('Activities');
   writer.close('TrainingCenterDatabase');
   return writer.finish();
+}
+
+function writeHeartRate(writer: XmlWriter, element: string, value: number | undefined): void {
+  if (value === undefined) return;
+  writer.open(element);
+  writer.leaf('Value', integer(value));
+  writer.close(element);
 }
 
 function writeTrackpoint(writer: XmlWriter, point: TrackPoint): void {
@@ -456,6 +615,8 @@ export const TCX_LOSSY_CHANNELS = ['point.temperature', 'activity.name'];
  * - `<Id>` is the activity's start, written from the first point when the
  *   activity has none of its own.
  * - `Lap@StartTime` likewise.
+ * - `Intensity` and `TriggerMethod` are required elements, so a lap with
+ *   neither comes back `Active` and `Manual` — #1321.
  */
 export function withoutTcxLossyChannels(activity: TrackActivity): TrackActivity {
   return {
@@ -466,6 +627,8 @@ export function withoutTcxLossyChannels(activity: TrackActivity): TrackActivity 
     laps: activity.laps.map((lap) => ({
       ...lap,
       startTime: lap.startTime ?? lap.points[0]?.timestamp,
+      intensity: lap.intensity ?? 'Active',
+      triggerMethod: lap.triggerMethod ?? 'Manual',
       points: lap.points.map((point) => ({ ...point, temperature: undefined })),
     })),
   };

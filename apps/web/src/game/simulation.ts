@@ -65,7 +65,10 @@ import {
   advance,
   advanceBot,
   botDemand,
+  dragAreaSquareMetres,
   START_OF_RIDE,
+  withDefaultCoefficients,
+  withDragArea,
   type BotCourse,
   type BotTick,
   type RideConditions,
@@ -285,6 +288,15 @@ export interface SimulationSetup {
    * `hud/fields.ts` §`windReading`, from {@link GameState.headwindMetresPerSecond}.
    */
   readonly wind?: Wind | undefined;
+  /**
+   * Where on the route the rider starts, in odometer metres — #1647, for the
+   * demo's group preset, whose HUD rider starts 30 m up the road from the
+   * rider at the back (`demo/presets.ts` §`GROUP_PRESET`).
+   *
+   * Absent is the start line, `START_OF_RIDE`, which is every ride a rider
+   * starts: nothing in the app passes it.
+   */
+  readonly startMetres?: number | undefined;
 }
 
 /** What one call to {@link GameSimulation.advanceTo} did. */
@@ -484,14 +496,26 @@ export class GameSimulation {
    */
   #correction: { readonly remaining: number; readonly perStep: number } | undefined;
 
+  /**
+   * The draft multiplier `k` the RIDER is ridden at — #787, ADR 0038 D-4: the
+   * room's prediction for this rider (`net/room-session.ts` §`draftFactor`),
+   * `1` on every ride with no room. The bot is never drafted: its conditions
+   * are its own (#327).
+   */
+  #draftFactor = 1;
+
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
     this.#course = botCourseFor(setup);
+    const start: RideState =
+      setup.startMetres === undefined
+        ? START_OF_RIDE
+        : { ...START_OF_RIDE, distance: metres(setup.startMetres) };
     this.#state = {
-      ride: START_OF_RIDE,
+      ride: start,
       elapsed: seconds(0),
       ridden: seconds(0),
-      grade: gradeAtDistance(setup.profile, START_OF_RIDE.distance),
+      grade: gradeAtDistance(setup.profile, start.distance),
       input: { power: watts(0), live: false },
       // On the start line from the first frame rather than from the first tick:
       // `GameView` renders a scene before the loop has run once, and a bot that
@@ -505,7 +529,7 @@ export class GameSimulation {
       // run once, and a wind that appeared a tick late would show a rider a
       // dash for the field they had just set — indistinguishable from the
       // still-air ride they did not choose.
-      ...headwindField(this.#headwindAt(START_OF_RIDE.distance)),
+      ...headwindField(this.#headwindAt(start.distance)),
     };
   }
 
@@ -547,6 +571,21 @@ export class GameSimulation {
    */
   holdAt(nowMs: number): void {
     this.#originMs = nowMs - this.#stepsCredited * SIMULATION_STEP_SECONDS * 1000;
+  }
+
+  /**
+   * Ride the rider at draft multiplier `k` from the next step — #787: the
+   * room's predicted `k`, which the room's own re-simulation then corrects
+   * (ADR 0038 D-4). `k` outside (0, 1] is riding alone: a prediction that is
+   * not a draft is never ridden as one.
+   */
+  draftWith(k: number): void {
+    this.#draftFactor = Number.isFinite(k) && k > 0 && k < 1 ? k : 1;
+  }
+
+  /** The draft multiplier the rider is being ridden at. @see draftWith */
+  get draftFactor(): number {
+    return this.#draftFactor;
   }
 
   /** Whether a correction toward a room is still being applied. @see correctToward */
@@ -758,10 +797,27 @@ export class GameSimulation {
    */
   #conditionsAt(distance: number): RideConditions {
     const headwind = this.#headwindAt(distance);
+    const drafted = this.#drafted(this.#setup.conditions);
     if (headwind === undefined) {
-      return this.#setup.conditions;
+      return drafted;
     }
-    return { ...this.#setup.conditions, headwindMetresPerSecond: headwind };
+    return { ...drafted, headwindMetresPerSecond: headwind };
+  }
+
+  /**
+   * `conditions` with the rider's draft applied — #787: `k` times the drag
+   * area and nothing else (ADR 0038 D-1), the same product a room's
+   * `ridingConditions(mass, position, k)` rides, to the bit. The same object
+   * when riding alone, so a ride with no room is exactly the ride it was.
+   */
+  #drafted(conditions: RideConditions): RideConditions {
+    const k = this.#draftFactor;
+    if (k === 1) return conditions;
+    const coefficients = withDefaultCoefficients(conditions.coefficients);
+    return {
+      ...conditions,
+      coefficients: { ...coefficients, ...withDragArea(k * dragAreaSquareMetres(coefficients)) },
+    };
   }
 
   /**

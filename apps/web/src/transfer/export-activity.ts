@@ -24,7 +24,8 @@
  *
  * ## What each format can carry
  *
- * FIT carries everything the store holds. GPX and TCX each drop something, and
+ * FIT carries every sample channel and total the store holds, and which splits
+ * are laps (#1320, `fit-lap-mark.ts`), but not a lap row's figures (#1471). GPX and TCX each drop something, and
  * the codec states what — {@link GPX_LOSSY_CHANNELS}, {@link TCX_LOSSY_CHANNELS}
  * — rather than this file guessing. The view shows those lists beside the
  * format chooser, so the rider picks knowing the cost.
@@ -32,6 +33,8 @@
 
 import {
   geographicPosition,
+  metres,
+  seconds,
   unixSeconds,
   type Metres,
   type Seconds,
@@ -51,6 +54,7 @@ import {
   type FitEncodeInput,
   type FitRecord,
   type TrackActivity,
+  type TrackLap,
   type TrackPoint,
 } from '@onyourleft/fit';
 import type {
@@ -63,14 +67,116 @@ import type {
 } from '@onyourleft/store';
 
 import type { ActivityFileFormat } from './file-format';
+import { fitLapMarkDeclarations, fitLapMarkOf, type FitLapKind } from './fit-lap-mark';
 import type { DownloadableFile, TransferStore } from './store-port';
 
-/** What a format costs, in the codec's own words. Empty for FIT. */
+/** @see LOSSY_CHANNELS */
+const MOVING_TIME = 'activity.movingTime';
+
+/** @see LOSSY_CHANNELS — #1321. */
+const LAP_ASCENT = 'lap.ascent';
+
+/** @see LOSSY_CHANNELS — #1321. */
+const LAP_DISTANCE = 'lap.distance';
+
+/**
+ * What a FIT lap does not carry of a lap row: its figures and its climb.
+ * `packages/fit`'s profile subset names no lap field for either: a field number
+ * goes in only with a provenance ADR 0006 R2 admits, and finding one is
+ * #1471's. Its kind (which splits are laps, and the part-lap mark) is carried
+ * since #1320, in a developer field of this client's own (`fit-lap-mark.ts`).
+ * Named as TCX's lap names them, which is how GPX's codec list names them too.
+ *
+ * @see LOSSY_CHANNELS
+ */
+const FIT_LAP_LOSSY_CHANNELS = [
+  'lap.averageHeartRate',
+  'lap.maxHeartRate',
+  'lap.averageCadence',
+  'lap.averagePower',
+  'lap.maxPower',
+  LAP_ASCENT,
+];
+
+/**
+ * What a format costs, in the codec's own words.
+ *
+ * Plus the ride's **moving time**, which is a loss of this exporter's rather
+ * than of the codec's — #1323. The codec's track has no moving time to drop: a
+ * GPX file states no totals at all, and a TCX `<Lap>` states one time,
+ * `TotalTimeSeconds`, which this client writes as the elapsed time so that its
+ * laps add up to the ride. So a paused ride exported as either comes back with
+ * no pause in it (`read-activity-file.ts` takes a GPX ride's moving time as the
+ * span of its samples, and a TCX ride's as its laps' times added up, which in
+ * this client's file are that span too — §`statedMovingTimeOf`), and the rider is told
+ * before choosing the format rather than after importing it. FIT's session
+ * carries it.
+ *
+ * And, since #1321, two figures of a lap row: its **climb**, which neither has
+ * an element for, and in TCX its **own distance**, because a TCX lap states its
+ * share of the ride's (`trackActivityOf`). GPX's codec list already names the
+ * lap's distance.
+ *
+ * FIT carries every sample channel, the moving time, a lap's own distance and,
+ * since #1320, its kind, but none of a lap row's figures:
+ * {@link FIT_LAP_LOSSY_CHANNELS}. Until #1321 it was empty, and the screen said
+ * FIT carries every channel — which was not true of a lap row's figures, and
+ * the owner's ruling of 2026-10-19 on #1458 leaves FIT's lap fields as they
+ * were until #1471.
+ */
 export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string[]>> = {
-  fit: [],
-  gpx: GPX_LOSSY_CHANNELS,
-  tcx: TCX_LOSSY_CHANNELS,
+  fit: FIT_LAP_LOSSY_CHANNELS,
+  gpx: [...GPX_LOSSY_CHANNELS, LAP_ASCENT, MOVING_TIME],
+  tcx: [...TCX_LOSSY_CHANNELS, LAP_ASCENT, LAP_DISTANCE, MOVING_TIME],
 };
+
+/** A lap's kind: `lap.intensity` and `lap.triggerMethod` said as one — #1452. */
+const LAP_KIND = 'which splits are laps and which are part laps';
+
+/**
+ * Each entry of {@link LOSSY_CHANNELS} in plain words, as the export screen
+ * says it — #1452. The codes stay the codec's (tests and the README table read
+ * them); a rider reads these. `export-activity.test.ts` fails for an entry
+ * with no name here, so a codec that starts dropping something new cannot
+ * reach the screen as a code path.
+ */
+const LOSSY_CHANNEL_NAMES: Readonly<Record<string, string>> = {
+  'point.distance': 'the distance at each point',
+  'point.temperature': 'temperature',
+  'lap.totalElapsedTime': 'each lap’s elapsed time',
+  'lap.totalDistance': 'each lap’s distance',
+  'lap.averageHeartRate': 'each lap’s average heart rate',
+  'lap.maxHeartRate': 'each lap’s highest heart rate',
+  'lap.averageCadence': 'each lap’s average cadence',
+  'lap.averagePower': 'each lap’s average power',
+  'lap.maxPower': 'each lap’s best power',
+  [LAP_ASCENT]: 'each lap’s climb',
+  [LAP_DISTANCE]: 'each lap’s distance',
+  // One phrase for the pair: a lap's kind is both of them together, and
+  // `lossyChannelNames` says a shared name once.
+  'lap.intensity': LAP_KIND,
+  'lap.triggerMethod': LAP_KIND,
+  'activity.name': 'the ride’s name',
+  [MOVING_TIME]: 'moving time',
+};
+
+/** The plain name of a {@link LOSSY_CHANNELS} entry, or `undefined` for one the table lacks. */
+export function lossyChannelName(channel: string): string | undefined {
+  return Object.hasOwn(LOSSY_CHANNEL_NAMES, channel) ? LOSSY_CHANNEL_NAMES[channel] : undefined;
+}
+
+/**
+ * What `format` cannot carry, in plain words — #1452. Each name once: two
+ * entries that share a name (a lap's intensity and trigger, which together
+ * are its kind) are said as one.
+ */
+export function lossyChannelNames(format: ActivityFileFormat): readonly string[] {
+  // An entry the table lacks is shown as its code rather than hidden: a loss
+  // left unsaid is worse than one said badly, and the test above keeps it rare.
+  return [
+    ...new Set(LOSSY_CHANNELS[format].map((channel) => lossyChannelName(channel) ?? channel)),
+  ];
+}
 
 /**
  * The media types, chosen so a browser saves rather than renders.
@@ -188,12 +294,7 @@ export async function exportActivity(options: ExportOptions): Promise<ExportedAc
   // erase — lost them. Scoped on `athleteId`, not on `activity.athleteId`: the
   // ride is already known to be this athlete's, and reaching for the record's
   // own owner would be the shape that reads somebody else's rows.
-  const laps = splitsOf(
-    await store.listLaps(athleteId, activityId),
-    points,
-    activity,
-    endOf(streams),
-  );
+  const laps = splitsOf(await store.listLaps(athleteId, activityId), points, activity, streams);
 
   // #162. The encoder's contract is deliberately *bytes plus faults*: the file
   // is still produced, and a caller that reads the faults can tell the rider
@@ -207,14 +308,15 @@ export async function exportActivity(options: ExportOptions): Promise<ExportedAc
   let bytes: Uint8Array;
   let faults: readonly FitEncodeError[] = [];
   if (format === 'fit') {
-    const encoded = encodeFitActivity(fitInputOf(activity, streams, laps));
+    const encoded = encodeFitActivity(fitInputOf(activity, streams, framed(laps, streams)));
     bytes = encoded.bytes;
     faults = encoded.faults;
   } else {
+    const written = framed(withASampleEach(laps), streams);
     bytes = new TextEncoder().encode(
       format === 'gpx'
-        ? encodeGpx(trackActivityOf(activity, laps))
-        : encodeTcx(trackActivityOf(activity, laps)),
+        ? encodeGpx(trackActivityOf(activity, written))
+        : encodeTcx(trackActivityOf(activity, written)),
     );
   }
 
@@ -318,33 +420,126 @@ function instant(value: UnixSeconds): FitDateTime {
  * A shape of this file's own rather than `LapRecord` plus an array, because the
  * whole-ride fallback is not a stored lap and never was — pretending it is one
  * would mean inventing a `LapId` for a row that does not exist, which is the
- * kind of fiction that later gets written back to disk by somebody.
+ * kind of fiction that later gets written back to disk by somebody. Since
+ * #1312 the same is true of the stretches of a ride that no stored lap covers.
  */
 interface ExportLap {
   readonly startedAt: UnixSeconds;
   readonly endsAt: UnixSeconds;
   readonly elapsedTime: Seconds;
   readonly movingTime: Seconds;
+  /**
+   * What this split states as its own distance: a stored lap's own figure, and
+   * for a stretch no stored lap covers its share of the ride's.
+   */
   readonly distance: Metres;
+  /**
+   * The RIDE's own elapsed time and distance from its start through the end of
+   * this split. The last split's are the activity's totals exactly, so a
+   * format with no total of its own (TCX) can state splits that add up to the
+   * ride — {@link trackActivityOf}.
+   */
+  readonly rideThrough: { readonly elapsedTime: number; readonly distance: number };
+  /**
+   * The one split of a ride with no stored laps. ⚠️ Its totals go into a
+   * file as the activity's own, untouched — what such a ride has always
+   * exported as, to the byte (`trackActivityOf`).
+   */
+  readonly wholeRide?: true;
+  /**
+   * #1321: the stored lap this split is, when it is one — whose figures and
+   * whose part-lap mark go into the file — or `undefined` for a stretch of the
+   * ride outside every lap. A split another was folded into keeps its own.
+   */
+  readonly lap?: LapRecord | undefined;
   readonly points: readonly TrackPoint[];
 }
 
+/** A stretch of the ride's timeline: a stored lap, or what lies outside every one. */
+interface Stretch {
+  readonly startedAt: UnixSeconds;
+  readonly endsAt: UnixSeconds;
+  readonly lap: LapRecord | undefined;
+}
+
 /**
- * The stored laps with the ride's samples dealt into them — #221, ADR 0019 D-5.
+ * The ride's timeline cut into stretches that leave none of it out — #1312.
  *
- * **A partition, and that is the property to hold on to.** Every point lands in
- * exactly one lap: the sweep walks the points in order and advances the lap
- * whenever the *next* lap's start has been reached, so a sample before the
- * first lap's start goes into the first lap and one after the last lap's end
- * goes into the last. Neither is dropped. A boundary test written as
- * "start ≤ t < start + elapsed" reads more naturally and silently loses every
- * sample in a gap between two laps — which is a paused ride, and is common.
+ * The stored laps in `ordinal` order, with a stretch of its own for the time
+ * before the first, between two that do not meet, and after the last. A course
+ * lap (`recording/laps.ts`) covers the game ride and not the recording: the
+ * time before the rider left the line and after *End ride* is the rider's ride
+ * too, and it is on no lap row.
+ *
+ * ⚠️ **It does not sort**, for {@link splitsOf}'s reason. A row that starts
+ * before its predecessor ended gets no stretch in front of it and loses
+ * nothing.
+ */
+function stretchesOf(stored: readonly LapRecord[], activity: ActivityRecord): readonly Stretch[] {
+  const stretches: Stretch[] = [];
+  let cursor: number = activity.startedAt;
+  for (const lap of stored) {
+    if (lap.startedAt > cursor) {
+      stretches.push({ startedAt: unixSeconds(cursor), endsAt: lap.startedAt, lap: undefined });
+    }
+    const endsAt = unixSeconds(lap.startedAt + lap.elapsedTime);
+    stretches.push({ startedAt: lap.startedAt, endsAt, lap });
+    cursor = endsAt;
+  }
+  // ⚠️ Only when the ride runs on past its last lap. A lap's mark is the
+  // session's clock and the ride's elapsed time ends at the wall clock's
+  // `stop`, which can be BEHIND it: such a ride ends before its last lap
+  // does, and a stretch from one to the other would last less than nothing —
+  // which no duration can say, so the export of that ride threw, in every
+  // format, and with it the push to an instance.
+  const rideEnds = activity.startedAt + activity.elapsedTime;
+  if (rideEnds > cursor) {
+    stretches.push({
+      startedAt: unixSeconds(cursor),
+      endsAt: unixSeconds(rideEnds),
+      lap: undefined,
+    });
+  }
+  return stretches;
+}
+
+/**
+ * The ride's samples dealt into splits that cover the whole ride — #221,
+ * ADR 0019 D-5, and #1312.
+ *
+ * **A partition twice over, and both are the property to hold on to.**
+ *
+ * 1. *Of the samples.* Every point lands in exactly one split: the sweep walks
+ *    the points in order and advances whenever the *next* split's first slot
+ *    has been reached, so a sample before the first split goes into the first
+ *    and one after the last goes into the last. Neither is dropped. A boundary
+ *    test written as "start ≤ t < start + elapsed" reads more naturally and
+ *    silently loses every sample in a gap — which is a paused ride, and is
+ *    common.
+ * 2. *Of the ride's totals* (#1312). {@link stretchesOf} gives the time outside
+ *    every stored lap a split of its own, and each split carries the ride's
+ *    own elapsed time and distance through its end ({@link ExportLap.rideThrough}).
+ *    ⚠️ **Before this a TCX file of a ride with course laps stated the laps'
+ *    totals as the ride's**: TCX has no session total, a reader sums its laps
+ *    (`read-activity-file.ts` §`statedMovingTimeOf`), and the laps of a game
+ *    ride cover neither the whole recording nor the recording's own distance —
+ *    a course lap's distance is the game's road, the ride's is the speed
+ *    channel summed. Export, erase, import again gave back a different ride.
+ *
+ * ⚠️ **By slot, as `recording/laps.ts` §`courseLap` counts**: a lap owns the
+ * samples from the slot it began in up to the slot it ended in. So the samples
+ * a file holds inside a course lap are the samples its stored averages were
+ * worked out from.
+ *
+ * ⚠️ **A stretch outside every lap has no moving time or distance of its
+ * own on record.** Its moving time is its share, by elapsed time, of what the
+ * ride moved outside its laps; its distance is its share of the ride's.
  *
  * ⚠️ **It does not sort.** `listLaps` returns `ordinal` order, which is the
- * order the rider pressed the button in and the order every reader renders. A
- * store row whose `startedAt` disagrees with its `ordinal` would make the
- * sweep put more points in an earlier lap than a reader expects — and it still
- * loses nothing, which is the invariant that matters. Re-ordering the splits to
+ * order the laps were ridden in and the order every reader renders. A store
+ * row whose `startedAt` disagrees with its `ordinal` would make the sweep put
+ * more points in an earlier split than a reader expects — and it still loses
+ * nothing, which is the invariant that matters. Re-ordering the splits to
  * repair a bad row would hide it.
  *
  * With no stored laps, one lap spanning the ride: the shape this file has
@@ -355,47 +550,243 @@ function splitsOf(
   stored: readonly LapRecord[],
   points: readonly TrackPoint[],
   activity: ActivityRecord,
-  endsAt: UnixSeconds,
+  streams: StreamSet,
 ): readonly ExportLap[] {
+  const whole = { elapsedTime: activity.elapsedTime, distance: activity.distance };
   if (stored.length === 0) {
     return [
       {
         startedAt: activity.startedAt,
-        endsAt,
+        endsAt: endOf(streams),
         elapsedTime: activity.elapsedTime,
         movingTime: activity.movingTime,
         distance: activity.distance,
+        rideThrough: whole,
+        wholeRide: true,
         points,
       },
     ];
   }
 
-  const buckets: TrackPoint[][] = stored.map(() => []);
+  const stretches = stretchesOf(stored, activity);
+  /** The instant of the slot an instant falls in: `courseLap`'s rule. */
+  const slotInstant = (instant: number): number =>
+    streams.startedAt +
+    Math.floor((instant - streams.startedAt) / streams.sampleInterval) * streams.sampleInterval;
+  const firstSlots = stretches.map((stretch) => slotInstant(stretch.startedAt));
+
+  const buckets: TrackPoint[][] = stretches.map(() => []);
+  /** The speed channel summed over each split: `recording/finish.ts` §`distanceOf`'s sum. */
+  const recorded = stretches.map(() => 0);
   let index = 0;
   for (const point of points) {
-    while (index + 1 < stored.length && reaches(point, stored[index + 1])) {
+    while (
+      index + 1 < stretches.length &&
+      point.timestamp !== undefined &&
+      point.timestamp >= (firstSlots[index + 1] ?? Number.POSITIVE_INFINITY)
+    ) {
       index += 1;
     }
-    // Total by construction: `buckets` has one entry per stored lap and `index`
+    // Total by construction: `buckets` has one entry per stretch and `index`
     // is bounded by the loop above, so the `?? ` branch cannot be taken. It is
     // here because a non-null assertion would be a stronger claim than this
     // function needs to make.
     (buckets[index] ?? buckets[0])?.push(point);
+    recorded[index] = (recorded[index] ?? 0) + (point.speed ?? 0) * streams.sampleInterval;
   }
 
-  return stored.map((lap, ordinal) => ({
-    startedAt: lap.startedAt,
-    endsAt: unixSeconds(lap.startedAt + lap.elapsedTime),
-    elapsedTime: lap.elapsedTime,
-    movingTime: lap.movingTime,
-    distance: lap.distance,
-    points: buckets[ordinal] ?? [],
-  }));
+  const recordedTotal = recorded.reduce((sum, part) => sum + part, 0);
+  /**
+   * A stretch outside the laps that is not written as a split of its own: one
+   * with no sample in it, or shorter than one sample. @see folded, below
+   */
+  const slight = (ordinal: number): boolean => {
+    const stretch = stretches[ordinal];
+    return (
+      stretch !== undefined &&
+      stretch.lap === undefined &&
+      ((buckets[ordinal]?.length ?? 0) === 0 ||
+        stretch.endsAt - stretch.startedAt < streams.sampleInterval)
+    );
+  };
+  const outsideSeconds = stretches.reduce(
+    (sum, stretch) =>
+      stretch.lap === undefined ? sum + (stretch.endsAt - stretch.startedAt) : sum,
+    0,
+  );
+  const movedOutside = Math.max(
+    0,
+    activity.movingTime - stored.reduce((sum, lap) => sum + lap.movingTime, 0),
+  );
+
+  let recordedThrough = 0;
+  let through = { elapsedTime: 0, distance: 0 };
+  const splits = stretches.map((stretch, ordinal): ExportLap => {
+    const last = ordinal === stretches.length - 1;
+    const duration = stretch.endsAt - stretch.startedAt;
+    recordedThrough += recorded[ordinal] ?? 0;
+    // Never backwards and never past the ride, whatever a row says; and the
+    // last split ends where the ride does.
+    const elapsedThrough = last
+      ? whole.elapsedTime
+      : Math.min(
+          whole.elapsedTime,
+          Math.max(through.elapsedTime, stretch.endsAt - activity.startedAt),
+        );
+    // The ride's own distance, shared out as the speed channel was ridden —
+    // and by time for a ride with no speed on record.
+    const share =
+      recordedTotal > 0
+        ? recordedThrough / recordedTotal
+        : whole.elapsedTime > 0
+          ? elapsedThrough / whole.elapsedTime
+          : 1;
+    const before = through;
+    through = {
+      elapsedTime: elapsedThrough,
+      // (The last split's share is the whole: the same sums, in the same order.)
+      distance: whole.distance * share,
+    };
+    return {
+      startedAt: stretch.startedAt,
+      endsAt: stretch.endsAt,
+      elapsedTime: stretch.lap?.elapsedTime ?? seconds(duration),
+      movingTime:
+        stretch.lap?.movingTime ??
+        seconds(outsideSeconds > 0 ? (movedOutside * duration) / outsideSeconds : 0),
+      distance: stretch.lap?.distance ?? metres(through.distance - before.distance),
+      rideThrough: through,
+      lap: stretch.lap,
+      points: buckets[ordinal] ?? [],
+    };
+  });
+
+  // ⚠️ **No split with nothing in it, and none shorter than a sample.** A
+  // stretch outside the laps that holds no sample — a game ride begun half a
+  // second into its recording, a recording stopped a moment after *End ride*
+  // — would be a TCX `<Lap>` with an empty `<Track>`, which a strict reader
+  // may refuse, and a FIT lap a fraction of a second long; and one shorter
+  // than a sample that DOES hold one would be a lap of a few metres in no
+  // time at all, which a reader dividing one by the other shows as an
+  // infinite speed. Either is folded into the split before it: that split's
+  // running totals run on through it, and its samples go with it, so the
+  // splits still add up to the ride and hold every sample. One at the very
+  // start with nothing in it needs nothing: the first split written counts
+  // from the ride's start whatever it is.
+  //
+  // ⚠️ **So a file's lap holds every sample its stored row counted, first and
+  // in order, and then the samples of whatever stretch was folded into it —
+  // which its row's averages leave out** (#1312's second review note,
+  // `export-activity.test.ts` §"a stretch folded into the lap before it"). A
+  // lap owns the slots up to and not including the one it ended in, so a
+  // folded stretch begins in that slot; it lasts less than one sample, so it
+  // reaches into one slot more at the most. Between two laps that is one
+  // sample (the next lap's first slot is its own); after the last lap, two.
+  // They are not made to agree because the only other place those samples
+  // could go is a split of their own lasting less than a sample, and the
+  // third pass's lap of nought seconds in every such ride's file was the
+  // worse answer. A ride that ends before its last lap does has no stretch
+  // after it, and the sweep puts any sample from that lap's end slot on into
+  // that lap the same way.
+  //
+  // ⚠️ **The folded samples go AFTER the split's own**: they were recorded
+  // after them, and FIT's records are these points end to end.
+  const folded: ExportLap[] = [];
+  splits.forEach((split, ordinal) => {
+    const before = folded[folded.length - 1];
+    if (!slight(ordinal) || (before === undefined && split.points.length > 0)) {
+      folded.push(split);
+    } else if (before !== undefined) {
+      folded[folded.length - 1] = {
+        ...before,
+        rideThrough: split.rideThrough,
+        points: [...before.points, ...split.points],
+      };
+    }
+  });
+  return folded;
 }
 
-/** Whether this point is at or past the given lap's start. */
-function reaches(point: TrackPoint, next: LapRecord | undefined): boolean {
-  return next !== undefined && point.timestamp !== undefined && point.timestamp >= next.startedAt;
+/**
+ * The splits a format that needs a sample in every one of them is given: one
+ * with none is left out, and the split before it runs on through it, so the
+ * ones written still add up to the ride.
+ *
+ * ⚠️ **This is where a STORED lap with no sample goes, in TCX and GPX.** A
+ * whole lap ridden while the recording is paused is a real lap with no
+ * reading in it (the engine takes none while paused). FIT writes it: a lap
+ * message needs no record. TCX would write a `<Lap>` with an empty `<Track>`,
+ * so that lap is not in a TCX file — its time is in the lap before it, and
+ * the file says the ride's totals still. Stated in the PR, with the rest of
+ * what TCX cannot carry.
+ */
+function withASampleEach(laps: readonly ExportLap[]): readonly ExportLap[] {
+  const kept: ExportLap[] = [];
+  for (const lap of laps) {
+    const before = kept[kept.length - 1];
+    if (lap.points.length > 0) {
+      kept.push(lap);
+    } else if (before !== undefined) {
+      kept[kept.length - 1] = { ...before, rideThrough: lap.rideThrough };
+    }
+  }
+  // A ride with no reading in any slot keeps the one shape it always had.
+  return kept.length === 0 ? laps : kept;
+}
+
+/**
+ * The splits with the ride's first and last slots stated, where no reading
+ * does — #1323.
+ *
+ * {@link pointsOf} writes no point for a slot with no reading in it, and an
+ * import starts a ride at its first timed sample and bounds its elapsed time by
+ * the span of its samples (`read-activity-file.ts` §`observedSpan`, which is
+ * deliberate: it stops a file inflating a ride). So a recording whose first
+ * second held no reading came back a second late and a second short, in every
+ * format. A point with a time and nothing else — what a head unit writes when a
+ * recording starts before a sensor answers — says where the ride starts and
+ * ends and invents no reading: every format here writes one (a FIT record, a
+ * TCX `<Trackpoint>` with only a `<Time>`, a GPX `<trkpt>` with only a
+ * `<time>`), and the import places it on the grid and writes nothing into it.
+ *
+ * The first and last SLOTS, not `activity.startedAt + elapsedTime`: the stored
+ * grid is the extent of the ride on disk, and stating it is what makes the
+ * import build a grid of the same length.
+ *
+ * ⚠️ **Added after the splits are cut**, into the first split and the last, so
+ * that a lead-in or a tail with no reading in it is still folded exactly as
+ * {@link splitsOf} and {@link withASampleEach} decided — a bare time is not a
+ * sample those rules should count.
+ */
+function framed(laps: readonly ExportLap[], streams: StreamSet): readonly ExportLap[] {
+  const first = laps[0];
+  const lastIndex = laps.length - 1;
+  if (first === undefined) {
+    return laps;
+  }
+  const points = laps.flatMap((lap) => lap.points);
+  const start = at(streams, 0);
+  const end = endOf(streams);
+  const bare = (timestamp: UnixSeconds): TrackPoint => ({
+    timestamp,
+    position: undefined,
+    altitude: undefined,
+    distance: undefined,
+    speed: undefined,
+    heartRate: undefined,
+    cadence: undefined,
+    power: undefined,
+    temperature: undefined,
+  });
+  const opens = points[0]?.timestamp === start;
+  const closes = points[points.length - 1]?.timestamp === end;
+  return laps.map((lap, ordinal) => {
+    const before = ordinal === 0 && !opens ? [bare(start)] : [];
+    const after = ordinal === lastIndex && !closes ? [bare(end)] : [];
+    return before.length === 0 && after.length === 0
+      ? lap
+      : { ...lap, points: [...before, ...lap.points, ...after] };
+  });
 }
 
 function fitInputOf(
@@ -404,6 +795,10 @@ function fitInputOf(
   laps: readonly ExportLap[],
 ): FitEncodeInput {
   const end = endOf(streams);
+  // #1320: a ride with laps marks which of its splits are laps (`fit-lap-mark.ts`).
+  // A ride with none writes no mark and no declaration, so it exports as it
+  // always has, to the byte.
+  const marked = laps.some((lap) => lap.wholeRide !== true);
   return {
     fileId: {
       type: FILE_TYPE_ACTIVITY,
@@ -412,6 +807,7 @@ function fitInputOf(
       serialNumber: undefined,
       timeCreated: instant(activity.createdAt),
     },
+    ...(marked ? fitLapMarkDeclarations() : {}),
     // Flattened from the laps rather than taken from `points` directly, so the
     // records written and the records counted by the laps are the same list.
     // The split preserves order, so this is the stored order sample for sample.
@@ -423,6 +819,7 @@ function fitInputOf(
       totalElapsedTime: lap.elapsedTime,
       totalTimerTime: lap.movingTime,
       totalDistance: lap.distance,
+      developerFields: marked ? [fitLapMarkOf(fitLapKindOf(lap))] : [],
     })),
     sessions: [
       {
@@ -455,6 +852,46 @@ function fitInputOf(
   };
 }
 
+/** A split as #1320's FIT mark says it: as {@link tcxLapFiguresOf} says it in TCX. */
+function fitLapKindOf(lap: ExportLap): FitLapKind {
+  if (lap.lap === undefined) return 'outside';
+  return lap.lap.partial === true ? 'part' : 'lap';
+}
+
+/**
+ * What a TCX lap states beyond its times and distance — its `Intensity` and
+ * `TriggerMethod`, and the figures TCX has an element for — #1321.
+ *
+ * | split | `Intensity` | `TriggerMethod` |
+ * |---|---|---|
+ * | a whole lap | `Active` | `Location`: it ended at the line |
+ * | a part lap | `Active` | `Manual`: the rider ended it |
+ * | a stretch outside every lap | `Resting` | `Manual` |
+ *
+ * ⚠️ **No session-end value in TCX**, so the part lap is told from the whole by
+ * `Location` against `Manual`, which a TCX from elsewhere uses for every lap
+ * its rider pressed. A reader has to know whose file it is to read `Manual` as
+ * a part lap (`TCX_CREATOR`). Climb has no element at all; the lap's own
+ * distance has one, `DistanceMeters`, and it holds the lap's share of the
+ * ride's ({@link trackActivityOf}), so the lap's own is not in the file either.
+ *
+ * Not called for the one split of a ride with no laps, which
+ * {@link trackActivityOf} writes as it always has, with no mark.
+ */
+function tcxLapFiguresOf(lap: ExportLap): Partial<TrackLap> {
+  const stored = lap.lap;
+  if (stored === undefined) return { intensity: 'Resting', triggerMethod: 'Manual' };
+  return {
+    intensity: 'Active',
+    triggerMethod: stored.partial === true ? 'Manual' : 'Location',
+    averageHeartRate: stored.averageHeartRate,
+    maxHeartRate: stored.maxHeartRate,
+    averageCadence: stored.averageCadence,
+    averagePower: stored.averagePower,
+    maxPower: stored.maxPower,
+  };
+}
+
 function fitRecordOf(point: TrackPoint): FitRecord {
   return {
     timestamp: point.timestamp === undefined ? undefined : instant(point.timestamp),
@@ -470,6 +907,11 @@ function fitRecordOf(point: TrackPoint): FitRecord {
   };
 }
 
+/** A total to the tenth TCX writes it to (`packages/fit` §`encodeTcx`). */
+function tenths(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
 function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): TrackActivity {
   return {
     startTime: activity.startedAt,
@@ -483,12 +925,40 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
     // `lap.totalElapsedTime` and `lap.totalDistance` have nowhere to go there.
     // A rider exporting GPX keeps where each split started and stopped, which
     // is the part that cannot be recomputed from anything else.
-    laps: laps.map((lap) => ({
-      startTime: lap.startedAt,
-      totalElapsedTime: lap.elapsedTime,
-      totalDistance: lap.distance,
-      points: lap.points,
-    })),
+    //
+    // ⚠️ **A TCX lap states its part of the RIDE's totals, not the stored
+    // lap's own** (#1312). The file has no other total: a reader adds its
+    // laps up, so they have to add up to the ride. Each is the difference of
+    // two running totals rounded to the tenth the format is written to, so
+    // the tenths add up to the ride's total and not to a rounding of it. A
+    // course lap's own distance — the game's road — is therefore not in a TCX
+    // file; FIT has a session total, and its laps keep theirs.
+    //
+    // ⚠️ **And a ride with NO stored laps is written exactly as it always
+    // was**: the activity's own totals, handed to the codec as they are.
+    // Rounding them here first is not the same thing — 38613.35 is a hair
+    // under the half as a float, so the codec's `toFixed(1)` writes `38613.3`
+    // and `Math.round(x * 10) / 10` gives `38613.4` (#1316's third review).
+    laps: laps.map((lap, ordinal) => {
+      if (lap.wholeRide === true) {
+        return {
+          startTime: lap.startedAt,
+          totalElapsedTime: lap.elapsedTime,
+          totalDistance: lap.distance,
+          points: lap.points,
+        };
+      }
+      const before = laps[ordinal - 1]?.rideThrough ?? { elapsedTime: 0, distance: 0 };
+      return {
+        startTime: lap.startedAt,
+        totalElapsedTime: seconds(
+          tenths(tenths(lap.rideThrough.elapsedTime) - tenths(before.elapsedTime)),
+        ),
+        totalDistance: metres(tenths(tenths(lap.rideThrough.distance) - tenths(before.distance))),
+        points: lap.points,
+        ...tcxLapFiguresOf(lap),
+      };
+    }),
   };
 }
 

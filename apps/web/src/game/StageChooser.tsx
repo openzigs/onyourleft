@@ -6,7 +6,8 @@
  * What a rider sees before a ride: the routes as TILES, each filled by its own
  * elevation drawn from its profile, with its distance, climb and steepest
  * gradient in words on a solid band (#1011); the
- * ride's LOADOUT (the ghost, the pacer, the riding position and the wind); and
+ * ride's LOADOUT (the ghost, the pacer, the riding position and the wind,
+ * and since #1818 a Delivery round, with the realistic world chosen); and
  * ONE *Ride*, for the chosen route. It was a bulleted list with a checkbox and
  * a button per route (`GameView.tsx` until #940), and everything that list did
  * is still done here — moved out of `GameView.tsx` so that what the picker
@@ -56,7 +57,7 @@
  */
 
 import { Check, Info } from 'lucide-react';
-import { useId, type JSX } from 'react';
+import { useId, useRef, useState, type JSX, type RefObject } from 'react';
 
 import {
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -80,6 +81,8 @@ import type { PacerChoice } from './pacer-choice';
 import { realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
+import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
+import { corridorStateText, type CorridorState } from './world-data/corridor';
 
 /** One route the rider could ride, as the picker needs it. */
 export interface RidableRoute {
@@ -136,6 +139,53 @@ const PACER_INTENSITY_ID = 'oyl-game-pacer-intensity';
 const WIND_SPEED_ID = 'oyl-game-wind-speed';
 const WIND_BEARING_ID = 'oyl-game-wind-bearing';
 
+/**
+ * What the chooser says under *Ride* about the ride being saved — #1221.
+ *
+ * ⚠️ **A game ride is saved only if the Ride screen's recording is running
+ * under it** (`trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`): the game
+ * draws a ride and records none of its own. A rider who rode the game with no
+ * recording running ended with no activity and only the HUD's dashed *Moving*
+ * to say why. So with none running the chooser says, in words, before the
+ * press, that this ride will not be saved, and offers the one control that
+ * records it.
+ */
+export interface RecordingOffer {
+  /** Whether a ride is in progress — recording or paused — under the game. */
+  readonly recorded: boolean;
+  /**
+   * Start a recording under the game: `GameTrainerPort.recordGameRide`.
+   * Answers whether one is now running. `undefined` where nothing can record
+   * (no ride controller), and the line then says so instead of offering it.
+   */
+  readonly onRecord: (() => Promise<boolean>) | undefined;
+}
+
+/**
+ * A Delivery round, as the chooser offers it — #1818 (epic #1803, ADR 0059),
+ * resting on the owner's ruling DL6: offered only with the realistic world
+ * chosen, because its houses are the mapped houses a realistic town draws.
+ *
+ * ⚠️ **The chooser cannot know whether the route's towns draw enough houses.**
+ * `stage-chooser-imports.test.ts` holds it to no renderer, no map and no
+ * network, and the houses are planned from the corridor at the press. So it
+ * offers the round wherever the world is the realistic one, and the ride
+ * decides at the press: a route with fewer houses than the week's round rides
+ * a shorter one, and one with fewer than `FEWEST_DELIVERY_HOUSES`, or with no
+ * houses read, is an ordinary ride the HUD says is one
+ * (`hud/delivery-announce.ts` §`oweNoRound`).
+ */
+export interface DeliveryOffer {
+  /** Whether the rider switched the round on. */
+  readonly chosen: boolean;
+  readonly onChoose: (value: boolean) => void;
+  /**
+   * The week this device has kept (`delivery/delivery-progress.ts`): its day
+   * and how many houses are on today's round. Counts only (DL11).
+   */
+  readonly week: Pick<WeekProgress, 'day' | 'houses'>;
+}
+
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
   readonly routes: readonly RidableRoute[] | undefined;
@@ -150,6 +200,16 @@ interface RoutePickerProps {
   readonly units: UnitSystem;
   readonly withGhost: boolean;
   readonly onGhost: (value: boolean) => void;
+  /**
+   * Whether to race another rider's ghost instead of the rider's own (#331).
+   * Offered only where {@link riderGhostOffered}; absent, never drawn.
+   */
+  readonly withRiderGhost?: boolean | undefined;
+  readonly onRiderGhost?: ((value: boolean) => void) | undefined;
+  /** Whether this device can ask an instance for another rider's ghost (#331). */
+  readonly riderGhostOffered?: boolean | undefined;
+  /** Why the last press found no other rider's ghost, and so did not start (#331). */
+  readonly riderGhostProblem?: string | undefined;
   readonly withPacer: boolean;
   readonly onPacer: (value: boolean) => void;
   readonly intensity: string;
@@ -186,17 +246,37 @@ interface RoutePickerProps {
    * always. @see GameTrainer.releaseFault
    */
   readonly releaseNotice: string | undefined;
+  /**
+   * Whether the ride about to be ridden is being RECORDED, and the way to
+   * record it — #1221. `undefined` says nothing at all (a chooser with no
+   * trainer port: a test, or a harness). @see RecordingOffer
+   */
+  readonly recording?: RecordingOffer | undefined;
   /** Where the rider's hands are — #365. @see RIDING_POSITIONS */
   readonly position: RidingPosition;
   readonly onPosition: (value: RidingPosition) => void;
   /** Whether this device chose the realistic world — #475. @see realisticWorldChosenText */
   readonly worldChosen: boolean;
+  /**
+   * What the chosen route's corridor came to — #1539. `undefined` draws no
+   * line: no port, or nothing asked yet. @see CorridorLine
+   */
+  readonly corridor?: CorridorState | undefined;
+  /**
+   * A Delivery round to offer — #1818. Drawn only where {@link worldChosen}
+   * (DL6); `undefined` draws nothing. @see DeliveryOffer
+   */
+  readonly delivery?: DeliveryOffer | undefined;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
     pacer: BotPacerPlan | undefined,
     air: Wind | undefined,
     position: RidingPosition,
+    /** #331: race another rider's ghost. Never with `ghost`: one ghost at a time. */
+    riderGhost?: boolean,
+    /** #1818: ride a Delivery round. Never without the realistic world (DL6). */
+    delivery?: boolean,
   ) => Promise<void>;
 }
 
@@ -243,6 +323,8 @@ export function routeFacts(profile: RouteProfile, units: UnitSystem): string {
 /** Choosing a route, whether to race yourself on it, and whether to be paced. */
 export function RoutePicker(props: RoutePickerProps): JSX.Element {
   const ids = useId();
+  // #1221: where focus goes when *Record this ride* is pressed and goes away.
+  const rideRef = useRef<HTMLButtonElement>(null);
   if (props.routes === undefined) {
     return <p>Loading your routes…</p>;
   }
@@ -306,6 +388,8 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       .join(' ') || undefined;
   const chosen = props.routes.find((route) => route.id === props.picked) ?? first;
   const headingId = `${ids}-heading`;
+  // #1818: offered with the realistic world only (DL6), so asked for only then.
+  const deliveryOffer = props.worldChosen ? props.delivery : undefined;
   const notices = [
     props.worldChosen ? (
       // #475, and since #1011 ONE compact line rather than a box: which world,
@@ -315,6 +399,11 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       // @see RealisticWorldLine
       <RealisticWorldLine key="world" />
     ) : undefined,
+    props.corridor === undefined ? undefined : (
+      // #1539: towns from map data, in one line that names no place — beside
+      // the world line, because it is about the world.
+      <CorridorLine key="corridor" state={props.corridor} />
+    ),
     props.releaseNotice === undefined ? undefined : (
       // #372: about the machine under the rider now rather than the road they
       // are about to choose. Kept (#1086): trainer-control text is never
@@ -388,6 +477,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           */}
           <Button
             size="ride"
+            ref={rideRef}
             // #509: unavailable while the trainer is being asked, as well
             // as while a box refuses. The click is not guarded on `asking`
             // here — `GameView` §`startingRef` refuses it, so the refusal
@@ -398,12 +488,18 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
               if (refused) {
                 return;
               }
+              // #331: another rider's ghost REPLACES the rider's own — one
+              // ghost at a time (ADR 0021 D-4.1) — so the two are never both
+              // sent as true.
+              const riderGhost = props.riderGhostOffered === true && props.withRiderGhost === true;
               void props.onStart(
                 chosen,
-                props.withGhost && chosen.attempts > 0,
+                !riderGhost && props.withGhost && chosen.attempts > 0,
                 props.choice.plan,
                 props.air.wind,
                 props.position,
+                riderGhost,
+                deliveryOffer?.chosen === true,
               );
             }}
           >
@@ -420,6 +516,16 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
             <span className="oyl-chooser__ride-label">Ride {chosen.name}</span>
           </Button>
         </div>
+        {/*
+          #1221: straight UNDER Ride rather than among the notices above it.
+          It is read with the press it qualifies, and it does not move Ride
+          down: #940 holds Ride on the screen at the top with the notices it
+          has, and a rider with no recording running — most riders, at this
+          screen — would otherwise have one more above it on every phone.
+        */}
+        {props.recording === undefined ? undefined : (
+          <RecordingLine offer={props.recording} rideRef={rideRef} />
+        )}
       </div>
       <h2 id={headingId}>Choose a route</h2>
       <RouteCards
@@ -434,6 +540,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
         <LoadoutHelp />
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
+        {props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
+          <RiderGhostControl
+            withRiderGhost={props.withRiderGhost === true}
+            onRiderGhost={props.onRiderGhost}
+            problem={props.riderGhostProblem}
+          />
+        ) : null}
         <PacerControls
           withPacer={props.withPacer}
           onPacer={props.onPacer}
@@ -453,6 +566,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           problem={props.air.problem}
           field={props.air.field}
         />
+        {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
       </div>
     </div>
   );
@@ -544,6 +658,78 @@ function RouteCards(props: {
   );
 }
 
+/** What the chooser says with nothing recording — #1221. */
+export const NOT_RECORDING_TEXT =
+  'This ride will not be saved as an activity: nothing is recording it.';
+
+/** ...and where nothing CAN record: no ride controller in this browser — #1221. */
+export const CANNOT_RECORD_TEXT = 'This browser cannot record a ride.';
+
+/** What it says once *Record this ride* has started a recording — #1221. */
+export const RECORDING_STARTED_TEXT =
+  'This ride is being recorded. Stop and save it on the Ride screen when you finish.';
+
+/** What it says when the press could not start one — #1221. */
+export const RECORDING_REFUSED_TEXT = 'A recording could not be started. The Ride screen says why.';
+
+/**
+ * The line under *Ride* about the ride being saved — #1221. @see RecordingOffer
+ *
+ * Nothing at all while a ride is recording that this line did not start: the
+ * HUD's *Moving* time is the recording's, and the rider started it on the Ride
+ * screen, where they will stop it. Once *Record this ride* has started one,
+ * the line says where it is saved, `live`, because it is a change the rider
+ * caused — and focus goes to *Ride*, since the control pressed is gone (WCAG
+ * 2.2 SC 2.4.3).
+ */
+function RecordingLine(props: {
+  readonly offer: RecordingOffer;
+  readonly rideRef: RefObject<HTMLButtonElement | null>;
+}): JSX.Element | null {
+  const id = useId();
+  const [answer, setAnswer] = useState<'started' | 'refused' | undefined>(undefined);
+  const { recorded, onRecord } = props.offer;
+  if (recorded) {
+    return answer === 'started' ? (
+      <StatusMessage tone="success" label="Recording" live>
+        {RECORDING_STARTED_TEXT}
+      </StatusMessage>
+    ) : null;
+  }
+  return (
+    <div className="oyl-chooser__recording">
+      <p className="tw:m-0" id={id}>
+        <span className="oyl-chooser__recording-label">Not recording</span>
+        {' · '}
+        {NOT_RECORDING_TEXT}
+        {onRecord === undefined ? ` ${CANNOT_RECORD_TEXT}` : undefined}
+      </p>
+      {onRecord === undefined ? undefined : (
+        <Button
+          variant="secondary"
+          describedBy={id}
+          onClick={() => {
+            void onRecord().then((started) => {
+              setAnswer(started ? 'started' : 'refused');
+              if (started) {
+                props.rideRef.current?.focus();
+              }
+            });
+          }}
+        >
+          Record this ride
+        </Button>
+      )}
+      {answer === 'refused' ? (
+        // Polite, not an alert: nothing here pre-empts (#394).
+        <p className="tw:m-0" role="status">
+          {RECORDING_REFUSED_TEXT}
+        </p>
+      ) : undefined}
+    </div>
+  );
+}
+
 /**
  * The realistic world, as ONE compact line — #1011 (#475 before it).
  *
@@ -572,6 +758,27 @@ function RealisticWorldLine(): JSX.Element {
         <p className="tw:m-0">{realisticWorldChosenText()}</p>
       </details>
     </div>
+  );
+}
+
+/**
+ * The corridor's one line — #1539 behaviour 5.
+ *
+ * ⚠️ **Announced politely, once, and never as a count.** The progress
+ * (*"reading (12 of 40)"*) is drawn for the eye and hidden from assistive
+ * technology, because a live region that changed with every tile would read
+ * a number out forty times. The settled words (*ready*, *not available*,
+ * *off …*) go into a `status` region, which is polite, the one time they
+ * arrive; `picker.a11y.test.tsx` §"#1539" holds both halves.
+ */
+function CorridorLine(props: { readonly state: CorridorState }): JSX.Element {
+  const text = corridorStateText(props.state);
+  const settled = props.state.kind !== 'reading';
+  return (
+    <p className="oyl-chooser__corridor tw:m-0">
+      <span role="status">{settled ? text : ''}</span>
+      <span aria-hidden="true">{settled ? '' : text}</span>
+    </p>
   );
 }
 
@@ -639,6 +846,136 @@ function GhostControl(props: {
           ? 'Race your best — ride it once first'
           : 'Race your own best attempt'}
       </label>
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of #331's choice, for the owner's approval.
+ *
+ * The label says what is asked for and whose consent it rests on; the hint
+ * says the two things a rider needs before choosing it — that it replaces
+ * their own best (one ghost at a time), and that it is fetched from their
+ * instance, so it needs one.
+ */
+export const RIDER_GHOST_TEXT = {
+  label: 'Race another rider’s ghost',
+  hint:
+    'One rider who agreed to be raced on this route, fetched from your instance when you ' +
+    'press Ride. It replaces your own best: one ghost at a time.',
+} as const;
+
+const RIDER_GHOST_HINT_ID = 'oyl-game-rider-ghost-hint';
+
+const RIDER_GHOST_PROBLEM_ID = 'oyl-game-rider-ghost-problem';
+
+/**
+ * Whether to race ONE other rider's consented attempt on the chosen route
+ * instead of the rider's own — #331, ADR 0039. Drawn only on a device that
+ * can ask its instance; turning it on turns the rider's own ghost off, which
+ * `GameView` does, so the two switches never both read "on".
+ */
+function RiderGhostControl(props: {
+  readonly withRiderGhost: boolean;
+  readonly onRiderGhost: (value: boolean) => void;
+  readonly problem: string | undefined;
+}): JSX.Element {
+  return (
+    <div className="oyl-game__ghost tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={props.withRiderGhost}
+          // The refusal travels with the switch that caused it, as #255's do.
+          aria-describedby={
+            props.problem === undefined
+              ? RIDER_GHOST_HINT_ID
+              : `${RIDER_GHOST_HINT_ID} ${RIDER_GHOST_PROBLEM_ID}`
+          }
+          onChange={(event) => {
+            props.onRiderGhost(event.target.checked);
+          }}
+        />
+        {RIDER_GHOST_TEXT.label}
+      </label>
+      <p id={RIDER_GHOST_HINT_ID} className="tw:m-0">
+        {RIDER_GHOST_TEXT.hint}
+      </p>
+      {props.problem === undefined ? null : (
+        <p className="oyl-game__problem tw:m-0" id={RIDER_GHOST_PROBLEM_ID} role="alert">
+          {props.problem}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of #1818's choice, for the owner's approval: the
+ * project's own (DL1), naming no other game.
+ *
+ * The label says what is switched on; the hint says what a round is, that
+ * nothing in it reaches the trainer (DL5, true in every trainer state, a
+ * workout's included), and what happens where the route cannot hold one,
+ * because the chooser cannot tell beforehand.
+ */
+export const DELIVERY_CHOICE_TEXT = {
+  label: 'Ride a Delivery round',
+  hint:
+    'Throw parcels to the doorsteps of the houses on the round as you ride through a town. ' +
+    'Nothing in the round changes what your trainer is sent. A route with fewer mapped houses ' +
+    `than the round rides a shorter one, and one with fewer than ${String(FEWEST_DELIVERY_HOUSES)} ` +
+    'is an ordinary ride.',
+} as const;
+
+/**
+ * The week's progress, in words: *"Day 2 of 7 · up to 8 houses on the round"*
+ * (#1818, #1878).
+ *
+ * ⚠️ **"Up to", because the line is the day's count and the ride's round can
+ * be shorter.** The chooser cannot read the route's mapped houses (the houses
+ * are planned from the corridor at the press, and `stage-chooser-imports.test.ts`
+ * keeps the map out of this file), and a route with fewer reachable houses than
+ * the day's count rides a round of the houses it has. A line that stated the
+ * day's count flat read "8 houses" over a HUD that then showed 3. The count is
+ * the ceiling the ride will not exceed, so "up to" is true on every route.
+ */
+export function deliveryWeekText(week: Pick<WeekProgress, 'day' | 'houses'>): string {
+  const houses = week.houses === 1 ? '1 house' : `${String(week.houses)} houses`;
+  return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · up to ${houses} on the round`;
+}
+
+const DELIVERY_WEEK_ID = 'oyl-game-delivery-week';
+const DELIVERY_HINT_ID = 'oyl-game-delivery-hint';
+
+/**
+ * Whether this ride runs a Delivery round — #1818. A switch, as the ghost,
+ * the pacer and the wind beside it are, described by the week's progress and
+ * by what a round is. Last in the loadout: it is the one choice that is about
+ * the game rather than the ride's company or its air.
+ */
+function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element {
+  return (
+    <div className="oyl-game__delivery tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={props.offer.chosen}
+          aria-describedby={`${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`}
+          onChange={(event) => {
+            props.offer.onChoose(event.target.checked);
+          }}
+        />
+        {DELIVERY_CHOICE_TEXT.label}
+      </label>
+      <p id={DELIVERY_WEEK_ID} className="tw:m-0">
+        {deliveryWeekText(props.offer.week)}
+      </p>
+      <p id={DELIVERY_HINT_ID} className="tw:m-0">
+        {DELIVERY_CHOICE_TEXT.hint}
+      </p>
     </div>
   );
 }

@@ -15,6 +15,16 @@ From the layout tree of CLAUDE.md §2, from `apps/` down to `apps/web/src/game/`
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
+    demo/               the demo page (#1645, epic #1643): its own build,
+                        vite.demo.config.ts into demo/dist/, with its code in
+                        src/demo/. No trainer, Bluetooth, network or storage
+                        module may be in its bundle (tools/demo/), and none of
+                        it may be in the product's. docs/architecture.md's
+                        component table has the row. Since #1651 (ADR 0056)
+                        `demo:bake -- --route <id>` bakes a preset route's map
+                        data from the owner's demo/routes/<id>.gpx into
+                        demo/dist/routes/ only (tools/demo/bake-route.ts);
+                        CI bakes only the synthetic corridor fixture.
     browser/            the browser gate (#63) — the one place a real browser runs;
                         a harness page driving the map adapter, and its Playwright
                         spec, and since #63's cold-load criterion the PMTiles
@@ -257,7 +267,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         exactly that reason. Since #664 it also lists the
                         SOFTWARE the app includes, read from the contents of
                         the third-party notices `check:notices` generates and
-                        gates (§4g), and links the full document
+                        gates (§4g), and shows the full document on the
+                        screen (`credits/notices-document.ts`) — never a
+                        link, which left the app in the Android WebView
+    src/demo/           the demo's scripted bot riders (#1646, epic #1643): authored
+                        power, cadence and heart-rate scripts (`script.ts`), three
+                        presets (`presets.ts`: climb, sprint, group) and a runner
+                        that moves every rider through physics' own `advance`
+                        (`runner.ts`). Pure, no DOM. ⚠️ AUTHORED, never derived from a
+                        recorded ride (ADR 0007 D4): `SyntheticScript` fails
+                        typecheck on a field that could carry one, and
+                        `no-recorded-data.test.ts` refuses any import of the store,
+                        `fit`, `ride/` or an activity or ghost module. ⚠️ No `Date`,
+                        `performance` or `Math.random` (eslint): `runner.test.ts`
+                        pins a SHA-256 of each preset, so changing a preset, the
+                        runner or the physics re-pins it on purpose
     src/design/         design tokens, theme.css and the primitives (#48), and since
                         #307 the two systems those tokens now form — the elevation
                         ramp, which is a surface COLOUR because a shadow is invisible
@@ -328,7 +352,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         step at 800 in `--oyl-font-family-display` (the one
                         token ADR 0043's face replaces), and a menu's figures
                         go through `Reading.tsx`. `look.browser.spec.ts` reads
-                        it back on every route
+                        it back on every route. Since #1432 `touch-lock.ts` and
+                        `TouchLockButton.tsx` are the Ride screen's touch
+                        lock (not yet the HUD's): a tap (`detail` > 0) is
+                        swallowed, a key or screen reader is not, and a
+                        `touchLockExempt` control (the trainer's releases)
+                        never is
     src/design/illustration/
                         the menus' illustration kit (#938): `Sky`, `Hills`,
                         `RoadRibbon`, `RiderSilhouette` (`game/bicycle.ts`'s own
@@ -393,7 +422,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         row can be hand-edited. ⚠️ A failed, cancelled or
                         withheld ask keeps the earlier write-up and says why
                         ABOVE it (the owner's ruling of 2026-09-29); with no
-                        model set up it is one sentence and a link to Camera
+                        instance it is one sentence (since #1103 no link to
+                        Camera: the device sets up no model of its own)
     src/instance/       the client half of signing in to an instance (#772) and
                         of linking this device to an athlete (#773): the local
                         athlete first, then the device key, then challenge →
@@ -403,8 +433,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         parameter, and #777 is the one module allowed to call
                         an instance, after #778's disclosures. Since #881
                         (#776) it also holds `sync.ts`, two-way sync with an
-                        instance, under the same rule (no `fetch`, nothing in
-                        the shipped client calls it). ⚠️ **The device's change
+                        instance, under the same rule (no `fetch`). ⚠️ Since
+                        #1195 the shipped client DOES call it: `sync-port.ts`
+                        over the sealed session, from the Instance screen's
+                        *Sync now* (`views/SyncPanel.tsx`), offered only with
+                        the instance's card and drawn not at all with no
+                        instance; a key is admitted only from the rider's
+                        confirmation there. ⚠️ **The device's change
                         wins**, and a reviewer who remembers "pull, then push
                         whatever differs" is reading #893's first draft, which
                         pulled back a ride deleted here and overwrote a
@@ -450,7 +485,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         session token and the address are kept on the DEVICE,
                         not the athlete row (ADR 0020 D-2's question, answered
                         the other way in the port's header). The screen is
-                        `views/InstanceView.tsx` at `#/settings/instance`
+                        `views/InstanceView.tsx` at `#/settings/instance`.
+                        Since #1190 `instance-pin.ts` holds the device's PIN on
+                        the instance's identity key, taken only from an
+                        instance card pasted in the app (never a registered
+                        URL scheme — `no-url-handler.test.ts`), judged by
+                        `@onyourleft/domain` §`judgeInstanceKeys`;
+                        `sealedRouteGate` is the gate every phase-1 feature
+                        asks, and the card on the link-code screen and in an
+                        invitation is `cardFromPin`, never an instance answer
     src/net/            a race room, from the client's side (#782) —
                         `room-port.ts` (the port and `createRoomPort`, which
                         only `main.tsx` names), `room-session.ts` (the hello
@@ -561,7 +604,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         unsubscribes `onControlLost` before it closes the
                         client and `close()` writes nothing, so any path that
                         detaches a controlling trainer without releasing it
-                        first skips the release in silence
+                        first skips the release in silence. Since #1433
+                        `reading-choice.ts` is which readings the Ride screen
+                        shows and in which order (ranked on Settings) and its
+                        *Zoom* to the top two at `--oyl-font-size-zoom`, kept
+                        on the device; `rideview.browser.spec.ts` §"#1433"
+                        measures the zoomed digit against a stated floor
     src/offline/        the service worker, whether it is registered at all, and
                         when a new one may take over
                         (#406, #407) — the one cache strategy, the four handlers
@@ -700,67 +748,37 @@ apps/                 AGPL-3.0-or-later, without exception
                         `input.test.ts` walks a built input for all of it. A
                         gap is coverage, never a zero; W/kg only with a real
                         mass; the pose summary only with camera consent and
-                        never in a section. ⚠️ Called since #804 (below).
-                        Since #811 `runner.ts` runs a template's steps through
-                        `model-step-port.ts` — per-step and per-run time and
-                        token budgets, one parse-repair re-ask, a failed
-                        section LEFT OUT, the #798 screen and one rewrite —
-                        and saves nothing: a caller keeps a write-up only on
-                        `written`. Time is a `RunnerClock` it is handed.
-                        ⚠️ Its two `@unwired` tags came off with #804 —
-                        a reviewer who remembers them is reading the old
-                        file. Since #802
-                        `own-computer-step.ts` is the step port to the rider's
-                        own computer: text only (a step with any other field,
-                        a byte array or a `data:` URL is refused as
-                        `not-numbers` before a byte is sent), `finish_reason`
-                        read, the runner's signal handed to the request. It
-                        sends through `camera/analysis-transport.ts`
-                        §`riderModelStepPort`, which hands it the client's ONE
-                        `fetch`; ⚠️ it is NOT in that module because that
-                        module builds pictures and this one must reach none.
-                        Since #804 `ride-analysis.ts` is the post-ride ASK
-                        behind `ride-analysis-port.ts`: one press on a ride's
-                        page (`RideWriteUpControl.tsx`, the only caller) reads
-                        the ride, runs the agent through the step port
-                        `main.tsx` builds with `riderModelStepSource`, and
-                        saves ONLY a `ScreenedWriteUp`, replacing the ride's
-                        write-up; any failure leaves the earlier one as it
-                        was. The rider's own computer is offered first.
-                        ⚠️ Since #803 there IS a hosted source — a reviewer
-                        who remembers "no hosted STEP port until #803" is
-                        reading the old file: `hosted-step.ts` sends each step
-                        through `CameraController.askHostedModel`, which
-                        checks the hosted consent on EVERY step, to
-                        `camera/hosted-transport.ts`'s one `fetch`. Only a
-                        step the runner SEALED is sent (`sealed-step.ts`: a
-                        brand no literal satisfies, and a `WeakSet` checked
-                        by identity at run time); `sealed-step.test.ts` fails
-                        if any production module but `runner.ts` names
-                        `sealStep`. No `response_format` hint goes to a hosted
-                        service. ⚠️ The port is an
-                        optional prop, so `ride-analysis-wiring.test.tsx`
-                        drives the real shell at the detail route with it
-                        built as `main.tsx` builds it. ⚠️ Since #805 the
-                        control is RENDERED by `detail/RideWriteUpSection.tsx`
-                        rather than straight by the page, keeps its ask
-                        controls in the tab order (`aria-disabled`) while a
-                        run goes, and says beside them what will be sent, in
-                        ADR 0035 D-9 B's words, marked kept-visible. A port
-                        remembers a server that refused the `response_format`
-                        hint and stops offering it (#805, from #831's review).
-                        ⚠️ **Since #1094 the platform-free core is NOT here**:
-                        `runner.ts`, `template*.ts`, `input.ts`, `history.ts`,
-                        `model-step-port.ts`, `sealed-step.ts` and
-                        `hosted-mask.ts` moved to `packages/analysis`
-                        (`@onyourleft/analysis`, Apache-2.0, ADR 0046 D-4),
-                        imported from there unchanged. What stays here is
-                        everything that reads a store, names a transport or
-                        renders: `read-input.ts`, `ride-summary.ts`,
-                        `ride-analysis.ts`, `own-computer-step.ts`,
-                        `hosted-step.ts` and every `.tsx`. The tests that read
-                        the app or the shell stayed too, as `*-app.test.ts`
-                        and `runner-native.test.ts` beside them
+                        never in a section. Called by the instance ask (below).
+                        ⚠️ **Since #1103 the device runs no write-up of its
+                        own**, and a reviewer who remembers `runner.ts`,
+                        `own-computer-step.ts`, `hosted-step.ts`,
+                        `ride-analysis.ts`, `ride-analysis-port.ts` or
+                        `RideWriteUpControl.tsx` is reading the old file:
+                        the device's runner, the write-up asked of the rider's
+                        own computer and the hosted model on a key kept on the
+                        device went together (ADR 0046 D-1, owner ruling 1 of
+                        2026-10-04). A write-up is asked of the rider's
+                        INSTANCE only (#1102): `instance-analysis.ts` behind
+                        `instance-analysis-port.ts`, pressed from
+                        `InstanceWriteUpControl.tsx`, screened again and saved
+                        on the device. Write-ups saved by the old paths still
+                        render, with their source in words. The platform-free
+                        core is `packages/analysis` (#1094); what stays here
+                        reads a store, names a transport or renders.
+                        ⚠️ Since #1251 it also holds the rider's OWN hosted
+                        key and hosted consent on their instance:
+                        `hosted-settings.ts` (the sealed calls, `pastedKey`
+                        on the one that carries the key, and the device's
+                        note of which service a hosted write-up may be
+                        OFFERED for), `hosted-settings-port.ts`,
+                        `HostedServicePanel.tsx` (the Instance screen's
+                        section) and `hosted-consent.ts` — EVERY sentence a
+                        rider reads about it, DRAFT until the owner approves
+                        it, pinned word for word by `hosted-consent.test.ts`.
+                        ⚠️ The instance masks with ITS copy of the rider's
+                        list, so `sendMaskingGuard` writes it before a
+                        consent and before every hosted job
+                        (`instance-analysis.ts`); nothing synced it before
     src/rider-text/     the rider's own text for the analysis agent's history
                         (#836, ADR 0040 D-1, D-11) — the goals box on Settings,
                         a ride's note on its page (`RiderTextBox.tsx`, one
@@ -794,7 +812,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         "Eased" notice takes the notice cell from the road
                         notice while the rescue holds (`GameView.tsx`
                         §`roadNotice`); `ride.html?rescue=floor` is the
-                        browser gate that measures it
+                        browser gate that measures it; and since #1434
+                        `target-band.ts`, the block being ridden against the
+                        target the trainer CONFIRMED (`workout-graph.ts`
+                        §`heldNow`) — a ±5 % band, 3 s power, the block's
+                        average (`controller.ts` §`blockPower`, summed beside
+                        the trace because a block outlasts its five minutes),
+                        time left and the ERG cadence cue — drawn at the foot
+                        of `WorkoutPanel`'s running section
     src/workouts/       the workout library and builder (#14) — the read
                         budget, the row model that quotes no watts, the one
                         place a typed percentage becomes a share, and since

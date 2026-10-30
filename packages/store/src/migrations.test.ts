@@ -37,7 +37,7 @@ import {
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { openActivityStore } from './activity-store';
+import { deleteActivityStore, openActivityStore } from './activity-store';
 import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId, routeId } from './ids';
 
@@ -55,11 +55,12 @@ import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE
 import type {
   PersistedActivity,
   PersistedCameraFrame,
-  PersistedCameraFrameV17,
+  PersistedCameraFrameV20,
   PersistedActivityV14,
   PersistedSideCameraReport,
   PersistedSideCameraReportV12,
 } from './persisted';
+import type { WorldCorridorRecord } from './records';
 import {
   cameraFrameFor,
   framingReferenceFor,
@@ -68,8 +69,16 @@ import {
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
+  workoutGoalsFor,
   sideCameraReportFor,
+  ATHLETES,
+  createStoreHarness,
+  openOlderSchema,
+  seedAthletes,
+  seedEveryTable,
+  unpackWorldCorridorFeatures,
 } from './testing';
+import type { StoreHarness } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
@@ -309,10 +318,13 @@ describe('the production registry', () => {
     // gains a REQUIRED `mayBeRaced`, false. So the registry holds two.
     // Version 16 (#836) adds `riderTexts`: a new store, so nothing again.
     // Version 17 (#898) adds `trustedDeviceKeys`: a new store, nothing again.
+    // Version 18 (#1236) adds `workoutGoals`: a new store, nothing again.
+    // Version 19 (#1431) adds `recentlyDeleted`: a new store, nothing again.
+    // Version 20 (#1545) adds `worldCorridors`: a new store, nothing again.
     //
-    // ⚠️ Version 18 (#1063) is the third record migration: every camera frame
+    // ⚠️ Version 21 (#1063) is the third record migration: every camera frame
     // gains a REQUIRED `source`, `activityId` and `outline`. So it holds three.
-    expect(SCHEMA_VERSION).toBe(18);
+    expect(SCHEMA_VERSION).toBe(21);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([
       SIDE_REPORT_POSE_SUMMARY,
       ACTIVITY_MAY_BE_RACED,
@@ -1152,9 +1164,296 @@ describe('version 16 to version 17 — #898’s trusted device keys', () => {
   });
 });
 
-describe('version 17 to version 18 — #1063’s side-camera snapshots, a record migration', () => {
-  /** Two version-17 kept frames, as they sat on disk before #1063. */
-  const v17Frame = (id: string, owner: string, salt: number): PersistedCameraFrameV17 => ({
+describe('version 17 to version 18 — #1236’s typed workout goals', () => {
+  /**
+   * Additive: rides written at version 17 read back unchanged at 18, and the
+   * new store is usable on a database that predates it. The rollback is
+   * `workout-goals-store.test.ts` §"version 18 rolls back".
+   */
+  it('reads every version-17 ride unchanged and makes workout goals usable', async () => {
+    const v17 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 17).forEach((stores, index) => {
+      v17.version(index + 1).stores(stores);
+    });
+    const rides: PersistedActivity[] = [
+      {
+        id: 'ride-1',
+        athleteId: 'athlete-a',
+        name: 'Written at seventeen',
+        startedAt: 1_760_000_000,
+        startedAtTimeZone: 'Europe/London',
+        elapsedTime: 600,
+        movingTime: 590,
+        distance: 5000,
+        visibility: 'public',
+        hasPosition: true,
+        createdAt: 1_760_000_600,
+        mayBeRaced: true,
+      },
+      {
+        id: 'ride-2',
+        athleteId: 'athlete-a',
+        name: 'Indoors',
+        startedAt: 1_760_100_000,
+        startedAtTimeZone: 'UTC',
+        elapsedTime: 1200,
+        movingTime: 1200,
+        distance: 10_000,
+        visibility: 'private',
+        hasPosition: false,
+        createdAt: 1_760_101_200,
+        mayBeRaced: false,
+      },
+    ];
+    await v17.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v17.table(TABLE.activities).bulkPut(rides);
+    const beforeVersion = v17.backendDB().version;
+    v17.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const empty = await store.getWorkoutGoals(owner);
+    const goals = workoutGoalsFor(owner);
+    await store.putWorkoutGoals(goals);
+    store.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = await raw.table(TABLE.activities).toArray();
+    const afterVersion = raw.backendDB().version;
+    raw.close();
+
+    const reopened = openActivityStore(databaseName);
+    const read = await reopened.getWorkoutGoals(owner);
+    reopened.close();
+
+    expect(beforeVersion).toBe(17 * 10);
+    expect(afterVersion).toBe(SCHEMA_VERSION * 10);
+    expect(onDisk).toStrictEqual(rides);
+    expect(empty).toStrictEqual({ status: 'none' });
+    expect(read).toStrictEqual({ status: 'kept', record: goals });
+  });
+});
+
+describe('version 18 to version 19 — #1431’s Recently deleted', () => {
+  /**
+   * Additive: a ride written at version 18 reads back unchanged at 19, and can
+   * be moved to Recently deleted and brought back on a database that predates
+   * the store. The rollback is export → downgrade → re-import (`schema.ts`
+   * §`STORES_V19`): a downgrade loses only the rides in Recently deleted.
+   */
+  it('reads a version-18 ride unchanged, and moves it to Recently deleted and back', async () => {
+    const v18 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 18).forEach((stores, index) => {
+      v18.version(index + 1).stores(stores);
+    });
+    const ride: PersistedActivity = {
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'Written at eighteen',
+      startedAt: 1_760_000_000,
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: 600,
+      movingTime: 590,
+      distance: 5000,
+      visibility: 'public',
+      hasPosition: true,
+      createdAt: 1_760_000_600,
+      mayBeRaced: false,
+    };
+    await v18.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v18.table(TABLE.activities).put(ride);
+    const beforeVersion = v18.backendDB().version;
+    v18.close();
+
+    const owner = athleteId('athlete-a');
+    const at = unixSeconds(1_760_100_000);
+    const store = openActivityStore(databaseName);
+    const moved = await store.moveActivityToRecentlyDeleted(owner, activityId('ride-1'), at);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const listed = await reopened.listRecentlyDeleted(owner, at);
+    const restored = await reopened.restoreRecentlyDeleted(owner, activityId('ride-1'), at);
+    reopened.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = await raw.table(TABLE.activities).toArray();
+    raw.close();
+
+    expect(beforeVersion).toBe(18 * 10);
+    expect(moved).toBe(true);
+    expect(listed.map((each) => each.summary.name)).toStrictEqual(['Written at eighteen']);
+    expect(restored).toBe('restored');
+    expect(onDisk).toStrictEqual([ride]);
+  });
+});
+
+describe('version 19 to version 20 — #1545’s world corridors', () => {
+  /**
+   * Additive: a new store, `worldCorridors`, and nothing else changes. Both
+   * halves run against a database with rows in **every** table — the tables
+   * come from `SCHEMA_VERSIONS`, and the world is `seedEveryTable`'s, so a
+   * table added later is in this test the day it is in the schema, and fails
+   * here until the seed fills it.
+   *
+   * ⚠️ **The "export" here is every table but `worldCorridors`, read raw.**
+   * ADR 0005 F's rollback is export → downgrade → re-import, and what this
+   * version adds is a cache that the account export never carries (ADR 0054
+   * D-3.5; `apps/web/src/transfer/world-corridor-not-exported.test.ts` holds
+   * that) — so what a downgrade must keep is everything else, and the honest
+   * way to say "everything else" in this package is every other table.
+   */
+
+  /** Every table any version declares, the way Dexie merges them. */
+  function tablesOf(versions: readonly Readonly<Record<string, string>>[]): string[] {
+    return [...new Set(versions.flatMap((stores) => Object.keys(stores)))].sort();
+  }
+
+  /** Every row of every table, read on a raw connection at the current version. */
+  async function dumpEveryTable(name: string): Promise<Map<string, unknown[]>> {
+    const raw = new Dexie(name);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    try {
+      const dump = new Map<string, unknown[]>();
+      for (const table of tablesOf(SCHEMA_VERSIONS)) {
+        dump.set(table, await raw.table(table).toArray());
+      }
+      return dump;
+    } finally {
+      raw.close();
+    }
+  }
+
+  /** The current build's database, with all three athletes' footprints in every table. */
+  async function seededAtTwenty(): Promise<{
+    harness: StoreHarness;
+    dump: Map<string, unknown[]>;
+  }> {
+    const harness = createStoreHarness();
+    await seedAthletes(harness);
+    for (const athlete of ATHLETES) {
+      await seedEveryTable(harness, athlete);
+    }
+    await harness.discard();
+    const dump = await dumpEveryTable(harness.databaseName);
+    const empty = [...dump].filter(([, rows]) => rows.length === 0).map(([table]) => table);
+    expect(empty, 'seedEveryTable left this table empty, so nothing here checks it').toStrictEqual(
+      [],
+    );
+    return { harness, dump };
+  }
+
+  /**
+   * Re-imports `dump` into a database the version-19 build makes: deletes the
+   * newer one first (IndexedDB refuses to open lower — `VersionError`), opens
+   * at 19, and puts every row of every table version 19 has.
+   */
+  async function reimportAtNineteen(name: string, dump: Map<string, unknown[]>): Promise<string[]> {
+    await deleteActivityStore(name);
+    const older = await openOlderSchema(name, 19);
+    try {
+      expect(older.version).toBe(19);
+      for (const table of older.tables) {
+        for (const row of dump.get(table) ?? []) {
+          await older.put(table, row);
+        }
+      }
+      return [...older.tables].sort();
+    } finally {
+      older.close();
+    }
+  }
+
+  it('carries every row of a version-19 database with rows in every table, and adds an empty, usable worldCorridors', async () => {
+    const { harness, dump } = await seededAtTwenty();
+    try {
+      const tablesAtNineteen = await reimportAtNineteen(harness.databaseName, dump);
+      expect(tablesAtNineteen).toStrictEqual(tablesOf(SCHEMA_VERSIONS.slice(0, 19)));
+      expect(tablesAtNineteen).not.toContain(TABLE.worldCorridors);
+
+      // Upgrade: the current build opens it.
+      const store = openActivityStore(harness.databaseName);
+      const [corridor] = dump.get(TABLE.worldCorridors) as WorldCorridorRecord[];
+      expect(corridor).toBeDefined();
+      if (corridor === undefined) return;
+      const before = await store.getWorldCorridor(corridor.owner, corridor.routeId);
+      store.close();
+
+      const after = await dumpEveryTable(harness.databaseName);
+      for (const table of tablesAtNineteen) {
+        expect(after.get(table), `${table} did not come through the upgrade`).toStrictEqual(
+          dump.get(table),
+        );
+      }
+      expect(before).toBeUndefined();
+      expect(after.get(TABLE.worldCorridors)).toStrictEqual([]);
+
+      // And usable: a corridor kept at 20 reads back on a fresh connection.
+      const writer = openActivityStore(harness.databaseName);
+      await writer.putWorldCorridor(corridor);
+      writer.close();
+      const reader = openActivityStore(harness.databaseName);
+      const read = await reader.getWorldCorridor(corridor.owner, corridor.routeId);
+      reader.close();
+      expect(read?.routeDigest).toBe(corridor.routeDigest);
+      expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(corridor.features),
+      );
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('version 20 rolls back: export → open at 19 → re-import keeps every other table, and 20 again has no corridor', async () => {
+    const { harness, dump } = await seededAtTwenty();
+    try {
+      const corridors = dump.get(TABLE.worldCorridors) as WorldCorridorRecord[];
+      expect(corridors).toHaveLength(ATHLETES.length);
+
+      // Export, downgrade, re-import.
+      const tablesAtNineteen = await reimportAtNineteen(harness.databaseName, dump);
+
+      // Upgrade again: every other table's rows survived, and the corridors
+      // are gone — a cache, which #1539 reads again on the next ride.
+      const store = openActivityStore(harness.databaseName);
+      const reads = await Promise.all(
+        corridors.map(async (each) => store.getWorldCorridor(each.owner, each.routeId)),
+      );
+      const routes = await Promise.all(
+        corridors.map(async (each) => store.getRoute(each.owner, each.routeId)),
+      );
+      store.close();
+      const after = await dumpEveryTable(harness.databaseName);
+
+      expect(
+        tablesOf(SCHEMA_VERSIONS).filter((table) => !tablesAtNineteen.includes(table)),
+      ).toStrictEqual([TABLE.worldCorridors]);
+      for (const table of tablesAtNineteen) {
+        expect(after.get(table), `${table} lost rows in the rollback`).toStrictEqual(
+          dump.get(table),
+        );
+      }
+      expect(after.get(TABLE.worldCorridors)).toStrictEqual([]);
+      expect(reads).toStrictEqual(corridors.map(() => undefined));
+      // The routes the corridors were around are all still there.
+      expect(routes.map((route) => route?.id)).toStrictEqual(corridors.map((each) => each.routeId));
+    } finally {
+      await harness.destroy();
+    }
+  });
+});
+
+describe('version 20 to version 21 — #1063’s side-camera snapshots, a record migration', () => {
+  /** Two version-20 kept frames, as they sat on disk before #1063. */
+  const v20Frame = (id: string, owner: string, salt: number): PersistedCameraFrameV20 => ({
     id,
     athleteId: owner,
     capturedAt: 1_760_000_000 + salt,
@@ -1163,61 +1462,74 @@ describe('version 17 to version 18 — #1063’s side-camera snapshots, a record
     height: 480,
     bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, salt, salt + 1, 0xff, 0xd9]),
   });
-  const V17_FRAMES: readonly PersistedCameraFrameV17[] = [
-    v17Frame('frame-1', 'athlete-a', 1),
-    v17Frame('frame-2', 'athlete-b', 2),
+  const V20_FRAMES: readonly PersistedCameraFrameV20[] = [
+    v20Frame('frame-1', 'athlete-a', 1),
+    v20Frame('frame-2', 'athlete-b', 2),
   ];
 
-  it('up then down returns every version-17 frame to exactly its version-17 shape', () => {
+  it('up then down returns every version-20 frame to exactly its version-20 shape', () => {
     expect(
-      migrateDown(CAMERA_FRAME_SOURCE, migrateUp(CAMERA_FRAME_SOURCE, V17_FRAMES)),
-    ).toStrictEqual(V17_FRAMES);
+      migrateDown(CAMERA_FRAME_SOURCE, migrateUp(CAMERA_FRAME_SOURCE, V20_FRAMES)),
+    ).toStrictEqual(V20_FRAMES);
   });
 
   it('up makes every frame a kept one with no ride and no outline, and moves nothing else', () => {
-    expect(migrateUp(CAMERA_FRAME_SOURCE, V17_FRAMES)).toStrictEqual(
-      V17_FRAMES.map((row) => ({ ...row, source: 'kept', activityId: null, outline: null })),
+    expect(migrateUp(CAMERA_FRAME_SOURCE, V20_FRAMES)).toStrictEqual(
+      V20_FRAMES.map((row) => ({ ...row, source: 'kept', activityId: null, outline: null })),
     );
   });
 
-  it('down drops a snapshot’s ride and outline and keeps its picture — the loss its description names', () => {
+  it('up leaves a frame that already says what it is as it was — a version-21 row re-imported raw', () => {
+    // The one way such a row reaches this upgrade: `seedEveryTable`'s snapshot,
+    // exported raw and put back into a version-19 database by §"version 20
+    // rolls back". Made a kept frame, it would lose its ride for nothing.
     const snapshot: PersistedCameraFrame = {
-      ...V17_FRAMES[0]!,
+      ...V20_FRAMES[0]!,
       source: 'snapshot',
       activityId: 'ride-1',
       outline: { aspect: 1.5, landmarks: [{ name: 'knee', x: 0.5, y: 0.6 }] },
     };
-    expect(CAMERA_FRAME_SOURCE.down(snapshot)).toStrictEqual(V17_FRAMES[0]);
+    expect(CAMERA_FRAME_SOURCE.up(snapshot)).toStrictEqual(snapshot);
+  });
+
+  it('down drops a snapshot’s ride and outline and keeps its picture — the loss its description names', () => {
+    const snapshot: PersistedCameraFrame = {
+      ...V20_FRAMES[0]!,
+      source: 'snapshot',
+      activityId: 'ride-1',
+      outline: { aspect: 1.5, landmarks: [{ name: 'knee', x: 0.5, y: 0.6 }] },
+    };
+    expect(CAMERA_FRAME_SOURCE.down(snapshot)).toStrictEqual(V20_FRAMES[0]);
     expect(CAMERA_FRAME_SOURCE.description).toMatch(/down drops/);
   });
 
   it('is pure — the fixture is not mutated', () => {
-    const before = structuredClone(V17_FRAMES);
-    migrateDown(CAMERA_FRAME_SOURCE, migrateUp(CAMERA_FRAME_SOURCE, V17_FRAMES));
-    expect(V17_FRAMES).toStrictEqual(before);
+    const before = structuredClone(V20_FRAMES);
+    migrateDown(CAMERA_FRAME_SOURCE, migrateUp(CAMERA_FRAME_SOURCE, V20_FRAMES));
+    expect(V20_FRAMES).toStrictEqual(before);
   });
 
-  it('migrates the frames on a real version-17 database, takes a snapshot after, and rolls back exactly', async () => {
-    const v17 = new Dexie(databaseName);
-    SCHEMA_VERSIONS.slice(0, 17).forEach((stores, index) => {
-      v17.version(index + 1).stores(stores);
+  it('migrates the frames on a real version-20 database, takes a snapshot after, and rolls back exactly', async () => {
+    const v20 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 20).forEach((stores, index) => {
+      v20.version(index + 1).stores(stores);
     });
-    await v17.table(TABLE.athletes).bulkPut([
+    await v20.table(TABLE.athletes).bulkPut([
       { id: 'athlete-a', displayName: 'A', createdAt: 1 },
       { id: 'athlete-b', displayName: 'B', createdAt: 1 },
     ]);
-    await v17.table(TABLE.cameraFrames).bulkPut([...V17_FRAMES]);
-    const beforeVersion = v17.backendDB().version;
-    v17.close();
+    await v20.table(TABLE.cameraFrames).bulkPut([...V20_FRAMES]);
+    const beforeVersion = v20.backendDB().version;
+    v20.close();
 
     const owner = athleteId('athlete-a');
     const store = openActivityStore(databaseName);
     const kept = await store.listCameraFrames(owner);
     // A snapshot is storable on a database that predates it, against a ride.
     const ride = {
-      id: activityId('ride-after-18'),
+      id: activityId('ride-after-21'),
       athleteId: owner,
-      name: 'After eighteen',
+      name: 'After twenty-one',
       startedAt: unixSeconds(1_760_000_000),
       startedAtTimeZone: 'Europe/London',
       elapsedTime: seconds(600),
@@ -1240,19 +1552,19 @@ describe('version 17 to version 18 — #1063’s side-camera snapshots, a record
     const onDisk = (await raw
       .table(TABLE.cameraFrames)
       .where('id')
-      .anyOf(V17_FRAMES.map((row) => row.id))
+      .anyOf(V20_FRAMES.map((row) => row.id))
       .sortBy('id')) as PersistedCameraFrame[];
     raw.close();
 
-    expect(beforeVersion).toBe(17 * 10);
+    expect(beforeVersion).toBe(20 * 10);
     expect(kept.map((frame) => [frame.id, frame.source, frame.activityId])).toStrictEqual([
       ['frame-1', 'kept', null],
     ]);
     expect(snapshots.map((frame) => frame.id)).toStrictEqual([snapshot.id]);
     expect(onDisk).toStrictEqual(
-      V17_FRAMES.map((row) => ({ ...row, source: 'kept', activityId: null, outline: null })),
+      V20_FRAMES.map((row) => ({ ...row, source: 'kept', activityId: null, outline: null })),
     );
     // The rollback, executed against what the real upgrade wrote.
-    expect(migrateDown(CAMERA_FRAME_SOURCE, onDisk)).toStrictEqual(V17_FRAMES);
+    expect(migrateDown(CAMERA_FRAME_SOURCE, onDisk)).toStrictEqual(V20_FRAMES);
   });
 });

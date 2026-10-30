@@ -24,13 +24,14 @@
  * ## Registration and moderation — #775, #83
  *
  * - **`OYL_INSTANCE_REGISTRATION`**: `open`, `approval`, `invite` or `closed`.
- *   Case does not matter. ⚠️ **Unset is `closed`** (#891's merge review): an
- *   instance somebody starts without reading this registers nobody, as main's
- *   instance did before the modes existed. The PROJECT's instance registers by
- *   `approval` — the owner's rulings (#16, Q5 and Q13, 2026-09-28) are about
- *   it — and its image sets that (`Dockerfile`).
- * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the two
- *   moderators' device keys, 64 lowercase hex characters each (ruling Q13).
+ *   Case does not matter. ⚠️ **Unset is `approval`** (the owner's ruling on
+ *   #775, 2026-10-15): a new rider's account waits for a moderator, and only
+ *   the keys the operator names register active. It was `closed` from #891's
+ *   merge review until that ruling. The project's image also sets `approval`
+ *   explicitly (`Dockerfile`; rulings Q5 and Q13).
+ * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the
+ *   moderators' device keys, 64 lowercase hex characters each. The deputy is
+ *   optional, and the project's instance names none (#905).
  * - **`OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS`** and
  *   **`OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES`**: public-room eligibility's
  *   thresholds (`moderation/eligibility.ts`).
@@ -47,8 +48,9 @@
  * accept. Failing at start-up is the only place that is cheap.
  */
 
+import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './analysis/model-turn.ts';
 import { isAddress, normalisedAddress } from './client-address.ts';
-import { configuredHostProblem } from './history/address.ts';
+import { configuredHostProblem, isAddressLiteral } from './history/address.ts';
 import {
   DEFAULT_DOCUMENT_PREFIX,
   DEFAULT_EMBEDDING_MODEL,
@@ -60,6 +62,8 @@ import {
   type PublicRoomThresholds,
 } from './moderation/eligibility.ts';
 import type { Moderators } from './moderation/moderation.ts';
+import { readLegalSettings, type LegalSettings, type RawLegalSettings } from './legal.ts';
+import { readTermsSettings, type RawTermsSettings, type TermsSettings } from './terms.ts';
 
 /** This repository. The same URL `apps/web/src/privacy/policy.ts` §`REPOSITORY` names. */
 export const REPOSITORY = 'https://github.com/openzigs/onyourleft';
@@ -81,14 +85,18 @@ export const REGISTRATION_MODES: readonly RegistrationMode[] = [
   'closed',
 ];
 
-/** The mode an instance registers in when the operator sets none: nobody new (#891's merge review). */
-export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
+/**
+ * The mode an instance registers in when the operator sets none: a new account
+ * waits for a moderator (the owner's ruling on #775, 2026-10-15; `closed`
+ * before it).
+ */
+export const DEFAULT_REGISTRATION: RegistrationMode = 'approval';
 
 /** The longest name an operator may give their instance, in characters. */
 export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
 
 /** The raw values, as the environment gives them. */
-export interface RawConfig {
+export interface RawConfig extends RawLegalSettings, RawTermsSettings {
   readonly host?: string | undefined;
   readonly port?: string | undefined;
   readonly commit?: string | undefined;
@@ -104,6 +112,10 @@ export interface RawConfig {
   readonly embeddingModel?: string | undefined;
   readonly embeddingDocumentPrefix?: string | undefined;
   readonly embeddingQueryPrefix?: string | undefined;
+  readonly analysisModelUrl?: string | undefined;
+  readonly analysisModel?: string | undefined;
+  readonly analysisModelReasoningTokens?: string | undefined;
+  readonly pictureModel?: string | undefined;
   readonly name?: string | undefined;
 }
 
@@ -125,7 +137,66 @@ export type HistorySettings =
 
 /** Why the history index is off. */
 export type HistoryOffCode =
-  'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'bad-model' | 'bad-prefix';
+  'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'tls-by-name' | 'bad-model' | 'bad-prefix';
+
+/**
+ * The analysis model (#1096, ADR 0046 D-9 source 1): an OpenAI-compatible
+ * server at a LOCAL address, and the model the operator pulled — or off, and
+ * why. Like the history index, off is never a refusal to start.
+ */
+export type AnalysisModelSettings =
+  | {
+      readonly kind: 'on';
+      /** The OpenAI-compatible base URL: `http://ollama:11434/v1`. */
+      readonly baseUrl: URL;
+      /** The model the operator pulled. There is no default (ADR 0031 D-4). */
+      readonly model: string;
+      /**
+       * What a turn may spend reasoning, when the operator says this model
+       * reasons (`OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS`, #1268).
+       * Absent: the agent finds out from the model's replies.
+       */
+      readonly reasoningTokens?: number;
+    }
+  | {
+      readonly kind: 'off';
+      readonly code: AnalysisModelOffCode;
+      readonly reason: string;
+    };
+
+/** Why the analysis model is off. */
+export type AnalysisModelOffCode =
+  | 'not-set'
+  | 'not-a-url'
+  | 'not-base-url'
+  | 'not-local'
+  | 'tls-by-name'
+  | 'no-model'
+  | 'bad-model'
+  | 'bad-reasoning';
+
+/**
+ * The model the side camera's pictures are shown to (#1106): the local server
+ * the analysis model is on, and a model the operator named FOR PICTURES — or
+ * off, and why. Off is never a refusal to start, and it is the default: an
+ * instance takes no picture until its operator names a model that reads them.
+ */
+export type PictureModelSettings =
+  | {
+      readonly kind: 'on';
+      /** `OYL_INSTANCE_ANALYSIS_MODEL_URL`'s base URL: one local server, both models. */
+      readonly baseUrl: URL;
+      /** The model the operator pulled for pictures. There is no default (ADR 0031 D-4). */
+      readonly model: string;
+    }
+  | {
+      readonly kind: 'off';
+      readonly code: PictureModelOffCode;
+      readonly reason: string;
+    };
+
+/** Why no local model takes pictures. `no-server` carries the server's own refusal. */
+export type PictureModelOffCode = 'not-set' | 'no-server' | 'bad-model';
 
 /** A configuration the instance can start with. */
 export interface Config {
@@ -149,6 +220,10 @@ export interface Config {
   readonly trustedProxies: readonly string[];
   /** The history index's embedding model, or why there is none (#835). */
   readonly history: HistorySettings;
+  /** The analysis agent's model, or why there is none (#1096). */
+  readonly analysis: AnalysisModelSettings;
+  /** The local model for the side camera's pictures, or why there is none (#1106). */
+  readonly pictures: PictureModelSettings;
   /**
    * What the operator calls this instance, which a rider's app shows once it
    * is connected (#777) — or `null`, and the app then names the instance by
@@ -156,6 +231,17 @@ export interface Config {
    * operator chose.
    */
   readonly name: string | null;
+  /**
+   * What the legal and contact page names, and whether public rooms are on
+   * (#908, `legal.ts`): on with no contact or no accountable person is a
+   * refusal to start.
+   */
+  readonly legal: LegalSettings;
+  /**
+   * The terms of service this instance publishes, and the date they took
+   * effect (#909, `terms.ts`), or `null` for none: never a default.
+   */
+  readonly terms: TermsSettings | null;
 }
 
 export type ConfigResult =
@@ -306,10 +392,15 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  const legal = readLegalSettings(raw, problems);
+  const terms = readTermsSettings(raw, problems);
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
   const history = readHistorySettings(raw);
+  const analysis = readAnalysisModelSettings(raw);
+  const pictures = readPictureModelSettings(raw);
   return {
     ok: true,
     config: {
@@ -324,7 +415,11 @@ export function readConfig(raw: RawConfig): ConfigResult {
       clientAddressHeader,
       trustedProxies,
       history,
+      analysis,
+      pictures,
       name: instanceName,
+      legal,
+      terms,
     },
   };
 }
@@ -347,6 +442,12 @@ const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
  *   §`configuredHostProblem`), it must be `http:` or `https:`, and it names the
  *   server's origin only — no path, no query, no credentials. Every connection
  *   checks where the name resolved to as well (`embedder.ts`).
+ * - **`https:` only at an address literal** (#1248, as #1187 for the analysis
+ *   model). Every request goes to the address the name was checked at, never
+ *   to the name (`embedder.ts` §`embedUrl`), so a certificate issued to a NAME
+ *   cannot verify: TLS would fail on every request and report only
+ *   `unreachable`. A name with `https:` is refused here instead, saying why
+ *   (`tls-by-name`).
  * - **The model defaults to `nomic-embed-text`** (the owner's ruling, D-5), and
  *   its prefixes to that model's own. For any other model the prefixes default
  *   to none, because another model's convention is its own. A prefix that is
@@ -393,6 +494,12 @@ export function readHistorySettings(raw: RawConfig): HistorySettings {
       `OYL_INSTANCE_EMBEDDING_URL was refused because ${hostProblem}: the embedding model must be on this machine or its private network (ADR 0040 D-6).`,
     );
   }
+  if (url.protocol === 'https:' && !isAddressLiteral(url.hostname)) {
+    return off(
+      'tls-by-name',
+      'OYL_INSTANCE_EMBEDDING_URL was refused because it is https: by a name: each request goes to the address the name was checked at, so a certificate issued to the name cannot verify. Use http: on the private network, or https: at the address itself.',
+    );
+  }
   const model = present(raw.embeddingModel) ? raw.embeddingModel.trim() : DEFAULT_EMBEDDING_MODEL;
   if (!MODEL_NAME.test(model)) {
     return off(
@@ -426,6 +533,139 @@ export function readHistorySettings(raw: RawConfig): HistorySettings {
     kind: 'on',
     embedding: { endpoint: new URL(url.origin), model, documentPrefix, queryPrefix },
   };
+}
+
+/**
+ * The analysis model's settings (#1096, ADR 0046 D-9 source 1), read from
+ * `OYL_INSTANCE_ANALYSIS_MODEL_URL` and `OYL_INSTANCE_ANALYSIS_MODEL`.
+ *
+ * - **No address, no analysis.** Nothing is defaulted.
+ * - **The address is local or refused**, by the history index's own rule
+ *   (`history/address.ts` §`configuredHostProblem`, ADR 0040 D-6): loopback,
+ *   a private, link-local, shared or unique-local literal, or a single-label
+ *   (Compose) name. A public name and `.local` are refused here; where a name
+ *   resolves to is checked again on every request (`analysis/model.ts`).
+ * - **It is a base URL**: `http:` or `https:`, no credentials, query or
+ *   fragment. A path is kept (`/v1`), because an OpenAI-compatible server is
+ *   addressed by one.
+ * - **`https:` only at an address literal** (#1187). Every turn sends to the
+ *   address the name was checked at, never to the name (`analysis/model.ts`
+ *   §`atAddress`), so a certificate issued to a NAME cannot verify: TLS would
+ *   fail on every turn and report only `model-unreachable`. A name with
+ *   `https:` is refused here instead, saying why (`tls-by-name`).
+ * - **The model has NO default**, and no model is named in source or the
+ *   documentation (ADR 0031 D-4): an address with no model is off, saying so.
+ */
+export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings {
+  const off = (code: AnalysisModelOffCode, reason: string): AnalysisModelSettings => ({
+    kind: 'off',
+    code,
+    reason,
+  });
+  const server = localModelServer(raw);
+  if (!('baseUrl' in server)) return server;
+  const { baseUrl } = server;
+  if (!present(raw.analysisModel)) {
+    return off(
+      'no-model',
+      'OYL_INSTANCE_ANALYSIS_MODEL is not set: name the model you pulled. There is no default.',
+    );
+  }
+  const model = raw.analysisModel.trim();
+  if (!MODEL_NAME.test(model)) {
+    return off(
+      'bad-model',
+      'OYL_INSTANCE_ANALYSIS_MODEL must be a model name, such as name or name:tag.',
+    );
+  }
+  if (!present(raw.analysisModelReasoningTokens)) return { kind: 'on', baseUrl, model };
+  const reasoningTokens = Number(raw.analysisModelReasoningTokens.trim());
+  if (!isReasoningTokens(reasoningTokens)) {
+    return off(
+      'bad-reasoning',
+      `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS must be a whole number from 1 to ${MAXIMUM_REASONING_TOKENS}, or not set.`,
+    );
+  }
+  return { kind: 'on', baseUrl, model, reasoningTokens };
+}
+
+/**
+ * The side camera's picture model (#1106), read from
+ * `OYL_INSTANCE_PICTURE_MODEL` and the server at
+ * `OYL_INSTANCE_ANALYSIS_MODEL_URL`, by {@link readAnalysisModelSettings}'s
+ * rules for that address. ⚠️ **Not set is off**: the analysis model is not
+ * used for pictures, because a model that writes may not read a picture and
+ * some servers answer about a picture they dropped. The operator names the
+ * one that does.
+ */
+export function readPictureModelSettings(raw: RawConfig): PictureModelSettings {
+  if (!present(raw.pictureModel)) {
+    return {
+      kind: 'off',
+      code: 'not-set',
+      reason: 'OYL_INSTANCE_PICTURE_MODEL is not set, so no local model takes pictures.',
+    };
+  }
+  const server = localModelServer(raw);
+  if (!('baseUrl' in server)) {
+    return {
+      kind: 'off',
+      code: 'no-server',
+      reason: `OYL_INSTANCE_PICTURE_MODEL is set, and the server it is on is not usable. ${server.reason}`,
+    };
+  }
+  const model = raw.pictureModel.trim();
+  if (!MODEL_NAME.test(model)) {
+    return {
+      kind: 'off',
+      code: 'bad-model',
+      reason: 'OYL_INSTANCE_PICTURE_MODEL must be a model name, such as name or name:tag.',
+    };
+  }
+  return { kind: 'on', baseUrl: server.baseUrl, model };
+}
+
+/** The local model server's base URL, or why `OYL_INSTANCE_ANALYSIS_MODEL_URL` gives none. */
+function localModelServer(
+  raw: RawConfig,
+): { readonly baseUrl: URL } | Extract<AnalysisModelSettings, { readonly kind: 'off' }> {
+  const off = (code: AnalysisModelOffCode, reason: string) =>
+    ({ kind: 'off', code, reason }) as const;
+  if (!present(raw.analysisModelUrl)) {
+    return off(
+      'not-set',
+      'OYL_INSTANCE_ANALYSIS_MODEL_URL is not set, so no analysis model is configured.',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(raw.analysisModelUrl.trim());
+  } catch {
+    return off('not-a-url', 'OYL_INSTANCE_ANALYSIS_MODEL_URL is not a URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return off('not-a-url', 'OYL_INSTANCE_ANALYSIS_MODEL_URL must be an http: or https: URL.');
+  }
+  if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
+    return off(
+      'not-base-url',
+      'OYL_INSTANCE_ANALYSIS_MODEL_URL must be the server’s base URL alone, with no credentials, query or fragment.',
+    );
+  }
+  const hostProblem = configuredHostProblem(url.hostname);
+  if (hostProblem !== undefined) {
+    return off(
+      'not-local',
+      `OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because ${hostProblem}: the analysis model must be on this machine or its private network (ADR 0046 D-9, ADR 0040 D-6).`,
+    );
+  }
+  if (url.protocol === 'https:' && !isAddressLiteral(url.hostname)) {
+    return off(
+      'tls-by-name',
+      'OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because it is https: by a name: each request goes to the address the name was checked at, so a certificate issued to the name cannot verify. Use http: on the private network, or https: at the address itself.',
+    );
+  }
+  return { baseUrl: new URL(url.href.replace(/\/+$/, '')) };
 }
 
 /**

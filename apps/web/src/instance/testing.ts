@@ -10,15 +10,41 @@
  * wrong one here too. It sends nothing anywhere.
  */
 
+import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, type LoadedFrom } from './instance-pin';
+
+/** A copy of the app opened from this device: sealed features are offered (#1192, ADR 0047 D-11). */
+export const LOADED_LOCALLY: LoadedFrom = { native: false, href: 'http://localhost:5173/' };
+
+/** A copy of the app a website served: no sealed feature is offered (#1192, ADR 0047 D-11). */
+export const LOADED_FROM_A_WEBSITE: LoadedFrom = { native: false, href: 'https://app.example/' };
+
+/**
+ * What a port that seals needs, for a device that holds NO card (#1210): it
+ * calls in plaintext and seals nothing, so its key is never asked for — and
+ * asking is a failure here, not a silent sealed request.
+ */
+export const NO_CARD_DEVICE = {
+  loadedFrom: LOADED_LOCALLY,
+  signingKey: (): Promise<never> =>
+    Promise.reject(new Error('a device with no card signs no sealed request')),
+} as const;
+import type { AccountChangeEntry } from './account-change-notices';
 import type {
+  AccountChangesOutcome,
+  CardOutcome,
   ConnectOutcome,
   DevicesOutcome,
   InstanceDevice,
   InstancePort,
   InstanceState,
+  KeysOutcome,
+  RenameOutcome,
 } from './instance-port';
 import {
+  MODERATION_REFUSAL_TEXT,
   NOTHING_CHANGED_TEXT,
+  RESTRICTING_ACTIONS,
+  type StatementInput,
   type ModerationList,
   type ModerationLogEntry,
   type ModerationOutcome,
@@ -26,6 +52,8 @@ import {
   type ModerationStanding,
   type OpenReport,
   type PendingRegistration,
+  type ReceivedNotice,
+  type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
 
@@ -41,24 +69,100 @@ export interface ScriptedInstance {
     displayName: string;
     sourceUrl: string | null;
     devices: readonly InstanceDevice[];
+    /** The pinned fingerprint, 52 base32 characters, or `undefined` for a device with no card (#1190). */
+    pin: string | undefined;
+    /** The date the instance's terms took effect (#909), or `null` for none. */
+    termsVersion: string | null;
+    /** The terms version this device marked read, if any (#909). */
+    termsRead: string | undefined;
+    /** The account-change log (#1208), oldest first. */
+    changes: readonly AccountChangeEntry[];
+    /** This device's mark in it (#1208): the notices are the other keys' entries after it. */
+    acknowledgedThrough: number;
   };
 }
+
+/** A fingerprint a scripted card carries: 52 base32 characters, padding bits clear. */
+export const SCRIPTED_FINGERPRINT = `${'ABCD'.repeat(12)}EFGA`;
+
+/** A second one, for the confirm-new-card screen. */
+export const SCRIPTED_NEW_FINGERPRINT = `${'WXYZ'.repeat(12)}234A`;
+
+/**
+ * A September 2026 moment on the device's own calendar, in Unix seconds
+ * (#1511): the notices and the Devices row write the device's calendar, so a
+ * fixture at a UTC moment names a different day east of UTC+12 or west of
+ * UTC-11. Local, it names the same day in every zone a test runs in.
+ */
+const september = (date: number, hour = 12, minute = 0): number =>
+  new Date(2026, 8, date, hour, minute).getTime() / 1000;
 
 /** Two devices, one of them this one — the shape `GET /v1/auth/devices` answers. */
 export const SCRIPTED_DEVICES: readonly InstanceDevice[] = [
   {
     publicKey: 'a1'.repeat(32),
-    addedAt: 1_790_000_000,
-    lastUsedAt: 1_790_500_000,
+    addedAt: september(21, 14, 13),
+    lastUsedAt: september(27, 9, 6),
     revokedAt: null,
     thisDevice: true,
   },
   {
     publicKey: 'b2'.repeat(32),
-    addedAt: 1_790_100_000,
+    addedAt: september(22),
     lastUsedAt: null,
     revokedAt: null,
     thisDevice: false,
+  },
+];
+
+const THIS_DEVICE_KEY = 'a1'.repeat(32);
+const OTHER_DEVICE_KEY = 'b2'.repeat(32);
+
+/**
+ * The account-change log behind {@link SCRIPTED_DEVICES} (#1208): this device
+ * linked the other, and the other then gave a recovery address and made a
+ * link code — two notices on this device until it acknowledges them.
+ */
+export const SCRIPTED_ACCOUNT_CHANGES: readonly AccountChangeEntry[] = [
+  {
+    id: 1,
+    at: september(22, 4, 6),
+    kind: 'link_code_minted',
+    actorKey: THIS_DEVICE_KEY,
+    subjectKey: null,
+    subjectAddedAt: null,
+    via: null,
+    address: null,
+  },
+  {
+    id: 2,
+    at: september(22),
+    kind: 'key_added',
+    actorKey: THIS_DEVICE_KEY,
+    subjectKey: OTHER_DEVICE_KEY,
+    subjectAddedAt: september(22),
+    via: 'link_code',
+    address: null,
+  },
+  {
+    id: 3,
+    at: september(23),
+    kind: 'address_added',
+    actorKey: OTHER_DEVICE_KEY,
+    subjectKey: null,
+    subjectAddedAt: null,
+    via: null,
+    address: 'rider@example.org',
+  },
+  {
+    id: 4,
+    at: september(24),
+    kind: 'link_code_minted',
+    actorKey: OTHER_DEVICE_KEY,
+    subjectKey: null,
+    subjectAddedAt: null,
+    via: null,
+    address: null,
   },
 ];
 
@@ -68,6 +172,14 @@ export interface ScriptedInstanceOptions {
   readonly connectAnswer?: ConnectOutcome;
   /** What `current` answers when connected, when not a plain `connected`. */
   readonly state?: InstanceState;
+  /** The pin the device starts with (#1190); none unless given. */
+  readonly pin?: string;
+  /** What `keys` answers when pinned, when not a plain `trusted`. */
+  readonly keys?: KeysOutcome;
+  /** What `offerCard` answers, when not what the held pin implies. */
+  readonly cardAnswer?: CardOutcome;
+  /** What `rename` answers, when not a plain success; a refusal changes nothing held. */
+  readonly renameAnswer?: RenameOutcome;
 }
 
 export function scriptedInstance(options: ScriptedInstanceOptions = {}): ScriptedInstance {
@@ -82,19 +194,31 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
       sourceUrl:
         'https://github.com/openzigs/onyourleft/tree/0123456789abcdef0123456789abcdef01234567',
       devices: SCRIPTED_DEVICES,
+      pin: options.pin,
+      termsVersion: null,
+      termsRead: undefined,
+      changes: SCRIPTED_ACCOUNT_CHANGES,
+      acknowledgedThrough: 0,
     },
     port: {
       current: () => {
         calls.push('current');
         const { held } = scripted;
         if (!held.connected) return Promise.resolve({ kind: 'not-connected' });
+        // #1210: an `unreadable` sign-in stands until a card is pinned, as a real port's does.
+        const state =
+          options.state?.kind === 'unreadable' && held.pin !== undefined
+            ? undefined
+            : options.state;
         return Promise.resolve(
-          options.state ?? {
+          state ?? {
             kind: 'connected',
             origin: held.origin,
             instanceName: held.instanceName,
             displayName: held.displayName,
             sourceUrl: held.sourceUrl,
+            termsVersion: held.termsVersion,
+            termsUnread: held.termsVersion !== null && held.termsRead !== held.termsVersion,
           },
         );
       },
@@ -107,12 +231,137 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
         }
         return Promise.resolve(answer);
       },
+      link: (offer) => {
+        calls.push(`link ${offer}`);
+        const answer = options.connectAnswer ?? { kind: 'connected' };
+        if (answer.kind === 'connected') scripted.held.connected = true;
+        return Promise.resolve(answer);
+      },
+      keys: () => {
+        calls.push('keys');
+        const { pin } = scripted.held;
+        const answer: KeysOutcome =
+          pin === undefined
+            ? { kind: 'no-card', text: INSTANCE_KEY_TEXT['needs-card'] }
+            : (options.keys ?? { kind: 'trusted', pinned: pin, serial: 1_790_000_000 });
+        return Promise.resolve(answer);
+      },
+      offerCard: (card) => {
+        calls.push(`offerCard ${card}`);
+        const offered = card.trim().split('#')[1] ?? '';
+        if (options.cardAnswer !== undefined) return Promise.resolve(options.cardAnswer);
+        const { pin } = scripted.held;
+        if (pin === undefined || pin === offered) {
+          scripted.held.pin = offered;
+          return Promise.resolve({ kind: 'pinned' } as const);
+        }
+        return Promise.resolve({
+          kind: 'confirm',
+          text: INSTANCE_KEY_TEXT['confirm-new-card'],
+          pinned: pin,
+          offered,
+        } as const);
+      },
+      confirmCard: (card) => {
+        calls.push(`confirmCard ${card}`);
+        scripted.held.pin = card.trim().split('#')[1] ?? '';
+        return Promise.resolve({ kind: 'pinned' } as const);
+      },
+      linkCode: () => {
+        calls.push('linkCode');
+        const { held } = scripted;
+        const card = cardFromPin(
+          held.pin === undefined
+            ? undefined
+            : { origin: held.origin, instanceAthleteId: 'scripted', pin: held.pin },
+        );
+        if (card === undefined) {
+          return Promise.resolve({
+            kind: 'unavailable',
+            text: INSTANCE_KEY_TEXT['needs-card'],
+          } as const);
+        }
+        const linkCode = 'abcd-efgh-jkmn-pqrs';
+        return Promise.resolve({
+          kind: 'shown',
+          offer: codeWithCard(card, linkCode),
+          card,
+          linkCode,
+          expiresAt: 1_790_000_300,
+        } as const);
+      },
       devices: () => {
         calls.push('devices');
         const answer: DevicesOutcome = scripted.held.connected
           ? { kind: 'listed', devices: scripted.held.devices }
           : { kind: 'unavailable', text: 'not connected' };
         return Promise.resolve(answer);
+      },
+      accountChanges: () => {
+        calls.push('accountChanges');
+        const { held } = scripted;
+        const me = held.devices.find((each) => each.thisDevice)?.publicKey;
+        const answer: AccountChangesOutcome = held.connected
+          ? {
+              kind: 'read',
+              changes: held.changes,
+              notices: held.changes.filter(
+                (entry) => entry.id > held.acknowledgedThrough && entry.actorKey !== me,
+              ),
+              acknowledgedThrough: held.acknowledgedThrough,
+            }
+          : { kind: 'unavailable', text: 'not connected' };
+        return Promise.resolve(answer);
+      },
+      acknowledgeAccountChanges: (through) => {
+        calls.push(`acknowledgeAccountChanges ${String(through)}`);
+        const { held } = scripted;
+        // As the instance does: clamped to the newest entry, never moved back.
+        const newest = held.changes.reduce((most, entry) => Math.max(most, entry.id), 0);
+        held.acknowledgedThrough = Math.max(held.acknowledgedThrough, Math.min(through, newest));
+        return Promise.resolve({
+          kind: 'acknowledged',
+          acknowledgedThrough: held.acknowledgedThrough,
+        } as const);
+      },
+      revokeDevice: (publicKey) => {
+        calls.push(`revokeDevice ${publicKey}`);
+        const { held } = scripted;
+        const me = held.devices.find((each) => each.thisDevice)?.publicKey ?? '';
+        const target = held.devices.find((each) => each.publicKey === publicKey);
+        if (target === undefined || target.revokedAt !== null) {
+          return Promise.resolve({ kind: 'unavailable', text: 'not revoked' } as const);
+        }
+        const at = 1_790_600_000;
+        held.devices = held.devices.map((each) =>
+          each.publicKey === publicKey ? { ...each, revokedAt: at } : each,
+        );
+        held.changes = [
+          ...held.changes,
+          {
+            id: held.changes.length + 1,
+            at,
+            kind: 'key_revoked',
+            actorKey: me,
+            subjectKey: publicKey,
+            subjectAddedAt: target.addedAt,
+            via: null,
+            address: null,
+          },
+        ];
+        return Promise.resolve({ kind: 'revoked' } as const);
+      },
+      rename: (displayName) => {
+        calls.push(`rename ${displayName}`);
+        // As the instance does: trimmed, kept, and answered — the screen reads it back.
+        const name = displayName.trim();
+        if (options.renameAnswer !== undefined) return Promise.resolve(options.renameAnswer);
+        scripted.held.displayName = name;
+        return Promise.resolve({ kind: 'renamed', displayName: name } as const);
+      },
+      markTermsRead: (version) => {
+        calls.push(`markTermsRead ${version}`);
+        scripted.held.termsRead = version;
       },
       disconnect: () => {
         calls.push('disconnect');
@@ -139,8 +388,18 @@ export interface ScriptedModeration {
   held: {
     standing: ModerationStanding;
     me: string;
+    /** Whether the scripted instance names this moderator alone (#905). */
+    soleModerator: boolean;
     registrations: PendingRegistration[];
     reports: OpenReport[];
+    /** The notices the instance's notice page received (#907); `undefined` as when they could not be read. */
+    notices: ReceivedNotice[] | undefined;
+    /** `false` to answer the record export as the port does when it could not be read (#912). */
+    recordReadable: boolean;
+    /** The open appeals (#911); `undefined` as when they could not be read. */
+    appeals: OpenAppeal[] | undefined;
+    /** Every statement of reasons a restriction was sent with (#910), and whom it was about. */
+    statements: (StatementInput & { readonly athleteId: string })[];
     log: ModerationLogEntry[];
     /** `false` to answer a read as the port does when the log alone could not be read. */
     logReadable: boolean;
@@ -156,6 +415,66 @@ export interface ScriptedModeration {
     accounts: Set<string>;
   };
 }
+
+/** Two notices from the instance's notice page (#907): one with a notifier's email, one an intimate image report. */
+export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
+  {
+    noticeId: 1,
+    receivedAt: 1_790_003_000,
+    kind: 'illegal_content',
+    explanation: 'The route of this room spells out a threat against a named person.',
+    items: ['route:0123456789abcdef0123456789abcdef'],
+    location: null,
+    notifierName: 'A. Notifier',
+    notifierEmail: 'notifier@example.com',
+    bonaFide: true,
+    acknowledgedAt: null,
+    decidedAt: null,
+    decision: null,
+    logId: null,
+    notifierToldAt: null,
+  },
+  {
+    noticeId: 2,
+    receivedAt: 1_790_004_000,
+    kind: 'intimate_image',
+    explanation: 'A picture of me in a room’s listing.',
+    items: [],
+    location: 'The Sunday group ride',
+    notifierName: null,
+    notifierEmail: 'me@example.com',
+    bonaFide: false,
+    acknowledgedAt: 1_790_004_100,
+    decidedAt: 1_790_004_200,
+    decision: 'Taken down: the route of the room is hidden.',
+    logId: 2,
+    notifierToldAt: null,
+  },
+];
+
+/** Two open appeals (#911): one against this moderator's own decision, one against another's. */
+export const SCRIPTED_APPEALS: readonly OpenAppeal[] = [
+  {
+    appealId: 3,
+    filedAt: 1_790_005_000,
+    grounds: 'I was quoting another rider, not abusing them.',
+    appellantAthleteId: 'rider-dafydd',
+    statementId: 11,
+    restriction: 'suspend',
+    facts: 'Abuse of other riders in a room.',
+    decidedBy: 'moderator-1',
+  },
+  {
+    appealId: 4,
+    filedAt: 1_790_006_000,
+    grounds: 'It is my family name.',
+    appellantAthleteId: 'rider-carys',
+    statementId: 12,
+    restriction: 'hide_display_name',
+    facts: 'The display name reads as a slur.',
+    decidedBy: 'moderator-2',
+  },
+];
 
 /** This moderator's id on the scripted instance. */
 export const SCRIPTED_MODERATOR = 'moderator-1';
@@ -219,6 +538,15 @@ export function scriptedModeration(
     readonly empty?: boolean;
     /** Accounts suspended from the start: id to when, in Unix seconds (#961). */
     readonly suspended?: Readonly<Record<string, number>>;
+    /** This device's pin (#1190): {@link SCRIPTED_FINGERPRINT} unless `null`, which is no card. */
+    readonly pin?: string | null;
+    /**
+     * A moderator on a device that cannot seal now (#1192): `read` answers
+     * `sealed-unavailable` with this sentence.
+     */
+    readonly sealedUnavailable?: string;
+    /** The instance names this moderator alone (#905); `false` unless given. */
+    readonly soleModerator?: boolean;
   } = {},
 ): ScriptedModeration {
   const calls: string[] = [];
@@ -229,8 +557,13 @@ export function scriptedModeration(
   const held: ScriptedModeration['held'] = {
     standing: options.standing ?? 'moderator',
     me: SCRIPTED_MODERATOR,
+    soleModerator: options.soleModerator ?? false,
     registrations: [...queues.registrations],
     reports: [...queues.reports],
+    notices: options.empty === true ? [] : [...SCRIPTED_NOTICES],
+    statements: [],
+    recordReadable: true,
+    appeals: options.empty === true ? [] : [...SCRIPTED_APPEALS],
     log: [...queues.log],
     logReadable: true,
     suspendedReadable: true,
@@ -304,11 +637,17 @@ export function scriptedModeration(
     read: () => {
       calls.push('read');
       if (held.standing !== 'moderator') return Promise.resolve({ kind: held.standing });
+      if (options.sealedUnavailable !== undefined) {
+        return Promise.resolve({ kind: 'sealed-unavailable', text: options.sealedUnavailable });
+      }
       return Promise.resolve({
         kind: 'moderator',
         me: held.me,
+        soleModerator: held.soleModerator,
         registrations: [...held.registrations],
         reports: [...held.reports],
+        notices: held.notices === undefined ? undefined : [...held.notices],
+        appeals: held.appeals === undefined ? undefined : [...held.appeals],
         suspended: held.suspendedReadable ? pageFrom(suspendedRows(), undefined) : undefined,
         log: held.logReadable ? pageFrom(logRows(), undefined) : undefined,
       });
@@ -336,18 +675,57 @@ export function scriptedModeration(
       calls.push(`dismiss ${String(reportId)}`);
       const report = held.reports.find((each) => each.reportId === reportId);
       if (report === undefined) return Promise.resolve(nothing);
-      if (report.targetAthleteId === held.me)
+      const own = report.targetAthleteId === held.me;
+      // As the instance does (#905): refused while another moderator is
+      // named; the only moderator's own dismissal is logged as such.
+      if (own && !held.soleModerator) {
         return refusedAndLogged('dismiss_report', null, reportId, reason);
-      const outcome = logged('dismiss_report', null, reportId, reason);
+      }
+      const outcome = own
+        ? logged('dismiss_own_report', held.me, reportId, reason)
+        : logged('dismiss_report', null, reportId, reason);
       if (outcome.kind === 'done') {
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
     },
-    actOnAccount: (athleteId, action, reason, reportId) => {
+    removeFromRoom: (roomId, athleteId, reason, reportId, statement) => {
+      calls.push(
+        `remove ${athleteId} from ${roomId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
+      );
+      // #1384: as the real port, refused without its statement.
+      if (
+        statement === undefined ||
+        statement.facts.trim() === '' ||
+        (statement.legalGround.trim() === '' && statement.termsGround.trim() === '')
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      held.statements.push({ athleteId: athleteId.trim(), ...statement });
+      const id = athleteId.trim();
+      if (id === held.me) return refusedAndLogged('remove_from_room', id, reportId ?? null, reason);
+      if (!held.accounts.has(id)) return Promise.resolve(nothing);
+      const outcome = logged('remove_from_room', id, reportId ?? null, reason);
+      if (outcome.kind === 'done' && reportId !== undefined) {
+        held.reports = held.reports.filter((each) => each.reportId !== reportId);
+      }
+      return Promise.resolve(outcome);
+    },
+    actOnAccount: (athleteId, action, reason, reportId, statement) => {
       calls.push(
         `${action} ${athleteId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
       );
+      // #910: as the real port, a restriction is refused without its statement.
+      if (
+        RESTRICTING_ACTIONS.has(action) &&
+        (statement === undefined ||
+          statement.facts.trim() === '' ||
+          (statement.legalGround.trim() === '' && statement.termsGround.trim() === ''))
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      if (statement !== undefined)
+        held.statements.push({ athleteId: athleteId.trim(), ...statement });
       const id = athleteId.trim();
       if (id === held.me) return refusedAndLogged(action, id, reportId ?? null, reason);
       if (!held.accounts.has(id)) return Promise.resolve(nothing);
@@ -364,6 +742,97 @@ export function scriptedModeration(
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
+    },
+    recordNoticeStep: (noticeId, step, decision, logId) => {
+      calls.push(`${step} notice ${String(noticeId)}`);
+      const index = held.notices?.findIndex((each) => each.noticeId === noticeId) ?? -1;
+      const notice = held.notices?.[index];
+      if (notice === undefined || held.notices === undefined) return Promise.resolve(nothing);
+      const at = 1_790_030_000 + held.log.length;
+      if (step === 'decided') {
+        if ((decision ?? '').trim() === '') {
+          return Promise.resolve({
+            kind: 'refused',
+            text: MODERATION_REFUSAL_TEXT['notice-decision'],
+          });
+        }
+        held.notices[index] = {
+          ...notice,
+          decidedAt: at,
+          decision: (decision ?? '').trim(),
+          logId: logId ?? null,
+        };
+      } else if (notice.notifierEmail === null) {
+        return Promise.resolve(nothing);
+      } else if (step === 'acknowledged') {
+        held.notices[index] = { ...notice, acknowledgedAt: at };
+      } else {
+        if (notice.decidedAt === null) return Promise.resolve(nothing);
+        held.notices[index] = { ...notice, notifierToldAt: at };
+      }
+      return Promise.resolve({ kind: 'done' });
+    },
+    hideItem: (item, reason, statement) => {
+      calls.push(`hide_item ${item.trim()}`);
+      if (
+        statement.facts.trim() === '' ||
+        (statement.legalGround.trim() === '' && statement.termsGround.trim() === '')
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      held.statements.push({ athleteId: item.trim(), ...statement });
+      return Promise.resolve(logged('hide_item', null, null, reason));
+    },
+    exportRecord: () => {
+      calls.push('exportRecord');
+      return Promise.resolve(
+        held.recordReadable
+          ? `${JSON.stringify({ notices: held.notices ?? [], appeals: [] }, null, 2)}\n`
+          : undefined,
+      );
+    },
+    decideAppeal: (appealId, outcome, decision) => {
+      calls.push(`${outcome} appeal ${String(appealId)}`);
+      const appeal = held.appeals?.find((each) => each.appealId === appealId);
+      if (appeal === undefined) return Promise.resolve(nothing);
+      if (decision.trim() === '') {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision });
+      }
+      const outcomeOf = logged(
+        outcome === 'reversed' ? 'reverse_appeal' : 'uphold_appeal',
+        appeal.appellantAthleteId,
+        null,
+        decision,
+      );
+      if (outcome === 'reversed' && appeal.restriction === 'suspend') {
+        held.suspended.delete(appeal.appellantAthleteId);
+      }
+      held.appeals = held.appeals?.filter((each) => each.appealId !== appealId);
+      return Promise.resolve(outcomeOf);
+    },
+    mintInvite: (reason) => {
+      calls.push(`mintInvite ${reason}`);
+      const pin = options.pin === undefined ? SCRIPTED_FINGERPRINT : options.pin;
+      const card = cardFromPin(
+        pin === null
+          ? undefined
+          : { origin: 'https://ride.example', instanceAthleteId: SCRIPTED_MODERATOR, pin },
+      );
+      if (card === undefined) {
+        return Promise.resolve({ kind: 'refused', text: INSTANCE_KEY_TEXT['needs-card'] } as const);
+      }
+      if (reason.trim() === '') {
+        return Promise.resolve({ kind: 'refused', text: 'Give a reason.' } as const);
+      }
+      const inviteCode = 'wxyz-2345-abcd-efgh';
+      logged('mint_invite', null, null, reason.trim());
+      return Promise.resolve({
+        kind: 'minted',
+        invite: codeWithCard(card, inviteCode),
+        card,
+        inviteCode,
+        expiresAt: 1_790_604_800,
+      } as const);
     },
   };
   return { port, calls, held };

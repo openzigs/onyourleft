@@ -31,6 +31,9 @@
  * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
  * | `RideSnapshot.keepAliveFailed`, when it appears (#647) | `screen-off-risk` | `controller.ts` §`RIDE_MAY_STOP_SPOKEN` |
  * | `TrainerSnapshot.ergHeld`, per press, announcements ON only (#655) | `erg-held` | "Held: …", `TrainerPanel` §`heldSentence` |
+ * | `RideWorkoutSnapshot.hold`, when its sentence changes, announcements ON only, at most once a minute (#1240) | `hold-changed` | "Heart-rate hold: …", `workout/hold-text.ts` |
+ * | `RideWorkoutSnapshot.replan.waiting`, once for each accepted re-plan, announcements ON only, never above threshold power (#1244) | `plan-changed` | "Plan change: …", `workout/replan-text.ts` |
+ * | {@link RideAnnouncerProps.lap}, once for each lap taken by hand, announcements ON only (#1318) | `lap-ended` | "Lap 2: …", `ride/manual-lap-text.ts` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -98,6 +101,14 @@ import {
   isEasedAnnouncement,
   workoutRescueText,
 } from '../workout/rescue-text';
+import {
+  holdAnnouncement,
+  holdSentence,
+  NOTHING_ANNOUNCED,
+  type HoldAnnounced,
+} from '../workout/hold-text';
+
+import { planChangeAnnouncement, planDiscardedAnnouncement } from '../workout/replan-text';
 
 import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -133,6 +144,21 @@ export interface RideAnnouncerProps {
    * which is what pins it.
    */
   readonly keepAliveFailed?: boolean | undefined;
+  /**
+   * The lap taken by hand that ended most recently, by its number — #1318
+   * (`RideSnapshot.manualLap.last`, said as `manual-lap-text.ts` writes it).
+   * Said once, when a NEW number appears, never on a first render; with
+   * announcements ON only (`lap-ended` is not in `announce.ts`
+   * §`ALWAYS_SPOKEN`), as the HUD says a course lap — with them off the Ride
+   * screen's notice is itself the status message. OWED until spoken, as
+   * #655's answer is: the lowest event but one, so a sentence offered once
+   * could be displaced and never said; a newer lap replaces it.
+   *
+   * ⚠️ Optional, so a caller that stops passing it is green in
+   * `check:wiring` (§Limits' third entry); `ride/manual-lap.a11y.test.tsx`
+   * drives the Ride screen and reads this region, which is what pins it.
+   */
+  readonly lap?: { readonly number: number; readonly sentence: string } | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */
   readonly storage?: PreferenceStorage | undefined;
   /**
@@ -277,6 +303,7 @@ export function RideAnnouncer({
   workout,
   sideCamera,
   keepAliveFailed = false,
+  lap,
   storage,
   preference: handed,
   onEvent,
@@ -318,6 +345,31 @@ export function RideAnnouncer({
    * Owed like {@link screenOffSaid}'s sentence, and for the same reason.
    */
   const heldOwed = useRef<AnnouncementEvent | undefined>(undefined);
+  /**
+   * #1318: the lap last seen, by number — seeded from the first render, so a
+   * lap that ended before the screen appeared is not said (#394's rule) —
+   * and its sentence while it is owed.
+   */
+  const lapSeen = useRef<number | undefined>(lap?.number);
+  const lapOwed = useRef<AnnouncementEvent | undefined>(undefined);
+  /**
+   * The heart-rate hold's sentence as last seen, and when one was last
+   * offered — #1240. Seeded from the first render, so a hold already running
+   * when the screen appears is not announced (#394's rule).
+   */
+  const holdSeen = useRef<HoldAnnounced>({
+    ...NOTHING_ANNOUNCED,
+    sentence: workout?.hold === undefined ? undefined : holdSentence(workout.hold),
+  });
+
+  /**
+   * The accepted re-plan last offered, by its revision — #1244. Seeded from
+   * the first render, so one already waiting when the screen appears is not
+   * announced again (#394's rule).
+   */
+  const planOffered = useRef<number | undefined>(workout?.replan?.waiting?.revision);
+  /** The discarded re-plan last said to have been discarded — #1244. Seeded the same way. */
+  const planDiscardedSaid = useRef<number | undefined>(workout?.replan?.discarded);
 
   /**
    * One call of the core. ⚠️ The only place this component writes the region,
@@ -338,6 +390,10 @@ export function RideAnnouncer({
     const heldAnswer = heldOwed.current;
     if (heldAnswer !== undefined && !offered.some((event) => event.kind === 'erg-held')) {
       offered.push(heldAnswer);
+    }
+    const lapAnswer = lapOwed.current;
+    if (lapAnswer !== undefined) {
+      offered.push(lapAnswer);
     }
     const at = now.current();
     const heard = announce(announcer.current, {
@@ -360,12 +416,18 @@ export function RideAnnouncer({
     if (heard.kind === 'erg-held') {
       heldOwed.current = undefined;
     }
+    if (heard.kind === 'lap-ended') {
+      lapOwed.current = undefined;
+    }
     // A sentence that is WAITING for the window has no render to carry it — a
     // paused workout re-renders nothing — so ask again when the window opens.
     // #647's, too, when a higher sentence took the window it was offered in.
     const last = heard.state.lastSpokenAt;
     if (
-      (heard.state.pending !== undefined || owed() || heldOwed.current !== undefined) &&
+      (heard.state.pending !== undefined ||
+        owed() ||
+        heldOwed.current !== undefined ||
+        lapOwed.current !== undefined) &&
       last !== undefined
     ) {
       const wait = Math.max(0, ANNOUNCE_WINDOW_SECONDS - (at - last)) * 1000;
@@ -381,6 +443,11 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
+  const holdText = workout?.hold === undefined ? undefined : holdSentence(workout.hold);
+  const waitingPlan = workout?.replan?.waiting;
+  const lapNumber = lap?.number;
+  const lapSentence = lap?.sentence;
+  const discardedPlan = workout?.replan?.discarded;
   const {
     lost,
     releaseFault,
@@ -410,6 +477,16 @@ export function RideAnnouncer({
     // #655: a new press held, or the held one no longer true. Whatever was
     // owed or waiting for the last press is taken back first — a hand-back
     // wrote that target, and a newer press is the one to answer.
+    // #1318: a new lap. Whatever was owed or waiting for the last one is
+    // taken back first: the newer lap is the one to say.
+    if (lapNumber !== lapSeen.current) {
+      lapSeen.current = lapNumber;
+      lapOwed.current = undefined;
+      announcer.current = withdrawPending(announcer.current, (event) => event.kind === 'lap-ended');
+      if (preference.enabled && lapNumber !== undefined && lapSentence !== undefined) {
+        lapOwed.current = { kind: 'lap-ended', text: lapSentence };
+      }
+    }
     if (heldPress !== seen.current.heldPress) {
       heldOwed.current = undefined;
       announcer.current = withdrawPending(announcer.current, (event) => event.kind === 'erg-held');
@@ -451,6 +528,51 @@ export function RideAnnouncer({
       heldPress,
       heldText,
     };
+    // #1240: the hold's sentence when it changes — at most once a minute, and
+    // not in the last 30 s of a hard segment. Its rank is below every trainer
+    // and workout fault, and it is spoken with announcements ON only
+    // (`announce.ts` §`PRIORITY`, §`ALWAYS_SPOKEN`).
+    const held = holdAnnouncement(
+      holdSeen.current,
+      holdText,
+      now.current(),
+      timeline === undefined || elapsedSeconds === undefined
+        ? undefined
+        : { timeline, elapsedSeconds },
+    );
+    holdSeen.current = held.next;
+    // Offered whatever the preference: `hold-changed` is not in `announce.ts`
+    // §`ALWAYS_SPOKEN`, so with announcements off the core drops it.
+    if (held.event !== undefined) {
+      events.push(held.event);
+    }
+    // #1244: an accepted re-plan waiting for the next block, once — and not
+    // in a stretch above threshold power, where it waits for the stretch to
+    // end. Ranked below the hold's sentence, announcements ON only.
+    const plan = planChangeAnnouncement(
+      planOffered.current,
+      waitingPlan,
+      timeline === undefined || elapsedSeconds === undefined
+        ? undefined
+        : { timeline, elapsedSeconds },
+    );
+    planOffered.current = plan.offered;
+    if (plan.event !== undefined) {
+      events.push(plan.event);
+    }
+    // #1244: a waiting move a pause or a lost trainer discarded: one
+    // sentence, once, announcements ON only as the move's own was.
+    const dropped = planDiscardedAnnouncement(
+      planDiscardedSaid.current,
+      discardedPlan,
+      // Only of the move this region was offered: one held back and never
+      // said is taken away in silence.
+      planOffered.current,
+    );
+    planDiscardedSaid.current = dropped.said;
+    if (dropped.event !== undefined) {
+      events.push(dropped.event);
+    }
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -482,6 +604,11 @@ export function RideAnnouncer({
     timeline,
     elapsedSeconds,
     status,
+    holdText,
+    waitingPlan,
+    discardedPlan,
+    lapNumber,
+    lapSentence,
   ]);
 
   return (

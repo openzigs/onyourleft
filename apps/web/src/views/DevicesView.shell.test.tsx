@@ -17,8 +17,14 @@
  */
 
 import { act } from 'react';
-import type { TransportAvailability } from '@onyourleft/sensors';
-import { createCapacitorTransport, mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
+import { deviceId, type TransportAvailability } from '@onyourleft/sensors';
+import {
+  createCapacitorTransport,
+  mayShowDeviceList,
+  openCapacitorSettings,
+  permissionNotice,
+  readCapacitorSignal,
+} from '@onyourleft/mobile';
 import { scriptedPort, type ScriptedPort, type ScriptedStack } from '@onyourleft/mobile/testing';
 import { unixSeconds } from '@onyourleft/domain';
 import { createIndoorBikeDataProfile } from '@onyourleft/sensors/protocol';
@@ -30,8 +36,14 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import { capacitorShellSupport, SHELL_ANSWER_TIMEOUT } from '../support/shell-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
-import { createRideController, type RideController } from '../ride/controller';
+import { createRideController, type RideController, type RideSnapshot } from '../ride/controller';
 import { idleSnapshot, stubRideController } from '../ride/testing';
+
+import { NOT_FOUND } from '../ride/pairing-words';
+import type { SignalStrengthPort } from '../ride/signal-port';
+import { BLUETOOTH_WHY, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
+import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
+import type { SystemSettingsPort } from '../support/system-settings-port';
 
 import { DevicesView } from './DevicesView';
 
@@ -206,12 +218,14 @@ describe('#48 criterion 1 still holds on the shell branch', () => {
 
 describe('#659 — inside the shell, Devices pairs through the Capacitor transport', () => {
   /** What `main.tsx` §`buildPlatform` builds inside the shell, over a scripted plugin. */
-  function shellPlatform(): {
+  function shellPlatform(stack: ScriptedStack = {}): {
     readonly port: ShellSupportPort;
     readonly plugin: ScriptedPort;
     readonly controller: RideController;
+    /** #1435: the signal port, built as `main.tsx` builds it — over the same plugin. */
+    readonly signal: SignalStrengthPort;
   } {
-    const plugin = scriptedPort({});
+    const plugin = scriptedPort(stack);
     const transport = createCapacitorTransport({
       plugin,
       profiles: [createIndoorBikeDataProfile()],
@@ -219,6 +233,7 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
     });
     return {
       plugin,
+      signal: { readSignal: async (id) => readCapacitorSignal(plugin, id) },
       port: capacitorShellSupport({
         availability: async () => transport.availability(),
         notice: permissionNotice,
@@ -229,7 +244,7 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
         store: {
           putRecordingSession: (record) => Promise.resolve(record.id),
           appendRecordingChunk: () => Promise.resolve(0),
-          listRecordingSessions: () => Promise.resolve([]),
+          readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
           recoverRecording: () => Promise.resolve(undefined),
           deleteRecordingSession: () => Promise.resolve(false),
         },
@@ -269,6 +284,69 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
     controller.dispose();
   });
 
+  it.each([
+    [-60, 'Signal strong'],
+    [-78, 'Signal fair'],
+    [-92, 'Signal weak — bring the phone closer to it'],
+  ])(
+    'shows a paired device’s signal strength in words — %s dBm reads "%s" (#1435)',
+    async (rssi, words) => {
+      const { port, plugin, controller, signal } = shellPlatform({ rssi });
+      mounted = await mount(
+        <DevicesView capabilities={WEBVIEW} shell={port} controller={controller} signal={signal} />,
+      );
+      await settle();
+      // Nothing connected, so nothing is asked.
+      expect(plugin.calls.filter((call) => call.startsWith('readRssi'))).toEqual([]);
+
+      await activateWithKeyboard(button('Pair a smart trainer'));
+      await settle();
+      await settle();
+
+      expect(plugin.calls).toContain('readRssi:AA:BB:CC:DD:EE:FF');
+      const row = document.querySelector('.oyl-pairing__row');
+      expect(row?.textContent).toContain(words);
+      // Only the reading the radio gave: one sentence, not every band's.
+      const said = ['Signal strong', 'Signal fair', 'Signal weak'].filter((one) =>
+        row?.textContent?.includes(one),
+      );
+      expect(said).toHaveLength(1);
+      controller.dispose();
+    },
+  );
+
+  it('shows no signal line where the platform gives no reading (#1435)', async () => {
+    const { port, controller, signal } = shellPlatform({
+      rssiRejectsWith: new Error('Reading RSSI failed.'),
+    });
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} controller={controller} signal={signal} />,
+    );
+    await settle();
+    await activateWithKeyboard(button('Pair a smart trainer'));
+    await settle();
+    await settle();
+
+    expect(document.body.textContent).toContain('Scripted Trainer: Connected');
+    expect(document.body.textContent).not.toContain('Signal');
+    controller.dispose();
+  });
+
+  it('says a chooser that closed empty is "not found", with the fix, and not the plugin’s words (#1435)', async () => {
+    const { port, controller } = shellPlatform({ chooserRejectsWith: 'No device found.' });
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} controller={controller} />,
+    );
+    await settle();
+    await activateWithKeyboard(button('Pair a smart trainer'));
+    await settle();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(NOT_FOUND);
+    expect(text).not.toContain('no device was chosen');
+    controller.dispose();
+  });
+
   it('keeps "no silent reconnect" visible on a phone, and claims no background limit it does not have', async () => {
     const { port, controller } = shellPlatform();
     mounted = await mount(
@@ -297,6 +375,121 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
       mounted.unmount();
       mounted = undefined;
     }
+  });
+});
+
+describe('#1435 — signal strength is read only while nothing drives a trainer', () => {
+  const TRAINER = {
+    id: deviceId('kickr'),
+    name: 'KICKR 1F2A',
+    role: 'trainer',
+    capabilities: ['power'],
+    state: 'connected',
+  } as const;
+
+  async function openWith(snapshot: RideSnapshot): Promise<ReturnType<typeof vi.fn>> {
+    const { port } = shellPort({ kind: 'available' });
+    const readSignal = vi.fn<SignalStrengthPort['readSignal']>(async () => Promise.resolve(-60));
+    const stub = stubRideController(snapshot);
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        controller={stub.controller}
+        signal={{ readSignal }}
+      />,
+    );
+    await settle();
+    await settle();
+    return readSignal;
+  }
+
+  it('reads it for a connected device while the trainer is idle', async () => {
+    const readSignal = await openWith({ ...idleSnapshot(), sensors: [TRAINER] });
+
+    expect(readSignal).toHaveBeenCalledWith(deviceId('kickr'));
+    expect(document.body.textContent).toContain('Signal strong');
+  });
+
+  it('asks the radio nothing while a ride is under way', async () => {
+    const readSignal = await openWith({
+      ...idleSnapshot(),
+      phase: 'recording',
+      sensors: [TRAINER],
+    });
+
+    expect(readSignal).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('Signal');
+  });
+
+  it('asks the radio nothing while this app holds trainer control', async () => {
+    const idle = idleSnapshot();
+    const readSignal = await openWith({
+      ...idle,
+      sensors: [TRAINER],
+      trainer: { ...idle.trainer, paired: true, controllable: true, hasControl: true },
+    });
+
+    expect(readSignal).not.toHaveBeenCalled();
+  });
+
+  it('stops asking the remaining devices once the screen is closed mid-round', async () => {
+    const { port } = shellPort({ kind: 'available' });
+    let release: (dbm: number) => void = () => undefined;
+    const readSignal = vi.fn<SignalStrengthPort['readSignal']>(
+      async () => new Promise<number>((resolve) => (release = resolve)),
+    );
+    const second = {
+      ...TRAINER,
+      id: deviceId('strap'),
+      name: 'Strap',
+      role: 'heart-rate',
+    } as const;
+    const stub = stubRideController({ ...idleSnapshot(), sensors: [TRAINER, second] });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        controller={stub.controller}
+        signal={{ readSignal }}
+      />,
+    );
+    await settle();
+    expect(readSignal).toHaveBeenCalledTimes(1);
+
+    mounted.unmount();
+    mounted = undefined;
+    release(-60);
+    await settle();
+    await settle();
+
+    expect(readSignal).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not say another app has control while this app holds it', async () => {
+    const idle = idleSnapshot();
+    await openWith({
+      ...idle,
+      sensors: [TRAINER],
+      trainer: {
+        ...idle.trainer,
+        paired: true,
+        controllable: true,
+        hasControl: true,
+        lost: 'permission-lost',
+      },
+    });
+
+    expect(document.body.textContent).not.toContain('another app');
+  });
+
+  it('asks nothing about a device that is not connected', async () => {
+    const readSignal = await openWith({
+      ...idleSnapshot(),
+      sensors: [{ ...TRAINER, state: 'disconnected' }],
+    });
+
+    expect(readSignal).not.toHaveBeenCalled();
   });
 });
 
@@ -482,5 +675,143 @@ describe('the plugin is asked and never answers (#322)', () => {
     });
 
     expect(result.container.textContent).toContain('This phone can pair sensors');
+  });
+});
+
+/**
+ * #1436 — Bluetooth is asked for in context, after one sentence saying why,
+ * and a denial offers the way to Android's settings.
+ *
+ * The chain is the production one: `createCapacitorTransport` over the scripted
+ * plugin, the real `capacitorShellSupport`, the real `permissionNotice`, and
+ * the settings port built as `main.tsx` builds it — so "Android asked" is read
+ * as the plugin's own `initialize` call, which is where its dialog comes from.
+ */
+describe('#1436 — Bluetooth is asked for in context, and a denial has a way out', () => {
+  function overPlugin(stack: ScriptedStack = {}): {
+    readonly port: ShellSupportPort;
+    readonly plugin: ScriptedPort;
+    readonly settings: SystemSettingsPort;
+  } {
+    const plugin = scriptedPort(stack);
+    const transport = createCapacitorTransport({ plugin, profiles: [], now: () => unixSeconds(0) });
+    return {
+      plugin,
+      port: capacitorShellSupport({
+        availability: async () => transport.availability(),
+        notice: permissionNotice,
+        mayShowDeviceList,
+      }),
+      settings: { openSystemSettings: async (page) => openCapacitorSettings(plugin, page) },
+    };
+  }
+
+  function memoryAsk(asked = false): BluetoothAskPort & { readonly noted: () => number } {
+    let noted = 0;
+    let remembered = asked;
+    return {
+      askedBefore: () => remembered,
+      noteAsked: () => {
+        noted += 1;
+        remembered = true;
+      },
+      noted: () => noted,
+    };
+  }
+
+  function button(label: string): HTMLButtonElement {
+    const found = [...document.querySelectorAll('button')].find(
+      (each) => each.textContent?.trim() === label,
+    );
+    if (found === undefined) throw new Error(`no button labelled "${label}"`);
+    return found;
+  }
+
+  it('says why before Android asks, and asks nothing until the rider presses', async () => {
+    const { port, plugin } = overPlugin();
+    const ask = memoryAsk();
+    mounted = await mount(<DevicesView capabilities={WEBVIEW} shell={port} bluetoothAsk={ask} />);
+    await settle();
+
+    expect(document.body.textContent).toContain(BLUETOOTH_WHY);
+    // Android's dialog is raised by `initialize()`. Not called: not asked.
+    expect(plugin.calls).not.toContain('initialize');
+
+    await activateWithKeyboard(button(LOOK_FOR_DEVICES));
+    await settle();
+
+    expect(plugin.calls).toContain('initialize');
+    expect(ask.noted()).toBe(1);
+    expect(document.body.textContent).not.toContain(BLUETOOTH_WHY);
+    expect(document.body.textContent).toContain('This phone can pair sensors');
+  });
+
+  it('reads on open for a rider who has pressed through before', async () => {
+    const { port, plugin } = overPlugin();
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} bluetoothAsk={memoryAsk(true)} />,
+    );
+    await settle();
+
+    expect(plugin.calls).toContain('initialize');
+    expect(document.body.textContent).not.toContain(BLUETOOTH_WHY);
+  });
+
+  it('after a denial says what no longer works and opens the app’s page in Settings', async () => {
+    const { port, plugin, settings } = overPlugin({
+      initializeRejectsWith: new Error('Permission denied.'),
+    });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        bluetoothAsk={memoryAsk(true)}
+        settings={settings}
+      />,
+    );
+    await settle();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('On Your Left needs Bluetooth permission');
+    expect(text).toContain('cannot be found');
+
+    await activateWithKeyboard(button('Open app settings'));
+    await settle();
+
+    expect(plugin.calls).toContain('openAppSettings');
+    expect(plugin.calls).not.toContain('openBluetoothSettings');
+    // And "Check again" stays beside it, for the rider who comes back.
+    expect(button('Check again for Bluetooth on this phone')).toBeDefined();
+  });
+
+  it('sends a rider whose radio is off to Bluetooth settings', async () => {
+    const { port, plugin, settings } = overPlugin({ enabled: false });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        bluetoothAsk={memoryAsk(true)}
+        settings={settings}
+      />,
+    );
+    await settle();
+
+    await activateWithKeyboard(button('Open Bluetooth settings'));
+    await settle();
+
+    expect(plugin.calls).toContain('openBluetoothSettings');
+  });
+
+  it('offers no settings button where none can be opened', async () => {
+    const { port } = overPlugin({ initializeRejectsWith: new Error('Permission denied.') });
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} bluetoothAsk={memoryAsk(true)} />,
+    );
+    await settle();
+
+    expect(document.body.textContent).toContain('On Your Left needs Bluetooth permission');
+    expect([...document.querySelectorAll('button')].map((each) => each.textContent)).not.toContain(
+      'Open app settings',
+    );
   });
 });

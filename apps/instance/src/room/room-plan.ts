@@ -45,6 +45,8 @@ export interface RoomPlan {
   readonly capacity: number | null;
   readonly countdownMs: number | null;
   readonly rejoinWindowMs: number | null;
+  /** Whether the room drafts its riders — #787, fixed when it was made. */
+  readonly drafting: boolean;
   /** Who may start it, if it is a race: {@link RaceStarter}. */
   readonly startedBy: RaceStarter;
 }
@@ -70,6 +72,7 @@ export function planFor(
     capacity: course.capacity,
     countdownMs: course.countdownMs,
     rejoinWindowMs: course.rejoinWindowMs,
+    drafting: course.drafting !== false,
     startedBy,
   };
 }
@@ -115,5 +118,6 @@ export function settingsFromPlan(plan: RoomPlan): RoomSettings {
     ...(plan.capacity === null ? {} : { capacity: plan.capacity }),
     ...(plan.countdownMs === null ? {} : { countdownMs: plan.countdownMs }),
     ...(plan.rejoinWindowMs === null ? {} : { rejoinWindowMs: plan.rejoinWindowMs }),
+    drafting: plan.drafting,
   });
 }

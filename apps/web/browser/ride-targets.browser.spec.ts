@@ -119,6 +119,14 @@ const SCENES: readonly Scene[] = [
     query: '?workout=running',
     surfaces: RIDE_SCREEN,
   },
+  // #1244: an accepted re-plan waiting for the next block, which is the only
+  // state that puts *Keep the plan* on the screen.
+  {
+    name: 'the Ride screen, a re-plan waiting',
+    page: 'rideview',
+    query: '?workout=replan',
+    surfaces: RIDE_SCREEN,
+  },
   { name: 'the game, sounds on', page: 'ride', query: '?sounds=on', surfaces: ['game-hud'] },
   // #710's review: while paused the HUD's Pause reads Resume — the same
   // element, on the list under that name, and measured here in that state.
@@ -133,6 +141,26 @@ const SCENES: readonly Scene[] = [
     name: 'the game, a race on its line',
     page: 'ride',
     query: '?room=race',
+    surfaces: ['game-hud'],
+  },
+  // #788: a room's running race with the rider following another, which puts
+  // #789's *Report* on the HUD.
+  {
+    name: 'the game, following a rider in a room',
+    page: 'ride',
+    query: '?room=following',
+    surfaces: ['game-hud'],
+  },
+  // #1244: a workout in the game with an accepted re-plan waiting, which is
+  // the only state that puts *Keep the plan* on the HUD. ⚠️ Without
+  // `trainer=workout`: that adds *Trainer notice* to the row *Pause* is in,
+  // a 72 px control that is not on the list and so keeps its floor when the
+  // listed ones are stripped, holding the whole row at 72. `ride-workout.browser.spec.ts`
+  // §"#1244" measures the state WITH it, which is the one a rider is in.
+  {
+    name: 'the game, a re-plan waiting',
+    page: 'ride',
+    query: '?graph=replan',
     surfaces: ['game-hud'],
   },
   // #940: the pre-ride chooser, whose *Ride* starts the ride. `ride.html`

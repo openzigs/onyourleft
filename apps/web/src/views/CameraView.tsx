@@ -40,15 +40,16 @@
  * read (`camera/ScanViewfinder.tsx`, ADR 0033's 2026-09-26 amendment). No
  * frame is taken for it and nothing of it is kept.
  *
- * ⚠️ **Two ways off the device, and only one of them carries a picture.** Since
+ * ⚠️ **One way off the device from this screen, for a picture.** Since
  * [#387](https://github.com/openzigs/onyourleft/issues/387) a picture can go to
  * the rider's OWN computer, at an address they type and switch on —
  * {@link AnalysisSection} — and its address box still refuses anything not on
- * the rider's own network (`camera/analysis-endpoint.ts`). Since
- * [#518](https://github.com/openzigs/onyourleft/issues/518) a QUESTION, and
- * never a picture, can go to a hosted model on the rider's own key —
- * {@link HostedSection} — under the owner's *"numbers only"* ruling (ADR 0029's
- * 2026-09-28 amendment), with its own consent, off whenever the app is opened.
+ * the rider's own network (`camera/analysis-endpoint.ts`). From #518 to #1103
+ * this screen also held a hosted model service's key, kept on this device;
+ * #1103 removed it (ADR 0046 D-1). A reviewer who remembers a section called
+ * "A hosted model, on your own key" here is reading the old file. A rider
+ * whose key was deleted is told so once, at the top of this screen
+ * (`camera/retired-hosted-key.ts`).
  *
  * ⚠️ **No claim about a body anywhere on this screen.**
  * [ADR 0030](../../../../docs/adr/0030-what-the-app-may-say-about-a-body.md)
@@ -90,24 +91,16 @@ import {
   writeSideAnalyserOnComputer,
 } from '../camera/side-analyser';
 import { useAnalysis, type AnalysisState } from '../camera/useAnalysis';
-import { HOSTED_FAILURE_TEXT } from '../camera/hosted-port';
-import {
-  forgetHostedModel,
-  HOSTED_CONSENT,
-  HOSTED_MASKING_NOTICE,
-  HOSTED_MODEL_REFUSAL_TEXT,
-  HOSTED_TEST_QUESTION_LABEL,
-  hostedModelDecisionKeepingKey,
-  readHostedModel,
-  writeHostedModel,
-  type HostedModelRefusal,
-} from '../camera/hosted-model';
-import { useHostedCheck, type HostedCheckState } from '../camera/useHostedCheck';
+import { deviceRetiredKeyStorage } from '../camera/retired-hosted-key';
+import { RetiredKeyNotice } from '../camera/RetiredKeyNotice';
 import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
+import { SIDE_INSTANCE_WHAT_IS_SENT, writeSideInstanceSwitch } from '../camera/instance-pose';
+import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { SideCameraControl } from './SideCameraControl';
 import type { SideSnapshotPort } from '../camera/side-snapshot-port';
+import { SideInstancePictures } from './SideInstancePictures';
 
 /**
  * What became of the picture just taken — kept, dropped, or refused a home.
@@ -154,6 +147,11 @@ export interface CameraViewProps {
   readonly sidePairing?: SidePairingPort | undefined;
   /** Where *Save snapshot* holds a picture for its ride — #1063. */
   readonly sideSnapshots?: SideSnapshotPort | undefined;
+  /**
+   * The rider's instance, for the side camera's pictures — #1106. `undefined`
+   * where `main.tsx` built none; the section is then absent.
+   */
+  readonly sidePictures?: SideInstancePicturesPort | undefined;
 }
 
 /** The heading of the side camera's way in — #557. */
@@ -209,16 +207,13 @@ export const ANALYSIS_WHAT_IS_SENT =
  */
 /**
  * The kept-visible sentences that render only once the camera is agreed to:
- * "Your own computer" and, since #518, the hosted model's consent — what
- * leaves, to where, on whose key.
+ * "Your own computer" and the side camera's pictures on the instance — what
+ * leaves, and to where. (#1103 took the device-held hosted model's consent
+ * out of this list with the section.)
  */
 export const CAMERA_AGREED_KEPT_VISIBLE: readonly string[] = [
   ANALYSIS_WHAT_IS_SENT,
-  HOSTED_CONSENT.headline,
-  ...HOSTED_CONSENT.paragraphs,
-  HOSTED_CONSENT.notNeeded,
-  HOSTED_CONSENT.offUntilOn,
-  HOSTED_MASKING_NOTICE,
+  SIDE_INSTANCE_WHAT_IS_SENT,
 ];
 
 export const CAMERA_KEPT_VISIBLE: readonly string[] = [
@@ -231,6 +226,7 @@ export function CameraView({
   controller,
   sidePairing,
   sideSnapshots,
+  sidePictures,
 }: CameraViewProps): JSX.Element {
   if (controller === undefined) {
     return (
@@ -240,17 +236,26 @@ export function CameraView({
       </section>
     );
   }
-  return <Camera controller={controller} sidePairing={sidePairing} sideSnapshots={sideSnapshots} />;
+  return (
+    <Camera
+      controller={controller}
+      sidePairing={sidePairing}
+      sideSnapshots={sideSnapshots}
+      sidePictures={sidePictures}
+    />
+  );
 }
 
 function Camera({
   controller,
   sidePairing,
   sideSnapshots,
+  sidePictures,
 }: {
   readonly controller: CameraController;
   readonly sidePairing: SidePairingPort | undefined;
   readonly sideSnapshots: SideSnapshotPort | undefined;
+  readonly sidePictures: SideInstancePicturesPort | undefined;
 }): JSX.Element {
   // ⚠️ Three booleans rather than the whole state object: `useSyncExternalStore`
   // compares snapshots with `Object.is`, so a getter returning a fresh object
@@ -332,6 +337,9 @@ function Camera({
   );
 
   const [acknowledged, setAcknowledged] = useState(false);
+  // #1106: the side camera's two "send them elsewhere" switches are in two
+  // sections; each re-reads its own when the other changed one.
+  const [sideRevision, setSideRevision] = useState(0);
   /**
    * How many pictures this device is holding — or `'unknown'` when the store
    * could not say (#498). `undefined` until the first read answers.
@@ -405,16 +413,16 @@ function Camera({
     const decision = controller.agree({
       acknowledgedBystanders: acknowledged,
       allowLocal: true,
-      // ⚠️ Hard `false`, and there is no control that changes it. See
-      // `camera/consent.ts` §`CameraConsent.hosted`.
-      allowHosted: false,
     });
     setRefusal(decision.refusal);
   }, [acknowledged, controller]);
 
   return (
-    <section className="oyl-camera oyl-sections" aria-labelledby={TITLE_ID}>
-      {/*
+    <>
+      {/* #1103: a hosted key this device held was deleted at launch. Said once. */}
+      <RetiredKeyNotice storage={deviceRetiredKeyStorage()} />
+      <section className="oyl-camera oyl-sections" aria-labelledby={TITLE_ID}>
+        {/*
         ⚠️ **Named, because its children are.** A `<section>` with an accessible
         name is a `region` landmark; one without is nothing. This screen has
         three named subsections inside an outer one, and an unnamed outer
@@ -428,11 +436,11 @@ function Camera({
         that agrees to it; the title spans them (`theme.css` §"A screen of
         sections").
       */}
-      <h2 id={TITLE_ID} className="oyl-sections__title">
-        Camera
-      </h2>
+        <h2 id={TITLE_ID} className="oyl-sections__title">
+          Camera
+        </h2>
 
-      {/*
+        {/*
         #528. The tripod phone's own screen, for the arrangement the owner
         chose (#386): a link rather than a control, because it is a different
         page with its own consent, not a setting of this one.
@@ -449,191 +457,196 @@ function Camera({
         (`controls-first.browser.spec.ts`), where it used to start at
         y = 1,400 px under the consent text.
       */}
-      <section aria-labelledby="oyl-camera-side-way">
-        {/* #1013: the section keeps one line, and the rest is behind its ⓘ.
+        <section aria-labelledby="oyl-camera-side-way">
+          {/* #1013: the section keeps one line, and the rest is behind its ⓘ.
           #1023: the line introduces the phone itself, so it reads alone. */}
-        <SectionHeading
-          level={3}
-          id="oyl-camera-side-way"
-          help={
-            <p>
-              The phone is paired with the tablet you ride with, which is the one way to use the
-              camera with a ride.
-            </p>
-          }
-        >
-          {SIDE_CAMERA_WAY_TITLE}
-        </SectionHeading>
-        <p>A spare phone on a tripod beside the bike films; the tablet starts and stops it.</p>
-        {sidePairing === undefined ? (
-          <p>{SIDE_CAMERA_UNAVAILABLE}</p>
-        ) : (
-          <ol>
-            <li>
-              On the phone on the tripod:{' '}
-              <a className="oyl-button" href="#/camera/side">
-                Use this phone as the side camera
-              </a>
-            </li>
-            <li>
-              On the tablet: agree to the camera below, then press “Pair a phone” under “A side
-              camera on a tripod”.
-            </li>
-          </ol>
-        )}
-      </section>
+          <SectionHeading
+            level={3}
+            id="oyl-camera-side-way"
+            help={
+              <p>
+                The phone is paired with the tablet you ride with, which is the one way to use the
+                camera with a ride.
+              </p>
+            }
+          >
+            {SIDE_CAMERA_WAY_TITLE}
+          </SectionHeading>
+          <p>A spare phone on a tripod beside the bike films; the tablet starts and stops it.</p>
+          {sidePairing === undefined ? (
+            <p>{SIDE_CAMERA_UNAVAILABLE}</p>
+          ) : (
+            <ol>
+              <li>
+                On the phone on the tripod:{' '}
+                <a className="oyl-button" href="#/camera/side">
+                  Use this phone as the side camera
+                </a>
+              </li>
+              <li>
+                On the tablet: agree to the camera below, then press “Pair a phone” under “A side
+                camera on a tripod”.
+              </li>
+            </ol>
+          )}
+        </section>
 
-      <section aria-labelledby="oyl-camera-what">
-        <h3 id="oyl-camera-what">What this does</h3>
-        {/*
+        <section aria-labelledby="oyl-camera-what">
+          <h3 id="oyl-camera-what">What this does</h3>
+          {/*
           #666: never tucked. What is captured, where it goes and what is kept
           is what the consent below agrees to (ADR 0029, #382), and the
           bystander sentence is D-5's — both stay on the screen, before the
           box that says they were read.
         */}
-        <KeptVisible>
-          <ul>
-            {CONSENT_STATEMENT.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          {/*
+          <KeptVisible>
+            <ul>
+              {CONSENT_STATEMENT.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            {/*
           ADR 0029 D-5, verbatim, and `camera/consent.ts` asserts it against the
           ADR on disk. It is a `StatusMessage` rather than a paragraph because
           it is the one sentence on this screen that is about somebody who is
           not the rider and cannot answer for themselves.
         */}
-          <StatusMessage tone="warning" label="Anyone else in the room">
-            {BYSTANDER_SENTENCE}
-          </StatusMessage>
-        </KeptVisible>
-      </section>
+            <StatusMessage tone="warning" label="Anyone else in the room">
+              {BYSTANDER_SENTENCE}
+            </StatusMessage>
+          </KeptVisible>
+        </section>
 
-      {agreed ? null : (
-        <section aria-labelledby="oyl-camera-agree">
-          <h3 id="oyl-camera-agree">Turning it on</h3>
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(event) => {
-                  setAcknowledged(event.target.checked);
-                }}
-              />{' '}
-              I have read what happens to anyone else in the room.
-            </label>
-          </p>
-          {/*
+        {agreed ? null : (
+          <section aria-labelledby="oyl-camera-agree">
+            <h3 id="oyl-camera-agree">Turning it on</h3>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(event) => {
+                    setAcknowledged(event.target.checked);
+                  }}
+                />{' '}
+                I have read what happens to anyone else in the room.
+              </label>
+            </p>
+            {/*
             #668: one primary per view. Where the side camera is offered its
             link above is the primary — the way in, #557 — and the consent
             steps down beside it; with no side camera, agreeing is the step
             this screen is for.
           */}
-          <Button variant={sidePairing === undefined ? 'primary' : 'secondary'} onClick={agree}>
-            Allow the camera on this device
-          </Button>
-          {refusal === undefined ? null : (
-            <StatusMessage tone="warning" live>
-              {CONSENT_REFUSAL_TEXT[refusal]}
-            </StatusMessage>
-          )}
-        </section>
-      )}
+            <Button variant={sidePairing === undefined ? 'primary' : 'secondary'} onClick={agree}>
+              Allow the camera on this device
+            </Button>
+            {refusal === undefined ? null : (
+              <StatusMessage tone="warning" live>
+                {CONSENT_REFUSAL_TEXT[refusal]}
+              </StatusMessage>
+            )}
+          </section>
+        )}
 
-      {/*
+        {/*
         #529. The tablet's half of the side camera. After the consent section
         on purpose: reading the phone's code uses THIS device's camera (ADR
         0033 D-4), so the rider meets the consent first. ⚠️ **And before the
         single-picture camera since #557**, which is not the way in and was
         taken for it.
       */}
-      {sidePairing === undefined ? null : (
-        <SideCameraControl
-          controller={controller}
-          pairing={sidePairing}
-          snapshots={sideSnapshots}
-        />
-      )}
+        {sidePairing === undefined ? null : (
+          <SideCameraControl
+            controller={controller}
+            pairing={sidePairing}
+            snapshots={sideSnapshots}
+          />
+        )}
 
-      {agreed ? (
-        <section aria-labelledby="oyl-camera-control">
-          <h3 id="oyl-camera-control">{SINGLE_PICTURE_TITLE}</h3>
-          {/*
+        {agreed ? (
+          <section aria-labelledby="oyl-camera-control">
+            <h3 id="oyl-camera-control">{SINGLE_PICTURE_TITLE}</h3>
+            {/*
             #557: says what it is FOR, because it is not the side camera and
             the owner took it for the way in.
           */}
-          <p>{sidePairing === undefined ? SINGLE_PICTURE_PURPOSE_ALONE : SINGLE_PICTURE_PURPOSE}</p>
-          <p>{live ? 'The camera is on.' : 'The camera is off.'}</p>
-          {live ? (
+            <p>
+              {sidePairing === undefined ? SINGLE_PICTURE_PURPOSE_ALONE : SINGLE_PICTURE_PURPOSE}
+            </p>
+            <p>{live ? 'The camera is on.' : 'The camera is off.'}</p>
+            {live ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  controller.turnOff();
+                }}
+              >
+                Turn the camera off
+              </Button>
+            ) : (
+              <Button
+                variant={sidePairing === undefined ? 'primary' : 'secondary'}
+                onClick={turnOn}
+              >
+                Turn the camera on
+              </Button>
+            )}{' '}
             <Button
               variant="secondary"
               onClick={() => {
-                controller.turnOff();
+                // ⚠️ `refreshKept` as well as `setOutcome`, because a kept picture
+                // changes what "Pictures on this device" below is counting. It
+                // used to run on mount and after `forgetKept` alone, so a rider
+                // who kept three pictures went on reading "holding no pictures"
+                // until they navigated away and back.
+                //
+                // ⚠️ It is a **fresh store read** rather than an increment of the
+                // number already on screen: this counter is what a rider decides
+                // whether to press "Delete every picture" by, and a count derived
+                // from what this tab believes it wrote is the write-reports-
+                // success-while-the-read-cannot-see-it shape docs/agents/quality-gate.md §5 names.
+                //
+                // `captureOne` never rejects — see `camera/session.ts`.
+                void controller.captureOne().then((result) => {
+                  setOutcome(result);
+                  refreshKept();
+                });
               }}
             >
-              Turn the camera off
+              Take a picture
+            </Button>{' '}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAcknowledged(false);
+                setRefusal(undefined);
+                setOutcome(undefined);
+                controller.revoke();
+              }}
+            >
+              Stop using the camera on this device
             </Button>
-          ) : (
-            <Button variant={sidePairing === undefined ? 'primary' : 'secondary'} onClick={turnOn}>
-              Turn the camera on
-            </Button>
-          )}{' '}
-          <Button
-            variant="secondary"
-            onClick={() => {
-              // ⚠️ `refreshKept` as well as `setOutcome`, because a kept picture
-              // changes what "Pictures on this device" below is counting. It
-              // used to run on mount and after `forgetKept` alone, so a rider
-              // who kept three pictures went on reading "holding no pictures"
-              // until they navigated away and back.
-              //
-              // ⚠️ It is a **fresh store read** rather than an increment of the
-              // number already on screen: this counter is what a rider decides
-              // whether to press "Delete every picture" by, and a count derived
-              // from what this tab believes it wrote is the write-reports-
-              // success-while-the-read-cannot-see-it shape docs/agents/quality-gate.md §5 names.
-              //
-              // `captureOne` never rejects — see `camera/session.ts`.
-              void controller.captureOne().then((result) => {
-                setOutcome(result);
-                refreshKept();
-              });
-            }}
-          >
-            Take a picture
-          </Button>{' '}
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setAcknowledged(false);
-              setRefusal(undefined);
-              setOutcome(undefined);
-              controller.revoke();
-            }}
-          >
-            Stop using the camera on this device
-          </Button>
-          {/*
+            {/*
             ADR 0029 D-2's per-ride keep. OFF every time the camera is turned
             on — `camera/session.ts` §`turnOn` is what makes that true rather
             than this component remembering to reset a box — and there is
             deliberately no "always keep" anywhere in this client.
           */}
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                role="switch"
-                checked={keeping}
-                onChange={(event) => {
-                  controller.setKeeping(event.target.checked);
-                }}
-              />{' '}
-              Keep the pictures from this ride on this device
-            </label>
-          </p>
-          {/*
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={keeping}
+                  onChange={(event) => {
+                    controller.setKeeping(event.target.checked);
+                  }}
+                />{' '}
+                Keep the pictures from this ride on this device
+              </label>
+            </p>
+            {/*
             ⚠️ **Both numbers, because one of them cannot answer this.** The
             switch above says what the NEXT picture will do; this sentence is
             about the ones already taken, and a rider may turn the switch on and
@@ -641,8 +654,8 @@ function Camera({
             the one place the wording lives, and it is pure so that it is tested
             without a DOM.
           */}
-          <p>{keptSummarySentence(captured, keptThisSession)}</p>
-          {/*
+            <p>{keptSummarySentence(captured, keptThisSession)}</p>
+            {/*
             #390. OFF every time the camera is turned on, like the keep above.
             It needs no second consent and grants nothing new — the same
             camera, under the same agreement, with the same indicator showing
@@ -654,43 +667,71 @@ function Camera({
             user never hears why (`views/DevicesView.tsx`'s rule), and an
             enabled one that did nothing would be a way in that is not.
           */}
-          {live ? (
-            <p>
-              <label>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={watchingPresence}
-                  onChange={(event) => {
-                    controller.watchPresence(event.target.checked);
-                  }}
-                />{' '}
-                Pause my ride when nobody is on the bike
-              </label>
-            </p>
-          ) : null}
-          {live && watchingPresence ? <p>{presenceSentence(presence, presenceAllowed)}</p> : null}
-          {outcome === undefined ? null : (
-            <StatusMessage tone={outcome.taken && !outcome.keepFailed ? 'success' : 'warning'} live>
-              {/*
+            {live ? (
+              <p>
+                <label>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={watchingPresence}
+                    onChange={(event) => {
+                      controller.watchPresence(event.target.checked);
+                    }}
+                  />{' '}
+                  Pause my ride when nobody is on the bike
+                </label>
+              </p>
+            ) : null}
+            {live && watchingPresence ? <p>{presenceSentence(presence, presenceAllowed)}</p> : null}
+            {outcome === undefined ? null : (
+              <StatusMessage
+                tone={outcome.taken && !outcome.keepFailed ? 'success' : 'warning'}
+                live
+              >
+                {/*
                 ⚠️ A size and a count. ADR 0029 D-8 permits exactly this and
                 forbids the thumbnail somebody will ask for — and the failure
                 branch carries nothing of the storage error either, not its
                 message and not the key it could not write.
               */}
-              {outcome.taken
-                ? `A picture was taken — ${String(outcome.width)} by ${String(outcome.height)}, ${String(outcome.bytes)} bytes — and ${captureEnding(outcome)}`
-                : 'No picture was taken.'}
-            </StatusMessage>
-          )}
-        </section>
-      ) : null}
+                {outcome.taken
+                  ? `A picture was taken — ${String(outcome.width)} by ${String(outcome.height)}, ${String(outcome.bytes)} bytes — and ${captureEnding(outcome)}`
+                  : 'No picture was taken.'}
+              </StatusMessage>
+            )}
+          </section>
+        ) : null}
 
-      {agreed ? <AnalysisSection controller={controller} live={live} /> : null}
+        {agreed ? (
+          <AnalysisSection
+            controller={controller}
+            live={live}
+            revision={sideRevision}
+            onSideSwitched={(on) => {
+              // #1106: one place at a time. The computer's switch going on takes the instance's off.
+              if (on) {
+                writeSideInstanceSwitch(undefined);
+              }
+              setSideRevision((revision) => revision + 1);
+            }}
+          />
+        ) : null}
 
-      {agreed ? <HostedSection controller={controller} /> : null}
+        {agreed && sidePictures !== undefined ? (
+          <SideInstancePictures
+            port={sidePictures}
+            revision={sideRevision}
+            onSwitched={(on) => {
+              // And the instance's going on takes the computer's off.
+              if (on) {
+                writeSideAnalyserOnComputer(false);
+              }
+              setSideRevision((revision) => revision + 1);
+            }}
+          />
+        ) : null}
 
-      {/*
+        {/*
         ⚠️ **A COUNT, and never a picture.** ADR 0029 D-11 keeps a kept frame
         off every screen somebody who did not take it could meet by accident,
         and D-8's permitted column is *"a count, a byte size, a format name"*.
@@ -698,86 +739,87 @@ function Camera({
         without being shown what — and how they get rid of it, which is D-2's
         rider-driven expiry and the only one that works in this milestone.
       */}
-      <section aria-labelledby="oyl-camera-kept">
-        <h3 id="oyl-camera-kept">Pictures on this device</h3>
-        <p>
-          {kept === undefined
-            ? 'Counting…'
-            : kept === 'unknown'
-              ? 'This device could not count the pictures it is holding.'
-              : kept === 0
-                ? 'This device is holding no pictures.'
-                : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}${keptSnapshotsClause(snapshotsKept)}.`}
-        </p>
-        {deleteFailed ? (
-          // #498: a delete the store refused. The true count is re-read below,
-          // and this says the one thing the count cannot: that a press happened
-          // and did nothing. Nothing of the error — ADR 0029 D-8.
-          <StatusMessage tone="warning" live>
-            The pictures could not be deleted. They are still on this device.
-          </StatusMessage>
-        ) : null}
-        {/*
+        <section aria-labelledby="oyl-camera-kept">
+          <h3 id="oyl-camera-kept">Pictures on this device</h3>
+          <p>
+            {kept === undefined
+              ? 'Counting…'
+              : kept === 'unknown'
+                ? 'This device could not count the pictures it is holding.'
+                : kept === 0
+                  ? 'This device is holding no pictures.'
+                  : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}${keptSnapshotsClause(snapshotsKept)}.`}
+          </p>
+          {deleteFailed ? (
+            // #498: a delete the store refused. The true count is re-read below,
+            // and this says the one thing the count cannot: that a press happened
+            // and did nothing. Nothing of the error — ADR 0029 D-8.
+            <StatusMessage tone="warning" live>
+              The pictures could not be deleted. They are still on this device.
+            </StatusMessage>
+          ) : null}
+          {/*
           Offered while the count is UNKNOWN as well as while it is positive
           (#498): a rider the store cannot count for is the rider most likely
           to want the pictures gone, and a control withheld for a count that
           never arrives is no control at all.
         */}
-        {/*
-          #1063's review: the delete takes every ride's side-camera snapshots
-          too, so while there are any (or the count is not known) it names
-          them and asks for a second press, as a ride's page does for one
-          snapshot. With none it is the one press it always was.
-        */}
-        {kept === undefined || kept === 0 ? null : deleteArmed ? (
-          <p>
-            <span>{deleteEverythingQuestion(snapshotsKept)} </span>
-            <Button variant="danger" onClick={deleteEverything}>
-              Yes, delete every picture
-            </Button>{' '}
+          {/*
+            #1063's review: the delete takes every ride's side-camera snapshots
+            too, so while there are any (or the count is not known) it names
+            them and asks for a second press, as a ride's page does for one
+            snapshot. With none it is the one press it always was.
+          */}
+          {kept === undefined || kept === 0 ? null : deleteArmed ? (
+            <p>
+              <span>{deleteEverythingQuestion(snapshotsKept)} </span>
+              <Button variant="danger" onClick={deleteEverything}>
+                Yes, delete every picture
+              </Button>{' '}
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setDeleteArmed(false);
+                }}
+              >
+                Keep them
+              </Button>
+            </p>
+          ) : (
             <Button
               variant="secondary"
               onClick={() => {
-                setDeleteArmed(false);
+                if (snapshotsKept === 0) {
+                  deleteEverything();
+                } else {
+                  setDeleteArmed(true);
+                }
               }}
             >
-              Keep them
+              {deleteEverythingLabel(snapshotsKept)}
             </Button>
-          </p>
-        ) : (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              if (snapshotsKept === 0) {
-                deleteEverything();
-              } else {
-                setDeleteArmed(true);
-              }
-            }}
-          >
-            {deleteEverythingLabel(snapshotsKept)}
-          </Button>
-        )}
-      </section>
+          )}
+        </section>
 
-      {notice === null ? null : (
-        <section aria-labelledby="oyl-camera-problem">
-          <h3 id="oyl-camera-problem">{notice.title}</h3>
-          {/*
+        {notice === null ? null : (
+          <section aria-labelledby="oyl-camera-problem">
+            <h3 id="oyl-camera-problem">{notice.title}</h3>
+            {/*
             The explanation and the instruction, and never an error code — #382:
             "A test asserts the explanation renders and names no error code as
             its only content." The words come from `camera/notice.ts`'s fixed
             table, which is where D-8 is enforced.
           */}
-          {/* #1013: what the camera is doing and has captured is the camera's
+            {/* #1013: what the camera is doing and has captured is the camera's
             own privacy state (ADR 0029), so it is kept on the screen whole. */}
-          <KeptVisible>
-            <p>{notice.explanation}</p>
-            {notice.instruction === null ? null : <p>{notice.instruction}</p>}
-          </KeptVisible>
-        </section>
-      )}
-    </section>
+            <KeptVisible>
+              <p>{notice.explanation}</p>
+              {notice.instruction === null ? null : <p>{notice.instruction}</p>}
+            </KeptVisible>
+          </section>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -867,7 +909,7 @@ function SideAnalyserSwitch({
       <p>
         {on
           ? 'On. The next time you pair a side camera, its pictures go to your computer.'
-          : 'Off. The side camera’s pictures are looked at on this tablet and go nowhere else. One already sending them to your computer has stopped.'}
+          : 'Off. No picture is sent to your computer from the side camera. One already sending them to your computer has stopped.'}
       </p>
     </>
   );
@@ -888,9 +930,15 @@ function SideAnalyserSwitch({
 function AnalysisSection({
   controller,
   live,
+  revision,
+  onSideSwitched,
 }: {
   readonly controller: CameraController;
   readonly live: boolean;
+  /** Changes when the instance's section changed a switch this one shows (#1106). */
+  readonly revision: number;
+  /** Called after the side camera's computer switch changed here. */
+  readonly onSideSwitched: (on: boolean) => void;
 }): JSX.Element {
   const saved = readAnalysisEndpoint();
   const [address, setAddress] = useState(saved?.address ?? '');
@@ -900,6 +948,9 @@ function AnalysisSection({
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [configured, setConfigured] = useState(saved?.switchedOn === true);
   const [sideOnComputer, setSideOnComputer] = useState(readSideAnalyserOnComputer);
+  useEffect(() => {
+    setSideOnComputer(readSideAnalyserOnComputer());
+  }, [revision]);
   const { state, ask } = useAnalysis(controller);
   const sentence = analysisSentence(state);
 
@@ -1045,6 +1096,7 @@ function AnalysisSection({
           onChange={(on) => {
             const kept = writeSideAnalyserOnComputer(on);
             setSideOnComputer(kept && on);
+            onSideSwitched(kept && on);
           }}
         />
       ) : null}
@@ -1057,218 +1109,6 @@ function AnalysisSection({
             }}
           >
             Send one picture to check the connection
-          </Button>
-        </p>
-      ) : null}
-      {sentence === undefined ? null : (
-        <StatusMessage
-          tone={
-            state.kind === 'failed'
-              ? 'warning'
-              : state.kind === 'answered' && state.understood
-                ? 'success'
-                : 'info'
-          }
-          live
-        >
-          {sentence}
-        </StatusMessage>
-      )}
-    </section>
-  );
-}
-
-/** What the screen says about the hosted connection check. None carries what was said. */
-export function hostedSentence(state: HostedCheckState): string | undefined {
-  switch (state.kind) {
-    case 'idle':
-      return undefined;
-    case 'asking':
-      return 'A test question was sent to the service. No picture and no numbers were sent. Waiting for its answer…';
-    case 'answered':
-      return state.understood
-        ? 'The service answered, and understood the question.'
-        : `The service answered (${String(state.characters)} characters), but not with the one word it was asked for. What it said is not shown.`;
-    case 'failed':
-      return HOSTED_FAILURE_TEXT[state.failure];
-  }
-}
-
-/**
- * A hosted model on the rider's own key — #518.
- *
- * ⚠️ **Its consent is its own**: the switch here calls
- * `CameraController.agreeToHosted`, and nothing else on this screen can turn
- * it on — agreeing to the camera above passes `allowHosted: false`. It is off
- * whenever the app is opened, because the controller keeps consent in memory.
- *
- * ⚠️ **The key box is a password field and is never filled back in.** A saved
- * key is not shown again — the screen says one is saved — so it is not in the
- * DOM for a screenshot, a screen reader or a shoulder to read; typing a new
- * one replaces it, and Forget removes it.
- *
- * ⚠️ **Nothing is pre-filled**, ADR 0031 D-4 condition 2: no address, no
- * model, no placeholder, no list of services.
- */
-function HostedSection({ controller }: { readonly controller: CameraController }): JSX.Element {
-  const consented = useSyncExternalStore(
-    (listener) => controller.subscribe(listener),
-    () => controller.state().consent.hosted,
-    () => false,
-  );
-  const saved = readHostedModel();
-  const [address, setAddress] = useState(saved?.address ?? '');
-  const [model, setModel] = useState(saved?.model ?? '');
-  const [key, setKey] = useState('');
-  const [hasKey, setHasKey] = useState(saved !== undefined);
-  const [refusal, setRefusal] = useState<HostedModelRefusal | undefined>(undefined);
-  const [message, setMessage] = useState<string | undefined>(undefined);
-  const { state, ask } = useHostedCheck(controller);
-  const sentence = hostedSentence(state);
-
-  const save = (): void => {
-    // A blank key box keeps the saved key, for the address it was saved with
-    // and no other — `hostedModelDecisionKeepingKey` says why.
-    const decision = hostedModelDecisionKeepingKey({ address, model, key }, readHostedModel());
-    setRefusal(decision.refusal);
-    if (decision.model === undefined) {
-      setMessage(undefined);
-      return;
-    }
-    const kept = writeHostedModel(decision.model);
-    setKey('');
-    setHasKey(kept);
-    setMessage(
-      kept
-        ? 'Saved. Nothing is sent until you turn the hosted model on below and press the button.'
-        : 'This device would not keep the service, so nothing is sent.',
-    );
-  };
-
-  return (
-    <section aria-labelledby="oyl-camera-hosted">
-      <h3 id="oyl-camera-hosted">A hosted model, on your own key</h3>
-      {/* #666: what leaves, to where, on whose key — never tucked. */}
-      <p data-oyl-kept-visible="">
-        <strong>{HOSTED_CONSENT.headline}</strong>
-      </p>
-      {HOSTED_CONSENT.paragraphs.map((paragraph) => (
-        <p key={paragraph} data-oyl-kept-visible="">
-          {paragraph}
-        </p>
-      ))}
-      {/* #839: what masking does, and that it does not guarantee anything. */}
-      <p data-oyl-kept-visible="">{HOSTED_MASKING_NOTICE}</p>
-      <p data-oyl-kept-visible="">
-        <strong>{HOSTED_CONSENT.notNeeded}</strong>
-      </p>
-      <p id="oyl-hosted-consent" data-oyl-kept-visible="">
-        {HOSTED_CONSENT.offUntilOn}
-      </p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          save();
-        }}
-      >
-        <p>
-          <label htmlFor="oyl-hosted-address">The service’s address</label>{' '}
-          <input
-            id="oyl-hosted-address"
-            className="oyl-input"
-            type="url"
-            inputMode="url"
-            autoComplete="off"
-            spellCheck={false}
-            value={address}
-            onChange={(event) => {
-              setAddress(event.target.value);
-            }}
-          />
-        </p>
-        <p>
-          <label htmlFor="oyl-hosted-model">The model’s name at that service</label>{' '}
-          <input
-            id="oyl-hosted-model"
-            className="oyl-input"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={model}
-            onChange={(event) => {
-              setModel(event.target.value);
-            }}
-          />
-        </p>
-        <p>
-          <label htmlFor="oyl-hosted-key">
-            {hasKey ? 'Your key (one is saved; type a new one to replace it)' : 'Your key'}
-          </label>{' '}
-          <input
-            id="oyl-hosted-key"
-            className="oyl-input"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={key}
-            onChange={(event) => {
-              setKey(event.target.value);
-            }}
-          />
-        </p>
-        <Button variant="secondary" type="submit">
-          Save this service
-        </Button>{' '}
-        {!hasKey ? null : (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              forgetHostedModel();
-              controller.agreeToHosted(false);
-              setAddress('');
-              setModel('');
-              setKey('');
-              setHasKey(false);
-              setRefusal(undefined);
-              setMessage('Forgotten, key and all. Nothing is sent.');
-            }}
-          >
-            Forget this service and key
-          </Button>
-        )}
-      </form>
-      {refusal === undefined ? null : (
-        <StatusMessage tone="warning" live>
-          {HOSTED_MODEL_REFUSAL_TEXT[refusal]}
-        </StatusMessage>
-      )}
-      {message === undefined ? null : (
-        <StatusMessage tone="info" live>
-          {message}
-        </StatusMessage>
-      )}
-      <p>
-        <label className="oyl-announce__switch">
-          <input
-            type="checkbox"
-            checked={consented}
-            aria-describedby="oyl-hosted-consent"
-            onChange={(event) => {
-              controller.agreeToHosted(event.target.checked);
-            }}
-          />{' '}
-          Turn the hosted model on until this app is closed
-        </label>
-      </p>
-      {consented && hasKey ? (
-        <p>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              ask('connection-check');
-            }}
-          >
-            {HOSTED_TEST_QUESTION_LABEL}
           </Button>
         </p>
       ) : null}

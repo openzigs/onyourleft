@@ -162,6 +162,19 @@ export const SYNC_HAPPY_CALLS: Readonly<
       mayBeRaced: true,
     });
   },
+  setRaceRoute: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    await authorised(world, token, 'POST', `/v1/sync/records/${content}/race-consent`, {
+      mayBeRaced: true,
+    });
+    return authorised(world, token, 'POST', `/v1/sync/records/${content}/race-route`, {
+      routeSha256: 'a'.repeat(64),
+    });
+  },
+  getRiderGhost: async (world) => {
+    const { token } = await signedInRider(world);
+    return authorised(world, token, 'GET', `/v1/ghosts/${'a'.repeat(64)}`);
+  },
   putSyncItem: async (world) => {
     const { token } = await signedInRider(world);
     return authorised(world, token, 'POST', '/v1/sync/items/write-up/ride-1', { body: '{}' });
@@ -216,7 +229,12 @@ export async function riderWithRide(world: IdentityInstance) {
   return { ...rider, content: contentSha256 };
 }
 
-/** A request with the session token, and a JSON body when there is one. */
+/**
+ * A request with the session token, and a JSON body when there is one —
+ * SEALED, since every sync route is sealed-only (#1192, ADR 0047 D-7), and
+ * signed by the device the session belongs to (`IdentityInstance.request`).
+ * The answer is the inner one, opened.
+ */
 export function authorised(
   world: IdentityInstance,
   token: string,
@@ -224,12 +242,5 @@ export function authorised(
   path: string,
   body?: unknown,
 ): Promise<Response> {
-  return fetch(`${world.url}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  return world.request(method, path, { token, ...(body === undefined ? {} : { body }) });
 }

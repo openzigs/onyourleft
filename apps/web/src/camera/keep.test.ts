@@ -41,7 +41,7 @@ import type { CameraStorePort } from './store-port';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
 import { browserSecureWindow } from './secure-window-testing';
 
-const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
+const AGREED = { acknowledgedBystanders: true, allowLocal: true } as const;
 
 let harness: StoreHarness;
 let minted = 0;

@@ -122,6 +122,60 @@ describe('the activity library, populated', () => {
 
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toStrictEqual([]);
-    expect(document.body.textContent).toContain('cannot be undone');
+    // #1431: says where the ride goes, now that a delete can be undone.
+    expect(document.body.textContent).toContain('Recently deleted');
+  });
+});
+
+describe('Recently deleted — #1431', () => {
+  const NOW = unixSeconds(1_800_000_000);
+
+  async function mountWithDeleted(): Promise<void> {
+    const library = {
+      ...stubLibrary(OWNER, [
+        ride('outdoor', 'Tuesday hills', true),
+        ride('indoor', 'Zwift hour', false),
+        ride('gone', 'Sunday long', true),
+      ]),
+      now: () => NOW,
+    };
+    await library.store.moveActivityToRecentlyDeleted(OWNER, activityId('gone'), NOW);
+    await library.store.moveActivityToRecentlyDeleted(OWNER, activityId('indoor'), NOW);
+    mounted = await mount(
+      <main>
+        <h1>Activities</h1>
+        <ActivitiesView library={library} />
+      </main>,
+    );
+    await settle();
+    await settle();
+  }
+
+  it('has no accessibility violations with rides in it', async () => {
+    await mountWithDeleted();
+    expect(document.querySelector('.oyl-recently-deleted')).not.toBeNull();
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toStrictEqual([]);
+  });
+
+  it('names each control by its ride, and puts every one in the tab order', async () => {
+    await mountWithDeleted();
+    const names = tabbableElements(document).map((element) => element.textContent ?? '');
+    expect(names).toContain('Restore Sunday long');
+    expect(names).toContain('Delete for good Sunday long');
+    expect(names).toContain('Restore Zwift hour');
+    expect(names).toContain('Empty Recently deleted');
+  });
+
+  it('has no accessibility violations with a delete for good being confirmed', async () => {
+    await mountWithDeleted();
+    const forGood = queryAll<HTMLButtonElement>(document.body, 'button').find(
+      (button) => button.textContent === 'Delete for good Sunday long',
+    );
+    await activateWithKeyboard(forGood as HTMLElement);
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toStrictEqual([]);
   });
 });

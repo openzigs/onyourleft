@@ -24,6 +24,10 @@ export type { StoreHarness, StoreHarnessOptions } from './harness';
 
 export type { PersistentStore, StoreFactory } from './store';
 
+export { openOlderSchema } from './older-schema';
+export { seedEveryTable } from './seed-every-table';
+export type { OlderSchemaDatabase } from './older-schema';
+
 export {
   assertRecordingRecovers,
   assertSameSamples,
@@ -38,6 +42,7 @@ export {
   assertSyncBaseRoundTrip,
   assertRiderTextRoundTrip,
   assertTrustedDeviceKeyRoundTrip,
+  assertWorkoutGoalsRoundTrip,
   assertStreamSetRoundTrip,
   assertWorkoutRoundTrip,
   RoundTripFailure,
@@ -59,6 +64,11 @@ export {
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
+  workoutGoalsFor,
+  packWorldCorridorFeatures,
+  unpackWorldCorridorFeatures,
+  worldCorridorFeaturesFor,
+  worldCorridorFor,
   CHANNELS_WITHOUT_POSITION,
   chunksOf,
   claimsFor,
@@ -84,7 +94,7 @@ export {
   signedRecordFor,
   streamSetFor,
 } from './fixtures';
-export type { StreamFixtureOptions, StreamGap } from './fixtures';
+export type { StreamFixtureOptions, StreamGap, WorldCorridorFixtureFeatures } from './fixtures';
 
 export {
   droppedFlushStoreFactory,
@@ -111,4 +121,6 @@ export {
   truncatedWorkoutStoreFactory,
   unscopedAttemptStoreFactory,
   consentIgnoredStoreFactory,
+  piecewiseRideStoreFactory,
+  replanlessCheckpointStoreFactory,
 } from './fakes';

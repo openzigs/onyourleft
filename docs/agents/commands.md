@@ -17,7 +17,7 @@ code block that stayed in the root:
 
 Every command, what it prints and what it enforces is [`docs/agents/commands.md`](commands.md) §4a — **read it
 literally**: a command listed there has been run, and nothing else may be quoted as if it had. What
-CI runs is [`docs/agents/ci.md`](ci.md) §4c. The ones nearly every change needs (Node 24 from `.nvmrc`,
+CI runs is [`docs/agents/ci.md`](ci.md) §4c. The ones nearly every change needs (Node 26 from `.nvmrc`,
 pnpm 11 from `packageManager` through `corepack enable pnpm`):
 
 **Read this section literally.** Commands are split into ones that work **today** and ones that do
@@ -67,7 +67,7 @@ bash scripts/check-doc-links.sh
 bash scripts/check-doc-links.test.sh
 
 # Run several commands at once and fail if ANY of them fails (#651). Not a
-# check: it is how CI runs the checks, in one of its steps — see §4c. Every
+# check: it is how CI runs the checks, in one step of its `checks` shard — see §4c. Every
 # line is labelled with its command as it arrives, each process is waited on by
 # itself, and a failing command's whole output is printed again at the end.
 # No commands at all is exit 2, not a pass. Bash only, so it runs on a bare
@@ -79,25 +79,40 @@ bash scripts/run-concurrently.sh 'lint' 'pnpm run lint' 'typecheck' 'pnpm run ty
 # plus a rendezvous that fails if the commands were quietly run one at a time.
 bash scripts/run-concurrently.test.sh
 
+# The required check's verdict (#1285, §4c §"Shards"). CI's work is four jobs
+# side by side since #1362 and a fifth, named `Repository rules`, that runs this over
+# their results: anything but `success` fails (SHARD001) — `failure`,
+# `cancelled` and, the one that matters, `skipped`, which GitHub would
+# otherwise count as a pass — and so does no result at all (SHARD002). It
+# reads the workflow's `toJSON(needs)` from NEEDS. Bash only. Not a check to
+# run before pushing: there is nothing for it to read outside a workflow run.
+NEEDS='{"checks":{"result":"success","outputs":{}}}' bash scripts/check-shard-results.sh
+
+# Its own suite. 17 cases, most of them a pass it must not give.
+bash scripts/check-shard-results.test.sh
+
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 ```
 
-**The workspace — needs Node 24 and pnpm 11, and the first run needs the network.**
+**The workspace — needs Node 26 and pnpm 11, and the first run needs the network.**
 Executed in this order on a clean clone on 2026-09-03, from nothing installed to green:
 
 ```bash
-# Node 24 "Krypton", read from .nvmrc so the runner and you cannot disagree.
+# Node 26 (LTS since 2026-10-28), read from .nvmrc so the runner and you cannot disagree.
 # With nvm: `nvm install` then `nvm use`. Any other version manager is fine;
-# what matters is that `node --version` reports v24.
+# what matters is that `node --version` reports v26.
 nvm install && nvm use
 
 # pnpm 11, from the `packageManager` field in package.json rather than a global
-# install, so the version is the one the lockfile was written by. Corepack ships
-# with Node. The first `pnpm` command after this downloads that exact version,
+# install, so the version is the one the lockfile was written by. ⚠️ Corepack no
+# longer ships with Node (since v25; #1597), so it is installed from npm first,
+# at the version CI pins (.github/workflows/rules.yml). The first `pnpm` command
+# after `corepack enable` downloads that exact version,
 # and in an interactive terminal corepack asks before it does — answer yes, or
 # set COREPACK_ENABLE_DOWNLOAD_PROMPT=0. CI sets neither because corepack does
 # not prompt when CI=true.
+npm install --global --ignore-scripts corepack@0.36.0
 corepack enable pnpm
 
 # Install. --frozen-lockfile is what CI runs: it fails rather than quietly
@@ -126,7 +141,15 @@ pnpm run test
 # #1076 — every `.a11y.test.` file, which `test:a11y` runs (so CI runs them
 # once, not twice). The a11y exclude is a glob in SINGLE quotes, because the
 # script goes through `sh`; `check:test-split` reads a whole single-quoted word.
+# ⚠️ Since #1280 CI runs this NIGHTLY (`.github/workflows/nightly.yml`), which
+# publishes the table and the HTML artefact; the required job runs the next
+# command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
+
+# The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):
+# `test:coverage` with no `--coverage`, the same files, 106–133 s less on the
+# slower runner. `check:test-split` fails the two if their excludes differ.
+pnpm run test:required
 
 # The files `test:coverage` excludes, with NO coverage (#852): the #545
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
@@ -141,15 +164,17 @@ pnpm run test:uninstrumented
 # What stops those lists coming apart (#852). Reads the scripts out of
 # package.json, asks `vitest list` what the whole suite and each run selects,
 # and fails on a file in NO run (CI would never run it) or in two. ⚠️ Since
-# #1076 there are THREE runs — `test:coverage`, `test:uninstrumented` and
-# `test:a11y` — and a reviewer who remembers "both halves" is reading the old
-# file. ⚠️ An
+# #1076 there are THREE runs — `test:required` (`test:coverage` until #1280),
+# `test:uninstrumented` and `test:a11y` — and a reviewer who remembers "both
+# halves" is reading the old file. ⚠️ Since #1280 it also fails a
+# `test:coverage` that is not `test:required` with `--coverage` after `run`:
+# the nightly report is of the files the required job runs. ⚠️ An
 # `--exclude` glob is matched against each Vitest PROJECT's root, not the
 # repository's, which is why it compares selections rather than globs. Lists,
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 51 cases on 2026-10-03 (33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 60 cases on 2026-10-12 (51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -158,7 +183,8 @@ bash scripts/check-test-split.test.sh
 # is a SUBSET of `pnpm run test` — the same files, run under a name that says
 # what broke. Unlike coverage it DOES gate: criterion 4 of #48 is that a
 # violation fails the build. See §4e. ⚠️ Since #1076 it is the ONLY CI run of
-# these files: `test:coverage` excludes them, so they are not in the report.
+# these files: `test:required` and `test:coverage` exclude them, so they are
+# not in the report.
 pnpm run test:a11y
 
 # What proves that gate selects every accessibility test there is (#142). Runs
@@ -244,14 +270,16 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. One CI job, because a second job reports under
-# a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ THREE CI jobs since #1720 — the shards
+# `browser-1` to `browser-3`, which the job named `Repository rules` waits for
+# (§4c §"Three browser shards — #1720") — and each runs its own spec files of
+# this command, as `test:browser:shard-1` to `-3` below; this is the whole. ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
 # then `game` alone, each with its own stop (§4c §"23m50s of 25 — #1128").
 # A failed build ends it before either run. CI runs it under
-# `timeout --verbose --kill-after=10s 765s` (§4c, `GATE_STEP_MS`).
+# `timeout --verbose --kill-after=10s 825s` (§4c, `GATE_STEP_MS`).
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
@@ -287,6 +315,31 @@ pnpm run test:browser
 # `nightly-split.test.ts` (in `pnpm run test`) fails a tag the list does not
 # name and a test in both runs or in neither.
 pnpm run test:browser:nightly
+
+# The nightly checks as CI runs them, in five jobs (#1675, #1698, §4c §"Four
+# nightly browser shards"): the first every nightly spec but the realistic
+# page's, then `realistic.browser.spec.ts`; `realistic-trees.browser.spec.ts`
+# with, since #1626, `realistic-wreath.browser.spec.ts`;
+# `realistic-town.browser.spec.ts`; and `realistic-mapped.browser.spec.ts`
+# with, since #1815, `realistic-delivery.browser.spec.ts` — a job each, on one
+# worker under the same
+# 840 s stop. `nightly-split.test.ts` holds every nightly spec in exactly one,
+# and each shard's realistic loads inside 60 % of the stop.
+pnpm run test:browser:nightly:shard-1
+pnpm run test:browser:nightly:shard-2
+pnpm run test:browser:nightly:shard-3
+pnpm run test:browser:nightly:shard-4
+pnpm run test:browser:nightly:shard-5
+
+# The browser gate as CI runs it, in three parts (#1720, §4c §"Three browser
+# shards"): each builds both pages and runs the `chromium` project over the
+# spec files it names, on the whole gate's workers and stop; the third runs
+# the `game` project after its part. Together they are `test:browser`, every
+# spec in exactly one, which `nightly-split.test.ts` holds: a NEW spec file
+# goes into one of these lists in the same pull request, or that test is red.
+pnpm run test:browser:shard-1
+pnpm run test:browser:shard-2
+pnpm run test:browser:shard-3
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth
@@ -365,8 +418,15 @@ pnpm --filter @onyourleft/web run test
 # names it; the default is `ktx` on the PATH), a second pinned TOOL that makes
 # every KTX2 texture, byte-stable, so `--check` still compares byte for byte.
 # `apps/web/tools/realistic/sources.ts` §`PINNED_KTX` says how it was installed.
+# ⚠️ Since #1283 a third pinned TOOL makes the generated trees: EZ-Tree 1.1.0, a
+# devDependency `pnpm install` brings (§`PINNED_EZ_TREE`), refused at any other
+# version, and run under the repository's Node (`.nvmrc`). A tree whose numbers are
+# not the digests `generated-trees.ts` records is refused before Blender runs;
+# `--geometry` prints what the committed seeds and parameters make today, to
+# record after one is changed on purpose, and needs neither Blender nor `ktx`.
 pnpm --filter @onyourleft/web run realistic:fetch
 pnpm --filter @onyourleft/web run realistic:process --check
+pnpm --filter @onyourleft/web run realistic:process --geometry
 pnpm --filter @onyourleft/web run realistic:stage
 
 # Regenerate the map's label glyphs (#578) from the committed Roboto v2.138.
@@ -487,7 +547,11 @@ OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance s
 # server never migrates), `backup <dir> [--keep N] [--copy-to <dir>]` (an
 # online VACUUM INTO and the blobs), `restore <snapshot> [--force]` (checked
 # against the snapshot's manifest), `verify`, and `room-open <id> --kind
-# ride|race --length <m>` (until #784/#785). They act on OYL_INSTANCE_DATABASE
+# ride|race --length <m>` (until #784/#785), `load-accounts add|erase`
+# (#1383, below), and `account-erase [--confirm]` (#1802: one rider's account,
+# found by the recovery code they emailed, read from standard input and never
+# printed; erased only with --confirm, as their own erasure does it; its test is
+# src/operator/account-erase.test.ts). They act on OYL_INSTANCE_DATABASE
 # and OYL_INSTANCE_BLOBS. docs/operating-an-instance.md says what each does.
 pnpm --filter @onyourleft/instance run operator migrate
 
@@ -498,6 +562,48 @@ pnpm --filter @onyourleft/instance run operator migrate
 # the run). NOT a gate: it needs the real tunnel. Run locally against the
 # image for one minute on 2026-09-29 (no disconnect, 59 frames each).
 pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … --minutes 30
+
+# #464's race-length load run: N riders (keys from `race-load keys`) race one
+# `room-open … --kind race` room through the public hostname to the line, and
+# it reports frame lateness, missing ticks, disconnects, rejoins and bytes.
+# NOT a gate. ⚠️ The riders must be ticketable: on an `approval` instance a new
+# key is a PENDING account and is refused a ticket. Its local test races 3
+# riders to a 40 m line (~12 s). #1383: in the instance
+# container, `load-accounts add` reads the public keys `race-load keys` printed
+# on standard input and makes each an APPROVED throwaway account (`Load N`,
+# marked `load_run_at`); `load-accounts erase` erases every marked account
+# through a rider's own erasure path and prints how many. Registration stays
+# `approval`; no route reaches either; a key any account already holds is
+# refused. Its test races 2 such riders on an `approval` instance (~16 s);
+# the two `docker exec` lines below have NOT yet been run against the image.
+pnpm --filter @onyourleft/instance run race-load ride --url https://… --room … --keys <file>
+docker exec -i <container> node src/operator/cli.ts load-accounts add < public-keys.txt
+docker exec <container> node src/operator/cli.ts load-accounts erase
+
+# #1235's round-trip measurement (spike 0023): a throwaway device starts an
+# analysis job, follows it to its decrypted result and times every leg it can
+# see, sealed by default, `--transport plaintext` against an instance with no
+# keys as the control. NOT a gate: it needs a running instance with an analysis
+# model that admits a new device. Run over loopback on 2026-10-11; ⚠️ never
+# yet through the tunnel.
+pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --cold-runs 5 --unload 'ollama stop <model>'
+# The same, on a HOSTED model and a key of your own (spike 0023 §11):
+# `--hosted-url` and `--hosted-model` together. ⚠️ The key is read from
+# OYL_MEASURE_HOSTED_KEY and from nowhere else: it is not an argument, an
+# option the command does not have (`--hosted-key` too) is refused by name and
+# never with its value, and the key is printed nowhere. Set it from a file for
+# the one command, as below. Each throwaway account stores it, consents to the
+# URL's origin and pushes an empty masking item; when the run ends or throws,
+# the key and consent are cleared and read back (`hosted.cleared` in the
+# report; exit 3, and a last stderr line saying to revoke the key, when one was
+# not). Sealed only; refused with `--unload` (a hosted model has no cold runs).
+# ⚠️ "Sealed" is less than the app's: the tool pins no instance and checks no
+# key statement (ADR 0047 D-5, D-6), it seals to whatever key `--url` serves.
+# So hosted needs an `https:` or loopback `--url`, and over `https:` the key is
+# sealed to whoever terminates TLS for that name. Use a key you can revoke. A
+# run that is KILLED clears nothing: revoke the key. Run once against a real
+# hosted service, through the tunnel, on 2026-10-11 (spike 0023 §11).
+OYL_MEASURE_HOSTED_KEY="$(cat key-file)" pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --hosted-url https://… --hosted-model <name>
 
 # Migrate an instance database file by hand (#769): `status`, `latest`, `up`
 # (one) or `down` (one), each printing the applied migrations and every table's
@@ -573,8 +679,10 @@ npm view typescript-eslint peerDependencies.typescript
 # since #780 requires /ready to be `ready` (IMG007: the store opened, so its
 # runtime dependencies are in the image). IMG001-IMG005: since #841 the base
 # image must be pinned by digest (IMG005) and is pulled as its own step, so a
-# Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
-# than an IMG001 that reads like a broken Dockerfile. ⚠️ Since #852 that is
+# registry that will not serve it is IMG004 -- the registry, named -- rather
+# than an IMG001 that reads like a broken Dockerfile. Since #1231 every base
+# image must come from the project's GHCR mirror, ghcr.io/openzigs/ (IMG008),
+# never Docker Hub (§4c). ⚠️ Since #852 that is
 # EVERY `FROM`, in any case, with options such as `--platform=` before the
 # image; a stage naming an earlier stage, and `scratch`, are not base images.
 # Until then it read the first line beginning `FROM` alone. A base image already
@@ -589,6 +697,14 @@ bash scripts/check-instance-image.sh
 # and waits for nothing; every IMG id has a case that goes red. 71 cases on
 # 2026-09-29 (69 with #780 before #864's merge, 62 with #864 alone, 43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
+
+# The mirror's script and its suite (#1231). The script copies Docker Hub's
+# official image, by the digest the Dockerfile pins, to ghcr.io/openzigs/, and
+# needs skopeo and a GHCR login with `packages: write`, so it is run by
+# .github/workflows/mirror-base-image.yml and not by hand. The suite fakes
+# `skopeo` and needs neither; it runs in the required `checks` shard.
+bash scripts/mirror-base-image.sh
+bash scripts/mirror-base-image.test.sh
 
 # The same image by hand. The commit is a REQUIRED build argument: the build
 # fails without it, rather than an instance that cannot say which source it
@@ -680,12 +796,12 @@ The stack the workspace is built on is decided in ADR 0005 and is not open:
 | Concern | Decision |
 |---|---|
 | Language | TypeScript **6.0.3** — *not* 7.x, see §8 |
-| Runtime | Node **24 "Krypton"** (Active LTS until 2026-10-20) |
+| Runtime | Node **26** (Active LTS from 2026-10-28; ADR 0005's amendment of 2026-10-29) |
 | Package manager | **pnpm 11** workspaces |
 | Web client | React 19 + Vite 8 |
 | Styling | `theme.css` over `design/tokens.ts`, and since #950 Tailwind CSS **4.3.3** utilities built from those tokens (`tw:` prefix, no preflight) — [ADR 0042](../adr/0042-tailwind-and-radix-over-the-tokens.md) |
 | Headless UI primitives | Radix, one package per primitive, lazily loaded — `@radix-ui/react-alert-dialog` 1.1.23 since #950 (ADR 0042 D-6) |
-| Test runner | Vitest 4.1.11 + `@vitest/coverage-v8` |
+| Test runner | Vitest 4.1.12 + `@vitest/coverage-v8` |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Typechecker | `tsc --noEmit` |
 | Local data layer | IndexedDB via **Dexie 4.4.5** |

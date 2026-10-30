@@ -23,7 +23,7 @@
  * twice is two sentences that drift.
  */
 
-import { TREND_WINDOW, type WorkoutRescue } from '@onyourleft/domain';
+import { TREND_WINDOW, type Watts, type WorkoutRescue } from '@onyourleft/domain';
 
 /**
  * What opens the sentence when it is SPOKEN, on either screen — so the one
@@ -38,6 +38,19 @@ export function isEasedAnnouncement(event: {
   readonly text: string;
 }): boolean {
   return event.kind === 'workout-fault' && event.text.startsWith(EASED_SPOKEN_PREFIX);
+}
+
+/**
+ * The reason a stall RELIEF is told by, in place of the rescue's own, when it
+ * lowers nothing — #1305's second pass. The block was itself at or under the
+ * trainer's minimum, so the trainer already held the minimum, and the relief's
+ * smaller number is raised to the same minimum: "it has been eased" would be
+ * untrue. `workout/session.ts` §`rescueAsTold` decides when.
+ *
+ * ⚠️ Rider-facing wording awaiting the owner's approval (#1305).
+ */
+export function reliefAtFloorReason(minimum: Watts): string {
+  return `The trainer is holding its lowest target, ${String(minimum)} W, so it cannot be eased any further.`;
 }
 
 /** Where the sentence is shown, which decides how it says to leave the workout. */

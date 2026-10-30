@@ -21,7 +21,7 @@
 #   the two files #852 took out of coverage (28 s on run 36634388848). The
 #   fuzz is a robustness sweep over the decoder: the named refusals the
 #   decoder makes -- XXE, bad CRC, the bounds -- are unit tests that stay in
-#   the required `test:coverage`. `check:test-split`, which stays required,
+#   the required `test:required`. `check:test-split`, which stays required,
 #   still fails a file that is in no Vitest run. Since #1076 it also runs
 #   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
 #   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
@@ -34,6 +34,26 @@
 #   D-3); the one is the reflow walk's DARK palette (#1076, the owner's
 #   ruling of 2026-10-03), whose light-palette twin stays required. `nightly-split.test.ts`, in the required suite, fails a tag that
 #   list does not name and a script or workflow that stops running them.
+#   Since #1675 CI runs it in two halves, `test:browser:nightly:shard-1` in
+#   the `heavy` job and `test:browser:nightly:shard-2` in `browser-2`, and
+#   the reporter `apps/web/browser/not-run-reporter.ts` names any test a run
+#   did not reach and fails the run for it.
+#
+# And, since #1280 (the owner's ruling of 2026-10-12), the one thing here that
+# is a REPORT rather than a check:
+#
+#   test:coverage -- the files the required job runs as `test:required`, run
+#   again under V8's coverage, with the table published to this run's summary
+#   and the HTML uploaded as the `coverage-report` artefact. Taking coverage
+#   in the required job cost it 106 to 133 s on the EPYC 7763 (run
+#   38243281606) while that job was being cancelled at its stop with every
+#   test green. No test left the required job: `check:test-split` fails the
+#   two scripts if their excludes differ. Coverage is reported, never gated
+#   (ADR 0005 decision C), so what moved is a table, from every pull
+#   request's run summary to one run a night. Since #1701 it is the
+#   `coverage` job, on a runner of its own: after browser shard 1 in `heavy`
+#   it took that job to 1 242 s of its 1 800 s stop (run 40853930991), and a
+#   slow runner would have cancelled shard 1's tests with it.
 name: Nightly heavy checks
 
 # `schedule` and `workflow_dispatch`, plus a pull request that changes THIS
@@ -54,13 +74,21 @@ on:
       - .github/workflows/nightly.yml
       - apps/web/browser/nightly.ts
       - apps/web/browser/game.browser.spec.ts
+      - apps/web/browser/not-run-reporter.ts
       - apps/web/browser/realistic.browser.spec.ts
+      - apps/web/browser/realistic-delivery.browser.spec.ts
+      - apps/web/browser/realistic-ride.ts
+      - apps/web/browser/realistic-mapped.browser.spec.ts
+      - apps/web/browser/realistic-town.browser.spec.ts
+      - apps/web/browser/realistic-trees.browser.spec.ts
       - apps/web/browser/reflow.browser.spec.ts
       - apps/web/playwright.config.ts
+      - apps/web/package.json
       - apps/web/src/game/near-field.test.ts
       - apps/web/src/game/realistic-textures.test.ts
       - package.json
       - packages/fit/tools/fuzz/decode-fuzz.test.ts
+      - scripts/coverage-summary.mjs
 
 # Read-only by default. Only the reporting job widens it, to issues alone.
 permissions:
@@ -77,7 +105,11 @@ jobs:
     # repository (CLAUDE.md section 8).
     runs-on: ubuntu-latest
     # A stop, not a budget. The browser half stops itself first
-    # (playwright.config.ts GATE_BUDGET_MS).
+    # (playwright.config.ts GATE_BUDGET_MS). The coverage run was in this job
+    # from #1280 to #1701 and is the `coverage` job now; docs/agents/ci.md
+    # section 4c "Coverage in a job of its own -- #1701" has what each
+    # measured, and nightly-split.test.ts holds every nightly job's slowest
+    # measured run inside 60 % of its stop.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -93,8 +125,8 @@ jobs:
         run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
 
       - name: Set up Node
-        #   gh api repos/actions/setup-node/git/ref/tags/v7.0.0 --jq .object.sha
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.1.0 --jq .object.sha
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -102,6 +134,7 @@ jobs:
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
         run: |
+          npm install --global --ignore-scripts corepack@0.36.0
           corepack enable pnpm
           pnpm --version
 
@@ -122,24 +155,308 @@ jobs:
 
       # One worker: the realistic loads draw on the CPU through SwiftShader,
       # and two of them side by side took about twice as long each (#651).
-      - name: Nightly browser checks
-        run: pnpm run test:browser:nightly
+      # ⚠️ ONE SHARD of the nightly browser checks since #1675, and a reviewer
+      # who remembers this step running `test:browser:nightly` is reading the
+      # old file: on one worker the whole set took 804 s of its 840 s stop
+      # (run 40141730529) and three runs stopped there with 9 to 15 not run.
+      # This shard is every nightly spec but the owner's realistic page, whose
+      # four spec files the `browser-2` to `browser-5` jobs
+      # below run, each on a runner of its own, so each still has the CPU to
+      # itself (#1698: the page's one file outgrew one job, reaching 840 s on
+      # run 40188796060). Split by FILE rather than with `--shard`, which
+      # balances by test count and would have put the game spec's 54 cases
+      # alone in one half and every other file in the other: the game spec's
+      # loads share one worker fixture, so dividing that file would pay for
+      # them twice. nightly-split.test.ts holds every nightly spec in exactly
+      # one shard, and each realistic shard's page loads inside 60 % of its
+      # stop. docs/agents/ci.md section 4c "Four nightly browser shards --
+      # #1698" has the measurements.
+      - name: Nightly browser checks (1 of 5)
+        run: pnpm run test:browser:nightly:shard-1
+
+  # The coverage report (#1280), in a job of its own since #1701: in `heavy`,
+  # after browser shard 1, it was 679 to 783 s of a job that reached 1 242 s
+  # of its 1 800 s stop, and it grows with every test file. On a runner of its
+  # own a slow report cannot cancel a browser check, nor a browser check the
+  # report. No Chromium: the required job's Vitest files run in `jsdom` and
+  # Node, and its `Tests` shard installs no browser either. Every other step
+  # and pin is `heavy`'s, whose comments say why.
+  coverage:
+    name: Nightly coverage report
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the run took 679 to 783 s as a step of `heavy`,
+    # and docs/agents/ci.md section 4c "Coverage in a job of its own -- #1701"
+    # has what it measured here.
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The required job's Vitest files, under coverage. Its `!cancelled()` is
+      # #1280's, from when it followed the browser checks in `heavy`; the two
+      # steps after it keep theirs so that a red run still publishes what it
+      # measured. ⚠️ A test that fails HERE turns this job red and opens the
+      # nightly issue, and that is meant: these are the required job's own tests, so a failure
+      # here and not there is a case that passes only without instrumentation
+      # -- a timeout tuned too close (docs/agents/ci.md section 4c), which is worth an
+      # issue. The coverage FIGURES gate nothing, here or anywhere.
+      - name: Tests under coverage
+        if: ${{ !cancelled() }}
+        run: pnpm run test:coverage
+
+      # Reported, never gated -- ADR 0005 decision C and CLAUDE.md section 5
+      # make the mutation list the gate and forbid a percentage floor. It
+      # cannot fail the job: the renderer exits non-zero only when the report
+      # is missing or unparseable, and `|| true` keeps even that from turning a
+      # reporting step into a gate. `!cancelled()` so a failing suite still
+      # publishes what it measured.
+      - name: Publish the coverage summary
+        if: ${{ !cancelled() }}
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true
+
+      # The full HTML report, for the run where a number in the table above
+      # looks wrong and the question is which line.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload the coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # The owner's realistic page, in three jobs since #1698 (one, `browser-2`,
+  # since #1675): each of its spec files on a runner of its own, because each
+  # lever adds a load of the page and the one file reached its 840 s stop on
+  # run 40188796060 with every case green. This one is
+  # `realistic.browser.spec.ts`: the instruments (#616) and the route's
+  # season (#1623). Every step and pin is `heavy`'s, whose comments say why.
+  browser-2:
+    name: Nightly browser checks (2 of 5)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the Playwright run stops itself at 840 s
+    # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Nightly browser checks (2 of 5)
+        run: pnpm run test:browser:nightly:shard-2
+
+  # `realistic-trees.browser.spec.ts`: the page's tree levers (#1283, #1294,
+  # #1523). As `browser-2`, whose comment says why it is a job of its own.
+  # A deliberate copy of `browser-2` (and `browser-4` and `browser-5` of
+  # both), not a matrix: `nightly-split.test.ts` holds each shard in a job of
+  # its own, so a change to one job's steps or SHA pins is made in all four.
+  browser-3:
+    name: Nightly browser checks (3 of 5)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the Playwright run stops itself at 840 s
+    # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Nightly browser checks (3 of 5)
+        run: pnpm run test:browser:nightly:shard-3
+
+  # `realistic-town.browser.spec.ts`: the village road (#1559), the holiday
+  # decorations (#1624) and the village frame's freeze (#1689). As
+  # `browser-2`, whose comment says why it is a job of its own.
+  browser-4:
+    name: Nightly browser checks (4 of 5)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the Playwright run stops itself at 840 s
+    # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Nightly browser checks (4 of 5)
+        run: pnpm run test:browser:nightly:shard-4
+
+  # `realistic-mapped.browser.spec.ts`: the mapped-blobs lever (#1657) and
+  # the city centre (#1636), out of `browser-4` since the combined PR that
+  # brought #1636 and #1689 together took it past 7 loads; since #1815 also
+  # `realistic-delivery.browser.spec.ts`, Delivery's village ceiling, because
+  # `browser-4` holds 7. As `browser-2`, whose comment says why it is a job of
+  # its own.
+  browser-5:
+    name: Nightly browser checks (5 of 5)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the Playwright run stops itself at 840 s
+    # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Nightly browser checks (5 of 5)
+        run: pnpm run test:browser:nightly:shard-5
 
   # A red nightly run has to be SEEN, or moving a check here is deleting it.
   # Opens an issue the first time, and comments on it while it stays open.
   report:
     name: Report a red run
-    needs: heavy
+    # Every job since #1675 (four since #1698, five since #1636 met #1689, six
+    # since #1701's `coverage`): a red realistic shard has to open the issue too.
+    needs: [heavy, coverage, browser-2, browser-3, browser-4, browser-5]
     # `result` rather than `failure()`: a job stopped by its timeout-minutes
     # ends `cancelled`, not `failed`, and a hung run must be reported too.
     # (A run cancelled by hand is reported as well; that is the cheaper error.)
     if: >-
       always() && github.event_name != 'pull_request' &&
-      (needs.heavy.result == 'failure' || needs.heavy.result == 'cancelled')
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # This job's token may write issues and nothing else -- not contents, not
     # pull requests. It checks nothing out and runs no repository code.
+    # Reading which step of this run failed (below) needs no more than that
+    # on a public repository: measured with this permission block exactly,
+    # run 38262275064 (#1285).
     permissions:
       issues: write
     steps:
@@ -149,9 +466,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HEAD_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        # One issue for every nightly failure, so the body names the step that
+        # went red: since #1280 a test that fails only under coverage lands
+        # here beside a browser check and a fuzz case. `cancelled` as well as
+        # `failure`, for the step a job's stop cut short. A read that fails
+        # must not cost the issue itself, so it falls back to saying so.
         run: |
           title='Nightly heavy checks failed'
+          steps=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | .name as $job | .steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \($job): \(.name) (\(.conclusion))"' || true)
           body="The nightly run failed on ${HEAD_SHA}: ${RUN_URL}
+
+          What went red:
+          ${steps:-(the steps could not be read; open the run)}
 
           These checks are not required and cannot block a merge (docs/agents/ci.md section 4c, #866), so this issue is how a break in them is seen. Close it once a nightly run is green again."
           existing=$(gh issue list --state open --search "\"${title}\" in:title" --json number,title \

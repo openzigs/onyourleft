@@ -11,7 +11,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { formatDuration } from '../format';
-import { RECOVERABLE_LIMIT, recoverableRides } from './recovery';
+import { RECOVERABLE_LIMIT, recoverableRides, unreadableRecordings } from './recovery';
 
 const ATHLETE = toAthleteId('athlete-a');
 
@@ -130,5 +130,32 @@ describe('what is never offered back', () => {
 
   it('offers nothing at all when the device is holding nothing', () => {
     expect(recoverableRides([])).toEqual([]);
+  });
+});
+
+describe('a header that did not all read (#1325)', () => {
+  it('offers no Continue for a ride whose pauses did not read, and says which field', () => {
+    const [ride] = recoverableRides([{ ...row('a', 'recording', 100, 400), damaged: ['pauses'] }]);
+    expect(ride?.kind).toBe('interrupted');
+    expect(ride?.canContinue).toBe(false);
+    expect(ride?.damaged).toEqual(['pauses']);
+  });
+
+  it('says nothing is damaged of a header that read', () => {
+    const [ride] = recoverableRides([row('a', 'recording', 100, 400)]);
+    expect(ride?.damaged).toEqual([]);
+    expect(ride?.canContinue).toBe(true);
+  });
+
+  it('reports the unreadable ones by id, never the one in progress, and bounded', () => {
+    const many = Array.from({ length: RECOVERABLE_LIMIT + 3 }, (_, index) => ({
+      id: recordingSessionId(`broken-${String(index)}`),
+    }));
+    expect(
+      unreadableRecordings([{ id: recordingSessionId('live') }, ...many.slice(0, 1)], {
+        excluding: recordingSessionId('live'),
+      }),
+    ).toEqual(['broken-0']);
+    expect(unreadableRecordings(many)).toHaveLength(RECOVERABLE_LIMIT);
   });
 });

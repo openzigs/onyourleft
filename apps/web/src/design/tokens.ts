@@ -563,7 +563,7 @@ export const TYPE_SCALE_RATIO = 1.25;
  *
  * Steps −1 through 3 are the reading sizes and are contiguous: caption, body,
  * lead, section heading, page heading. `metric` skips to 6 because it is not a
- * reading size at all — see the note on it below.
+ * reading size at all — see the note on it below — and `zoom` to 9 (#1433).
  */
 export const TYPE_SCALE_STEPS = {
   sm: -1,
@@ -573,6 +573,7 @@ export const TYPE_SCALE_STEPS = {
   xxl: 3,
   display: 4,
   metric: 6,
+  zoom: 9,
 } as const satisfies Record<string, number>;
 
 /**
@@ -623,6 +624,19 @@ export const FONT_SIZE_TOKENS = {
    * criterion still holds with room.
    */
   metric: '3.814697265625rem',
+  /**
+   * Step 9 (#1433): a ride metric with the Ride screen's zoom on — the top two
+   * readings and no others, sized to be read in one short glance.
+   *
+   * The stated target is ISO 15008's recommended character height for a
+   * display read in a glance (20 arcmin, via NHTSA's human-factors guidance)
+   * at #49's two metres — 11.6 mm, and so about 2.7 times that at arm's length.
+   * `ride/MetricGrid.tsx` §`ZOOMED_DIGIT_FLOOR_PIXELS` turns it into a digit
+   * height and `rideview.browser.spec.ts` §"#1433" measures the rendered digit
+   * against it at phones and tablets. Step 8 (95 px) draws a digit short of it
+   * in the display face; step 9 is 119 px.
+   */
+  zoom: '7.450580596923828rem',
 } as const satisfies Record<string, string>;
 
 /**

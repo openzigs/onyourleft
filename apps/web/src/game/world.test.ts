@@ -48,9 +48,16 @@ import {
   WORLD_HIGHEST_LAND_METRES,
   WORLD_SAMPLE_LIMIT,
   fogFactor,
+  groundColourIn,
   irradianceOn,
+  roofSnowIn,
+  routeHemisphere,
+  routeLatitudeMagnitude,
+  snowCoverIn,
+  treeLineMetres,
   worldStyle,
 } from './world';
+import { natureOn, type CalendarDay } from './season';
 
 /**
  * A straight route at a latitude and an altitude, of a given length.
@@ -511,5 +518,115 @@ describe('the sun', () => {
 
     expect(alpine.y).not.toBeCloseTo(tropical.y, 3);
     expect(worldStyle(routeAt({ latitude: 46, altitude: 1800 })).sun).toEqual(alpine);
+  });
+});
+
+/**
+ * Snow by the route's real season — #1623. Every colour here is read from
+ * `groundColourIn`, the function the realistic world's ground mesh is drawn
+ * in (`three-renderer.ts` §`#stage`), with the winter `season.ts` §`natureOn`
+ * gives the route's own hemisphere and latitude, as `GameView` hands it.
+ */
+describe('the ground under the route’s own winter — #1623', () => {
+  const on = (month: number, day: number): CalendarDay => ({ year: 2026, month, day });
+  const winterOf = (profile: RouteProfile, day: CalendarDay): number =>
+    natureOn(day, routeHemisphere(profile), routeLatitudeMagnitude(profile)).winter;
+  /** The ground a route is drawn on, on a day. */
+  const groundOn = (profile: RouteProfile, day: CalendarDay): number =>
+    groundColourIn(worldStyle(profile), winterOf(profile, day));
+  const coverOn = (profile: RouteProfile, day: CalendarDay): number =>
+    snowCoverIn(worldStyle(profile), winterOf(profile, day));
+  const everyFortnight: readonly CalendarDay[] = Array.from({ length: 24 }, (_, index) =>
+    on(Math.floor(index / 2) + 1, index % 2 === 0 ? 1 : 15),
+  );
+  /** Snow, as this file paints the ground a kilometre above the tree line. */
+  const snow = worldStyle(routeAt({ latitude: 46, altitude: 5000 })).groundColour;
+
+  it('draws a sea-level route near the equator with no snow on any day', () => {
+    const tropical = routeAt({ latitude: 5, altitude: 0 });
+    for (const day of everyFortnight) {
+      expect(coverOn(tropical, day)).toBe(0);
+      expect(groundOn(tropical, day)).toBe(worldStyle(tropical).groundColour);
+    }
+  });
+
+  it('covers a sea-level route at 60° N in mid-January, and not in mid-July', () => {
+    const north = routeAt({ latitude: 60, altitude: 0 });
+    expect(coverOn(north, on(1, 15))).toBe(1);
+    expect(groundOn(north, on(1, 15))).toBe(snow);
+    expect(coverOn(north, on(7, 15))).toBe(0);
+    expect(groundOn(north, on(7, 15))).toBe(worldStyle(north).groundColour);
+    expect(worldStyle(north).groundColour).not.toBe(snow);
+  });
+
+  it('covers the mirrored southern route in mid-July, and not in mid-January', () => {
+    const south = routeAt({ latitude: -60, altitude: 0 });
+    expect(routeHemisphere(south)).toBe('south');
+    expect(coverOn(south, on(7, 15))).toBe(1);
+    expect(groundOn(south, on(7, 15))).toBe(snow);
+    expect(coverOn(south, on(1, 15))).toBe(0);
+    expect(groundOn(south, on(1, 15))).toBe(worldStyle(south).groundColour);
+  });
+
+  it('is plausible, not festive: a sea-level route at 50° N stays green in mid-January', () => {
+    // The North Sea's south and the Channel: a winter there does not lie to the coast.
+    expect(coverOn(routeAt({ latitude: 50, altitude: 0 }), on(1, 15))).toBe(0);
+    // But the same winter whitens its hills: the line coming down, not a switch.
+    const hills = routeAt({ latitude: 50, altitude: 700 });
+    expect(coverOn(hills, on(1, 15))).toBeGreaterThan(0.3);
+    expect(coverOn(hills, on(7, 15))).toBe(0);
+  });
+
+  it('brings the snow down by the header’s own table, and never up', () => {
+    // §"How far a winter brings the snow down", row by row, to the metre.
+    const rows: readonly (readonly [number, number])[] = [
+      [40, 0],
+      [45, 443],
+      [50, 914],
+      [55, 1386],
+      [60, 1857],
+      [65, 2329],
+    ];
+    for (const [latitude, lowering] of rows) {
+      const world = worldStyle(routeAt({ latitude, altitude: 0 }));
+      expect(Math.round(world.snow.winterLoweringMetres)).toBe(lowering);
+      expect(world.snow.aboveSnowMetres).toBeCloseTo(-treeLineMetres(latitude), 6);
+    }
+    // Every depth of winter covers at least what a shallower one does.
+    const alpine = worldStyle(routeAt({ latitude: 46, altitude: 1500 }));
+    let previous = snowCoverIn(alpine, 0);
+    expect(previous).toBeGreaterThan(0);
+    for (const winter of [0.2, 0.4, 0.6, 0.8, 1]) {
+      const cover = snowCoverIn(alpine, winter);
+      expect(cover).toBeGreaterThanOrEqual(previous);
+      previous = cover;
+    }
+    expect(previous).toBeGreaterThan(snowCoverIn(alpine, 0));
+  });
+
+  it('draws exactly today’s ground with no winter, and for a route with no positions', () => {
+    for (const latitude of [0, 23, 46, 60, 75]) {
+      for (const altitude of [-430, 0, 700, 1600, 3000, 8849]) {
+        const world = worldStyle(routeAt({ latitude, altitude }));
+        expect(groundColourIn(world, 0)).toBe(world.groundColour);
+        expect(roofSnowIn(world, 0)).toBe(0);
+      }
+    }
+    // A profile may carry no positions: its hemisphere is unknown, and it has no season.
+    const placeless: RouteProfile = { ...routeAt({ latitude: 60, altitude: 0 }), positions: [] };
+    expect(routeHemisphere(placeless)).toBe('unknown');
+    for (const day of everyFortnight) {
+      expect(groundOn(placeless, day)).toBe(worldStyle(placeless).groundColour);
+    }
+  });
+
+  it('puts snow on a roof only in a winter, as deep as the ground’s', () => {
+    const north = worldStyle(routeAt({ latitude: 60, altitude: 0 }));
+    expect(roofSnowIn(north, 0.93)).toBeCloseTo(0.93, 6);
+    // Above the tree line the ground is snow in July, and a roof is bare.
+    const alpine = worldStyle(routeAt({ latitude: 46, altitude: 3000 }));
+    expect(snowCoverIn(alpine, 0)).toBeGreaterThan(0.5);
+    expect(roofSnowIn(alpine, 0)).toBe(0);
+    expect(roofSnowIn(alpine, 1)).toBe(1);
   });
 });

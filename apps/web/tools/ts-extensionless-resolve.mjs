@@ -4,7 +4,7 @@
  * A module resolve hook that lets `node` run this app's authoring-time
  * TypeScript — the `realistic:*` scripts in `package.json` (#430, #478).
  *
- * Node 24 strips types from a `.ts` file it is given, but it does not resolve
+ * Node 26 strips types from a `.ts` file it is given, but it does not resolve
  * an extensionless specifier: `import { LOCK } from './fetch-assets'` fails
  * with `ERR_MODULE_NOT_FOUND`, and a directory specifier fails with
  * `ERR_UNSUPPORTED_DIR_IMPORT`. So both spellings are tried — `./y.ts` and

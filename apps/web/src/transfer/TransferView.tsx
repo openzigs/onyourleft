@@ -44,7 +44,7 @@ import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/St
 import { useUnits } from '../units/context';
 import { formatDistance, measurementText, shownDistance } from '../units/format';
 
-import { ActivityExportError, exportActivity, LOSSY_CHANNELS } from './export-activity';
+import { ActivityExportError, exportActivity, lossyChannelNames } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
 import {
   importActivityFiles,
@@ -89,7 +89,7 @@ export const FILES_KEPT_VISIBLE: readonly string[] = [
   // EVERYTHING, and what it cannot reach, stay here.
   ...ERASE_CANNOT_REACH,
   'This removes everything this device holds about you.',
-  'There is no server and nothing has been uploaded, so there is nowhere else to ask',
+  'When this finishes, it is finished on this device only.',
   'What this cannot reach:',
   'Erasing the signing key cannot be undone, and it cannot be recreated.',
   'Rides you have already exported go on verifying forever, but after this the device signs as a new identity.',
@@ -720,7 +720,7 @@ function ExportPanel({
     );
   }
 
-  const lossy = LOSSY_CHANNELS[format];
+  const lossy = lossyChannelNames(format);
   return (
     <>
       <p className="oyl-muted" data-oyl-kept-visible="">
@@ -1114,9 +1114,11 @@ function ErasePanel({
       const outcome = await eraseDevice(port.store, port.athleteId, {
         drafts: port.drafts,
         theme: port.theme,
-        hostedModel: port.hostedModel,
+        retiredHostedKey: port.retiredHostedKey,
         instance: port.instance,
         heldSnapshots: port.heldSnapshots,
+        instanceAnalysis: port.instanceAnalysis,
+        trainerTargets: port.trainerTargets,
         athlete: port.athleteRow,
       });
       setDone(eraseSentence(outcome));
@@ -1179,9 +1181,8 @@ function ErasePanel({
         </SectionHeading>
         <KeptVisible>
           <p>
-            This removes everything this device holds about you. There is no server and nothing has
-            been uploaded, so there is nowhere else to ask &mdash; when this finishes, it is
-            finished.
+            This removes everything this device holds about you. When this finishes, it is finished
+            on this device only.
           </p>
           <p className="oyl-muted">What this cannot reach:</p>
           <ul>

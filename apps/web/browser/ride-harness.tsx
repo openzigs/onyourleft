@@ -74,12 +74,18 @@ import { flushSync } from 'react-dom';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
   buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   kilograms,
+  metres,
   routeProfile,
+  seconds,
+  thresholdShare,
+  unixSeconds,
   watts,
   type RoutePoint,
   type RouteProfile,
@@ -88,18 +94,26 @@ import {
 
 import { scriptedSidePairing } from '../src/camera/testing';
 import { roomPortOver } from '../src/net/room-port';
-import { ScriptedRoom } from '../src/net/testing';
+import { frameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
+import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
+import type { LapFigures } from '../src/recording/laps';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
+import { longestReplanSentence } from './replan-longest';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
+import { corridorRide, corridorRideKind } from './ride-corridor';
+import { writeDeliveryAssist } from '../src/game/delivery/assist-preference';
+import { writeDeliveryProgress } from '../src/game/delivery/delivery-progress';
+import { deliveryTown } from '../src/game/delivery/delivery-town-testing';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -271,7 +285,7 @@ function route(): RouteProfile {
 /**
  * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SEVEN
  * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
- * `ride.browser.spec.ts` §"#940" can choose the last card and measure where
+ * `pre-ride.browser.spec.ts` §"#940" can choose the last card and measure where
  * *Ride* is. The first route is the ridden fixture's own, so everything the
  * chooser shows above *Ride* is what the ridden page's rider saw.
  *
@@ -378,13 +392,63 @@ function restoreTheList(): void {
   document.head.append(style);
 }
 
+/**
+ * `ride.html?corridor=archive` / `?corridor=none` — #1552: the ride's route
+ * read through the product's corridor port, so its world has map data or has
+ * none, and the ride screen credits OpenStreetMap or does not. @see ride-corridor.ts
+ */
+const CORRIDOR_KIND = corridorRideKind(window.location.search);
+const CORRIDOR =
+  CORRIDOR_KIND === undefined ? undefined : corridorRide(CORRIDOR_KIND, 'harness', errors);
+
+/**
+ * `ride.html?delivery=round` — #1816: the widest ride the picker starts, with
+ * a Delivery round on, started the way a developer starts one: the game's
+ * developer route (`#/game?delivery=on`, `shell/routes.ts`
+ * §`gameDeliveryFromHash`) and the Ride press. The week is day 7 with twelve
+ * houses on the round, the largest round there is (`round.ts`
+ * §`MOST_HOUSES`), and the assist is wider windows and no obstacles, each
+ * written through the product's own preference module before the shell
+ * renders, as a ride and Settings would. The route is a synthetic town whose
+ * houses stand near the road (`delivery-town-testing.ts`), handed over as the
+ * ride's corridor, so the round's houses are picked from it at the press.
+ *
+ * The page is ready with the round at its start, *12 left*.
+ * `ride-delivery.browser.spec.ts` rides it on to *10 delivered, 2 missed*
+ * itself, on Playwright's clock.
+ */
+const DELIVERY = new URLSearchParams(window.location.search).get('delivery') === 'round';
+const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
+
 const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
     Promise.resolve([
-      { id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 },
+      {
+        id: 'harness',
+        name: 'Harness hills',
+        // #1312: `?lap=riding` and `?lap=ended` ride a loop. @see LAP
+        // #1552: `?corridor=` rides the corridor fixture's route.
+        profile:
+          DELIVERY_TOWN !== undefined
+            ? DELIVERY_TOWN.profile
+            : CORRIDOR !== undefined
+              ? CORRIDOR.profile
+              : new URLSearchParams(window.location.search).get('lap') === null
+                ? route()
+                : lapCircuit(),
+        attempts: 1,
+      },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
+  ...(CORRIDOR === undefined ? {} : { loadWorldCorridor: CORRIDOR.loadWorldCorridor }),
+  // #1816: the Delivery town's corridor, ready at once, so the press fixes it.
+  ...(DELIVERY_TOWN === undefined
+    ? {}
+    : {
+        loadWorldCorridor: () =>
+          Promise.resolve({ kind: 'ready' as const, corridor: DELIVERY_TOWN.corridor }),
+      }),
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
@@ -507,8 +571,35 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
  * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
  * waits for as long as the page is open.
  */
-const IN_A_RACE = new URLSearchParams(window.location.search).get('room') === 'race';
-const RACE_ROOM = IN_A_RACE ? new ScriptedRoom() : undefined;
+const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
+/**
+ * `ride.html?room=standings` — #1347: the same race RUNNING, its room having
+ * named nine riders and sent a frame and its standings, so the HUD carries
+ * the race's standings panel at its widest: seven lines, the longest names a
+ * room admits beside realistic ones, a flag and a coaster among them.
+ * `ride-room.browser.spec.ts` §"#1347" measures it.
+ */
+/**
+ * `ride.html?room=report` — #789: that running race with the rider following
+ * the first rider *Follow* reaches and *Report* pressed, so the actions panel
+ * carries *Follow*, *Report* and the three reasons — the room row at its
+ * tallest. `?room=following` is the same with *Report* not pressed: the
+ * state the reasons open from, and `ride-room.browser.spec.ts` §"#789"'s control.
+ */
+const REPORT_OPEN = ROOM_QUERY === 'report';
+const FOLLOWING = ROOM_QUERY === 'following' || REPORT_OPEN;
+const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING;
+const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
+/**
+ * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
+ * group ride in a room whose notice slot carries a room sentence, measured by
+ * `ride.browser.spec.ts` at every overlay viewport. `paused`: the recording
+ * under the ride is paused (`GameTrainerPort.recordingPaused`), so the slot
+ * says so. `lost`: the room's socket closes and no ticket comes back, so the
+ * slot holds `ROOM_LOST_TEXT`, the longest sentence that slot carries.
+ */
+const ROOM_NOTICE = ROOM_QUERY === 'paused' || ROOM_QUERY === 'lost' ? ROOM_QUERY : undefined;
+const RACE_ROOM = IN_A_RACE || ROOM_NOTICE !== undefined ? new ScriptedRoom() : undefined;
 const RACE_PORTS =
   RACE_ROOM === undefined
     ? {}
@@ -516,24 +607,206 @@ const RACE_PORTS =
         room: roomPortOver(() => RACE_ROOM.link(), {}),
         roomId: 'harness-race',
         // The owner's ruling of 2026-09-30: only its maker is offered *Start the race*.
-        madeTheRoom: true,
+        madeTheRoom: IN_A_RACE,
         riderMass: kilograms(72),
         rooms: {
           create: () => Promise.resolve({ kind: 'unreachable' as const }),
           join: () => Promise.resolve({ kind: 'unreachable' as const }),
+          listPublic: () => Promise.resolve({ kind: 'unreachable' as const }),
+          joinPublic: () => Promise.resolve({ kind: 'unreachable' as const }),
           start: () => Promise.resolve({ kind: 'started' as const }),
           results: () => Promise.resolve({ kind: 'unreachable' as const }),
+          blockRider: () => Promise.resolve({ kind: 'unreachable' as const }),
+          noticePage: () => undefined,
         },
       };
 
+/**
+ * `?graph=hold` and `?graph=plain`: the running workout as the HUD's strip
+ * reads it (#1307). Fixed numbers, so two loads measure the same picture.
+ * Paired with `?trainer=workout`, whose route panel it is drawn in.
+ *
+ * - `hold`: in a heart-rate hold, so the strip's one lane is heart rate
+ *   against its range. `hold-silent` is the same hold with a strap gone
+ *   quiet, so the strip writes "— bpm" and draws no heart-rate line.
+ * - `plain`: the same plan with no hold and a target that STEPS inside the
+ *   window, so the lane is power against the confirmed target. `paused` is
+ *   that workout paused: the trainer holds its 50 W minimum, and the newest
+ *   sample (175 W) is from before the ease. `paused-hold` is the hold
+ *   paused (#1313): the trainer at its 50 W minimum, no hold on the snapshot
+ *   (the controller hands over none while paused), and a trace whose newest
+ *   sample still carries the range and a heart rate, so the strip's lane is
+ *   the heart-rate one and must draw nothing.
+ * - `replan` (#1244): the plain workout with an accepted re-plan waiting for
+ *   its next block — the ramp shortened by two minutes — so the strip draws
+ *   what the move replaced as a dotted outline and the HUD's actions show
+ *   *Keep the plan*, which no other state of this page does — and, since
+ *   #1329, *Switch re-plans off*, as a ride with a move waiting has re-plans on.
+ * - `replan-on` (#1329): the plain workout with re-plans on and nothing
+ *   waiting, which is most of such a workout: *Switch re-plans off* alone.
+ */
+const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
+const GRAPH_HOLD =
+  GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent' || GRAPH_KIND === 'paused-hold';
+/** `paused` and `paused-hold`: the workout paused — the trainer eased to its 50 W minimum. */
+const GRAPH_PAUSED = GRAPH_KIND === 'paused' || GRAPH_KIND === 'paused-hold';
+/** `replan`: an accepted re-plan waiting for the next block — #1244. */
+const GRAPH_REPLAN = GRAPH_KIND === 'replan';
+/** `replan` and `replan-on`: the workout has re-plans on — #1329. */
+const GRAPH_REPLANS_ON = GRAPH_REPLAN || GRAPH_KIND === 'replan-on';
+const graphPlan = (rampSeconds: number) =>
+  expandWorkout({
+    name: 'Hold',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+      { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.7) },
+      {
+        kind: 'ramp',
+        seconds: seconds(rampSeconds),
+        from: thresholdShare(0.7),
+        to: thresholdShare(0.4),
+      },
+    ],
+  });
+/**
+ * The move waiting while {@link GRAPH_REPLAN}'s page rides: what the HUD's
+ * region is offered, and since #1324 what its actions show above *Keep the
+ * plan* — {@link longestReplanSentence}. The plan drawn is the ramp shortened
+ * by two minutes: the sentence is chosen for its length and the plan for its
+ * shape, as `rideview-harness.tsx` §`REPLAN_SENTENCE` does.
+ */
+const REPLAN_WAITING = {
+  revision: 1,
+  sentence: longestReplanSentence(),
+};
+const GRAPH: WorkoutGraphInput | undefined =
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLANS_ON
+    ? {
+        ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
+        elapsedSeconds: 900,
+        // As the controller hands it over while a move waits: the REVISED
+        // plan, and what it replaced from the next block on.
+        timeline: graphPlan(GRAPH_REPLAN ? 480 : 600),
+        ...(GRAPH_REPLAN
+          ? { replaced: graphPlan(600).segments.filter((segment) => segment.block >= 2) }
+          : {}),
+        // In a hold the trainer holds what the hold last asked: 167 W.
+        holdingWatts: GRAPH_PAUSED ? 50 : GRAPH_HOLD ? 167 : 175,
+        hold: GRAPH_HOLD && !GRAPH_PAUSED ? { reason: 'lowered', target: 167 } : undefined,
+        thresholdWatts: 250,
+        trace: Array.from({ length: 300 }, (_, index) =>
+          GRAPH_HOLD
+            ? {
+                at: 601 + index,
+                target: 175 - Math.floor(index / 60) * 2,
+                asked: 175 - Math.floor(index / 60) * 2,
+                power: 170 + Math.round(8 * Math.sin(index / 9)),
+                // `hold-silent`: a strap gone quiet.
+                heartRate: GRAPH_KIND === 'hold-silent' ? undefined : 128 + Math.round(index / 25),
+                range: { low: 130, high: 140 },
+              }
+            : {
+                at: 601 + index,
+                // The write for the 70 % block lands a second after it starts,
+                // then an ease to 140 W for a minute and back: three steps.
+                target: index >= 120 && index < 180 ? 140 : 175,
+                power:
+                  (index >= 126 && index < 186 ? 142 : 173) + Math.round(8 * Math.sin(index / 9)),
+                heartRate: undefined,
+                range: undefined,
+              },
+        ),
+      }
+    : undefined;
+
+/**
+ * `ride.html?lap=riding` and `?lap=ended` — #1312: the ride is on a LOOP.
+ *
+ * - `riding`: the recording has a lap open, so the elevation strip's sentence
+ *   carries the lap's time beside the lap's number (`fields.ts`
+ *   §`profileReading`) — `59:59`, the widest a lap short of an hour reads.
+ *   No lap ends: the port answers no laps, as it does with nothing recorded.
+ * - `ended`: the same, and the rider has just completed a lap, so the notice
+ *   cell carries the finished lap. The loop is FOUR metres round, so the
+ *   harness's rider is over its line within two seconds of the start and
+ *   again every second after: the notice is up for ten seconds of ride after
+ *   each crossing, so once the first lap is done it is always on the stage.
+ *   ⚠️ That short on purpose. A forty-metre loop took eight seconds to its
+ *   first line at every viewport, which is over a minute of a gate whose
+ *   `chromium` run has 88 s to spare (docs/agents/ci.md §4c).
+ *
+ * The laps are the port's — the recording's, in the product — and the third
+ * is the WIDEST notice a ride short of an hour-long lap produces: every
+ * figure, a three-digit difference from the lap before, and the longest of
+ * the four ways the comparison with the best lap ends — the one a recording
+ * of two courses gives (`lap-text.ts` §"of this course").
+ */
+const LAP = new URLSearchParams(window.location.search).get('lap');
+const LAP_ENDED = LAP === 'ended';
+
+/** A level loop, two metres out and back, so its two ends meet. */
+function lapCircuit(): RouteProfile {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 8; index += 1) {
+    const out = index <= 4 ? index : 8 - index;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (out * 0.5) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(60),
+    });
+  }
+  return routeProfile(points, { loop: true });
+}
+
+/** One whole 35.99 km lap, in `moving` seconds. @see LAP_ENDED */
+function harnessLap(moving: number): LapFigures {
+  return {
+    startedAt: unixSeconds(1_800_000_000),
+    elapsedTime: seconds(moving),
+    movingTime: seconds(moving),
+    distance: metres(35_990),
+    averagePower: watts(342),
+    averageHeartRate: beatsPerMinute(168),
+  };
+}
+
+/**
+ * Lap 3 is the one just ended: 59:59, 124 s slower than lap 2, which is the
+ * best lap of this course — and lap 1 was another course, so the notice ends
+ * the longest way it can: `Best on this course: lap 2, 57:55.`
+ */
+const HARNESS_LAPS: readonly LapFigures[] = [
+  { ...harnessLap(3_800), distance: metres(12_000) },
+  harnessLap(3_475),
+  harnessLap(3_599),
+];
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
+  // #1312. @see LAP_ENDED
+  courseLine: (event) => (LAP_ENDED && event.kind === 'lap' ? HARNESS_LAPS : undefined),
+  rideLapSeconds: () => (LAP === 'ended' || LAP === 'riding' ? 59 * 60 + 59 : undefined),
+  runningWorkout: () => GRAPH,
+  // #1244: a re-plan waiting, which is what puts *Keep the plan* on the HUD.
+  workoutPlanChange: () => (GRAPH_REPLAN ? { waiting: REPLAN_WAITING, quiet: false } : undefined),
+  keepThePlan: () => undefined,
+  // #1329: re-plans on, which is what puts *Switch re-plans off* on the HUD.
+  workoutReplansOn: () => GRAPH_REPLANS_ON,
+  switchReplansOff: () => undefined,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
   recordingMayStop: () => MAY_STOP,
+  // #1360's re-review (R3). @see ROOM_NOTICE
+  recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
-  rideMovingSeconds: () => MOVING_SECONDS,
+  // #1221: the tallest chooser has nothing recording under it, so the line
+  // under *Ride* and its *Record this ride* are laid out and measured with the
+  // rest. This double records nothing.
+  rideMovingSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
+  recordGameRide: () => Promise.resolve(false),
   watchRide: () => () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
@@ -637,14 +910,28 @@ function measure(): StageMeasurement {
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],
     ['the side camera stop', '.oyl-hud__side-camera-stop'],
+    // #1324: a waiting re-plan's sentence, above *Keep the plan*.
+    ['the plan change', '.oyl-hud__plan-change'],
+    // #1552: the OpenStreetMap credit, on a ride with map data in its world.
+    ['the map credit', '.oyl-hud__attribution'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element !== null) {
       items.push(item(name, element));
     }
   }
-  for (const control of document.querySelectorAll('.oyl-hud__control')) {
+  // #1482: and the touch lock, which is the design system's toggle rather
+  // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.
+  for (const control of document.querySelectorAll('.oyl-hud__control, .oyl-hud__lock')) {
     items.push(item(`control: ${textOf(control)}`, control));
+  }
+  // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.
+  for (const control of document.querySelectorAll('.oyl-hud__room-row button')) {
+    items.push(item(`room: ${textOf(control)}`, control));
+  }
+  // #1816: a Delivery round's throws, a row of their own under Pause.
+  for (const control of document.querySelectorAll('.oyl-hud__throws button')) {
+    items.push(item(`throw: ${textOf(control)}`, control));
   }
   // #400: the mute and the volume, when the rider turned sounds on.
   for (const control of document.querySelectorAll('.oyl-sound button, .oyl-sound input')) {
@@ -674,9 +961,11 @@ function measure(): StageMeasurement {
     // measurement would find it "over" the panel it is inside.
     panels: [
       ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])'),
-      ...[...document.querySelectorAll('.oyl-hud__side-camera-row')].filter(
-        (each) => window.getComputedStyle(each).position === 'absolute',
-      ),
+      // #1398: so is the sound row, in a room ride on a phone on its side
+      // (`theme.css` §"A ROOM RIDE WITH SOUNDS ON, ON A PHONE").
+      ...[
+        ...document.querySelectorAll('.oyl-hud__side-camera-row, .oyl-hud__actions > .oyl-sound'),
+      ].filter((each) => window.getComputedStyle(each).position === 'absolute'),
     ].map((each) => item(each.className, each)),
     items,
     primary: labels('.oyl-hud__fields--primary'),
@@ -873,8 +1162,13 @@ async function run(): Promise<void> {
   if (host === null) {
     throw new Error('ride harness: #shell is missing from ride.html');
   }
-  // The real route, so the shell renders the real view.
-  window.location.hash = '#/game';
+  // The real route, so the shell renders the real view — and, for a Delivery
+  // round, the developer route that asks for one (#1816).
+  window.location.hash = DELIVERY ? '#/game?delivery=on' : '#/game';
+  if (DELIVERY) {
+    writeDeliveryProgress(localStorage, { day: 7, houses: 12, score: 0 });
+    writeDeliveryAssist(localStorage, { widerWindows: true, obstacles: 'none', noFail: false });
+  }
   // #400: a fresh origin every run, so absent means off.
   localStorage.removeItem(CUES_STORAGE_KEY);
   if (WITH_SOUNDS) {
@@ -938,6 +1232,16 @@ async function run(): Promise<void> {
     labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),
   );
   type(speed, '40');
+  // #1552: the corridor's read, settled on the picker before the press — the
+  // world is fixed at the press (ADR 0054 D-2.4), so a ride started mid-read
+  // is a ride with no map data.
+  if (CORRIDOR_KIND !== undefined) {
+    const settled =
+      CORRIDOR_KIND === 'archive' ? 'Towns from map data: ready' : 'Towns from map data: off';
+    await until(`the picker to say "${settled}"`, () =>
+      (document.querySelector('main')?.textContent ?? '').includes(settled) ? true : undefined,
+    );
+  }
   // A frame, so React has committed the wind before the button reads it.
   await until('the ride button to be usable', () =>
     ride.getAttribute('aria-disabled') === 'true' ? undefined : ride,
@@ -945,14 +1249,102 @@ async function run(): Promise<void> {
   ride.click();
 
   await until('the ride to take the stage', () => document.querySelector(`.${STAGE_CLASS}`));
+  // #1816: the round, at its start — twelve houses left on day 7.
+  if (DELIVERY) {
+    await until('the Delivery round at its start', () =>
+      [...document.querySelectorAll('.oyl-hud__field--delivery')].find(
+        (field) =>
+          field.querySelector('dt')?.textContent === 'Houses' &&
+          field.querySelector('dd')?.firstChild?.textContent === '12',
+      ),
+    );
+  }
   if (RACE_ROOM !== undefined) {
     // #785: the room answers the ride's hello as a race, and sends no frame.
     await until('the race room to be asked for', () =>
       RACE_ROOM.sockets.length > 0 ? RACE_ROOM : undefined,
     );
     RACE_ROOM.accept();
-    RACE_ROOM.welcome(0, 'race');
-    await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    RACE_ROOM.welcome(0, IN_A_RACE ? 'race' : 'ride');
+    if (ROOM_NOTICE !== undefined) {
+      if (ROOM_NOTICE === 'lost') {
+        // Lost, and kept lost: no ticket comes back for the rejoin.
+        RACE_ROOM.ticketAnswer = () => ({ kind: 'unreachable' });
+        RACE_ROOM.closeFromServer(1006);
+      }
+      const words = ROOM_NOTICE === 'lost' ? 'connection was lost' : 'Recording paused';
+      await until(`the room's notice`, () =>
+        [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
+          (each.textContent ?? '').includes(words),
+        ),
+      );
+    } else if (WITH_STANDINGS) {
+      // #1347: nine riders, this one fifth; 32 scalars is the longest name a
+      // room admits (`@onyourleft/domain` §`MAXIMUM_DISPLAY_NAME_SCALARS`).
+      const names = [
+        'Me',
+        'Wilhelmina Vandersteen-Oduya Mbe',
+        'Ann',
+        'Bea Ng',
+        'Cai Rhys',
+        'Dafydd ap Gwilym-Llewellyn Jones',
+        'Eve',
+        'Femi Adeyemi',
+        'Gus',
+      ];
+      names.forEach((name, riderId) => {
+        RACE_ROOM.name(riderId, name);
+      });
+      // In the room's order: this rider (0) fifth.
+      const order = [1, 2, 3, 4, 0, 5, 6, 7, 8];
+      RACE_ROOM.frame(
+        1,
+        order.map((riderId, index) => frameRider(riderId, 400 - index * 15)),
+      );
+      RACE_ROOM.standings(
+        1,
+        order.map((riderId, index) =>
+          standingsRider(
+            riderId,
+            (index - 4) * 61.4,
+            riderId === 7 ? 0 : 3 + index / 10,
+            riderId === 2 ? FLAG_PLAUSIBILITY : riderId === 7 ? FLAG_COASTING : 0,
+          ),
+        ),
+      );
+      await until('the race standings', () => document.querySelector('.oyl-hud__standings'));
+      if (FOLLOWING) {
+        // #789: Follow, on the first rider it reaches — the longest name the
+        // room admits — and, for `report`, the press that opens the reasons.
+        const follow = await until('Follow', () =>
+          labelled<HTMLButtonElement>('button', 'Follow the next rider near you'),
+        );
+        follow.click();
+        const report = await until('Report', () =>
+          labelled<HTMLButtonElement>('.oyl-hud__report', 'Report'),
+        );
+        if (REPORT_OPEN) {
+          report.click();
+          await until('the reasons', () => document.querySelector('.oyl-hud__report-reasons'));
+        }
+        // ...and the followed rider's gap as a NUMBER. A gap has none while
+        // the rider is still at rest (`fields.ts` §`timeGap`), and the dash
+        // has no "ahead of you" line under it: on the CI runner a load that
+        // was ready on a frame before the rider moved measured the top panel
+        // 14 px shorter, so the actions panel and *Pause* 14 px higher, and
+        // §"#789" compared one load's Pause against another's in two different
+        // states (PR #1388's second run). Both loads measure this one.
+        await until('the followed rider’s gap', () =>
+          [...document.querySelectorAll('.oyl-hud__field')].find(
+            (field) =>
+              field.querySelector('.oyl-hud__label')?.textContent === names[1] &&
+              field.querySelector('.oyl-hud__detail') !== null,
+          ),
+        );
+      }
+    } else {
+      await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    }
   }
   // The trainer line appears once the gradient session has written once, which
   // is a frame or two in. Waiting for it is what makes it part of every

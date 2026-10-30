@@ -275,6 +275,25 @@ describe('when the model will not load', () => {
   });
 });
 
+describe('when the rider’s instance stops, and says why — #1106', () => {
+  it('keeps the reason beside the state, for the screen to say', async () => {
+    const { link, model, analysis } = setUp();
+    link.picture();
+    await model.answer({ kind: 'unavailable', why: 'model-without-pictures' });
+    expect(analysis.sideAnalysisState()).toMatchObject({
+      model: 'unavailable',
+      unavailableBecause: 'model-without-pictures',
+    });
+  });
+
+  it('has no reason for a model that gave none', async () => {
+    const { link, model, analysis } = setUp();
+    link.picture();
+    await model.answer({ kind: 'unavailable' });
+    expect(analysis.sideAnalysisState().unavailableBecause).toBeUndefined();
+  });
+});
+
 describe('the framing check (D-7)', () => {
   const STORED: FramingReferenceRecord = { athleteId: ATHLETE, ...referenceOf(pose()) };
 

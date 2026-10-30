@@ -140,7 +140,10 @@ describe('the other refusals', () => {
   });
 
   it('names the field of a malformed statement, never its value', async () => {
-    const w = await start();
+    // On an instance with no keys, in plaintext: a statement no key signed has
+    // no device to seal it, and since #1210 an instance with keys refuses every
+    // plaintext sign-in before reading it.
+    const w = await start({ keyless: true });
     const answer = await w.call('POST', '/v1/auth/session', {
       body: {
         purpose: 'oyl-auth-v1',
@@ -150,6 +153,7 @@ describe('the other refusals', () => {
         issuedAt: 1,
         signature: '0'.repeat(128),
       },
+      plain: true,
     });
     expect(answer.status).toBe(400);
     expect(JSON.stringify(answer.body)).toContain('"field":"nonce"');
@@ -242,12 +246,13 @@ describe('what the rate limits hold, and for how long — #892 review', () => {
     expect(w.identity.heldRateLimitKeys()).toBe(1);
     await w.signIn(device);
     // 203.0.113.9 and the test's own loopback address, per address; the key,
-    // proven; and loopback again, for the registration it made.
-    expect(w.identity.heldRateLimitKeys()).toBe(4);
+    // proven; loopback again, for the registration it made; and loopback once
+    // more, for the sessionless SEALED request it registered through (#1192).
+    expect(w.identity.heldRateLimitKeys()).toBe(5);
     const end = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
     w.clock.ms = end - 1;
     w.identity.sweepRateLimits();
-    expect(w.identity.heldRateLimitKeys()).toBe(4);
+    expect(w.identity.heldRateLimitKeys()).toBe(5);
     w.clock.ms = end;
     w.identity.sweepRateLimits();
     expect(w.identity.heldRateLimitKeys()).toBe(0);

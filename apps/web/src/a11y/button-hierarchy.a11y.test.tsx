@@ -130,8 +130,14 @@ describe('#939, #1010 — Home has exactly one primary, Next up’s Ride', () =>
     it(data, async () => {
       await open(routeById('home'), data === 'populated');
       const primaries = buttonsByView(document)[0]?.primaries ?? [];
-      expect(primaries.map((element) => (element.textContent ?? '').trim())).toEqual(['Ride']);
-      for (const label of ['Start a ride', 'Choose a route', 'Choose a workout']) {
+      // #1429: on a first open the one primary is the first ride's, and the
+      // ride cards are not drawn, so there is no secondary to check.
+      expect(primaries.map((element) => (element.textContent ?? '').trim())).toEqual([
+        data === 'empty' ? 'Start a ride' : 'Ride',
+      ]);
+      for (const label of data === 'empty'
+        ? []
+        : ['Start a ride', 'Choose a route', 'Choose a workout']) {
         const link = [...document.querySelectorAll('main a.oyl-button')].find(
           (element) => (element.textContent ?? '').trim() === label,
         );
@@ -162,6 +168,7 @@ describe('#668 — the ride screen, in the states where its panels meet', () => 
     spanned: '10:00',
     canContinue: true,
     alreadySaved: false,
+    damaged: [],
   };
   const states: readonly (readonly [string, RideSnapshot])[] = [
     [
@@ -272,15 +279,23 @@ describe('#670 — one primary per pane on a list–detail route', () => {
     }
   }
 
-  it('is what lets Activities show two primaries at once — one per pane', async () => {
-    // Without the per-pane rule this screen would be a violation: the list's
-    // *Start a ride* and the selected ride's *Open ride details* are both on
-    // a landscape tablet. So the whole-main count is 2, and it passes.
+  it('counts Activities’ primaries per pane, the chosen ride’s page among them', async () => {
+    // The list's *Start a ride* is its pane's primary. Until #1439 the chosen
+    // ride's pane had one too, *Open ride details*, and the whole-main count
+    // of 2 was what this case showed the per-pane rule allowing. Since #1439
+    // that pane IS the ride's page, whose controls are toggles and
+    // secondaries (#668), so it has none, and the rule is still applied per
+    // pane: the list's one primary is not a fault.
     restorePanes = answerTwoPanes(true, THEME);
     mounted = await openRoute(routeById('activities'), true);
     await selectFixtureItem(routeById('activities'));
-    expect(buttonsByView(document)[0]?.primaries).toHaveLength(2);
-    expect(primaryUnits(document).map((unit) => unit.primaries.length)).toEqual([0, 1, 1]);
+    expect(
+      document.querySelector(
+        '[data-oyl-pane="detail"] .oyl-chart-table, [data-oyl-pane="detail"] .oyl-ride-summary',
+      ),
+    ).not.toBeNull();
+    expect(buttonsByView(document)[0]?.primaries).toHaveLength(1);
+    expect(primaryUnits(document).map((unit) => unit.primaries.length)).toEqual([0, 1, 0]);
     expect(onePrimaryViolations(document)).toEqual([]);
   });
 

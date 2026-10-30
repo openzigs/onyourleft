@@ -14,13 +14,30 @@
  *
  * | State | What is rendered |
  * |---|---|
- * | no model set up, nothing saved (the fallback) | one sentence and a link to the Camera page, and nothing else — no heading, no request |
- * | a model set up, nothing saved | the ask control, what will be sent, and {@link WRITE_UP_NOT_ASKED} |
- * | running | #804's live region, Cancel, and the ask controls `aria-disabled` |
+ * | a browser that cannot hold an instance sign-in, nothing saved (the fallback) | one sentence, and nothing else — no heading, no request |
+ * | no instance, nothing saved | one sentence and a link to the Connect screen, and nothing else |
+ * | an instance, nothing saved | the ask control, what will be sent, and {@link WRITE_UP_NOT_ASKED} |
+ * | running | the live region, Cancel, and the ask control `aria-disabled` |
  * | written | the framing (ADR 0035 D-9 A), then the text, then where it was asked, whether the pose summary went, and which sections were left out |
  * | withheld by the screen | the ask's own sentence, or — for a saved row — {@link WRITE_UP_WITHHELD_SAVED}. No model text |
  * | failed or cancelled | the ask's sentence, ABOVE any earlier write-up, which says it is the earlier one (the owner's ruling of 2026-09-29) |
  * | a row this build cannot read | {@link WRITE_UP_UNREADABLE} |
+ *
+ * ## The rider's instance — #1102
+ *
+ * Handed an instance port (ADR 0046 D-1), the section asks the INSTANCE when
+ * this device holds a sign-in to one (`ride-analysis/InstanceWriteUpControl.tsx`:
+ * start, stream, cancel, resume, then screen and save on the device), and when
+ * it does not, says so in one sentence with a link to the Connect screen
+ * (#1104 B4, ADR 0046 D-2) — the section's whole content when nothing is
+ * saved, and above a saved write-up, which still renders and is still screened,
+ * when something is. Without an instance port — a browser that cannot hold a
+ * sign-in — it says in one sentence that a write-up cannot be asked for here.
+ *
+ * ⚠️ **#1103 removed the device's own ask**: the own-computer write-up and the
+ * device-held hosted key (ADR 0046 D-1). A reviewer who remembers a "Camera
+ * page" link and two ask buttons here is reading the old file. Write-ups saved
+ * by those paths still render, screened, with their source in words.
  *
  * Each pair a rider could confuse — nothing asked and written, withheld and
  * failed, written and an earlier one after a failure — renders different
@@ -42,28 +59,27 @@ import { useState, type JSX } from 'react';
 
 import type { ActivityId } from '@onyourleft/store';
 
-import type {
-  AskOutcome,
-  RideAnalysisPort,
-  RideWriteUpSource,
-} from '../ride-analysis/ride-analysis-port';
-import { RideWriteUpControl, WRITE_UP_HEADING } from '../ride-analysis/RideWriteUpControl';
-import { hrefFor, routeById } from '../shell/routes';
+import { SectionHeading } from '../design/SectionHelp';
+import type { AskOutcome, InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
+import { InstanceWriteUpControl } from '../ride-analysis/InstanceWriteUpControl';
+import { hrefFor, INSTANCE_ROUTE } from '../shell/routes';
 
 import type { WriteUpOverview } from './load';
 import {
   missingSectionsText,
   shownWriteUp,
+  WRITE_UP_CANNOT_ASK_HERE,
   WRITE_UP_EARLIER,
   WRITE_UP_EARLIER_NOT_READ,
   WRITE_UP_EARLIER_READING,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
+  WRITE_UP_HEADING,
+  WRITE_UP_NO_INSTANCE_AFTER,
+  WRITE_UP_NO_INSTANCE_BEFORE,
   WRITE_UP_NOT_ASKED,
   WRITE_UP_POSE_TEXT,
-  WRITE_UP_SET_UP_AFTER,
-  WRITE_UP_SET_UP_BEFORE,
-  WRITE_UP_SET_UP_LINK,
+  WRITE_UP_REPLACES,
   WRITE_UP_SOURCE_TEXT,
   WRITE_UP_UNREADABLE,
   WRITE_UP_WITHHELD_SAVED,
@@ -72,8 +88,13 @@ import {
 const HEADING_ID = 'oyl-write-up-heading';
 
 export interface RideWriteUpSectionProps {
-  /** The post-ride ask (#804), or `undefined` for none — the fallback. */
-  readonly port?: RideAnalysisPort | undefined;
+  /**
+   * The rider's instance (#1102, ADR 0046 D-1). Given, the section asks the
+   * instance when this device is signed in to one, and says in one sentence
+   * that a write-up needs one when it is not. `undefined` where this browser
+   * cannot hold a sign-in: the fallback.
+   */
+  readonly instance?: InstanceAnalysisPort | undefined;
   readonly activityId: ActivityId;
   /** What the page read with the ride. */
   readonly initial: WriteUpOverview;
@@ -81,12 +102,17 @@ export interface RideWriteUpSectionProps {
   readonly reread: () => Promise<WriteUpOverview>;
 }
 
-/** The fallback's one sentence, with its link. */
-function SetUp(): JSX.Element {
+/** The fallback's one sentence (#1103). */
+function CannotAskHere(): JSX.Element {
+  return <p className="oyl-muted">{WRITE_UP_CANNOT_ASK_HERE}</p>;
+}
+
+/** #1104 B4: no instance, in one sentence, with a link to connect one (ADR 0046 D-2). */
+function NoInstance(): JSX.Element {
   return (
     <p className="oyl-muted">
-      {WRITE_UP_SET_UP_BEFORE} <a href={hrefFor(routeById('camera'))}>{WRITE_UP_SET_UP_LINK}</a>{' '}
-      {WRITE_UP_SET_UP_AFTER}
+      {WRITE_UP_NO_INSTANCE_BEFORE} <a href={hrefFor(INSTANCE_ROUTE)}>{INSTANCE_ROUTE.title}</a>
+      {WRITE_UP_NO_INSTANCE_AFTER}
     </p>
   );
 }
@@ -136,14 +162,13 @@ function Saved({
 }
 
 export function RideWriteUpSection({
-  port,
+  instance,
   activityId,
   initial,
   reread,
 }: RideWriteUpSectionProps): JSX.Element {
-  // Read when the page opens: it asks only whether a port COULD be built, and
-  // sends nothing.
-  const [sources] = useState<readonly RideWriteUpSource[]>(() => port?.availableSources() ?? []);
+  // Read when the page opens: storage only, nothing sent.
+  const [connected] = useState(() => instance?.connected() ?? false);
   const [saved, setSaved] = useState<WriteUpOverview>(initial);
   const [last, setLast] = useState<AskOutcome | undefined>(undefined);
   // Between a write-up being saved and it being read back, what is on the page
@@ -176,18 +201,28 @@ export function RideWriteUpSection({
     earlier = readBack === 'reading' ? WRITE_UP_EARLIER_READING : WRITE_UP_EARLIER_NOT_READ;
   }
 
-  if (sources.length === 0 && saved.kind === 'none') {
-    // The fallback: today's page and one sentence. No heading, no request.
-    return <SetUp />;
+  if (instance === undefined && saved.kind === 'none') {
+    // The fallback: one sentence. No heading, no request.
+    return <CannotAskHere />;
+  }
+  if (instance !== undefined && !connected && saved.kind === 'none') {
+    // #1102: no instance and nothing saved — one sentence, no heading, no request.
+    return <NoInstance />;
   }
 
   return (
     <section aria-labelledby={HEADING_ID} className="oyl-write-up-section">
-      <h3 id={HEADING_ID}>{WRITE_UP_HEADING}</h3>
-      {port === undefined || sources.length === 0 ? (
-        <SetUp />
+      {/* #1439: what a new write-up does to this ride's is the explanation,
+          behind the ⓘ; what is sent stays beside the press. */}
+      <SectionHeading level={3} id={HEADING_ID} help={<p>{WRITE_UP_REPLACES}</p>}>
+        {WRITE_UP_HEADING}
+      </SectionHeading>
+      {instance === undefined ? (
+        <CannotAskHere />
+      ) : connected ? (
+        <InstanceWriteUpControl port={instance} activityId={activityId} onEnded={ended} />
       ) : (
-        <RideWriteUpControl port={port} activityId={activityId} sources={sources} onEnded={ended} />
+        <NoInstance />
       )}
       {saved.kind === 'none' && last === undefined ? (
         <p className="oyl-write-up__state">{WRITE_UP_NOT_ASKED}</p>

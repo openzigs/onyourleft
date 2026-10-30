@@ -23,10 +23,15 @@
  * directory would put it outside the tsconfig program that typechecks it.
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { unixSeconds, type HeartRateHoldContext } from '@onyourleft/domain';
 import { deviceId } from '@onyourleft/sensors';
 
-import { RIDE_METRIC_IDS, type RideController, type RideSnapshot } from './controller';
+import {
+  RIDE_METRIC_IDS,
+  type RideController,
+  type RideSnapshot,
+  type WorkoutChoices,
+} from './controller';
 
 /** Every call the screen made, in order, for a test to assert on. */
 export interface RecordedCalls {
@@ -35,6 +40,13 @@ export interface RecordedCalls {
   readonly setTargetPower: number[];
   /** The workouts the screen asked to ride, by name. */
   readonly startWorkout: string[];
+  /** #1240: what each of those was started with — the threshold and the hold context. */
+  readonly startWorkoutWith: {
+    readonly thresholdPower: number;
+    readonly heartRateHold: HeartRateHoldContext | undefined;
+    /** #1244: what the rider chose for that workout — re-plans on or off. */
+    readonly choices: WorkoutChoices | undefined;
+  }[];
   /** #212's three, each recorded with the recording it was asked about. */
   readonly continueRecovered: string[];
   readonly saveRecovered: string[];
@@ -46,9 +58,17 @@ export interface RecordedCalls {
   resume: number;
   armStop: number;
   cancelStop: number;
+  /** #1432 — the touch lock. */
+  lockTouch: number;
+  unlockTouch: number;
   confirmStop: number;
   /** #1042 — the latched outcomes the game handed over, in order. */
   readonly noteGameRideEnded: (string | undefined)[];
+  /** #785 — a room ride asked for a recording, and the races noted. */
+  recordForRoom: number;
+  readonly noteRoomRace: unknown[];
+  /** #1318 — the ride screen's *Lap*. */
+  markLap: number;
   /** #1042 — the result card's *Done*, and its one announcement. */
   dismissResult: number;
   noteResultAnnounced: number;
@@ -57,6 +77,10 @@ export interface RecordedCalls {
   requestControl: number;
   clearTarget: number;
   endWorkout: number;
+  /** #1244 — *Keep the plan*. */
+  keepThePlan: number;
+  /** #1244 — *Switch re-plans off*. */
+  switchReplansOff: number;
   tick: number;
 }
 
@@ -72,8 +96,11 @@ export function idleSnapshot(): RideSnapshot {
   return {
     phase: 'idle',
     stopArmed: false,
+    touchLocked: false,
     elapsedSeconds: 0,
     movingSeconds: 0,
+    courseLapSeconds: undefined,
+    manualLap: { available: false, last: undefined },
     sampleCount: 0,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
@@ -103,6 +130,7 @@ export function idleSnapshot(): RideSnapshot {
     resultAnnounced: false,
     leftover: false,
     recoverable: [],
+    unreadableRecordings: [],
     connectionsRemaining: 3,
     notificationNotice: undefined,
     keepAliveFailed: false,
@@ -116,6 +144,9 @@ export function ridingSnapshot(): RideSnapshot {
   return {
     ...base,
     phase: 'recording',
+    // #1318: a recording with no course under it offers *Lap*, as the real
+    // controller's does.
+    manualLap: { available: true, last: undefined },
     elapsedSeconds: 3_725,
     movingSeconds: 3_600,
     sampleCount: 3_725,
@@ -157,7 +188,11 @@ export function ridingSnapshot(): RideSnapshot {
   };
 }
 
-export function stubRideController(initial: RideSnapshot = idleSnapshot()): StubRideController {
+export function stubRideController(
+  initial: RideSnapshot = idleSnapshot(),
+  /** #1244: whether the stub says re-plans can be offered. Off, as with no instance. */
+  replansAvailable = false,
+): StubRideController {
   let snapshot = initial;
   const listeners = new Set<() => void>();
   const calls: RecordedCalls = {
@@ -165,6 +200,7 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     unpair: [],
     setTargetPower: [],
     startWorkout: [],
+    startWorkoutWith: [],
     continueRecovered: [],
     saveRecovered: [],
     discardRecovered: [],
@@ -174,14 +210,21 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     resume: 0,
     armStop: 0,
     cancelStop: 0,
+    lockTouch: 0,
+    unlockTouch: 0,
     confirmStop: 0,
     noteGameRideEnded: [],
+    recordForRoom: 0,
+    noteRoomRace: [],
+    markLap: 0,
     dismissResult: 0,
     noteResultAnnounced: 0,
     startNewRide: 0,
     requestControl: 0,
     clearTarget: 0,
     endWorkout: 0,
+    keepThePlan: 0,
+    switchReplansOff: 0,
     tick: 0,
   };
 
@@ -241,14 +284,33 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     cancelStop: () => {
       calls.cancelStop += 1;
     },
+    lockTouch: () => {
+      calls.lockTouch += 1;
+    },
+    unlockTouch: () => {
+      calls.unlockTouch += 1;
+    },
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },
+    recordForRoom: () => {
+      calls.recordForRoom += 1;
+      return Promise.resolve(false);
+    },
+    noteRoomRace: (race) => {
+      calls.noteRoomRace.push(race);
+    },
+    // #1312: the stub records nothing, so a line crossed over it ends no lap.
+    noteCourseLine: () => undefined,
     // #1042: these two DO move the stub's snapshot, because what a test reads
     // is whether a screen mounted again sees what the first one recorded —
     // which is the whole of #1049's review finding. The rules around them
     // (cleared on a new ride, refused with no saved ride) are the real
     // controller's, and `controller.test.ts` §"#1042" drives those.
+    markLap: () => {
+      calls.markLap += 1;
+      return snapshot.manualLap.available;
+    },
     dismissResult: () => {
       calls.dismissResult += 1;
       snapshot = { ...snapshot, savedRide: undefined };
@@ -291,8 +353,9 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
      * control, so nothing on the screen this stub is for reads it.
      */
     simulationControl: () => undefined,
-    startWorkout: (record) => {
+    startWorkout: (record, thresholdPower, heartRateHold, choices) => {
       calls.startWorkout.push(record.name);
+      calls.startWorkoutWith.push({ thresholdPower, heartRateHold, choices });
       // ⚠️ Answers `true` unconditionally, and a test that needs the refusal
       // path drives the real controller instead. A stub that guessed at the
       // control state would be a second implementation of the rule
@@ -301,6 +364,15 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     },
     endWorkout: () => {
       calls.endWorkout += 1;
+    },
+    // #1244: what the stub was told a screen may offer; `controller.test.ts`
+    // §"#1244" drives the real controller's.
+    replansAvailable: () => replansAvailable,
+    keepThePlan: () => {
+      calls.keepThePlan += 1;
+    },
+    switchReplansOff: () => {
+      calls.switchReplansOff += 1;
     },
     // #782: the Ride screen holds no room; `controller.test.ts` §"#782" drives the real one.
     keepAliveForRoom: () => () => undefined,

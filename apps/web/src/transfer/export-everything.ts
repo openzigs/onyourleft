@@ -103,7 +103,13 @@
  * not itself accumulate.
  */
 
-import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
+import {
+  readReplanRecord,
+  type ReplanRecord,
+  type SignedActivityRecord,
+  type UnixSeconds,
+  type WorkoutGoals,
+} from '@onyourleft/domain';
 import {
   SIDE_SESSION_KINDS,
   StoreDecodeError,
@@ -119,6 +125,9 @@ import {
   type SideSessionKind,
   type SideSessionSourceRecord,
   type SideSessionSummaryRecord,
+  type WorkoutBlockFact,
+  type WorkoutGoalsRead,
+  workoutBlockFactsOf,
 } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
@@ -197,6 +206,40 @@ export interface ManifestRideFacts {
   readonly bestPower?: readonly { readonly duration: number; readonly power: number }[];
   readonly workoutFinished?: boolean;
   readonly ghostRaced?: boolean;
+  /**
+   * Every re-plan decision made on the ride — #1244, ADR 0048 P9: each
+   * accepted or refused move, the rule that decided and when, and a move
+   * accepted and then not ridden. Like the two above it is known only to the
+   * ride that recorded it, so this is the only copy that leaves the device.
+   */
+  readonly replans?: readonly ReplanRecord[];
+  /** How many of the ride's re-plan records could not be read (`RideFacts.replansDropped`). */
+  readonly replansDropped?: number;
+  /**
+   * The private races the ride was ridden in, each as its room told this
+   * device — #785, `RideFacts.races`: this rider's place and how many finished,
+   * and nothing of any other rider. Known only to the ride that recorded them,
+   * so this is the only copy that leaves the device (#1360's review, B1).
+   */
+  readonly races?: readonly ManifestRoomRace[];
+  /**
+   * The blocks of each workout ridden on the ride, and what was ridden in
+   * each — #1319, `RideFacts.workoutBlocks`. Where each block began and ended
+   * is known only to the ride that recorded it, so this is the only copy that
+   * leaves the device.
+   */
+  readonly workoutBlocks?: readonly WorkoutBlockFact[];
+}
+
+/** A race as the manifest carries it, field by field. @see ManifestRideFacts.races */
+export interface ManifestRoomRace {
+  readonly roomId: string;
+  readonly place: number | null;
+  readonly finishers: number | null;
+  readonly crossedTheLine?: true;
+  /** #1364: this rider's place among the riders across, and how many were. */
+  readonly placeAcross?: number;
+  readonly across?: number;
 }
 
 /**
@@ -251,6 +294,23 @@ export interface ManifestRiderTexts {
     | { readonly unreadable: string }
   )[];
 }
+
+/**
+ * The rider's typed workout goals as the manifest carries them — #1236, ADR
+ * 0048 D-10. Not {@link ManifestRiderTexts}' free-text goals: these bound a
+ * heart-rate hold or a re-plan. They are here because ADR 0005 F's rollback is
+ * export → downgrade → re-import, and a downgrade drops the store that holds
+ * them, so an archive without them loses them. Field by field, never the row:
+ * the athlete is the archive's own. `{ unreadable }` in the place of a row the
+ * store re-checked and refused — carrying nothing of it, not even the store's
+ * fault, which names a field.
+ */
+export type ManifestWorkoutGoals =
+  { readonly goals: WorkoutGoals; readonly savedAt: number } | { readonly unreadable: string };
+
+/** What the manifest says of typed workout goals on this device that could not be read. */
+export const WORKOUT_GOALS_UNREADABLE =
+  'this device holds workout goals that could not be read, so this archive does not contain them';
 
 /** What the manifest says of goals, notes or documents on this device that could not be read. */
 export const RIDER_TEXTS_UNREADABLE =
@@ -534,6 +594,8 @@ export function accountManifest(input: {
   readonly camera: CameraManifest;
   /** #836. @see ManifestRiderTexts — absent from a manifest made before #836. */
   readonly riderTexts?: ManifestRiderTexts | undefined;
+  /** #1236. @see ManifestWorkoutGoals — `undefined` when the rider saved none. */
+  readonly workoutGoals?: ManifestWorkoutGoals | undefined;
   /**
    * #528, ADR 0033 D-7: where the rider was in the side camera's picture in
    * their last session — numbers, never a picture — and, since #530, whether
@@ -591,6 +653,9 @@ export function accountManifest(input: {
     camera: input.camera,
     // #836, ADR 0040 D-10: the rider's own goals, ride notes and documents.
     riderTexts: input.riderTexts ?? null,
+    // #1236, ADR 0048 D-10: the rider's typed workout goals. `null` rather than
+    // omitted, so "there were none" is written down.
+    workoutGoals: input.workoutGoals ?? null,
     // #528, ADR 0033 D-7 and ADR 0004 E: the athlete's own numbers coming back
     // to them. Fields, not the row: the record's `athleteId` is already the
     // manifest's own, and a spread would carry whatever the record grows next.
@@ -892,6 +957,7 @@ export async function exportEverything(
       store.getFramingReference(athleteId),
     ]);
   const riderTexts = await readRiderTexts(store, athleteId);
+  const workoutGoals = manifestWorkoutGoalsOf(await store.getWorkoutGoals(athleteId));
 
   // #384, ADR 0029 D-3.
   //
@@ -982,6 +1048,7 @@ export async function exportEverything(
       },
       framingReference,
       riderTexts,
+      workoutGoals,
       exportedAt: Math.trunc(Date.now() / 1000),
     }),
   );
@@ -1081,6 +1148,32 @@ async function readRiderTexts(
   };
 }
 
+/**
+ * The rider's typed workout goals, field by field, or `undefined` for none.
+ * @see ManifestWorkoutGoals
+ */
+function manifestWorkoutGoalsOf(read: WorkoutGoalsRead): ManifestWorkoutGoals | undefined {
+  if (read.status === 'none') return undefined;
+  if (read.status === 'fault') return { unreadable: WORKOUT_GOALS_UNREADABLE };
+  const { goals, savedAt } = read.record;
+  return {
+    goals: {
+      ...(goals.sessionType === undefined ? {} : { sessionType: goals.sessionType }),
+      ...(goals.durationMinutes === undefined ? {} : { durationMinutes: goals.durationMinutes }),
+      ...(goals.holdRange === undefined
+        ? {}
+        : { holdRange: { low: goals.holdRange.low, high: goals.holdRange.high } }),
+      ...(goals.heartRateAbove === undefined ? {} : { heartRateAbove: goals.heartRateAbove }),
+      ...(goals.powerCeiling === undefined ? {} : { powerCeiling: goals.powerCeiling }),
+      ...(goals.timeInRangeMinutes === undefined
+        ? {}
+        : { timeInRangeMinutes: goals.timeInRangeMinutes }),
+      ...(goals.effortCheckIns === undefined ? {} : { effortCheckIns: goals.effortCheckIns }),
+    },
+    savedAt,
+  };
+}
+
 /** A pose summary, field by field. @see ManifestPoseSummary */
 function manifestPoseOf(pose: SideSessionSummaryRecord): ManifestPoseSummary {
   const differences: Partial<Record<SideSessionKind, number>> = {};
@@ -1114,7 +1207,40 @@ function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
         }),
     ...(facts.workoutFinished === undefined ? {} : { workoutFinished: facts.workoutFinished }),
     ...(facts.ghostRaced === undefined ? {} : { ghostRaced: facts.ghostRaced }),
+    ...(facts.replans === undefined
+      ? {}
+      : {
+          // Through the domain's reader, which copies a record's own keys and
+          // no other: a key added to a record later is not exported by accident.
+          replans: facts.replans.flatMap((each) => {
+            const record = readReplanRecord(each);
+            return record === undefined ? [] : [record];
+          }),
+        }),
+    ...(facts.replansDropped === undefined ? {} : { replansDropped: facts.replansDropped }),
+    // #785: field by field, so a key added to a race later is not exported by accident.
+    ...(facts.races === undefined
+      ? {}
+      : {
+          races: facts.races.map((race) => ({
+            roomId: race.roomId,
+            place: race.place,
+            finishers: race.finishers,
+            ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+            ...(race.placeAcross === undefined || race.across === undefined
+              ? {}
+              : { placeAcross: race.placeAcross, across: race.across }),
+          })),
+        }),
+    // #1319: through the store's reader, which copies each block's own keys
+    // and no other, so a key added to one later is not exported by accident.
+    ...workoutBlocksOf(facts.workoutBlocks),
   };
+}
+
+function workoutBlocksOf(value: unknown): { workoutBlocks?: readonly WorkoutBlockFact[] } {
+  const blocks = workoutBlockFactsOf(value);
+  return blocks === undefined ? {} : { workoutBlocks: blocks };
 }
 
 function manifestWriteUpOf(writeUp: RideWriteUpRecord): ManifestRideWriteUp {

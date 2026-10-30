@@ -27,8 +27,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { decodeRoomMessage, encodeMessage, utf8ByteLength } from './codec';
-import type { Frame } from './messages';
-import { MAXIMUM_MESSAGE_BYTES, MAXIMUM_RIDERS } from './schema';
+import type { Frame, Standings } from './messages';
+import {
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_MESSAGE_BYTES,
+  MAXIMUM_RIDERS,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
+} from './schema';
 
 function midRace(count: number): Frame {
   return {
@@ -72,5 +77,40 @@ describe('frame size — #768', () => {
     expect(utf8ByteLength(largest)).toBe(3_682);
     expect(utf8ByteLength(largest)).toBeLessThan(MAXIMUM_MESSAGE_BYTES);
     expect(decodeRoomMessage(largest).ok).toBe(true);
+  });
+});
+
+/**
+ * #1347: a race's standings, sent beside each frame. Four slots a rider, a
+ * gap that may be negative, so it is the same order as a frame — and it is
+ * sent only in a race, so a group ride's bytes are unchanged.
+ */
+describe('standings size — #1347', () => {
+  it('fits the largest legal standings inside the byte limit', () => {
+    const largest: Standings = {
+      type: 'standings',
+      tick: Number.MAX_SAFE_INTEGER,
+      riders: Array.from({ length: MAXIMUM_RIDERS }, (_, index) => ({
+        riderId: 2_147_483_647 - index,
+        gapDeciseconds: -MAXIMUM_GAP_DECISECONDS,
+        wattsPerKilogramTenths: MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
+        flags: 7,
+      })),
+    };
+    const text = encodeMessage(largest);
+    expect(utf8ByteLength(text)).toBe(2_955);
+    expect(utf8ByteLength(text)).toBeLessThan(MAXIMUM_MESSAGE_BYTES);
+    expect(decodeRoomMessage(text).ok).toBe(true);
+  });
+
+  it('fits the longest name in one message, which is why a name is one message a rider', () => {
+    const text = encodeMessage({
+      type: 'name',
+      riderId: 2_147_483_647,
+      displayName: '🚲'.repeat(32),
+    });
+    expect(utf8ByteLength(text)).toBeLessThan(200);
+    // A hundred of them in one roster would not fit.
+    expect(utf8ByteLength(text) * MAXIMUM_RIDERS).toBeGreaterThan(MAXIMUM_MESSAGE_BYTES);
   });
 });

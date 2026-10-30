@@ -56,11 +56,13 @@
  * work to close.
  */
 
-import type { Seconds } from '../quantities';
+import type { BeatsPerMinute, Seconds } from '../quantities';
 
 import { WorkoutError } from './errors';
 import type {
   FreeRideBlock,
+  HeartRateHoldBlock,
+  HeartRateRange,
   IntervalsBlock,
   RampBlock,
   SteadyBlock,
@@ -79,8 +81,37 @@ import { validateWorkout } from './workout';
  */
 const VERSION_KEY = 'onYourLeftWorkout';
 
-/** The version this build writes, and the only one it reads. */
-export const WORKOUT_FILE_VERSION = 1;
+/**
+ * The newest version this build reads and writes: 2, since #1239 added the
+ * heart-rate hold (ADR 0048 D-3, and ADR 0017's 2026-10-09 amendment).
+ *
+ * ⚠️ **A workout is written at the LOWEST version that can carry it**, so a
+ * workout with no hold block is still a version-1 file and an older build still
+ * opens it. Only a file that needs version 2 says 2 — {@link
+ * workoutFileVersionFor} is that rule.
+ */
+export const WORKOUT_FILE_VERSION = 2;
+
+/** The version a workout with no heart-rate hold is written as. */
+export const WORKOUT_FILE_FIRST_VERSION = 1;
+
+/**
+ * Which block kinds each version may carry. Version 1 is exactly the four it
+ * always had, so a version-1 file carrying a hold is refused — it claims a
+ * version that cannot hold one, and believing either half of that would be
+ * guessing (ADR 0017 D-3).
+ */
+const KINDS_IN_VERSION: Readonly<Record<1 | 2, ReadonlySet<string>>> = {
+  1: new Set(['steady', 'ramp', 'intervals', 'free-ride']),
+  2: new Set(['steady', 'ramp', 'intervals', 'free-ride', 'heart-rate-hold']),
+};
+
+/** The lowest version that can carry this workout. */
+export function workoutFileVersionFor(workout: Workout): 1 | 2 {
+  return workout.blocks.some((block) => block.kind === 'heart-rate-hold')
+    ? 2
+    : WORKOUT_FILE_FIRST_VERSION;
+}
 
 /**
  * What an exported workout is called.
@@ -142,6 +173,10 @@ const BLOCK_FIELDS = {
     optional: ['label'],
   },
   'free-ride': { required: ['seconds'], optional: ['label'] },
+  'heart-rate-hold': {
+    required: ['seconds', 'range', 'startShare', 'ceilingShare'],
+    optional: ['label'],
+  },
 } satisfies Record<
   WorkoutBlock['kind'],
   { readonly required: readonly string[]; readonly optional: readonly string[] }
@@ -163,7 +198,7 @@ export function encodeWorkoutFile(workout: Workout): string {
   validateWorkout(workout);
 
   const document: WorkoutFile = {
-    [VERSION_KEY]: WORKOUT_FILE_VERSION,
+    [VERSION_KEY]: workoutFileVersionFor(workout),
     name: workout.name,
     ...(workout.description === undefined ? {} : { description: workout.description }),
     blocks: workout.blocks.map(encodeBlock),
@@ -183,7 +218,10 @@ function encodeBlock(block: WorkoutBlock): Record<string, unknown> {
   // hung on the object, and write a file this decoder then refuses.
   for (const key of [...fields.required, ...fields.optional]) {
     const value = (block as unknown as Record<string, unknown>)[key];
-    if (value !== undefined) {
+    if (key === 'range' && block.kind === 'heart-rate-hold') {
+      // The two numbers and nothing else, for the reason above.
+      out[key] = { low: block.range.low, high: block.range.high };
+    } else if (value !== undefined) {
       out[key] = value;
     }
   }
@@ -207,7 +245,7 @@ export function decodeWorkoutFile(text: string): Workout {
   }
 
   const document = asObject(parse(text), 'the file');
-  readVersion(document);
+  const version = readVersion(document);
   refuseUnknownKeys(document, TOP_LEVEL_REQUIRED, TOP_LEVEL_OPTIONAL, 'the file');
 
   const rawBlocks = document['blocks'];
@@ -218,7 +256,7 @@ export function decodeWorkoutFile(text: string): Workout {
   const workout: Workout = {
     name: readString(document['name'], "the workout's name"),
     ...readOptionalDescription(document['description']),
-    blocks: rawBlocks.map(decodeBlock),
+    blocks: rawBlocks.map((raw, index) => decodeBlock(raw, index, version)),
   };
 
   // ⚠️ The load-bearing line. Everything above establishes that the document
@@ -254,7 +292,7 @@ function asObject(value: unknown, where: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function readVersion(document: Record<string, unknown>): void {
+function readVersion(document: Record<string, unknown>): 1 | 2 {
   const declared = document[VERSION_KEY];
   if (declared === undefined) {
     throw new WorkoutError(
@@ -263,13 +301,15 @@ function readVersion(document: Record<string, unknown>): void {
         `"${VERSION_KEY}" key that says what it is`,
     );
   }
-  if (declared !== WORKOUT_FILE_VERSION) {
+  if (declared !== 1 && declared !== 2) {
     throw new WorkoutError(
       'unsupported-version',
-      `this workout file is version ${JSON.stringify(declared)} and this program reads version ` +
-        `${String(WORKOUT_FILE_VERSION)}. A newer version of On Your Left will open it.`,
+      `this workout file is version ${JSON.stringify(declared)} and this program reads versions ` +
+        `${String(WORKOUT_FILE_FIRST_VERSION)} to ${String(WORKOUT_FILE_VERSION)}. A newer ` +
+        'version of On Your Left will open it.',
     );
   }
+  return declared;
 }
 
 /**
@@ -312,7 +352,7 @@ function refuseUnknownKeys(
   }
 }
 
-function decodeBlock(raw: unknown, index: number): WorkoutBlock {
+function decodeBlock(raw: unknown, index: number, version: 1 | 2): WorkoutBlock {
   const where = `block ${String(index + 1)}`;
   const record = asObject(raw, where);
 
@@ -322,6 +362,17 @@ function decodeBlock(raw: unknown, index: number): WorkoutBlock {
       'unknown-block',
       `${where} is a "${String(kind)}" block, which this program does not know how to ride. ` +
         `The kinds it knows are ${Object.keys(BLOCK_FIELDS).join(', ')}.`,
+    );
+  }
+  if (!KINDS_IN_VERSION[version].has(kind)) {
+    // ⚠️ #1239: a hold in a file that says version 1. The file contradicts
+    // itself — version 1 has no such block — so it is refused whole rather
+    // than read as whichever half looks more likely.
+    throw new WorkoutError(
+      'unknown-block',
+      `${where} is a "${kind}" block, which a version-${String(version)} workout file cannot ` +
+        `carry. The kinds version ${String(version)} knows are ` +
+        `${[...KINDS_IN_VERSION[version]].join(', ')}.`,
     );
   }
 
@@ -361,6 +412,15 @@ function decodeBlock(raw: unknown, index: number): WorkoutBlock {
         seconds: readSeconds(record['seconds'], `${where}'s length`),
         ...label,
       } satisfies FreeRideBlock;
+    case 'heart-rate-hold':
+      return {
+        kind,
+        seconds: readSeconds(record['seconds'], `${where}'s length`),
+        range: readRange(record['range'], `${where}'s heart-rate range`),
+        startShare: readShare(record['startShare'], `${where}'s starting target`),
+        ceilingShare: readShare(record['ceilingShare'], `${where}'s ceiling`),
+        ...label,
+      } satisfies HeartRateHoldBlock;
     default: {
       // Unreachable past `isKnownKind`, and written out so that adding a block
       // kind is a compile error here too rather than a case that falls through.
@@ -368,6 +428,16 @@ function decodeBlock(raw: unknown, index: number): WorkoutBlock {
       throw new WorkoutError('unknown-block', `${where}: ${JSON.stringify(unhandled)}`);
     }
   }
+}
+
+/** A hold's range: exactly `low` and `high`, both numbers; `validateWorkout` judges them. */
+function readRange(value: unknown, where: string): HeartRateRange {
+  const record = asObject(value, where);
+  refuseUnknownKeys(record, ['low', 'high'], [], where);
+  return {
+    low: readNumber(record['low'], `${where}'s low`) as BeatsPerMinute,
+    high: readNumber(record['high'], `${where}'s high`) as BeatsPerMinute,
+  };
 }
 
 function isKnownKind(value: unknown): value is WorkoutBlock['kind'] {

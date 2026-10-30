@@ -3,7 +3,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RaceResultRow } from '../net/rooms-port';
-import { flagText, raceResultLines, raceTime, UNNAMED_RIDER } from './race-result';
+import {
+  flagText,
+  raceFactTerm,
+  raceFactText,
+  raceResultLines,
+  raceTime,
+  UNNAMED_RIDER,
+} from './race-result';
 
 const row = (overrides: Partial<RaceResultRow>): RaceResultRow => ({
   place: 1,
@@ -73,5 +80,44 @@ describe('a race’s result in words — #785', () => {
         (l) => l.place,
       ),
     ).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd']);
+  });
+});
+
+describe('a ride’s race, as kept on this device — #785', () => {
+  it('says the place in the room’s order, a race not finished, and one left before it was over', () => {
+    expect(raceFactText({ roomId: 'r', place: 1, finishers: 3 })).toBe(
+      '1st of 3 in a private race',
+    );
+    expect(raceFactText({ roomId: 'r', place: 22, finishers: 30 })).toBe(
+      '22nd of 30 in a private race',
+    );
+    expect(raceFactText({ roomId: 'r', place: null, finishers: 3 })).toBe(
+      'A private race, not finished',
+    );
+    expect(raceFactText({ roomId: 'r', place: null, finishers: null })).toBe(
+      'A private race, left before it was over',
+    );
+  });
+
+  it('says a race finished on this device and left before the room gave places as finished — #1360’s review (N2)', () => {
+    expect(raceFactText({ roomId: 'r', place: null, finishers: null, crossedTheLine: true })).toBe(
+      'A private race, finished: you left before the room gave places',
+    );
+  });
+
+  it('says the place among the riders already across, for a rider who left before the room gave places — #1364', () => {
+    const crossed = { roomId: 'r', place: null, finishers: null, crossedTheLine: true as const };
+    expect(raceFactText({ ...crossed, placeAcross: 1, across: 5 })).toBe(
+      '1st across of 5 in a private race, before the room gave places',
+    );
+    expect(raceFactText({ ...crossed, placeAcross: 3, across: 3 })).toBe(
+      '3rd across of 3 in a private race, before the room gave places',
+    );
+  });
+
+  it('names the row for one race or more than one — N3', () => {
+    const one = { roomId: 'r', place: 1, finishers: 2 };
+    expect(raceFactTerm([one])).toBe('Race');
+    expect(raceFactTerm([one, one])).toBe('Races');
   });
 });

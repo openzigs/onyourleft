@@ -17,6 +17,8 @@
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { unixSeconds } from '@onyourleft/domain';
+
 import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
 import { activityId as activityIdOf } from './ids';
 import { fromPersistedCameraFrame, toPersistedCameraFrame } from './persisted';
@@ -362,6 +364,44 @@ describe('a side-camera snapshot', () => {
     // The other ride's snapshot, and the kept frame, are untouched.
     await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
       2,
+    );
+  });
+
+  it('stays while its ride is in Recently deleted, and comes back with it (#1431)', async () => {
+    // A ride moved to Recently deleted keeps its report and streams so it can
+    // come back whole; its snapshots are the same.
+    const ride = await seedRide(harness, ATHLETE_A);
+    const snapshot = snapshotFor(ATHLETE_A, ride.id);
+    const at = unixSeconds(1_800_000_000);
+    await harness.write(async (store) => store.putCameraFrame(snapshot));
+    await harness.write(async (store) =>
+      store.moveActivityToRecentlyDeleted(ATHLETE_A, ride.id, at),
+    );
+    await expect(
+      harness.read(async (store) => store.countRideSnapshots(ATHLETE_A, ride.id)),
+    ).resolves.toBe(1);
+    await harness.write(async (store) => store.restoreRecentlyDeleted(ATHLETE_A, ride.id, at));
+    const read = await harness.read(async (store) => store.listRideSnapshots(ATHLETE_A, ride.id));
+    expect(read.map((each) => each.id)).toStrictEqual([snapshot.id]);
+  });
+
+  it('goes when its ride leaves Recently deleted for good (#1431)', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const at = unixSeconds(1_800_000_000);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(snapshotFor(ATHLETE_A, ride.id));
+      await store.putCameraFrame(cameraFrameFor(ATHLETE_A));
+    });
+    await harness.write(async (store) =>
+      store.moveActivityToRecentlyDeleted(ATHLETE_A, ride.id, at),
+    );
+    await harness.write(async (store) => store.deleteRecentlyDeletedForGood(ATHLETE_A, ride.id));
+    await expect(
+      harness.read(async (store) => store.listRideSnapshots(ATHLETE_A, ride.id)),
+    ).resolves.toStrictEqual([]);
+    // The kept frame, which names no ride, is untouched.
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
+      1,
     );
   });
 

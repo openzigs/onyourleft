@@ -21,31 +21,59 @@
 
 import { fileURLToPath } from 'node:url';
 
-import { kilograms, toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  encodeWorkoutFile,
+  fromHex,
+  readWorkoutGoals,
+  thresholdShare,
+  kilograms,
+  toHex,
+  unixSeconds,
+  type ActivityClaims,
+  type SigningKey,
+  type WorkoutGoals,
+} from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   ensureDeviceSigningKey,
+  webCryptoHpkePrimitives,
   webCryptoSha256,
   webCryptoVerifier,
   type ActivityId,
+  type WorkoutGoalsRecord,
+  type WorkoutRecord,
+  type RideFacts,
 } from '@onyourleft/store';
 import {
   createStoreHarness,
   rideWriteUpFor,
+  routeFor,
   riderTextFor,
   sideCameraReportFor,
+  workoutFor,
   type StoreHarness,
 } from '@onyourleft/store/testing';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { raceRouteDigest, raceRouteOf } from '../detail/race-consent';
 import { orderedRows, PAGE_SIZE } from '../library/rows';
 import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
+import { workoutRow } from '../workouts/library';
+import {
+  createInstanceClock,
+  sealedInstance,
+  type InstanceSend,
+  type SealedInstance,
+} from './instance-transport';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
 import {
   admitDeviceKey,
   athleteKeysFrom,
+  MAXIMUM_PULLED_REPLANS,
+  sealedSyncTransport,
   syncWithInstance,
   type SyncDependencies,
   type SyncTransport,
@@ -80,8 +108,30 @@ interface InstanceStoreModule {
       requester: string,
       limit: number,
     ): Promise<readonly { readonly athleteId: string; readonly contentSha256: string }[]>;
+    /** #331: what the instance would offer as a ghost on one route. */
+    listRaceableOnRoute(
+      requester: string,
+      routeSha256: string,
+      limit: number,
+    ): Promise<readonly { readonly athleteId: string; readonly contentSha256: string }[]>;
+    /** The agent's read port (`analysis/tools/reads.ts` §`AnalysisReads`), as `SqlStore` serves it. */
+    listLiveSyncItems(
+      athleteId: string,
+      kind: string,
+      limit: number,
+    ): Promise<readonly { readonly key: string; readonly body: Uint8Array | null }[]>;
     close(): Promise<void>;
   }>;
+}
+
+/** The instance agent's `workouts` tool (#1100), run over the reads it is handed. */
+interface InstanceToolsModule {
+  readonly WORKOUTS: {
+    run(
+      context: { readonly athleteId: string; readonly input: unknown; readonly reads: unknown },
+      args: Readonly<Record<string, never>>,
+    ): Promise<string>;
+  };
 }
 
 const INSTANCE = (path: string): string =>
@@ -90,11 +140,25 @@ const INSTANCE = (path: string): string =>
 let instanceTesting: InstanceTesting;
 let syncTesting: SyncTesting;
 let instanceStore: InstanceStoreModule;
+let instanceTools: InstanceToolsModule;
 beforeAll(async () => {
+  instanceTools = (await import(INSTANCE('analysis/tools/tools.ts'))) as InstanceToolsModule;
   instanceTesting = (await import(INSTANCE('auth/identity-testing.ts'))) as InstanceTesting;
   syncTesting = (await import(INSTANCE('sync/sync-testing.ts'))) as SyncTesting;
   instanceStore = (await import(INSTANCE('store/open-sql-store.ts'))) as InstanceStoreModule;
 });
+
+/** What the instance would offer as a ghost on `route` to a stranger, read on a fresh store (#331). */
+async function offeredOnInstance(path: string, route: string): Promise<string[]> {
+  const fresh = await instanceStore.openSqlStore(path);
+  try {
+    return (await fresh.listRaceableOnRoute('a-stranger', route, 100)).map(
+      (record) => record.contentSha256,
+    );
+  } finally {
+    await fresh.close();
+  }
+}
 
 /**
  * What the instance would serve as raceable to a rider who is not A — read on
@@ -123,13 +187,45 @@ afterEach(async () => {
 
 const NOW = unixSeconds(1_790_000_000);
 
-/** `fetch` against the instance, with this device's session once it has one. */
-function transports(url: string) {
+/**
+ * `fetch` against the instance, with this device's session once it has one.
+ * The challenge and a known key's sign-in go in plaintext (`auth`); a new
+ * key's registration, a link (`sealed`) and every sync route (`sync`) go
+ * SEALED (#1192): through the client's own `sealedInstance`, to the newest
+ * key the instance serves, signed by this device's key.
+ */
+function transports(url: string, signingKey: () => Promise<SigningKey>) {
   let token: string | undefined;
+  const origin = instanceTesting.TEST_ORIGIN;
+  const clock = createInstanceClock();
   const headers = (json: boolean): Record<string, string> => ({
     ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
     ...(json ? { 'content-type': 'application/json' } : {}),
   });
+  // The instance answers at `url`; it states, and is sealed to, `origin`.
+  const send: InstanceSend = (target, init) => fetch(target.replace(origin, url), init);
+  const instance = async (): Promise<SealedInstance> => {
+    const served = (await (await fetch(`${url}/v1/instance/keys`)).json()) as {
+      statements: { statement: { keyId: string; encryptionKey: string } }[];
+    };
+    const newest = served.statements.at(-1)?.statement;
+    if (newest === undefined) throw new Error('the instance serves no encryption key');
+    return sealedInstance(
+      origin,
+      {
+        instanceKey: {
+          keyId: newest.keyId,
+          publicKey: fromHex(newest.encryptionKey, 'the encryption key', 32),
+        },
+        signingKey: await signingKey(),
+        primitives: webCryptoHpkePrimitives,
+        sha256: webCryptoSha256,
+        clock,
+        now: () => NOW * 1000,
+      },
+      send,
+    );
+  };
   const auth: InstanceTransport = {
     post: async (path, body) => {
       const response = await fetch(`${url}${path}`, {
@@ -140,23 +236,21 @@ function transports(url: string) {
       return { status: response.status, body: (await response.json()) as unknown };
     },
   };
+  const sealed: InstanceTransport = {
+    post: async (path, body) => (await instance()).call('POST', path, { body }),
+  };
+  const held = (): string => {
+    if (token === undefined) throw new Error('this device holds no session yet');
+    return token;
+  };
   const sync: SyncTransport = {
-    json: async (method, path, body) => {
-      const response = await fetch(`${url}${path}`, {
-        method,
-        headers: headers(body !== undefined),
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
-      const text = await response.text();
-      return { status: response.status, body: text === '' ? null : (JSON.parse(text) as unknown) };
-    },
-    bytes: async (path) => {
-      const response = await fetch(`${url}${path}`, { headers: headers(false) });
-      return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
-    },
+    json: async (method, path, body) =>
+      sealedSyncTransport(await instance(), held()).json(method, path, body),
+    bytes: async (path) => sealedSyncTransport(await instance(), held()).bytes(path),
   };
   return {
     auth,
+    sealed,
     sync,
     setToken: (value: string) => {
       token = value;
@@ -179,7 +273,9 @@ function device(url: string): Device {
   const map = new Map<string, string>();
   return {
     harness,
-    transport: transports(url),
+    transport: transports(url, () =>
+      harness.write((store) => ensureDeviceSigningKey(store, LOCAL_ATHLETE, { now: () => NOW })),
+    ),
     account: {
       getItem: (key) => map.get(key) ?? null,
       setItem: (key, value) => void map.set(key, value),
@@ -191,6 +287,8 @@ function signInDependencies(origin: string, on: Device) {
   return {
     origin,
     transport: on.transport.auth,
+    // A new key registers, and a device links, only sealed (#1192).
+    sealed: on.transport.sealed,
     storage: on.account,
     ensureLocalAthlete: () => on.harness.write((store) => ensureLocalAthlete(store, NOW)),
     signingKey: () =>
@@ -201,7 +299,7 @@ function signInDependencies(origin: string, on: Device) {
 
 function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDependencies {
   return {
-    transport: on.transport.sync,
+    sealed: on.transport.sync,
     store,
     athleteId: LOCAL_ATHLETE,
     signingKey: () => ensureDeviceSigningKey(store as never, LOCAL_ATHLETE, { now: () => NOW }),
@@ -214,6 +312,8 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     // The athlete's keys, from the instance's device list (#898).
     athleteKeys: () => athleteKeysFrom(on.transport.sync),
     newDocumentId: () => crypto.randomUUID(),
+    // #331: the race offer, as `main.tsx` binds it — this device's zones.
+    raceRoute: raceRouteOf(store as never, LOCAL_ATHLETE, webCryptoSha256),
   };
 }
 
@@ -263,7 +363,7 @@ async function signedInDevice(url: string, origin: string, names: readonly strin
   const signedIn = await signInToInstance(signInDependencies(origin, on));
   on.transport.setToken(signedIn.sessionToken);
   const sync = () => on.harness.write((store) => syncWithInstance(syncDependencies(on, store)));
-  return { on, ids, sync };
+  return { on, ids, sync, athleteId: signedIn.instanceAthleteId };
 }
 
 /** A device's own public key, lowercase hex, as a signed record carries it. */
@@ -454,7 +554,7 @@ describe('two-way sync through the real instance (#776)', () => {
       },
     };
     const report = await b.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b, store), transport: tampering }),
+      syncWithInstance({ ...syncDependencies(b, store), sealed: tampering }),
     );
     expect(report.pulled).toBe(0);
     expect(report.failures).toEqual([
@@ -469,7 +569,7 @@ describe('two-way sync through the real instance (#776)', () => {
         Promise.resolve({ status: 200, bytes: syncTesting.corpusFile('paused-laps.fit') }),
     };
     const swapped = await b.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b, store), transport: swapping }),
+      syncWithInstance({ ...syncDependencies(b, store), sealed: swapping }),
     );
     expect(swapped.failures).toEqual([
       expect.objectContaining({ kind: 'activity', reason: 'content-mismatch' }),
@@ -532,6 +632,87 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(await libraryRows(b.harness)).toHaveLength(1);
   }, 60_000);
 
+  // #1431: what the Activities screen's Delete does since #1431 — the ride goes
+  // to Recently deleted. To a sync that is a ride deleted here (rule 2): it is
+  // deleted on the instance. Brought back afterwards, the ride is on this
+  // device again and the instance keeps its tombstone (rule 3): nothing of it
+  // is sent back. The instance's behaviour is unchanged by #1431 (ADR 0036 D-3).
+  it('deletes a ride moved to Recently deleted on the instance, and sends none of it back once restored — #1431', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, [
+      'nominal-outdoor-ride.fit',
+      'paused-laps.fit',
+    ]);
+    const [gone, kept] = a.ids;
+    await a.on.harness.write(async (store) => {
+      await store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, gone!));
+      await store.putRiderText(riderTextFor(LOCAL_ATHLETE, 'note', gone));
+    });
+    expect(await a.sync()).toMatchObject({ pushed: 2, failures: [] });
+    expect(await instanceItem(a.on, 'write-up', gone!)).toBeDefined();
+    expect(await instanceItem(a.on, 'note', gone!)).toBeDefined();
+
+    const at = unixSeconds(1_800_000_000);
+    await a.on.harness.write((store) =>
+      store.moveActivityToRecentlyDeleted(LOCAL_ATHLETE, gone!, at),
+    );
+    expect(await a.sync()).toMatchObject({ pulled: 0, deletedOnInstance: 1, failures: [] });
+    expect((await libraryRows(a.on.harness)).map((row) => row.id)).toEqual([kept]);
+    // A second sync while it is held: the instance's tombstone is seen, and the
+    // ride's base row must survive it (the rider may restore it any day).
+    expect(await a.sync()).toMatchObject({ pushed: 0, failures: [] });
+
+    await a.on.harness.write((store) => store.restoreRecentlyDeleted(LOCAL_ATHLETE, gone!, at));
+    for (const round of [1, 2]) {
+      expect(await a.sync(), `sync ${round} after restore`).toMatchObject({
+        pushed: 0,
+        pulled: 0,
+        deletedOnInstance: 0,
+        itemsPushed: 0,
+        summariesPushed: 0,
+        textsPushed: 0,
+        failures: [],
+      });
+    }
+    expect((await libraryRows(a.on.harness)).map((row) => row.id).sort()).toEqual(
+      [gone, kept].sort(),
+    );
+    // Every kind in the manifest, read back through the instance: nothing of
+    // the restored ride is live there.
+    const manifest = await manifestOf(a.on);
+    const live = manifest.filter((entry) => !entry.deleted);
+    expect(
+      live.filter((entry) => entry.key === gone || entry.activityId === gone),
+      'live entries of the restored ride',
+    ).toEqual([]);
+    expect(await instanceItem(a.on, 'write-up', gone!)).toBeUndefined();
+    expect(await instanceItem(a.on, 'ride-summary', gone!)).toBeUndefined();
+    expect(await instanceItem(a.on, 'note', gone!)).toBeUndefined();
+    expect(
+      live.filter((entry) => entry.kind === 'activity').map((entry) => entry.activityId),
+    ).toEqual([kept]);
+  }, 60_000);
+
+  // A ride never synced, moved to Recently deleted, is not pushed.
+  it('does not push a ride that is in Recently deleted — #1431', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, [
+      'nominal-outdoor-ride.fit',
+      'paused-laps.fit',
+    ]);
+    const [held, kept] = a.ids;
+    await a.on.harness.write((store) =>
+      store.moveActivityToRecentlyDeleted(LOCAL_ATHLETE, held!, unixSeconds(1_800_000_000)),
+    );
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    const manifest = await manifestOf(a.on);
+    expect(manifest.filter((entry) => entry.kind === 'activity').map((e) => e.activityId)).toEqual([
+      kept,
+    ]);
+  }, 60_000);
+
   // #893's review, B1: the device is canonical (ADR 0036 D-3), so a ride the
   // rider deleted HERE is deleted there — and never pulled back.
   it('does not pull back a ride deleted on this device, and deletes it on the instance with its write-up', async () => {
@@ -545,7 +726,7 @@ describe('two-way sync through the real instance (#776)', () => {
     await a.on.harness.write((store) => store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, gone!)));
     expect(await a.sync()).toMatchObject({ pushed: 2, itemsPushed: 1, failures: [] });
 
-    // The Activities screen's delete (`ActivitiesView.tsx`), and a re-sync of
+    // A delete for good (since #1431, Recently deleted's own), and a re-sync of
     // the SAME device.
     await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, gone!));
     const report = await a.sync();
@@ -852,6 +1033,364 @@ describe('two-way sync through the real instance (#776)', () => {
   }, 60_000);
 });
 
+describe('a ride’s race offer (#331)', () => {
+  it('offers a consented ride on its route, withdraws it when a zone touches the route, and leaves the deciding to the device that signed it', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    const route = routeFor(LOCAL_ATHLETE);
+    await a.on.harness.write(async (store) => {
+      await store.putRoute(route);
+      const stored = await store.getActivity(LOCAL_ATHLETE, ride);
+      await store.putActivity({ ...stored!, routeId: route.id });
+    });
+    const digest = await raceRouteDigest(route.profile, webCryptoSha256);
+
+    // No consent: the ride goes, and no offer with it.
+    expect(await a.sync()).toMatchObject({ pushed: 1, offersSent: 0, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toStrictEqual([]);
+
+    // Consent: the same sync sends the consent and then the offer.
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 1, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toHaveLength(1);
+    // And a sync with nothing changed sends nothing.
+    expect(await a.sync()).toMatchObject({ offersSent: 0, failures: [] });
+
+    // A second device of the rider's, with none of A's zones, never decides it.
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, offersSent: 0, failures: [] });
+
+    // A zone on A that touches the route: the next sync withdraws the offer,
+    // though the consent stands.
+    await a.on.harness.write((store) =>
+      store.putPrivacyZone({
+        id: 'zone-home' as never,
+        athleteId: LOCAL_ATHLETE,
+        centre: route.profile.positions[0]!,
+        radius: 150 as never,
+        label: 'Home',
+        createdAt: NOW,
+      }),
+    );
+    expect(await a.sync()).toMatchObject({ offersSent: 1, consentsPushed: 0, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toStrictEqual([]);
+    expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
+
+  it('takes the offer away with a revocation, and offers again only once consent is given again', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    const route = routeFor(LOCAL_ATHLETE);
+    await a.on.harness.write(async (store) => {
+      await store.putRoute(route);
+      const stored = await store.getActivity(LOCAL_ATHLETE, ride);
+      await store.putActivity({ ...stored!, routeId: route.id, mayBeRaced: true });
+    });
+    const digest = await raceRouteDigest(route.profile, webCryptoSha256);
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 1, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toHaveLength(1);
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 0, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toStrictEqual([]);
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 1, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toHaveLength(1);
+  }, 60_000);
+});
+
+describe('a ride’s re-plan record is synced with the ride — #1315, ADR 0048 D-10', () => {
+  /**
+   * ADR 0048 D-10: *"P9's record of each acceptance and refusal is kept with
+   * the ride on the device and synced with it."* Rule 11: an item of its
+   * ride, keyed by the ride's id, pushed sealed and pulled on another device,
+   * where every entry is read by `readReplanRecord` before anything is
+   * written. Read back on the instance through a fresh store, and on each
+   * device through the ride's own read (`getActivity`).
+   */
+  const REPLANS = [
+    {
+      decision: 'accepted',
+      // A string that can only have come from the record, to look for.
+      move: { kind: 'swap-next-block', workoutId: 'RECORD-MARKER-1315', blockIndex: 0 },
+      reason: 'heart-rate-high',
+      revision: 1,
+      at: 300,
+    },
+    { decision: 'not-applied', why: 'kept', revision: 1, at: 320 },
+    { decision: 'refused', rule: 'P4', at: 400 },
+  ] as unknown as NonNullable<RideFacts['replans']>;
+
+  /** A record from a build that knew a move this one does not. */
+  const FROM_A_LATER_BUILD = {
+    decision: 'accepted',
+    move: { kind: 'set-watts', watts: 400 },
+    reason: 'heart-rate-high',
+    revision: 2,
+    at: 900,
+  };
+
+  /** Every live re-plan item the instance holds for `athleteId`, on a store opened for this read. */
+  async function replansOnInstance(path: string, athleteId: string) {
+    const fresh = await instanceStore.openSqlStore(path);
+    try {
+      const items = await fresh.listLiveSyncItems(athleteId, 'replan-record', 10);
+      return items.map((item) => ({
+        key: item.key,
+        body: JSON.parse(new TextDecoder().decode(item.body ?? new Uint8Array())) as unknown,
+      }));
+    } finally {
+      await fresh.close();
+    }
+  }
+
+  const replansOn = async (on: Device, ride: ActivityId) =>
+    (await on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.rideFacts?.replans;
+
+  /** A signed-in device with one ride that carries {@link REPLANS}. */
+  async function rodeWithReplans() {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['indoor-trainer-no-position.fit']);
+    const ride = a.ids[0]!;
+    const facts = await a.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(
+      await a.on.harness.write((store) =>
+        store.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+          ...facts?.rideFacts,
+          replans: REPLANS,
+        }),
+      ),
+    ).toBe(true);
+    return { a, ride, origin, path: world.path };
+  }
+
+  it('is pushed as an item of its ride, and a linked device pulls it into that ride', async () => {
+    const { a, ride, origin, path } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ pushed: 1, replansPushed: 1, failures: [] });
+
+    // On the instance, under its own kind and the ride's key, and nowhere else.
+    expect(await replansOnInstance(path, a.athleteId)).toStrictEqual([
+      { key: ride, body: REPLANS },
+    ]);
+    for (const entry of await manifestOf(a.on)) {
+      if (entry.kind === 'replan-record') continue;
+      const answer = await a.on.transport.sync.json(
+        'GET',
+        `/v1/sync/items/${entry.kind}/${entry.key}`,
+      );
+      expect(JSON.stringify(answer.body), entry.kind).not.toContain('RECORD-MARKER-1315');
+    }
+    // Nothing moves the second time.
+    expect(await a.sync()).toMatchObject({ replansPushed: 0, replansPulled: 0, failures: [] });
+
+    // A second device of the same rider pulls the ride, and its record with it.
+    const b = await linkedDevice(world!.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, replansPulled: 1, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(REPLANS);
+    expect(await b.sync()).toMatchObject({ replansPulled: 0, replansPushed: 0, failures: [] });
+
+    // Another athlete on the same instance holds none of it.
+    const stranger = await signedInDevice(world!.url, origin, ['paused-laps.fit']);
+    expect(await replansOnInstance(path, stranger.athleteId)).toStrictEqual([]);
+
+    // ADR 0036 D-3 (b): the device that rode it keeps its copy after the instance confirmed.
+    expect(await replansOn(a.on, ride)).toStrictEqual(REPLANS);
+  }, 60_000);
+
+  it('writes nothing, and remembers nothing, for a body that is not a list of records', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['indoor-trainer-no-position.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, replansPushed: 0, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+
+    const one = REPLANS[0];
+    for (const body of [
+      'not json',
+      JSON.stringify(one),
+      JSON.stringify({ replans: REPLANS }),
+      '[]',
+      JSON.stringify([one, FROM_A_LATER_BUILD]),
+      JSON.stringify([one, null]),
+      JSON.stringify(Array.from({ length: MAXIMUM_PULLED_REPLANS + 1 }, () => one)),
+    ]) {
+      const put = await a.on.transport.sync.json('POST', `/v1/sync/items/replan-record/${ride}`, {
+        body,
+      });
+      expect(put.status).toBe(200);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const report = await b.sync();
+        expect(report.replansPulled, body.slice(0, 40)).toBe(0);
+        expect(report.failures, body.slice(0, 40)).toContainEqual({
+          kind: 'replan-record',
+          key: ride,
+          reason: 'not-replan-records',
+        });
+      }
+      expect(await replansOn(b.on, ride), body.slice(0, 40)).toBeUndefined();
+      const bases = await b.on.harness.read((store) => store.listSyncBase(LOCAL_ATHLETE));
+      expect(bases.filter((row) => row.kind === 'replan-record')).toStrictEqual([]);
+    }
+
+    // The control: a list of records that read is taken.
+    await a.on.transport.sync.json('POST', `/v1/sync/items/replan-record/${ride}`, {
+      body: JSON.stringify(REPLANS),
+    });
+    expect(await b.sync()).toMatchObject({ replansPulled: 1, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(REPLANS);
+  }, 60_000);
+
+  it('is deleted on the instance with its ride', async () => {
+    const { a, ride } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, ride));
+    expect(await a.sync()).toMatchObject({ deletedOnInstance: 1, failures: [] });
+    const entry = (await manifestOf(a.on)).find(
+      (item) => item.kind === 'replan-record' && item.key === ride,
+    );
+    expect(entry?.deleted).toBe(true);
+    expect(await replansOnInstance(world!.path, a.athleteId)).toStrictEqual([]);
+    const bases = await a.on.harness.read((store) => store.listSyncBase(LOCAL_ATHLETE));
+    expect(bases.filter((row) => row.kind === 'replan-record')).toStrictEqual([]);
+  }, 60_000);
+
+  it('is never deleted here by another device’s delete, nor sent back for a ride it hides', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, replansPulled: 1, failures: [] });
+    await b.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, ride));
+    expect(await b.sync()).toMatchObject({ deletedOnInstance: 1, failures: [] });
+
+    expect(await a.sync()).toMatchObject({ hiddenOnInstance: 1, replansPushed: 0, failures: [] });
+    expect(await replansOn(a.on, ride)).toStrictEqual(REPLANS);
+    expect(await replansOnInstance(world!.path, a.athleteId)).toStrictEqual([]);
+  }, 60_000);
+
+  it('is not written over a record this device came to hold while the pull waited', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    // B pulls the ride, and before its record is written B's own lands.
+    const own = [{ decision: 'refused', rule: 'P2', at: 10 }] as unknown as typeof REPLANS;
+    const report = await b.on.harness.write((store) => {
+      let edited = false;
+      return syncWithInstance(
+        syncDependencies(
+          b.on,
+          new Proxy(store, {
+            get: (target, property) => {
+              const value = Reflect.get(target, property) as unknown;
+              if (typeof value !== 'function') return value;
+              const bound = (value as (...args: unknown[]) => unknown).bind(target);
+              if (property !== 'setActivityRideFacts') return bound;
+              return async (...args: unknown[]) => {
+                if (!edited) {
+                  edited = true;
+                  const held = await target.getActivity(LOCAL_ATHLETE, ride);
+                  await target.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+                    ...held?.rideFacts,
+                    replans: own,
+                  });
+                }
+                return bound(...args);
+              };
+            },
+          }),
+        ),
+      );
+    });
+    expect(report).toMatchObject({ pulled: 1, replansPulled: 0, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(own);
+    // The next sync sends B's, which is the device's change winning.
+    expect(await b.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+  }, 60_000);
+
+  // The two halves of the pull's `onlyIf`, each on its own (#1315's review):
+  // a record that lands during the wait on the instance is in the facts read
+  // after it, so only the record check refuses it; a change to another fact
+  // after that read leaves the records as they were, so only the facts check
+  // refuses it.
+
+  it('is not written over a record that landed here during the wait on the instance itself', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    const own = [{ decision: 'refused', rule: 'P2', at: 10 }] as unknown as typeof REPLANS;
+    const report = await b.on.harness.write((store) => {
+      const dependencies = syncDependencies(b.on, store);
+      const sealed: SyncTransport = {
+        bytes: (path) => dependencies.sealed.bytes(path),
+        json: async (method, path, body) => {
+          const answer = await dependencies.sealed.json(method, path, body);
+          // While B waits on the record, B's own lands — before the facts
+          // the write is checked against are read.
+          if (method === 'GET' && path.startsWith('/v1/sync/items/replan-record/')) {
+            const held = await store.getActivity(LOCAL_ATHLETE, ride);
+            await store.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+              ...held?.rideFacts,
+              replans: own,
+            });
+          }
+          return answer;
+        },
+      };
+      return syncWithInstance({ ...dependencies, sealed });
+    });
+    expect(report).toMatchObject({ pulled: 1, replansPulled: 0, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(own);
+  }, 60_000);
+
+  it('is not written over another fact of the ride that changed after the facts were read', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    const report = await b.on.harness.write((store) => {
+      let edited = false;
+      return syncWithInstance(
+        syncDependencies(
+          b.on,
+          new Proxy(store, {
+            get: (target, property) => {
+              const value = Reflect.get(target, property) as unknown;
+              if (typeof value !== 'function') return value;
+              const bound = (value as (...args: unknown[]) => unknown).bind(target);
+              if (property !== 'setActivityRideFacts') return bound;
+              return async (...args: unknown[]) => {
+                // Only the pull's write carries an `onlyIf`; the ride's records
+                // stay as the sync read them, and another fact moves.
+                if (!edited && args[3] !== undefined) {
+                  edited = true;
+                  const held = await target.getActivity(LOCAL_ATHLETE, ride);
+                  expect(held?.rideFacts?.ghostRaced).not.toBe(true);
+                  await target.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+                    ...held?.rideFacts,
+                    ghostRaced: true,
+                  });
+                }
+                return bound(...args);
+              };
+            },
+          }),
+        ),
+      );
+    });
+    expect(report).toMatchObject({ pulled: 1, replansPulled: 0, failures: [] });
+    const kept = await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(kept?.rideFacts?.ghostRaced).toBe(true);
+    expect(kept?.rideFacts?.replans).toBeUndefined();
+  }, 60_000);
+});
+
 describe('what a device will not take from an instance (#898)', () => {
   /** A ride on A, pushed; B linked to A's athlete. */
   async function twoDevices() {
@@ -933,7 +1472,7 @@ describe('what a device will not take from an instance (#898)', () => {
       const report = await b.on.harness.write((store) =>
         syncWithInstance({
           ...syncDependencies(b.on, store),
-          transport: lying,
+          sealed: lying,
           athleteKeys: () => athleteKeysFrom(lying),
         }),
       );
@@ -1007,7 +1546,7 @@ describe('what a device will not take from an instance (#898)', () => {
         },
       };
       const report = await b.on.harness.write((store) =>
-        syncWithInstance({ ...syncDependencies(b.on, store), transport: lying }),
+        syncWithInstance({ ...syncDependencies(b.on, store), sealed: lying }),
       );
       expect(report.failures).toEqual([
         expect.objectContaining({ kind: 'activity', reason: 'not-your-key' }),
@@ -1095,7 +1634,7 @@ describe('a push whose answer was lost (#901)', () => {
     };
     await expect(
       a.on.harness.write((store) =>
-        syncWithInstance({ ...syncDependencies(a.on, store), transport: losing }),
+        syncWithInstance({ ...syncDependencies(a.on, store), sealed: losing }),
       ),
     ).rejects.toThrow(/dropped/);
     expect(
@@ -1127,7 +1666,7 @@ describe('a push whose answer was lost (#901)', () => {
           : honest.json(method, path, body),
     };
     const first = await a.on.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(a.on, store), transport: refusing }),
+      syncWithInstance({ ...syncDependencies(a.on, store), sealed: refusing }),
     );
     expect(first).toMatchObject({
       pushed: 0,
@@ -1384,7 +1923,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
       },
     };
     const failed = await b.on.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b.on, store), transport: failingOnce }),
+      syncWithInstance({ ...syncDependencies(b.on, store), sealed: failingOnce }),
     );
     expect(failed.failures).toEqual([
       expect.objectContaining({ kind: 'goal', reason: 'internal' }),
@@ -1412,7 +1951,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
           : honest.json(method, path, body),
     };
     const report = await b.on.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b.on, store), transport: unreadable }),
+      syncWithInstance({ ...syncDependencies(b.on, store), sealed: unreadable }),
     );
     expect(report.failures).toEqual([
       expect.objectContaining({ kind: 'goal', reason: 'internal' }),
@@ -1481,4 +2020,723 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     await a.on.harness.write((store) => store.deleteRiderText(LOCAL_ATHLETE, 'document', plan.key));
     expect(await a.sync()).toMatchObject({ textsDeletedOnInstance: 1, failures: [] });
   }, 60_000);
+});
+
+describe('the rider’s saved workouts, through to the agent’s tool (#1100)', () => {
+  /** The `workouts` tool's answer for an athlete, on a store opened for this read alone. */
+  async function workoutsOnInstance(path: string, athleteId: string): Promise<string> {
+    const fresh = await instanceStore.openSqlStore(path);
+    try {
+      return await instanceTools.WORKOUTS.run({ athleteId, input: {}, reads: fresh }, {});
+    } finally {
+      await fresh.close();
+    }
+  }
+
+  /** What the tool should say of a workout: the Workouts screen's own row, in one line. */
+  const toolLine = (record: WorkoutRecord): string => {
+    const row = workoutRow(record);
+    return `Workout: ${row.name} — ${row.duration}: ${row.shape}`;
+  };
+
+  const workoutsOn = (on: Device) => on.harness.read((store) => store.listWorkouts(LOCAL_ATHLETE));
+
+  const idsOf = (records: readonly { readonly id: string }[]): string[] =>
+    records.map((row) => row.id).sort();
+
+  /** Workout bodies a hand-edited instance could hold, each one this program refuses. */
+  const INVALID_WORKOUT_BODIES: readonly (readonly [string, string])[] = [
+    // ADR 0017 D-4: an unknown key is refused, not ignored.
+    [
+      'workout-unknown-key',
+      JSON.stringify({
+        onYourLeftWorkout: 1,
+        name: 'Extra',
+        blocks: [{ kind: 'steady', seconds: 60, target: 0.5 }],
+        resistanceOverride: 400,
+      }),
+    ],
+    // ADR 0017 D-6: 51 interval blocks of 100 repeats expand past 10 000 segments.
+    [
+      'workout-over-the-bound',
+      JSON.stringify({
+        onYourLeftWorkout: 1,
+        name: 'Too long',
+        blocks: Array.from({ length: 51 }, () => ({
+          kind: 'intervals',
+          repeats: 100,
+          hardSeconds: 1,
+          hardTarget: 1,
+          easySeconds: 1,
+          easyTarget: 0.5,
+        })),
+      }),
+    ],
+  ];
+
+  const renamed = (record: WorkoutRecord, name: string): WorkoutRecord => ({
+    ...record,
+    name,
+    workout: { ...record.workout, name },
+    updatedAt: unixSeconds(record.updatedAt + 1),
+  });
+
+  it('sends a saved workout, and the tool reads it back on a fresh store — for its athlete only', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Over-unders' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(workout));
+    // Nothing moves the second time.
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 0, failures: [] });
+
+    // Another athlete on the same instance reads none of it.
+    const stranger = await signedInDevice(world.url, origin, ['paused-laps.fit']);
+    expect(stranger.athleteId).not.toBe(a.athleteId);
+    expect(await workoutsOnInstance(world.path, stranger.athleteId)).toBe(
+      'The cyclist has no saved workouts synced.',
+    );
+
+    // A change here is sent again.
+    const changed = renamed(workout, 'Threshold');
+    await a.on.harness.write((store) => store.putWorkout(changed));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(changed));
+  }, 60_000);
+
+  it('deletes on the instance a workout deleted here, and the tool no longer returns it; another device that brought it back keeps it', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const kept = workoutFor(LOCAL_ATHLETE, { name: 'Kept' });
+    const gone = workoutFor(LOCAL_ATHLETE, { name: 'Gone' });
+    await a.on.harness.write(async (store) => {
+      await store.putWorkout(kept);
+      await store.putWorkout(gone);
+    });
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 2, failures: [] });
+
+    // A linked device brings both back (the owner's ruling of 2026-10-10).
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({
+      workoutsPulled: 2,
+      workoutsPushed: 0,
+      workoutsDeletedOnInstance: 0,
+      failures: [],
+    });
+    expect(idsOf(await workoutsOn(b.on))).toStrictEqual(idsOf([kept, gone]));
+    expect((await workoutsOn(b.on)).find((row) => row.id === gone.id)?.workout).toStrictEqual(
+      gone.workout,
+    );
+
+    await a.on.harness.write((store) => store.deleteWorkout(LOCAL_ATHLETE, gone.id));
+    expect(await a.sync()).toMatchObject({ workoutsDeletedOnInstance: 1, failures: [] });
+    const entry = (await manifestOf(a.on)).find(
+      (item) => item.kind === 'workout' && item.key === gone.id,
+    );
+    expect(entry?.deleted).toBe(true);
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(kept));
+    // Forgotten, so nothing more is asked of the instance, and nothing comes back.
+    expect(await a.sync()).toMatchObject({
+      workoutsDeletedOnInstance: 0,
+      workoutsPushed: 0,
+      workoutsPulled: 0,
+      failures: [],
+    });
+    expect(idsOf(await workoutsOn(a.on))).toStrictEqual([kept.id]);
+
+    // Another device's deletion of a workout still here leaves it here.
+    expect(await b.sync()).toMatchObject({
+      workoutsHiddenOnInstance: 1,
+      workoutsDeletedOnInstance: 0,
+      workoutsPushed: 0,
+      failures: [],
+    });
+    expect(idsOf(await workoutsOn(b.on))).toStrictEqual(idsOf([kept, gone]));
+  }, 60_000);
+
+  it('deletes a workout deleted here even over a change another device made since, and never brings it back', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Contested' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({ workoutsPulled: 1, failures: [] });
+
+    // B changes it there; A deletes it here. A's change wins.
+    await b.on.harness.write((store) => store.putWorkout(renamed(workout, 'Changed on B')));
+    expect(await b.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.deleteWorkout(LOCAL_ATHLETE, workout.id));
+    expect(await a.sync()).toMatchObject({
+      workoutsDeletedOnInstance: 1,
+      workoutsPulled: 0,
+      failures: [],
+    });
+    expect(await a.sync()).toMatchObject({ workoutsPulled: 0, failures: [] });
+    expect(await workoutsOn(a.on)).toStrictEqual([]);
+    expect(
+      (await manifestOf(a.on)).find((item) => item.kind === 'workout' && item.key === workout.id)
+        ?.deleted,
+    ).toBe(true);
+  }, 60_000);
+
+  it('brings back a change made on another device, and sends this device’s over one made there too', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Both' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({ workoutsPulled: 1, failures: [] });
+
+    // Changed on B only: A, unchanged since, brings it back.
+    await b.on.harness.write((store) => store.putWorkout(renamed(workout, 'From B')));
+    expect(await b.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    expect(await a.sync()).toMatchObject({ workoutsPulled: 1, workoutsPushed: 0, failures: [] });
+    expect((await workoutsOn(a.on)).map((row) => row.name)).toStrictEqual(['From B']);
+
+    // Changed on both: each device's own change wins on it, and is sent.
+    await b.on.harness.write(async (store) =>
+      store.putWorkout(renamed((await store.getWorkout(LOCAL_ATHLETE, workout.id))!, 'B again')),
+    );
+    expect(await b.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    await a.on.harness.write(async (store) =>
+      store.putWorkout(renamed((await store.getWorkout(LOCAL_ATHLETE, workout.id))!, 'A wins')),
+    );
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, workoutsPulled: 0, failures: [] });
+    expect((await workoutsOn(a.on)).map((row) => row.name)).toStrictEqual(['A wins']);
+    expect(await instanceItem(a.on, 'workout', workout.id)).toMatchObject({ name: 'A wins' });
+    // B, unchanged since its own push, now brings A's back.
+    expect(await b.sync()).toMatchObject({ workoutsPulled: 1, workoutsPushed: 0, failures: [] });
+    expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['A wins']);
+  }, 60_000);
+
+  it('writes nothing, and remembers nothing, for a workout on the instance this program would not read', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const good = workoutFor(LOCAL_ATHLETE, { name: 'Good' });
+    for (const [key, body] of [
+      ['workout-good', encodeWorkoutFile(good.workout)],
+      ...INVALID_WORKOUT_BODIES,
+    ] as const) {
+      const put = await a.on.transport.sync.json(
+        'POST',
+        `/v1/sync/items/workout/${encodeURIComponent(key)}`,
+        { body },
+      );
+      expect(put.status, key).toBe(200);
+    }
+    const report = await a.sync();
+    expect(report).toMatchObject({ workoutsPulled: 1, workoutsPushed: 0 });
+    expect(report.failures).toStrictEqual(
+      INVALID_WORKOUT_BODIES.map(([key]) => ({
+        kind: 'workout',
+        key,
+        reason: 'not-a-workout',
+      })).sort((one, other) => one.key.localeCompare(other.key)),
+    );
+    expect(idsOf(await workoutsOn(a.on))).toStrictEqual(['workout-good']);
+    const baseKeys = await a.on.harness.read(async (store) =>
+      (await store.listSyncBase(LOCAL_ATHLETE))
+        .filter((row) => row.kind === 'workout')
+        .map((row) => row.key),
+    );
+    expect(baseKeys).toStrictEqual(['workout-good']);
+    // Asked again next time, and refused again.
+    expect((await a.sync()).failures).toHaveLength(INVALID_WORKOUT_BODIES.length);
+  }, 60_000);
+
+  it('keeps a workout the instance deleted, and sends it again only once it is changed here', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Sweet spot' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+
+    const deleted = await a.on.transport.sync.json(
+      'DELETE',
+      `/v1/sync/items/workout/${encodeURIComponent(workout.id)}`,
+    );
+    expect(deleted.status).toBeLessThan(300);
+    expect(await a.sync()).toMatchObject({
+      workoutsHiddenOnInstance: 1,
+      workoutsPushed: 0,
+      failures: [],
+    });
+    expect((await workoutsOn(a.on)).map((row) => row.id)).toStrictEqual([workout.id]);
+
+    await a.on.harness.write((store) => store.putWorkout(renamed(workout, 'Sweet spot 2')));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+  }, 60_000);
+
+  it('sends and deletes nothing of the workouts when their list cannot be read', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Kept on the instance' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+
+    const report = await a.on.harness.write((store) =>
+      syncWithInstance(
+        syncDependencies(
+          a.on,
+          // The store's methods read private fields, so each is bound to it.
+          new Proxy(store, {
+            get: (target, property) => {
+              if (property === 'listWorkouts') return () => Promise.reject(new Error('unreadable'));
+              const value = Reflect.get(target, property) as unknown;
+              return typeof value === 'function'
+                ? (value as (...args: unknown[]) => unknown).bind(target)
+                : value;
+            },
+          }),
+        ),
+      ),
+    );
+    expect(report).toMatchObject({ workoutsDeletedOnInstance: 0, workoutsPushed: 0 });
+    expect(report.failures).toStrictEqual([{ kind: 'workout', key: '', reason: 'not-read' }]);
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(workout));
+  }, 60_000);
+});
+
+describe('the rider’s typed workout goals, through to the agent’s read port (#1237)', () => {
+  /**
+   * The typed goals as the agent's read port serves them (`AnalysisReads`),
+   * on a store opened for this read alone — each body read back WHOLE by
+   * `readWorkoutGoals`, or `null` where it is not goals.
+   */
+  async function goalsOnInstance(
+    path: string,
+    athleteId: string,
+    kind = 'workout-goal',
+  ): Promise<readonly (WorkoutGoals | null)[]> {
+    const fresh = await instanceStore.openSqlStore(path);
+    try {
+      const items = await fresh.listLiveSyncItems(athleteId, kind, 10);
+      return items.map((item) => {
+        try {
+          const reading = readWorkoutGoals(
+            JSON.parse(new TextDecoder().decode(item.body ?? new Uint8Array())),
+          );
+          return reading.ok ? reading.goals : null;
+        } catch {
+          return null;
+        }
+      });
+    } finally {
+      await fresh.close();
+    }
+  }
+
+  const GOALS: WorkoutGoals = {
+    sessionType: 'endurance',
+    durationMinutes: 90,
+    holdRange: { low: beatsPerMinute(128), high: beatsPerMinute(138) },
+    heartRateAbove: beatsPerMinute(150),
+    powerCeiling: thresholdShare(0.75),
+    timeInRangeMinutes: 60,
+    effortCheckIns: true,
+  };
+
+  const saved = (goals: WorkoutGoals): WorkoutGoalsRecord => ({
+    athleteId: LOCAL_ATHLETE,
+    goals,
+    savedAt: NOW,
+  });
+
+  const goalsOn = (on: Device) => on.harness.read((store) => store.getWorkoutGoals(LOCAL_ATHLETE));
+
+  it('sends the goals, and the agent’s read port reads them back on a fresh store — that kind and that athlete only', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([GOALS]);
+    // Not under #836's free-text kind, which never sets a bound.
+    expect(await goalsOnInstance(world.path, a.athleteId, 'goal')).toStrictEqual([]);
+    // Nothing moves the second time.
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 0, failures: [] });
+
+    // Another athlete on the same instance reads none of it.
+    const stranger = await signedInDevice(world.url, origin, ['paused-laps.fit']);
+    expect(stranger.athleteId).not.toBe(a.athleteId);
+    expect(await goalsOnInstance(world.path, stranger.athleteId)).toStrictEqual([]);
+
+    // A change here is sent again.
+    const changed: WorkoutGoals = { ...GOALS, powerCeiling: thresholdShare(0.7) };
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(changed)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([changed]);
+  }, 60_000);
+
+  it('removes the goals from the instance at the next sync once they are cleared here, and never brings them back', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    await a.on.harness.write((store) => store.deleteWorkoutGoals(LOCAL_ATHLETE));
+    expect(await a.sync()).toMatchObject({ workoutGoalsDeletedOnInstance: 1, failures: [] });
+    const entry = (await manifestOf(a.on)).find(
+      (item) => item.kind === 'workout-goal' && item.key === 'goals',
+    );
+    expect(entry?.deleted).toBe(true);
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([]);
+    // Forgotten: nothing more is asked, and nothing comes back.
+    expect(await a.sync()).toMatchObject({
+      workoutGoalsDeletedOnInstance: 0,
+      workoutGoalsPushed: 0,
+      workoutGoalsPulled: 0,
+      failures: [],
+    });
+    expect(await goalsOn(a.on)).toStrictEqual({ status: 'none' });
+  }, 60_000);
+
+  it('brings the goals to a linked device, takes a change made on another device, and keeps them there when another device clears them', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 1, failures: [] });
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: saved(GOALS) });
+
+    // Changed on A: B, unchanged since, takes it.
+    const changed: WorkoutGoals = { sessionType: 'recovery', durationMinutes: 45 };
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(changed)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+    expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 1, workoutGoalsPushed: 0 });
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: saved(changed) });
+
+    // Cleared on A: B, unchanged since, keeps them and does not send them back.
+    await a.on.harness.write((store) => store.deleteWorkoutGoals(LOCAL_ATHLETE));
+    expect(await a.sync()).toMatchObject({ workoutGoalsDeletedOnInstance: 1 });
+    expect(await b.sync()).toMatchObject({
+      workoutGoalsHiddenOnInstance: 1,
+      workoutGoalsPushed: 0,
+      failures: [],
+    });
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: saved(changed) });
+  }, 60_000);
+
+  it('writes nothing, and remembers nothing, for goals on the instance this program would not read', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    // A ceiling over ADR 0048 H3's 0.85, as a hand-edited instance could hold.
+    const answer = await a.on.transport.sync.json('POST', '/v1/sync/items/workout-goal/goals', {
+      body: JSON.stringify({ powerCeiling: 0.95 }),
+    });
+    expect(answer.status).toBe(200);
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const report = await b.sync();
+      expect(report.workoutGoalsPulled).toBe(0);
+      expect(report.failures).toContainEqual({
+        kind: 'workout-goal',
+        key: 'goals',
+        reason: 'not-workout-goals',
+      });
+    }
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+    const bases = await b.on.harness.read((store) => store.listSyncBase(LOCAL_ATHLETE));
+    expect(bases.filter((row) => row.kind === 'workout-goal')).toStrictEqual([]);
+  }, 60_000);
+
+  it('sends and deletes nothing of the goals when they cannot be read here', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    const report = await a.on.harness.write((store) =>
+      syncWithInstance(
+        syncDependencies(
+          a.on,
+          new Proxy(store, {
+            get: (target, property) => {
+              if (property === 'getWorkoutGoals') {
+                return () => Promise.resolve({ status: 'fault', fault: 'workoutGoals: bad' });
+              }
+              const value = Reflect.get(target, property) as unknown;
+              return typeof value === 'function'
+                ? (value as (...args: unknown[]) => unknown).bind(target)
+                : value;
+            },
+          }),
+        ),
+      ),
+    );
+    expect(report).toMatchObject({ workoutGoalsDeletedOnInstance: 0, workoutGoalsPushed: 0 });
+    expect(report.failures).toStrictEqual([
+      { kind: 'workout-goal', key: 'goals', reason: 'not-read' },
+    ]);
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([GOALS]);
+  }, 60_000);
+});
+
+describe('a pull does not undo a change made here while it waited on the instance (#1263)', () => {
+  /** The store as `harness.write` hands it. */
+  type HeldStore = Parameters<Parameters<StoreHarness['write']>[0]>[0];
+
+  /**
+   * `on`'s sync, with `edit` made on its store just before the FIRST `method`
+   * write — after the sync read the row and waited on the instance, before
+   * the pull's write: the window a rider can type into. `edit` runs as its
+   * own transaction, committed before the pull's begins.
+   */
+  function syncEditingBefore(
+    on: Device,
+    method: 'putRiderText' | 'putWorkout' | 'putWorkoutGoals',
+    edit: (store: HeldStore) => Promise<unknown>,
+  ) {
+    return on.harness.write((store) => {
+      let edited = false;
+      return syncWithInstance(
+        syncDependencies(
+          on,
+          new Proxy(store, {
+            get: (target, property) => {
+              const value = Reflect.get(target, property) as unknown;
+              if (typeof value !== 'function') return value;
+              const bound = (value as (...args: unknown[]) => unknown).bind(target);
+              if (property !== method) return bound;
+              return async (...args: unknown[]) => {
+                if (!edited) {
+                  edited = true;
+                  await edit(target);
+                }
+                return bound(...args);
+              };
+            },
+          }),
+        ),
+      );
+    });
+  }
+
+  /** A on the instance, B linked and holding A's copy, then A changes it: B's next sync pulls. */
+  async function pullPending(
+    save: (store: HeldStore) => Promise<unknown>,
+    change: (store: HeldStore) => Promise<unknown>,
+  ) {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write(save);
+    expect((await a.sync()).failures).toStrictEqual([]);
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect((await b.sync()).failures).toStrictEqual([]);
+    await a.on.harness.write(change);
+    expect((await a.sync()).failures).toStrictEqual([]);
+    return { a, b };
+  }
+
+  const nothing = (): Promise<void> => Promise.resolve();
+
+  /** A on the instance, B linked but never synced: B's first sync pulls what B never held. */
+  async function firstPull(save: (store: HeldStore) => Promise<unknown>) {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write(save);
+    expect((await a.sync()).failures).toStrictEqual([]);
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    return { a, b };
+  }
+
+  describe('a goal, note or document (rule 8)', () => {
+    const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
+    const withText = (text: string) => (store: HeldStore) => store.putRiderText({ ...goal, text });
+    const goalOn = (on: Device) =>
+      on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', goal.key));
+    const pending = () => pullPending(withText('Ride a century.'), withText('Climb Ventoux.'));
+
+    it('keeps a text edited here in the wait, and sends it at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putRiderText', withText('Typed on B.'));
+      expect(report).toMatchObject({ textsPulled: 0, textsPushed: 0, failures: [] });
+      expect((await goalOn(b.on))?.text).toBe('Typed on B.');
+
+      // Changed here and there since the base: rule 8 keeps A's as a copy,
+      // and sends B's — and the copy, a new document, as well.
+      expect(await b.sync()).toMatchObject({ textsPushed: 2, textConflicts: 1, failures: [] });
+      expect(await instanceItem(a.on, 'goal', goal.key)).toStrictEqual({ text: 'Typed on B.' });
+      expect((await goalOn(b.on))?.text).toBe('Typed on B.');
+    }, 60_000);
+
+    it('does not bring back a text deleted here in the wait; the next sync is #924’s', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putRiderText', (store) =>
+        store.deleteRiderText(LOCAL_ATHLETE, 'goal', goal.key),
+      );
+      expect(report).toMatchObject({ textsPulled: 0, textsDeletedOnInstance: 0, failures: [] });
+      expect(await goalOn(b.on)).toBeUndefined();
+
+      // Deleted here over words another device typed since the base, which
+      // the rider never saw: #924's ruling pulls them rather than deleting
+      // them there. Not this issue's to overrule — the PR says so.
+      expect(await b.sync()).toMatchObject({ textsPulled: 1, textsDeletedOnInstance: 0 });
+      expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+    }, 60_000);
+
+    it('keeps a text typed here in the wait of a first sync, never held before', async () => {
+      const { b } = await firstPull(withText('Ride a century.'));
+      const report = await syncEditingBefore(b.on, 'putRiderText', withText('Typed on B.'));
+      expect(report).toMatchObject({ textsPulled: 0, failures: [] });
+      expect((await goalOn(b.on))?.text).toBe('Typed on B.');
+    }, 60_000);
+
+    it('still pulls when nothing changed here in the wait', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putRiderText', nothing);
+      expect(report).toMatchObject({ textsPulled: 1, failures: [] });
+      expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+    }, 60_000);
+  });
+
+  describe('a saved workout (rule 9)', () => {
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Read' });
+    const named = (name: string): WorkoutRecord => ({
+      ...workout,
+      name,
+      workout: { ...workout.workout, name },
+      updatedAt: unixSeconds(workout.updatedAt + 1),
+    });
+    const workoutsOn = (on: Device) =>
+      on.harness.read((store) => store.listWorkouts(LOCAL_ATHLETE));
+    const pending = () =>
+      pullPending(
+        (store) => store.putWorkout(workout),
+        (store) => store.putWorkout(named('From A')),
+      );
+
+    it('keeps a workout edited here in the wait, and sends it at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkout', (store) =>
+        store.putWorkout(named('Typed on B')),
+      );
+      expect(report).toMatchObject({ workoutsPulled: 0, workoutsPushed: 0, failures: [] });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['Typed on B']);
+
+      expect(await b.sync()).toMatchObject({ workoutsPushed: 1, workoutsPulled: 0, failures: [] });
+      expect(await instanceItem(a.on, 'workout', workout.id)).toMatchObject({ name: 'Typed on B' });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['Typed on B']);
+    }, 60_000);
+
+    it('keeps a workout deleted here in the wait deleted, and deletes it on the instance at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkout', (store) =>
+        store.deleteWorkout(LOCAL_ATHLETE, workout.id),
+      );
+      expect(report).toMatchObject({ workoutsPulled: 0, failures: [] });
+      expect(await workoutsOn(b.on)).toStrictEqual([]);
+
+      expect(await b.sync()).toMatchObject({
+        workoutsDeletedOnInstance: 1,
+        workoutsPulled: 0,
+        failures: [],
+      });
+      expect(await instanceItem(a.on, 'workout', workout.id)).toBeUndefined();
+      expect(await b.sync()).toMatchObject({ workoutsPulled: 0, failures: [] });
+      expect(await workoutsOn(b.on)).toStrictEqual([]);
+    }, 60_000);
+
+    it('keeps a workout saved here in the wait of a first sync, never held before', async () => {
+      const { b } = await firstPull((store) => store.putWorkout(workout));
+      const report = await syncEditingBefore(b.on, 'putWorkout', (store) =>
+        store.putWorkout(named('Typed on B')),
+      );
+      expect(report).toMatchObject({ workoutsPulled: 0, failures: [] });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['Typed on B']);
+    }, 60_000);
+
+    it('still pulls when nothing changed here in the wait', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkout', nothing);
+      expect(report).toMatchObject({ workoutsPulled: 1, failures: [] });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['From A']);
+    }, 60_000);
+  });
+
+  describe('the typed workout goals (rule 10)', () => {
+    const goals = (durationMinutes: number): WorkoutGoalsRecord => ({
+      athleteId: LOCAL_ATHLETE,
+      goals: { sessionType: 'endurance', durationMinutes },
+      savedAt: NOW,
+    });
+    const goalsOn = (on: Device) =>
+      on.harness.read((store) => store.getWorkoutGoals(LOCAL_ATHLETE));
+    const pending = () =>
+      pullPending(
+        (store) => store.putWorkoutGoals(goals(60)),
+        (store) => store.putWorkoutGoals(goals(90)),
+      );
+
+    it('keeps goals edited here in the wait, and sends them at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', (store) =>
+        store.putWorkoutGoals(goals(45)),
+      );
+      expect(report).toMatchObject({ workoutGoalsPulled: 0, workoutGoalsPushed: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(45) });
+
+      expect(await b.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+      expect(await instanceItem(a.on, 'workout-goal', 'goals')).toStrictEqual(goals(45).goals);
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(45) });
+    }, 60_000);
+
+    it('keeps goals cleared here in the wait cleared, and deletes them on the instance at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', (store) =>
+        store.deleteWorkoutGoals(LOCAL_ATHLETE),
+      );
+      expect(report).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+
+      expect(await b.sync()).toMatchObject({ workoutGoalsDeletedOnInstance: 1, failures: [] });
+      expect(await instanceItem(a.on, 'workout-goal', 'goals')).toBeUndefined();
+      expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+    }, 60_000);
+
+    it('keeps goals typed here in the wait of a first sync, never held before', async () => {
+      const { b } = await firstPull((store) => store.putWorkoutGoals(goals(60)));
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', (store) =>
+        store.putWorkoutGoals(goals(45)),
+      );
+      expect(report).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(45) });
+    }, 60_000);
+
+    it('still pulls when nothing changed here in the wait', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', nothing);
+      expect(report).toMatchObject({ workoutGoalsPulled: 1, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(90) });
+    }, 60_000);
+  });
 });

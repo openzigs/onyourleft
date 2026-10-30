@@ -30,14 +30,14 @@ import type {
   RiderTextRecord,
   LapRecord,
   ListActivitiesOptions,
-  NewActivity,
-  NewStreamSet,
+  NewFinishedRide,
   PrivacyZoneRecord,
   RouteId,
   RouteRecord,
   SegmentRecord,
   StoredActivityRecord,
   StreamSet,
+  WorkoutGoalsRead,
   WorkoutRecord,
 } from '@onyourleft/store';
 
@@ -80,6 +80,11 @@ export interface AccountStore {
    * that formats one into a string.
    */
   deleteAthlete(id: AthleteId): Promise<AthleteDeletionCounts>;
+  /**
+   * The rider's typed workout goals (#1236) — carried by the account export so
+   * that ADR 0005 F's rollback (export → downgrade → re-import) keeps them.
+   */
+  getWorkoutGoals(owner: AthleteId): Promise<WorkoutGoalsRead>;
   /**
    * Puts the athlete row back after an erase.
    *
@@ -190,8 +195,11 @@ export interface TransferStore {
     owner: AthleteId,
     sha256: string,
   ): Promise<ActivityRecord | undefined>;
-  putActivity(record: NewActivity): Promise<ActivityId>;
-  putStreamSet(set: NewStreamSet): Promise<ActivityId>;
+  /**
+   * An imported ride — its activity, samples and laps — in one transaction
+   * (#1320, `import-batch.ts` §`storeRide`): all of it lands or none of it.
+   */
+  putFinishedRide(ride: NewFinishedRide): Promise<ActivityId>;
   deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean>;
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   getStreamSet(owner: AthleteId, activity: ActivityId): Promise<StreamSet | undefined>;
@@ -275,11 +283,13 @@ export interface TransferPort {
    */
   readonly theme: DraftStore;
   /**
-   * The hosted model's address, model name and key in `localStorage` (#518),
-   * so an erase can forget them. Required for `theme`'s reason: a caller
-   * cannot build an erase that silently leaves a key behind.
+   * A hosted model's key this device kept before #1103, and the note that it
+   * was deleted, in `localStorage` — `camera/retired-hosted-key.ts`. The first
+   * launch after #1103 deletes the key; an erase forgets both all the same.
+   * Required for `theme`'s reason: a caller cannot build an erase that
+   * silently leaves a key behind.
    */
-  readonly hostedModel: DraftStore;
+  readonly retiredHostedKey: DraftStore;
   /**
    * This device's sign-in to an instance and its address in `localStorage`
    * (#777), so an erase can forget them — `instance/instance-port.ts`
@@ -294,6 +304,20 @@ export interface TransferPort {
    * keeper was built — there is then nothing held to forget.
    */
   readonly heldSnapshots?: DraftStore | undefined;
+  /**
+   * The note of analysis jobs asked of an instance and not yet seen to end
+   * (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`.
+   * Required, so an erase cannot leave it behind and the policy's sentence
+   * about it stay true.
+   */
+  readonly instanceAnalysis: DraftStore;
+  /**
+   * The last target each trainer acknowledged (#1305), keyed by the trainer's
+   * device id, which on Android is its Bluetooth address —
+   * `ride/trainer-target-memory.ts`. Required for `theme`'s reason. The same
+   * memory the ride controller writes, so an erase clears the page's copy too.
+   */
+  readonly trainerTargets: DraftStore;
   /**
    * The row to recreate after an erase.
    *

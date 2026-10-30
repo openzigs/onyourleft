@@ -80,11 +80,15 @@ import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import { GOALS_KEY, MAXIMUM_GOALS_CHARACTERS } from '@onyourleft/store';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { DocumentsPanel } from '../rider-text/DocumentsPanel';
+import { WorkoutGoalsPanel } from '../workout-goals/WorkoutGoalsPanel';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
+import { WORKOUT_GOALS_CARD_TITLE, WORKOUT_GOALS_KEPT_VISIBLE } from '../workout-goals/wording';
 import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { GOALS_WORDS } from '../rider-text/words';
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
+import { VisuallyHidden } from '../design/VisuallyHidden';
 // The parts' own files, not the kit's index: the index names every part, and
 // a part these cards do not draw is not this screen's to pull into a bundle.
 import { Hills } from '../design/illustration/Hills';
@@ -105,17 +109,12 @@ import { Stepper } from '../design/Stepper';
 import { CLEARING_STILL_REMOVES, PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
-import {
-  distanceUnit,
-  formatMass,
-  formatSmallDistance,
-  massIn,
-  massUnit,
-  measurementText,
-} from '../units/format';
+import { distanceUnit, formatMass, massIn, massUnit, measurementText } from '../units/format';
 import {
   DISTANCE_EVERY_CHOICES,
-  CLIMB_LEAD_CHOICES,
+  climbLeadChoices,
+  climbLeadIn,
+  climbLeadText,
   INTERVAL_LEAD_CHOICES,
   POWER_EVERY_CHOICES,
   deviceStorage,
@@ -139,6 +138,24 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
+import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
+import {
+  OBSTACLE_SETTINGS,
+  readDeliveryAssist,
+  writeDeliveryAssist,
+  type DeliveryAssist,
+} from '../game/delivery/assist-preference';
+import { presentationFor } from '../ride/MetricGrid';
+import type { RideMetricId } from '../ride/metrics';
+import {
+  chosenReadings,
+  moveReading,
+  readRideReadings,
+  showReading,
+  writeRideReadings,
+  type RideReadingsChoice,
+} from '../ride/reading-choice';
 import { KIT_PALETTE } from '../game/bicycle';
 import { PUBLISHED_BASEMAP_URL, type BasemapConfig } from '../map/basemap';
 import { readMapTilesChoice, writeMapTilesChoice } from '../map/tiles-preference';
@@ -198,27 +215,68 @@ export const MASS_SAVED = 'Saved. The trainer game now rides you at this weight.
 /** Said when the weight has been cleared and the default is back. */
 export const MASS_CLEARED = 'Cleared. The trainer game rides you at the assumed weight again.';
 
-/** Where the rider's weight goes, which is nowhere — kept on the screen (#666). */
-export const WEIGHT_STAYS_HERE =
-  'Nothing is sent anywhere — it is stored on this device with your rides.';
+/**
+ * The assumed weight as a sentence names it — #1440: `assumed 71.0 kg` in
+ * metric, and `assumed weight` in imperial, where the 71 kg it is would read
+ * as 156.5 lb: a converted number, not a round one.
+ */
+export function assumedWeightText(units: UnitSystem): string {
+  return units === 'imperial'
+    ? 'assumed weight'
+    : `assumed ${measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}`;
+}
+
+/**
+ * Where the weight box's − and + start from when it is blank (#994) — #1440:
+ * the assumed weight in kilograms, or to the nearest 5 lb (155 lb, not 156.5).
+ */
+export function assumedWeightStart(units: UnitSystem): number {
+  const shown = massIn(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units);
+  return units === 'imperial' ? Math.round(shown / 5) * 5 : shown;
+}
+
+/**
+ * Where the rider's weight goes — kept on the screen (#666).
+ *
+ * ⚠️ **It said "Nothing is sent anywhere" until #1333, which was false three
+ * ways.** The stored weight is the one a private room's ticket declares
+ * (`game/GameView.tsx` → `net/room-port.ts` §`instanceRoomLink`); it is
+ * `rider.massKilograms` in every ride analysis' input (`@onyourleft/analysis`
+ * §`rideAnalysisInput`), whichever model reads it; and it is the divisor of
+ * the power per kilogram in the ride summary a sync pushes
+ * (`ride-analysis/ride-summary.ts`). A fourth path is a fourth clause here.
+ */
+export const WEIGHT_WHERE_IT_GOES =
+  'It is stored on this device with your rides. Joining a private room sends it to that room’s instance, and asking for a ride analysis sends it to the model you chose. A ride you sync with an instance carries your power per kilogram.';
 
 /** Where the announcement choice is kept — on the screen, beside the switch (#699's review, N9). */
 export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on this device only.';
 
 /**
+ * What the Delivery choices touch (#1813): a privacy sentence, so it stays on
+ * the screen under the controls, not behind the section's ⓘ (`SectionHelp`).
+ */
+export const DELIVERY_ASSIST_STAYS_HERE =
+  'They change nothing on any other ride and nothing your trainer is sent. They are kept on this device only.';
+
+/**
  * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
- * weight is kept, and that clearing site data takes the rides with it.
+ * weight is kept and sent, and that clearing site data takes the rides with it.
  * `a11y/kept-visible.a11y.test.tsx` fails this route if any of them has a
  * closed `<details>` above it. Fragments where the sentence names a host.
  */
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
-  WEIGHT_STAYS_HERE,
+  WEIGHT_WHERE_IT_GOES,
   ANNOUNCEMENTS_STAY_HERE,
+  DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
   'sends the map area and your device’s IP address to',
   'It sends no ride data.',
+  // #1539: the corridor read, from the same host, and never near a zone.
+  'With the realistic world chosen, choosing or saving a route also asks',
+  'never for the map near your privacy zones',
   'keeps a record of each map request',
   'We don’t use it or share it.',
   'the app asks',
@@ -230,6 +288,8 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   // #836, ADR 0040 D-11: what the goals and documents are kept as, where they
   // go, and that a model reads them.
   ...RIDER_TEXT_KEPT_VISIBLE,
+  // #1237: where the typed workout goals are kept, and where a sync sends them.
+  ...WORKOUT_GOALS_KEPT_VISIBLE,
 ];
 
 /** Said when there is nothing to write a weight to. */
@@ -389,6 +449,12 @@ export interface SettingsViewProps {
    * so and offers no control.
    */
   readonly riderText?: RiderTextPort | undefined;
+  /**
+   * The rider's typed workout goals (#1237), which bound a heart-rate hold.
+   * `undefined` where this browser has no local store — the panel then says
+   * so and offers no control.
+   */
+  readonly workoutGoals?: WorkoutGoalsPort | undefined;
 }
 
 export function SettingsView({
@@ -407,6 +473,7 @@ export function SettingsView({
   themeStorage,
   maskedWords,
   riderText,
+  workoutGoals,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -564,6 +631,17 @@ export function SettingsView({
         />
 
         {/*
+          #1813: how the rider plays Delivery, beside the kit they ride it in.
+          Here rather than in *The ride* because there it made that card 2.25×
+          *Your words* beside it on the CI runner (2.19× locally, compact),
+          over #1026's balance rule (`sections.browser.spec.ts`
+          §`ROW_BALANCE_LIMIT`); here it evens this card's row instead.
+        */}
+        <DeliveryAssistPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
+
+        {/*
           #946: the menus' own switch and volume — how the app answers the
           rider's own presses, apart from the ride's sounds in *Look and sound*.
           Here rather than beside those because there it made that card 2.07×
@@ -603,7 +681,18 @@ export function SettingsView({
           </>
         }
       >
+        {/* #1433: which readings the Ride screen shows, and in which order. */}
+        <RideReadingsPanel
+          units={units}
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
+
         <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+
+        {/* #787: whether a ride in a room shows and says this rider's draft. */}
+        <DraftReadingPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
 
         <MapTilesPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
@@ -665,6 +754,29 @@ export function SettingsView({
         <DocumentsPanel port={riderText} />
       </SettingsCard>
 
+      {/*
+        #1237. The TYPED goals, which bound a heart-rate hold — their own card,
+        after the goals and documents in words, which never set a number. It
+        spans both columns of a landscape tablet: beside the short Connect
+        card in one column it was three times that card's height
+        (`sections.browser.spec.ts` §"#1026"), and across both its boxes sit
+        side by side.
+      */}
+      <SettingsCard
+        id="oyl-settings-workout-goals"
+        wide
+        title={SETTINGS_CARD_TITLES.workoutGoals}
+        picture={
+          <>
+            <Sky sun={false} />
+            <Hills seed={5} />
+            <RoadRibbon />
+          </>
+        }
+      >
+        <WorkoutGoalsPanel port={workoutGoals} />
+      </SettingsCard>
+
       <SettingsCard
         id="oyl-settings-device"
         title={SETTINGS_CARD_TITLES.device}
@@ -708,6 +820,7 @@ export const SETTINGS_CARD_TITLES = {
   words: 'Your words',
   goals: 'Your goals',
   documents: 'Your documents',
+  workoutGoals: WORKOUT_GOALS_CARD_TITLE,
   device: 'Connect and keep',
 } as const;
 
@@ -728,15 +841,18 @@ function SettingsCard({
   title,
   picture,
   children,
+  wide = false,
 }: {
   readonly id: string;
   readonly title: string;
   readonly picture: ReactNode;
   readonly children: ReactNode;
+  /** Across both columns of a landscape tablet (#1237), for a card of many boxes. */
+  readonly wide?: boolean;
 }): JSX.Element {
   return (
     <section
-      className="oyl-settings-card tw:bg-surface-raised tw:rounded-card"
+      className={`oyl-settings-card${wide ? ' oyl-settings-card--wide' : ''} tw:bg-surface-raised tw:rounded-card`}
       aria-labelledby={id}
     >
       <div className="tw:flex tw:items-center tw:gap-sm tw:mb-md">
@@ -966,12 +1082,11 @@ function AnnouncementsPanel({
       <EveryChoice
         id="oyl-announce-climb"
         label="Say a climb ahead"
-        value={preference.climbLeadMetres}
-        choices={CLIMB_LEAD_CHOICES}
-        // #399: stored in metres, labelled in the rider's own unit.
-        describe={(metres) =>
-          `${measurementText(formatSmallDistance(metres, units))} before it starts`
-        }
+        // #399: stored in metres, labelled in the rider's own unit. #1440: and
+        // offered in its own round steps, a stored step shown as the nearest.
+        value={climbLeadIn(preference.climbLeadMetres, units)}
+        choices={climbLeadChoices(units)}
+        describe={(metres) => `${climbLeadText(metres, units)} before it starts`}
         onChange={(climbLeadMetres) => {
           save({ ...preference, climbLeadMetres });
         }}
@@ -983,7 +1098,7 @@ function AnnouncementsPanel({
       )}
       {/*
         #699's review (N9): where the choice is kept stays on the screen, as
-        "Your weight" keeps WEIGHT_STAYS_HERE there; how the announcements behave
+        "Your weight" keeps WEIGHT_WHERE_IT_GOES there; how the announcements behave
         is what is tucked.
       */}
       <KeptVisible>
@@ -1194,6 +1309,8 @@ function GameWorldPanel({
   readonly storage: PreferenceStorage | undefined;
 }): JSX.Element {
   const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
+  // #1622: on by default, in either world — only a stored "off" turns it off.
+  const [decorated, setDecorated] = useState(() => readHolidayDecorations(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   // ⚠️ `oyl-announce` for its switch's declared 24×24 target (`theme.css`
   // §`.oyl-announce input[type='checkbox']`), as the Sounds panel carries it:
@@ -1247,6 +1364,25 @@ function GameWorldPanel({
           Ride in the realistic world
         </label>
       </p>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={decorated}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setDecorated(next);
+              setMessage(
+                writeHolidayDecorations(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Holiday decorations
+        </label>
+      </p>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}
@@ -1257,10 +1393,369 @@ function GameWorldPanel({
 }
 
 /**
+ * What the assisted Delivery setting says (#1813). Each number in it is a
+ * constant in the module that applies it, and a test holds the sentence to
+ * that constant: `throw.ts` §`ASSISTED_THROW_SCALE`, `obstacles.ts`
+ * §`OBSTACLE_SPACING_METRES` and §`FEWER_OBSTACLES_KEEP_ONE_IN`.
+ */
+export const DELIVERY_ASSIST_TEXT = {
+  heading: 'Delivery',
+  about:
+    'Delivery is a round of houses in the trainer game: you throw parcels to doorsteps as you ride past. These choices make a round easier.',
+  stays: DELIVERY_ASSIST_STAYS_HERE,
+  widerLabel: 'Wider throw windows',
+  widerDetail:
+    'A parcel counts from three times as far along the road from the doorstep, so you have longer to throw.',
+  obstaclesLegend: 'Obstacles',
+  obstacles: {
+    normal: {
+      label: 'As usual',
+      detail: 'A bin, a trolley or a cone rolls across the road about every 250 metres.',
+    },
+    fewer: { label: 'Fewer', detail: 'Half as many: about one every 500 metres.' },
+    none: { label: 'None', detail: 'Nothing rolls across the road.' },
+  },
+  noFailLabel: 'Keep missed houses on the round',
+  noFailDetail: 'A house you miss stays on the next day’s round instead of dropping out.',
+} as const satisfies {
+  readonly [part: string]: unknown;
+  readonly obstacles: Readonly<
+    Record<(typeof OBSTACLE_SETTINGS)[number], { label: string; detail: string }>
+  >;
+};
+
+/**
+ * The assisted Delivery setting — #1813, the owner's ruling DL10: wider throw
+ * windows, fewer or no obstacles, and no fail, so the throw's timing need not
+ * be a barrier (WCAG 2.2 SC 2.2.1 is not leaned on for an exception).
+ *
+ * ⚠️ **A device choice**, as {@link GameWorldPanel}'s is
+ * (`game/delivery/assist-preference.ts`). Two switches and a group of three
+ * native radios. What each changes is its sentence in the section's help,
+ * behind its ⓘ (#1031), and each control is described by that sentence
+ * through `aria-describedby`, so a screen reader reads what it changes as well
+ * as its name — as {@link AppearancePanel}'s group is. The group's
+ * description is the chosen option's own sentence, and every option's is in
+ * the help, so the ones not chosen are still on the screen (#666).
+ *
+ * In *You and your bike*, after the kit, and not in *The ride*: there it made
+ * that card 2.25× *Your words* beside it on the CI runner's landscape tablet,
+ * over #1026's balance rule (`sections.browser.spec.ts`
+ * §`ROW_BALANCE_LIMIT`). The sentences are in the help, as the other game
+ * panels' are, rather than under each control.
+ *
+ * The switches take the announcement switch's 24×24 target from `theme.css`
+ * by this section's own class, `oyl-delivery-assist`, which is also the
+ * tests' hook: `.oyl-announce` is how the announcement tests find their own
+ * controls.
+ */
+function DeliveryAssistPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [assist, setAssist] = useState<DeliveryAssist>(() => readDeliveryAssist(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  function keep(next: DeliveryAssist): void {
+    setAssist(next);
+    setMessage(
+      writeDeliveryAssist(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+  const text = DELIVERY_ASSIST_TEXT;
+  return (
+    <section
+      className="oyl-panel oyl-delivery-assist"
+      aria-labelledby="oyl-delivery-assist-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-delivery-assist-heading"
+        help={
+          <>
+            <p className="oyl-muted">{text.about}</p>
+            <dl className="oyl-muted">
+              <div>
+                <dt>{text.widerLabel}</dt>
+                <dd id="oyl-delivery-wider-detail">{text.widerDetail}</dd>
+              </div>
+              {/* #666: every obstacle choice's sentence, the ones not chosen too. */}
+              {OBSTACLE_SETTINGS.map((option) => (
+                <div key={option}>
+                  <dt>
+                    {text.obstaclesLegend}: {text.obstacles[option].label}
+                  </dt>
+                  <dd id={`oyl-delivery-obstacles-${option}-detail`}>
+                    {text.obstacles[option].detail}
+                  </dd>
+                </div>
+              ))}
+              <div>
+                <dt>{text.noFailLabel}</dt>
+                <dd id="oyl-delivery-no-fail-detail">{text.noFailDetail}</dd>
+              </div>
+            </dl>
+          </>
+        }
+      >
+        {text.heading}
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={assist.widerWindows}
+            aria-describedby="oyl-delivery-wider-detail"
+            onChange={(event) => {
+              keep({ ...assist, widerWindows: event.currentTarget.checked });
+            }}
+          />{' '}
+          {text.widerLabel}
+        </label>
+      </p>
+      <fieldset
+        className="oyl-segmented"
+        aria-describedby={`oyl-delivery-obstacles-${assist.obstacles}-detail`}
+      >
+        <legend>{text.obstaclesLegend}</legend>
+        <div className="oyl-segmented__options">
+          {OBSTACLE_SETTINGS.map((option) => (
+            <label key={option} htmlFor={`oyl-delivery-obstacles-${option}`}>
+              <input
+                type="radio"
+                id={`oyl-delivery-obstacles-${option}`}
+                name="oyl-delivery-obstacles"
+                value={option}
+                checked={assist.obstacles === option}
+                onChange={() => {
+                  keep({ ...assist, obstacles: option });
+                }}
+              />{' '}
+              {text.obstacles[option].label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={assist.noFail}
+            aria-describedby="oyl-delivery-no-fail-detail"
+            onChange={(event) => {
+              keep({ ...assist, noFail: event.currentTarget.checked });
+            }}
+          />{' '}
+          {text.noFailLabel}
+        </label>
+      </p>
+      <KeptVisible>
+        <p className="oyl-muted">{text.stays}</p>
+      </KeptVisible>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Whether a ride in a room shows and says this rider's draft — #787,
+ * ADR 0038 D-5 binding #327's indicator criteria, as the owner amended them on
+ * 2026-10-15: **on by default, one rider setting**. `game/draft-preference.ts`
+ * says why it is not the room's switch.
+ * The `oyl-announce` class for its switch's 24×24 target, as
+ * {@link GameWorldPanel} carries it; `oyl-draft-reading` is the tests' hook.
+ */
+function DraftReadingPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [shown, setShown] = useState(() => readDraftReadingChoice(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  return (
+    <section
+      className="oyl-panel oyl-announce oyl-draft-reading"
+      aria-labelledby="oyl-draft-reading-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-draft-reading-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              Riding close behind another rider in a room takes less effort, as on the road. With
+              this on, the ride screen shows how much of your air resistance the draft is taking
+              away, as a percentage, and a bar up to the most any draft can give. On a climb the
+              number is small because there is little air to push; that is not a fault.
+            </p>
+            <p className="oyl-muted">
+              If spoken announcements are on, you also hear when you go into the draft and out of
+              it. Turning this off changes only what you see and hear: whether a room drafts is
+              chosen by whoever made it.
+            </p>
+          </>
+        }
+      >
+        Draft
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={shown}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setShown(next);
+              setMessage(
+                writeDraftReadingChoice(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Show my draft when riding in a room
+        </label>
+      </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * #1433: what the Ride screen shows a rider was not asked about until now —
+ * which of the four readings, and in which order. Ranked, because the Ride
+ * screen's *Zoom* keeps the top two: the order is what decides what a zoomed
+ * screen shows. Kept on this device (`ride/reading-choice.ts` says why).
+ *
+ * Each row is a checkbox and two buttons, *Up* and *Down*, rather than a drag:
+ * a drag is not operable from a keyboard or a switch, and WCAG 2.2 SC 2.5.7
+ * asks for a single-pointer way that is not one. The buttons at the ends stay
+ * in the tab order and say they cannot move (`aria-disabled`). Each row is
+ * keyed by its reading, so the button pressed moves with its row and keeps
+ * the focus (React puts it back after the move). The last reading shown
+ * cannot be turned off; the panel says so rather than leaving an empty screen.
+ */
+function RideReadingsPanel({
+  units,
+  storage,
+}: {
+  readonly units: UnitSystem;
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [choice, setChoice] = useState(() => readRideReadings(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  const labels = presentationFor(units);
+
+  function keep(next: RideReadingsChoice, said: string): void {
+    setChoice(next);
+    const kept = writeRideReadings(storage, next);
+    setMessage({
+      tone: kept ? 'success' : 'warning',
+      text: `${said} ${kept ? ANNOUNCEMENTS_SAVED : ANNOUNCEMENTS_NOT_KEPT}`,
+    });
+  }
+
+  function move(id: RideMetricId, by: -1 | 1): void {
+    const next = moveReading(choice, id, by);
+    if (next === choice) return;
+    keep(next, rideReadingMoved(labels[id].label, next.order.indexOf(id) + 1, next.order.length));
+  }
+
+  const shown = chosenReadings(choice);
+  return (
+    <section className="oyl-panel oyl-ride-readings" aria-labelledby="oyl-ride-readings-heading">
+      <SectionHeading
+        level={3}
+        id="oyl-ride-readings-heading"
+        help={
+          <p className="oyl-muted">
+            The readings the Ride screen shows, top first. With Zoom pressed on the Ride screen it
+            shows the top two, larger.
+          </p>
+        }
+      >
+        Ride screen readings
+      </SectionHeading>
+      <ol className="oyl-ride-readings__list">
+        {choice.order.map((id, index) => {
+          const label = labels[id].label;
+          const on = shown.includes(id);
+          return (
+            <li key={id} className="oyl-ride-readings__row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(event) => {
+                    const next = showReading(choice, id, event.currentTarget.checked);
+                    if (next === choice) {
+                      setMessage({ tone: 'warning', text: RIDE_READINGS_ONE_STAYS });
+                      return;
+                    }
+                    keep(next, `${label} ${on ? 'hidden' : 'shown'}.`);
+                  }}
+                />{' '}
+                {label}
+              </label>
+              {(
+                [
+                  [-1, 'Up', index === 0],
+                  [1, 'Down', index === choice.order.length - 1],
+                ] as const
+              ).map(([by, word, atEnd]) => (
+                <Button
+                  key={word}
+                  variant="secondary"
+                  unavailable={atEnd}
+                  onClick={() => {
+                    move(id, by);
+                  }}
+                >
+                  <VisuallyHidden>{`Move ${label} `}</VisuallyHidden>
+                  {word}
+                </Button>
+              ))}
+            </li>
+          );
+        })}
+      </ol>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/** #1433: said when a reading moves. ⚠️ Draft wording for the owner. */
+export function rideReadingMoved(label: string, place: number, of: number): string {
+  return `${label} is now ${String(place)} of ${String(of)}.`;
+}
+
+/** #1433: said when the last reading shown is unticked. ⚠️ Draft wording for the owner. */
+export const RIDE_READINGS_ONE_STAYS =
+  'At least one reading stays on the Ride screen. Tick another first to hide this one.';
+
+/**
  * Whether a ride's map draws tiles under the line — the owner's decision of
  * 2026-09-25 on #534's review: **on by default, with a switch to turn it off**.
  *
- * ⚠️ **The one Settings switch here that starts ON**, and the only one that
+ * ⚠️ **One of two Settings switches here that start ON** (the draft reading
+ * is the other, which contacts nothing), and the only one that
  * decides whether this app contacts a host. So the sentence beside it says
  * exactly what turning it on sends and to whom — the map area around a ride
  * and the device's IP address, to the host named in the build's own basemap
@@ -1315,7 +1810,9 @@ function MapTilesPanel({
             <p className="oyl-muted">
               When this is on, opening a ride that has GPS asks {host} for the map around where you
               rode. That sends the map area and your device’s IP address to {host}. It sends no ride
-              data.
+              data. With the realistic world chosen, choosing or saving a route also asks {host},
+              once for that route, for the map along it, so the game can place towns where the map
+              has them — but never for the map near your privacy zones.
               {ours
                 ? ` Cloudflare, which runs ${host} for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days. We don’t use it or share it.`
                 : ''}{' '}
@@ -1339,7 +1836,7 @@ function MapTilesPanel({
                   );
                 }}
               />{' '}
-              Draw map tiles under my rides
+              Use map tiles for ride maps and the realistic world’s towns
             </label>
           </p>
         </>
@@ -1533,7 +2030,7 @@ function WeightPanel({
         Your weight
       </SectionHeading>
       <KeptVisible>
-        <p className="oyl-muted">{WEIGHT_STAYS_HERE}</p>
+        <p className="oyl-muted">{WEIGHT_WHERE_IT_GOES}</p>
       </KeptVisible>
 
       {port === undefined ? (
@@ -1556,8 +2053,9 @@ function WeightPanel({
       )}
 
       <p className="oyl-muted">
-        {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
-        {measurementText(formatMass(current.mass, units))}.
+        {current.assumed
+          ? `You have not entered one, so rides use an ${assumedWeightText(units)}.`
+          : `Rides use ${measurementText(formatMass(current.mass, units))}.`}
       </p>
     </section>
   );
@@ -1781,16 +2279,12 @@ function WeightField({
         <label htmlFor="oyl-rider-mass">Your weight ({massUnit(units)})</label>{' '}
         {/*
           #994: − and + beside the box, which still takes typing. A box left
-          blank starts from the assumed weight the sentence below names, in
-          the rider's own units, so the first press is not a step from nothing.
+          blank starts from the assumed weight, in the rider's own units and
+          rounded to 5 lb in imperial (#1440), so the first press is not a step
+          from nothing.
           Nothing is saved until *Save weight*, exactly as with typing.
         */}
-        <Stepper
-          name="weight"
-          step={0.5}
-          min={0}
-          start={Number(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units).value)}
-        >
+        <Stepper name="weight" step={0.5} min={0} start={assumedWeightStart(units)}>
           <input
             className="oyl-input"
             id="oyl-rider-mass"
@@ -1808,8 +2302,7 @@ function WeightField({
       {/* #1023: an instruction for this field is under it and is its
         description (WCAG 2.2 SC 3.3.2), not in a disclosure away from it. */}
       <p id={WEIGHT_HINT_ID} className="oyl-muted oyl-field-hint">
-        Leave it blank to go back to the assumed{' '}
-        {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
+        Leave it blank to go back to the {assumedWeightText(units)}.
       </p>
       <Button
         onClick={() => {

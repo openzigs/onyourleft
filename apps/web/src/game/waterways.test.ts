@@ -23,6 +23,7 @@ import {
 } from '@onyourleft/domain';
 
 import { createGradientSession } from './gradient';
+import { NO_LAND_CLASS } from './land-class';
 import {
   TERRAIN_COLUMN_OFFSETS,
   VERGE_DROP_METRES,
@@ -202,10 +203,14 @@ describe('the bridge — #459', () => {
     expect(road - water).toBeCloseTo(BRIDGE_CLEARANCE_METRES, 6);
     const seed = scatterSeed(profile);
     for (const lateral of [4, -4, 10, -10, 40, -40]) {
-      expect(terrainHeightAt(profile, origin, seed, crossing, lateral)).toBeLessThan(water);
+      expect(terrainHeightAt(profile, origin, seed, crossing, lateral, NO_LAND_CLASS)).toBeLessThan(
+        water,
+      );
     }
     // And away from the stream the ground is back beside the road.
-    expect(terrainHeightAt(profile, origin, seed, crossing - 120, 8)).toBeGreaterThan(water + 2);
+    expect(
+      terrainHeightAt(profile, origin, seed, crossing - 120, 8, NO_LAND_CLASS),
+    ).toBeGreaterThan(water + 2);
   });
 
   it('stands parapets on the deck and abutments into the bed, beside the road and never on it', () => {

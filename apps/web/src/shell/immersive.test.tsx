@@ -176,6 +176,15 @@ describe('a ride takes the screen over — #423', () => {
       expect(element, name).not.toBeNull();
     }
     expect(document.querySelector('.oyl-game--riding')).toBeNull();
+    // #1244's review: the footer under every screen said "No account, no
+    // server: everything here stays on this device." There has been an
+    // account and a server since ADR 0036, and a rider can now switch on
+    // sending from the Ride screen above it. It says only what holds. #1442:
+    // and no longer where rides are, which the screens that need it say once.
+    expect(chrome()['footer']?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'On Your Left — free and open source.',
+    );
+    expect(chrome()['footer']?.textContent).not.toMatch(/no server|everything here stays/i);
   });
 
   it('renders none of it once the ride has started', async () => {
@@ -196,7 +205,8 @@ describe('a ride takes the screen over — #423', () => {
     await press('Ride ');
 
     const stops = tabbableElements(document.body).map((each) => each.textContent);
-    expect(stops).toEqual(['Pause', 'End ride']);
+    // #1482: and the HUD's touch lock, after them.
+    expect(stops).toEqual(['Pause', 'End ride', 'Lock']);
   });
 
   it('keeps the landmark and the heading that names it', async () => {
@@ -282,7 +292,8 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
     expect(updateOffer()).toBeNull();
     const stops = tabbableElements(document.body).map((each) => each.textContent);
-    expect(stops).toEqual(['Pause', 'End ride']);
+    // #1482: and the HUD's touch lock, after them.
+    expect(stops).toEqual(['Pause', 'End ride', 'Lock']);
     expect(waiting.activations()).toBe(0);
   });
 

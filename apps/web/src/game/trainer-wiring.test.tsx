@@ -35,6 +35,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
+import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { createGradientSession } from './gradient';
 import {
   gameTrainerPortOver,
@@ -42,6 +43,7 @@ import {
   type GameTrainerPort,
   type GradientTrainer,
 } from './trainer-port';
+import { courseProgressEvent } from './course-laps';
 import type { GameRenderer, SceneFrame } from './port';
 import { browserScreenLockSource, type ScreenLockSource } from './hud/wake-lock';
 import { hideablePage, type HideablePage } from './hud/wake-lock-testing';
@@ -56,6 +58,28 @@ vi.mock('./gradient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gradient')>();
   return { ...actual, createGradientSession: vi.fn(actual.createGradientSession) };
 });
+/**
+ * What `GameView` OFFERED the announcer, call by call — #1312, the seam
+ * `hud/hud-announcer.a11y.test.tsx` uses and for its reason: the region's text
+ * cannot tell an event offered once from one offered on every frame. The real
+ * `announce` still runs.
+ */
+const offered = vi.hoisted((): string[] => []);
+/** While `on`, the region is held by something higher: no window is open to say anything in. */
+const held = vi.hoisted(() => ({ on: false }));
+vi.mock('./hud/announce', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./hud/announce')>();
+  return {
+    ...actual,
+    announce: (...args: Parameters<typeof actual.announce>) => {
+      for (const event of args[1].events ?? []) offered.push(event.kind);
+      return actual.announce(
+        held.on ? { ...args[0], lastSpokenAt: args[1].now } : args[0],
+        args[1],
+      );
+    },
+  };
+});
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
   altitudeMetres,
@@ -64,22 +88,37 @@ import {
   geographicPosition,
   kilograms,
   routeProfile,
+  metres,
   seconds,
   SIMULATION_SETPOINT_INTERVAL_SECONDS,
   watts,
+  unixSeconds,
   type RoutePoint,
 } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { deviceId } from '@onyourleft/sensors';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
-import { activityId, recordingSessionId } from '@onyourleft/store';
+import { FLAG_FINISHED } from '@onyourleft/protocol';
+import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
+import { LAP_NOTICE_SECONDS } from './hud/lap-text';
+import {
+  CANNOT_RECORD_TEXT,
+  NOT_RECORDING_TEXT,
+  RECORDING_REFUSED_TEXT,
+  RECORDING_STARTED_TEXT,
+} from './StageChooser';
+import type { CourseLineEvent } from '../recording/laps';
+import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
 import { createRideController } from '../ride/controller';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
 import { roomPortOver } from '../net/room-port';
 import { frameRider, ManualClock, ScriptedRoom } from '../net/testing';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
+import type { LandUseFeature } from '@onyourleft/map-features';
+import { corridorOrigin } from './terrain';
+import type { WorldCorridor } from './world-data/corridor';
 
 /**
  * Two kilometres that climb at 4 % and then fall at 4 %.
@@ -127,6 +166,7 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       },
       setQuality: () => undefined,
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),
@@ -222,7 +262,16 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
 });
+
+/** The rider has turned spoken announcements on — off is the default. */
+function turnAnnouncementsOn(): void {
+  localStorage.setItem(
+    ANNOUNCEMENTS_STORAGE_KEY,
+    JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true }),
+  );
+}
 
 async function clickThrough(element: HTMLElement | undefined): Promise<void> {
   await act(async () => {
@@ -317,6 +366,82 @@ describe('the road the game draws reaches the trainer', () => {
     // perfectly correct ride, and a bound of "greater than zero" alone would
     // pass against a driver stuck on the first sample for ever.
     expect(commands.written.some((parameters) => parameters.grade > 3.5)).toBe(true);
+  });
+
+  it('sends the same grades with a mapped town levelled beside the road — #1547', async () => {
+    // A ride whose corridor maps built-up land 40–200 m either side of the
+    // whole climb: the ground there is levelled (`landform.ts`), and the road
+    // and every grade the trainer is sent must not move. The ground beside the
+    // road is not the road.
+    const route = hillRoute();
+    const origin = corridorOrigin(route.profile);
+    const block = (from: number, to: number): LandUseFeature => ({
+      layer: 'landuse',
+      kind: 'residential',
+      rings: [Float32Array.of(from, -100, to, -100, to, 2_100, from, 2_100)],
+    });
+    const corridor: WorldCorridor = {
+      routeId: route.id,
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 3_000 }],
+      landUse: [block(40, 200), block(-200, -40)],
+      buildings: [],
+      paths: [],
+      streets: [],
+    };
+    const rideOnce = async (
+      loadWorldCorridor: GamePort['loadWorldCorridor'] | undefined,
+    ): Promise<{ readonly grades: number[]; readonly ground: number[] }> => {
+      pending = [];
+      nowMs = 1_000_000;
+      const commands: Commands = { written: [], releases: [], requests: [] };
+      // The ground's heights as each frame was drawn: its arrays are lent (#469).
+      const ground: number[] = [];
+      const renderer: GameRenderer = {
+        loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
+        create: () => ({
+          hasContext: true,
+          prepare: () => Promise.resolve(),
+          render: (frame: SceneFrame) => {
+            const vertices = frame.terrain.mesh.vertices;
+            let sum = 0;
+            for (let at = 1; at < vertices.length; at += 3) sum += Math.abs(vertices[at] ?? 0);
+            ground.push(sum);
+          },
+          setQuality: () => undefined,
+          setRiderKit: () => undefined,
+          setSeason: () => undefined,
+          resize: () => undefined,
+          destroy: () => undefined,
+        }),
+      };
+      mounted = await mount(
+        <GameView
+          port={{
+            ...pedallingPort(route),
+            ...(loadWorldCorridor === undefined ? {} : { loadWorldCorridor }),
+          }}
+          trainer={trainerPort(READY, commands)}
+          renderer={() => Promise.resolve(renderer)}
+          now={() => nowMs}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await pump(40);
+      await settle();
+      mounted.unmount();
+      mounted = undefined;
+      return { grades: commands.written.map((parameters) => parameters.grade), ground };
+    };
+    const without = await rideOnce(undefined);
+    const levelled = await rideOnce(() => Promise.resolve({ kind: 'ready', corridor }));
+    // Non-vacuity: a ride, writes, and ground that the levelling did move.
+    expect(without.grades.length).toBeGreaterThan(5);
+    expect(levelled.ground.length).toBeGreaterThan(10);
+    expect(levelled.ground).not.toStrictEqual(without.ground);
+    expect(levelled.grades).toStrictEqual(without.grades);
   });
 
   it('does not write faster than the driver allows', async () => {
@@ -744,6 +869,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     const harness = createStoreHarness();
     await seedAthletes(harness);
     const savedIds: string[] = [];
+    let mintedLaps = 0;
     const { transport, bench } = createSimulator({
       devices: [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' })],
     });
@@ -755,8 +881,8 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
           harness.write(async (store) => store.putRecordingSession(record)),
         appendRecordingChunk: async (chunk) =>
           harness.write(async (store) => store.appendRecordingChunk(chunk)),
-        listRecordingSessions: async (owner) =>
-          harness.write(async (store) => store.listRecordingSessions(owner)),
+        readRecordingSessions: async (owner) =>
+          harness.write(async (store) => store.readRecordingSessions(owner)),
         recoverRecording: async (owner, id) =>
           harness.write(async (store) => store.recoverRecording(owner, id)),
         deleteRecordingSession: async (owner, id) =>
@@ -770,17 +896,15 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       // the real store, so what a group ride leaves in it can be read back.
       rideSave: {
         newActivityId: () => activityId('the-ride'),
+        newLapId: () => lapId(`lap-${String((mintedLaps += 1))}`),
         timeZone: 'Europe/London',
         store: {
-          putActivity: (record) =>
+          putFinishedRide: (ride) =>
             harness.write(async (store) => {
-              const id = await store.putActivity(record);
+              const id = await store.putFinishedRide(ride);
               savedIds.push(id);
               return id;
             }),
-          putStreamSet: (set) => harness.write(async (store) => store.putStreamSet(set)),
-          deleteActivity: (owner, id) =>
-            harness.write(async (store) => store.deleteActivity(owner, id)),
         },
       },
     });
@@ -939,6 +1063,440 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     for (const trace of ['777.7', '1234.5', '13.37', '11.11', 'room-1', '"riderId"']) {
       expect(everything, trace).not.toContain(trace);
     }
+    await rig.done();
+  });
+
+  /**
+   * #785 through every real piece at once (#1360's review, N8): the room
+   * admits the rider, `GameView` asks the REAL controller for a recording,
+   * the race is ridden, *End ride* notes it, the ride is stopped and saved,
+   * and the race is read back from the store on a fresh connection.
+   */
+  describe('a ride in a private race, saved with its race — #785', () => {
+    /** Sixty flat metres, not a loop: a race's line a rider can reach in a test. */
+    const shortRoute = (): RidableRoute => {
+      const points: RoutePoint[] = [];
+      for (let index = 0; index <= 6; index += 1) {
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (index * 10) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(20),
+        });
+      }
+      return { id: 'route-short', name: 'Test sprint', profile: routeProfile(points), attempts: 0 };
+    };
+
+    async function raceOn(route: RidableRoute) {
+      const rig = await onTheBench(false);
+      const clock = new ManualClock();
+      const room = new ScriptedRoom();
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(route)}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+          room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+          roomId="room-1"
+          riderMass={kilograms(72)}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      // Nothing is recorded before the room has let the rider in (N6).
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      room.accept();
+      room.welcome(0, 'race');
+      /** `at`: where the ROOM has this rider on each of its frames, or no word of them. */
+      const rideFor = async (frames: number, at?: number): Promise<void> => {
+        for (let index = 0; index < frames; index += 1) {
+          await clock.advance(FRAME_MS);
+          if (index % 2 === 1) {
+            room.frame(index, at === undefined ? [] : [frameRider(0, at)]);
+            // In `act`: the HUD's moving time is the controller's, and moves on its tick.
+            await act(async () => {
+              rig.bench.advance(seconds(1));
+              await rig.controller.tick(rig.bench.now);
+            });
+          }
+          await pump(1);
+        }
+      };
+      return { rig, room, rideFor };
+    }
+
+    async function endAndSave(rig: Awaited<ReturnType<typeof onTheBench>>) {
+      await clickThrough(buttonStarting('End ride'));
+      await flush();
+      await act(async () => {
+        rig.controller.armStop();
+        await rig.controller.confirmStop();
+      });
+      await flush();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      const activity = await rig.harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('the-ride')),
+      );
+      return activity?.rideFacts?.races;
+    }
+
+    it('records once the room admits the rider, and saves the room’s place with the ride', async () => {
+      const { rig, room, rideFor } = await raceOn(hillRoute());
+      await rideFor(2);
+      // A ride in a room always records — the real controller, started by the game.
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      await rideFor(8);
+      room.send({ type: 'finish', order: [3, 0] });
+      await rideFor(2);
+      expect(await endAndSave(rig)).toEqual([{ roomId: 'room-1', place: 2, finishers: 2 }]);
+      await rig.done();
+    });
+
+    /**
+     * N2, by the ROOM's word on where the rider is (#1360's re-review, R1 and
+     * R2): its frames place this rider exactly on the sixty-metre line, a few
+     * metres short of it, or past it — whatever this device's own odometer
+     * says, which at 300 W is well past the line in twenty seconds.
+     */
+    it.each([
+      ['exactly on the line', 60, true],
+      ['past the line', 64.3, true],
+      ['three metres short of the line', 57, false],
+      ['a decimetre short of the line', 59.9, false],
+    ])(
+      'saves a rider the room has %s, who ended the ride before the room’s order (N2)',
+      async (_where, at, crossed) => {
+        const { rig, rideFor } = await raceOn(shortRoute());
+        await rideFor(40, at);
+        expect(rig.controller.getSnapshot().phase).toBe('recording');
+        expect(await endAndSave(rig)).toEqual([
+          crossed
+            ? { roomId: 'room-1', place: null, finishers: null, crossedTheLine: true }
+            : { roomId: 'room-1', place: null, finishers: null },
+        ]);
+        await rig.done();
+      },
+    );
+
+    /**
+     * #1364: the room's standings have the rider across the line, second of
+     * the three it has across, before its `finish` — and the rider ends the
+     * ride. Their place among those across is saved with the race, by the
+     * room's word: its flags and its order, read through the real session.
+     */
+    it('saves the place among the riders the room’s standings have across, for a rider who ended before the room’s order (#1364)', async () => {
+      const { rig, room, rideFor } = await raceOn(shortRoute());
+      await rideFor(38, 64.3);
+      const row = (riderId: number, flags: number) => ({
+        riderId,
+        gapDeciseconds: 0,
+        wattsPerKilogramTenths: 0,
+        flags,
+      });
+      room.standings(40, [
+        row(3, FLAG_FINISHED),
+        row(0, FLAG_FINISHED),
+        row(5, FLAG_FINISHED),
+        row(7, 0),
+      ]);
+      await rideFor(2, 64.3);
+      expect(await endAndSave(rig)).toEqual([
+        {
+          roomId: 'room-1',
+          place: null,
+          finishers: null,
+          crossedTheLine: true,
+          placeAcross: 2,
+          across: 3,
+        },
+      ]);
+      await rig.done();
+    });
+
+    it('saves a rider who left the race short of the line as having left it', async () => {
+      const { rig, rideFor } = await raceOn(hillRoute());
+      await rideFor(6);
+      expect(await endAndSave(rig)).toEqual([{ roomId: 'room-1', place: null, finishers: null }]);
+      await rig.done();
+    });
+
+    it('says, in the room’s notice, that the recording under it is paused — and resumes nothing (N1)', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await rig.controller.pause();
+      const clock = new ManualClock();
+      const room = new ScriptedRoom();
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(hillRoute())}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+          room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+          roomId="room-1"
+          riderMass={kilograms(72)}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      room.accept();
+      room.welcome(0);
+      for (let index = 0; index < 4; index += 1) {
+        await clock.advance(FRAME_MS);
+        await pump(1);
+      }
+      expect(mounted?.container.textContent).toContain(ROOM_RECORDING_PAUSED_TEXT);
+      // #516: only the rider's own Resume resumes a ride.
+      expect(rig.controller.getSnapshot().phase).toBe('paused');
+      await act(async () => {
+        await rig.controller.resume();
+      });
+      await pump(1);
+      expect(mounted?.container.textContent).not.toContain(ROOM_RECORDING_PAUSED_TEXT);
+      await rig.done();
+    });
+  });
+
+  /**
+   * #1221: a game ride with no recording running was ridden and lost, with
+   * only the HUD's dashed *Moving* to say so. The chooser now says it in
+   * words under *Ride*, before the press, and *Record this ride* starts the
+   * REAL controller's recording — which, stopped and saved, is an activity in
+   * the library, read back through the store's own list on the device.
+   */
+  describe('a game ride with nothing recording says so, and can be recorded — #1221', () => {
+    /** The line under Ride, as a rider reads it. */
+    const recordingLine = (): string =>
+      mounted?.container.querySelector('.oyl-chooser__recording')?.textContent ?? '';
+
+    it('says before the press that the ride will not be saved, and records it once asked — saved to the library on the device', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      expect(recordingLine()).not.toContain(CANNOT_RECORD_TEXT);
+
+      await clickThrough(buttonStarting('Record this ride'));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      // The offer is gone, the line says where the ride is saved, and focus is
+      // on Ride rather than lost with the pressed control (SC 2.4.3).
+      expect(buttonStarting('Record this ride')).toBeUndefined();
+      expect(mounted?.container.textContent).not.toContain(NOT_RECORDING_TEXT);
+      expect(mounted?.container.textContent).toContain(RECORDING_STARTED_TEXT);
+      expect(document.activeElement).toBe(buttonStarting('Ride '));
+
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      for (let index = 0; index < 10; index += 1) {
+        await pump(2);
+        await act(async () => {
+          rig.bench.advance(seconds(1));
+          await rig.controller.tick(rig.bench.now);
+        });
+      }
+      await clickThrough(buttonStarting('End ride'));
+      await flush();
+      await act(async () => {
+        rig.controller.armStop();
+        await rig.controller.confirmStop();
+      });
+      await flush();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      // ⚠️ Read back through the library's own list, on a fresh read of the
+      // device's store — no instance anywhere in this rig (ADR 0036 D-3).
+      const library = await rig.harness.read(async (store) =>
+        store.listActivitySummaries(ATHLETE_A),
+      );
+      expect(library.map((summary) => summary.id)).toEqual([activityId('the-ride')]);
+      await rig.done();
+    });
+
+    it('says nothing under Ride while a recording started on the Ride screen is running', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(mounted?.container.querySelector('.oyl-chooser__recording')).toBeNull();
+      expect(buttonStarting('Record this ride')).toBeUndefined();
+      expect(mounted?.container.textContent).not.toContain(RECORDING_STARTED_TEXT);
+      await rig.done();
+    });
+
+    it('says the ride will not be saved again once the recording under it has stopped', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(recordingLine()).toBe('');
+      await act(async () => {
+        rig.controller.armStop();
+        await rig.controller.confirmStop();
+      });
+      await flush();
+      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      await rig.done();
+    });
+
+    it('says this browser cannot record, and offers nothing, where there is no ride controller', async () => {
+      await openTheGame(gameTrainerPortOver(undefined));
+      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      expect(recordingLine()).toContain(CANNOT_RECORD_TEXT);
+      expect(buttonStarting('Record this ride')).toBeUndefined();
+    });
+
+    it('says so when the recording could not be started, and keeps the offer', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame({
+        ...gameTrainerPortOver(rig.controller),
+        recordGameRide: () => Promise.resolve(false),
+      });
+      await clickThrough(buttonStarting('Record this ride'));
+      await flush();
+      expect(recordingLine()).toContain(RECORDING_REFUSED_TEXT);
+      expect(buttonStarting('Record this ride')).toBeDefined();
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      await rig.done();
+    });
+  });
+
+  it('records a lap each time the rider completes a loop, says it on the HUD, and saves a part lap as one (#1312)', async () => {
+    // The lap is SAID only to a rider who chose announcements (third pass).
+    turnAnnouncementsOn();
+    /** 300 flat metres out and back, so its ends meet and it is honestly a loop. */
+    const circuit = (): RidableRoute => {
+      const points: RoutePoint[] = [];
+      for (let index = 0; index <= 30; index += 1) {
+        const out = index <= 15 ? index : 30 - index;
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (out * 10) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(20),
+        });
+      }
+      return {
+        id: 'route-circuit',
+        name: 'Test circuit',
+        profile: routeProfile(points, { loop: true }),
+        attempts: 0,
+      };
+    };
+    const route = circuit();
+    const rig = await onTheBench(false);
+    await rig.controller.start();
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(route)}
+        trainer={gameTrainerPortOver(rig.controller)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+
+    const hud = (): string => mounted?.container.textContent ?? '';
+    const region = (): string =>
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+    /** The strip's own sentence: which lap, and its time — `12% of lap 2 · 0:03`. */
+    const strip = (): string =>
+      mounted?.container.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
+    const lapLabel = (): string | undefined => /of (lap \d+)/.exec(strip())?.[1];
+    /** One second of ride: two frames of the game, one tick of the recording. */
+    const rideOneSecond = async (): Promise<void> => {
+      await pump(1);
+      // In `act`: the tick tells the HUD's lap time, which re-renders.
+      await act(async () => {
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      });
+      await pump(1);
+    };
+    const rideUntil = async (reached: () => boolean): Promise<void> => {
+      for (let second = 0; second < 400 && !reached(); second += 1) {
+        await rideOneSecond();
+      }
+      expect(reached()).toBe(true);
+    };
+
+    // On the first lap: the HUD says which lap, and nothing has ended.
+    await rideOneSecond();
+    await rideOneSecond();
+    expect(lapLabel()).toBe('lap 1');
+    // The lap's time is the RECORDING's moving time since the line — and the
+    // recording began on the line here, so it is the ride's moving time.
+    const early = rig.controller.getSnapshot();
+    expect(early.courseLapSeconds).toBeGreaterThan(0);
+    expect(early.courseLapSeconds).toBe(early.movingSeconds);
+    expect(strip()).toMatch(new RegExp(`of lap 1 · 0:0${String(early.courseLapSeconds)}$`));
+    expect(region()).not.toContain('Lap 1:');
+
+    // The line, the first time: lap 1 is shown and said, with nothing to compare it with.
+    await rideUntil(() => lapLabel() === 'lap 2');
+    // And the lap's clock began again at the line.
+    expect(strip()).toMatch(/of lap 2 · 0:0[0-2]$/);
+    await rideUntil(() => region().startsWith('Lap 1:'));
+    // The notice a rider reads: the lap, its time and its averages.
+    expect(hud()).toMatch(/Lap 1: \d+:\d\d · \d+ W · /);
+    expect(region()).not.toContain('than lap');
+    // Said ONCE: offered until the region said it, and not again while its
+    // notice is still up — or it would hold every reading off for ten seconds.
+    expect(offered).toContain('lap-ended');
+    offered.length = 0;
+    await rideOneSecond();
+    expect(offered).not.toContain('lap-ended');
+    expect(hud()).toMatch(/Lap 1: \d+:\d\d · /);
+    // The notice is for a few seconds of ride, and then the cell is given back.
+    for (let second = 0; second < 12; second += 1) {
+      await rideOneSecond();
+    }
+    expect(lapLabel()).toBe('lap 2');
+    expect(hud()).not.toMatch(/Lap 1: \d+:\d\d · /);
+
+    // The second time: compared with the first, in words.
+    await rideUntil(() => lapLabel() === 'lap 3');
+    await rideUntil(() => region().startsWith('Lap 2:'));
+    expect(region()).toMatch(/(faster|slower) than lap 1\.|The same time as lap 1\./);
+    expect(hud()).toMatch(/than lap 1\.|Same time as lap 1\./);
+
+    // *End ride*, part-way round the third.
+    for (let second = 0; second < 5; second += 1) {
+      await rideOneSecond();
+    }
+    await clickThrough(buttonStarting('End ride'));
+    await act(async () => {
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+    });
+    await flush();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    // Read back on a fresh connection, as the ride's page reads them.
+    const laps = await rig.harness.read(async (store) =>
+      store.listLaps(ATHLETE_A, activityId('the-ride')),
+    );
+    const length: number = route.profile.totalDistance;
+    expect(laps.map((lap) => [lap.ordinal, lap.partial])).toEqual([
+      [0, undefined],
+      [1, undefined],
+      [2, true],
+    ]);
+    expect(laps[0]?.distance).toBe(length);
+    expect(laps[1]?.distance).toBe(length);
+    expect(laps[2]?.distance).toBeGreaterThan(0);
+    expect(laps[2]?.distance).toBeLessThan(length);
+    for (const lap of laps) {
+      expect(lap.movingTime).toBeGreaterThan(0);
+      // One clock for both: a lap never moved for longer than it lasted.
+      expect(lap.movingTime).toBeLessThanOrEqual(lap.elapsedTime);
+    }
+    // The second lap began where the first ended.
+    expect(laps[1]?.startedAt).toBe((laps[0]?.startedAt ?? 0) + (laps[0]?.elapsedTime ?? 0));
     await rig.done();
   });
 
@@ -1449,7 +2007,11 @@ describe('other riders never reach the trainer — #782 review (N8)', () => {
     await clickThrough(buttonStarting('Ride '));
     await flushRoom();
     room.accept();
-    room.welcome(0);
+    // A room with drafting OFF (#787): with it on, a rider level with this one
+    // would rightly change how fast this one rides — and so where they are and
+    // the grade there. What this holds is that other riders' positions never
+    // reach the trainer by any other way.
+    room.welcome(0, 'ride', 'off');
     for (let tick = 1; tick <= 30; tick += 1) {
       // This rider where the room would put them at 5 m/s from the start…
       room.frame(tick, [frameRider(0, tick * 2.5, 5), ...others(tick)]);
@@ -1484,3 +2046,240 @@ async function pumpWith(clock: ManualClock, count: number): Promise<void> {
     await pump(1);
   }
 }
+
+/** 300 flat metres out and back: a loop (#1312's review tests). */
+/** `climbPerPoint` metres up each point of the way out, and down again (#1419). */
+function lapCircuit(climbPerPoint = 0): RidableRoute {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 30; index += 1) {
+    const out = index <= 15 ? index : 30 - index;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (out * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(20 + out * climbPerPoint),
+    });
+  }
+  return {
+    id: 'route-circuit',
+    name: 'Test circuit',
+    profile: routeProfile(points, { loop: true }),
+    attempts: 0,
+  };
+}
+
+const LAP_FIGURES = {
+  startedAt: unixSeconds(1_000),
+  elapsedTime: seconds(60),
+  movingTime: seconds(60),
+  distance: metres(300),
+  averagePower: watts(300),
+};
+
+/** A port that records every line event and answers each lap with one lap. */
+function linePort(events: string[], said: CourseLineEvent[] = []): GameTrainerPort {
+  return {
+    ...gameTrainerPortOver(undefined),
+    courseLine: (event) => {
+      events.push(event.kind);
+      said.push(event);
+      return event.kind === 'lap' ? [LAP_FIGURES] : undefined;
+    },
+  };
+}
+
+async function mountCircuit(
+  events: string[],
+  said: CourseLineEvent[] = [],
+  route: RidableRoute = lapCircuit(),
+): Promise<void> {
+  mounted = await mount(
+    <GameView
+      port={pedallingPort(route)}
+      trainer={linePort(events, said)}
+      renderer={() => Promise.resolve(capturingRenderer([]))}
+      now={() => nowMs}
+    />,
+  );
+  await settle();
+}
+
+/** Frames of ride until the line has been reported `count` times as a lap. */
+async function pumpUntilLaps(events: string[], count: number): Promise<number> {
+  let frames = 0;
+  while (events.filter((kind) => kind === 'lap').length < count && frames < 2_000) {
+    await pump(1);
+    frames += 1;
+  }
+  expect(events.filter((kind) => kind === 'lap').length).toBe(count);
+  return frames;
+}
+
+const hudText = (): string => mounted?.container.textContent ?? '';
+
+/**
+ * #1312's review: `End ride` returns to the picker in the SAME mount, so what a
+ * ride leaves in `GameView`'s refs outlives it. A second ride must begin with
+ * no laps done, no lap notice and no sentence owed.
+ */
+describe('a second game ride in one mount begins with no lap of the first — #1312', () => {
+  it('counts its own laps, and shows and says nothing the first ride owed', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+
+    await clickThrough(buttonStarting('Ride '));
+    const first = await pumpUntilLaps(events, 1);
+    await pumpUntilLaps(events, 2);
+    // End ride with the second lap's notice on the HUD and its sentence owed.
+    expect(hudText()).toMatch(/Lap 1: /);
+    await clickThrough(buttonStarting('End ride'));
+    await settle();
+
+    events.length = 0;
+    offered.length = 0;
+    await clickThrough(buttonStarting('Ride '));
+    // The previous ride's notice is not carried over, nor its sentence offered.
+    await pump(2);
+    expect(hudText()).not.toMatch(/Lap 1: /);
+    expect(offered).not.toContain('lap-ended');
+    // The second ride's first lap is its own: after about as long as the
+    // first's, and not once the odometer passes the first ride's two laps.
+    const second = await pumpUntilLaps(events, 1);
+    expect(second).toBeLessThanOrEqual(first + 4);
+  });
+});
+
+describe('the recording is told how far round the lap the rider is — #1322', () => {
+  it('once a second of the ride, not every frame, and only after the lap began', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+
+    const frames = await pumpUntilLaps(events, 1);
+
+    const said = events.filter((kind) => kind === 'progress').length;
+    expect(events[0]).toBe('started');
+    // Before the line, and after it again: the new lap's progress, not the old one's.
+    expect(events.indexOf('progress')).toBeLessThan(events.indexOf('lap'));
+    await pump(6);
+    expect(events.lastIndexOf('progress')).toBeGreaterThan(events.indexOf('lap'));
+    // Frames are half a second apart here, so once a second is about half of them.
+    expect(said).toBeGreaterThan(0);
+    expect(said).toBeLessThanOrEqual(Math.ceil(frames / 2) + 1);
+  });
+
+  it('says the distance and the climb of the stretch ridden since the line — #1419', async () => {
+    held.on = false;
+    const events: string[] = [];
+    const said: CourseLineEvent[] = [];
+    // Two metres up for every ten of the way out: the climb said is not nought.
+    const route = lapCircuit(2);
+    const total = route.profile.totalDistance as number;
+    await mountCircuit(events, said, route);
+    await clickThrough(buttonStarting('Ride '));
+
+    await pumpUntilLaps(events, 1);
+    await pump(4);
+    const line = said.findIndex((event) => event.kind === 'lap');
+    const before = said.slice(0, line).filter((event) => event.kind === 'progress');
+    const after = said.slice(line).filter((event) => event.kind === 'progress');
+    const last = before.at(-1);
+    const next = after[0];
+    if (last?.kind !== 'progress' || next?.kind !== 'progress') {
+      throw new Error('progress was not said on both sides of the line');
+    }
+    // The last said before the line: nearly the whole lap — said within the
+    // last second of riding it, which is under 25 m here…
+    expect(last.distance).toBeLessThan(total);
+    expect(last.distance).toBeGreaterThan(total - 25);
+    // …and the climb of THAT stretch, the profile's own figure for it: out to
+    // the turn is 30 m up, less what the run rule leaves out.
+    expect(last.ascent).toBeGreaterThan(20);
+    expect(courseProgressEvent(route.profile, last.distance)).toStrictEqual(last);
+    // The first said after it is of the new lap, measured from the line.
+    expect(next.distance).toBeGreaterThan(0);
+    expect(next.distance).toBeLessThan(25);
+  });
+});
+
+describe('a lap’s summary respects the announcements setting — #1312', () => {
+  it('is shown and not said with announcements off, which is the default', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+    const region = (): string =>
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+
+    await pumpUntilLaps(events, 1);
+
+    // The notice is on the HUD, and the region is offered the sentence…
+    expect(hudText()).toMatch(/Lap 1: /);
+    expect(offered).toContain('lap-ended');
+    // …and does not say it, now or for as long as the notice is shown.
+    for (let frames = 0; frames < 8; frames += 1) {
+      await pump(1);
+      expect(region()).not.toMatch(/Lap 1:/);
+    }
+    // ⚠️ So the notice says it ITSELF (SC 4.1.3, #1316's fourth review): it is
+    // a status message, and with the region silent nothing else exposes it.
+    expect(lapNoticeRole()).toBe('status');
+  });
+
+  it('is said with announcements on', async () => {
+    held.on = false;
+    turnAnnouncementsOn();
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+
+    await pumpUntilLaps(events, 1);
+    await pump(2);
+
+    expect(
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '',
+    ).toMatch(/^Lap 1:/);
+    // And the notice is NOT a second live region: the lap is said once.
+    expect(hudText()).toMatch(/Lap 1: /);
+    expect(lapNoticeRole()).toBeNull();
+  });
+});
+
+/** The `role` of the lap notice on the HUD, `null` when it has none, `undefined` when it is not shown. */
+function lapNoticeRole(): string | null | undefined {
+  const label = [...(mounted?.container.querySelectorAll('.oyl-status__label') ?? [])].find(
+    (each) => each.textContent?.startsWith('Lap '),
+  );
+  const notice = label?.closest('.oyl-status');
+  return notice === null || notice === undefined ? undefined : notice.getAttribute('role');
+}
+
+describe('the lap sentence is never said after its notice has gone — #1312', () => {
+  it('is taken back once the notice has gone, however long a higher event held the region', async () => {
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+    held.on = true;
+    try {
+      await pumpUntilLaps(events, 1);
+      // Held, so the sentence waits — and is offered while it can still be said.
+      expect(offered).toContain('lap-ended');
+      for (let frames = 0; frames < (LAP_NOTICE_SECONDS + 2) * 2; frames += 1) await pump(1);
+      expect(hudText()).not.toMatch(/Lap 1: /);
+      offered.length = 0;
+      await pump(2);
+      // The notice has gone, so the sentence is no longer offered.
+      expect(offered).not.toContain('lap-ended');
+    } finally {
+      held.on = false;
+    }
+    // And the region, free again, does not say it late.
+    await pump(4);
+    expect(
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '',
+    ).not.toMatch(/^Lap 1:/);
+  });
+});

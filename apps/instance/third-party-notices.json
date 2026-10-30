@@ -1,0 +1,17 @@
+{
+  "$comment": [
+    "Reviewed inputs to the instance's third-party notices -- #1096. scripts/check-third-party-notices.mjs reads this file (SERVERS[].inputs); nothing else does.",
+    "noLicenceFile: packages in the instance's distributed closure whose installed tarball carries NO licence file. The generator fails closed on such a package (NOT003) unless an entry here, keyed by name@version, says where its notice comes from instead, so a version bump fails closed again until somebody re-reads the new version. 'upstream' is text read from the project's own repository at a named commit; 'licenceText' adds the canonical licence text this repository already pins (LIC005), once, at the end of the document."
+  ],
+  "noLicenceFile": {
+    "@ai-sdk/provider-utils@5.0.56": {
+      "why": "The tarball holds its build, its source, its README and its CHANGELOG and no LICENSE, where its siblings from the same repository and release (@ai-sdk/provider 4.0.24, ai 7.0.130) each ship one. Its manifest says Apache-2.0 and names the vercel/ai repository; the text below is that repository's root LICENSE at the commit the tag @ai-sdk/provider-utils@5.0.56 names, byte-identical to the LICENSE @ai-sdk/provider 4.0.24 ships.",
+      "upstream": {
+        "url": "https://github.com/vercel/ai/blob/e7f55a481fe2c39bd2540162ee8b45bd8de3354b/LICENSE",
+        "read": "2026-10-08",
+        "text": "Copyright 2023 Vercel, Inc.\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n    http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License."
+      },
+      "licenceText": "Apache-2.0"
+    }
+  }
+}

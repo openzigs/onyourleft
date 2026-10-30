@@ -17,7 +17,7 @@ import { CameraController, type FrameSink } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
 import { browserSecureWindow } from './secure-window-testing';
 
-const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
+const AGREED = { acknowledgedBystanders: true, allowLocal: true } as const;
 
 /** A send that must never be reached; it records if it is. */
 function forbiddenSend(): { readonly send: AnalysisSend; readonly calls: string[] } {
@@ -128,10 +128,10 @@ describe('with no configuration the app makes no request at all', () => {
   });
 });
 
-describe('the local answer grants nothing hosted', () => {
-  it('leaves consent.hosted false, and a public address is still refused', async () => {
+describe('the local answer grants nothing beyond the camera', () => {
+  it('grants only the camera, and a public address is still refused', async () => {
     // Everything a rider can do for LOCAL analysis — agree, turn on, type an
-    // address and switch it on — and the hosted answer is untouched and a
+    // address and switch it on — and the consent holds nothing else, and a
     // hosted service cannot be the address.
     const forbidden = forbiddenSend();
     const hosted = endpointDecision({
@@ -143,7 +143,7 @@ describe('the local answer grants nothing hosted', () => {
     const { controller } = await liveController(() =>
       riderAnalysisPort(hosted.endpoint, { send: forbidden.send }),
     );
-    expect(controller.state().consent).toStrictEqual({ local: true, hosted: false });
+    expect(controller.state().consent).toStrictEqual({ local: true });
     expect(await controller.askAboutPicture('connection-check').outcome).toStrictEqual({
       kind: 'failed',
       failure: 'not-configured',

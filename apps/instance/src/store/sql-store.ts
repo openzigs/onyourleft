@@ -35,7 +35,11 @@
 
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
+  AccountChangeMarkTable,
+  AccountChangeTable,
   ActivityRecordTable,
+  AnalysisEventTable,
+  AnalysisJobTable,
   AthleteTable,
   BlockTable,
   DeviceKeyTable,
@@ -45,8 +49,13 @@ import type {
   InviteCodeTable,
   LinkCodeTable,
   ModerationLogTable,
+  NoticeTable,
+  StatementTable,
+  AppealTable,
+  NoticeStepTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
+  RecoveryEmailTable,
   ReportTable,
   PrivateRoomTable,
   ResultTable,
@@ -137,6 +146,12 @@ export interface RoomCourse {
   readonly capacity: number | null;
   readonly countdownMs: number | null;
   readonly rejoinWindowMs: number | null;
+  /**
+   * Whether the room drafts its riders (#787, the owner's ruling of
+   * 2026-09-30): chosen by whoever made the room and fixed for it. Absent on
+   * a write is `true`, the default the ruling chose; always present on a read.
+   */
+  readonly drafting?: boolean;
   /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
   readonly raceStartedAt: number | null;
   /**
@@ -188,6 +203,8 @@ export interface PrivateRoom {
   readonly createdAt: number;
   /** Unix seconds: when the room was over, or `null` while it is not. */
   readonly closedAt: number | null;
+  /** Unix seconds: when a PUBLIC room's creator said it starts (#788), or `null` for one shared by its code. */
+  readonly startsAt: number | null;
 }
 
 /** Everything one rider's new room is, written together (#784). */
@@ -199,6 +216,37 @@ export interface NewPrivateRoom {
   readonly creatorAthleteId: string;
   /** Unix seconds. */
   readonly createdAt: number;
+  /** Unix seconds: a PUBLIC room's start (#788). Absent, or `null`, for a room shared by its code. */
+  readonly startsAt?: number | null;
+  /**
+   * #788: at most `limit` PUBLIC rooms made by the creator since
+   * `sinceSeconds`, this one included — counted in the transaction that
+   * writes, so two at once cannot each see room for one more.
+   */
+  readonly publicCap?: { readonly limit: number; readonly sinceSeconds: number };
+}
+
+/** What writing a rider's new room came to (#784; `rate-limited`, #788's three a day). */
+export type RoomWritten = 'created' | 'code-taken' | 'rate-limited';
+
+/**
+ * A public room that is not over, as the listing reads it (#788): what a rider
+ * choosing one is told, and never where its route is.
+ */
+export interface OpenPublicRoom {
+  readonly roomId: string;
+  readonly kind: 'group' | 'race';
+  /** Unix seconds: the start its creator gave it. */
+  readonly startsAt: number;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  readonly lengthMetres: number;
+  readonly grades: readonly (readonly [number, number])[];
+  readonly ridingPosition: 'upright' | 'hoods' | 'drops';
+  readonly drafting: boolean;
+  readonly loop: boolean;
+  /** A race that left its lobby. */
+  readonly raceStarted: boolean;
 }
 
 /** A nonce issued to a public key (#772). */
@@ -242,19 +290,82 @@ export interface DisplayNameChange {
   readonly changedAt: number;
 }
 
-/** An athlete's email recovery address. */
+/**
+ * One of an athlete's recovery addresses (#1194, ADR 0047 D-8): at most
+ * {@link SqlStore.confirmRecoveryEmail}'s `addressLimit` an athlete, and one
+ * athlete an address.
+ */
 export interface RecoveryEmail {
   readonly athleteId: string;
   readonly address: string;
+  /**
+   * When `/confirm` bound it, Unix seconds — it is HELD for a week from then.
+   * `null` for an address bound before migration 0019, which is established.
+   */
+  readonly confirmedAt: number | null;
+  /** The key that gave it (its binder); `null` before migration 0019. */
+  readonly boundByKey: string | null;
 }
 
-/** An email recovery link's token, as its SHA-256. */
+/**
+ * Whether an address is past its hold: bound before migration 0019, or
+ * confirmed at or before `heldSince` (now less the hold).
+ */
+export function isEstablished(
+  address: Pick<RecoveryEmail, 'confirmedAt'>,
+  heldSince: number,
+): boolean {
+  return address.confirmedAt === null || address.confirmedAt <= heldSince;
+}
+
+/** An email recovery token, as its SHA-256. */
 export interface EmailRecoveryToken {
   readonly tokenSha256: string;
   readonly athleteId: string;
   readonly expiresAt: number;
   readonly usedAt: number | null;
+  /** The address it was mailed to (#1194); `null` only for a row no migration could place. */
+  readonly address: string | null;
 }
+
+/**
+ * A step-up for a route a device key alone may not take (#1194, ADR 0047
+ * D-8): one of the athlete's recovery codes in force, or a token mailed to an
+ * ESTABLISHED address — for `/clear`, to the address being cleared.
+ */
+export type RecoveryStepUp =
+  | { readonly kind: 'code'; readonly codeSha256: string }
+  | { readonly kind: 'token'; readonly tokenSha256: string };
+
+/** Why a step-up's proof was refused. */
+export type StepUpRefusal =
+  'step_up_required' | 'code_unknown' | 'code_used' | 'code_expired' | 'address_unbound';
+
+/** What `/clear` did (#1194). */
+export type ClearOutcome = 'cleared' | 'not_found' | StepUpRefusal;
+
+/** What the full reset did (#1194). */
+export type ResetOutcome = 'reset' | StepUpRefusal;
+
+/** A `recover`, with its options, in one transaction (#1194). */
+export interface Recovery {
+  /** The key the recovering device proved it holds. */
+  readonly publicKey: string;
+  readonly at: number;
+  /** Now less the hold: an address confirmed after it is still held. */
+  readonly heldSince: number;
+  readonly proof: RecoveryStepUp;
+  /** The full reset's new codes, as their SHA-256s, when the reset is chosen. */
+  readonly resetCodeSha256s?: readonly string[];
+  /** *Revoke every other key*: each as a plain revoke, and every mailed token and link code voided. */
+  readonly revokeOtherKeys: boolean;
+}
+
+/** What a `recover` did: `unbound` when its mailed token's address is gone or still held. */
+export type RecoveryOutcome =
+  | Take<{ readonly athleteId: string }>
+  | { readonly outcome: 'unbound' }
+  | { readonly outcome: 'key_in_use' };
 
 /**
  * An address an athlete gave for email recovery, waiting for them to follow
@@ -266,13 +377,25 @@ export interface EmailConfirmation {
   readonly address: string;
   readonly expiresAt: number;
   readonly usedAt: number | null;
+  /** The key that gave the address (#1193); `null` for a row from before migration 0018. */
+  readonly requestedByKey: string | null;
+  /** When another key's confirmation of the same address bound it first (#1194). */
+  readonly supersededAt: number | null;
 }
 
 /**
- * What spending a confirmation did: {@link Take}, or `held` when another
- * athlete's confirmed address it is — refused, and nothing spent.
+ * What spending a confirmation did, in `/confirm`'s check order (#1194, ADR
+ * 0047 D-8 item 9): `unknown`, `used` or `expired`; `superseded` when another
+ * key's confirmation of the address bound it first; `held` when another
+ * athlete holds the address; `taken` — with `added` false when the address was
+ * already this athlete's, which changes nothing; or `limit` when the athlete
+ * already holds the most addresses. Nothing is spent but on `taken`.
  */
-export type ConfirmOutcome = Take<{ readonly athleteId: string }> | { readonly outcome: 'held' };
+export type ConfirmOutcome =
+  | Take<{ readonly athleteId: string; readonly added: boolean }>
+  | { readonly outcome: 'held' }
+  | { readonly outcome: 'superseded' }
+  | { readonly outcome: 'limit' };
 
 /** A new athlete, their first key and their recovery codes, written together or not at all. */
 export interface Registration {
@@ -287,7 +410,10 @@ export interface Registration {
    * registration — somebody else's included — is usable for recovery by
    * nobody until the mailbox's reader follows the link.
    */
-  readonly recoveryEmailConfirmation?: Omit<EmailConfirmation, 'athleteId' | 'usedAt'>;
+  readonly recoveryEmailConfirmation?: Omit<
+    EmailConfirmation,
+    'athleteId' | 'usedAt' | 'requestedByKey' | 'supersededAt'
+  >;
   /** The rider confirmed they are 18 or over as they registered (#775): when. */
   readonly adultConfirmedAt?: number;
   /**
@@ -297,6 +423,12 @@ export interface Registration {
    * {@link InviteRefusedError}.
    */
   readonly inviteCodeSha256?: string;
+  /**
+   * Only from the operator's `load-accounts add` (#1383): when it made this
+   * throwaway account, so `load-accounts erase` can find it and nothing else.
+   * Registration over HTTP never sets it.
+   */
+  readonly loadRunAt?: number;
 }
 
 /** A moderator's invitation, as its SHA-256 (#775). */
@@ -318,25 +450,173 @@ export class InviteRefusedError extends Error {
   }
 }
 
+/** The hosted model key as the store holds it: ciphertext, never the key (#1097). */
+export interface SealedHostedModelKey {
+  /** The hosted service's base URL, `https:` only (`analysis/hosted-key.ts` checks it). */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly setAt: number;
+  /**
+   * What the rider says a turn may spend reasoning (#1268, migration 0023).
+   * Only a rider's own key carries it; absent is none said.
+   */
+  readonly reasoningTokens?: number;
+}
+
+/** The held key, and the athlete it is held for: the operator (ADR 0046 Q9). */
+export interface HeldHostedModelKey extends SealedHostedModelKey {
+  readonly athleteId: string;
+}
+
+/**
+ * A rider's own recorded hosted consent (#1199, ADR 0046 Q10): the ORIGIN it
+ * names — `https://host[:port]`, as `new URL(…).origin` writes it — and when
+ * it was recorded, in Unix seconds.
+ */
+export interface HostedConsent {
+  readonly athleteId: string;
+  readonly origin: string;
+  readonly recordedAt: number;
+}
+
+/** What {@link SqlStore.putHostedModelKey} did. */
+export type HostedKeyPut =
+  | { readonly outcome: 'stored' }
+  /** There is no such athlete on this instance: nothing was written. */
+  | { readonly outcome: 'no-athlete' };
+
+/**
+ * One of the instance's own keys as the store holds it (#1189, ADR 0047 D-5):
+ * the private half WRAPPED, never in clear (`keys/wrap.ts`).
+ */
+export interface InstanceKeyRow {
+  /** 16 lowercase hex: the first 8 bytes of SHA-256 over the public key. */
+  readonly keyId: string;
+  readonly role: 'identity' | 'encryption';
+  /** The raw 32-byte public key. */
+  readonly publicKey: Uint8Array;
+  readonly iv: Uint8Array;
+  readonly wrapped: Uint8Array;
+  /** An encryption key's serial; `null` for the identity key. */
+  readonly serial: number | null;
+  /** Unix seconds, by the box's clock. */
+  readonly createdAt: number;
+  /** When an encryption key's successor was made, or `null`. */
+  readonly supersededAt: number | null;
+}
+
+/** What the instance's identity key signed (#1189). Public. */
+export interface InstanceKeyStatementRow {
+  readonly keyId: string;
+  readonly kind: 'key' | 'identity-rotation';
+  readonly issuedAt: number;
+  readonly notAfter: number | null;
+  /** The signed RFC 8785 text. */
+  readonly body: string;
+  /** Lowercase hex. */
+  readonly signature: string;
+}
+
 /** One athlete blocking another (#83). */
 export interface Block {
   /** The blocker. */
   readonly athleteId: string;
   readonly blockedAthleteId: string;
   readonly createdAt: number;
+  /**
+   * Opaque and random, never {@link blockedAthleteId} (#1529): what the app
+   * lists and undoes a block by, since it never holds another rider's id.
+   */
+  readonly handle: string;
+  /**
+   * The name a race's result showed the blocker on the row they blocked
+   * from (#1529), or `null`: a block made by id, made before migration 0035,
+   * or of an athlete since erased.
+   */
+  readonly shownName: string | null;
 }
 
-/** A report (#83): its reporter is `athleteId`. */
+/**
+ * A report (#83): its reporter is `athleteId` — or nobody, for a plausibility
+ * flag a room filed itself (#789, ADR 0028 D-2 rule 3).
+ */
 export interface Report {
   readonly id: number;
-  readonly athleteId: string;
+  readonly athleteId: string | null;
   readonly targetAthleteId: string;
   readonly reason: string;
   readonly createdAt: number;
   readonly closedAt: number | null;
   readonly closedByAthleteId: string | null;
   readonly outcome: string | null;
+  /** The room it came from, and the room's tick then (#789); `null` from outside a room. */
+  readonly roomId: string | null;
+  readonly roomTick: number | null;
+  /** A flag's breached ceiling (#789): never a power trace. `null` for a rider's report. */
+  readonly flag: RoomFlag | null;
 }
+
+/** A plausibility ceiling a rider breached in a room (#789): which, by its duration and W/kg. */
+export interface RoomFlag {
+  readonly durationSeconds: number;
+  readonly ceilingWattsPerKilogram: number;
+}
+
+/**
+ * A notice of illegal content (#907), as it was received. Its notifier may be
+ * anybody, and is named only by what they chose to give.
+ */
+export interface Notice {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly receivedAt: number;
+  /** A notice of illegal content, or an intimate image content report (OSA s.20A). */
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** The item identifiers it names (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: readonly string[];
+  /** Where, in the notifier's words, when an identifier was not enough. */
+  readonly location: string | null;
+  readonly notifierName: string | null;
+  readonly notifierEmail: string | null;
+  /** Whether the notifier made the bona fide statement (DSA Art. 16(2)(d)). */
+  readonly bonaFide: boolean;
+}
+
+/** What a notice is stored with: everything but the id the store gives it. */
+export type NewNotice = Omit<Notice, 'id'>;
+
+/** A step taken on a notice after it was received (#912). */
+export type NoticeStepKind = 'acknowledged' | 'decided' | 'notifier_told';
+
+/** One step taken on a notice, by whom and when (#912). */
+export interface NoticeStep {
+  readonly id: number;
+  readonly noticeId: number;
+  readonly step: NoticeStepKind;
+  readonly actorAthleteId: string;
+  /** For `decided`: the decision, in the moderator's words. */
+  readonly decision: string | null;
+  /** For `decided`: the moderation log entry of the action it took, if any. */
+  readonly logId: number | null;
+  /** Unix seconds. */
+  readonly at: number;
+}
+
+/** What recording a step did (#912). */
+export type NoticeStepRecorded =
+  | 'recorded'
+  | 'not_found'
+  /** This step is already recorded for this notice: each happens once. */
+  | 'already'
+  /** The notifier gave no address, so there is nobody to acknowledge or tell. */
+  | 'no_contact'
+  /** The notifier cannot be told a decision not yet recorded. */
+  | 'not_decided'
+  /** The decision names a log entry that does not exist. */
+  | 'no_such_log_entry';
 
 /** What a moderator may do (#83, #775). */
 export type ModerationActionKind =
@@ -344,14 +624,64 @@ export type ModerationActionKind =
   | 'unsuspend'
   | 'hide_display_name'
   | 'dismiss_report'
+  /**
+   * The only moderator dismissing a report about themselves (#905): nobody
+   * else could decide it, so they do, and the log says it was their own. Its
+   * target is the moderator, and its reason is their declaration.
+   */
+  | 'dismiss_own_report'
   | 'approve_registration'
   | 'refuse_registration'
+  /** A moderator removed a rider from a room (#789): `roomId` names it. */
+  | 'remove_from_room'
+  /** A private room's host removed a rider from it (#789): not a moderator's action, logged as one. */
+  | 'host_remove_from_room'
+  /**
+   * One item hidden (#913): a room's listing, the route shown in a room, or
+   * a row of a race's result. Taken through {@link SqlStore.hideItem}, never
+   * {@link SqlStore.moderate}: it names an item, and the athlete is its owner.
+   */
+  | 'hide_item'
   /**
    * The instance's, not a moderator's: a pending account whose key the
    * operator named as a moderator's signed in, and was activated, because
    * nobody may approve a moderator (#891's review). Its actor is the account.
    */
   | 'activate_moderator_key';
+
+/**
+ * What a restriction is decided on, and the DSA Art. 17(3) fields the
+ * affected rider is told (#910). (a), what was restricted, is the action
+ * itself; (c), automated means, are never used; (f), redress, comes from the
+ * instance's settings when the statement is read.
+ */
+export interface StatementFields {
+  /** (b) the facts and circumstances relied on. */
+  readonly facts: string;
+  /** (b) what the decision was taken on. */
+  readonly decidedOn: 'notice' | 'report' | 'own_initiative';
+  /** (d) the law relied on, and why the content is illegal under it; `null` when decided on the terms alone. */
+  readonly legalGround: string | null;
+  /** (e) the terms relied on, and why the content breaks them; `null` when decided on the law alone. */
+  readonly termsGround: string | null;
+  /** The notifier, named only where it is necessary to see why (recital 54); usually `null`. */
+  readonly notifierNamed: string | null;
+  /** The moderator declared a conflict of interest (the owner's ruling of 2026-09-30). */
+  readonly moderatorConflict: boolean;
+  /** When the restriction ends, Unix seconds; `null` for no end date. */
+  readonly endsAt: number | null;
+}
+
+/** A statement of reasons as it was written, with its log entry's id and time (#910). */
+export interface Statement extends StatementFields {
+  readonly logId: number;
+  readonly targetAthleteId: string;
+  /** The moderator who took the decision (#911: an appeal's conflict is theirs). Never shown to the rider. */
+  readonly actorAthleteId: string;
+  /** The action it explains: `suspend`, `hide_display_name`. */
+  readonly restriction: string;
+  readonly at: number;
+}
 
 /** One moderator action, as it is asked for and as it is logged. */
 export interface ModerationAction {
@@ -362,6 +692,14 @@ export interface ModerationAction {
   readonly reportId: number | null;
   readonly reason: string;
   readonly at: number;
+  /** The room the action is taken in (#789): required by the two removals, `null` otherwise. */
+  readonly roomId?: string | null;
+  /**
+   * The statement of reasons the affected rider is told (#910), written in the
+   * same transaction as the log entry. Required of a restriction by
+   * `moderation.ts`; the store writes it whenever it is given.
+   */
+  readonly statement?: StatementFields;
 }
 
 /**
@@ -370,12 +708,50 @@ export interface ModerationAction {
  * included — which was refused and changed nothing (#891's review).
  */
 export type LoggedActionKind =
-  ModerationActionKind | 'mint_invite' | `refused_${ModerationActionKind}`;
+  | ModerationActionKind
+  | 'mint_invite'
+  | `refused_${ModerationActionKind}`
+  /** An appeal decided (#911): the restriction stands, or it is reversed. */
+  | 'uphold_appeal'
+  | 'reverse_appeal';
+
+/** An appeal against a restriction (#911), with its decision once there is one. */
+export interface Appeal {
+  readonly id: number;
+  /** The statement of reasons — and so the log entry — it appeals. */
+  readonly statementLogId: number;
+  readonly appellantAthleteId: string;
+  readonly grounds: string;
+  /** Unix seconds. */
+  readonly filedAt: number;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  /** What the rider is told, once decided. */
+  readonly decision: string | null;
+  /** The deciding moderator took the decision appealed, and declared it. */
+  readonly moderatorConflict: boolean | null;
+  readonly decidedAt: number | null;
+  readonly decidedLogId: number | null;
+}
+
+/** What filing an appeal did (#911). */
+export type AppealFiled =
+  | { readonly outcome: 'filed'; readonly appealId: number }
+  /** No statement of that id about this athlete — the same answer whether or not it is somebody else's. */
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'already_appealed' };
+
+/** What deciding an appeal did (#911). */
+export type AppealDecided =
+  | { readonly outcome: 'applied'; readonly logId: number; readonly moderatorConflict: boolean }
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'not_applicable' };
 
 /** One entry of the append-only moderation log. */
-export interface ModerationLogEntry extends Omit<ModerationAction, 'action'> {
+export interface ModerationLogEntry extends Omit<ModerationAction, 'action' | 'roomId'> {
   readonly id: number;
   readonly action: LoggedActionKind;
+  /** The room the action was taken in (#789), or `null`. */
+  readonly roomId: string | null;
 }
 
 /**
@@ -389,6 +765,53 @@ export type ModerationOutcome =
 
 /** What revoking a device key did (#867). */
 export type RevokeOutcome = 'revoked' | 'not_found' | 'last_device';
+
+/** What an account-change entry records (#1193, migration 0018). */
+export type AccountChangeKind =
+  | 'codes_replaced'
+  | 'address_added'
+  | 'address_cleared'
+  | 'link_code_minted'
+  | 'key_added'
+  | 'key_revoked';
+
+/** How a key was added (#1193). */
+export type KeyAddedVia = 'link_code' | 'recovery_code' | 'email_token';
+
+/**
+ * One account-security change (#1193, ADR 0047 D-8), and the device key that
+ * authorised it: the key whose sealed, signed request made it; for a key
+ * added with a link code, the key that MINTED the code; for a key added by
+ * `recover`, the key it added.
+ */
+export interface AccountChange {
+  readonly id: number;
+  readonly athleteId: string;
+  readonly at: number;
+  readonly kind: AccountChangeKind;
+  readonly actorKey: string;
+  /** The key added or revoked. */
+  readonly subjectKey: string | null;
+  readonly via: KeyAddedVia | null;
+  /** The address added or cleared. */
+  readonly address: string | null;
+}
+
+/** How far one device has acknowledged the log (#1193). */
+export interface AccountChangeMark {
+  readonly athleteId: string;
+  readonly deviceKey: string;
+  /** The highest entry id this device has acknowledged. */
+  readonly acknowledgedThrough: number;
+  readonly acknowledgedAt: number;
+}
+
+/** A key added with a link code or by `recover`, logged with the key it adds (#1193). */
+export interface KeyAddition {
+  readonly via: KeyAddedVia;
+  /** The key that authorised it: the code's minter, or for `recover` the key added. */
+  readonly actorKey: string;
+}
 
 /** How many times a display name may change, and over how long (#774, #867). */
 export interface RenameLimit {
@@ -411,6 +834,10 @@ export const SYNC_KINDS: readonly SyncKind[] = [
   'goal',
   'note',
   'document',
+  'masking',
+  'workout',
+  'workout-goal',
+  'replan-record',
 ];
 
 /** One thing an athlete synced, or its tombstone (#776). */
@@ -440,6 +867,12 @@ export interface ManifestRow extends SyncItem {
    * own without a request per ride.
    */
   readonly mayBeRaced: boolean | null;
+  /**
+   * The route a live, consented activity is offered to be raced on (#331),
+   * or `null` — so the device that signed it can tell whether its offer is
+   * the instance's without a request per ride.
+   */
+  readonly raceRouteSha256: string | null;
 }
 
 /** A position in the manifest's order. */
@@ -540,19 +973,111 @@ export interface HistoryIndexSummary {
 }
 
 /** The storage port. */
+/** An analysis job's status (#1095). `queued` and `running` have not ended. */
+export type AnalysisJobStatus = AnalysisJobTable['status'];
+
+/** What an analysis job's stream carries (#1095). */
+export type AnalysisEventKind = AnalysisEventTable['kind'];
+
+/** An analysis job, as the store gives it back (#1095). */
+export interface AnalysisJob {
+  readonly id: string;
+  readonly athleteId: string;
+  readonly status: AnalysisJobStatus;
+  readonly source: AnalysisJobTable['source'];
+  readonly templateVersion: string;
+  readonly inputJson: string;
+  /** The synced ride it writes up, by its own id; `null` when the device named none (#1229). */
+  readonly rideId: string | null;
+  readonly candidate: string | null;
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly createdAt: number;
+  readonly endedAt: number | null;
+}
+
+/** The write-up a finished job kept (ADR 0046 D-12). */
+export interface AnalysisResult {
+  readonly jobId: string;
+  readonly athleteId: string;
+  readonly source: AnalysisJobTable['source'];
+  readonly templateVersion: string;
+  readonly endedAt: number;
+  readonly writeUp: string;
+}
+
+/** A job a device has just asked for: queued, with nothing ended. */
+export type NewAnalysisJob = Pick<
+  AnalysisJob,
+  'id' | 'athleteId' | 'source' | 'templateVersion' | 'inputJson' | 'createdAt'
+> & {
+  /** #1229: the synced ride it writes up; absent or `null` when the device named none. */
+  readonly rideId?: string | null;
+};
+
+/** One event of a job's stream. */
+export interface AnalysisEvent {
+  readonly jobId: string;
+  readonly athleteId: string;
+  readonly seq: number;
+  readonly kind: AnalysisEventKind;
+  readonly data: string;
+  readonly at: number;
+}
+
+/** How a job ended: its status, and the `result` event that says so. */
+export interface AnalysisJobEnding {
+  readonly status: Exclude<AnalysisJobStatus, 'queued' | 'running'>;
+  readonly failure: string | null;
+  /** The screened write-up of a `succeeded` job; `null` otherwise. */
+  readonly candidate: string | null;
+  /** The `result` event's JSON. */
+  readonly data: string;
+  readonly at: number;
+}
+
 export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
   getAthlete(athleteId: string): Promise<AthleteRecord | undefined>;
 
-  putDeviceKey(key: DeviceKeyWrite): Promise<void>;
+  /**
+   * Hold a key for an athlete. With `addition` — a key added with a link code
+   * or by `recover` — the account-change log gains its `key_added` entry in
+   * the same transaction (#1193).
+   */
+  putDeviceKey(key: DeviceKeyWrite, addition?: KeyAddition): Promise<void>;
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
   /** Authentication: the key is what names the athlete, so this is not athlete-scoped. */
   findDeviceKey(publicKey: string): Promise<DeviceKey | undefined>;
-  /** Record that one of this athlete's keys signed in. */
+  /** Record that one of this athlete's keys signed in, or signed a sealed request (#1191). */
   touchDeviceKey(athleteId: string, publicKey: string, at: number): Promise<void>;
+  /**
+   * Record a sealed request's `enc` (#1191, ADR 0047 D-9): `recorded` the
+   * first time it is seen, `replayed` every time after, for as long as it is
+   * kept. The check and the record are ONE statement — an insert that does
+   * nothing on the primary key — so two identical requests at once cannot
+   * both be `recorded`. Rows seen before `forgetBefore` are deleted first.
+   */
+  recordSealedRequest(
+    encSha256: string,
+    at: number,
+    forgetBefore: number,
+  ): Promise<'recorded' | 'replayed'>;
   /**
    * Revoke one of this athlete's keys, and every session and unspent link
    * code it holds. `not_found` when the athlete holds no such key.
+   *
+   * Since #1193 (ADR 0047 D-8) it undoes what that key did and nothing else,
+   * in the one transaction: its sessions ended, the link codes it MINTED
+   * voided, its pending recovery-address confirmation cancelled, and a
+   * `key_revoked` entry naming `actorKey` logged. ⚠️ It **never replaces the
+   * recovery codes**, whoever asks: a thief's live key revoking the rider's
+   * would otherwise take the rider's way back with it (review H1).
+   *
+   * Since #1194 it also clears every address that key bound which is still
+   * HELD (confirmed after `heldSince`), under the removal rule: every token
+   * mailed to it voided, and every pending confirmation of it. An established
+   * address is left alone, whoever asks.
    *
    * ⚠️ **The last-key rule is checked HERE, in the transaction that writes
    * (#867)**: the athlete's LAST live key is revoked only when
@@ -566,9 +1091,107 @@ export interface SqlStore {
     publicKey: string,
     at: number,
     recoveryCodeSha256: string | null,
+    actorKey: string,
+    heldSince: number,
   ): Promise<RevokeOutcome>;
   /** A new athlete with their first key and recovery codes, in one transaction (#772). */
   registerAthlete(registration: Registration): Promise<void>;
+
+  /**
+   * Hold the instance's ONE hosted model key (#1097), sealed, for `athleteId`
+   * — the operator's athlete (ADR 0046 Q9), which the caller looks up. In ONE
+   * statement that writes only if that athlete exists, so it is `no-athlete`
+   * and writes nothing otherwise. Replaces a key already held, scrubbing the
+   * old ciphertext ({@link SqlStore.clearHostedModelKey}).
+   */
+  putHostedModelKey(athleteId: string, key: SealedHostedModelKey): Promise<HostedKeyPut>;
+  /** The held key, sealed, or `undefined`. The instance's one, so no athlete is asked for. */
+  getHostedModelKey(): Promise<HeldHostedModelKey | undefined>;
+  /**
+   * Clear the held key: `true` if there was one. With `secure_delete` on, and
+   * the write-ahead log checkpointed and truncated after, so the ciphertext
+   * is not left in a free page or the log (`docs/operating-an-instance.md`
+   * §"A hosted model key" says what can still remain).
+   */
+  clearHostedModelKey(): Promise<boolean>;
+
+  /**
+   * Hold `athleteId`'s OWN hosted model key (#1199: bring-your-own), sealed.
+   * One statement that writes only if the athlete exists, replacing any key
+   * they held, scrubbed. ⚠️ **A key at another ORIGIN than their recorded
+   * consent names withdraws that consent**, in the same transaction (Q10: a
+   * changed endpoint is not consented to); a key rotated at the same origin
+   * keeps it.
+   */
+  putAthleteHostedKey(athleteId: string, key: SealedHostedModelKey): Promise<HostedKeyPut>;
+  /** `athleteId`'s own key, sealed, or `undefined`. Never another athlete's. */
+  getAthleteHostedKey(athleteId: string): Promise<HeldHostedModelKey | undefined>;
+  /** Clear `athleteId`'s own key, scrubbed: `true` if there was one. */
+  clearAthleteHostedKey(athleteId: string): Promise<boolean>;
+  /**
+   * Record `athleteId`'s hosted consent naming `origin` (#1199, ADR 0046
+   * Q10), replacing any they had: `no-athlete` and nothing written for an
+   * athlete who is not here.
+   */
+  putHostedConsent(consent: HostedConsent): Promise<HostedKeyPut>;
+  /** `athleteId`'s recorded hosted consent, or `undefined`. */
+  getHostedConsent(athleteId: string): Promise<HostedConsent | undefined>;
+  /** Withdraw `athleteId`'s hosted consent: `true` if there was one. */
+  clearHostedConsent(athleteId: string): Promise<boolean>;
+
+  /**
+   * The instance's own keys (#1189, ADR 0047 D-5), wrapped: every row, the
+   * identity key and every encryption key still held. Instance-wide, so no
+   * athlete is asked for.
+   */
+  listInstanceKeys(): Promise<readonly InstanceKeyRow[]>;
+  /** Everything the identity key has signed that is still kept. */
+  listInstanceKeyStatements(): Promise<readonly InstanceKeyStatementRow[]>;
+  /** Hold a new key. Refused if its id is held already. */
+  putInstanceKey(key: InstanceKeyRow): Promise<void>;
+  /**
+   * Hold a new ENCRYPTION key and, in the same transaction, mark every
+   * encryption key without a successor as superseded at `key.createdAt`.
+   */
+  addEncryptionKey(key: InstanceKeyRow): Promise<void>;
+  /** Keep a signed statement, and drop every key statement whose `notAfter` is at or before `expiredBy`. */
+  putInstanceKeyStatement(statement: InstanceKeyStatementRow, expiredBy: number): Promise<void>;
+  /**
+   * Delete keys and what was signed for them, SCRUBBED: with `secure_delete`
+   * on and the log truncated after, so a backup taken afterwards holds none of
+   * their wrapped private halves.
+   */
+  deleteInstanceKeys(keyIds: readonly string[]): Promise<void>;
+  /**
+   * Replace the identity key, scrubbed, in one transaction: the old identity
+   * key and every statement it signed gone, the new one held, and its
+   * endorsement kept when there is one.
+   */
+  replaceIdentityKey(key: InstanceKeyRow, endorsement?: InstanceKeyStatementRow): Promise<void>;
+  /** Every key and statement gone, scrubbed (`operator instance-key reset`). */
+  clearInstanceKeys(): Promise<void>;
+  /**
+   * Hold a new IDENTITY key unless one is held already (#1203): `true` when
+   * this one was kept, `false` when another pass got there first — one
+   * atomic insert, so two processes racing their first pass keep one.
+   */
+  claimIdentityKey(key: InstanceKeyRow): Promise<boolean>;
+  /**
+   * Take the lease on changing the instance's keys for `holder` until
+   * `expiresAt` (#1203, migration 0016): `true` when it is now `holder`'s,
+   * `false` when someone else holds it and it has not lapsed at `now`. One
+   * atomic statement, so two processes cannot both take it.
+   */
+  takeInstanceKeyLease(holder: string, now: number, expiresAt: number): Promise<boolean>;
+  /**
+   * Extend `holder`'s lease to `expiresAt` (#1207): `true` while the lease is
+   * still `holder`'s — lapsed or not, so long as nobody took it — and `false`
+   * once another holder has. A pass calls it before each write, which is what
+   * FENCES it: a pass that outlived its lease and lost it writes nothing more.
+   */
+  renewInstanceKeyLease(holder: string, expiresAt: number): Promise<boolean>;
+  /** Give the lease back, if `holder` still holds it. */
+  releaseInstanceKeyLease(holder: string): Promise<void>;
 
   putChallenge(challenge: Challenge): Promise<void>;
   /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
@@ -585,11 +1208,22 @@ export interface SqlStore {
   hasRecoveryCode(athleteId: string, codeSha256: string): Promise<boolean>;
   /** Spend a recovery code, whoever's it is: the code is what names the athlete. */
   takeRecoveryCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
+  /**
+   * The recovery code whose SHA-256 is `codeSha256`, spent or not, whoever's it
+   * is — read, never spent: the code is what names the athlete. Only the
+   * operator's `account-erase` reads it (#1802), to find the account an
+   * emailed request proves is the sender's.
+   */
+  findRecoveryCode(codeSha256: string): Promise<RecoveryCode | undefined>;
 
-  putLinkCode(code: Omit<LinkCode, 'usedAt'>): Promise<void>;
+  /** Mint a link code, and log `link_code_minted` by its minter at `at`, together (#1193). */
+  putLinkCode(code: Omit<LinkCode, 'usedAt'>, at: number): Promise<void>;
   listLinkCodes(athleteId: string): Promise<readonly LinkCode[]>;
-  /** Spend a link code: the code is what names the athlete. */
-  takeLinkCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
+  /** Spend a link code: the code is what names the athlete, and its minter the key that allowed it. */
+  takeLinkCode(
+    codeSha256: string,
+    now: number,
+  ): Promise<Take<{ readonly athleteId: string; readonly mintedByKey: string }>>;
 
   /**
    * Change a display name, keeping the old one in the audit trail.
@@ -606,36 +1240,121 @@ export interface SqlStore {
   ): Promise<RenameOutcome>;
   listDisplayNameChanges(athleteId: string): Promise<readonly DisplayNameChange[]>;
 
-  getRecoveryEmail(athleteId: string): Promise<RecoveryEmail | undefined>;
+  /** This athlete's recovery addresses, held and established, the first bound first (#1194). */
+  listRecoveryEmails(athleteId: string): Promise<readonly RecoveryEmail[]>;
   /**
    * An address given for recovery, waiting to be confirmed (#865). Binds
-   * nothing. ⚠️ **Replaces the athlete's earlier unconfirmed confirmation**, in
-   * the same transaction (#883), so an athlete has at most one link pending and
-   * the table cannot grow with every address they give; a link already
+   * nothing. ⚠️ **Replaces the earlier unconfirmed confirmation THE SAME KEY
+   * gave**, in the same transaction (#883, and per key since #1194, ADR 0047
+   * D-8 item 3), so one key giving an address never cancels another key's,
+   * and the table cannot grow with every address a key gives; a link already
    * followed stays, as the record that its token is spent.
    */
-  putEmailConfirmation(confirmation: Omit<EmailConfirmation, 'usedAt'>): Promise<void>;
+  putEmailConfirmation(
+    confirmation: Omit<EmailConfirmation, 'usedAt' | 'supersededAt'>,
+  ): Promise<void>;
   listEmailConfirmations(athleteId: string): Promise<readonly EmailConfirmation[]>;
   /**
-   * Spend one of THIS athlete's confirmation tokens and bind its address to
-   * them, replacing any address they had, in one transaction (#865). Another
-   * athlete's token is `unknown`. `held` — and nothing spent or bound — when
-   * the address is already another athlete's.
+   * `/confirm` (#865; #1194, ADR 0047 D-8 item 9), in ONE transaction and in
+   * this order, stopping at the first that answers: take one of THIS athlete's
+   * confirmations (another athlete's is `unknown`; one another key's bound
+   * first is `superseded`); `held` when another athlete holds the address;
+   * the no-op `taken` (`added: false`) when the address is already this
+   * athlete's; `limit` when they hold `addressLimit` addresses; otherwise the
+   * address is ADDED, held from `now`, beside whatever is bound — never
+   * replacing one — with the key that GAVE it as its binder, `address_added`
+   * logged by that key, and every other pending confirmation of the address
+   * spent as superseded.
+   *
+   * ⚠️ The add is an insert that does NOTHING on conflict, and only a row it
+   * actually inserted is held, logged and supersedes: an upsert would re-hold
+   * the rider's own established address under whichever key gave it.
    */
   confirmRecoveryEmail(
     athleteId: string,
     tokenSha256: string,
     now: number,
+    confirmingKey: string,
+    addressLimit: number,
   ): Promise<ConfirmOutcome>;
+  /**
+   * `/clear` (#1194): remove one of this athlete's addresses, by `actorKey`.
+   * A HELD address (confirmed after `heldSince`) is removed only when
+   * `actorKey` bound it; an ESTABLISHED one only with `proof` — an unspent
+   * recovery code (checked, not spent) or a token mailed to THAT address
+   * (spent). Under the removal rule, in the same transaction: every
+   * unredeemed token mailed to it voided, every pending confirmation of it
+   * voided, `address_cleared` logged.
+   */
+  clearRecoveryEmail(clearing: {
+    readonly athleteId: string;
+    readonly address: string;
+    readonly at: number;
+    readonly actorKey: string;
+    readonly heldSince: number;
+    readonly proof: RecoveryStepUp | null;
+  }): Promise<ClearOutcome>;
+  /**
+   * The full reset (#1194): with a step-up — an unspent code of this
+   * athlete's, or an unspent token mailed to one of their ESTABLISHED
+   * addresses — replace every recovery code with `newCodeSha256s`, clear
+   * every address, void every pending confirmation, mailed token and link
+   * code, and log `codes_replaced` (and each `address_cleared`) by
+   * `actorKey`, in one transaction.
+   */
+  resetRecovery(reset: {
+    readonly athleteId: string;
+    readonly at: number;
+    readonly actorKey: string;
+    readonly heldSince: number;
+    readonly proof: RecoveryStepUp;
+    readonly newCodeSha256s: readonly string[];
+  }): Promise<ResetOutcome>;
+  /**
+   * `recover` (#773; #1194): spend the code or the mailed token that names the
+   * athlete, add `publicKey`, and apply the chosen options, in ONE
+   * transaction. A token is re-checked: its address must still be bound to
+   * its athlete and past its hold, or it is spent and `unbound`. A key held
+   * already is `key_in_use`, and nothing is spent.
+   */
+  recoverAccount(recovery: Recovery): Promise<RecoveryOutcome>;
+
+  /**
+   * The athlete's account-change log, oldest first (#1193, ADR 0047 D-8). Only
+   * the store's writes add to it, each in the transaction of its change.
+   */
+  listAccountChanges(athleteId: string): Promise<readonly AccountChange[]>;
+  /** Every device's mark in that log, for the account export. */
+  listAccountChangeMarks(athleteId: string): Promise<readonly AccountChangeMark[]>;
+  /**
+   * Move ONE device's mark to `through` (#1193): clamped to the athlete's
+   * newest entry, and never backwards. Keyed by athlete AND key, so it moves
+   * no other device's mark and no other athlete's. Answers the mark after.
+   */
+  acknowledgeAccountChanges(
+    athleteId: string,
+    deviceKey: string,
+    through: number,
+    at: number,
+  ): Promise<number>;
   /** Email recovery: the address is what names the athlete. */
   findRecoveryEmail(address: string): Promise<RecoveryEmail | undefined>;
   putEmailRecoveryToken(token: Omit<EmailRecoveryToken, 'usedAt'>): Promise<void>;
   listEmailRecoveryTokens(athleteId: string): Promise<readonly EmailRecoveryToken[]>;
-  /** Spend an email recovery token: the token is what names the athlete. */
+  /**
+   * Spend an email recovery token: the token is what names the athlete. Since
+   * #1194 it is RE-CHECKED in the same transaction: its address must still be
+   * bound to its athlete and confirmed at or before `heldSince`, or the token
+   * is spent and `unbound`. No production route calls this: recovery spends
+   * through `recoverAccount`, and a new route must too, not use this spender.
+   */
   takeEmailRecoveryToken(
     tokenSha256: string,
     now: number,
-  ): Promise<Take<{ readonly athleteId: string }>>;
+    heldSince: number,
+  ): Promise<
+    Take<{ readonly athleteId: string; readonly address: string }> | { readonly outcome: 'unbound' }
+  >;
 
   putSession(session: Session): Promise<void>;
   /** Authentication: the token names the athlete, so this is not athlete-scoped. */
@@ -669,6 +1388,12 @@ export interface SqlStore {
   putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
   getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
   /**
+   * #1098: this athlete's LIVE items of one kind, newest first — what the
+   * analysis agent's read-only tools read (`analysis/tools/`). Tombstones are
+   * never returned; at most `limit` rows.
+   */
+  listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
+  /**
    * Replace a live item with its tombstone — an activity's record goes with
    * it. `false` when the athlete holds no such live item.
    */
@@ -697,9 +1422,34 @@ export interface SqlStore {
    * 0039 D-2). ⚠️ **Cross-athlete by design**, and never the requester's own
    * (their own attempts are #93's, not this). The consent is required: a
    * record whose rider revoked it is not returned on the next read. Nothing
-   * serves it over HTTP yet; #331 is its first caller.
+   * serves it over HTTP: a ghost is served by route, through
+   * {@link listRaceableOnRoute} (#331).
    */
   listRaceableActivities(requester: string, limit: number): Promise<readonly ActivityRecord[]>;
+  /**
+   * #331: set or clear the route one of THIS athlete's consented records is
+   * offered to be raced on (migration 0025). `false`, and nothing written,
+   * when the athlete holds no such record. A record whose consent is off
+   * holds no route: setting one there writes nothing and answers `false`.
+   */
+  setActivityRaceRoute(
+    athleteId: string,
+    contentSha256: string,
+    routeSha256: string | null,
+  ): Promise<boolean>;
+  /**
+   * #331: other athletes' records offered to be raced on ONE route, newest
+   * first — the cross-rider ghost candidates (ADR 0039 D-2). ⚠️
+   * **Cross-athlete by design**, like {@link listRaceableActivities}, and with
+   * the same two conditions — the consent, and never the requester's own —
+   * plus the route. Which of them may be SEEN is the choke point's
+   * (`moderation.ts` §`canSee`), asked by the caller one candidate at a time.
+   */
+  listRaceableOnRoute(
+    requester: string,
+    routeSha256: string,
+    limit: number,
+  ): Promise<readonly ActivityRecord[]>;
 
   /**
    * #835: live items of `kinds`, of any athlete, that have no index row for
@@ -750,7 +1500,7 @@ export interface SqlStore {
    * nothing, when another room already has that code's digest (a collision
    * the caller answers by drawing another).
    */
-  createPrivateRoom(created: NewPrivateRoom): Promise<'created' | 'code-taken'>;
+  createPrivateRoom(created: NewPrivateRoom): Promise<RoomWritten>;
   getPrivateRoom(roomId: string): Promise<PrivateRoom | undefined>;
   /** The private room whose code has this digest — open or closed — or `undefined`. */
   findPrivateRoomByCode(codeSha256: string): Promise<PrivateRoom | undefined>;
@@ -782,16 +1532,42 @@ export interface SqlStore {
    * route by this digest — its blob is shared by all of them (#784).
    */
   countOpenPrivateRoomsWithRoute(routeSha256: string, exceptRoomId: string): Promise<number>;
+  /**
+   * #788: every PUBLIC room that is not over, in the listing's one order —
+   * the start its creator gave it, then when it was made, then its id — and
+   * no other. Nothing here features, ranks or pins a room.
+   */
+  listOpenPublicRooms(): Promise<readonly OpenPublicRoom[]>;
+  /**
+   * #788: whether anybody else in `roomId` — its creator, or a rider who
+   * joined it — blocks `athleteId`, or is blocked by them.
+   */
+  hasBlockWithRoomMember(roomId: string, athleteId: string): Promise<boolean>;
 
   putResult(result: Result): Promise<void>;
   listResults(athleteId: string): Promise<readonly Result[]>;
   /** A room's finish order is every rider's, by design: not athlete-scoped. */
   listRoomResults(roomId: string): Promise<readonly Result[]>;
 
-  /** Block (#83). Idempotent: blocking twice keeps the first row. */
-  putBlock(athleteId: string, blockedAthleteId: string, at: number): Promise<void>;
+  /**
+   * Block (#83). Idempotent: blocking twice keeps the first row. `shownName`
+   * is the name a race's result showed the blocker (#1529); a block by id has
+   * none.
+   */
+  putBlock(
+    athleteId: string,
+    blockedAthleteId: string,
+    at: number,
+    shownName?: string,
+  ): Promise<void>;
   /** Unblock. `false` when this athlete had no such block. */
   deleteBlock(athleteId: string, blockedAthleteId: string): Promise<boolean>;
+  /**
+   * Unblock by the block's {@link Block.handle} (#1529), and ONLY this
+   * athlete's own: another athlete's handle deletes nothing. `false` when
+   * this athlete had no such block.
+   */
+  deleteBlockByHandle(athleteId: string, handle: string): Promise<boolean>;
   listBlocks(athleteId: string): Promise<readonly Block[]>;
   /**
    * What `viewerId` may know of `subjectId`, in ONE query (#83, #891's
@@ -818,12 +1594,98 @@ export interface SqlStore {
   putReport(
     report: Pick<Report, 'athleteId' | 'targetAthleteId' | 'reason' | 'createdAt'> & {
       readonly closedAs?: string;
+      /** The room it came from and its tick (#789). */
+      readonly roomId?: string;
+      readonly roomTick?: number;
+      /** A flag the room filed (#789): `athleteId` is then `null`. */
+      readonly flag?: RoomFlag;
     },
   ): Promise<number>;
   /** The reports this athlete made. */
   listReports(athleteId: string): Promise<readonly Report[]>;
   /** The moderators' queue: every report not yet decided, oldest first. */
   listOpenReports(): Promise<readonly Report[]>;
+  /** One report by id, open or closed (#899: a dismissal reads the one it decides). */
+  getReport(reportId: number): Promise<Report | undefined>;
+  /** Whether this athlete was removed from this room (#789): their ticket for it is refused. */
+  isRemovedFromRoom(roomId: string, athleteId: string): Promise<boolean>;
+  /**
+   * The athletes who block this one (#789): with {@link listBlocks}, everybody
+   * a room must not name to them, nor them to. Other athletes' rows, read
+   * only to hide names in a room the two share — never answered to anybody.
+   */
+  listBlockedBy(athleteId: string): Promise<readonly string[]>;
+
+  /** A notice of illegal content, as it was received (#907). Answers its id. */
+  putNotice(notice: NewNotice): Promise<number>;
+  /** How many notices arrived at or after `since` (Unix seconds), from anybody: the instance's cap. */
+  countNoticesSince(since: number): Promise<number>;
+  /** Every notice received, oldest first: the moderators' queue (#907). */
+  listNotices(): Promise<readonly Notice[]>;
+  /**
+   * Record one step taken on a notice (#912), in ONE transaction with the
+   * checks it rests on: the notice exists, the step has not been taken, a
+   * notifier with no address is neither acknowledged nor told, the notifier
+   * is told only once a decision is recorded, and a decision's log entry
+   * exists.
+   */
+  putNoticeStep(step: Omit<NoticeStep, 'id'>): Promise<NoticeStepRecorded>;
+  /** Every step taken on every notice, oldest first (#912). */
+  listNoticeSteps(): Promise<readonly NoticeStep[]>;
+  /**
+   * Hide one item (#913), in ONE transaction: the log entry, the statement of
+   * reasons its owner is shown, and the hidden item — or, for an item already
+   * hidden, nothing.
+   */
+  hideItem(hide: {
+    readonly item: string;
+    readonly ownerAthleteId: string;
+    readonly actorAthleteId: string;
+    readonly reason: string;
+    readonly statement: StatementFields;
+    readonly at: number;
+  }): Promise<
+    { readonly outcome: 'applied'; readonly logId: number } | { readonly outcome: 'not_applicable' }
+  >;
+  /**
+   * The items of one room that are hidden now (#913): its listing, its route
+   * and any rows of its result — each with whose it is.
+   */
+  listHiddenItemsOfRoom(
+    roomId: string,
+  ): Promise<readonly { readonly item: string; readonly ownerAthleteId: string }[]>;
+  /** The statements of reasons about this athlete, newest first (#910). */
+  listStatements(athleteId: string): Promise<readonly Statement[]>;
+  /**
+   * File an appeal against the statement `statementLogId` (#911) — only one
+   * about the appellant, and only once.
+   */
+  putAppeal(appeal: {
+    readonly statementLogId: number;
+    readonly appellantAthleteId: string;
+    readonly grounds: string;
+    readonly filedAt: number;
+  }): Promise<AppealFiled>;
+  /** The appeals this athlete filed, newest first (#911). */
+  listAppeals(athleteId: string): Promise<readonly Appeal[]>;
+  /** The moderators' queue: every appeal not yet decided, oldest first (#911). */
+  listOpenAppeals(): Promise<readonly Appeal[]>;
+  /** Every appeal, decided or not, oldest first: the record (#912). */
+  listEveryAppeal(): Promise<readonly Appeal[]>;
+  /**
+   * Decide an appeal, in ONE transaction (#911): a reversal lifts the
+   * suspension or restores the display name the statement explains, the
+   * decision is appended to the log, and the appeal records it — or nothing
+   * changes. The conflict is the store's to see: the deciding moderator took
+   * the decision appealed.
+   */
+  decideAppeal(decision: {
+    readonly appealId: number;
+    readonly actorAthleteId: string;
+    readonly outcome: 'upheld' | 'reversed';
+    readonly decision: string;
+    readonly at: number;
+  }): Promise<AppealDecided>;
 
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
@@ -835,8 +1697,6 @@ export interface SqlStore {
    * `refused_<action>`, changing nothing else. Answers the log entry's id.
    */
   logRefusedAction(action: ModerationAction): Promise<number>;
-  /** The moderation log, oldest first. */
-  listModerationLog(): Promise<readonly ModerationLogEntry[]>;
   /**
    * One page of the moderation log, NEWEST first (#961): at most `limit`
    * entries whose id is below `beforeId`, or the newest when it is `undefined`.
@@ -859,6 +1719,8 @@ export interface SqlStore {
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
   /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
+  listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
   countActivityRecords(athleteId: string): Promise<number>;
   /** A moderator's invitation, and its entry in the moderation log, together (#775). */
@@ -867,6 +1729,77 @@ export interface SqlStore {
     log: { readonly reason: string; readonly at: number },
   ): Promise<void>;
   listInviteCodes(athleteId: string): Promise<readonly InviteCode[]>;
+
+  /**
+   * Queue an analysis job (#1095), in ONE transaction with the check that the
+   * athlete has no job queued or running: `busy` when they have, and nothing
+   * is written.
+   */
+  createAnalysisJob(job: NewAnalysisJob): Promise<'created' | 'busy'>;
+  /** This athlete's job, or `undefined` — another athlete's job is not theirs to see. */
+  getAnalysisJob(athleteId: string, jobId: string): Promise<AnalysisJob | undefined>;
+  /** This athlete's job's events after `afterSeq`, in order, at most `limit`. */
+  listAnalysisEvents(
+    athleteId: string,
+    jobId: string,
+    afterSeq: number,
+    limit: number,
+  ): Promise<readonly AnalysisEvent[]>;
+  /**
+   * The worker's: the oldest queued job of ANY athlete, marked `running` in
+   * the same statement, or `undefined` when none is queued. Not a rider's read.
+   */
+  claimAnalysisJob(): Promise<AnalysisJob | undefined>;
+  /**
+   * Append an event to a RUNNING job: its sequence number, or `undefined`
+   * when the job is not running — cancelled, ended or erased — so nothing a
+   * cancelled job's engine says afterwards is kept.
+   */
+  appendAnalysisEvent(
+    athleteId: string,
+    jobId: string,
+    kind: Exclude<AnalysisEventKind, 'result'>,
+    data: string,
+    at: number,
+  ): Promise<number | undefined>;
+  /**
+   * End a job that has not ended, with its `result` event, in ONE transaction:
+   * the result's sequence number, or `undefined` when it had already ended
+   * (or does not exist), in which case nothing changes.
+   */
+  endAnalysisJob(
+    athleteId: string,
+    jobId: string,
+    ending: AnalysisJobEnding,
+  ): Promise<number | undefined>;
+  /**
+   * The device saved the write-up: the job's events go. The write-up itself
+   * STAYS (ADR 0046 D-12: results are kept on the instance so another device
+   * can see them), beside its job row. `job_running` for a job that has not
+   * ended, `not_found` for none of this athlete's.
+   */
+  acknowledgeAnalysisJob(
+    athleteId: string,
+    jobId: string,
+  ): Promise<'acknowledged' | 'job_running' | 'not_found'>;
+  /**
+   * The worker's, at start: every job left `queued` or `running` by an
+   * instance that stopped ends `failed` with `failure`, and a result event.
+   * Answers how many. Never re-run.
+   */
+  interruptAnalysisJobs(failure: string, data: string, at: number): Promise<number>;
+  /**
+   * Retention (ADR 0046 D-12): delete the events of every job that ended
+   * before `endedBefore`, and the job row of each that holds no write-up. A
+   * job that holds one is kept, with its write-up. Answers how many job rows
+   * were deleted.
+   */
+  pruneAnalysisJobs(endedBefore: number): Promise<number>;
+  /**
+   * This athlete's kept write-ups, oldest first (ADR 0046 D-12): the account
+   * export's, and what another device reads.
+   */
+  listAnalysisResults(athleteId: string): Promise<readonly AnalysisResult[]>;
 
   /**
    * Remove every row this athlete owns, the athlete included (#35). Answers
@@ -959,6 +1892,39 @@ const athleteFrom = (row: Selectable<AthleteTable>): AthleteRecord => ({
   activatedAt: row.activated_at,
 });
 
+const analysisJobFrom = (row: Selectable<AnalysisJobTable>): AnalysisJob => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  status: row.status,
+  source: row.source,
+  templateVersion: row.template_version,
+  inputJson: row.input_json,
+  rideId: row.ride_id,
+  candidate: row.candidate,
+  failure: row.failure,
+  createdAt: row.created_at,
+  endedAt: row.ended_at,
+});
+
+const analysisEventFrom = (row: Selectable<AnalysisEventTable>): AnalysisEvent => ({
+  jobId: row.job_id,
+  athleteId: row.athlete_id,
+  seq: row.seq,
+  kind: row.kind,
+  data: row.data,
+  at: row.at,
+});
+
+/** The next sequence number of a job's stream, inside `trx`. */
+async function nextAnalysisSeq(trx: Transaction<InstanceDatabase>, jobId: string): Promise<number> {
+  const last = await trx
+    .selectFrom('analysis_event')
+    .select((eb) => eb.fn.max<number | null>('seq').as('seq'))
+    .where('job_id', '=', jobId)
+    .executeTakeFirst();
+  return Number(last?.seq ?? 0) + 1;
+}
+
 const inviteCodeFrom = (row: Selectable<InviteCodeTable>): InviteCode => ({
   codeSha256: row.code_sha256,
   athleteId: row.athlete_id,
@@ -970,6 +1936,8 @@ const blockFrom = (row: Selectable<BlockTable>): Block => ({
   athleteId: row.athlete_id,
   blockedAthleteId: row.blocked_athlete_id,
   createdAt: row.created_at,
+  handle: row.handle,
+  shownName: row.shown_name,
 });
 
 const reportFrom = (row: Selectable<ReportTable>): Report => ({
@@ -981,6 +1949,73 @@ const reportFrom = (row: Selectable<ReportTable>): Report => ({
   closedAt: row.closed_at,
   closedByAthleteId: row.closed_by_athlete_id,
   outcome: row.outcome,
+  roomId: row.room_id,
+  roomTick: row.room_tick,
+  flag:
+    row.flag_duration_seconds === null || row.flag_ceiling_watts_per_kilogram === null
+      ? null
+      : {
+          durationSeconds: row.flag_duration_seconds,
+          ceilingWattsPerKilogram: row.flag_ceiling_watts_per_kilogram,
+        },
+});
+
+/** A stored notice's items: written by {@link SqlStore.putNotice} alone, as a JSON array of strings. */
+function noticeItems(text: string): readonly string[] {
+  const parsed: unknown = JSON.parse(text);
+  return Array.isArray(parsed) ? parsed.filter((each) => typeof each === 'string') : [];
+}
+
+const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
+  id: row.id,
+  receivedAt: row.received_at,
+  kind: row.kind,
+  explanation: row.explanation,
+  items: noticeItems(row.items),
+  location: row.location,
+  notifierName: row.notifier_name,
+  notifierEmail: row.notifier_email,
+  bonaFide: row.bona_fide === 1,
+});
+
+const statementFrom = (
+  row: Selectable<StatementTable> & { readonly actor_athlete_id: string },
+): Statement => ({
+  logId: row.log_id,
+  targetAthleteId: row.target_athlete_id,
+  actorAthleteId: row.actor_athlete_id,
+  restriction: row.restriction,
+  facts: row.facts,
+  decidedOn: row.decided_on,
+  legalGround: row.legal_ground,
+  termsGround: row.terms_ground,
+  notifierNamed: row.notifier_named,
+  moderatorConflict: row.moderator_conflict === 1,
+  endsAt: row.ends_at,
+  at: row.at,
+});
+
+const appealFrom = (row: Selectable<AppealTable>): Appeal => ({
+  id: row.id,
+  statementLogId: row.statement_log_id,
+  appellantAthleteId: row.appellant_athlete_id,
+  grounds: row.grounds,
+  filedAt: row.filed_at,
+  outcome: row.outcome,
+  decision: row.decision,
+  moderatorConflict: row.moderator_conflict === null ? null : row.moderator_conflict === 1,
+  decidedAt: row.decided_at,
+  decidedLogId: row.decided_log_id,
+});
+
+const noticeStepFrom = (row: Selectable<NoticeStepTable>): NoticeStep => ({
+  id: row.id,
+  noticeId: row.notice_id,
+  step: row.step,
+  actorAthleteId: row.actor_athlete_id,
+  decision: row.decision,
+  logId: row.log_id,
+  at: row.at,
 });
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
@@ -991,6 +2026,7 @@ const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEn
   reportId: row.report_id,
   reason: row.reason,
   at: row.at,
+  roomId: row.room_id,
 });
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
@@ -1027,6 +2063,14 @@ const emailRecoveryTokenFrom = (row: Selectable<EmailRecoveryTokenTable>): Email
   athleteId: row.athlete_id,
   expiresAt: row.expires_at,
   usedAt: row.used_at,
+  address: row.address,
+});
+
+const recoveryEmailFrom = (row: Selectable<RecoveryEmailTable>): RecoveryEmail => ({
+  athleteId: row.athlete_id,
+  address: row.address,
+  confirmedAt: row.confirmed_at,
+  boundByKey: row.bound_by_key,
 });
 
 const emailConfirmationFrom = (
@@ -1037,7 +2081,273 @@ const emailConfirmationFrom = (
   address: row.address,
   expiresAt: row.expires_at,
   usedAt: row.used_at,
+  requestedByKey: row.requested_by_key,
+  supersededAt: row.superseded_at,
 });
+
+const accountChangeFrom = (row: Selectable<AccountChangeTable>): AccountChange => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  at: row.at,
+  kind: row.kind as AccountChangeKind,
+  actorKey: row.actor_key,
+  subjectKey: row.subject_key,
+  via: row.via as KeyAddedVia | null,
+  address: row.address,
+});
+
+const accountChangeMarkFrom = (row: Selectable<AccountChangeMarkTable>): AccountChangeMark => ({
+  athleteId: row.athlete_id,
+  deviceKey: row.device_key,
+  acknowledgedThrough: row.acknowledged_through,
+  acknowledgedAt: row.acknowledged_at,
+});
+
+/** One log entry, written in the transaction `trx` makes the change in (#1193). */
+async function logAccountChange(
+  trx: Transaction<InstanceDatabase>,
+  change: Omit<AccountChange, 'id' | 'subjectKey' | 'via' | 'address'> &
+    Partial<Pick<AccountChange, 'subjectKey' | 'via' | 'address'>>,
+): Promise<void> {
+  await trx
+    .insertInto('account_change')
+    .values({
+      athlete_id: change.athleteId,
+      at: change.at,
+      kind: change.kind,
+      actor_key: change.actorKey,
+      subject_key: change.subjectKey ?? null,
+      via: change.via ?? null,
+      address: change.address ?? null,
+    })
+    .execute();
+}
+
+/**
+ * Remove one of an athlete's addresses under the removal rule (#1194, ADR
+ * 0047 D-8), in `trx`: the address unbound, every unredeemed token mailed to
+ * it voided, every pending confirmation of it voided, `address_cleared`
+ * logged by `actorKey`. A link code redeems no address, so none is voided.
+ */
+async function clearAddressIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  address: string,
+  at: number,
+  actorKey: string,
+): Promise<void> {
+  await trx
+    .deleteFrom('recovery_email')
+    .where('athlete_id', '=', athleteId)
+    .where('address', '=', address)
+    .execute();
+  await trx
+    .updateTable('email_recovery_token')
+    .set({ used_at: at })
+    .where('athlete_id', '=', athleteId)
+    .where('address', '=', address)
+    .where('used_at', 'is', null)
+    .execute();
+  await trx
+    .deleteFrom('recovery_email_confirmation')
+    .where('athlete_id', '=', athleteId)
+    .where('address', '=', address)
+    .where('used_at', 'is', null)
+    .execute();
+  await logAccountChange(trx, { athleteId, at, kind: 'address_cleared', actorKey, address });
+}
+
+/**
+ * Revoke one key and undo what it did and nothing else (#1193, #1194): its
+ * sessions ended, the link codes it minted voided, its pending confirmation
+ * cancelled, and every address it bound that is still HELD cleared under the
+ * removal rule. An established address, and the recovery codes, are never
+ * touched. `key_revoked` is logged by `actorKey` when the key was live.
+ */
+async function revokeKeyIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  publicKey: string,
+  at: number,
+  actorKey: string,
+  heldSince: number,
+): Promise<void> {
+  const before = await trx
+    .selectFrom('device_key')
+    .select('revoked_at')
+    .where('athlete_id', '=', athleteId)
+    .where('public_key', '=', publicKey)
+    .executeTakeFirst();
+  await trx
+    .updateTable('device_key')
+    .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+    .where('athlete_id', '=', athleteId)
+    .where('public_key', '=', publicKey)
+    .execute();
+  await trx
+    .updateTable('session')
+    .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+    .where('athlete_id', '=', athleteId)
+    .where('device_key', '=', publicKey)
+    .execute();
+  await trx
+    .updateTable('link_code')
+    .set({ used_at: sql<number>`coalesce(used_at, ${at})` })
+    .where('athlete_id', '=', athleteId)
+    .where('minted_by_key', '=', publicKey)
+    .execute();
+  // Its pending confirmation is cancelled (#1193); a spent one stays, as the
+  // record that its token was used. The recovery codes are NOT touched,
+  // whoever asks (ADR 0047 D-8, review H1).
+  await trx
+    .deleteFrom('recovery_email_confirmation')
+    .where('athlete_id', '=', athleteId)
+    .where('requested_by_key', '=', publicKey)
+    .where('used_at', 'is', null)
+    .execute();
+  if (before?.revoked_at === null) {
+    await logAccountChange(trx, {
+      athleteId,
+      at,
+      kind: 'key_revoked',
+      actorKey,
+      subjectKey: publicKey,
+    });
+  }
+  // Only a HELD address it bound (#1194): one past its hold may be the
+  // rider's only way back, and is left alone whoever asks.
+  const held = await trx
+    .selectFrom('recovery_email')
+    .select('address')
+    .where('athlete_id', '=', athleteId)
+    .where('bound_by_key', '=', publicKey)
+    .where('confirmed_at', 'is not', null)
+    .where('confirmed_at', '>', heldSince)
+    .orderBy('address')
+    .execute();
+  for (const { address } of held) await clearAddressIn(trx, athleteId, address, at, actorKey);
+}
+
+/**
+ * Void everything mailed or minted that could still add a key or bind an
+ * address (#1194, the removal rule for the reset and *revoke every other
+ * key*): every unredeemed recovery token, every pending confirmation and
+ * every unredeemed link code.
+ */
+async function voidMailedAndMintedIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  at: number,
+): Promise<void> {
+  await trx
+    .updateTable('email_recovery_token')
+    .set({ used_at: at })
+    .where('athlete_id', '=', athleteId)
+    .where('used_at', 'is', null)
+    .execute();
+  await trx
+    .deleteFrom('recovery_email_confirmation')
+    .where('athlete_id', '=', athleteId)
+    .where('used_at', 'is', null)
+    .execute();
+  await trx
+    .updateTable('link_code')
+    .set({ used_at: at })
+    .where('athlete_id', '=', athleteId)
+    .where('used_at', 'is', null)
+    .execute();
+}
+
+/**
+ * The full reset's steps (#1194): every code replaced, every address cleared,
+ * everything mailed or minted voided, `codes_replaced` logged by `actorKey`.
+ */
+async function resetIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  at: number,
+  actorKey: string,
+  newCodeSha256s: readonly string[],
+): Promise<void> {
+  await trx.deleteFrom('recovery_code').where('athlete_id', '=', athleteId).execute();
+  for (const codeSha256 of newCodeSha256s) {
+    await trx
+      .insertInto('recovery_code')
+      .values({ code_sha256: codeSha256, athlete_id: athleteId, created_at: at, used_at: null })
+      .execute();
+  }
+  await logAccountChange(trx, { athleteId, at, kind: 'codes_replaced', actorKey });
+  const bound = await trx
+    .selectFrom('recovery_email')
+    .select('address')
+    .where('athlete_id', '=', athleteId)
+    .orderBy('address')
+    .execute();
+  for (const { address } of bound) await clearAddressIn(trx, athleteId, address, at, actorKey);
+  await voidMailedAndMintedIn(trx, athleteId, at);
+}
+
+/**
+ * Spend a mailed token, then RE-CHECK its address (#1194, ADR 0047 D-8 item
+ * 7): still bound to the token's athlete and past its hold, or `unbound`. The
+ * token is spent either way. `athleteId` scopes the token to one athlete
+ * where the caller knows who it is; `null` lets the token name them (`recover`).
+ */
+async function takeTokenIn(
+  trx: Transaction<InstanceDatabase>,
+  tokenSha256: string,
+  athleteId: string | null,
+  now: number,
+  heldSince: number,
+): Promise<
+  | { readonly outcome: 'taken'; readonly athleteId: string; readonly address: string }
+  | { readonly outcome: 'unknown' | 'used' | 'expired' | 'unbound' }
+> {
+  let query = trx
+    .selectFrom('email_recovery_token')
+    .selectAll()
+    .where('token_sha256', '=', tokenSha256);
+  if (athleteId !== null) query = query.where('athlete_id', '=', athleteId);
+  const row = await query.executeTakeFirst();
+  const outcome = outcomeOf(row, now);
+  if (row === undefined || outcome === 'unknown') return { outcome: 'unknown' };
+  if (outcome === 'expired') return { outcome };
+  await trx
+    .updateTable('email_recovery_token')
+    .set({ used_at: sql<number>`coalesce(used_at, ${now})` })
+    .where('token_sha256', '=', tokenSha256)
+    .execute();
+  // The address is asked BEFORE whether the token was spent: a token voided
+  // by the removal of its address answers `unbound`, which is what happened
+  // to it, rather than `used`, which did not.
+  const address = row.address;
+  const bound =
+    address === null
+      ? undefined
+      : await trx
+          .selectFrom('recovery_email')
+          .select('confirmed_at')
+          .where('athlete_id', '=', row.athlete_id)
+          .where('address', '=', address)
+          .executeTakeFirst();
+  if (
+    address === null ||
+    bound === undefined ||
+    !isEstablished({ confirmedAt: bound.confirmed_at }, heldSince)
+  ) {
+    return { outcome: 'unbound' };
+  }
+  if (outcome === 'used') return { outcome };
+  return { outcome: 'taken', athleteId: row.athlete_id, address };
+}
+
+/** The step-up refusal a token's or a code's outcome is answered with. */
+function stepUpRefusal(outcome: 'unknown' | 'used' | 'expired' | 'unbound'): StepUpRefusal {
+  if (outcome === 'unbound') return 'address_unbound';
+  if (outcome === 'used') return 'code_used';
+  if (outcome === 'expired') return 'code_expired';
+  return 'code_unknown';
+}
 
 /** A single-use row's outcome, from what was read before it was spent. */
 function outcomeOf(
@@ -1060,7 +2370,7 @@ const sessionFrom = (row: Selectable<SessionTable>): Session => ({
 });
 
 const activityRecordFrom = (
-  row: Omit<Selectable<ActivityRecordTable>, 'may_be_raced'>,
+  row: Omit<Selectable<ActivityRecordTable>, 'may_be_raced' | 'race_route_sha256'>,
 ): ActivityRecord => ({
   athleteId: row.athlete_id,
   contentSha256: row.content_sha256,
@@ -1159,6 +2469,7 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   capacity: row.capacity,
   countdownMs: row.countdown_ms,
   rejoinWindowMs: row.rejoin_window_ms,
+  drafting: row.drafting === 1,
   raceStartedAt: row.race_started_at,
   ...(row.finishers === null ? {} : { finishers: row.finishers }),
   ...(row.race_finished_at === null ? {} : { raceFinishedAt: row.race_finished_at }),
@@ -1180,6 +2491,7 @@ const privateRoomFrom = (row: Selectable<PrivateRoomTable>): PrivateRoom => ({
   routeLoop: row.route_loop === 1,
   createdAt: row.created_at,
   closedAt: row.closed_at,
+  startsAt: row.starts_at,
 });
 
 /**
@@ -1230,8 +2542,24 @@ async function applyToAthlete(
         .where('athlete_id', '=', target.id)
         .execute();
       return true;
+    case 'remove_from_room':
+    case 'host_remove_from_room': {
+      // A removal names its room; one already made changes nothing (#789).
+      if (action.roomId === undefined || action.roomId === null) return false;
+      const removed = await trx
+        .insertInto('room_removal')
+        .values({ room_id: action.roomId, athlete_id: target.id, removed_at: at })
+        .onConflict((conflict) => conflict.columns(['room_id', 'athlete_id']).doNothing())
+        .executeTakeFirst();
+      return (removed.numInsertedOrUpdatedRows ?? 0n) > 0n;
+    }
     case 'dismiss_report':
+    case 'dismiss_own_report':
       return true;
+    case 'hide_item':
+      // An item is hidden by `hideItem`, which writes its own row; asked of
+      // `moderate`, it changes nothing.
+      return false;
   }
 }
 
@@ -1255,12 +2583,60 @@ export function vectorFrom(bytes: Uint8Array): Float32Array {
 }
 
 /** The store over an already-migrated database. */
+function instanceKeyValues(key: InstanceKeyRow) {
+  return {
+    key_id: key.keyId,
+    role: key.role,
+    public_key: key.publicKey,
+    iv: key.iv,
+    wrapped: key.wrapped,
+    serial: key.serial,
+    created_at: key.createdAt,
+    superseded_at: key.supersededAt,
+  };
+}
+
+function instanceKeyStatementValues(statement: InstanceKeyStatementRow) {
+  return {
+    key_id: statement.keyId,
+    kind: statement.kind,
+    issued_at: statement.issuedAt,
+    not_after: statement.notAfter,
+    body: statement.body,
+    signature: statement.signature,
+  };
+}
+
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
   let queue: Promise<unknown> = Promise.resolve();
   function exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const next = queue.then(operation, operation);
     queue = next.catch(() => undefined);
     return next;
+  }
+
+  /**
+   * `operation` with SQLite's `secure_delete` on, so a deleted or replaced row
+   * is overwritten with zeros in its page rather than left in a free one; then
+   * the write-ahead log checkpointed and TRUNCATED, so the old page images it
+   * held are gone too (#1097: a cleared hosted key's ciphertext). A checkpoint
+   * another connection's open read holds back is not an error, and its result
+   * row is not read: the old page images stay in the log until SQLite next
+   * writes it over from its start (its own checkpoints are PASSIVE and never
+   * truncate), or the last connection closes (`docs/operating-an-instance.md`).
+   * With `busy_timeout` at 5 s that wait can hold this store's queue for up to
+   * about 5 s — an erasure during an `operator backup`, say — which is accepted.
+   * Inside {@link exclusive}, so no other statement on this connection runs
+   * with the setting on.
+   */
+  async function scrubbing<T>(operation: () => Promise<T>): Promise<T> {
+    await sql`pragma secure_delete = on`.execute(db);
+    try {
+      return await operation();
+    } finally {
+      await sql`pragma secure_delete = off`.execute(db);
+      await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+    }
   }
 
   return {
@@ -1300,7 +2676,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return row === undefined ? undefined : athleteFrom(row);
       }),
 
-    putDeviceKey: (key) =>
+    putDeviceKey: (key, addition) =>
       exclusive(async () => {
         await db.transaction().execute(async (trx) => {
           const held = await trx
@@ -1326,6 +2702,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               }),
             )
             .execute();
+          if (addition !== undefined) {
+            await logAccountChange(trx, {
+              athleteId: key.athleteId,
+              at: key.addedAt,
+              kind: 'key_added',
+              actorKey: addition.actorKey,
+              subjectKey: key.publicKey,
+              via: addition.via,
+            });
+          }
         });
       }),
 
@@ -1361,7 +2747,19 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .execute();
       }),
 
-    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256) =>
+    recordSealedRequest: (encSha256, at, forgetBefore) =>
+      exclusive(async () => {
+        await db.deleteFrom('sealed_replay').where('seen_at', '<', forgetBefore).execute();
+        const inserted = await db
+          .insertInto('sealed_replay')
+          .values({ enc_sha256: encSha256, seen_at: at })
+          .onConflict((conflict) => conflict.column('enc_sha256').doNothing())
+          .returning('enc_sha256')
+          .executeTakeFirst();
+        return inserted === undefined ? 'replayed' : 'recorded';
+      }),
+
+    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256, actorKey, heldSince) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<RevokeOutcome> => {
           const keys = await trx
@@ -1387,24 +2785,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                     .executeTakeFirst();
             if (held === undefined) return 'last_device';
           }
-          await trx
-            .updateTable('device_key')
-            .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
-            .where('athlete_id', '=', athleteId)
-            .where('public_key', '=', publicKey)
-            .execute();
-          await trx
-            .updateTable('session')
-            .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
-            .where('athlete_id', '=', athleteId)
-            .where('device_key', '=', publicKey)
-            .execute();
-          await trx
-            .updateTable('link_code')
-            .set({ used_at: sql<number>`coalesce(used_at, ${at})` })
-            .where('athlete_id', '=', athleteId)
-            .where('minted_by_key', '=', publicKey)
-            .execute();
+          await revokeKeyIn(trx, athleteId, publicKey, at, actorKey, heldSince);
           return 'revoked';
         }),
       ),
@@ -1447,6 +2828,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               registration_state: athlete.registrationState,
               adult_confirmed_at: registration.adultConfirmedAt ?? null,
               activated_at: athlete.registrationState === 'active' ? athlete.createdAt : null,
+              load_run_at: registration.loadRunAt ?? null,
             })
             .execute();
           await trx
@@ -1480,6 +2862,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 address: confirmation.address,
                 expires_at: confirmation.expiresAt,
                 used_at: null,
+                requested_by_key: key.publicKey,
               })
               .execute();
           }
@@ -1553,6 +2936,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .executeTakeFirst()) !== undefined,
       ),
 
+    findRecoveryCode: (codeSha256) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('recovery_code')
+          .selectAll()
+          .where('code_sha256', '=', codeSha256)
+          .executeTakeFirst();
+        return row === undefined ? undefined : recoveryCodeFrom(row);
+      }),
+
     takeRecoveryCode: (codeSha256, now) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -1574,18 +2967,26 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         }),
       ),
 
-    putLinkCode: (code) =>
+    putLinkCode: (code, at) =>
       exclusive(async () => {
-        await db
-          .insertInto('link_code')
-          .values({
-            code_sha256: code.codeSha256,
-            athlete_id: code.athleteId,
-            minted_by_key: code.mintedByKey,
-            expires_at: code.expiresAt,
-            used_at: null,
-          })
-          .execute();
+        await db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('link_code')
+            .values({
+              code_sha256: code.codeSha256,
+              athlete_id: code.athleteId,
+              minted_by_key: code.mintedByKey,
+              expires_at: code.expiresAt,
+              used_at: null,
+            })
+            .execute();
+          await logAccountChange(trx, {
+            athleteId: code.athleteId,
+            at,
+            kind: 'link_code_minted',
+            actorKey: code.mintedByKey,
+          });
+        });
       }),
 
     listLinkCodes: (athleteId) =>
@@ -1617,7 +3018,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .set({ used_at: now })
             .where('code_sha256', '=', codeSha256)
             .execute();
-          return { outcome: 'taken', athleteId: row.athlete_id } as const;
+          return {
+            outcome: 'taken',
+            athleteId: row.athlete_id,
+            mintedByKey: row.minted_by_key,
+          } as const;
         }),
       ),
 
@@ -1669,24 +3074,36 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(displayNameChangeFrom),
       ),
 
-    getRecoveryEmail: (athleteId) =>
-      exclusive(async () => {
-        const row = await db
-          .selectFrom('recovery_email')
-          .selectAll()
-          .where('athlete_id', '=', athleteId)
-          .executeTakeFirst();
-        return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
-      }),
+    listRecoveryEmails: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('recovery_email')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            // An address from before migration 0019 (no time) first, then by
+            // when each was bound.
+            .orderBy(sql`confirmed_at is not null`)
+            .orderBy('confirmed_at')
+            .orderBy('address')
+            .execute()
+        ).map(recoveryEmailFrom),
+      ),
 
     putEmailConfirmation: (confirmation) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
-          await trx
-            .deleteFrom('recovery_email_confirmation')
-            .where('athlete_id', '=', confirmation.athleteId)
-            .where('used_at', 'is', null)
-            .execute();
+          // One pending confirmation per KEY (#1194, D-8 item 3): another
+          // key's is left where it is. A row from before migration 0018 has
+          // no key and is replaced by nothing.
+          if (confirmation.requestedByKey !== null) {
+            await trx
+              .deleteFrom('recovery_email_confirmation')
+              .where('athlete_id', '=', confirmation.athleteId)
+              .where('requested_by_key', '=', confirmation.requestedByKey)
+              .where('used_at', 'is', null)
+              .execute();
+          }
           await trx
             .insertInto('recovery_email_confirmation')
             .values({
@@ -1695,6 +3112,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               address: confirmation.address,
               expires_at: confirmation.expiresAt,
               used_at: null,
+              requested_by_key: confirmation.requestedByKey,
             })
             .execute();
         }),
@@ -1712,19 +3130,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(emailConfirmationFrom),
       ),
 
-    confirmRecoveryEmail: (athleteId, tokenSha256, now) =>
+    confirmRecoveryEmail: (athleteId, tokenSha256, now, confirmingKey, addressLimit) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<ConfirmOutcome> => {
+          // 1. Take the confirmation. One that another key's confirmation of
+          // the same address superseded is told apart from an unknown code.
           const row = await trx
             .selectFrom('recovery_email_confirmation')
             .selectAll()
             .where('athlete_id', '=', athleteId)
             .where('token_sha256', '=', tokenSha256)
             .executeTakeFirst();
+          if (row?.superseded_at != null) return { outcome: 'superseded' };
           const outcome = outcomeOf(row, now);
           if (outcome !== 'spendable' || row === undefined) {
             return { outcome: outcome === 'spendable' ? 'unknown' : outcome };
           }
+          // 2. Another athlete holds the address: 0004's unique constraint
+          // on the address stays (review K5).
           const holder = await trx
             .selectFrom('recovery_email')
             .select('athlete_id')
@@ -1733,19 +3156,256 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (holder !== undefined && holder.athlete_id !== row.athlete_id) {
             return { outcome: 'held' };
           }
-          await trx
+          // 3 before 4 (review K4): an address already bound to this athlete
+          // is never counted against the limit, so re-confirming it is the
+          // no-op success whatever is bound beside it.
+          const alreadyBound = holder !== undefined;
+          if (!alreadyBound) {
+            const count = await trx
+              .selectFrom('recovery_email')
+              .select((eb) => eb.fn.countAll<number>().as('n'))
+              .where('athlete_id', '=', row.athlete_id)
+              .executeTakeFirstOrThrow();
+            if (Number(count.n) >= addressLimit) return { outcome: 'limit' };
+          }
+          // 5. Added, held, beside whatever is bound. The binder is the key
+          // that GAVE the address, not the key that typed the code (D-8 item
+          // 6). DO NOTHING on conflict: only a row this inserted is held,
+          // logged and supersedes the others — an upsert would re-hold the
+          // rider's own address under whichever key gave it.
+          const binder = row.requested_by_key ?? confirmingKey;
+          const inserted = await trx
             .insertInto('recovery_email')
-            .values({ athlete_id: row.athlete_id, address: row.address })
-            .onConflict((conflict) =>
-              conflict.column('athlete_id').doUpdateSet({ address: row.address }),
-            )
-            .execute();
+            .values({
+              athlete_id: row.athlete_id,
+              address: row.address,
+              confirmed_at: now,
+              bound_by_key: binder,
+            })
+            .onConflict((conflict) => conflict.columns(['athlete_id', 'address']).doNothing())
+            .returning('address')
+            .executeTakeFirst();
           await trx
             .updateTable('recovery_email_confirmation')
             .set({ used_at: now })
             .where('token_sha256', '=', tokenSha256)
             .execute();
-          return { outcome: 'taken', athleteId: row.athlete_id };
+          if (inserted !== undefined) {
+            await logAccountChange(trx, {
+              athleteId: row.athlete_id,
+              at: now,
+              kind: 'address_added',
+              actorKey: binder,
+              address: row.address,
+            });
+            // The first taken wins (D-8 item 8): every other pending
+            // confirmation of this address, whichever key gave it, is spent.
+            await trx
+              .updateTable('recovery_email_confirmation')
+              .set({ used_at: now, superseded_at: now })
+              .where('athlete_id', '=', row.athlete_id)
+              .where('address', '=', row.address)
+              .where('used_at', 'is', null)
+              .execute();
+          }
+          return { outcome: 'taken', athleteId: row.athlete_id, added: inserted !== undefined };
+        }),
+      ),
+
+    clearRecoveryEmail: ({ athleteId, address, at, actorKey, heldSince, proof }) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ClearOutcome> => {
+          const row = await trx
+            .selectFrom('recovery_email')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .where('address', '=', address)
+            .executeTakeFirst();
+          if (row === undefined) return 'not_found';
+          if (!isEstablished({ confirmedAt: row.confirmed_at }, heldSince)) {
+            // A HELD address goes only for the key that bound it.
+            if (row.bound_by_key !== actorKey) return 'step_up_required';
+          } else if (proof === null) {
+            return 'step_up_required';
+          } else if (proof.kind === 'code') {
+            // Checked and not spent, as for the last key and the erase step-up.
+            const code = await trx
+              .selectFrom('recovery_code')
+              .select('code_sha256')
+              .where('athlete_id', '=', athleteId)
+              .where('code_sha256', '=', proof.codeSha256)
+              .where('used_at', 'is', null)
+              .executeTakeFirst();
+            if (code === undefined) return 'code_unknown';
+          } else {
+            // A token mailed to THAT address, not another of the athlete's —
+            // asked before it is spent, so a wrong-address press costs nothing.
+            const mailedTo = await trx
+              .selectFrom('email_recovery_token')
+              .select('address')
+              .where('token_sha256', '=', proof.tokenSha256)
+              .where('athlete_id', '=', athleteId)
+              .executeTakeFirst();
+            if (mailedTo !== undefined && mailedTo.address !== address) return 'address_unbound';
+            const taken = await takeTokenIn(trx, proof.tokenSha256, athleteId, at, heldSince);
+            if (taken.outcome !== 'taken') return stepUpRefusal(taken.outcome);
+            if (taken.address !== address) return 'address_unbound';
+          }
+          await clearAddressIn(trx, athleteId, address, at, actorKey);
+          return 'cleared';
+        }),
+      ),
+
+    resetRecovery: ({ athleteId, at, actorKey, heldSince, proof, newCodeSha256s }) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ResetOutcome> => {
+          if (proof.kind === 'code') {
+            const code = await trx
+              .selectFrom('recovery_code')
+              .select('code_sha256')
+              .where('athlete_id', '=', athleteId)
+              .where('code_sha256', '=', proof.codeSha256)
+              .where('used_at', 'is', null)
+              .executeTakeFirst();
+            if (code === undefined) return 'code_unknown';
+          } else {
+            const taken = await takeTokenIn(trx, proof.tokenSha256, athleteId, at, heldSince);
+            if (taken.outcome !== 'taken') return stepUpRefusal(taken.outcome);
+          }
+          await resetIn(trx, athleteId, at, actorKey, newCodeSha256s);
+          return 'reset';
+        }),
+      ),
+
+    recoverAccount: (recovery) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<RecoveryOutcome> => {
+          const { publicKey, at, heldSince, proof } = recovery;
+          // Asked before the secret is spent (#861): a refusal must not cost
+          // a rider a code.
+          const inUse = await trx
+            .selectFrom('device_key')
+            .select('public_key')
+            .where('public_key', '=', publicKey)
+            .executeTakeFirst();
+          if (inUse !== undefined) return { outcome: 'key_in_use' };
+          let athleteId: string;
+          if (proof.kind === 'code') {
+            const row = await trx
+              .selectFrom('recovery_code')
+              .selectAll()
+              .where('code_sha256', '=', proof.codeSha256)
+              .executeTakeFirst();
+            const outcome = outcomeOf(row, at);
+            if (outcome !== 'spendable' || row === undefined) {
+              return { outcome: outcome === 'spendable' ? 'unknown' : outcome };
+            }
+            await trx
+              .updateTable('recovery_code')
+              .set({ used_at: at })
+              .where('code_sha256', '=', proof.codeSha256)
+              .execute();
+            athleteId = row.athlete_id;
+          } else {
+            const taken = await takeTokenIn(trx, proof.tokenSha256, null, at, heldSince);
+            if (taken.outcome !== 'taken') return { outcome: taken.outcome };
+            athleteId = taken.athleteId;
+          }
+          await trx
+            .insertInto('device_key')
+            .values({
+              public_key: publicKey,
+              athlete_id: athleteId,
+              added_at: at,
+              revoked_at: null,
+            })
+            .execute();
+          // `recover` has no session: the key it adds is the one it names (D-8).
+          await logAccountChange(trx, {
+            athleteId,
+            at,
+            kind: 'key_added',
+            actorKey: publicKey,
+            subjectKey: publicKey,
+            via: proof.kind === 'code' ? 'recovery_code' : 'email_token',
+          });
+          if (recovery.revokeOtherKeys) {
+            const others = await trx
+              .selectFrom('device_key')
+              .select('public_key')
+              .where('athlete_id', '=', athleteId)
+              .where('public_key', '!=', publicKey)
+              .where('revoked_at', 'is', null)
+              .orderBy('public_key')
+              .execute();
+            for (const other of others) {
+              await revokeKeyIn(trx, athleteId, other.public_key, at, publicKey, heldSince);
+            }
+            await voidMailedAndMintedIn(trx, athleteId, at);
+          }
+          if (recovery.resetCodeSha256s !== undefined) {
+            await resetIn(trx, athleteId, at, publicKey, recovery.resetCodeSha256s);
+          }
+          return { outcome: 'taken', athleteId };
+        }),
+      ),
+
+    listAccountChanges: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('account_change')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('id')
+            .execute()
+        ).map(accountChangeFrom),
+      ),
+
+    listAccountChangeMarks: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('account_change_mark')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('device_key')
+            .execute()
+        ).map(accountChangeMarkFrom),
+      ),
+
+    acknowledgeAccountChanges: (athleteId, deviceKey, through, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const newest = await trx
+            .selectFrom('account_change')
+            .select((eb) => eb.fn.max<number | null>('id').as('id'))
+            .where('athlete_id', '=', athleteId)
+            .executeTakeFirst();
+          const mark = Math.max(0, Math.min(through, Number(newest?.id ?? 0)));
+          await trx
+            .insertInto('account_change_mark')
+            .values({
+              athlete_id: athleteId,
+              device_key: deviceKey,
+              acknowledged_through: mark,
+              acknowledged_at: at,
+            })
+            .onConflict((conflict) =>
+              conflict.columns(['athlete_id', 'device_key']).doUpdateSet({
+                // Never backwards: an older acknowledgement arriving late moves nothing.
+                acknowledged_through: sql<number>`max(account_change_mark.acknowledged_through, excluded.acknowledged_through)`,
+                acknowledged_at: at,
+              }),
+            )
+            .execute();
+          const after = await trx
+            .selectFrom('account_change_mark')
+            .select('acknowledged_through')
+            .where('athlete_id', '=', athleteId)
+            .where('device_key', '=', deviceKey)
+            .executeTakeFirstOrThrow();
+          return after.acknowledged_through;
         }),
       ),
 
@@ -1756,7 +3416,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .selectAll()
           .where('address', '=', address)
           .executeTakeFirst();
-        return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
+        return row === undefined ? undefined : recoveryEmailFrom(row);
       }),
 
     putEmailRecoveryToken: (token) =>
@@ -1768,6 +3428,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             athlete_id: token.athleteId,
             expires_at: token.expiresAt,
             used_at: null,
+            address: token.address,
           })
           .execute();
       }),
@@ -1784,25 +3445,9 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(emailRecoveryTokenFrom),
       ),
 
-    takeEmailRecoveryToken: (tokenSha256, now) =>
+    takeEmailRecoveryToken: (tokenSha256, now, heldSince) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const row = await trx
-            .selectFrom('email_recovery_token')
-            .selectAll()
-            .where('token_sha256', '=', tokenSha256)
-            .executeTakeFirst();
-          const outcome = outcomeOf(row, now);
-          if (outcome !== 'spendable' || row === undefined) {
-            return { outcome: outcome === 'spendable' ? 'unknown' : outcome } as const;
-          }
-          await trx
-            .updateTable('email_recovery_token')
-            .set({ used_at: now })
-            .where('token_sha256', '=', tokenSha256)
-            .execute();
-          return { outcome: 'taken', athleteId: row.athlete_id } as const;
-        }),
+        db.transaction().execute((trx) => takeTokenIn(trx, tokenSha256, null, now, heldSince)),
       ),
 
     putSession: (session) =>
@@ -1921,7 +3566,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       exclusive(async () => {
         const updated = await db
           .updateTable('activity_record')
-          .set({ may_be_raced: mayBeRaced ? 1 : 0 })
+          // A revocation takes the offer with it (#331): a consent given again
+          // is offered again only once the signing device has re-checked its
+          // privacy zones against the route.
+          .set(mayBeRaced ? { may_be_raced: 1 } : { may_be_raced: 0, race_route_sha256: null })
           .where('athlete_id', '=', athleteId)
           .where('content_sha256', '=', contentSha256)
           .executeTakeFirst();
@@ -1935,6 +3583,38 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .selectFrom('activity_record')
             .select(['athlete_id', 'content_sha256', 'signed_record', 'received_at'])
             .where('may_be_raced', '=', 1)
+            .where('athlete_id', '!=', requester)
+            .orderBy('received_at', 'desc')
+            .orderBy('athlete_id')
+            .orderBy('content_sha256')
+            .limit(limit)
+            .execute()
+        ).map(activityRecordFrom),
+      ),
+
+    setActivityRaceRoute: (athleteId, contentSha256, routeSha256) =>
+      exclusive(async () => {
+        let update = db
+          .updateTable('activity_record')
+          .set({ race_route_sha256: routeSha256 })
+          .where('athlete_id', '=', athleteId)
+          .where('content_sha256', '=', contentSha256);
+        // An offer stands on a consent: none is recorded without one. A
+        // clearing write is always taken, so a device can withdraw an offer
+        // whatever the consent says.
+        if (routeSha256 !== null) update = update.where('may_be_raced', '=', 1);
+        const updated = await update.executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
+
+    listRaceableOnRoute: (requester, routeSha256, limit) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('activity_record')
+            .select(['athlete_id', 'content_sha256', 'signed_record', 'received_at'])
+            .where('may_be_raced', '=', 1)
+            .where('race_route_sha256', '=', routeSha256)
             .where('athlete_id', '!=', requester)
             .orderBy('received_at', 'desc')
             .orderBy('athlete_id')
@@ -2064,6 +3744,21 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return row === undefined ? undefined : syncItemFrom(row);
       }),
 
+    listLiveSyncItems: (athleteId, kind, limit) =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('sync_item')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('kind', '=', kind)
+          .where('deleted_at', 'is', null)
+          .orderBy('received_at', 'desc')
+          .orderBy('seq', 'desc')
+          .limit(Math.max(0, Math.floor(limit)))
+          .execute();
+        return rows.map(syncItemFrom);
+      }),
+
     deleteSyncItem: (athleteId, kind, key, now) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -2111,6 +3806,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .selectAll('sync_item')
           .select('activity_record.signed_record as signed_record')
           .select('activity_record.may_be_raced as may_be_raced')
+          .select('activity_record.race_route_sha256 as race_route_sha256')
           .where('sync_item.athlete_id', '=', athleteId);
         if (after !== undefined) {
           query = query.where(
@@ -2126,6 +3822,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           ...syncItemFrom(row),
           signedRecord: row.signed_record,
           mayBeRaced: row.may_be_raced === null ? null : row.may_be_raced === 1,
+          raceRouteSha256: row.race_route_sha256,
         }));
       }),
 
@@ -2165,6 +3862,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           capacity: course.capacity,
           countdown_ms: course.countdownMs,
           rejoin_window_ms: course.rejoinWindowMs,
+          drafting: course.drafting === false ? 0 : 1,
         };
         await db
           .insertInto('room_course')
@@ -2205,14 +3903,27 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     createPrivateRoom: (created) =>
       exclusive(() =>
-        db.transaction().execute(async (trx): Promise<'created' | 'code-taken'> => {
+        db.transaction().execute(async (trx): Promise<RoomWritten> => {
           const taken = await trx
             .selectFrom('private_room')
             .select('room_id')
             .where('code_sha256', '=', created.codeSha256)
             .executeTakeFirst();
           if (taken !== undefined) return 'code-taken';
-          const { room, course } = created;
+          const { room, course, publicCap } = created;
+          if (publicCap !== undefined) {
+            const made = await trx
+              .selectFrom('room_member')
+              .innerJoin('private_room', 'private_room.room_id', 'room_member.room_id')
+              .innerJoin('room', 'room.id', 'room_member.room_id')
+              .select((eb) => eb.fn.countAll<number>().as('n'))
+              .where('room_member.athlete_id', '=', created.creatorAthleteId)
+              .where('room_member.role', '=', 'creator')
+              .where('room.visibility', '=', 'public')
+              .where('private_room.created_at', '>', publicCap.sinceSeconds)
+              .executeTakeFirstOrThrow();
+            if (Number(made.n) >= publicCap.limit) return 'rate-limited';
+          }
           await trx
             .insertInto('room')
             .values({
@@ -2233,6 +3944,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               capacity: course.capacity,
               countdown_ms: course.countdownMs,
               rejoin_window_ms: course.rejoinWindowMs,
+              drafting: course.drafting === false ? 0 : 1,
               race_started_at: null,
             })
             .execute();
@@ -2244,6 +3956,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               route_loop: created.routeLoop ? 1 : 0,
               created_at: created.createdAt,
               closed_at: null,
+              starts_at: created.startsAt ?? null,
             })
             .execute();
           await trx
@@ -2390,6 +4103,72 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return Number(row.n);
       }),
 
+    listOpenPublicRooms: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('private_room')
+            .innerJoin('room', 'room.id', 'private_room.room_id')
+            .innerJoin('room_course', 'room_course.room_id', 'private_room.room_id')
+            .select([
+              'private_room.room_id',
+              'private_room.starts_at',
+              'private_room.created_at',
+              'private_room.route_loop',
+              'room.kind',
+              'room_course.length_metres',
+              'room_course.grades',
+              'room_course.riding_position',
+              'room_course.drafting',
+              'room_course.race_started_at',
+            ])
+            .where('room.visibility', '=', 'public')
+            .where('private_room.closed_at', 'is', null)
+            // The listing's one rule (#788): start, then made, then id — never editorial.
+            .orderBy('private_room.starts_at')
+            .orderBy('private_room.created_at')
+            .orderBy('private_room.room_id')
+            .execute()
+        ).map((row) => ({
+          roomId: row.room_id,
+          kind: row.kind,
+          // Every public room is made with a start (`rooms.ts` §`create`).
+          startsAt: row.starts_at ?? row.created_at,
+          createdAt: row.created_at,
+          lengthMetres: row.length_metres,
+          grades: JSON.parse(row.grades) as [number, number][],
+          ridingPosition: row.riding_position,
+          drafting: row.drafting === 1,
+          loop: row.route_loop === 1,
+          raceStarted: row.race_started_at !== null,
+        })),
+      ),
+
+    hasBlockWithRoomMember: (roomId, athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_member')
+          .innerJoin('block', (join) =>
+            join.on((eb) =>
+              eb.or([
+                eb.and([
+                  eb('block.athlete_id', '=', athleteId),
+                  eb('block.blocked_athlete_id', '=', eb.ref('room_member.athlete_id')),
+                ]),
+                eb.and([
+                  eb('block.athlete_id', '=', eb.ref('room_member.athlete_id')),
+                  eb('block.blocked_athlete_id', '=', athleteId),
+                ]),
+              ]),
+            ),
+          )
+          .select('room_member.athlete_id')
+          .where('room_member.room_id', '=', roomId)
+          .where('room_member.athlete_id', '!=', athleteId)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
     putResult: (result) =>
       exclusive(async () => {
         const figures = {
@@ -2443,11 +4222,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(resultFrom),
       ),
 
-    putBlock: (athleteId, blockedAthleteId, at) =>
+    putBlock: (athleteId, blockedAthleteId, at, shownName) =>
       exclusive(async () => {
         await db
           .insertInto('block')
-          .values({ athlete_id: athleteId, blocked_athlete_id: blockedAthleteId, created_at: at })
+          .values({
+            athlete_id: athleteId,
+            blocked_athlete_id: blockedAthleteId,
+            created_at: at,
+            shown_name: shownName ?? null,
+          })
           .onConflict((conflict) =>
             conflict.columns(['athlete_id', 'blocked_athlete_id']).doNothing(),
           )
@@ -2460,6 +4244,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .deleteFrom('block')
           .where('athlete_id', '=', athleteId)
           .where('blocked_athlete_id', '=', blockedAthleteId)
+          .executeTakeFirst();
+        return deleted.numDeletedRows > 0n;
+      }),
+
+    deleteBlockByHandle: (athleteId, handle) =>
+      exclusive(async () => {
+        const deleted = await db
+          .deleteFrom('block')
+          .where('athlete_id', '=', athleteId)
+          .where('handle', '=', handle)
           .executeTakeFirst();
         return deleted.numDeletedRows > 0n;
       }),
@@ -2526,6 +4320,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             closed_at: report.closedAs === undefined ? null : report.createdAt,
             closed_by_athlete_id: null,
             outcome: report.closedAs ?? null,
+            room_id: report.roomId ?? null,
+            room_tick: report.roomTick ?? null,
+            flag_duration_seconds: report.flag?.durationSeconds ?? null,
+            flag_ceiling_watts_per_kilogram: report.flag?.ceilingWattsPerKilogram ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
@@ -2544,6 +4342,39 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(reportFrom),
       ),
 
+    isRemovedFromRoom: (roomId, athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_removal')
+          .select('athlete_id')
+          .where('room_id', '=', roomId)
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    listBlockedBy: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('block')
+            .select('athlete_id')
+            .where('blocked_athlete_id', '=', athleteId)
+            .orderBy('athlete_id')
+            .execute()
+        ).map((row) => row.athlete_id),
+      ),
+
+    getReport: (reportId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('report')
+          .selectAll()
+          .where('id', '=', reportId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : reportFrom(row);
+      }),
+
     listOpenReports: () =>
       exclusive(async () =>
         (
@@ -2554,6 +4385,321 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('id')
             .execute()
         ).map(reportFrom),
+      ),
+
+    putNotice: (notice) =>
+      exclusive(async () => {
+        const inserted = await db
+          .insertInto('notice')
+          .values({
+            received_at: notice.receivedAt,
+            kind: notice.kind,
+            explanation: notice.explanation,
+            items: JSON.stringify(notice.items),
+            location: notice.location,
+            notifier_name: notice.notifierName,
+            notifier_email: notice.notifierEmail,
+            bona_fide: notice.bonaFide ? 1 : 0,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return inserted.id;
+      }),
+
+    countNoticesSince: (since) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('notice')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('received_at', '>=', since)
+          .executeTakeFirstOrThrow();
+        return Number(row.n);
+      }),
+
+    putAppeal: (appeal) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<AppealFiled> => {
+          const statement = await trx
+            .selectFrom('statement')
+            .select('log_id')
+            .where('log_id', '=', appeal.statementLogId)
+            .where('target_athlete_id', '=', appeal.appellantAthleteId)
+            .executeTakeFirst();
+          if (statement === undefined) return { outcome: 'not_found' };
+          const held = await trx
+            .selectFrom('appeal')
+            .select('id')
+            .where('statement_log_id', '=', appeal.statementLogId)
+            .executeTakeFirst();
+          if (held !== undefined) return { outcome: 'already_appealed' };
+          const inserted = await trx
+            .insertInto('appeal')
+            .values({
+              statement_log_id: appeal.statementLogId,
+              appellant_athlete_id: appeal.appellantAthleteId,
+              grounds: appeal.grounds,
+              filed_at: appeal.filedAt,
+              outcome: null,
+              decision: null,
+              moderator_conflict: null,
+              decided_at: null,
+              decided_log_id: null,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'filed', appealId: inserted.id };
+        }),
+      ),
+
+    listAppeals: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('appeal')
+            .selectAll()
+            .where('appellant_athlete_id', '=', athleteId)
+            .orderBy('id', 'desc')
+            .execute()
+        ).map(appealFrom),
+      ),
+
+    listOpenAppeals: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('appeal')
+            .selectAll()
+            .where('decided_at', 'is', null)
+            .orderBy('id')
+            .execute()
+        ).map(appealFrom),
+      ),
+
+    listEveryAppeal: () =>
+      exclusive(async () =>
+        (await db.selectFrom('appeal').selectAll().orderBy('id').execute()).map(appealFrom),
+      ),
+
+    decideAppeal: (decision) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<AppealDecided> => {
+          const appeal = await trx
+            .selectFrom('appeal')
+            .selectAll()
+            .where('id', '=', decision.appealId)
+            .executeTakeFirst();
+          if (appeal === undefined) return { outcome: 'not_found' };
+          if (appeal.decided_at !== null) return { outcome: 'not_applicable' };
+          const appealed = await trx
+            .selectFrom('statement')
+            .innerJoin('moderation_log', 'moderation_log.id', 'statement.log_id')
+            .select([
+              'statement.restriction as restriction',
+              'statement.target_athlete_id as target',
+              'moderation_log.actor_athlete_id as actor',
+              'moderation_log.at as at',
+              'moderation_log.room_id as room',
+            ])
+            .where('statement.log_id', '=', appeal.statement_log_id)
+            .executeTakeFirstOrThrow();
+          if (decision.outcome === 'reversed') {
+            // Restored only if the appealed restriction itself still stands:
+            // the column must still carry this statement's own `at`, so a
+            // later restriction (lift then re-impose) is never lifted here.
+            const athlete = trx.updateTable('athlete').where('id', '=', appealed.target);
+            if (appealed.restriction === 'suspend') {
+              await athlete
+                .set({ suspended_at: null })
+                .where('suspended_at', '=', appealed.at)
+                .execute();
+            } else if (appealed.restriction === 'hide_display_name') {
+              await athlete
+                .set({ display_name_hidden_at: null })
+                .where('display_name_hidden_at', '=', appealed.at)
+                .execute();
+            } else if (appealed.restriction === 'hide_item') {
+              // #913: the item the statement explains is shown again.
+              await trx
+                .updateTable('hidden_item')
+                .set({ restored_at: decision.at })
+                .where('log_id', '=', appeal.statement_log_id)
+                .where('restored_at', 'is', null)
+                .execute();
+            } else if (appealed.restriction === 'remove_from_room' && appealed.room !== null) {
+              // #1384: the rider may come back into the room — only if the
+              // removal this statement explains is the one that still stands.
+              await trx
+                .deleteFrom('room_removal')
+                .where('room_id', '=', appealed.room)
+                .where('athlete_id', '=', appealed.target)
+                .where('removed_at', '=', appealed.at)
+                .execute();
+            }
+          }
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: decision.actorAthleteId,
+              action: decision.outcome === 'reversed' ? 'reverse_appeal' : 'uphold_appeal',
+              target_athlete_id: appealed.target,
+              report_id: null,
+              reason: decision.decision,
+              at: decision.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          const moderatorConflict = appealed.actor === decision.actorAthleteId;
+          await trx
+            .updateTable('appeal')
+            .set({
+              outcome: decision.outcome,
+              decision: decision.decision,
+              moderator_conflict: moderatorConflict ? 1 : 0,
+              decided_at: decision.at,
+              decided_log_id: logged.id,
+            })
+            .where('id', '=', decision.appealId)
+            .execute();
+          return { outcome: 'applied', logId: logged.id, moderatorConflict };
+        }),
+      ),
+
+    listStatements: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('statement')
+            .innerJoin('moderation_log', 'moderation_log.id', 'statement.log_id')
+            .selectAll('statement')
+            .select('moderation_log.actor_athlete_id')
+            .where('statement.target_athlete_id', '=', athleteId)
+            .orderBy('statement.log_id', 'desc')
+            .execute()
+        ).map(statementFrom),
+      ),
+
+    putNoticeStep: (step) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<NoticeStepRecorded> => {
+          const notice = await trx
+            .selectFrom('notice')
+            .select(['id', 'notifier_email'])
+            .where('id', '=', step.noticeId)
+            .executeTakeFirst();
+          if (notice === undefined) return 'not_found';
+          const taken = await trx
+            .selectFrom('notice_step')
+            .select('step')
+            .where('notice_id', '=', step.noticeId)
+            .execute();
+          if (taken.some((each) => each.step === step.step)) return 'already';
+          if (step.step !== 'decided' && notice.notifier_email === null) return 'no_contact';
+          if (step.step === 'notifier_told' && !taken.some((each) => each.step === 'decided')) {
+            return 'not_decided';
+          }
+          if (step.logId !== null) {
+            const entry = await trx
+              .selectFrom('moderation_log')
+              .select('id')
+              .where('id', '=', step.logId)
+              .executeTakeFirst();
+            if (entry === undefined) return 'no_such_log_entry';
+          }
+          await trx
+            .insertInto('notice_step')
+            .values({
+              notice_id: step.noticeId,
+              step: step.step,
+              actor_athlete_id: step.actorAthleteId,
+              decision: step.decision,
+              log_id: step.logId,
+              at: step.at,
+            })
+            .execute();
+          return 'recorded';
+        }),
+      ),
+
+    listNoticeSteps: () =>
+      exclusive(async () =>
+        (await db.selectFrom('notice_step').selectAll().orderBy('id').execute()).map(
+          noticeStepFrom,
+        ),
+      ),
+
+    hideItem: (hide) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const held = await trx
+            .selectFrom('hidden_item')
+            .select('log_id')
+            .where('item', '=', hide.item)
+            .where('restored_at', 'is', null)
+            .executeTakeFirst();
+          if (held !== undefined) return { outcome: 'not_applicable' } as const;
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: hide.actorAthleteId,
+              action: 'hide_item',
+              target_athlete_id: hide.ownerAthleteId,
+              report_id: null,
+              reason: hide.reason,
+              at: hide.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          await trx
+            .insertInto('statement')
+            .values({
+              log_id: logged.id,
+              target_athlete_id: hide.ownerAthleteId,
+              restriction: 'hide_item',
+              facts: hide.statement.facts,
+              decided_on: hide.statement.decidedOn,
+              legal_ground: hide.statement.legalGround,
+              terms_ground: hide.statement.termsGround,
+              notifier_named: hide.statement.notifierNamed,
+              moderator_conflict: hide.statement.moderatorConflict ? 1 : 0,
+              ends_at: hide.statement.endsAt,
+              at: hide.at,
+            })
+            .execute();
+          await trx
+            .insertInto('hidden_item')
+            .values({
+              log_id: logged.id,
+              item: hide.item,
+              owner_athlete_id: hide.ownerAthleteId,
+              hidden_at: hide.at,
+              restored_at: null,
+            })
+            .execute();
+          return { outcome: 'applied', logId: logged.id } as const;
+        }),
+      ),
+
+    listHiddenItemsOfRoom: (roomId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('hidden_item')
+            .select(['item', 'owner_athlete_id'])
+            .where('restored_at', 'is', null)
+            .where((row) =>
+              row.or([
+                row('item', '=', `room:${roomId}`),
+                row('item', '=', `route:${roomId}`),
+                row('item', 'like', `result:${roomId}:%`),
+              ]),
+            )
+            .execute()
+        ).map((row) => ({ item: row.item, ownerAthleteId: row.owner_athlete_id })),
+      ),
+
+    listNotices: () =>
+      exclusive(async () =>
+        (await db.selectFrom('notice').selectAll().orderBy('id').execute()).map(noticeFrom),
       ),
 
     moderate: (action) =>
@@ -2573,7 +4719,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             ) {
               return { outcome: 'not_found' };
             }
-          } else if (action.action === 'dismiss_report') {
+          } else if (action.action === 'dismiss_report' || action.action === 'dismiss_own_report') {
             return { outcome: 'not_found' };
           }
           if (action.action !== 'dismiss_report') {
@@ -2607,9 +4753,30 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               report_id: action.reportId,
               reason: action.reason,
               at: action.at,
+              room_id: action.roomId ?? null,
             })
             .returning('id')
             .executeTakeFirstOrThrow();
+          // #910: the statement of reasons, with the entry, or neither.
+          if (action.statement !== undefined && action.targetAthleteId !== null) {
+            const statement = action.statement;
+            await trx
+              .insertInto('statement')
+              .values({
+                log_id: logged.id,
+                target_athlete_id: action.targetAthleteId,
+                restriction: action.action,
+                facts: statement.facts,
+                decided_on: statement.decidedOn,
+                legal_ground: statement.legalGround,
+                terms_ground: statement.termsGround,
+                notifier_named: statement.notifierNamed,
+                moderator_conflict: statement.moderatorConflict ? 1 : 0,
+                ends_at: statement.endsAt,
+                at: action.at,
+              })
+              .execute();
+          }
           return { outcome: 'applied', logId: logged.id };
         }),
       ),
@@ -2625,18 +4792,12 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             report_id: action.reportId,
             reason: action.reason,
             at: action.at,
+            room_id: action.roomId ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
         return logged.id;
       }),
-
-    listModerationLog: () =>
-      exclusive(async () =>
-        (await db.selectFrom('moderation_log').selectAll().orderBy('id').execute()).map(
-          moderationLogFrom,
-        ),
-      ),
 
     listModerationLogPage: (beforeId, limit) =>
       exclusive(async () => {
@@ -2649,11 +4810,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       exclusive(async () => {
         let query = db.selectFrom('athlete').selectAll().where('suspended_at', 'is not', null);
         if (after !== undefined) {
+          // A row-value comparison, not the OR it means: SQLite walks the
+          // `athlete_suspended` index (#1166) for this, and sorts for the OR.
           query = query.where((row) =>
-            row.or([
-              row('suspended_at', '<', after.suspendedAt),
-              row.and([row('suspended_at', '=', after.suspendedAt), row('id', '<', after.id)]),
-            ]),
+            row(row.refTuple('suspended_at', 'id'), '<', row.tuple(after.suspendedAt, after.id)),
           );
         }
         return (
@@ -2682,6 +4842,19 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('id')
             .execute()
         ).map(athleteFrom),
+      ),
+
+    listLoadAthletes: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('athlete')
+            .select('id')
+            .where('load_run_at', 'is not', null)
+            .orderBy('created_at')
+            .orderBy('id')
+            .execute()
+        ).map((row) => row.id),
       ),
 
     countActivityRecords: (athleteId) =>
@@ -2885,27 +5058,569 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         })),
       ),
 
-    eraseAthlete: (athleteId) =>
+    createAnalysisJob: (job) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
-          const held = await trx
-            .selectFrom('activity_record')
-            .select('content_sha256')
-            .where('athlete_id', '=', athleteId)
+          const open = await trx
+            .selectFrom('analysis_job')
+            .select('id')
+            .where('athlete_id', '=', job.athleteId)
+            .where('status', 'in', ['queued', 'running'])
+            .executeTakeFirst();
+          if (open !== undefined) return 'busy' as const;
+          await trx
+            .insertInto('analysis_job')
+            .values({
+              id: job.id,
+              athlete_id: job.athleteId,
+              status: 'queued',
+              source: job.source,
+              template_version: job.templateVersion,
+              input_json: job.inputJson,
+              ride_id: job.rideId ?? null,
+              candidate: null,
+              failure: null,
+              created_at: job.createdAt,
+              ended_at: null,
+            })
             .execute();
-          for (const table of await athleteTablesInErasureOrder(trx)) {
-            // Every table here has `athlete_id`: the derivation refuses one that does not.
-            await trx
-              .deleteFrom(table as 'session')
-              .where('athlete_id', '=', athleteId)
-              .execute();
-          }
-          // Another athlete's block OF this one names nobody once they are gone (#83).
-          await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
-          await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
-          return held.map((row) => row.content_sha256);
+          return 'created' as const;
         }),
       ),
+
+    getAnalysisJob: (athleteId, jobId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('analysis_job')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('id', '=', jobId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : analysisJobFrom(row);
+      }),
+
+    listAnalysisEvents: (athleteId, jobId, afterSeq, limit) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('analysis_event')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .where('job_id', '=', jobId)
+            .where('seq', '>', afterSeq)
+            .orderBy('seq')
+            .limit(Math.max(0, Math.floor(limit)))
+            .execute()
+        ).map(analysisEventFrom),
+      ),
+
+    claimAnalysisJob: () =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const oldest = await trx
+            .selectFrom('analysis_job')
+            .selectAll()
+            .where('status', '=', 'queued')
+            .orderBy('created_at')
+            .orderBy('id')
+            .executeTakeFirst();
+          if (oldest === undefined) return undefined;
+          await trx
+            .updateTable('analysis_job')
+            .set({ status: 'running' })
+            .where('id', '=', oldest.id)
+            .where('athlete_id', '=', oldest.athlete_id)
+            .execute();
+          return analysisJobFrom({ ...oldest, status: 'running' });
+        }),
+      ),
+
+    appendAnalysisEvent: (athleteId, jobId, kind, data, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const running = await trx
+            .selectFrom('analysis_job')
+            .select('id')
+            .where('athlete_id', '=', athleteId)
+            .where('id', '=', jobId)
+            .where('status', '=', 'running')
+            .executeTakeFirst();
+          if (running === undefined) return undefined;
+          const seq = await nextAnalysisSeq(trx, jobId);
+          await trx
+            .insertInto('analysis_event')
+            .values({ job_id: jobId, athlete_id: athleteId, seq, kind, data, at })
+            .execute();
+          return seq;
+        }),
+      ),
+
+    endAnalysisJob: (athleteId, jobId, ending) =>
+      exclusive(() =>
+        // Scrubbed: a job that did not succeed keeps no section's text (D-12).
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const ended = await trx
+              .updateTable('analysis_job')
+              .set({
+                status: ending.status,
+                failure: ending.failure,
+                candidate: ending.candidate,
+                ended_at: ending.at,
+              })
+              .where('athlete_id', '=', athleteId)
+              .where('id', '=', jobId)
+              .where('status', 'in', ['queued', 'running'])
+              .executeTakeFirst();
+            if (Number(ended.numUpdatedRows) === 0) return undefined;
+            const seq = await nextAnalysisSeq(trx, jobId);
+            await trx
+              .insertInto('analysis_event')
+              .values({
+                job_id: jobId,
+                athlete_id: athleteId,
+                seq,
+                kind: 'result',
+                data: ending.data,
+                at: ending.at,
+              })
+              .execute();
+            if (ending.status !== 'succeeded') {
+              await trx
+                .deleteFrom('analysis_event')
+                .where('athlete_id', '=', athleteId)
+                .where('job_id', '=', jobId)
+                .where('kind', '=', 'section')
+                .execute();
+            }
+            return seq;
+          }),
+        ),
+      ),
+
+    acknowledgeAnalysisJob: (athleteId, jobId) =>
+      exclusive(() =>
+        // Scrubbed: the events hold the sections' text. The write-up itself is
+        // kept (ADR 0046 D-12).
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const job = await trx
+              .selectFrom('analysis_job')
+              .select('status')
+              .where('athlete_id', '=', athleteId)
+              .where('id', '=', jobId)
+              .executeTakeFirst();
+            if (job === undefined) return 'not_found' as const;
+            if (job.status === 'queued' || job.status === 'running') return 'job_running' as const;
+            await trx
+              .deleteFrom('analysis_event')
+              .where('athlete_id', '=', athleteId)
+              .where('job_id', '=', jobId)
+              .execute();
+            return 'acknowledged' as const;
+          }),
+        ),
+      ),
+
+    interruptAnalysisJobs: (failure, data, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const left = await trx
+            .selectFrom('analysis_job')
+            .select(['id', 'athlete_id'])
+            .where('status', 'in', ['queued', 'running'])
+            .execute();
+          for (const job of left) {
+            await trx
+              .updateTable('analysis_job')
+              .set({ status: 'failed', failure, candidate: null, ended_at: at })
+              .where('id', '=', job.id)
+              .where('athlete_id', '=', job.athlete_id)
+              .execute();
+            await trx
+              .insertInto('analysis_event')
+              .values({
+                job_id: job.id,
+                athlete_id: job.athlete_id,
+                seq: await nextAnalysisSeq(trx, job.id),
+                kind: 'result',
+                data,
+                at,
+              })
+              .execute();
+          }
+          return left.length;
+        }),
+      ),
+
+    pruneAnalysisJobs: (endedBefore) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const old = trx
+              .selectFrom('analysis_job')
+              .select('id')
+              .where('ended_at', 'is not', null)
+              .where('ended_at', '<', endedBefore);
+            await trx.deleteFrom('analysis_event').where('job_id', 'in', old).execute();
+            const deleted = await trx
+              .deleteFrom('analysis_job')
+              .where('ended_at', 'is not', null)
+              .where('ended_at', '<', endedBefore)
+              .where('candidate', 'is', null)
+              .executeTakeFirst();
+            return Number(deleted.numDeletedRows);
+          }),
+        ),
+      ),
+
+    listAnalysisResults: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('analysis_job')
+            .select(['id', 'athlete_id', 'source', 'template_version', 'ended_at', 'candidate'])
+            .where('athlete_id', '=', athleteId)
+            .where('status', '=', 'succeeded')
+            .where('candidate', 'is not', null)
+            .orderBy('ended_at')
+            .orderBy('id')
+            .execute()
+        ).map((row) => ({
+          jobId: row.id,
+          athleteId: row.athlete_id,
+          source: row.source,
+          templateVersion: row.template_version,
+          endedAt: row.ended_at ?? 0,
+          writeUp: row.candidate ?? '',
+        })),
+      ),
+
+    eraseAthlete: (athleteId) =>
+      exclusive(() =>
+        // Scrubbed (#1097): an erased athlete's rows — a hosted model key's
+        // ciphertext among them — are not left in a free page or the log.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('activity_record')
+              .select('content_sha256')
+              .where('athlete_id', '=', athleteId)
+              .execute();
+            for (const table of await athleteTablesInErasureOrder(trx)) {
+              // Every table here has `athlete_id`: the derivation refuses one that does not.
+              await trx
+                .deleteFrom(table as 'session')
+                .where('athlete_id', '=', athleteId)
+                .execute();
+            }
+            // Another athlete's block OF this one is KEPT (#899): it is the
+            // blocker's row, and deleting it would shrink their list and tell
+            // them the id they blocked was a real account — as a block of an
+            // id nobody ever held is kept (#891's review). Only the name a
+            // race's result showed the blocker goes from it (#1529): it is
+            // this athlete's, and an erased athlete's name is kept nowhere.
+            await trx
+              .updateTable('block')
+              .set({ shown_name: null })
+              .where('blocked_athlete_id', '=', athleteId)
+              .execute();
+            await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
+            return held.map((row) => row.content_sha256);
+          }),
+        ),
+      ),
+
+    putHostedModelKey: (athleteId, key) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          // ONE statement: the athlete's existence and the write cannot be
+          // split by another connection erasing them in between (#1097).
+          const written = await sql<{ athlete_id: string }>`
+            insert into hosted_model_key (slot, athlete_id, url, model, iv, ciphertext, set_at)
+            select 1, id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt}
+            from athlete where id = ${athleteId}
+            on conflict (slot) do update set
+              athlete_id = excluded.athlete_id, url = excluded.url, model = excluded.model,
+              iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at
+            returning athlete_id`.execute(db);
+          return written.rows.length > 0
+            ? ({ outcome: 'stored' } as const)
+            : ({ outcome: 'no-athlete' } as const);
+        }),
+      ),
+
+    getHostedModelKey: () =>
+      exclusive(async () => {
+        const row = await db.selectFrom('hosted_model_key').selectAll().executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              url: row.url,
+              model: row.model,
+              iv: row.iv,
+              ciphertext: row.ciphertext,
+              setAt: row.set_at,
+            };
+      }),
+
+    clearHostedModelKey: () =>
+      exclusive(() =>
+        scrubbing(async () => {
+          const result = await db.deleteFrom('hosted_model_key').executeTakeFirst();
+          return Number(result.numDeletedRows) > 0;
+        }),
+      ),
+
+    putAthleteHostedKey: (athleteId, key) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            // ONE statement for the athlete's existence and the write, as for
+            // the operator's key above.
+            const written = await sql<{ athlete_id: string }>`
+              insert into athlete_hosted_key
+                (athlete_id, url, model, iv, ciphertext, set_at, reasoning_tokens)
+              select id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt},
+                ${key.reasoningTokens ?? null}
+              from athlete where id = ${athleteId}
+              on conflict (athlete_id) do update set
+                url = excluded.url, model = excluded.model,
+                iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at,
+                reasoning_tokens = excluded.reasoning_tokens
+              returning athlete_id`.execute(trx);
+            if (written.rows.length === 0) return { outcome: 'no-athlete' } as const;
+            // Q10: a consent names an origin, and a key at another one is not consented to.
+            await trx
+              .deleteFrom('athlete_hosted_consent')
+              .where('athlete_id', '=', athleteId)
+              .where('origin', '!=', new URL(key.url).origin)
+              .execute();
+            return { outcome: 'stored' } as const;
+          }),
+        ),
+      ),
+
+    getAthleteHostedKey: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('athlete_hosted_key')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              url: row.url,
+              model: row.model,
+              iv: row.iv,
+              ciphertext: row.ciphertext,
+              setAt: row.set_at,
+              ...(row.reasoning_tokens === null ? {} : { reasoningTokens: row.reasoning_tokens }),
+            };
+      }),
+
+    clearAthleteHostedKey: (athleteId) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          const result = await db
+            .deleteFrom('athlete_hosted_key')
+            .where('athlete_id', '=', athleteId)
+            .executeTakeFirst();
+          return Number(result.numDeletedRows) > 0;
+        }),
+      ),
+
+    putHostedConsent: (consent) =>
+      exclusive(async () => {
+        const written = await sql<{ athlete_id: string }>`
+          insert into athlete_hosted_consent (athlete_id, origin, recorded_at)
+          select id, ${consent.origin}, ${consent.recordedAt}
+          from athlete where id = ${consent.athleteId}
+          on conflict (athlete_id) do update set
+            origin = excluded.origin, recorded_at = excluded.recorded_at
+          returning athlete_id`.execute(db);
+        return written.rows.length > 0
+          ? ({ outcome: 'stored' } as const)
+          : ({ outcome: 'no-athlete' } as const);
+      }),
+
+    getHostedConsent: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('athlete_hosted_consent')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : { athleteId: row.athlete_id, origin: row.origin, recordedAt: row.recorded_at };
+      }),
+
+    clearHostedConsent: (athleteId) =>
+      exclusive(async () => {
+        const result = await db
+          .deleteFrom('athlete_hosted_consent')
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      }),
+
+    listInstanceKeys: () =>
+      exclusive(async () => {
+        const rows = await db.selectFrom('instance_key').selectAll().orderBy('key_id').execute();
+        return rows.map((row) => ({
+          keyId: row.key_id,
+          role: row.role,
+          publicKey: row.public_key,
+          iv: row.iv,
+          wrapped: row.wrapped,
+          serial: row.serial,
+          createdAt: row.created_at,
+          supersededAt: row.superseded_at,
+        }));
+      }),
+
+    listInstanceKeyStatements: () =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('instance_key_statement')
+          .selectAll()
+          .orderBy('issued_at')
+          .orderBy('key_id')
+          .execute();
+        return rows.map((row) => ({
+          keyId: row.key_id,
+          kind: row.kind,
+          issuedAt: row.issued_at,
+          notAfter: row.not_after,
+          body: row.body,
+          signature: row.signature,
+        }));
+      }),
+
+    putInstanceKey: (key) =>
+      exclusive(async () => {
+        await db.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+      }),
+
+    addEncryptionKey: (key) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .updateTable('instance_key')
+            .set({ superseded_at: key.createdAt })
+            .where('role', '=', 'encryption')
+            .where('superseded_at', 'is', null)
+            .execute();
+          await trx.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+        }),
+      ),
+
+    putInstanceKeyStatement: (statement, expiredBy) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('instance_key_statement')
+            .values(instanceKeyStatementValues(statement))
+            .execute();
+          await trx
+            .deleteFrom('instance_key_statement')
+            .where('kind', '=', 'key')
+            .where('not_after', '<=', expiredBy)
+            .execute();
+        }),
+      ),
+
+    deleteInstanceKeys: (keyIds) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          if (keyIds.length === 0) return;
+          await db.transaction().execute(async (trx) => {
+            await trx.deleteFrom('instance_key_statement').where('key_id', 'in', keyIds).execute();
+            await trx.deleteFrom('instance_key').where('key_id', 'in', keyIds).execute();
+          });
+        }),
+      ),
+
+    replaceIdentityKey: (key, endorsement) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            // Everything the old identity key signed goes with it: a key
+            // statement it signed would not verify under the new key.
+            await trx.deleteFrom('instance_key_statement').execute();
+            await trx.deleteFrom('instance_key').where('role', '=', 'identity').execute();
+            await trx.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+            if (endorsement !== undefined) {
+              await trx
+                .insertInto('instance_key_statement')
+                .values(instanceKeyStatementValues(endorsement))
+                .execute();
+            }
+          }),
+        ),
+      ),
+
+    clearInstanceKeys: () =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            await trx.deleteFrom('instance_key_statement').execute();
+            await trx.deleteFrom('instance_key').execute();
+          }),
+        ),
+      ),
+
+    claimIdentityKey: (key) =>
+      exclusive(async () => {
+        // The partial unique index `instance_key_one_identity` (0015) is the
+        // guard: a second identity row is a conflict, and a conflict keeps
+        // nothing rather than throwing.
+        const result = await db
+          .insertInto('instance_key')
+          .values(instanceKeyValues({ ...key, role: 'identity' }))
+          .onConflict((conflict) => conflict.doNothing())
+          .executeTakeFirst();
+        return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    takeInstanceKeyLease: (holder, now, expiresAt) =>
+      exclusive(async () => {
+        const result = await db
+          .insertInto('instance_key_lease')
+          .values({ name: 'keys', holder, expires_at: expiresAt })
+          .onConflict((conflict) =>
+            conflict
+              .column('name')
+              .doUpdateSet({ holder, expires_at: expiresAt })
+              .where('instance_key_lease.expires_at', '<=', now),
+          )
+          .executeTakeFirst();
+        return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    renewInstanceKeyLease: (holder, expiresAt) =>
+      exclusive(async () => {
+        const result = await db
+          .updateTable('instance_key_lease')
+          .set({ expires_at: expiresAt })
+          .where('name', '=', 'keys')
+          .where('holder', '=', holder)
+          .executeTakeFirst();
+        return Number(result.numUpdatedRows) === 1;
+      }),
+
+    releaseInstanceKeyLease: (holder) =>
+      exclusive(async () => {
+        await db
+          .deleteFrom('instance_key_lease')
+          .where('name', '=', 'keys')
+          .where('holder', '=', holder)
+          .execute();
+      }),
 
     close: () => exclusive(() => db.destroy()),
   };

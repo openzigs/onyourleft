@@ -130,10 +130,11 @@ a recorded purpose cannot exist. A test asserts this block matches the corpus.
 | `truncated-mid-trackpoint.gpx` | 4098 | 12 | The nominal GPX cut off in the middle of its last track point’s time element: past that point’s coordinates, so every coordinate in the file still pairs, and with no closing tag for anything. The text counterpart of truncated-mid-record.fit — a partial silent success here is a ride that imports short and says nothing. |
 | `nominal-ride.tcx` | 19602 | 30 | Baseline TCX v2: one activity, one lap, 30 trackpoints with Position, AltitudeMeters, DistanceMeters, HeartRateBpm, Cadence and the ActivityExtension Watts. TCX nests its coordinates in elements rather than attributes, which is a different parsing path from GPX and fails differently. |
 | `indoor-no-position.tcx` | 13032 | 0 | A TCX whose trackpoints carry no Position element at all. The indoor case again, in the format where "no position" is an absent child rather than an undeclared field — a reader that dereferences Position unconditionally throws on the first point. |
+| `lap-figures.tcx` | 17254 | 30 | Two laps carrying the figures and the kind TCX has elements for (#1321): average and highest heart rate, the lap cadence, the LX extension’s average and highest watts, Intensity and TriggerMethod — a whole lap ended by distance and a resting one ended by hand with no power. Among them sit elements a head unit also writes and this package does not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the last Value it saw reads the wrong figure. |
 | `xxe-external-entity.tcx` | 3160 | 10 | The TCX counterpart of the hostile GPX: an external general entity referenced from the activity Id. Both formats are carried because a parser is usually configured per format and hardening one is not hardening the other. |
 | `deep-nesting.tcx` | 4478 | 0 | The TCX counterpart of deep-nesting.gpx. Both formats are carried for the reason the XXE pair is — but here the sharper reason is the fuzz rather than the parser: its .gpx and .tcx arms seed from their own extensions, so a fixture in one format leaves the other arm with nothing structural to mutate and its depth invariant unproven. |
 
-**24 fixtures, 116181 bytes of the 262144 byte budget (44%), 973 positions.** Regenerated with the corpus, so it cannot go stale.
+**25 fixtures, 133435 bytes of the 262144 byte budget (51%), 1003 positions.** Regenerated with the corpus, so it cannot go stale.
 
 <!-- END GENERATED FIXTURE TABLE -->
 

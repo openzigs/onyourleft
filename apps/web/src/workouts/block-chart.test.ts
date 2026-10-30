@@ -233,3 +233,36 @@ describe('a block chart — #1043', () => {
     expect(paths.freeRide).not.toBe('');
   });
 });
+
+describe('a scale handed in — #1307', () => {
+  const segments = expandWorkout({
+    name: 'test',
+    blocks: [{ kind: 'steady', seconds: seconds(300), target: thresholdShare(0.5) }],
+  }).segments;
+
+  it('is the segments’ own scale when none is given', () => {
+    expect(blockChartPaths(segments, {})).toEqual(blockChartPaths(segments));
+  });
+
+  it('draws on the end it is given, so a part of a workout keeps its place in the whole', () => {
+    // 300 s of a 600 s workout: the bar stops half way across.
+    const d = blockChartPaths(segments, { endSeconds: 600 }).bands.join('');
+    const xs = [...d.matchAll(/[ML](-?[\d.]+) /g)].map(([, x]) => Number(x));
+    expect(Math.max(...xs)).toBe(CHART_WIDTH / 2);
+    expect(blockChartPaths(segments, { endSeconds: 600 }).rule).toBe(
+      blockChartPaths(segments).rule,
+    );
+  });
+
+  it('draws on the top it is given', () => {
+    // 50 % on a scale whose top is 200 %: a quarter of the height.
+    const d = blockChartPaths(segments, { topShare: 2 }).bands.join('');
+    const ys = [...d.matchAll(/[ML]-?[\d.]+ (-?[\d.]+)/g)].map(([, y]) => Number(y));
+    expect(Math.min(...ys)).toBe(CHART_HEIGHT * 0.75);
+  });
+
+  it('draws nothing on an end that is not a length', () => {
+    expect(blockChartPaths(segments, { endSeconds: 0 }).rule).toBe('');
+    expect(blockChartPaths(segments, { endSeconds: Number.NaN }).rule).toBe('');
+  });
+});
