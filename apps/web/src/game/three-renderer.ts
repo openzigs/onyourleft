@@ -4794,6 +4794,19 @@ export class HorizonRing {
     ];
   }
 
+  /**
+   * The colour a segment's ridge was last drawn in, linear — #1686, for
+   * `realistic-textures.test.ts`: its ground hazed toward {@link footAt}.
+   */
+  ridgeAt(segment: number): readonly [number, number, number] {
+    const at = ((segment % (HORIZON_SEGMENTS + 1)) * 3 + 2) * 3;
+    return [
+      this.#colours[at] as number,
+      this.#colours[at + 1] as number,
+      this.#colours[at + 2] as number,
+    ];
+  }
+
   /** Every segment's foot for this air, into {@link #foots}, unless it is the air they were worked out for. */
   #footsFor(air: RealisticAir): void {
     const h = this.#horizon;
@@ -4837,6 +4850,10 @@ export class HorizonRing {
    * (`realistic-light.ts` §`directionalFogColour`) and its ridge hazes
    * towards that; without it — the stylised world, and #544's control — every
    * segment is `horizon`, exactly as before.
+   * `ground`, since #1686, is the ground colour the ridge is hazed from: the
+   * world's own, but in the realistic world under the route's winter
+   * (`world.ts` §`groundColourIn`), the very colour the ground mesh is drawn
+   * in, so a snowy route's far hills are white where its near ground is.
    */
   update(
     relief: HorizonRelief,
@@ -4846,6 +4863,7 @@ export class HorizonRing {
     crestFloor = Number.NEGATIVE_INFINITY,
     hazeShare = HORIZON_HAZE_SHARE,
     air?: RealisticAir,
+    ground = world.groundColour,
   ): void {
     if (this.#built !== relief || this.#floor !== crestFloor) {
       this.#built = relief;
@@ -4871,7 +4889,7 @@ export class HorizonRing {
     }
     this.#horizon.setRGB(horizon.r, horizon.g, horizon.b);
     if (air === undefined) {
-      this.#haze.setHex(world.groundColour).lerp(this.#horizon, hazeShare);
+      this.#haze.setHex(ground).lerp(this.#horizon, hazeShare);
       for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
         for (let row = 0; row < 3; row += 1) {
           const colour = row === 2 ? this.#haze : this.#horizon;
@@ -4894,7 +4912,7 @@ export class HorizonRing {
           this.#foots[foot + 1] as number,
           this.#foots[foot + 2] as number,
         );
-        this.#haze.setHex(world.groundColour).lerp(this.#footColour, hazeShare);
+        this.#haze.setHex(ground).lerp(this.#footColour, hazeShare);
         for (let row = 0; row < 3; row += 1) {
           const colour = row === 2 ? this.#haze : this.#footColour;
           const at = (segment * 3 + row) * 3;
@@ -14700,15 +14718,19 @@ function structureMaterials(
         surface,
       ),
     );
-  const lit = biased(
-    constructed(
-      new MeshStandardMaterial({
-        color: finish.tint,
-        roughness: finish.roughness,
-        metalness: finish.metalness,
-        vertexColors: true,
-        ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
-      }),
+  // #1686: the lit one lays the route's winter on what faces up; the flat one
+  // is the stylised rung's step down, which the realistic world never takes.
+  const lit = withRoofSnow(
+    biased(
+      constructed(
+        new MeshStandardMaterial({
+          color: finish.tint,
+          roughness: finish.roughness,
+          metalness: finish.metalness,
+          vertexColors: true,
+          ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+        }),
+      ),
     ),
   );
   return {
@@ -17046,6 +17068,71 @@ const ROOF_SNOW_GLSL = (() => {
 })();
 
 /**
+ * The line that lays {@link ROOF_SNOW_GLSL}'s snow, spliced after
+ * `normal_fragment_maps` — #1623: by the surface's own facing, not its map's,
+ * so a tile's relief does not speckle the cover. One line every roof that
+ * snows shares ({@link withFacade}, {@link withRoofSnow}), so a mapped roof, a
+ * house model's and a procedural structure's hold it alike.
+ */
+const ROOF_SNOW_LINE =
+  'diffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), oylRoofSnow);';
+
+/** The materials that lay a roof's snow: {@link withFacade}'s and {@link withRoofSnow}'s. */
+const ROOF_SNOW_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material lays snow on what faces up by the route's winter — #1623
+ * for the mapped buildings' facades, #1686 for the house models and the
+ * procedural structures' lit materials.
+ *
+ * @test-facing held by `mapped-building-belt.test.ts` §"#1686" and
+ * `three-renderer.test.ts` §"#1686", which assert the house models' and every
+ * realistic structure surface's lit material is taught it
+ */
+export function laysRoofSnow(material: Material): boolean {
+  return ROOF_SNOW_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a lit material the roofs' snow — #1686: {@link ROOF_SNOW_GLSL} by
+ * {@link SEASON}'s `oylRoofSnow`, laid by {@link ROOF_SNOW_LINE}, as
+ * {@link withFacade} lays it on a mapped building. For the materials the
+ * facade is not: the house models' (`houseModelMaterial`) and the procedural
+ * structures' lit ones (`structureMaterials`). A lit material only — its
+ * program holds `normal_fragment_maps` and three's `nonPerturbedNormal`; the
+ * realistic world has no flat rung. 0 calls, 0 triangles, 0 textures: one
+ * uniform every such material shares, and at `oylRoofSnow` 0 the colour
+ * comes back as it went in. Throws, as the tint does, if three's program no
+ * longer holds an include it is spliced at. Idempotent.
+ */
+function withRoofSnow<M extends Material>(material: M): M {
+  if (ROOF_SNOW_TAUGHT.has(material)) return material;
+  ROOF_SNOW_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1686's roof snow";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms.oylRoofSnow = SEASON.oylRoofSnow;
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}`,
+        'fragment',
+        spliced,
+      ),
+      '#include <normal_fragment_maps>',
+      `#include <normal_fragment_maps>\n${ROOF_SNOW_LINE}`,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-roof-snow`;
+  return material;
+}
+
+/**
  * A wreath on a mapped building's front door, in metres of the door's face —
  * #1626: its middle {@link WREATH_UP} above the door's foot, an evergreen ring
  * between {@link WREATH_RING}'s radii and a bow below it, in
@@ -17100,6 +17187,7 @@ const WREATH_GLSL = (() => {
 function withFacade<M extends Material>(material: M, surface: StructureSurface): M {
   if (FACADE_TAUGHT.has(material)) return material;
   FACADE_TAUGHT.add(material);
+  ROOF_SNOW_TAUGHT.add(material);
   defineFacadeLevers(material);
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
@@ -17172,7 +17260,7 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
       fragment,
       '#include <normal_fragment_maps>',
       // #1623: and snow on what faces up, by the surface's own facing, not its map's.
-      '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));\ndiffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), oylRoofSnow);',
+      `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));\n${ROOF_SNOW_LINE}`,
       'fragment',
       spliced,
     );
@@ -17442,8 +17530,9 @@ function houseModelMaterial(atlas: Texture | undefined): MeshStandardMaterial {
       ...(atlas === undefined ? {} : { map: atlas }),
     }),
   );
-  return withAtmosphere(
-    withVertexTint(atlas === undefined ? material : withTextureLodBias(material)),
+  // #1686: and the snow on their roofs, as the mapped roofs beside them carry it.
+  return withRoofSnow(
+    withAtmosphere(withVertexTint(atlas === undefined ? material : withTextureLodBias(material))),
   );
 }
 
@@ -20468,10 +20557,8 @@ class ThreeGameView implements GameView {
     SEASON.oylRoofSnow.value = roofSnowIn(frame.world, winter);
     // #1692: and the verge's ploughed slush, so the road's edge line still reads.
     SEASON.oylVergeSlush.value = vergeSlushIn(frame.world, winter);
-    this.#terrain.update(
-      frame.terrain.mesh,
-      winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter),
-    );
+    const ground = winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter);
+    this.#terrain.update(frame.terrain.mesh, ground);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -20485,6 +20572,8 @@ class ThreeGameView implements GameView {
       this.#horizonIsSky ? REALISTIC_HORIZON_HAZE_SHARE : HORIZON_HAZE_SHARE,
       // #622: and its foot leans towards the sky in each direction as the fog does.
       this.#air,
+      // #1686: and its ridge is hazed from the ground the terrain is drawn in.
+      ground,
     );
     this.#valleyMiddle = frame.terrain.horizon.middle;
     // #629: the realistic water reflects the scene's environment, turned as
@@ -20898,9 +20987,17 @@ class ThreeGameView implements GameView {
   get horizonColours(): {
     readonly fog: readonly [number, number, number];
     readonly foot: readonly [number, number, number];
+    readonly ridge: readonly [number, number, number];
+    readonly ridgeFoot: readonly [number, number, number];
   } {
     const fog = this.#fog.color;
-    return { fog: [fog.r, fog.g, fog.b], foot: this.#horizon.foot };
+    return {
+      fog: [fog.r, fog.g, fog.b],
+      foot: this.#horizon.foot,
+      // #1686: the first segment's ridge, and the foot it is hazed toward.
+      ridge: this.#horizon.ridgeAt(0),
+      ridgeFoot: this.#horizon.footAt(0),
+    };
   }
 
   /** @see nearFieldOf */

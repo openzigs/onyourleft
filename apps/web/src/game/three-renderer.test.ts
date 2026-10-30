@@ -117,6 +117,8 @@ import {
   LOT_CLADDING_GLSL,
   LOT_PART,
   readsLotPaint,
+  laysRoofSnow,
+  MappedBuildingBelt,
   realisticStructureGeometry,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
@@ -136,6 +138,8 @@ import {
   sceneryColours,
 } from './three-renderer';
 import { SASH, SASH_TOP_SHARE, WINDOW_IN_BAY, WINDOW_SILL_METRES, facadePartAt } from './facade';
+import { glslFunction } from './glsl-testing';
+import { mappedBuildingsOf } from './mapped-buildings';
 import { STYLE_SASH, STOREY_METRES } from './footprint-buildings';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import {
@@ -3494,7 +3498,7 @@ describe('a lot’s paint reaches its instance and its materials — #1581', () 
       vertexShader:
         '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
       fragmentShader:
-        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
     };
     material.onBeforeCompile(shader, undefined);
     // The planks' own first five, the joinery's stains.
@@ -3525,7 +3529,7 @@ describe('a lot’s paint reaches its instance and its materials — #1581', () 
       vertexShader:
         '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
       fragmentShader:
-        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
     };
     material.onBeforeCompile(shader, undefined);
     const slate = ROOF_PAINTS.slate ?? [];
@@ -3536,6 +3540,104 @@ describe('a lot’s paint reaches its instance and its materials — #1581', () 
     expect(shader.vertexShader).toContain('int(instanceColor.y + 0.5) - 1');
     expect(shader.fragmentShader).toContain('diffuseColor.rgb *= vOylPaint;');
     belts.dispose();
+  });
+});
+
+/**
+ * Snow on the procedural structures' roofs — #1686: a village's roof-tiles,
+ * slate and every other surface `RealisticStructureBelts` draws are taught
+ * the roofs' snow (`three-renderer.ts` §`withRoofSnow`), after the lot's
+ * paint and cladding, by the one uniform a mapped roof reads. Evaluated from
+ * the program three is handed, as `mapped-building-belt.test.ts` §"#1623"
+ * does for the facade.
+ */
+describe('a procedural structure’s roof under snow, and its wall without it — #1686', () => {
+  const programOf = (
+    material: unknown,
+  ): { fragment: string; uniforms: Record<string, unknown> } => {
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <emissivemap_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    (material as { onBeforeCompile(shader: unknown, renderer: unknown): void }).onBeforeCompile(
+      shader,
+      undefined,
+    );
+    return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+  };
+  const linear = (packed: number): readonly number[] =>
+    [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff].map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+  const TILE: readonly [number, number, number] = [0.3, 0.09, 0.05];
+  const apart = (a: readonly number[], b: readonly number[]): number =>
+    Math.hypot(...a.map((each, at) => each - (b[at] ?? 0)));
+  const surfaces: readonly StructureSurface[] = [
+    ...PHOTOGRAPHIC_STRUCTURE_SURFACES,
+    'painted',
+    'glass',
+  ];
+
+  it('teaches every surface’s lit material the snow, read from the season’s one uniform', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const mapped = new MappedBuildingBelt(mappedBuildingsOf([]), new Map());
+    try {
+      const season = programOf(mapped.materialOf('roof-tiles')).uniforms['oylRoofSnow'];
+      expect(season).toBeDefined();
+      let taught = 0;
+      for (const surface of surfaces) {
+        for (const kind of STRUCTURE_KINDS) {
+          for (const mesh of belts.beltOf(surface)?.meshesOf(kind) ?? []) {
+            expect(laysRoofSnow(mesh.material as never), `${surface}:${kind}`).toBe(true);
+            const { fragment, uniforms } = programOf(mesh.material);
+            expect(fragment).toContain('uniform float oylRoofSnow;');
+            // After the normals, by the surface's own facing — and after the lot's cladding.
+            const at = fragment.indexOf(
+              'diffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), oylRoofSnow);',
+            );
+            expect(at).toBeGreaterThan(fragment.indexOf('#include <normal_fragment_maps>'));
+            expect(at).toBeGreaterThan(fragment.indexOf('#include <color_fragment>'));
+            expect(at).toBeLessThan(fragment.indexOf('#include <emissivemap_fragment>'));
+            expect(uniforms['oylRoofSnow']).toBe(season);
+            taught += 1;
+          }
+        }
+      }
+      // Non-vacuity: every mesh the belts build, roof-tiles and slate among them.
+      expect(taught).toBe(REALISTIC_STRUCTURE_MESHES);
+    } finally {
+      mapped.dispose();
+      belts.dispose();
+    }
+  });
+
+  it('shades a roof’s up-facing fragment toward the snow on a snowy day, a wall not at all, and nothing at no snow', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    try {
+      const tiles = belts.beltOf('roof-tiles')?.meshesOf('building')[0];
+      if (tiles === undefined) throw new Error('a house has no tile mesh');
+      const snowedRoof = glslFunction(programOf(tiles.material).fragment, 'oylSnowedRoof');
+      const snowed = (up: number, snow: number): readonly number[] => {
+        const drawn = snowedRoof(TILE, up, snow);
+        if (typeof drawn === 'number') throw new Error('oylSnowedRoof returned a float');
+        return drawn;
+      };
+      const snow = linear(ROOF_SNOW);
+      const roof = snowed(Math.cos(Math.PI / 6), 1);
+      for (let channel = 0; channel < 3; channel += 1) {
+        expect(roof[channel]).toBeCloseTo(snow[channel] ?? 0, 5);
+      }
+      expect(apart(roof, snow)).toBeLessThan(apart(TILE, snow));
+      expect(snowed(0, 1)).toEqual(TILE);
+      // The season-free picture: no snow, every facing as before.
+      for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(TILE);
+    } finally {
+      belts.dispose();
+    }
   });
 });
 
