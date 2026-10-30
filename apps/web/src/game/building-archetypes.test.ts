@@ -355,7 +355,8 @@ describe('the caps — #1783', () => {
 /**
  * The plans before #1783, fingerprinted by `footprint-fixtures-testing.ts`
  * §`planFingerprint`, each town with its urban class: #1784's head
- * (`feature/issue-1784-porches-eaves` at `558f05aa`) as it planned them — the
+ * (`feature/issue-1784-porches-eaves` at `791cd106`, re-derived there after
+ * #1785's 2026-10-30 saltbox-eaves fix) as it planned them — the
  * commercial street by that head's own `footprint-buildings.ts` — and
  * `origin/main`'s at `ac20712c` with every later lever off as well.
  *
@@ -367,7 +368,7 @@ describe('the caps — #1783', () => {
  */
 const BEFORE = {
   main: { mixed: '18e7375f', houses: '15da7210' },
-  porches: { mixed: 'eea32fc0', houses: '8b985bcc', commercial: '10ef9ae2' },
+  porches: { mixed: '14d63891', houses: 'e8cab869', commercial: '10ef9ae2' },
 } as const;
 
 describe('the fallback and the lever — #1783', () => {
