@@ -409,7 +409,8 @@ describe('the caps — #1786', () => {
  * The plans before #1786, fingerprinted by `footprint-fixtures-testing.ts`
  * §`planFingerprint`: `origin/main`'s at `ac20712c` with #1785's roof
  * variants off as well (its own frozen record), and #1785's head
- * (`feature/issue-1785-roof-variants` at `44c72cfa`) with them on. Each town
+ * (`feature/issue-1785-roof-variants` at `9a616015`, re-derived there after
+ * the owner's 2026-10-30 saltbox-eaves fix) with them on. Each town
  * with its urban class, the realistic page's.
  *
  * A frozen record of the planner before #1786, not a snapshot to refresh. If
@@ -418,7 +419,7 @@ describe('the caps — #1786', () => {
  */
 const BEFORE = {
   main: { mixed: '18e7375f', houses: '15da7210' },
-  roofVariants: { mixed: 'f3054ead', houses: 'c99616bb' },
+  roofVariants: { mixed: '11a22964', houses: 'df19af4a' },
 } as const;
 
 describe('the lever — #1786', () => {
