@@ -60,7 +60,7 @@ import { mappedTown } from '../src/game/footprint-buildings';
 import {
   // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
-  cityCentreFixture as cityStreetscapeFixture,
+  cityStreetscapeFixture,
   countrysideFixture,
   houseStreetFixture,
   mixedTownFixture,

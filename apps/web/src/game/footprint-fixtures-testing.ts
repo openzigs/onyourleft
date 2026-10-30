@@ -667,7 +667,7 @@ export function terraceStreetFixture(latitude = FIXTURE_LATITUDE): {
  * stand on. No street is mapped. `use` is the land's: `residential` is the
  * same blocks on land the map calls houses.
  */
-export function cityCentreFixture(
+export function cityStreetscapeFixture(
   latitude = FIXTURE_LATITUDE,
   use: 'commercial' | 'residential' = 'commercial',
 ): {

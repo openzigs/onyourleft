@@ -3850,21 +3850,33 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     for (const values of [shadow.near, shadow.far, shadow.nearOff, shadow.farOff]) {
       expect(values).toHaveLength(3);
     }
-    // In the shadow, the wall's colour keeps about 0.6 of its light: past the
-    // gate's tolerance of 4 that #1659's control is held to, three times over.
-    // Measured locally (SwiftShader, 2026-10-29), a wall 7 m high from 5 m, each
-    // place read across the 0.3 m of plain wall the probe chose (#1715):
-    // 112/101/86 0.3 m under the eaves against 131/118/102 1.5 m under;
-    // 133/121/105 and 131/118/102 with the lever.
-    expect(luminance(shadow.far) - luminance(shadow.near)).toBeGreaterThan(12);
+    // ⚠️ RATIOS, since #1718, not differences of luminance: a difference held
+    // to an absolute floor moves with how bright the wall the probe picks is,
+    // and the control's `> -4` sat at its bound on a wall whose two places
+    // differ by 3 % with the term out. A ratio reads the same on a brighter wall.
+    const ratio = (a: readonly number[], b: readonly number[]): number =>
+      luminance(a) / luminance(b);
+    // In the shadow the near place keeps under 0.92 of the far place's light —
+    // the old `> 12` on a wall this bright. Measured locally (SwiftShader,
+    // 2026-10-29), a wall 7 m high from 5 m, each place read across the 0.3 m
+    // of plain wall the probe chose (#1715): 112/101/86 0.3 m under the eaves
+    // against 131/118/102 1.5 m under, 0.86; 133/121/105 and 131/118/102 with
+    // the lever, 1.02. Before #1715, read as a three-pixel column on a 5 m
+    // wall, CI printed 0.82 and, with the lever, 0.97.
+    expect(ratio(shadow.near, shadow.far)).toBeLessThan(0.92);
     // THE CONTROL: with the term out of the program, #1588's 0.6 m band reaches
-    // neither place, so the near one is no darker than the far one (it read
-    // 3 lighter: the same wall, a metre higher). #1715: read as a three-pixel
-    // column it read 4 darker, at this bound, where the wall's photograph fell ...
-    expect(luminance(shadow.nearOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
-    // ... and it is the shadow, not the wall, that darkened the near place.
-    expect(luminance(shadow.nearOff) - luminance(shadow.near)).toBeGreaterThan(12);
-    expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
+    // neither place, so the two are the same wall within 5 %, either way — the
+    // same wall a metre higher, which read 0.97 to 1.03 on every wall the probe
+    // has picked. Two-sided, where the old floor bounded it from below only ...
+    expect(Math.abs(ratio(shadow.nearOff, shadow.farOff) - 1)).toBeLessThan(0.05);
+    // ... and it is the shadow, not the wall, that darkened the near place:
+    // against the same two places with the term out, the near one keeps under
+    // 0.92 of its share of the far one's light (0.84 locally) ...
+    expect(ratio(shadow.near, shadow.far) / ratio(shadow.nearOff, shadow.farOff)).toBeLessThan(
+      0.92,
+    );
+    // ... while the far place, out of the shadow, is the same with it or without.
+    expect(Math.abs(ratio(shadow.far, shadow.farOff) - 1)).toBeLessThan(0.03);
   });
 
   test('#1679 a sunlit mapped wall and its parapet are in its cornice’s shadow and not 1 m under its top, and neither with -overhang-shadows', async ({
