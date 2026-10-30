@@ -256,6 +256,7 @@ import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import type { AnchorKind } from './decorations';
 import {
   FRONT_PORCH,
+  fullPorchSpanOf,
   hipFits,
   porchPieces,
   porchPitchOf,
@@ -3513,6 +3514,7 @@ export interface PorchSite {
   /**
    * #1784: an archetype's full-width porch — the whole wall less its end
    * margins and a garage's bay, on four posts — rather than the seeded width.
+   * A front too narrow for four posts, with steps in the middle bay, has no porch.
    */
   readonly full?: boolean;
 }
@@ -3566,7 +3568,7 @@ export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | un
   }
   const span =
     site.full === true
-      ? porchSpanOf({ left, right }, left + right, true, draws.side < 0.5 ? 1 : -1)
+      ? fullPorchSpanOf({ left, right })
       : porchSpanOf(
           { left, right },
           width.least + (width.most - width.least) * draws.width,
