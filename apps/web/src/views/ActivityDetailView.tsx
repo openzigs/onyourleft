@@ -91,6 +91,8 @@ import type { SharedTrack } from '../detail/privacy';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
+import { RideSnapshotsSection } from '../detail/RideSnapshotsSection';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
 import { RaceConsentSection } from '../detail/RaceConsentSection';
 import { MAXIMUM_RIDE_NOTE_CHARACTERS } from '@onyourleft/store';
@@ -169,6 +171,12 @@ export interface ActivityDetailViewProps {
    */
   readonly riderText?: RiderTextPort | undefined;
   /**
+   * This ride's side-camera snapshots (#1063), read only once the rider opens
+   * their section, or `undefined` where there is no store — and then the
+   * section is absent.
+   */
+  readonly snapshots?: RideSnapshotsPort | undefined;
+  /**
    * #1439: drawn inside History's detail pane, which is the ride's one page
    * there. The pane heads it with the ride's name (`shell/ListDetail.tsx`
    * §`SELECTED_HEADING_ID`, from the list's own row, so focus has somewhere to land before
@@ -228,6 +236,7 @@ export function ActivityDetailView({
   preferences,
   instanceWriteUp,
   riderText,
+  snapshots,
   embedded = false,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
@@ -609,6 +618,17 @@ export function ActivityDetailView({
         report renders nothing here at all.
       */}
       <SideCameraSection sideCamera={sideCamera} />
+
+      {/*
+        #1063. The side camera's snapshots of this ride — counted in words and
+        CLOSED until the rider opens them; no picture is read or mounted before
+        that (ADR 0044 D-6). A ride with none renders nothing. Keyed by the
+        ride (#1063's review): the shell keys this view by ROUTE, so moving
+        between two rides' pages keeps it mounted, and an opened section must
+        not stay open for the next ride. The page's own loading state
+        unmounts it between rides today; the key does not rest on that.
+      */}
+      <RideSnapshotsSection key={activity.id} port={snapshots} activityId={activity.id} />
 
       {/*
         #804, #805. A model's write-up of this ride, on every ride's page and

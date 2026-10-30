@@ -106,6 +106,7 @@ import {
   toPersistedSegment,
   fromPersistedCameraFrame,
   fromPersistedFramingReference,
+  cameraFrameProblem,
   framingReferenceProblem,
   fromPersistedSideCameraReport,
   sideCameraReportProblem,
@@ -1784,6 +1785,7 @@ export class ActivityStore {
       this.#rideWriteUps,
       this.#riderTexts,
       this.#recentlyDeleted,
+      this.#cameraFrames,
     ];
   }
 
@@ -1826,6 +1828,16 @@ export class ActivityStore {
     // #836. The rider's note on this ride is about this ride and nothing
     // else; left behind it would be words under a ride that is gone.
     await this.#riderTexts.delete([owner, 'note', id]);
+    // #1063. A side-camera snapshot is kept WITH its ride (ADR 0044 D-3), so
+    // it goes with it, in this transaction — which is the first time ADR 0029
+    // D-2's "deleting the activity deletes its frames" is true. ⚠️ Here and not
+    // in `moveActivityToRecentlyDeleted`: like the report and the streams, a
+    // snapshot stays while its ride is in Recently deleted, so a ride brought
+    // back is brought back whole, and goes when the ride leaves it (#1431).
+    await this.#cameraFrames
+      .where(INDEX.cameraFrameByAthleteAndActivity)
+      .equals([owner, id])
+      .delete();
     // #1431. The ride's Recently deleted row, with the record, efforts and
     // note it holds, when that is where the ride was.
     await this.#recentlyDeleted.delete(id);
@@ -2196,17 +2208,127 @@ export class ActivityStore {
    * if a frame with this id already belongs to a different athlete.
    */
   async putCameraFrame(record: CameraFrameRecord): Promise<CameraFrameId> {
-    await this.#db.transaction('rw', [this.#athletes, this.#cameraFrames], async () => {
-      await this.#requireAthlete(record.athleteId);
-      const existing = await this.#cameraFrames.get(record.id);
-      if (existing !== undefined && existing.athleteId !== record.athleteId) {
-        throw new StoreReferentialError(
-          `cannot overwrite camera frame ${record.id}: it belongs to a different athlete`,
-        );
-      }
-      await this.#cameraFrames.put(toPersistedCameraFrame(record));
-    });
+    // #1063: a snapshot names its ride and a kept frame names none. Checked
+    // before the transaction because it reads nothing but the record.
+    const problem = cameraFrameProblem(record);
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    await this.#db.transaction(
+      'rw',
+      [this.#athletes, this.#activities, this.#cameraFrames],
+      async () => {
+        await this.#requireAthlete(record.athleteId);
+        if (record.activityId !== null) {
+          // ADR 0044 D-3: *"A snapshot can therefore never name a ride the
+          // store does not hold"* — and never a ride another athlete holds.
+          // Inside the write's transaction, for the athlete check's reason: a
+          // `deleteActivity` between a check and the write would leave a
+          // picture under a ride that is gone, which nothing would delete.
+          const ride = await this.#activities
+            .where(INDEX.activityByAthleteAndId)
+            .equals([record.athleteId, record.activityId])
+            .first();
+          if (ride === undefined) {
+            throw new StoreReferentialError(
+              `cannot store camera frame ${record.id}: this athlete holds no activity ${record.activityId}`,
+            );
+          }
+        }
+        const existing = await this.#cameraFrames.get(record.id);
+        if (existing !== undefined && existing.athleteId !== record.athleteId) {
+          throw new StoreReferentialError(
+            `cannot overwrite camera frame ${record.id}: it belongs to a different athlete`,
+          );
+        }
+        await this.#cameraFrames.put(toPersistedCameraFrame(record));
+      },
+    );
     return record.id;
+  }
+
+  /**
+   * This athlete's snapshots of one ride, oldest first — #1063,
+   * [ADR 0044](../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+   * D-5 and D-6.
+   *
+   * ⚠️ **The one read of a picture a screen may make, and only one screen
+   * makes it**: the snapshot section of that ride's page, after the rider has
+   * opened it (D-6, ADR 0029 D-11 rule 1). It takes the owner first and
+   * filters on it through `[athleteId+activityId]`, so there is no way to ask
+   * for a ride's snapshots without saying whose ride it is.
+   * `activity-store.scoping.test.ts` probes it with three athletes.
+   *
+   * There is still no read by snapshot id (D-5).
+   */
+  async listRideSnapshots(owner: AthleteId, activity: ActivityId): Promise<CameraFrameRecord[]> {
+    const rows = await this.#cameraFrames
+      .where(INDEX.cameraFrameByAthleteAndActivity)
+      .equals([owner, activity])
+      .toArray();
+    return rows
+      .map(fromPersistedCameraFrame)
+      .filter((frame) => frame.source === 'snapshot')
+      .sort((a, b) => a.capturedAt - b.capturedAt || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * How many snapshots this athlete kept of one ride — #1063.
+   *
+   * What the closed snapshot section says in words without reading a picture:
+   * a count through the index, so no JPEG is decoded to produce a number (ADR
+   * 0044 D-6: *"says how many snapshots there are in words, and does not mount
+   * a picture"*).
+   */
+  async countRideSnapshots(owner: AthleteId, activity: ActivityId): Promise<number> {
+    return this.#cameraFrames
+      .where(INDEX.cameraFrameByAthleteAndActivity)
+      .equals([owner, activity])
+      .count();
+  }
+
+  /**
+   * How many side-camera snapshots this athlete holds across every ride —
+   * #1063's review.
+   *
+   * What the Camera screen names before *"Delete every picture on this
+   * device"* takes them with everything else: a count through
+   * `[athleteId+activityId]`, which holds snapshots only — a kept frame's ride
+   * is `null`, and a key with `null` in it is in no index — so no JPEG is
+   * decoded to produce a number (ADR 0029 D-8, D-11).
+   */
+  async countSnapshots(owner: AthleteId): Promise<number> {
+    return this.#cameraFrames
+      .where(INDEX.cameraFrameByAthleteAndActivity)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .count();
+  }
+
+  /**
+   * Deletes ONE snapshot — #1063, ADR 0044 D-3: *"The rider can also delete
+   * one snapshot, through an owner-scoped delete."*
+   *
+   * Scoped by the owner AND the ride: the row is found through
+   * `[athleteId+activityId]` and only then matched on its id, so an id alone —
+   * another athlete's, or another ride's — deletes nothing.
+   * `testing/fakes.ts` §`survivingSnapshotStoreFactory` is the store that
+   * reports the delete and keeps the picture.
+   *
+   * @returns whether a snapshot was removed.
+   */
+  async deleteRideSnapshot(
+    owner: AthleteId,
+    activity: ActivityId,
+    id: CameraFrameId,
+  ): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#cameraFrames], async () => {
+      const removed = await this.#cameraFrames
+        .where(INDEX.cameraFrameByAthleteAndActivity)
+        .equals([owner, activity])
+        .filter((row) => row.id === id && row.source === 'snapshot')
+        .delete();
+      return removed > 0;
+    });
   }
 
   /**
@@ -2225,17 +2347,69 @@ export class ActivityStore {
    * lookup would be a read a screen could be built on, and D-11's first rule is
    * that a kept frame is reached from the report the rider opens deliberately
    * and from nowhere else.
+   *
+   * ⚠️ **Leaves out the snapshots of a ride in Recently deleted** (#1063, the
+   * owner's ruling of 2026-10-30): a snapshot follows its ride, and the account
+   * export leaves that ride out. Restoring the ride brings them back, because
+   * they never moved; `#deleteRideParts` deletes them when the ride leaves
+   * Recently deleted for good.
    */
   async listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]> {
-    let query = this.#cameraFrames
-      .where(INDEX.cameraFrameByAthleteAndCapturedAt)
-      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
-      .reverse();
-    if (limit !== undefined) {
-      query = query.limit(limit);
-    }
-    const rows = await query.toArray();
-    return rows.map(fromPersistedCameraFrame);
+    return this.#db.transaction('r', [this.#cameraFrames, this.#recentlyDeleted], async () => {
+      const away = await this.#ridesInRecentlyDeleted(owner);
+      // ⚠️ Filtered in the query, not on the rows it returns: Dexie's limit
+      // counts only rows the filter accepts, so a deleted ride's snapshots do
+      // not use up the export's budget. Dropping them after `toArray` would
+      // write fewer pictures than the budget allows.
+      let query = this.#cameraFrames
+        .where(INDEX.cameraFrameByAthleteAndCapturedAt)
+        .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+        .reverse()
+        .filter((row) => row.activityId === null || !away.has(row.activityId));
+      if (limit !== undefined) {
+        query = query.limit(limit);
+      }
+      const rows = await query.toArray();
+      return rows.map(fromPersistedCameraFrame);
+    });
+  }
+
+  /**
+   * How many of this athlete's pictures {@link ActivityStore.listCameraFrames}
+   * would hand the account export with no limit: every one, less the
+   * snapshots of rides in Recently deleted (#1063, the owner's ruling of
+   * 2026-10-30). The export's manifest says `kept` from here, so an archive
+   * that left a deleted ride's snapshots out, as it leaves the ride out, is not
+   * reported as short.
+   *
+   * Counted through the indexes, for {@link ActivityStore.countCameraFrames}'
+   * reason: the whole count, less each deleted ride's count on
+   * `[athleteId+activityId]`. Both are scoped to `owner`.
+   */
+  async countExportableCameraFrames(owner: AthleteId): Promise<number> {
+    return this.#db.transaction('r', [this.#cameraFrames, this.#recentlyDeleted], async () => {
+      let count = await this.#cameraFrames.where(INDEX.cameraFrameByAthlete).equals(owner).count();
+      for (const id of await this.#ridesInRecentlyDeleted(owner)) {
+        count -= await this.#cameraFrames
+          .where(INDEX.cameraFrameByAthleteAndActivity)
+          .equals([owner, id])
+          .count();
+      }
+      return count;
+    });
+  }
+
+  /**
+   * The ids of this athlete's rides in Recently deleted — expired or not, since
+   * an expired ride not yet purged is out of the export too. Scoped to `owner`:
+   * another athlete's deleted ride says nothing about this athlete's pictures.
+   */
+  async #ridesInRecentlyDeleted(owner: AthleteId): Promise<Set<string>> {
+    const ids = await this.#recentlyDeleted
+      .where(INDEX.recentlyDeletedByAthlete)
+      .equals(owner)
+      .primaryKeys();
+    return new Set(ids.map(String));
   }
 
   /**
@@ -2262,8 +2436,10 @@ export class ActivityStore {
    * activity, or the device"*, and of those three this is the one that works
    * today: there is no activity link yet (`records.ts` §`CameraFrameRecord`
    * says why and names the issue that adds one), and the device is
-   * `deleteAthlete`. A per-picture delete would need a screen that listed them,
-   * which D-11 forbids.
+   * `deleteAthlete`. A per-picture delete of a kept frame would need a screen
+   * that listed them, which D-11 forbids. ⚠️ Since #1063 it removes this
+   * athlete's side-camera snapshots too, because they share the table; one
+   * snapshot is `deleteRideSnapshot`.
    *
    * @returns how many were removed, for the sentence afterwards. Zero on a
    * device that kept none, which is the ordinary case and is not an error.

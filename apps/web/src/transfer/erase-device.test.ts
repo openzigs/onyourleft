@@ -33,6 +33,7 @@ import {
   rideFor,
   routeFor,
   seedAthletes,
+  snapshotFor,
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
@@ -135,6 +136,17 @@ describe('what the rider is told before they press it', () => {
     const text = ERASE_REMOVES.join(' ');
     expect(text).toContain('photograph');
     expect(text).toContain('everything derived from one');
+  });
+
+  it('names side-camera snapshots as pictures, with their outline, held ones included — #1063', () => {
+    // ADR 0044 D-5: the erase removes every snapshot and its outline; D-3 rule
+    // 4: one still held in memory for a ride not yet saved goes too.
+    const line = ERASE_REMOVES.find((each) => each.includes('side-camera snapshot'));
+    expect(line).toBeDefined();
+    expect(line).toContain('picture');
+    expect(line).toContain('Save snapshot');
+    expect(line).toContain('outline');
+    expect(line).toContain('waiting for a ride to be saved');
   });
 
   it('names the side camera’s framing reference — #528, ADR 0033 D-7', () => {
@@ -362,6 +374,8 @@ describe('erasing, against the real store', () => {
         await store.putSideCameraReport(sideCameraReportFor(owner, ride.id));
         // #801. A model's write-up of this ride, named in ERASE_REMOVES.
         await store.putRideWriteUp(rideWriteUpFor(owner, ride.id));
+        // #1063. A side-camera snapshot kept with this ride, named there too.
+        await store.putCameraFrame(snapshotFor(owner, ride.id));
       });
     }
     await harness.write(async (store) => {
@@ -389,7 +403,8 @@ describe('erasing, against the real store', () => {
     expect(outcome.activities).toBe(2);
     expect(outcome.routes).toBe(1);
     expect(outcome.workouts).toBe(1);
-    expect(outcome.cameraFrames).toBe(1);
+    // One kept picture and a snapshot of each of the two rides (#1063).
+    expect(outcome.cameraFrames).toBe(3);
     expect(outcome.recentlyDeleted).toBe(1);
     // #1431: no restore copy outlives an erase.
     expect(
@@ -416,7 +431,35 @@ describe('erasing, against the real store', () => {
       // #801: the write-up line is true too.
       const writeUp = await harness.read(async (store) => store.getRideWriteUp(ATHLETE_A, id));
       expect(writeUp).toBeUndefined();
+      // #1063: and the snapshot line — the ride's page finds none.
+      const snapshots = await harness.read(async (store) => store.listRideSnapshots(ATHLETE_A, id));
+      expect(snapshots).toStrictEqual([]);
     }
+  });
+
+  it('throws away the snapshots held in memory BEFORE the cascade — #1063, ADR 0044 D-3 rule 4', async () => {
+    await seedAthletes(harness);
+    const order: string[] = [];
+    await harness.write(async (store) =>
+      eraseDevice(
+        {
+          deleteAthlete: async (owner) => {
+            order.push('cascade');
+            return store.deleteAthlete(owner);
+          },
+          ensureAthlete: async (record) => store.ensureAthlete(record),
+        },
+        ATHLETE_A,
+        {
+          heldSnapshots: {
+            forget: () => {
+              order.push('held snapshots');
+            },
+          },
+        },
+      ),
+    );
+    expect(order).toStrictEqual(['held snapshots', 'cascade']);
   });
 
   it('leaves another athlete alone', async () => {
@@ -427,7 +470,8 @@ describe('erasing, against the real store', () => {
     await harness.write(async (store) => eraseDevice(store, ATHLETE_A));
 
     const theirPictures = await harness.read(async (store) => store.listCameraFrames(ATHLETE_B));
-    expect(theirPictures).toHaveLength(1);
+    // Their kept picture and a snapshot of each of their two rides (#1063).
+    expect(theirPictures).toHaveLength(3);
     const theirs = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_B));
     expect(theirs).toHaveLength(2);
   });

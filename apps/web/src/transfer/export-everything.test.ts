@@ -24,6 +24,7 @@ import {
   routeFor,
   seedAthletes,
   signedRecordFor,
+  snapshotFor,
   streamSetFor,
   workoutFor,
   workoutGoalsFor,
@@ -58,6 +59,7 @@ import {
   RIDER_TEXTS_UNREADABLE,
   SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
+  snapshotFileName,
   WORKOUT_GOALS_UNREADABLE,
   type AccountExportCursor,
 } from './export-everything';
@@ -639,7 +641,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       routes: [],
       workouts: [],
       activities: [],
-      camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
+      camera: { kept: 0, written: 0, files: [], snapshots: [], cannotCarry: 'nothing kept' },
       framingReference: undefined,
       exportedAt: 1,
     });
@@ -657,7 +659,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       routes: [],
       workouts: [],
       activities: [],
-      camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
+      camera: { kept: 0, written: 0, files: [], snapshots: [], cannotCarry: 'nothing kept' },
       framingReference: undefined,
       exportedAt: 1,
     });
@@ -951,6 +953,86 @@ describe('exporting the pictures the rider kept (#384)', () => {
     // ADR 0029 D-3 asks for this line by name.
     expect(String(camera['cannotCarry'])).toContain('a photograph of you');
     expect(camera['cannotCarry']).toBe(CAMERA_CANNOT_CARRY);
+  });
+
+  it('carries a side-camera snapshot and names it against its ride in the manifest — #1063', async () => {
+    // ADR 0044 D-5: *"The account export carries every snapshot … The manifest
+    // names each one against its ride."* Read through the real store, written
+    // through the public path.
+    const { written } = await seedLibrary(2);
+    const ride = written[1]!.ride;
+    const snapshot = snapshotFor(ATHLETE_A, ride.id);
+    await harness.write(async (store) => store.putCameraFrame(snapshot));
+
+    const { files } = await runExport();
+    const name = snapshotFileName(snapshot.capturedAt, 1);
+    const file = files.find((each) => each.fileName === name);
+    // The picture, byte for byte, as its own file.
+    expect(file?.mediaType).toBe('image/jpeg');
+    expect(file?.bytes).toStrictEqual(snapshot.bytes);
+
+    const camera = manifestOf(files)['camera'] as Record<string, unknown>;
+    expect(camera['kept']).toBe(1);
+    expect(camera['files']).toStrictEqual([name]);
+    expect(camera['snapshots']).toStrictEqual([
+      { file: name, ride: ride.id, outline: snapshot.outline },
+    ]);
+    // Its ride, and nothing finer: no offset into the ride and no reading
+    // (D-3). The manifest's snapshot entry has exactly these three keys.
+    expect(Object.keys((camera['snapshots'] as object[])[0] ?? {})).toStrictEqual([
+      'file',
+      'ride',
+      'outline',
+    ]);
+    // And the manifest itself never carries the picture's bytes.
+    const manifestText = new TextDecoder().decode(
+      files.find((each) => each.fileName === MANIFEST_FILE_NAME)?.bytes,
+    );
+    expect(manifestText).not.toContain('"bytes"');
+  });
+
+  it('leaves out the snapshot of a ride in Recently deleted, and carries it again once the ride is restored — #1063', async () => {
+    // The owner's ruling of 2026-10-30: a snapshot follows its ride. One ride
+    // live and one in Recently deleted, each with a snapshot, read back
+    // through the export a rider runs.
+    const { written } = await seedLibrary(2);
+    const live = written[0]!.ride;
+    const deleted = written[1]!.ride;
+    const liveSnapshot = snapshotFor(ATHLETE_A, live.id);
+    const deletedSnapshot = snapshotFor(ATHLETE_A, deleted.id);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(liveSnapshot);
+      await store.putCameraFrame(deletedSnapshot);
+      await store.moveActivityToRecentlyDeleted(ATHLETE_A, deleted.id, unixSeconds(1_800_000_000));
+    });
+
+    const before = await runExport();
+    const carried = (files: readonly DownloadableFile[]) =>
+      files.filter((file) => file.mediaType === 'image/jpeg').map((file) => file.bytes);
+    expect(carried(before.files)).toStrictEqual([liveSnapshot.bytes]);
+    const camera = manifestOf(before.files)['camera'] as Record<string, unknown>;
+    expect((camera['snapshots'] as { ride: string }[]).map((each) => each.ride)).toStrictEqual([
+      live.id,
+    ]);
+    // The deleted ride's snapshot is not counted as kept-but-not-written: the
+    // archive is whole, and says so.
+    expect(camera['kept']).toBe(1);
+    expect(camera['written']).toBe(1);
+    expect(JSON.stringify(manifestOf(before.files))).not.toContain(deleted.id);
+
+    await harness.write(async (store) => {
+      await expect(
+        store.restoreRecentlyDeleted(ATHLETE_A, deleted.id, unixSeconds(1_800_000_001)),
+      ).resolves.toBe('restored');
+    });
+    const after = await runExport();
+    const restoredCamera = manifestOf(after.files)['camera'] as Record<string, unknown>;
+    expect(
+      (restoredCamera['snapshots'] as { ride: string }[]).map((each) => each.ride).sort(),
+    ).toStrictEqual([live.id, deleted.id].sort());
+    expect(restoredCamera['kept']).toBe(2);
+    expect(restoredCamera['written']).toBe(2);
+    expect(carried(after.files)).toContainEqual(deletedSnapshot.bytes);
   });
 
   it('says so when a rider kept none, rather than omitting the row', async () => {

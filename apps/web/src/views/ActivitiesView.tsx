@@ -121,6 +121,8 @@ export interface ActivitiesViewProps {
   readonly basemap?: ActivityDetailViewProps['basemap'];
   readonly instanceWriteUp?: ActivityDetailViewProps['instanceWriteUp'];
   readonly riderText?: ActivityDetailViewProps['riderText'];
+  /** #1063: the chosen ride's side-camera snapshots, closed until opened. */
+  readonly snapshots?: ActivityDetailViewProps['snapshots'];
 }
 
 /** The sort control's `id`, for its `<label>`. One library per page. */
@@ -246,6 +248,7 @@ export function ActivitiesView({
   basemap,
   instanceWriteUp,
   riderText,
+  snapshots,
 }: ActivitiesViewProps): JSX.Element {
   const instanceKnown = useInstanceKnown(instance);
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
@@ -618,6 +621,7 @@ export function ActivitiesView({
               basemap={basemap}
               instanceWriteUp={instanceWriteUp}
               riderText={riderText}
+              {...(snapshots === undefined ? {} : { snapshots })}
               embedded
             />
           </>

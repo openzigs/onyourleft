@@ -73,6 +73,8 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
@@ -260,6 +262,17 @@ export interface AppShellProps {
    * `undefined` where this platform has no WebRTC; both screens then say so.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * Where *Save snapshot* holds a side-camera picture until the ride it joins
+   * is saved — #1063, `camera/snapshot-keeper.ts`. One per tab, built by
+   * `main.tsx` beside the side-camera report's keeper.
+   */
+  readonly sideSnapshots?: SideSnapshotPort | undefined;
+  /**
+   * A ride's side-camera snapshots, read only once the rider opens their
+   * section on that ride's page — #1063, `detail/ride-snapshots-port.ts`.
+   */
+  readonly rideSnapshots?: RideSnapshotsPort | undefined;
   /**
    * The rider's instance, as the Camera page asks about it to offer it the
    * side camera's pictures (#1106). `undefined` where `main.tsx` built none,
@@ -615,6 +628,8 @@ function viewFor(
           basemap={props.basemap}
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
+          // #1063: the chosen ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'activity-detail':
@@ -626,6 +641,8 @@ function viewFor(
           basemap={props.basemap}
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
+          // #1063: the ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'analysis':
@@ -684,6 +701,8 @@ function viewFor(
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1063: where Save snapshot holds a picture for its ride.
+          {...(props.sideSnapshots === undefined ? {} : { sideSnapshots: props.sideSnapshots })}
           // #1106: the rider's instance, for the side camera's pictures.
           {...(props.sidePictures === undefined ? {} : { sidePictures: props.sidePictures })}
         />
