@@ -71,7 +71,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         with no account, migration 0026's append-only
                         `notice` table, and `GET /v1/moderation/notices`;
                         `moderation/notices.ts` says what it keeps. Since
-                        #910 a suspension or a hidden name needs a
+                        #1381 a notice's notifier details are erased six
+                        months after its decision, on the hour
+                        (`moderation/notice-retention.ts`, migration
+                        0036: the ONE update the `notice` table allows).
+                        Since #910 a suspension or a hidden name needs a
                         statement of reasons (migration 0027, append-only,
                         `moderation/statements.ts`), and `GET
                         /v1/statements` is the THIRD route a way-out
