@@ -50,6 +50,7 @@ import type {
   RoomsRefusal,
 } from '../net/rooms-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { NoticePageLink } from '../views/InstancePages';
 import { PUBLIC_ROOMS_TEXT, PublicRooms, publicRoomStartText } from './PublicRooms';
 import { ROOM_ROUTE_REFUSAL_TEXT, type RoomRouteRefusal } from './share';
 
@@ -63,12 +64,14 @@ export interface RoomRouteChoice {
 /**
  * What the references under an entered room are for (#913): each is an
  * identifier the instance's notice page takes, so a rider can report the room
- * or its route alone. ⚠️ Draft wording awaiting the owner's approval.
+ * or its route alone. ⚠️ Draft wording awaiting the owner's approval. Since
+ * #1381 the page itself is linked after them (`views/InstancePages.tsx`
+ * §`NoticePageLink`), where About's sentence pointing to it used to be.
  */
 export const ROOM_REFERENCES_SUMMARY = 'References, to report something in this room';
 export const ROOM_REFERENCES_TEXT =
   'To tell the instance’s moderator about this room or its route, copy its reference into the ' +
-  'instance’s notice page. About links to it.';
+  'instance’s notice page.';
 
 /** What a room's kind is called on this screen. */
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
@@ -243,6 +246,8 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
 
   const entered = props.entered;
   if (entered !== undefined) {
+    // #1381: the page the references below are pasted into.
+    const noticePage = props.rooms.noticePage();
     return (
       <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
         {heading}
@@ -300,6 +305,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
               <code>{formatModerationItem({ kind: 'route', roomId: entered.roomId })}</code>
             </li>
           </ul>
+          {noticePage === undefined ? undefined : <NoticePageLink href={noticePage} />}
         </details>
       </section>
     );

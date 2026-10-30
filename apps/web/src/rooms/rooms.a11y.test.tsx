@@ -45,6 +45,8 @@ const ROOMS: RoomsPort = {
   start: () => Promise.resolve({ kind: 'started' }),
   results: () => Promise.resolve({ kind: 'result', rows: ROWS }),
   blockRider: () => Promise.resolve({ kind: 'unreachable' as const }),
+  // #1381: audited with the notice page linked from the references.
+  noticePage: () => 'https://ride.example/report',
 };
 
 const ENTERED: EnteredRoom = {

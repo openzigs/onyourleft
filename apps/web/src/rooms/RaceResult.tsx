@@ -53,6 +53,7 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import type { RaceBlockAnswer, RaceResultRow, RoomsPort } from '../net/rooms-port';
 import { raceResultLines } from './race-result';
+import { NoticePageLink } from '../views/InstancePages';
 import { ROOMS_REFUSAL_TEXT, ROOMS_UNREACHABLE_TEXT } from './RoomPanel';
 
 /** How many times a result that is still arriving is asked for, a second apart. */
@@ -75,12 +76,14 @@ export const RACE_NO_RESULT_TEXT =
 /**
  * What the references below the result are for (#907): each is an
  * identifier the instance's notice page takes, so a rider can report one row
- * of a result, or the race's route, and not the whole race.
+ * of a result, or the race's route, and not the whole race. Since #1381 the
+ * page itself is linked after them (`views/InstancePages.tsx`
+ * §`NoticePageLink`), where About's sentence pointing to it used to be.
  */
 export const RACE_REFERENCES_SUMMARY = 'References, to report something in this race';
 export const RACE_REFERENCES_TEXT =
   'To tell the instance’s moderator about one row of this result, or about the race’s route, ' +
-  'copy its reference into the instance’s notice page. About links to it.';
+  'copy its reference into the instance’s notice page.';
 
 /**
  * #1516: every word of *Block* on a result. The owner's approved wording
@@ -139,6 +142,8 @@ type Shown =
 
 export function RaceResult(props: RaceResultProps): JSX.Element {
   const { rooms, roomId, finishers } = props;
+  // #1381: the page the references below are pasted into.
+  const noticePage = rooms.noticePage();
   const [shown, setShown] = useState<Shown>(
     finishers === undefined ? { kind: 'waiting', notOver: false } : { kind: 'asking' },
   );
@@ -326,6 +331,7 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
                 </li>
               ))}
             </ul>
+            {noticePage === undefined ? null : <NoticePageLink href={noticePage} />}
           </details>
         </>
       )}

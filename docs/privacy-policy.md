@@ -315,8 +315,9 @@ children's access assessments ([#886](https://github.com/openzigs/onyourleft/iss
 Digital Services Act's notice-and-action mechanism is in place
 ([#887](https://github.com/openzigs/onyourleft/issues/887)).
 
-**A report sent from an instance's notice page.** Every instance has a page, linked from *About*,
-where anybody, with or without an account, can report content on it that they think is illegal
+**A report sent from an instance's notice page.** Every instance has a page, linked from *About*
+and from the references under a room and a race's result, where anybody, with or without an
+account, can report content on it that they think is illegal
 ([#907](https://github.com/openzigs/onyourleft/issues/907)). The page is the instance's, not the
 app's: the app only links to it. What you type there — why you think the content is illegal, which
 items, where, and your name and email address only if you choose to give them — is kept by that
