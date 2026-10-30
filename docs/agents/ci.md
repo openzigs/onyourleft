@@ -1750,7 +1750,8 @@ workflow step. Adding one would duplicate it.
 [`.github/workflows/demo-video.yml`](../../.github/workflows/demo-video.yml) — **`Demo video`**
 ([#1655](https://github.com/openzigs/onyourleft/issues/1655)) — on `workflow_dispatch` it runs
 `demo:video:check` and then renders the three demo presets on `ubuntu-latest`, uploading each as an
-artefact. On a pull request it runs only when its own tooling's paths change, and then runs only the
+artefact. On a pull request it runs only when the video tooling or the demo code it renders (`apps/web/src/demo/**`,
+`apps/web/tools/demo/**` and the files they import from the gate) changes, and then runs only the
 checks. It installs `ffmpeg` with `apt-get` because the runner image has none. It is not a required
 check and uses no secret. [`docs/demo-video.md`](../demo-video.md) describes it.
 

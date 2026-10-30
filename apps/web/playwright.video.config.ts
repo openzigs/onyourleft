@@ -3,10 +3,10 @@
 /**
  * The demo video's checks — #1655: `pnpm --filter @onyourleft/web run demo:video:check`.
  *
- * ⚠️ **Not part of the browser gate, and not run on a pull request.** They
- * need `ffmpeg`, which the runner image does not have, and they render video:
- * `.github/workflows/demo-video.yml` installs it and runs them, by hand, before
- * it renders the presets. `playwright.config.ts` reads `browser/` for
+ * ⚠️ **Not part of the browser gate.** They need `ffmpeg`, which the runner
+ * image does not have, and they render video: `.github/workflows/demo-video.yml`
+ * installs it and runs them by hand before it renders the presets, and on a pull
+ * request that touches the demo or its render. `playwright.config.ts` reads `browser/` for
  * `*.browser.spec.ts` and never sees these; this config reads `tools/demo/`
  * for `*.video.spec.ts` and nothing else. No web server: the render answers
  * the built demo's files itself (`tools/demo/render-video.ts`), so

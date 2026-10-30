@@ -94,10 +94,12 @@ checks are not part of the browser gate and do not run on every pull request. Th
 
 ## On GitHub
 
-[`.github/workflows/demo-video.yml`](../.github/workflows/demo-video.yml), **Demo video**, runs only
-by hand (`workflow_dispatch`, with `seconds`, `size` and `fps` inputs), on `ubuntu-latest`. It runs
+[`.github/workflows/demo-video.yml`](../.github/workflows/demo-video.yml), **Demo video**, runs by
+hand (`workflow_dispatch`, with `seconds`, `size` and `fps` inputs), on `ubuntu-latest`. It runs
 the checks, then renders the three presets in parallel on the synthetic road and uploads each as an
 artefact, `demo-video-<preset>`. It uses no secret.
 
-A pull request that changes the video tooling's own files runs the checks only. Every other pull
+A pull request that changes the video tooling or the demo code the render drives
+(`apps/web/src/demo/`, `apps/web/tools/demo/`, the demo's entry page and build config, and the gate
+files the render imports; the workflow's `paths` list them) runs the checks only. Every other pull
 request runs nothing here.

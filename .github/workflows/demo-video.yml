@@ -7,9 +7,18 @@
 # D-9), so a video of a baked route is rendered by the owner, locally, with
 # `--route`.
 #
-# On a pull request only when the video tooling itself changes, and then only
-# the checks: a pull request that does not touch these paths runs nothing here,
-# and no pull request renders the presets (CI minutes; the issue's own rule).
+# On a pull request only when the video tooling, or the demo code the render
+# drives, changes, and then only the checks: a pull request that does not touch
+# these paths runs nothing here, and no pull request renders the presets (CI
+# minutes; the issue's own rule).
+#
+# The paths are the render's own code, not only the tooling: the render mode
+# lives in `src/demo/` (`main.tsx`'s clock, `stage.ts`'s stepped tick,
+# `DemoPage.tsx`'s render chrome, `query.ts`), and a regression there goes red
+# only in `demo:video:check`. Directory globs, so a new file there is covered
+# without editing this list. The game and `packages/` the demo also imports are
+# left out on purpose: the browser gate draws them on every pull request, and
+# this check guards the render mode, not the world.
 #
 # ⚠️ Standard runners only (CLAUDE.md section 8: a larger runner is charged even
 # on a public repository), every action pinned to a full commit SHA, only the
@@ -33,12 +42,20 @@ on:
   pull_request:
     paths:
       - .github/workflows/demo-video.yml
+      # The demo the render drives: its entry page, render mode and chrome.
+      - apps/web/demo/**
+      - apps/web/src/demo/**
+      - apps/web/vite.demo.config.ts
+      # The render, its checks and the route bake the checks run.
+      - apps/web/tools/demo/**
+      - apps/web/browser/demo-route-fixture.ts
+      - apps/web/src/world-data/corridor-source.ts
+      # `render-video.ts` imports LAUNCH_ARGS from the gate's config.
+      - apps/web/playwright.config.ts
       - apps/web/playwright.video.config.ts
-      - apps/web/tools/demo/demo-video.ts
-      - apps/web/tools/demo/demo-video.video.spec.ts
-      - apps/web/tools/demo/render-video.ts
-      - apps/web/tools/demo/video.ts
-      - apps/web/src/demo/render-clock.ts
+      # The scripts the job runs, and the frame pacer the stepped tick bypasses.
+      - apps/web/package.json
+      - apps/web/src/game/frame-pacer.ts
 
 permissions:
   contents: read
