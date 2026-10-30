@@ -10,6 +10,7 @@ import {
   countrysideWithLevers,
   DEFAULT_CONFIG,
   firPrepassWithLevers,
+  houseArchetypesWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -99,6 +100,19 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     // #1636: a city centre, for its shop fronts and its tower.
     expect(parseConfig('?town=city').town).toBe('city');
     expect(configQuery(parseConfig('?town=city&at=1430'))).toBe('?at=1430&town=city');
+    // #1782: the street of houses, whose before is its archetypes off.
+    expect(parseConfig('?town=houses').town).toBe('houses');
+    expect(configQuery(parseConfig('?town=houses&levers=-house-archetypes'))).toBe(
+      `?levers=${encodeURIComponent('-house-archetypes')}&town=houses`,
+    );
+  });
+
+  it('rides the street of houses through #1782’s fixture, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'houses'\s*\?\s*houseStreetFixture\(latitude\)/);
   });
 
   it('rides the city centre through #1636’s fixture, which is where it is wired', () => {
@@ -263,6 +277,18 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     const town = readFileSync(fileURLToPath(new URL('./town.ts', import.meta.url)), 'utf8');
     expect(town).toContain('const urban = urbanClassWithLevers(leversOff)');
     expect(town).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,/);
+  });
+
+  it('gives the houses their archetypes, as the product does, unless #1782’s lever takes them out', () => {
+    expect(LEVERS).toContain('house-archetypes');
+    expect(houseArchetypesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(houseArchetypesWithLevers(LEVERS.filter((lever) => lever !== 'house-archetypes'))).toBe(
+      true,
+    );
+    expect(houseArchetypesWithLevers(parseConfig('?levers=-house-archetypes').leversOff)).toBe(
+      false,
+    );
   });
 
   it('pitches the split houses, as the product does, unless #1660’s lever takes it out', () => {

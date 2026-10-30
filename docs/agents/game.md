@@ -1009,6 +1009,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         since #1660 an L, T, U or Z pitched over its 2–3
                         rectangles (`rectilinear-roofs.ts`), flat where a
                         split would pass the caps (`-split-roofs`);
+                        since #1782 a house's US archetype — ranch, Cape,
+                        Colonial, Foursquare, bungalow or gable-front
+                        farmhouse (`house-archetypes.ts`) — setting its roof,
+                        pitch, porch, shutters, picture window, dormers,
+                        garage and cladding together, `unknown` planned as
+                        before (`-house-archetypes`, `town=houses`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
