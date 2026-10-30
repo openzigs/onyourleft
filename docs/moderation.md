@@ -214,6 +214,18 @@ A notice is kept as it was received. Like the moderation log, it is **append-onl
 and erasing an account does not delete a notice about it. `migrate … down` refuses to undo migration
 0026 while a single notice is held.
 
+**Six months after you record the decision on a notice, the instance erases what its notifier gave**
+(#1381, the owner's ruling of 2026-10-30, for GDPR Art. 5(1)(e)): their name, their email address,
+and the words they typed, both why and where. It keeps the decision, every step's date, the items
+the notice names, its reference and whether they gave a name and an address, so the record below
+still says whether a receipt was owed. The instance does this on its own, on the hour and as it
+starts, with nothing for you to do, and the Moderation screen shows the notice as erased. A notice
+with no decision recorded keeps everything, so record one when you have decided. After the erasure
+there is no address to confirm receipt to or tell, so do both before then. Migration 0036's schema
+allows that one change to a notice and no other, and `migrate … down` refuses to undo it once a
+notice has been erased. ⚠️ **A backup taken before the erasure still holds what was erased**, until
+you delete that backup.
+
 **Record what you do about each notice** (#912). The instance sends no email, so it cannot know when
 you confirmed receipt or told the notifier what you decided. Under each notice the Moderation screen
 offers the next step, and records it with the time:
