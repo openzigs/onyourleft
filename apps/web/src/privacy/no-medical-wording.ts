@@ -145,11 +145,11 @@ export const EXEMPT: readonly {
     text: 'This app did not write it and cannot check it. It can be wrong. It is not medical advice.',
     why: 'ADR 0035 D-9 A, the owner’s approved framing above every model-written write-up, word for word: it is about an analysis, not a workout, and it disclaims rather than claims (ADR 0035 D-9, "A says not medical advice")',
   },
-  ...['agent-v1.ts', 'template-v1.ts', 'template-v2.ts'].map((template) => ({
-    file: `../../../packages/analysis/src/template/${template}`,
+  {
+    file: '../../../packages/analysis/src/template/agent-v1.ts',
     text: PROMPT_FORBIDS_THE_WORD,
-    why: 'an instruction to a model, not text a rider is shown: the write-up prompt uses the word to forbid it. Excused as this one whole sentence in the three prompt templates that carry it, so any other sentence in @onyourleft/analysis is still read',
-  })),
+    why: 'an instruction to a model, not text a rider is shown: the write-up prompt uses the word to forbid it. Excused as this one whole sentence in the one prompt template that carries it (the chain templates that also did went in #1797), so any other sentence in @onyourleft/analysis is still read',
+  },
 ];
 
 /** Whether a finding is one {@link EXEMPT} excuses: the same file and the same whole text. */
