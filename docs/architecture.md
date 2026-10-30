@@ -2159,6 +2159,15 @@ POST. ⚠️ **No ticket without a declared weight**: a rider who has set none i
 at a default (ADR 0028 D-1). ⚠️ `check:wiring` watches this directory since that review, for exports
 and port methods only (docs/agents/wiring-gate.md §4j).
 
+**Other riders' names on the road** (#783) are DOM laid over the world by `game/name-tags.ts`, not
+drawn into it, so they cost the stylised world no draw call and the realistic world no triangle, and
+both worlds get the same names through the same camera (`game/camera.ts` §`projectToFrame`). A name is
+only what the HUD calls that rider: a race's room's public name (#774; a group ride's room sends none,
+ADR 0051 D-3), or the seat label of the one rider *Follow* chose — never a figure. Names are drawn only
+over riders the realistic world draws too (`three-renderer.ts` §`realisticRemoteSplit`), within 60 m,
+at most eight, the followed rider's first, and a name that would cover a nearer one is left out. The
+layer is `aria-hidden`: everything it shows is on the HUD as text.
+
 ### The realistic world: what is built, and how a rider chooses it
 
 [ADR 0026](adr/0026-realistic-game-world.md) builds the realistic world in four layers and offers it

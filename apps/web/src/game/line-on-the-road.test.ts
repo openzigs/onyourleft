@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildGhostTrack,
+  ghostDistanceAt,
   gradePercent,
   kilograms,
   metres,
@@ -25,6 +26,7 @@ import {
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import {
+  BICYCLE_FRONT_METRES,
   BICYCLE_LENGTH_METRES,
   CRANK_PARKING_LEAN_RADIANS,
   RIDER_HALF_WIDTH_METRES,
@@ -32,9 +34,10 @@ import {
   lowestPedalHeight,
   pedallingShare,
 } from './bicycle';
+import { CAMERA_BEHIND_METRES, cameraRig } from './camera';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
-import { leanAt, lineOffsetAt, racingLine } from './racing-line';
+import { LINE_LIMIT_METRES, leanAt, lineOffsetAt, racingLine } from './racing-line';
 import {
   circuitRoute,
   cornerRoute,
@@ -346,8 +349,9 @@ describe('a rider a Delivery round steered, and the riders level with them — #
           ) {
             squeezed += 1;
           }
-          // A bot a fade or more away from everybody is drawn where it was without steering.
-          if (levelAt(gap) === 0) expect(drawn.bot).toBe(unsteered.bot);
+          // A bot a fade or more AHEAD of everybody is drawn where it was without
+          // steering. Behind, it is held aside until it is behind the camera (#1863).
+          if (gap > 0 && levelAt(gap) === 0) expect(drawn.bot).toBe(unsteered.bot);
         }
       }
       expect(squeezed).toBeGreaterThan(10);
@@ -389,6 +393,217 @@ describe('a rider a Delivery round steered, and the riders level with them — #
     // Non-vacuity: it did come across.
     expect(steepest).toBeGreaterThan(0.05);
   });
+});
+
+describe('a pacer or ghost just behind a steered rider, in front of the camera — #1863', () => {
+  /** #499's separation: a handlebar clear, between two riders level on the road. */
+  const SIDE_BY_SIDE = 1.2;
+  /** How far from the centre a rider is ever drawn: half a handlebar and 0.1 m inside the edge. */
+  const DRAWN_LIMIT = ROAD_WIDTH_METRES / 2 - RIDER_HALF_WIDTH_METRES - 0.1;
+  /**
+   * How far behind the rider a bicycle's front wheel is level with the camera's
+   * eye: nearer than this, some of it is in front of the camera.
+   */
+  const IN_FRONT_OF_THE_EYE = CAMERA_BEHIND_METRES + BICYCLE_FRONT_METRES;
+  /** `scene.ts`' fade, over which a held rider eases back to its line. */
+  const FADE = 2;
+  const track = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 10_000] });
+  type Who = 'bot' | 'ghost' | 'both';
+
+  /** The input for the rider steered to `steered`, with the bot, the ghost or both `gap` behind (negative) or ahead. */
+  function inputFor(
+    route: RouteProfile,
+    at: number,
+    gap: number,
+    steered: number | undefined,
+    who: Who,
+  ): Parameters<typeof sceneFrame>[0] {
+    const bot = who !== 'ghost';
+    const ghost = who !== 'bot';
+    return {
+      profile: route,
+      origin: corridorOrigin(route),
+      // The ghost rides 10 m a second, so a clock of `(at + gap) / 10` puts it at `at + gap`.
+      state: stateAt(
+        route,
+        at,
+        8,
+        bot ? { distance: at + gap, speed: 8 } : undefined,
+        ghost ? (at + gap) / 10 : at / 10,
+      ),
+      botDistance: bot ? at + gap : undefined,
+      ghost: ghost ? track : undefined,
+      steeredLateral: steered,
+    };
+  }
+
+  function placed(
+    route: RouteProfile,
+    at: number,
+    gap: number,
+    steered: number | undefined,
+    who: Who,
+  ): { rider: number; bot: number | undefined; ghost: number | undefined } {
+    const riders = placedRiders(
+      inputFor(route, at, gap, steered, who),
+      roadCorridor(route, corridorOrigin(route), at),
+    );
+    const of = (kind: RiderMarker['kind']): number | undefined =>
+      riders.find((each) => each.marker.kind === kind)?.lateral;
+    const rider = of('rider');
+    if (rider === undefined) throw new Error('no rider placed');
+    return { rider, bot: of('bot'), ghost: of('ghost') };
+  }
+
+  const routes = [
+    ['on a straight', northRoute(2_000, () => 0), 1_000],
+    ['at the hairpin’s apex, where the line is at the edge', hairpin, APEX],
+    ['on the way in, where the line is wide', hairpin, 390],
+  ] as const;
+
+  it.each(routes)(
+    'keeps them a handlebar clear of the camera’s line, on their own side, until their front wheel is behind the eye, %s',
+    (_, route, at) => {
+      const line = racingLine(route);
+      let wouldHaveCrossed = 0;
+      for (const who of ['bot', 'ghost', 'both'] as const) {
+        for (let steered = -1.75; steered <= 1.75 + 1e-9; steered += 0.25) {
+          for (let gap = 0; gap >= -IN_FRONT_OF_THE_EYE - 1e-9; gap -= 0.1) {
+            const drawn = placed(route, at, gap, steered, who);
+            // The rider, and so the camera (#499 §"the camera follows"), is where it steered.
+            expect(drawn.rider).toBe(steered);
+            // The bot on the negative side of the camera's line, the ghost on the positive.
+            if (drawn.bot !== undefined) {
+              expect(drawn.bot).toBeLessThanOrEqual(steered - SIDE_BY_SIDE + 1e-9);
+            }
+            if (drawn.ghost !== undefined) {
+              expect(drawn.ghost).toBeGreaterThanOrEqual(steered + SIDE_BY_SIDE - 1e-9);
+            }
+            for (const each of [drawn.bot, drawn.ghost]) {
+              if (each !== undefined)
+                expect(Math.abs(each)).toBeLessThanOrEqual(DRAWN_LIMIT + 1e-9);
+            }
+            // Non-vacuity: where its own line would have put it within a handlebar of the camera's.
+            if (Math.abs(lineOffsetAt(line, at + gap) - steered) < SIDE_BY_SIDE - 1e-6) {
+              wouldHaveCrossed += 1;
+            }
+          }
+        }
+      }
+      expect(wouldHaveCrossed).toBeGreaterThan(100);
+    },
+  );
+
+  it('holds that in the frame the renderer is handed, measured from the camera’s eye, on a straight', () => {
+    const route = northRoute(2_000, () => 0);
+    let inFront = 0;
+    let behindTheEye = 0;
+    // 8 x 21 = 168 frames, not the 15 x 41 = 615 it began as (#1883): this sweep builds
+    // a whole frame per step, and it sat at the edge of the 5 s timeout under coverage.
+    // The 0.5 grid still puts 176 markers in front of the eye and 160 behind it.
+    for (let steered = -1.75; steered <= 1.75 + 1e-9; steered += 0.5) {
+      for (let gap = 0; gap >= -10; gap -= 0.5) {
+        const frame = sceneFrame(inputFor(route, 1_000, gap, steered, 'both'));
+        const { eye } = cameraRig(frame.camera);
+        const { headingX, headingZ } = frame.camera;
+        for (const kind of ['bot', 'ghost'] as const) {
+          const marker = markerOf(frame, kind);
+          const dx = marker.x - eye.x;
+          const dz = marker.z - eye.z;
+          const forward = dx * headingX + dz * headingZ;
+          const sideways = dx * -headingZ + dz * headingX;
+          if (forward + BICYCLE_FRONT_METRES > 0) {
+            inFront += 1;
+            expect(Math.abs(sideways)).toBeGreaterThanOrEqual(SIDE_BY_SIDE - 1e-6);
+          } else {
+            behindTheEye += 1;
+          }
+        }
+      }
+    }
+    // Non-vacuity: the sweep met both halves.
+    expect(inFront).toBeGreaterThan(100);
+    expect(behindTheEye).toBeGreaterThan(100);
+  });
+
+  it.each(routes)(
+    'eases them back to their own line behind the camera, and is their ordinary place beyond, %s',
+    (_, route, at) => {
+      for (const who of ['bot', 'ghost', 'both'] as const) {
+        for (const steered of [-1.75, -0.5, 0, 0.5, 1.75]) {
+          for (let gap = -IN_FRONT_OF_THE_EYE - FADE; gap >= -12; gap -= 0.25) {
+            const drawn = placed(route, at, gap, steered, who);
+            const unsteered = placed(route, at, gap, undefined, who);
+            expect(drawn.bot).toBe(unsteered.bot);
+            expect(drawn.ghost).toBe(unsteered.ghost);
+          }
+        }
+      }
+    },
+  );
+
+  it('moves them across without a jump as they drop back', () => {
+    // The steepest is the bot behind a rider steered to the left-hand lane:
+    // 2.95 m from its place aside back to the line over the 2 m fade, 7.4 cm a step.
+    const route = northRoute(2_000, () => 0);
+    let steepest = 0;
+    for (const steered of [-1.75, 0, 1.75]) {
+      let previous: { bot: number | undefined; ghost: number | undefined } | undefined;
+      for (let gap = 0; gap >= -12; gap -= 0.05) {
+        const drawn = placed(route, 1_000, gap, steered, 'both');
+        if (previous !== undefined) {
+          for (const kind of ['bot', 'ghost'] as const) {
+            const was = previous[kind];
+            const now = drawn[kind];
+            if (was !== undefined && now !== undefined) {
+              steepest = Math.max(steepest, Math.abs(now - was));
+            }
+          }
+        }
+        previous = drawn;
+      }
+    }
+    expect(steepest).toBeLessThan(0.12);
+    // Non-vacuity: somebody did come back across.
+    expect(steepest).toBeGreaterThan(0.05);
+  });
+
+  it.each(routes)(
+    'draws an ordinary ride, with no round, exactly as #499 did, %s',
+    (_, route, at) => {
+      // #499's rule, restated: `line·(1 − g·w) + lane·1.2·w`, `w` the levelness
+      // with the nearest other rider.
+      const line = racingLine(route);
+      const given = 1 - (DRAWN_LIMIT - SIDE_BY_SIDE) / LINE_LIMIT_METRES;
+      const levelAt = (gap: number): number =>
+        Math.min(1, Math.max(0, (BICYCLE_LENGTH_METRES + FADE - Math.abs(gap)) / FADE));
+      const expected = (distance: number, lane: number, others: readonly number[]): number => {
+        const level = Math.max(0, ...others.map((other) => levelAt(other - distance)));
+        return lineOffsetAt(line, distance) * (1 - given * level) + lane * SIDE_BY_SIDE * level;
+      };
+      let held = 0;
+      for (const who of ['bot', 'ghost', 'both'] as const) {
+        for (let gap = -10; gap <= 10 + 1e-9; gap += 0.25) {
+          const drawn = placed(route, at, gap, undefined, who);
+          const ghostAt =
+            who === 'bot' ? undefined : ghostDistanceAt(track, seconds((at + gap) / 10));
+          const botAt = who === 'ghost' ? undefined : at + gap;
+          const riders: { kind: 'rider' | 'bot' | 'ghost'; distance: number; lane: number }[] = [
+            { kind: 'rider', distance: at, lane: 0 },
+          ];
+          if (botAt !== undefined) riders.push({ kind: 'bot', distance: botAt, lane: -1 });
+          if (ghostAt !== undefined) riders.push({ kind: 'ghost', distance: ghostAt, lane: 1 });
+          for (const each of riders) {
+            const others = riders.filter((other) => other !== each).map((other) => other.distance);
+            expect(drawn[each.kind]).toBeCloseTo(expected(each.distance, each.lane, others), 12);
+          }
+          // Non-vacuity: the places #1863 holds a steered round's riders aside.
+          if (gap < 0 && gap > -IN_FRONT_OF_THE_EYE && levelAt(gap) < 1) held += 1;
+        }
+      }
+      expect(held).toBeGreaterThan(20);
+    },
+  );
 });
 
 describe('the camera follows the rider across the road — #499', () => {

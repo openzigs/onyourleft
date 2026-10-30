@@ -316,22 +316,35 @@ export function roomFrame(
       nowMs,
     ),
   );
+  if (memory.following !== undefined && !drawn.has(memory.following)) memory.following = undefined;
+  // #1347: in a race, each rider by the name the room sent — its public
+  // projection (#774) and nothing else; a group ride's room names nobody.
+  const names = new Map<number, string>();
+  for (const row of room.standings()?.rows ?? []) {
+    if (row.displayName !== undefined) names.set(row.riderId, row.displayName);
+  }
   const remoteRiders = others
     .filter((rider) => drawn.has(rider.riderId))
-    .map((rider) => ({
-      riderId: rider.riderId,
-      distanceMetres: rider.distanceMetres,
-      speedMetresPerSecond: rider.speedMetresPerSecond,
-    }));
-  if (memory.following !== undefined && !drawn.has(memory.following)) memory.following = undefined;
+    .map((rider) => {
+      // #783: the name on the road is the name the HUD gives them — the
+      // room's, or the seat label of the one rider followed — or none.
+      const label =
+        names.get(rider.riderId) ??
+        (rider.riderId === memory.following ? seatLabel(rider.riderId) : undefined);
+      return {
+        riderId: rider.riderId,
+        distanceMetres: rider.distanceMetres,
+        speedMetresPerSecond: rider.speedMetresPerSecond,
+        ...(label === undefined ? {} : { label }),
+        ...(rider.riderId === memory.following ? { followed: true } : {}),
+      };
+    });
   const followed = remoteRiders.find((rider) => rider.riderId === memory.following);
-  // #1347: in a race, the followed rider by the name the room sent.
-  const named = room.standings()?.rows.find((row) => row.riderId === followed?.riderId);
   const chosen: ChosenRider | undefined =
     followed === undefined
       ? undefined
       : {
-          label: named?.displayName ?? seatLabel(followed.riderId),
+          label: followed.label ?? seatLabel(followed.riderId),
           gap: pacerGap(gapAgainst(simulation.state, followed.distanceMetres)),
         };
   return {

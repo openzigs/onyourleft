@@ -472,7 +472,16 @@ describe('the plans are clad — #1588, over the mixed town', () => {
       paths: [],
       streets: [],
     };
-    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    // #1782: an 11 m one-storey front is a Cape, which has no garage: the seeded plan has both.
+    const { plans } = footprintPlans(
+      corridor,
+      landClassMask(corridor),
+      profile,
+      origin,
+      undefined,
+      undefined,
+      { houseArchetypes: false },
+    );
     let both = 0;
     for (const plan of plans.filter((each) => each.garage)) {
       const wall = verticesOf(plan, 'wall').filter((vertex) => vertex.top > 0 && vertex.extra >= 0);
