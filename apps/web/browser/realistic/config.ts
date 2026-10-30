@@ -264,7 +264,10 @@ export type Layer = (typeof LAYERS)[number];
  *   pair and the tablet's cost pair (plan-time only: no call, no byte, no
  *   shader term); pair it with `town=commercial`, which has all three, or
  *   `town=mixed`, whose high street is main-street blocks. The product always
- *   chooses them.
+ *   chooses them. ⚠️ The pair's planting differs in one place, by design
+ *   (#1922): a garden apartment has no garage, so where the control's seeded
+ *   garage has a driveway, whose ground is cleared, the product plants trees
+ *   (`building-archetypes.ts` §`GARDEN_APARTMENT_FEATURES`).
  *
  * - `facade-trims` — #1663: the mapped facades' trims — a lintel over each
  *   window's head (stone on brick, the trim's paint on render and clapboard,
