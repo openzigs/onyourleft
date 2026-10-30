@@ -36,6 +36,15 @@ export const FIRST_DAY_HOUSES = 8;
 /** The most houses a round can hold: a perfect round adds one, up to this. */
 export const MOST_HOUSES = 12;
 
+/**
+ * The fewest houses a round is ridden with when the route has fewer than the
+ * day's count (the owner's ruling of 2026-10-29 on #1818): a shorter pick
+ * still rides a round of every house it found, and one of fewer than this is
+ * no round. A pick that finds the whole day's count is always ridden, so a
+ * week whose count has fallen below this still rides.
+ */
+export const FEWEST_DELIVERY_HOUSES = 3;
+
 /** Rounds in a week. The week also ends early when no house is left. */
 export const DAYS_IN_WEEK = 7;
 
@@ -53,6 +62,13 @@ export interface Round {
   readonly houses: readonly HouseOutcome[];
   /** The assist setting (#1813): a missed house stays on the next round. */
   readonly assisted: boolean;
+  /**
+   * The day's count of houses this round stands for (#1818): its own length,
+   * or more for a short round on a route with fewer houses than the day's
+   * count. {@link endRound} moves the week on from this, so a short round
+   * never lowers the next day's count by being short.
+   */
+  readonly dayHouses: number;
 }
 
 /**
@@ -102,6 +118,11 @@ export interface RoundOutcome {
 export interface RoundOptions {
   /** The assist setting (#1813). Off unless asked for. */
   readonly assisted?: boolean;
+  /**
+   * The day's count, when the route had fewer houses than it (#1818): from
+   * the round's length to {@link MOST_HOUSES}. The round's length unless given.
+   */
+  readonly dayHouses?: number;
 }
 
 /**
@@ -113,9 +134,16 @@ export function startRound(houses: number, options: RoundOptions = {}): Round {
       `a Delivery round holds a whole number of houses from 1 to ${String(MOST_HOUSES)}`,
     );
   }
+  const dayHouses = options.dayHouses ?? houses;
+  if (!Number.isInteger(dayHouses) || dayHouses < houses || dayHouses > MOST_HOUSES) {
+    throw new RangeError(
+      `a Delivery round stands for a day of its own houses or more, up to ${String(MOST_HOUSES)}`,
+    );
+  }
   return {
     houses: Array.from({ length: houses }, (): HouseOutcome => 'expecting'),
     assisted: options.assisted === true,
+    dayHouses,
   };
 }
 
@@ -185,7 +213,16 @@ function settle(round: Round, position: number, outcome: HouseOutcome): Round {
 
 /**
  * End the round ridden on `week`'s day, and say what the next ride starts
- * from. The round's own length is the count that was ridden.
+ * from. The count the week moves on from is the day's,
+ * {@link Round.dayHouses}: the round's own length, or more for a short round.
+ *
+ * A short round (#1818, the owner's ruling of 2026-10-29) is a day like any
+ * other but for its houses: a house the route could not offer is neither
+ * delivered nor missed. So a perfect short round adds one to the day's count,
+ * as a perfect full round does; each house missed on it takes one off the
+ * day's count, or none with the assist; and its deliveries score, and the
+ * day moves on, as a full round's do. A short round never lowers the next
+ * day's count by being short.
  *
  * A house still expecting when the round ends is one the rider never reached
  * (#1857, the owner's ruling of 2026-10-29): the ride ended before its throw
@@ -198,6 +235,7 @@ function settle(round: Round, position: number, outcome: HouseOutcome): Round {
  */
 export function endRound(week: WeekProgress, round: Round): RoundOutcome {
   const count = round.houses.length;
+  const day = round.dayHouses;
   const { delivered, missed } = roundTally(round);
   if (delivered + missed === 0) {
     return {
@@ -211,11 +249,7 @@ export function endRound(week: WeekProgress, round: Round): RoundOutcome {
     };
   }
   const perfect = delivered === count;
-  const nextHouses = perfect
-    ? Math.min(count + 1, MOST_HOUSES)
-    : round.assisted
-      ? count
-      : count - missed;
+  const nextHouses = perfect ? Math.min(day + 1, MOST_HOUSES) : round.assisted ? day : day - missed;
   const weekScore = week.score + delivered;
   const weekOver = nextHouses === 0 || week.day >= DAYS_IN_WEEK;
   return {
