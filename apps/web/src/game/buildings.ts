@@ -1358,3 +1358,99 @@ export function frontDoorOf(kind: BuiltKind, variant: number): FrontDoor | null 
 export function planTriangles(plan: BuildingPlan): number {
   return BUILDING_ROLES.reduce((sum, role) => sum + plan.triangles[role].length / 9, 0);
 }
+
+/**
+ * How far apart {@link glassPaneCoordinates} lays two panes' coordinates
+ * across: **4**, more than a pane's own −1 to 1, so that the shader reads a
+ * pane's index as `floor((u + 2) / 4)` and its place in it as what is left.
+ */
+export const PANE_STRIDE = 4;
+
+/**
+ * A plan's windows in the order {@link glassPaneCoordinates} numbers its
+ * panes — #1665: wall by wall, row by row up each wall, and along each row,
+ * so that two windows side by side are numbered one apart, an even and an
+ * odd, and a room seeded by the number's parity (`three-renderer.ts`
+ * §`oylRoomSeedOf`) differs from its neighbour's. A shop row cuts its
+ * windows unit by unit, so its own order would not. `lot-realism.test.ts`
+ * and the browser gate's `lotRealismProbe` decode the panes by it.
+ */
+export function glassPanesOf(plan: BuildingPlan): readonly PlannedOpening[] {
+  const key = (opening: PlannedOpening): readonly number[] => {
+    const { u0, v0 } = boundsOf(opening.outline);
+    const { origin, normal } = opening.face;
+    return [...normal, ...origin, Math.round(v0 * 100), u0];
+  };
+  return plan.openings
+    .filter((opening) => opening.kind === 'window')
+    .map((opening) => ({ opening, key: key(opening) }))
+    .sort((a, b) => {
+      for (let at = 0; at < a.key.length; at += 1) {
+        const by = (a.key[at] as number) - (b.key[at] as number);
+        if (by !== 0) return by;
+      }
+      return 0;
+    })
+    .map(({ opening }) => opening);
+}
+
+/**
+ * Where each of a plan's glass vertices is in its own pane — #1665, so that
+ * the rooms behind a lot's glass (#1662's `oylInterior`) know the pane's
+ * rectangle: two numbers a vertex, in `plan.triangles.glass`' order, across
+ * and up its window's outline's bounding rectangle from −1 to 1, the across
+ * one plus {@link PANE_STRIDE} times the window's place in
+ * {@link glassPanesOf}. A glass triangle is the window's whose face it lies on, set back
+ * {@link OPENING_RECESS_METRES}, inside its outline's rectangle.
+ *
+ * The renderer lays these in the glass's `uv` — which glass, sampling no
+ * photograph, reads nothing from — so a pane costs no vertex float more; the
+ * shader recovers the pane's half-size from their derivatives.
+ */
+export function glassPaneCoordinates(plan: BuildingPlan): Float32Array {
+  const glass = plan.triangles.glass;
+  const out = new Float32Array((glass.length / 3) * 2);
+  const windows = glassPanesOf(plan).map((opening) => ({
+    face: opening.face,
+    bounds: boundsOf(opening.outline),
+  }));
+  const onPane = (face: Face, p: Point): readonly [number, number, number] => {
+    const d = sub(p, face.origin);
+    return [
+      d[0] * face.right[0] + d[1] * face.right[1] + d[2] * face.right[2],
+      d[1],
+      d[0] * face.normal[0] + d[1] * face.normal[1] + d[2] * face.normal[2],
+    ];
+  };
+  const near = 1e-3;
+  for (let at = 0; at + 8 < glass.length; at += 9) {
+    const corner = (k: number): Point => [
+      glass[at + k * 3] as number,
+      glass[at + k * 3 + 1] as number,
+      glass[at + k * 3 + 2] as number,
+    ];
+    const centroid: Point = scaled(add(add(corner(0), corner(1)), corner(2)), 1 / 3);
+    const index = windows.findIndex(({ face, bounds }) => {
+      const [u, v, w] = onPane(face, centroid);
+      return (
+        Math.abs(w + OPENING_RECESS_METRES) < near &&
+        u > bounds.u0 - near &&
+        u < bounds.u1 + near &&
+        v > bounds.v0 - near &&
+        v < bounds.v1 + near
+      );
+    });
+    const pane = windows[index];
+    if (pane === undefined) {
+      throw new Error(`${plan.kind} ${String(plan.variant)}: a glass triangle is in no window`);
+    }
+    const { u0, u1, v0, v1 } = pane.bounds;
+    for (let k = 0; k < 3; k += 1) {
+      const [u, v] = onPane(pane.face, corner(k));
+      const vertex = at / 3 + k;
+      out[vertex * 2] = (2 * (u - u0)) / (u1 - u0) - 1 + PANE_STRIDE * index;
+      out[vertex * 2 + 1] = (2 * (v - v0)) / (v1 - v0) - 1;
+    }
+  }
+  return out;
+}
