@@ -47,7 +47,12 @@
  * request: "on the round", a house, a parcel; never a subscriber or a paper.
  */
 
-import { roundTally, type Round, type RoundOutcome } from '../delivery/round';
+import {
+  FEWEST_DELIVERY_HOUSES,
+  roundTally,
+  type Round,
+  type RoundOutcome,
+} from '../delivery/round';
 
 import type { AnnouncementEvent, AnnouncementKind } from './announce';
 
@@ -170,6 +175,47 @@ export function oweRoundOver(
   if (owed.delivered.length > 0) lead.push(`Delivered to ${theHouses(owed.delivered)}.`);
   const sentence = roundOverSentence(outcome, score);
   return { ...NOTHING_OWED, roundOver: [...lead, sentence].join(' ') };
+}
+
+/** The HUD notice's label for a ride that asked for a round and has none — #1818. */
+export const NO_ROUND_LABEL = 'Delivery';
+
+/**
+ * What a rider who chose a Delivery round is told when the press read the
+ * route's mapped houses and fewer than `round.ts` §`FEWEST_DELIVERY_HOUSES`
+ * are in reach — #1818, new rider-facing wording for the owner's approval.
+ * On the HUD as a notice, and said once through the one region as the
+ * round's last word (rank 5g, so only with announcements on: the owner's
+ * ruling of 2026-10-28 on #1812). It names no place and no number of houses
+ * the town has, only the floor every round is held to, that the ride is an
+ * ordinary one, and that the week has not moved (`ride-round.ts` §"A route
+ * with fewer houses than the day's rides a shorter round").
+ */
+export const TOO_FEW_HOUSES_TEXT =
+  `Fewer than ${String(FEWEST_DELIVERY_HOUSES)} mapped houses on this route are in reach for ` +
+  'today’s Delivery round, so this is an ordinary ride. Your week is as it was.';
+
+/**
+ * What the same rider is told when the press had no mapped houses to count
+ * at all — #1818, the review of PR #1870: the route's map was still being
+ * read, the read failed, the device was offline, the map tiles are off, or
+ * the route is outside the map's coverage. The houses may well be there, so
+ * this says only that they were not ready, never that there are too few.
+ * New rider-facing wording for the owner's approval, on the same rules as
+ * {@link TOO_FEW_HOUSES_TEXT}.
+ */
+export const HOUSES_NOT_READY_TEXT =
+  'The map’s houses were not ready for today’s Delivery round, so this is an ordinary ride. ' +
+  'Your week is as it was.';
+
+/**
+ * Owe the sentence for a ride that asked for a round and has none:
+ * {@link TOO_FEW_HOUSES_TEXT} or {@link HOUSES_NOT_READY_TEXT}. It is the
+ * only thing a ride with no round says about Delivery, so it is owed as the
+ * round's last word, and said once like any other (#1818).
+ */
+export function oweNoRound(text: string): DeliveryOwed {
+  return { ...NOTHING_OWED, roundOver: text };
 }
 
 /** What to offer `announce.ts` on this call: one event per kind owed. */
