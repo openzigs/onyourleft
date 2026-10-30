@@ -33,7 +33,7 @@ import { mixedTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
-import { MappedBuildingBelt, windowRoomsOf } from './three-renderer';
+import { LIT_COLOURS, MappedBuildingBelt, windowRoomsOf } from './three-renderer';
 
 const town = mixedTownFixture();
 const buildings = mappedBuildingsOf(
@@ -317,6 +317,21 @@ describe('the room behind the glass, in the shader — #1662', () => {
     expect(on).toContain('+ oylCurtainGlassC * max(0.0, 1.0 - oylBarShare - oylSpandrelShare);');
     // And a pane's Fresnel is a pane's only: its glass share fades to nought far off.
     expect(on).toContain('oylGlass = oylPaneOn * (1.0 - oylFade);');
+  });
+
+  it('puts every paint a room is drawn in inside `three-renderer.test.ts`’ sweep of lit colours', () => {
+    // A room's colour is a paint times a light below 1, so its paints bound
+    // it; "lights no colour past white" then holds the lit rooms too.
+    const paints = [
+      ...INTERIOR_PALETTE_ORDER.flatMap((palette) => {
+        const { walls, floors, ceilings } = INTERIOR_PALETTES[palette];
+        return [...walls, ...floors, ...ceilings];
+      }),
+      ...INTERIOR.blind.paints,
+      INTERIOR.silhouette.paint,
+    ];
+    for (const paint of paints) expect(LIT_COLOURS, paint.toString(16)).toContain(paint);
+    for (const channel of [...INTERIOR.lit, ...INTERIOR.unlit]) expect(channel).toBeLessThan(1);
   });
 
   it('adds no texture, no cubemap and no atlas: zero bytes', () => {

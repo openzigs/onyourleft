@@ -1438,7 +1438,11 @@ export const INTERIOR_PALETTES = {
 /** {@link INTERIOR_PALETTES}' order, as the shader's `palette` argument numbers them: 0, 1, 2. */
 export const INTERIOR_PALETTE_ORDER = ['home', 'shop', 'office'] as const;
 
-/** One of {@link INTERIOR_PALETTES}. */
+/**
+ * One of {@link INTERIOR_PALETTES}.
+ *
+ * @test-facing what {@link interiorAt} is asked with; the shader numbers it ({@link INTERIOR_PALETTE_ORDER})
+ */
 export type InteriorPalette = (typeof INTERIOR_PALETTE_ORDER)[number];
 
 /**
@@ -1453,7 +1457,11 @@ export const INTERIOR_SALT = {
   shop: [13, 29],
 } as const;
 
-/** Which plane of the room's box a ray meets, or the blind drawn over the glass. */
+/**
+ * Which plane of the room's box a ray meets, or the blind drawn over the glass.
+ *
+ * @test-facing what {@link interiorAt} answers, for `facade.test.ts` and `window-rooms.test.ts`
+ */
 export type InteriorSurface = 'back' | 'floor' | 'ceiling' | 'left' | 'right' | 'blind';
 
 /**

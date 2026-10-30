@@ -16056,12 +16056,12 @@ const INTERIOR_GLSL = /* glsl */ `
     return oylGlassF0 + (1.0 - oylGlassF0) * oylOff2 * oylOff2 * oylOff;
   }
   vec3 oylInterior(vec2 pane, vec2 paneSize, vec3 eyeFace, float seed, float palette, float lit) {
-    vec3 oylLight = mix(oylRoomUnlit, oylRoomLit, lit);
+    vec3 oylRoomGlow = mix(oylRoomUnlit, oylRoomLit, lit);
     // A blind, drawn down from the pane's head on the glass itself.
     float oylDrop = mix(oylBlindDrop.x, oylBlindDrop.y, oylRoomDraw(seed, 6.0));
     if (oylRoomDraw(seed, 5.0) < oylBlindShare && pane.y > paneSize.y * 0.5 - oylDrop * paneSize.y) {
       int oylBlind = int(min(floor(oylRoomDraw(seed, 7.0) * ${glslFloat(INTERIOR.blind.paints.length)}), ${glslFloat(INTERIOR.blind.paints.length - 1)}));
-      return oylBlindPaints[oylBlind] * oylLight;
+      return oylBlindPaints[oylBlind] * oylRoomGlow;
     }
     vec2 oylHit = oylRoomHit(pane.x, pane.y, paneSize.x, paneSize.y, eyeFace.x, eyeFace.y, eyeFace.z);
     float oylDeep = oylHit.y * max(eyeFace.z, oylRoomGraze);
@@ -16084,7 +16084,7 @@ const INTERIOR_GLSL = /* glsl */ `
         oylPaint = oylFigureC;
       }
     }
-    return oylPaint * oylLight * oylFall;
+    return oylPaint * oylRoomGlow * oylFall;
   }
 `;
 
