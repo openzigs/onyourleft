@@ -9,7 +9,7 @@
  * notices hidden; this is the state it cannot reach.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   accessibleName,
@@ -17,11 +17,18 @@ import {
   formatViolations,
   tabbableElements,
 } from '../a11y/audit';
-import { loadShippedLicence } from '../credits/licence-documents';
-import { loadNoticesDocument } from '../credits/notices-document';
+import * as licenceDocuments from '../credits/licence-documents';
+import * as noticesDocument from '../credits/notices-document';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  readsSettled,
+  settle,
+  type Mounted,
+} from '../testing/mount';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -30,6 +37,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   globalThis.location.hash = '';
+  vi.restoreAllMocks();
 });
 
 function showNotices(): HTMLElement | undefined {
@@ -49,8 +57,10 @@ function expectClean(where: string): void {
 
 describe('Credits — the full third-party notices (#664)', () => {
   it('is a named disclosure, reachable and operable by keyboard, and the screen passes the audit with the notices shown', async () => {
-    // Read once first, so the chunk's module is loaded and one settle is enough.
-    const committed = await loadNoticesDocument();
+    const committed = await noticesDocument.loadNoticesDocument();
+    // #1939: watched, not replaced, so the test waits for the read the screen
+    // started rather than for a number of event-loop turns.
+    const reads = vi.spyOn(noticesDocument, 'loadNoticesDocument');
     globalThis.location.hash = '#/about/credits';
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
     await settle();
@@ -62,7 +72,8 @@ describe('Credits — the full third-party notices (#664)', () => {
     expectClean('Credits, notices hidden');
 
     if (toggle !== undefined) await activateWithKeyboard(toggle);
-    await settle();
+    expect(reads).toHaveBeenCalledTimes(1);
+    await readsSettled(reads);
     expect(isOpen()).toBe(true);
     expect(document.querySelector('[data-notices-document]')?.textContent).toBe(committed);
     expectClean('Credits, notices shown');
@@ -72,9 +83,11 @@ describe('Credits — the full third-party notices (#664)', () => {
 describe('Credits — the shipped licence texts (#1744)', () => {
   it('is a named disclosure per licence, operable by keyboard, and the screen passes the audit with both shown', async () => {
     const texts = {
-      'Apache-2.0': await loadShippedLicence('Apache-2.0'),
-      'OFL-1.1': await loadShippedLicence('OFL-1.1'),
+      'Apache-2.0': await licenceDocuments.loadShippedLicence('Apache-2.0'),
+      'OFL-1.1': await licenceDocuments.loadShippedLicence('OFL-1.1'),
     };
+    // #1939: as above.
+    const reads = vi.spyOn(licenceDocuments, 'loadShippedLicence');
     globalThis.location.hash = '#/about/credits';
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
     await settle();
@@ -86,7 +99,8 @@ describe('Credits — the shipped licence texts (#1744)', () => {
       expect(toggle, licence).toBeDefined();
       expect(tabbableElements(document)).toContain(toggle);
       if (toggle !== undefined) await activateWithKeyboard(toggle);
-      await settle();
+      expect(reads.mock.calls.at(-1), licence).toEqual([licence]);
+      await readsSettled(reads);
       expect(document.querySelector(`[data-licence-text="${licence}"]`)?.textContent).toBe(text);
     }
     expectClean('Credits, licence texts shown');
