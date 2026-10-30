@@ -322,7 +322,11 @@ account, can report content on it that they think is illegal
 app's: the app only links to it. What you type there — why you think the content is illegal, which
 items, where, and your name and email address only if you choose to give them — is kept by that
 instance as you sent it, and shown only to the person who moderates it, who may write to the address
-you gave. It is kept as the record of what the instance was told and when. The project's own
+you gave. It is kept as the record of what the instance was told and when. **Six months after the
+instance's moderator records what they decided about it**, the instance erases your name, your email
+address and the words you typed — why, and where — and keeps only the decision, when the report was
+received and decided, the items it named and its reference
+([#1381](https://github.com/openzigs/onyourleft/issues/1381)). The project's own
 instance does not store your internet address with it: it counts reports from one address in memory
 only, for at most an hour.
 

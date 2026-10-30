@@ -733,6 +733,14 @@ function Appeals({
   );
 }
 
+/**
+ * Said on a notice whose notifier details the instance erased (#1381), in
+ * place of their words, name and address: six months after the decision.
+ */
+export function noticeDetailsErasedText(erasedAt: string): string {
+  return `Their name, email address and words were erased ${erasedAt}, six months after the decision.`;
+}
+
 /** The steps a moderator records on a notice, as the screen names them (#912). */
 export const NOTICE_STEP_TEXT = {
   acknowledge: 'I have confirmed receipt',
@@ -963,27 +971,35 @@ function Notices({
                   </ul>
                 </>
               )}
-              {notice.location === null ? null : (
+              {notice.detailsErasedAt !== null || notice.location === null ? null : (
                 <p className="oyl-moderation__quoted">Where, in their words: {notice.location}</p>
               )}
-              <p className="oyl-moderation__quoted">
-                Why they think it is illegal: {notice.explanation}
-              </p>
+              {notice.detailsErasedAt !== null ? null : (
+                <p className="oyl-moderation__quoted">
+                  Why they think it is illegal: {notice.explanation}
+                </p>
+              )}
               <p>
-                {notice.notifierName === null
-                  ? 'They gave no name.'
-                  : `From ${notice.notifierName}.`}{' '}
-                {notice.notifierEmail === null ? (
-                  'They gave no email address, so they cannot be told what you decide.'
+                {notice.detailsErasedAt !== null ? (
+                  noticeDetailsErasedText(when(notice.detailsErasedAt))
                 ) : (
                   <>
-                    Write to them at{' '}
-                    {LINKABLE_EMAIL.test(notice.notifierEmail) ? (
-                      <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>
+                    {notice.notifierName === null
+                      ? 'They gave no name.'
+                      : `From ${notice.notifierName}.`}{' '}
+                    {notice.notifierEmail === null ? (
+                      'They gave no email address, so they cannot be told what you decide.'
                     ) : (
-                      notice.notifierEmail
+                      <>
+                        Write to them at{' '}
+                        {LINKABLE_EMAIL.test(notice.notifierEmail) ? (
+                          <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>
+                        ) : (
+                          notice.notifierEmail
+                        )}
+                        .
+                      </>
                     )}
-                    .
                   </>
                 )}{' '}
                 {notice.bonaFide
