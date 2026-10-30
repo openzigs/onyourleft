@@ -1,9 +1,9 @@
 # ADR 0060: The lap race — its own expression, no game event reaches the trainer, effort distance and a bounded race offset, bots, and its own draw-call ceiling
 
-- **Status**: **Proposed, 2026-10-30.** Every decision below is a **proposal for the owner's
-  ruling**, and none is decided until the owner accepts it. D-14 lists the eight questions the owner
-  is asked to answer on the record. The pull request that carries this ADR does not merge before
-  every one is answered, quoted and dated
+- **Status**: **Accepted, 2026-10-30**, on the owner's
+  [ruling of that day](https://github.com/openzigs/onyourleft/pull/1930#issuecomment-6533945989) on
+  pull request #1930, with every D-14 recommendation as written; D-14 quotes the ruling and records
+  each answer. Proposed 2026-10-30
 - **Date**: 2026-10-30
 - **Deciders**: **the owner**, on the request of 2026-10-30 that the epic
   [#1894](https://github.com/openzigs/onyourleft/issues/1894) was planned from. The author drafted it
@@ -340,16 +340,28 @@ As ADR 0059 D-5.
 The epic's eight open questions, each with this ADR's proposal. Accepting the ADR as written accepts
 each proposal.
 
-| # | Question | Proposed | Where |
-|---|---|---|---|
-| **Q1** | Option A (bounded offset), B (flat circuits) or C (no simulation writes); and B's value | **A, with B = 10 m** | D-3 |
-| **Q2** | Lanes in a room: outside ADR 0038 D-3.4, or a superseding ADR? | **Outside**, the lane being read by item hits only | D-6 |
-| **Q3** | Bots in rooms: revisit the 2026-09-28 acceptance or not? | **Not now**; nothing filed | D-8 |
-| **Q4** | Bot rubber-banding by rank? | **No** | D-9 |
-| **Q5** | Stylised world or realistic towns first? | **Stylised**, on the rider's own loop | D-10 |
-| **Q6** | A circuit shipped in the app for solo races? | **Yes, for solo bot races only**, never a room's course | D-11 |
-| **Q7** | The mode's name, and the item catalogue's names and behaviour | **The owner's**; names in #1899's and #1904's pull requests | D-1 |
-| **Q8** | Drafting in a lap-race room: on, off, or the creator's choice? | **The creator's choice, as today** (#787), with `k` read from effort distance only | D-5.3 |
+| # | Question | Proposed | Owner's answer, 2026-10-30 | Where |
+|---|---|---|---|---|
+| **Q1** | Option A (bounded offset), B (flat circuits) or C (no simulation writes); and B's value | **A, with B = 10 m** | **A, B = 10 m**, as proposed | D-3 |
+| **Q2** | Lanes in a room: outside ADR 0038 D-3.4, or a superseding ADR? | **Outside**, the lane being read by item hits only | **Outside**: no new ADR for an item-only lane | D-6 |
+| **Q3** | Bots in rooms: revisit the 2026-09-28 acceptance or not? | **Not now**; nothing filed | **Not now**: no bots in rooms | D-8 |
+| **Q4** | Bot rubber-banding by rank? | **No** | **No** | D-9 |
+| **Q5** | Stylised world or realistic towns first? | **Stylised**, on the rider's own loop | **Stylised first** | D-10 |
+| **Q6** | A circuit shipped in the app for solo races? | **Yes, for solo bot races only**, never a room's course | **Yes, for solo bot races only** | D-11 |
+| **Q7** | The mode's name, and the item catalogue's names and behaviour | **The owner's**; names in #1899's and #1904's pull requests | **Chosen later**, in #1899 and #1904 | D-1 |
+| **Q8** | Drafting in a lap-race room: on, off, or the creator's choice? | **The creator's choice, as today** (#787), with `k` read from effort distance only | **The creator's choice**, read from effort distance | D-5.3 |
+
+**The owner's ruling, 2026-10-30**, on pull request
+[#1930](https://github.com/openzigs/onyourleft/pull/1930#issuecomment-6533945989), quoted:
+
+> ADR 0060 is accepted with every D-14 recommendation as written: Q1 A (effort distance for the
+> trainer, items move only a bounded race offset, B = 10 m); Q2 no new ADR for an item-only lane; Q3
+> no bots in rooms for now; Q4 no rubber-banding of bots; Q5 stylised world first; Q6 a bundled
+> circuit for solo bot races only; Q7 names chosen later in #1899/#1904; Q8 drafting is the room
+> creator's choice, read from effort distance. Mark it Accepted and merge.
+
+So every decision above marked *proposed* is decided as proposed, and the owner questions that end
+D-6, D-8, D-9 and D-11 are answered by Q2, Q3, Q4 and Q6.
 
 ---
 

@@ -14,8 +14,8 @@ It has the same authority as the root file. Where the text below says "this file
 
   ⚠️ **0060 is [ADR 0060](../adr/0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)**,
   taken by [#1895](https://github.com/openzigs/onyourleft/issues/1895) on 2026-10-30 for the lap
-  race (the epic [#1894](https://github.com/openzigs/onyourleft/issues/1894)), written as **Proposed**
-  and put to the owner. It took the next free number after 0059; **0057 and 0058 stay claimed** by
+  race (the epic [#1894](https://github.com/openzigs/onyourleft/issues/1894)), and **accepted on the
+  owner's ruling of the same day**, with every D-14 recommendation as written. It took the next free number after 0059; **0057 and 0058 stay claimed** by
   [#1748](https://github.com/openzigs/onyourleft/issues/1748) and
   [#1752](https://github.com/openzigs/onyourleft/issues/1752). **The next free number is 0061.** A
   reviewer who remembers this file offering 0060 is reading the old file.
