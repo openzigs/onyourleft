@@ -12,7 +12,13 @@
 import type { RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
-import type { FootprintVerdict } from './footprint-buildings';
+import {
+  EAVES_OVERHANG_METRES,
+  FOOTPRINT_ROLES,
+  type FootprintPlan,
+  type FootprintVerdict,
+} from './footprint-buildings';
+import { ARCHETYPE_FEATURES } from './house-archetypes';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { FIXTURE_LATITUDE, northRoute, plannerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
@@ -893,4 +899,130 @@ export function houseStreetFixture(latitude = FIXTURE_LATITUDE): {
       streets: [],
     },
   };
+}
+
+/**
+ * #1783's fixture: a main street and a commercial strip, for each of
+ * `building-archetypes.ts`' archetypes, for the owner's look pair
+ * (`?town=commercial`) and for the plans to be asserted over where the mixed
+ * town has only main-street blocks. Along a level road:
+ *
+ * - from 1 000 m to 1 400 m, both sides, a block every 14 m, its middle 16 m
+ *   out, 12 m along by 12 m deep, two or three storeys, on commercial land —
+ *   close enough that #1633 reads the stretch a town;
+ * - from 1 800 m to 2 600 m, on the road's right, a one-storey store every
+ *   160 m, 40 m along by 15 m deep and 3.3 m high (too low for #1590's
+ *   tallest shop front and its sign band both), its middle 40 m out, on
+ *   commercial land,
+ *   and between each pair a two-storey office 24 by 18, which no archetype's
+ *   cue admits; on its left, garden apartments every 160 m, 36 m along by 14 m
+ *   deep, two or three storeys, their middles 40 m out, on residential land —
+ *   sparse enough that #1633 reads it no town.
+ *
+ * Nothing here is a real place.
+ */
+export function commercialStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const place = (
+    corners: readonly (readonly [number, number])[],
+    along: number,
+    lateral: number,
+    height: number,
+  ): void => {
+    const ring = corners.map(([a, n]) => [along + a, lateral + n] as const);
+    buildings.push(buildingBeside(profile, origin, [ring], height));
+  };
+  let index = 0;
+  for (let along = 1_000; along < 1_400; along += 14) {
+    for (const side of [1, -1]) {
+      place(rectangleBeside(0, 0, 12, 12), along, side * 16, index % 2 === 0 ? 6.5 : 9.5);
+      index += 1;
+    }
+  }
+  for (let along = 1_800; along < 2_600; along += 160) {
+    place(rectangleBeside(0, 0, 40, 15), along, 40, 3);
+    place(rectangleBeside(0, 0, 24, 18), along + 80, 40, 6.5);
+    place(rectangleBeside(0, 0, 36, 14), along, -40, index % 2 === 0 ? 6.5 : 9.5);
+    index += 1;
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'commercial-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'retail', 950, 1_450, -40, 40),
+        landBeside(profile, origin, 'landuse', 'retail', 1_750, 2_650, 15, 80),
+        landBeside(profile, origin, 'landuse', 'residential', 1_750, 2_650, -80, -15),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/**
+ * An FNV-1a over every plan's roof, pitch, storeys, dormers, garage, porch and
+ * (`withPaint`) paint and every float of every role's triangles, in order: two
+ * towns' plans hash alike only if the belt would upload the same bytes for
+ * them. #1782's own copy is `house-archetypes.test.ts` §`fingerprint`; this
+ * one is shared by the levers that hold a plan to a frozen record of `main`'s
+ * (#1785's `-roof-variants` and the issues after it).
+ */
+export function planFingerprint(plans: readonly FootprintPlan[], withPaint = true): string {
+  let hash = 0x81_1c_9d_c5;
+  const mix = (word: number): void => {
+    hash ^= word;
+    hash = Math.imul(hash, 0x01_00_01_93) >>> 0;
+  };
+  const scalar = new Float32Array(1);
+  const scalarBits = new Uint32Array(scalar.buffer);
+  const value = (n: number): void => {
+    scalar[0] = n;
+    mix(scalarBits[0] as number);
+  };
+  for (const each of plans) {
+    value(['flat', 'gable', 'hip'].indexOf(each.roof));
+    value(each.pitchDegrees);
+    value(each.storeys);
+    value(each.dormers);
+    value(each.garage ? 1 : 0);
+    value(each.porch ? 1 : 0);
+    if (withPaint) {
+      value(each.paint.wall);
+      value(each.paint.roof);
+      value(each.paint.trim);
+      value(each.paint.door);
+    }
+    for (const role of FOOTPRINT_ROLES) {
+      const floats = each.triangles[role];
+      const bits = new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
+      mix(bits.length);
+      for (const word of bits) mix(word);
+    }
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+/**
+ * How far a plan's eaves overhang its walls across a slope, as the product
+ * plans it — #1784: its archetype's own, or {@link EAVES_OVERHANG_METRES}.
+ * Not for a plan made with `archetypePorches: false`, whose every overhang is
+ * the constant. It reads the same table production does, so a test using it
+ * checks consistency; the values themselves are pinned as literals in
+ * `archetype-porches.test.ts`.
+ */
+export function eavesOverhangOf(plan: FootprintPlan): number {
+  const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
+  return eaves === 'seeded' ? EAVES_OVERHANG_METRES : eaves;
 }

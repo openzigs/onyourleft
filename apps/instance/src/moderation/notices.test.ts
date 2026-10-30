@@ -125,6 +125,8 @@ describe('a notice sent from the page (#907)', () => {
       notifierName: 'A. Notifier',
       notifierEmail: 'notifier@example.com',
       bonaFide: true,
+      // #1381: nothing erased while it is open.
+      detailsErasedAt: null,
       // #912: no step taken yet.
       acknowledgedAt: null,
       decidedAt: null,

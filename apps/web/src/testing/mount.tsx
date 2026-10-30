@@ -196,6 +196,28 @@ export async function settle(): Promise<void> {
 }
 
 /**
+ * Wait for every read a spied loader has started — a `vi.spyOn` that calls
+ * through — and let React render what each resolved to (#1939).
+ *
+ * ⚠️ **Not {@link settle} until it is probably done.** A screen that reads a
+ * file this app ships does it with a dynamic `import()`, and in Vitest every
+ * `import()` — even of a module already loaded — is a round trip to the main
+ * process (`ModuleRunner.cachedModule` asks it `fetchModule` each time). An
+ * idle machine answers inside one event-loop turn, a loaded CI runner may not,
+ * so a test that counted turns read the text as `undefined` now and then. This
+ * waits for the promises themselves, so it is done when the reads are, however
+ * long that takes.
+ */
+export async function readsSettled(loader: {
+  readonly mock: { readonly results: readonly { readonly value: unknown }[] };
+}): Promise<void> {
+  await act(async () => {
+    await Promise.allSettled(loader.mock.results.map((result) => result.value));
+  });
+  await viewsArrived();
+}
+
+/**
  * Focus an element and activate it the way a keyboard would.
  *
  * The `focus()` and the check after it are the real assertion: a `div` with a

@@ -111,6 +111,13 @@ export interface ReceivedNotice {
   readonly notifierName: string | null;
   readonly notifierEmail: string | null;
   readonly bonaFide: boolean;
+  /**
+   * When the instance erased the notifier's name, email and words, six months
+   * after the decision (#1381), Unix seconds, or `null`. Once erased, the
+   * explanation is empty and the location, name and email are `null`. An
+   * instance from before #1381 sends none: `null`.
+   */
+  readonly detailsErasedAt: number | null;
   /** When the moderator recorded confirming receipt (#912), Unix seconds, or `null`. */
   readonly acknowledgedAt: number | null;
   /** When the moderator recorded the decision (#912), or `null`. */
@@ -608,6 +615,11 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     name === undefined ||
     email === undefined ||
     typeof row.bonaFide !== 'boolean' ||
+    !(
+      row.detailsErasedAt === undefined ||
+      row.detailsErasedAt === null ||
+      isTime(row.detailsErasedAt)
+    ) ||
     !(row.acknowledgedAt === null || isTime(row.acknowledgedAt)) ||
     !(row.decidedAt === null || isTime(row.decidedAt)) ||
     decision === undefined ||
@@ -629,6 +641,7 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     notifierName: name,
     notifierEmail: email,
     bonaFide: row.bonaFide,
+    detailsErasedAt: isTime(row.detailsErasedAt) ? row.detailsErasedAt : null,
     acknowledgedAt: row.acknowledgedAt,
     decidedAt: row.decidedAt,
     decision,
