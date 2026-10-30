@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HOSTED_AGREED_TEXT,
   HOSTED_ANSWER_REFUSAL_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_KEY_OPERATOR_CAN_READ,
   HOSTED_KEY_SEALED_ONLY,
   HOSTED_MASKING_NOT_SENT,
@@ -158,6 +159,7 @@ describe('the rest of what a rider reads (#1251), as drafted', () => {
     expect({
       ...HOSTED_ANSWER_REFUSAL_TEXT,
       unreadable: HOSTED_UNREADABLE,
+      changeUnknown: HOSTED_CHANGE_UNKNOWN,
       notOffered: HOSTED_NOT_OFFERED,
       notAccepted: HOSTED_NOT_ACCEPTED,
       maskingNotSent: HOSTED_MASKING_NOT_SENT,
@@ -177,6 +179,8 @@ describe('the rest of what a rider reads (#1251), as drafted', () => {
         'Enter a whole number from 1 to 16384 for the reasoning tokens, or leave the box empty.',
       unreadable:
         'Your instance did not answer, or answered something this app cannot read. Nothing was changed, and nothing was sent to a service.',
+      changeUnknown:
+        'Your instance did not answer, or answered something this app cannot read, so this app cannot tell whether your change was made. Nothing was sent to a service. Open this page again to see what your instance holds.',
       notOffered:
         'Your instance cannot hold a rider’s own key: it runs a version from before this, or its operator has not set it up to encrypt one. Nothing was stored, and nothing was sent to a service.',
       notAccepted:

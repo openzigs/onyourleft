@@ -22,13 +22,13 @@ import {
   routeFilesIn,
 } from '../../browser/demo-route-fixture';
 import type { RealisticWorldOutcome } from '../game/realistic-assets';
-import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
+import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
 import { OSM_COPYRIGHT_URL } from '../../tools/demo/route-bundle';
 import { BAKED_ROUTE_UNAVAILABLE, type ReadDemoFile } from './baked-route';
 
 import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudCore';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
-import { DemoPage } from './DemoPage';
+import { DEMO_LABEL, DemoPage } from './DemoPage';
 import { REFERENCE_ASPECT } from '../game/camera';
 import type { SceneFrame } from '../game/port';
 import { projectThrough } from './camera-tour-testing';
@@ -69,6 +69,8 @@ interface PageOptions {
   readonly readFile?: ReadDemoFile;
   /** What the realistic world's load comes to; never, by default. */
   readonly outcome?: Promise<RealisticWorldOutcome>;
+  /** #1655: the video render's hook for the closing card. */
+  readonly registerClosingCard?: (show: () => void) => void;
 }
 
 async function page(options: PageOptions = {}): Promise<Page> {
@@ -93,6 +95,7 @@ async function page(options: PageOptions = {}): Promise<Page> {
       readFile={options.readFile ?? NO_FILES}
       drawnSeason={fakeDrawnSeason}
       drawnDecorations={fakeDrawnDecorations}
+      registerClosingCard={options.registerClosingCard}
     />,
   );
   await settle();
@@ -382,6 +385,66 @@ describe('the demo page on a baked route — #1652', () => {
     expect(status()).toBe(BAKED_ROUTE_UNAVAILABLE);
     expect(credit()).toBeUndefined();
     expect(document.querySelector('summary')).toBeNull();
+  });
+
+  it.each([
+    ['?preset=climb&route=fixture&render', true],
+    ['?preset=climb&render', false],
+  ])(
+    '%j shows the closing card when the render asks: %s — #1655, ADR 0056 D-8.3',
+    async (search, shows) => {
+      let show: (() => void) | undefined;
+      const shown = await page({
+        search,
+        readFile: served(),
+        registerClosingCard: (given) => {
+          show = given;
+        },
+      });
+      await until(() => shown.last() !== undefined);
+      await shown.step(1);
+      expect(document.querySelector('.oyl-demo__closing-card')).toBeNull();
+      expect(show).toBeDefined();
+      await act(async () => {
+        show?.();
+        await Promise.resolve();
+      });
+      const card = document.querySelector('.oyl-demo__closing-card');
+      if (!shows) {
+        // Nothing is owed on the synthetic road, so there is no card to end on.
+        expect(card).toBeNull();
+        return;
+      }
+      expect(card?.getAttribute('role')).toBe('note');
+      expect([...(card?.querySelectorAll('p') ?? [])].map((each) => each.textContent)).toEqual([
+        OSM_ATTRIBUTION,
+        ODBL_NOTICE,
+        `OpenStreetMap: ${OSM_COPYRIGHT_URL}`,
+        `Open Database License: ${ODBL_LICENCE_URL}`,
+      ]);
+    },
+  );
+});
+
+describe('the demo page under the video render — #1655', { timeout: RIDE_TIMEOUT_MS }, () => {
+  it('is the label and the stage alone: no heading, status line or source offer', async () => {
+    const shown = await page({ search: '?preset=sprint&render' });
+    await shown.step(10);
+    expect(shown.last()?.state).toBe('playing');
+    const main = mounted?.container.querySelector('main');
+    expect(main?.querySelector('h1')).toBeNull();
+    expect(main?.querySelector('footer')).toBeNull();
+    expect(main?.querySelectorAll('[role="status"]:not([data-oyl-announcer])')).toHaveLength(0);
+    expect(main?.querySelector('.oyl-demo__label')?.textContent).toBe(DEMO_LABEL);
+    expect(main?.querySelector('.oyl-hud')).not.toBeNull();
+  });
+
+  it('control: without ?render the page has all three', async () => {
+    await page({ search: '?preset=sprint' });
+    const main = mounted?.container.querySelector('main');
+    expect(main?.querySelector('h1')?.textContent).toBe('On Your Left');
+    expect(main?.querySelector('footer')).not.toBeNull();
+    expect(main?.querySelectorAll('[role="status"]:not([data-oyl-announcer])')).toHaveLength(1);
   });
 });
 

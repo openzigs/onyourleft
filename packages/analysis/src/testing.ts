@@ -7,4 +7,3 @@
  */
 
 export * from './personal-details-testing';
-export { everyPrompt, textOf } from './template/template-fixtures-testing';
