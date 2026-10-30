@@ -297,7 +297,13 @@ is beside the key box.
 (`POST /v1/analysis/hosted/test`, sealed only). Your instance sends the service two fixed sentences
 on the rider's key — no ride, nothing the rider wrote — and tells the app only whether it answered.
 It passes the same checks as a job, so it sends nothing where a job would be refused. It is an
-outbound request from your machine to an address a rider chose, as every hosted job is.
+outbound request from your machine to an address a rider chose, as every hosted job is. Since #1796
+stopping the instance ends a test question that is out at once, rather than leaving it for its 30 s.
+
+**A hosted job names its service** (#1796). The app sends the origin of the service it showed the
+rider beside the press, and your instance refuses the job (`validation_failed` on `endpoint`) unless
+the rider's recorded consent names that origin, so a key replaced on the rider's other device never
+sends a ride to a service the pressing device did not name.
 
 **Yours is held for you, the operator, and for nobody else.** The instance also hosts group rides
 and races, so it has other riders, and holding a key changes nothing about them: they register and
@@ -366,7 +372,8 @@ leaves the key unreadable, and the instance says so and carries on with its loca
 **What clearing leaves.** `model-key clear`, replacing a key with `set`, and erasing the account all
 run with SQLite's `secure_delete` on, so the old ciphertext is overwritten with zeros in the
 database file rather than left in a free page, and then checkpoint and truncate the write-ahead log,
-which held copies of the old pages. ⚠️ Two copies are beyond that: **a snapshot taken while the key
+which held copies of the old pages. Since #1796 every sync delete does the same — a rider's masking
+list when they withdraw, a ride, a note — because an item can hold a place. ⚠️ Two copies are beyond that: **a snapshot taken while the key
 was held** still holds its ciphertext, and opens with the secret, so delete those snapshots or
 rotate the secret; and if another connection (the running server, when the command is run beside it) is reading at
 that moment, the truncation does not happen and the log's old pages stay until SQLite next writes
