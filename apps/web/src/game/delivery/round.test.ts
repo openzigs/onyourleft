@@ -209,6 +209,40 @@ describe('the assist setting keeps a missed house on the round — #1806 for #18
   });
 });
 
+describe('a short round, on a route with fewer houses than the day’s count — #1818', () => {
+  const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 5 };
+
+  it('stands for its own length unless told the day’s count', () => {
+    expect(startRound(3).dayHouses).toBe(3);
+    expect(startRound(3, { dayHouses: FIRST_DAY_HOUSES }).dayHouses).toBe(FIRST_DAY_HOUSES);
+  });
+
+  it.each([2, MOST_HOUSES + 1, 4.5, Number.NaN])('refuses a round of 3 standing for %s', (day) => {
+    expect(() => startRound(3, { dayHouses: day })).toThrow(RangeError);
+  });
+
+  it('adds one to the day’s count after a perfect short round, as a full round does', () => {
+    const outcome = endRound(week, deliverAll(startRound(3, { dayHouses: week.houses })));
+    expect(outcome).toMatchObject({ perfect: true, nextHouses: FIRST_DAY_HOUSES + 1 });
+    expect(outcome.next).toEqual({ day: 3, houses: FIRST_DAY_HOUSES + 1, score: 8 });
+    // The control: the same round standing for itself would leave tomorrow at 4.
+    expect(endRound(week, deliverAll(startRound(3))).nextHouses).toBe(4);
+  });
+
+  it('takes only the houses missed off the day’s count, and none with the assist', () => {
+    const missed = recordDelivery(recordMiss(recordMiss(startRound(3, { dayHouses: 8 }), 0), 1), 2);
+    expect(endRound(week, missed)).toMatchObject({ delivered: 1, missed: 2, nextHouses: 6 });
+    const assisted = missAll(startRound(3, { dayHouses: 8, assisted: true }));
+    expect(endRound(week, assisted).next).toEqual({ day: 3, houses: 8, score: 5 });
+  });
+
+  it('ends the week on its last day as a full round does', () => {
+    const last: WeekProgress = { day: DAYS_IN_WEEK, houses: FIRST_DAY_HOUSES, score: 30 };
+    const outcome = endRound(last, deliverAll(startRound(3, { dayHouses: 8 })));
+    expect(outcome).toMatchObject({ weekOver: true, weekScore: 33, next: FRESH_WEEK });
+  });
+});
+
 describe('FRESH_WEEK is shared, so it cannot be changed at runtime', () => {
   it('is frozen', () => {
     expect(Object.isFrozen(FRESH_WEEK)).toBe(true);
