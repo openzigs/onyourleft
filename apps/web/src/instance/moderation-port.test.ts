@@ -60,9 +60,15 @@ interface ModerationInstance {
   ): Promise<{ status: number; body: Record<string, unknown> }>;
   nonceFor(device: TestDevice): Promise<string>;
   close(): Promise<void>;
-  /** A second connection to the instance's file (#789: a room's flag is written straight in). */
+  /**
+   * A second connection to the instance's file (#789: a room's flag is written
+   * straight in; #1381: a notice's notifier details erased with no six months' wait).
+   */
   freshRead<T>(
-    read: (store: { putReport(report: Record<string, unknown>): Promise<number> }) => Promise<T>,
+    read: (store: {
+      putReport(report: Record<string, unknown>): Promise<number>;
+      eraseNoticeDetails(noticeId: number, at: number): Promise<string>;
+    }) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -903,6 +909,7 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: 'notifier@example.com',
         bonaFide: true,
+        detailsErasedAt: null,
         acknowledgedAt: null,
         decidedAt: null,
         decision: null,
@@ -945,6 +952,39 @@ describe('the notices — #907', () => {
     for (const marker of ['explanation-marker', 'name-marker', 'email-marker']) {
       expect(saved).not.toContain(marker);
     }
+  });
+
+  it('reads back a notice whose notifier details the instance erased, and when (#1381)', async () => {
+    const world = await moderatedWorld();
+    await sendNotice(world, {
+      kind: 'illegal_content',
+      explanation: 'explanation-marker',
+      items: `route:${ROOM}`,
+      location: 'location-marker',
+      name: 'name-marker',
+      email: 'email-marker@example.com',
+      bona_fide: 'on',
+    });
+    const [notice] = asModerator(await world.moderator.read()).notices ?? [];
+    const id = notice?.noticeId ?? 0;
+    expect(notice?.detailsErasedAt).toBeNull();
+    expect(await world.moderator.recordNoticeStep(id, 'decided', 'Not illegal.')).toEqual({
+      kind: 'done',
+    });
+    const at = Math.floor(world.world.clock.ms / 1000);
+    expect(await world.world.freshRead((store) => store.eraseNoticeDetails(id, at))).toBe('erased');
+    const [after] = asModerator(await world.moderator.read()).notices ?? [];
+    expect(after).toMatchObject({
+      noticeId: id,
+      explanation: '',
+      items: [`route:${ROOM}`],
+      location: null,
+      notifierName: null,
+      notifierEmail: null,
+      bonaFide: true,
+      detailsErasedAt: at,
+      decision: 'Not illegal.',
+    });
   });
 
   it('sends nothing for a decision with no words (#912)', async () => {
