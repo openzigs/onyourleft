@@ -74,7 +74,8 @@ The same three reasons ADR 0059 gave for Delivery, and one that is new:
 - **The grade is read at the rider's own distance.** `apps/web/src/game/gradient.ts` samples the
   road's grade at the rider's odometer, wrapped onto the route, and offers it to the trainer through
   `apps/web/src/game/trainer-port.ts`. `packages/domain/src/trainer/simulation.ts` writes a grade **at
-  most once a second**.
+  most once a second**, and only when it has moved by more than a **0.1 % deadband**. In a room the
+  #782 correction also limits how fast the grade may step. D-2.1 inherits all three.
 - **The trainer-command seam** is the list `scripts/check-wiring.mjs` holds as `TRAINER_COMMAND_SEAM`.
   Delivery's guarantee is `apps/web/src/game/delivery/delivery-cannot-reach-trainer.test.ts` (#1807),
   which reads that list and also finds every trainer-control writer by rule (ADR 0059's amendment).
@@ -159,13 +160,17 @@ grades at identical times through the real `GameView`. #1911 repeats it in a roo
 4. **The offset never decays into or out of `effortDistance`.** Nothing adds the offset to the effort
    distance, nothing derives the offset from it, and an offset that returns toward zero does so by its
    own rule, never by moving the effort distance.
-5. **What B means for the rider.** The road the rider is drawn on and the road the trainer is
-   simulating are never more than B apart. A rider knocked back 10 m sees a crest 10 m before they
-   feel it.
+5. **What B means for the rider.** The road the rider is drawn on and the road the grade is **read**
+   at are never more than B apart. What the trainer **holds** lags the read point further, because of
+   the once-a-second write, the deadband and, in a room, the #782 grade-step limiter, so the drawn
+   road and the felt road can differ by about 2B at 36 km/h. A rider knocked back 10 m sees a crest
+   up to about 20 m before they feel it.
 
 **Why 10 m.** The grade is written at most once a second, so the trainer already holds each grade for
 up to a second of road. At a race pace of about 36 km/h that is about 10 m. **B = 10 m keeps the
-drawn hill and the felt hill within about one write interval of each other at race pace.** It is also
+drawn hill and the grade's read point within about one write interval of each other at race pace.**
+This is **speed-dependent**: on a climb at 12 km/h, 10 m is about 3 s of road, so the same B is a
+larger disagreement in time exactly where the grade matters most. It is also
 about one second of riding, which is a felt but small swing in a race: an item can win or lose a
 close sprint, and 2B = 20 m (about two seconds) is the most items can ever move a result (D-4). The
 owner may choose another number. The trade-off is that a bigger B gives items more weight and lets
@@ -182,10 +187,12 @@ do can reach the trainer. **This costs the feel of the road**: no hills in the l
 
 ### D-4 — Effort dominates
 
-1. **The fairness rule, in a form #1897 can test**: *if, at the instant the first of two racers A
-   and B reaches the race length at their drawn distance, A's `effortDistance` exceeds B's by more
-   than 2B, then A finishes ahead of B, under any item sequence.* (The proof: B's drawn distance is
-   at most `eB + B`, which is less than `eA − B`, which is at most A's drawn distance.) In the
+1. **The fairness rule, in a form #1897 can test**, naming the two racers X and Y so that neither
+   letter is the bound B or an option: *if, at the instant the first of the two reaches the race
+   length at their drawn distance, X's `effortDistance` exceeds Y's by more than 2B, then X finishes
+   ahead of Y, under any item sequence.* (The proof, with `eX` and `eY` the two effort distances:
+   Y's drawn distance is at most `eY + B`, which is less than `eX − B`, which is at most X's drawn
+   distance.) In the
    epic's words: **a rider whose effort distance leads by more than 2B finishes ahead under any item
    sequence.** Under option
    A with B = 10 m, a rider who leads on the pedals by more than 20 m at the line wins, whatever
@@ -207,7 +214,11 @@ do can reach the trainer. **This costs the feel of the road**: no hills in the l
    never their shelter (ADR 0038 D-4 is unchanged).
 4. **Clients send inputs, never outcomes.** A rider's client sends "use the held item" and "change
    lane". The room resolves hits and offsets from the shared rules (#1899, #1909) and the client
-   predicts and is corrected, as ADR 0028 D-2 has it for position.
+   predicts and is corrected, as ADR 0028 D-2 has it for position. **The room's correction steers
+   toward `effortDistance` only.** The #782 correction moves the simulation's ride distance, which is
+   what the grade is read at, so a room that reported drawn distance (`effortDistance` plus
+   `raceOffset`) as position would let an item hit move the grade's read point and break D-2.1 and
+   D-3.4. `raceOffset` never reaches the correction path, and #1909 holds this as a test.
 5. **One item is held at a time, and matching items are never combined into a stronger effect.**
    Spike 0030 §3.3 and §6 read this as keeping US 11,103,784's claims out of reach by construction.
    A second item slot would need that reading re-run first.
@@ -221,7 +232,12 @@ do can reach the trainer. **This costs the feel of the road**: no hills in the l
 2. **Either way, the draft model keeps no lateral argument** and D-3.4's single-file drafting is
    unchanged. #1909's room holds the lane beside the item state, and a test asserts that neither
    `advance` nor the draft function is passed it.
-3. **The alternative** is to treat any room-held lateral position as D-3.4 says, which would need an
+3. **Lanes are discrete**, a small fixed number of positions a rider changes between, never a
+   continuous lateral position. Spike 0030 §6 reads US 11,071,911 as outside by construction *given
+   discrete lanes*, and §10 lists drag-scaled or touch-start steering as something that would make
+   that reading wrong. #1901 is bound by this, and a continuous or drag-scaled steer needs the spike's
+   reading re-run first.
+4. **The alternative** is to treat any room-held lateral position as D-3.4 says, which would need an
    ADR superseding ADR 0038 D-3.4 before #1909.
 
 **Owner question (D-14 Q2): is a lane the room holds for item hits only, never read by the physics
@@ -292,6 +308,10 @@ As ADR 0059 D-3, for this mode.
    - **In a room**, a bundled circuit keeps only the first ground, and weakens it, because a menu of
      shipped circuits is a menu of things offered for selection.
 3. **Proposed, if the owner allows bundled circuits: solo bot races only, never a room's course.**
+   **Authority.** ADR 0028 D-7.1 is a fairness and patent constraint between people, and a solo bot
+   race has no second rider, so the proposed reading is that D-7.1 does not reach it and this ADR
+   supersedes nothing. If the owner reads D-7.1 strictly, a yes to Q6 is a **partial supersession of
+   D-7.1 for solo bot races**, as D-6 would be for ADR 0038 D-3.4, and the owner's answer says so.
 
 **Owner question (D-14 Q6): may a loop circuit shipped in the app be offered for a solo bot race
 (proposed: yes, solo only, never in a room), or does every race use the rider's own loop?**
