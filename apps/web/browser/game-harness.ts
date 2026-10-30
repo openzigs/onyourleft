@@ -67,6 +67,7 @@ import {
   metresPerSecond,
   routeProfile,
   seconds,
+  type RouteProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
 import type { KitColour } from '@onyourleft/store';
@@ -77,6 +78,7 @@ import {
   NEAR_PLANE_METRES,
   cameraRig,
   verticalHalfTangent,
+  type RigPoint,
 } from '../src/game/camera';
 import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
@@ -84,7 +86,12 @@ import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
-import { ROAD_WIDTH_METRES, corridorOrigin, drawnRoadFrame } from '../src/game/terrain';
+import {
+  ROAD_WIDTH_METRES,
+  corridorOrigin,
+  drawnRoadFrame,
+  type CorridorOrigin,
+} from '../src/game/terrain';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from '../src/game/road-grid';
 import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES } from '../src/game/people';
 import { pavementSides } from '../src/game/footways';
@@ -102,6 +109,8 @@ import {
   hillRoute,
   lakeValleyRoute,
   northRoute,
+  plannerRoute,
+  sBendRoute,
   steadyClimb,
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
@@ -143,6 +152,7 @@ import {
   CORNICE,
   FACADE_OFFSET,
   FACADE_SHOPFRONT,
+  FOOTPRINT_MAX_VERTICES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   mappedTown,
@@ -158,6 +168,7 @@ import {
   besideRoad,
   buildingBeside,
   denseTownFixture,
+  kerbsideFixture,
   landBeside,
   mixedTownFixture,
   rectangleBeside,
@@ -285,7 +296,15 @@ import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../s
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { silhouetteCoverage, silhouetteThrow } from '../src/game/rider-silhouette';
 import { CONTACT_SHADOW_DARKNESS } from '../src/game/contact-shadow';
-import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
+import {
+  clearOfTheCamera,
+  mappedBuildingCut,
+  nearPyramid,
+  peopleClearOfTheCamera,
+  sceneryReach,
+  type NearPyramid,
+} from '../src/game/near-field';
+import { urbanClassMap } from '../src/game/urban-class';
 import {
   REALISTIC_SURFACES,
   REALISTIC_TREES_DEFAULT,
@@ -969,6 +988,10 @@ declare global {
       readonly settlement: SettlementMeasurement;
       /** #545 — the closest pass of scenery to the camera, drawn. @see nearFieldProbe */
       readonly nearField: NearFieldMeasurement;
+      /** #1835 — the closest pass of a mapped wall, drawn. @see nearFieldStreetProbe */
+      readonly nearFieldWall: StreetNearFieldMeasurement;
+      /** #1835 — the closest pass of a person, drawn. @see nearFieldStreetProbe */
+      readonly nearFieldPerson: StreetNearFieldMeasurement;
       /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
@@ -1710,6 +1733,241 @@ function nearFieldProbe(
     controlPixels: differing(control, controlNear),
     noisePixels: differing(shipped, again),
     world,
+  };
+}
+
+/**
+ * What {@link nearFieldStreetProbe} measures — #1835: {@link
+ * NearFieldMeasurement}'s pixels, and how many people the view's belt drew
+ * with the cull and without it (`three-renderer.ts` §`peopleDrawnOf`).
+ */
+export interface StreetNearFieldMeasurement extends NearFieldMeasurement {
+  readonly peopleDrawn: { readonly withCull: number; readonly without: number };
+}
+
+/** What {@link nearFieldStreetProbe} reports when it did not run. */
+const NO_STREET_NEAR_FIELD: StreetNearFieldMeasurement = {
+  ...NO_NEAR_FIELD,
+  peopleDrawn: { withCull: Number.NaN, without: Number.NaN },
+};
+
+/** Which of the two classes #1835's browser probe draws the closest pass of. */
+type StreetPass = 'mapped building' | 'person';
+
+/** One ride the street probe may take its frame from: a route, and what the frame is handed beyond it. */
+interface StreetRide {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly input: Partial<Parameters<typeof builtSceneFrame>[0]>;
+  /** Its mapped buildings, or none. */
+  readonly plans: readonly FootprintPlan[];
+  readonly buildings: MappedBuildings | undefined;
+}
+
+/** The rides on which `near-field-street.test.ts` finds each class at a 6 : 1 plane. */
+function streetRides(pass: StreetPass): readonly StreetRide[] {
+  if (pass === 'person') {
+    // The people on the villages' pavements round the bends.
+    return [
+      sBendRoute(30),
+      sBendRoute(30, 'left'),
+      plannerRoute(),
+      plannerRoute({ mirrored: true }),
+    ].map((profile) => ({
+      profile,
+      origin: corridorOrigin(profile),
+      input: {},
+      plans: [],
+      buildings: undefined,
+    }));
+  }
+  // The kerbside town's walls round the planner's bends.
+  const { profile, origin, corridor } = kerbsideFixture();
+  const land = landClassMask(corridor);
+  const urban = urbanClassMap(corridor, land, profile);
+  const { plans } = footprintPlans(corridor, land, profile, origin, FOOTPRINT_MAX_VERTICES, urban);
+  const buildings = mappedBuildingsOf(plans);
+  return [
+    {
+      profile,
+      origin,
+      input: {
+        worldCorridor: corridor,
+        landClass: land,
+        mappedBuildings: buildings,
+        mappedTown: mappedTown(corridor, plans, urban),
+      },
+      plans,
+      buildings,
+    },
+  ];
+}
+
+/**
+ * A mapped wall or a person the camera passes, read off the drawing buffer —
+ * #1835, the street's half of {@link nearFieldProbe}, by the same measure: the
+ * frame with the near plane where it ships and half as far, the cull on and
+ * off, and the shipped frame twice for the noise floor.
+ *
+ * ## Which frame
+ *
+ * Ridden a metre at a time on a 6 : 1 canvas (`camera.ts`
+ * §`WORST_CASE_ASPECT`, the widest the stylesheet allows and the frame #1835
+ * was found at), in the realistic world, the only one that draws mapped
+ * buildings and people: for the walls, `footprint-fixtures-testing.ts`
+ * §`kerbsideFixture`, mapped walls at the least clearance the press keeps round
+ * the planner's bends; for the people, the villages' pavements round the
+ * S-bend and the planner's route, both ways. The frame is the one on which
+ * `near-field.ts` §`mappedBuildingCut` or §`peopleClearOfTheCamera` drops the
+ * most of that class: the closest pass. `near-field-street.test.ts` is the
+ * arithmetic over every ride; this is the one frame, drawn.
+ *
+ * ⚠️ **A person's closest pass shows no cut pixel.** A person is culled on a
+ * box (`near-field.ts` §`personCut`), and at the nearest pass the probe finds,
+ * 1.7 m from the eye in plan, the box meets the plane while the body does not:
+ * the control's pixels are nought. So the person's half also reads back how
+ * many people the view's belt drew with the cull and without it
+ * (`three-renderer.ts` §`peopleDrawnOf`), which is what holds the view to
+ * handing the belt the cull's people.
+ *
+ * ## What is drawn of it
+ *
+ * The scenery whose reach could bring it to the plane, as {@link
+ * nearFieldProbe} says why, and the mapped buildings within the plane's reach
+ * of the eye: moving the near plane moves the depth buffer's precision under
+ * every far plinth in the town, which is not a cut.
+ */
+function nearFieldStreetProbe(
+  width: number,
+  height: number,
+  settings: QualitySettings,
+  pass: StreetPass,
+): StreetNearFieldMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, settings);
+  view.resize(width, height);
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (gl === null) {
+    view.destroy();
+    return NO_STREET_NEAR_FIELD;
+  }
+  const world = drawnWorldOf(view);
+  const aspect = width / height;
+  const inputAt = (ride: StreetRide, distance: number): Parameters<typeof builtSceneFrame>[0] => {
+    const start = atStartLine(ride.profile);
+    return {
+      profile: ride.profile,
+      origin: ride.origin,
+      state: {
+        ...start,
+        ridden: seconds(start.ridden + distance / 8),
+        ride: { speed: metresPerSecond(8), distance: metres(distance) },
+      },
+      people: PEOPLE_NEAR_MAX,
+      ...ride.input,
+    };
+  };
+  /** What the renderer's cull of `pass` drops from a frame, and the nearest of it in plan. */
+  const droppedFrom = (
+    ride: StreetRide,
+    frame: SceneFrame,
+    pyramid: NearPyramid,
+  ): { readonly cut: string[]; readonly pivot: number } => {
+    const eye = pyramid.points[0] as RigPoint;
+    const cut: string[] = [];
+    let pivot = Number.POSITIVE_INFINITY;
+    if (pass === 'person') {
+      const kept = peopleClearOfTheCamera(frame.people, pyramid);
+      const drawn = new Set([...(kept?.near ?? []), ...(kept?.far ?? [])]);
+      for (const person of [...(frame.people?.near ?? []), ...(frame.people?.far ?? [])]) {
+        if (drawn.has(person)) continue;
+        cut.push('person');
+        pivot = Math.min(pivot, Math.hypot(person.x - eye.x, person.z - eye.z));
+      }
+    }
+    if (pass === 'mapped building' && ride.buildings !== undefined) {
+      const { radii } = ride.buildings;
+      ride.plans.forEach((plan, index) => {
+        if (!mappedBuildingCut(plan, radii[index] as number, pyramid)) return;
+        cut.push('mapped building');
+        pivot = Math.min(pivot, Math.hypot(plan.centroid.x - eye.x, plan.centroid.z - eye.z));
+      });
+    }
+    return { cut, pivot };
+  };
+  let chosen:
+    { ride: StreetRide; distance: number; pivot: number; cut: readonly string[] } | undefined;
+  for (const ride of streetRides(pass)) {
+    for (let distance = 0; distance < ride.profile.totalDistance; distance += 1) {
+      const lent = lentSceneFrame(inputAt(ride, distance));
+      const dropped = droppedFrom(ride, lent, nearPyramid(cameraRig(lent.camera), aspect));
+      if (dropped.cut.length === 0) continue;
+      // A person's closest pass is the nearest; a wall's, the frame that drops
+      // the most, since a building's middle says little of where its wall is.
+      const closer =
+        chosen === undefined ||
+        (pass === 'person' ? dropped.pivot < chosen.pivot : dropped.cut.length > chosen.cut.length);
+      if (closer) chosen = { ride, distance, ...dropped };
+    }
+  }
+  if (chosen === undefined) {
+    view.destroy();
+    return NO_STREET_NEAR_FIELD;
+  }
+  const built = sceneFrame(inputAt(chosen.ride, chosen.distance));
+  const rig = cameraRig(built.camera);
+  const pyramid = nearPyramid(rig, aspect);
+  const { buildings } = chosen.ride;
+  const near = chosen.ride.plans.filter(
+    (plan, index) =>
+      Math.hypot(plan.centroid.x - rig.eye.x, plan.centroid.z - rig.eye.z) <=
+      (buildings?.radii[index] ?? 0) + 5 + pyramid.radius,
+  );
+  const frame: SceneFrame = {
+    ...built,
+    scatter: built.scatter.filter((item) => {
+      const reach = sceneryReach(item.kind, world);
+      const plan = Math.hypot(reach.x, Math.max(-reach.back, reach.front)) * item.scale;
+      return Math.hypot(item.x - rig.eye.x, item.z - rig.eye.z) <= plan + pyramid.radius;
+    }),
+    ...(built.mappedBuildings === undefined
+      ? {}
+      : { mappedBuildings: { ...built.mappedBuildings, buildings: mappedBuildingsOf(near) } }),
+  };
+  const drawn = (nearMetres: number, clear: boolean): Uint8Array => {
+    nearFieldOf(view, nearMetres, clear);
+    // Twice, and only the second read: `riderExtent` says why.
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, width, height);
+  };
+  const differing = (a: Uint8Array, b: Uint8Array): number =>
+    compareRegions(a, b, width, height, 0, 0, width, height).changed;
+  /** The people the view's belt drew in its last frame, read back off its meshes. */
+  const peopleDrawn = (): number => {
+    const people = peopleDrawnOf(view);
+    return (people?.near.length ?? 0) + (people?.far.length ?? 0);
+  };
+  const shipped = drawn(NEAR_PLANE_METRES, true);
+  const drawnWithCull = peopleDrawn();
+  const again = drawn(NEAR_PLANE_METRES, true);
+  const shippedNear = drawn(NEAR_PLANE_METRES * CONTROL_NEAR_SHARE, true);
+  const control = drawn(NEAR_PLANE_METRES, false);
+  const drawnWithout = peopleDrawn();
+  const controlNear = drawn(NEAR_PLANE_METRES * CONTROL_NEAR_SHARE, false);
+  nearFieldOf(view, NEAR_PLANE_METRES, true);
+  view.destroy();
+  return {
+    distance: chosen.distance,
+    pivotMetres: chosen.pivot,
+    cut: chosen.cut,
+    shippedPixels: differing(shipped, shippedNear),
+    controlPixels: differing(control, controlNear),
+    noisePixels: differing(shipped, again),
+    world,
+    peopleDrawn: { withCull: drawnWithCull, without: drawnWithout },
   };
 }
 
@@ -12429,6 +12687,8 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     water: NO_WATER,
     settlement: NO_SETTLEMENT,
     nearField: NO_NEAR_FIELD,
+    nearFieldWall: NO_STREET_NEAR_FIELD,
+    nearFieldPerson: NO_STREET_NEAR_FIELD,
     botCrankPixels: 0,
     contactShadowPixels: {},
     contactShadowLuminance: {},
@@ -12501,7 +12761,18 @@ async function run(): Promise<void> {
       // is what loaded that world. @see nearFieldProbe
       const nearField = nearFieldProbe(1_600, 200, REALISTIC_LADDER[0] as QualitySettings);
       phaseEnds('near field');
-      window.__oylGameHarness = { ...emptyHarness(errors), realistic, nearField };
+      // #1835: and the street's, at the widest frame the stylesheet allows.
+      const rung = REALISTIC_LADDER[0] as QualitySettings;
+      const nearFieldWall = nearFieldStreetProbe(1_200, 200, rung, 'mapped building');
+      const nearFieldPerson = nearFieldStreetProbe(1_200, 200, rung, 'person');
+      phaseEnds('near field, the street');
+      window.__oylGameHarness = {
+        ...emptyHarness(errors),
+        realistic,
+        nearField,
+        nearFieldWall,
+        nearFieldPerson,
+      };
     } catch (error: unknown) {
       errors.push(error instanceof Error ? error.message : String(error));
       window.__oylGameHarness = emptyHarness(errors);
@@ -13282,6 +13553,8 @@ async function run(): Promise<void> {
     water,
     settlement,
     nearField: NO_NEAR_FIELD,
+    nearFieldWall: NO_STREET_NEAR_FIELD,
+    nearFieldPerson: NO_STREET_NEAR_FIELD,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,

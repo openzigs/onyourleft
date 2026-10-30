@@ -46,21 +46,27 @@
  * furniture by the pavement it stands on. Measured while building this, a
  * 3 : 1 frame is clean too.
  *
- * ⚠️ **Not 6 : 1 — #1835.** `near-field.test.ts` holds the scatter clean at
- * 6 : 1, the widest frame the stylesheet allows, because the cull drops what
- * the plane would cut there. These classes are not culled, and from 32 : 9
- * upward the plane DOES meet two of them: people on the bends and the
- * kerbside town's walls. Those are desktop browser frames no device draws;
- * #1835 tracks them, and this file pins today's 6 : 1 count exactly as a
- * known failure, so a fix or a regression shows in CI.
+ * ⚠️ **At 6 : 1 two classes are culled — #1835.** From 32 : 9 upward the
+ * plane DOES meet two of them as `sceneFrame` builds the frame: people on the
+ * bends and the kerbside town's walls, desktop browser frames no device draws.
+ * Since #1835 the renderer drops them as it drops scatter (`near-field.ts`
+ * §`peopleClearOfTheCamera` and §`mappedBuildingCut`, which
+ * `three-renderer.ts` §`MappedBuildingBelt.clearOf` hides a building by), so
+ * this file asks each ride twice: what the plane meets in the frame as built —
+ * pinned exactly at 6 : 1, the cull's work, so a change that brings more to the
+ * plane shows — and what it meets of what the renderer still DRAWS, which is
+ * nothing at every aspect the stylesheet allows. And the culls drop exactly
+ * what this file's measure meets, so a cull that drops too much is red too.
  *
  * ⚠️ **The controls.** At 8 : 1, the frame `near-field.test.ts`' control
  * rides, the near rectangle is 5.6 m across, and the same measure on the same
  * frames DOES meet a gantry's leg, a person, a lamp post, a decoration and a
  * mapped wall. The classes 8 : 1 does not reach are held by a probe for every
- * class: a near pyramid stood where the product's own numbers put one thing
- * of that class must meet the subject this file built for it, and the same
- * pyramid 50 m up must not — so a box placed in the wrong frame, a mesh never
+ * class: near pyramids stood where the product's own numbers put one thing of
+ * that class — since #1835 at every corner the product gives it, so a box
+ * built too SMALL misses one, not only a box built in the wrong place — must
+ * meet the subject this file built for it, and the same pyramids 50 m up must
+ * not — so a box placed in the wrong frame or made too small, a mesh never
  * asked, or a plan never asked of its triangles cannot pass these rides over
  * nothing.
  */
@@ -78,11 +84,9 @@ import {
   type DecorationPart,
 } from './decorations';
 import {
-  buildingBeside,
   cityStreetscapeFixture,
-  landBeside,
+  kerbsideFixture,
   mixedTownFixture,
-  rectangleBeside,
   richmondStreetFixture,
 } from './footprint-fixtures-testing';
 import {
@@ -98,8 +102,14 @@ import { HOUSE_MODELS } from './house-models';
 import { landClassMask, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { mappedBuildingsOf } from './mapped-buildings';
-import { nearPyramid, triangleMeets, type NearPyramid } from './near-field';
-import { PEOPLE_NEAR_MAX, type Person } from './people';
+import {
+  mappedBuildingCut,
+  nearPyramid,
+  peopleClearOfTheCamera,
+  triangleMeets,
+  type NearPyramid,
+} from './near-field';
+import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES, type Person } from './people';
 import type { SceneFrame } from './port';
 import { distanceToDrawnRoad } from './road-grid';
 import { hairpinRoute, northRoute, plannerRoute, sBendRoute } from './route-fixtures-testing';
@@ -109,7 +119,11 @@ import { atStartLine } from './simulation';
 import type { FurnitureItem, FurnitureKind } from './streets';
 import { corridorOrigin, type CorridorOrigin } from './terrain';
 import { urbanClassMap, type UrbanClassMap } from './urban-class';
-import { decorationGeometry, decorationShapeTriangles } from './three-renderer';
+import {
+  decorationGeometry,
+  decorationShapeTriangles,
+  furniturePartBounds,
+} from './three-renderer';
 import type { WorldCorridor } from './world-data/corridor';
 
 /**
@@ -430,62 +444,6 @@ function pressed(fixture: {
   return { ...fixture, land, urban, plans, town: mappedTown(fixture.corridor, plans, urban) };
 }
 
-/** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
-const INSIDE_CLEARANCE_METRES = 2;
-
-/**
- * The closest pass a map can make: houses and shops whose front walls stand
- * `ROAD_CLEARANCE_METRES` and a few centimetres from the road — the least the
- * press keeps (`footprint-buildings.ts` rule 3) — every 9 m along both sides
- * of the planner's route, round its bends, on residential land and then
- * commercial, one storey to four. Every fifth is mapped nearer still, its
- * front {@link INSIDE_CLEARANCE_METRES} from the road, which the press must
- * drop. What the press drops, it drops; what is left is what a ride draws.
- */
-function kerbsideFixture(options: { readonly mirrored?: boolean } = {}): {
-  readonly profile: RouteProfile;
-  readonly origin: CorridorOrigin;
-  readonly corridor: WorldCorridor;
-} {
-  const profile = plannerRoute(options);
-  const origin = corridorOrigin(profile);
-  const heights = [3.5, 6, 9, 12] as const;
-  const kept = ROAD_CLEARANCE_METRES + 0.05;
-  const buildings = [];
-  const half = profile.totalDistance / 2;
-  for (let along = 20, index = 0; along < profile.totalDistance - 20; along += 9, index += 1) {
-    const front = index % 5 === 4 ? INSIDE_CLEARANCE_METRES : kept;
-    for (const side of [1, -1]) {
-      const depth = 8;
-      buildings.push(
-        buildingBeside(
-          profile,
-          origin,
-          [rectangleBeside(along, side * (front + depth / 2), 7, depth)],
-          heights[index % heights.length],
-        ),
-      );
-    }
-  }
-  return {
-    profile,
-    origin,
-    corridor: {
-      routeId: 'kerbside',
-      origin,
-      covered: () => true,
-      coveredBoxes: [{ minX: -5_000, maxX: 5_000, minZ: -5_000, maxZ: 5_000 }],
-      landUse: [
-        landBeside(profile, origin, 'landuse', 'residential', 0, half, -40, 40),
-        landBeside(profile, origin, 'landuse', 'commercial', half, profile.totalDistance, -40, 40),
-      ],
-      buildings,
-      paths: [],
-      streets: [],
-    },
-  };
-}
-
 /** A ride: its route, the stretch ridden, and what `sceneFrame` is handed beyond the state. */
 interface Ride {
   readonly profile: RouteProfile;
@@ -557,11 +515,99 @@ const RIDES: Readonly<Record<string, () => Ride>> = {
  * never from the boxes this file builds, so a box built in the wrong place
  * fails the probe test below rather than passing as clear.
  */
-type Probe = () => CameraRig;
+type Probe = () => readonly CameraRig[];
 
 /** A rig standing inside `point`, looking along the road's plane and a little down. */
 function rigInside(point: RigPoint): CameraRig {
   return { eye: point, target: vector(point.x + 1, point.y - 0.3, point.z + 0.2) };
+}
+
+/**
+ * How far inside a thing's own extremes a size probe stands, in metres: a
+ * centimetre, so that a box which reaches exactly as far as the thing passes,
+ * and one a centimetre short of it does not.
+ */
+const PROBE_INSET_METRES = 0.01;
+
+/** `point` moved {@link PROBE_INSET_METRES} toward `middle`. */
+function insetToward(point: RigPoint, middle: RigPoint): RigPoint {
+  const dx = middle.x - point.x;
+  const dy = middle.y - point.y;
+  const dz = middle.z - point.z;
+  const length = Math.hypot(dx, dy, dz);
+  if (length <= PROBE_INSET_METRES) return middle;
+  const share = PROBE_INSET_METRES / length;
+  return vector(point.x + dx * share, point.y + dy * share, point.z + dz * share);
+}
+
+/**
+ * Rigs at the eight corners of a box the PRODUCT gives — its middle, its own
+ * three axes and how far it reaches along each — each a centimetre inside:
+ * so the box this file built for it must reach every corner, and a box built
+ * too small (a person's made 1 cm) is missed by one of them (#1835).
+ */
+function rigsAtCorners(
+  middle: RigPoint,
+  axes: readonly [RigPoint, RigPoint, RigPoint],
+  half: readonly [number, number, number],
+): CameraRig[] {
+  const rigs: CameraRig[] = [];
+  for (const a of [-1, 1]) {
+    for (const b of [-1, 1]) {
+      for (const c of [-1, 1]) {
+        const corner = vector(
+          middle.x + axes[0].x * half[0] * a + axes[1].x * half[1] * b + axes[2].x * half[2] * c,
+          middle.y + axes[0].y * half[0] * a + axes[1].y * half[1] * b + axes[2].y * half[2] * c,
+          middle.z + axes[0].z * half[0] * a + axes[1].z * half[1] * b + axes[2].z * half[2] * c,
+        );
+        rigs.push(rigInside(insetToward(corner, middle)));
+      }
+    }
+  }
+  return rigs;
+}
+
+/**
+ * Which of `three-renderer.ts` §`FURNITURE_STYLE`'s parts each box of
+ * {@link FURNITURE_BOXES} is built round: a lamp post's foot and column in its
+ * first, its arm and lantern in its second.
+ */
+const FURNITURE_BOX_PARTS: Readonly<Record<FurnitureKind, readonly (readonly number[])[]>> = {
+  'lamp-post': [
+    [0, 1],
+    [2, 3],
+  ],
+  bollard: [[0, 1]],
+  bench: [[0, 1, 2, 3, 4, 5, 6, 7, 8]],
+  bin: [[0, 1]],
+};
+
+/** A furniture item's parts' corners, as the renderer builds them, placed and turned as the item is. */
+function furnitureProbe(item: FurnitureItem, box: number): Probe {
+  return () => {
+    const bounds = furniturePartBounds(item.kind);
+    const parts = FURNITURE_BOX_PARTS[item.kind][box] ?? [];
+    const sin = Math.sin(item.rotation);
+    const cos = Math.cos(item.rotation);
+    const ownX = vector(cos, 0, -sin);
+    const ownZ = vector(sin, 0, cos);
+    return parts.flatMap((part) => {
+      const { min, max } = bounds[part] as (typeof bounds)[number];
+      const mx = (min[0] + max[0]) / 2;
+      const my = (min[1] + max[1]) / 2;
+      const mz = (min[2] + max[2]) / 2;
+      const middle = vector(
+        item.x + ownX.x * mx + ownZ.x * mz,
+        item.y + my,
+        item.z + ownX.z * mx + ownZ.z * mz,
+      );
+      return rigsAtCorners(
+        middle,
+        [ownX, vector(0, 1, 0), ownZ],
+        [(max[0] - min[0]) / 2, (max[1] - min[1]) / 2, (max[2] - min[2]) / 2],
+      );
+    });
+  };
 }
 
 /**
@@ -647,7 +693,15 @@ type Subject = (
       readonly positions: Float32Array;
       readonly indices: Uint16Array | Uint32Array;
     }
-) & { readonly probe?: Probe };
+) & {
+  readonly probe?: Probe;
+  /** The sample it is probed as, when not its class: a lamp post's arm (#1835). */
+  readonly sample?: string;
+  /** The person it is, for the renderer's cull of the people (#1835). */
+  readonly person?: Person;
+  /** The mapped building it is, or stands for, and its reach, for the belt's cull (#1835). */
+  readonly building?: { readonly plan: FootprintPlan; readonly radius: number };
+};
 
 /** A decoration part's box, turned by its anchor's yaw as three turns it. */
 function decorationPartBox(placed: DecorationItem, part: DecorationPart): Box {
@@ -686,6 +740,21 @@ function drawnPartMiddles(placed: DecorationItem, kind: DecorationKind): RigPoin
   return middles;
 }
 
+/** Every vertex of one part of one decoration as `three-renderer.ts` §`decorationGeometry` draws it. */
+function drawnPartVertices(placed: DecorationItem, kind: DecorationKind, part: number): RigPoint[] {
+  const position = decorationGeometry([placed], [kind]).getAttribute('position');
+  let vertex = 0;
+  for (let at = 0; at < part; at += 1) {
+    vertex += decorationShapeTriangles((kind.parts[at] as DecorationPart).shape) * 3;
+  }
+  const count = decorationShapeTriangles((kind.parts[part] as DecorationPart).shape) * 3;
+  const vertices: RigPoint[] = [];
+  for (let at = vertex; at < vertex + count; at += 1) {
+    vertices.push(vector(position.getX(at), position.getY(at), position.getZ(at)));
+  }
+  return vertices;
+}
+
 /** Everything a frame draws that is not scatter, near enough the eye to ask about. */
 function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
   const subjects: Subject[] = [];
@@ -696,7 +765,7 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
       what: 'pavement',
       positions,
       indices,
-      probe: () => rigFacingLargest(meshTriangles(positions, indices)),
+      probe: () => [rigFacingLargest(meshTriangles(positions, indices))],
     });
     for (const item of street.furniture) {
       furnitureBoxes(item).forEach((box, index) => {
@@ -704,8 +773,10 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
           kind: 'box',
           what: item.kind,
           box,
-          // The first box is each kind's column or body, standing on its foot.
-          ...(index === 0 ? { probe: () => rigInside(vector(item.x, item.y + 0.5, item.z)) } : {}),
+          // Every box is probed at the corners of the parts it is built
+          // round: a lamp post's arm as a sample of its own (#1835).
+          probe: furnitureProbe(item, index),
+          ...(index === 0 ? {} : { sample: `${item.kind} arm` }),
         });
       });
     }
@@ -719,7 +790,16 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
           kind: 'box',
           what: `${holiday} ${placed.item}`,
           box: decorationPartBox(placed, part),
-          probe: () => rigInside(drawnPartMiddles(placed, kind)[index] as RigPoint),
+          // Its middle as drawn, and every vertex it is drawn with (#1835).
+          probe: () => {
+            const middle = drawnPartMiddles(placed, kind)[index] as RigPoint;
+            return [
+              rigInside(middle),
+              ...drawnPartVertices(placed, kind, index).map((vertex) =>
+                rigInside(insetToward(vertex, middle)),
+              ),
+            ];
+          },
         });
       });
     }
@@ -729,7 +809,19 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
       kind: 'box',
       what: 'person',
       box: personBox(person),
-      probe: () => rigInside(vector(person.x, person.y + person.height / 2, person.z)),
+      // Their feet, their crown and their shoulders, as `people.ts` gives
+      // them: a box built smaller than the person misses one (#1835).
+      probe: () =>
+        rigsAtCorners(
+          vector(person.x, person.y + person.height / 2, person.z),
+          [
+            vector(Math.cos(person.yaw), 0, -Math.sin(person.yaw)),
+            vector(0, 1, 0),
+            vector(Math.sin(person.yaw), 0, Math.cos(person.yaw)),
+          ],
+          [PERSON_HALF_WIDTH_METRES, person.height / 2, PERSON_HALF_WIDTH_METRES],
+        ),
+      person,
     });
   }
   for (const stand of frame.lines) {
@@ -742,7 +834,19 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
         box,
         ...(each === undefined
           ? {}
-          : { probe: () => rigInside(boxPoint(each, each.box.across, each.box.up)) }),
+          : {
+              // Its corners, where `gantry.ts` §`boxPoint` stands them (#1835).
+              probe: () =>
+                rigsAtCorners(
+                  boxPoint(each, each.box.across, each.box.up),
+                  [
+                    vector(-each.headingZ, 0, each.headingX),
+                    vector(0, 1, 0),
+                    vector(each.headingX, 0, each.headingZ),
+                  ],
+                  [each.box.width / 2, each.box.height / 2, each.box.depth / 2],
+                ),
+            }),
       });
     });
   }
@@ -752,11 +856,13 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
     plans.forEach((plan, index) => {
       const reach = (radii[index] ?? 0) + 30;
       if (Math.hypot(plan.centroid.x - eye.x, plan.centroid.z - eye.z) > reach) return;
+      const building = { plan, radius: radii[index] ?? 0 };
       subjects.push({
         kind: 'plan',
         what: 'mapped building',
         plan,
-        probe: () => rigFacingLargest(planTriangles(plan)),
+        probe: () => [rigFacingLargest(planTriangles(plan))],
+        building,
       });
       const model = modelBox(plan);
       const placed = plan.model;
@@ -766,7 +872,23 @@ function subjectsOf(frame: SceneFrame, eye: RigPoint): Subject[] {
           kind: 'box',
           what: 'house model',
           box: model,
-          probe: () => rigInside(vector(placed.cx, placed.y0 + height / 2, placed.cz)),
+          // The corners of the rectangle `house-models.ts` §`placeHouseModel`
+          // stretches it to, as tall as the model (#1835).
+          probe: () => {
+            const houseModel = HOUSE_MODELS[placed.model];
+            const length = Math.hypot(placed.ax, placed.az);
+            const long = vector(placed.ax / length, 0, placed.az / length);
+            return rigsAtCorners(
+              vector(placed.cx, placed.y0 + height / 2, placed.cz),
+              [long, vector(0, 1, 0), vector(-long.z, 0, long.x)],
+              [
+                ((houseModel?.length ?? 0) * placed.stretchX) / 2,
+                height / 2,
+                ((houseModel?.depth ?? 0) * placed.stretchZ) / 2,
+              ],
+            );
+          },
+          building,
         });
       }
     });
@@ -788,15 +910,37 @@ function meets(subject: Subject, pyramid: NearPyramid): boolean {
 interface Found {
   /** Frames measured, by ride, so a finding cannot pass over rides that never ran. */
   readonly measured: Map<string, number>;
-  /** Subject-frames the plane meets, by aspect, and what they were. */
+  /** Subject-frames the plane meets in the frame as `sceneFrame` built it, by aspect, and what they were. */
   readonly met: Map<string, Map<string, number>>;
+  /**
+   * Of {@link met}, those the renderer still draws: what is left once
+   * `near-field.ts` §`peopleClearOfTheCamera` and §`mappedBuildingCut` have
+   * dropped what they drop at that aspect (#1835).
+   */
+  readonly drawnMet: Map<string, Map<string, number>>;
+  /** Subject-frames those two culls drop, met or not, by aspect: so a cull that drops too much is red too. */
+  readonly dropped: Map<string, Map<string, number>>;
   /** Subject-frames asked about, by what they were: so a class that never came near cannot pass. */
   readonly asked: Map<string, number>;
-  /** The first subject of each class that carries a probe. */
+  /** The first subject of each class — or sample, a lamp post's arm — that carries a probe. */
   readonly samples: Map<string, Subject>;
 }
 
-const found: Found = { measured: new Map(), met: new Map(), asked: new Map(), samples: new Map() };
+const found: Found = {
+  measured: new Map(),
+  met: new Map(),
+  drawnMet: new Map(),
+  dropped: new Map(),
+  asked: new Map(),
+  samples: new Map(),
+};
+
+/** One more subject-frame of `what` at `label`. */
+function tally(into: Map<string, Map<string, number>>, label: string, what: string): void {
+  const byWhat = into.get(label) ?? new Map<string, number>();
+  byWhat.set(what, (byWhat.get(what) ?? 0) + 1);
+  into.set(label, byWhat);
+}
 
 /**
  * Ride `name` once and add what it found to {@link found}. Each test below
@@ -825,17 +969,41 @@ function ride(name: string): void {
     const subjects = subjectsOf(frame, rig.eye);
     for (const subject of subjects) {
       found.asked.set(subject.what, (found.asked.get(subject.what) ?? 0) + 1);
-      if (subject.probe !== undefined && !found.samples.has(subject.what)) {
-        found.samples.set(subject.what, subject);
+      const sample = subject.sample ?? subject.what;
+      if (subject.probe !== undefined && !found.samples.has(sample)) {
+        found.samples.set(sample, subject);
       }
     }
     for (const [label, aspect] of Object.entries(ASPECTS)) {
       const pyramid = nearPyramid(rig, aspect);
+      // What the renderer draws of them at this aspect (#1835): the people
+      // `three-renderer.ts` hands its people belt, and the mapped buildings
+      // its belt does not hide — a house model with its plan.
+      // The cull hands back the very same people when it drops nobody, which
+      // is nearly every frame: only then is a set of who is left built.
+      const people = peopleClearOfTheCamera(frame.people, pyramid);
+      const drawnPeople =
+        people === frame.people
+          ? undefined
+          : new Set([...(people?.near ?? []), ...(people?.far ?? [])]);
+      let cut: Map<FootprintPlan, boolean> | undefined;
+      const cutOf = ({ plan, radius }: { plan: FootprintPlan; radius: number }): boolean => {
+        cut ??= new Map();
+        const known = cut.get(plan);
+        if (known !== undefined) return known;
+        const answer = mappedBuildingCut(plan, radius, pyramid);
+        cut.set(plan, answer);
+        return answer;
+      };
       for (const subject of subjects) {
+        const dropped =
+          subject.person !== undefined
+            ? drawnPeople !== undefined && !drawnPeople.has(subject.person)
+            : subject.building !== undefined && cutOf(subject.building);
+        if (dropped) tally(found.dropped, label, subject.what);
         if (!meets(subject, pyramid)) continue;
-        const byWhat = found.met.get(label) ?? new Map<string, number>();
-        byWhat.set(subject.what, (byWhat.get(subject.what) ?? 0) + 1);
-        found.met.set(label, byWhat);
+        tally(found.met, label, subject.what);
+        if (!dropped) tally(found.drawnMet, label, subject.what);
       }
     }
     frames += 1;
@@ -848,6 +1016,9 @@ function rideAll(): Found {
   for (const name of Object.keys(RIDES)) ride(name);
   return found;
 }
+
+/** The classes the renderer culls at the near plane itself — #1835. */
+const CULLED = ['person', 'mapped building'] as const;
 
 /** Every class this file speaks for: each must be asked about, met by the control, and probed. */
 const CLASSES = [
@@ -887,6 +1058,9 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       for (const what of CLASSES) expect(asked.get(what) ?? 0, what).toBeGreaterThan(0);
       for (const label of Object.keys(DEVICE_ASPECTS)) {
         expect(Object.fromEntries(met.get(label) ?? []), label).toEqual({});
+        // So the renderer's own cull of the people and the mapped buildings
+        // has nothing to drop on a device either: nobody vanishes (#1835).
+        expect(Object.fromEntries(rideAll().dropped.get(label) ?? []), label).toEqual({});
       }
     },
     ALL_RIDES_TIMEOUT,
@@ -922,37 +1096,77 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       // box this file built in the wrong place, or a mesh it never asks, is
       // missed by that pyramid and goes red here; the same pyramid 50 m up
       // must meet nothing, so a measure that meets everything goes red too.
+      //
+      // ⚠️ Since #1835 a probe is every corner the product gives the thing,
+      // not only where it stands: a person's feet, crown and shoulders, each
+      // part of a piece of furniture, a gantry's box, a decoration's every
+      // drawn vertex, a model's rectangle. So a box this file built too small —
+      // a person's made 1 cm — misses one and goes red here, where before only
+      // the pinned count could see it.
       const { samples } = rideAll();
-      for (const what of CLASSES) {
+      for (const what of [...CLASSES, 'lamp-post arm']) {
         const subject = samples.get(what);
         expect(subject?.probe, `${what}: a sample to probe`).toBeDefined();
         if (subject?.probe === undefined) continue;
-        const at = subject.probe();
+        const rigs = subject.probe();
+        expect(rigs.length, `${what}: rigs to probe`).toBeGreaterThan(0);
         const up = (point: RigPoint): RigPoint => vector(point.x, point.y + 50, point.z);
         const aspect = DEVICE_ASPECTS["the owner's tablet"] as number;
-        expect
-          .soft(meets(subject, nearPyramid(at, aspect)), `${what}: met where it stands`)
-          .toBe(true);
-        expect
-          .soft(
-            meets(subject, nearPyramid({ eye: up(at.eye), target: up(at.target) }, aspect)),
-            `${what}: met 50 m above it`,
-          )
-          .toBe(false);
+        const missed = rigs.filter((at) => !meets(subject, nearPyramid(at, aspect))).length;
+        expect.soft(missed, `${what}: probes that miss it where it stands`).toBe(0);
+        const above = rigs.filter((at) =>
+          meets(subject, nearPyramid({ eye: up(at.eye), target: up(at.target) }, aspect)),
+        ).length;
+        expect.soft(above, `${what}: probes that meet it 50 m above it`).toBe(0);
       }
     },
     ALL_RIDES_TIMEOUT,
   );
 
   it(
-    'KNOWN FAILURE #1835: at 6 : 1 the plane meets people on the bends and the kerbside town’s walls',
+    'at 6 : 1 the renderer draws nothing the plane meets, where the frame as built has people on the bends and the kerbside town’s walls — #1835',
     () => {
-      // Pinned, not passed: `camera.ts` §`WORST_CASE_ASPECT`, a desktop
-      // window no device draws, cuts two classes no cull drops — #1835. The
-      // count is exact so that a fix (fewer) or a regression (more, or a new
-      // class) turns this red; whoever closes #1835 replaces it with `{}`.
-      const widest = rideAll().met.get(WIDEST_LABEL) ?? new Map<string, number>();
-      expect(Object.fromEntries(widest)).toEqual({ person: 23, 'mapped building': 282 });
+      const { met, drawnMet } = rideAll();
+      // What is drawn: nothing the plane meets, at the widest frame the
+      // stylesheet allows (`camera.ts` §`WORST_CASE_ASPECT`). This was pinned
+      // as a known failure until #1835.
+      expect(Object.fromEntries(drawnMet.get(WIDEST_LABEL) ?? [])).toEqual({});
+      // The control — the defect, as built: the same frames before the cull,
+      // pinned exactly as #1834 measured them, so a cull that has nothing to
+      // drop cannot pass over nothing, and a change to the camera, the line
+      // or the placement that brings more to the plane shows here.
+      expect(Object.fromEntries(met.get(WIDEST_LABEL) ?? [])).toEqual({
+        person: 23,
+        'mapped building': 282,
+      });
+    },
+    ALL_RIDES_TIMEOUT,
+  );
+
+  it(
+    'the cull drops exactly the people and the mapped buildings the plane meets, at 6 : 1 and at 8 : 1 — #1835',
+    () => {
+      // A cull that dropped every person near the eye, or every building in
+      // the street, would pass the test above; it is a frame missing what a
+      // rider should see. So what is dropped is what this file's own measure
+      // meets, class by class, and nothing more — a house model goes with its
+      // plan, which is the belt's rule, and is counted apart.
+      const { met, dropped, drawnMet } = rideAll();
+      for (const label of [WIDEST_LABEL, 'the control frame']) {
+        const byWhat = dropped.get(label) ?? new Map<string, number>();
+        for (const what of CULLED) {
+          expect(byWhat.get(what) ?? 0, `${label}: ${what} dropped`).toBe(
+            met.get(label)?.get(what) ?? 0,
+          );
+          expect(drawnMet.get(label)?.get(what) ?? 0, `${label}: ${what} drawn and met`).toBe(0);
+        }
+        for (const what of byWhat.keys()) {
+          expect([...CULLED, 'house model'], `${label}: ${what} dropped`).toContain(what);
+        }
+      }
+      // And at 8 : 1 what is not culled here is still met: the measure is the
+      // same, and only the two classes are taken away.
+      expect(drawnMet.get('the control frame')?.get('lamp-post') ?? 0).toBeGreaterThan(0);
     },
     ALL_RIDES_TIMEOUT,
   );

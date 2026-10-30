@@ -43,6 +43,7 @@ import {
   rowTownFixture,
 } from './footprint-fixtures-testing';
 import { HOUSE_MODELS, placedPoint } from './house-models';
+import { mappedBuildingCut, nearPyramid, type NearPyramid } from './near-field';
 import { FRONT_PORCH } from './porch';
 import { landClassMask } from './land-class';
 import {
@@ -1084,5 +1085,165 @@ describe('a wreath on a mapped door in the winter lights — #1626', () => {
     ] as const) {
       near(wreathed(x, y, 0), DOOR);
     }
+  });
+});
+
+describe('a building the near plane would cut is hidden from that frame, and drawn again — #1835', () => {
+  /** A near pyramid 5 cm off the middle of a plan's first wall triangle, looking into it. */
+  function pyramidInside(plan: FootprintPlan): NearPyramid {
+    const floats = plan.triangles.wall;
+    const stride = FOOTPRINT_VERTEX_FLOATS;
+    const middle = (axis: number): number =>
+      ((floats[axis] as number) +
+        (floats[stride + axis] as number) +
+        (floats[2 * stride + axis] as number)) /
+      3;
+    const [nx, ny, nz] = [floats[3] as number, floats[4] as number, floats[5] as number];
+    const eye = { x: middle(0) + nx * 0.05, y: middle(1) + ny * 0.05, z: middle(2) + nz * 0.05 };
+    const target = { x: middle(0) - nx + 0.5, y: middle(1), z: middle(2) - nz + 0.5 };
+    return nearPyramid({ eye, target }, 16 / 10);
+  }
+
+  type Geometry = MappedBuildingBelt['mesh']['geometry'];
+
+  /** A mesh's positions as drawn, as numbers. */
+  const positionsOf = (geometry: Geometry): number[] =>
+    Array.from(geometry.getAttribute('position').array).slice(0, geometry.drawRange.count * 3);
+
+  /** Every update range a geometry's attributes hold, by name. */
+  const rangesOf = (
+    geometry: Geometry,
+  ): Record<string, readonly { readonly start: number; readonly count: number }[]> =>
+    Object.fromEntries(
+      Object.entries(geometry.attributes).map(([name, attribute]) => [
+        name,
+        (attribute as unknown as UploadedAttribute).updateRanges,
+      ]),
+    );
+
+  /** As three does once it has uploaded what was written. */
+  const uploaded = (geometry: Geometry): void => {
+    for (const attribute of Object.values(geometry.attributes)) {
+      (attribute as unknown as { clearUpdateRanges: () => void }).clearUpdateRanges();
+    }
+  };
+
+  it('writes the nearest building’s every vertex to one point, uploads only that, and writes it back once the plane lets it go', () => {
+    const belt = aBelt();
+    const rider = viewAt(1_500);
+    belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    const drawn = belt.drawnAt(0);
+    if (drawn === undefined) throw new Error('nothing drawn');
+    const plan = planned[drawn.plan] as FootprintPlan;
+    const pyramid = pyramidInside(plan);
+    // Non-vacuity: the pyramid does stand inside the building.
+    expect(mappedBuildingCut(plan, buildings.radii[drawn.plan] as number, pyramid)).toBe(true);
+    const geometry = belt.mesh.geometry;
+    const whole = positionsOf(geometry);
+    uploaded(geometry);
+
+    expect(belt.clearOf(pyramid)).toBe(1);
+    expect(belt.hiddenAt(0)).toBe(true);
+    const roles = drawn.far ? FAR_ROLES : NEAR_ROLES;
+    const vertices = (onRoof: boolean): number =>
+      roles
+        .filter((role) => ROOF_ROLES.has(role) === onRoof)
+        .reduce((sum, role) => sum + plan.triangles[role].length / FOOTPRINT_VERTEX_FLOATS, 0);
+    const own = new Set<number>();
+    for (const [from, count] of [
+      [drawn.wallAt, vertices(false)],
+      [drawn.roofAt, vertices(true)],
+    ] as const) {
+      for (let vertex = from; vertex < from + count; vertex += 1) own.add(vertex);
+    }
+    expect(own.size).toBe(plan.triangleCount * 3);
+    // Its own vertices, wall run and roof run, all at one point, which draws
+    // no triangle; every other building's as the refill wrote it.
+    const hidden = positionsOf(geometry);
+    for (let vertex = 0; vertex < hidden.length / 3; vertex += 1) {
+      expect(hidden.slice(vertex * 3, vertex * 3 + 3)).toEqual(
+        own.has(vertex) ? [0, 0, 0] : whole.slice(vertex * 3, vertex * 3 + 3),
+      );
+    }
+    // Only the positions are uploaded, and only its two runs.
+    const ranges = rangesOf(geometry);
+    expect(ranges.position).toEqual([
+      { start: drawn.wallAt * 3, count: vertices(false) * 3 },
+      { start: drawn.roofAt * 3, count: vertices(true) * 3 },
+    ]);
+    for (const [name, each] of Object.entries(ranges)) {
+      if (name !== 'position') expect(each, name).toEqual([]);
+    }
+
+    // The same frame again writes nothing: it is hidden already.
+    uploaded(geometry);
+    expect(belt.clearOf(pyramid)).toBe(1);
+    expect(rangesOf(geometry).position).toEqual([]);
+
+    // The plane moves on — or the cull is off — and it is drawn as it was.
+    expect(belt.clearOf(undefined)).toBe(0);
+    expect(belt.hiddenAt(0)).toBe(false);
+    expect(positionsOf(geometry)).toEqual(whole);
+    // And a refill draws every building whole, whatever the last frame hid.
+    belt.clearOf(pyramid);
+    belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    expect(belt.hiddenAt(0)).toBe(false);
+    expect(positionsOf(geometry)).toEqual(whole);
+  });
+
+  it('hides nothing and writes nothing where the plane meets no building', () => {
+    const belt = aBelt();
+    const rider = viewAt(1_500);
+    belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    const geometry = belt.mesh.geometry;
+    const whole = positionsOf(geometry);
+    uploaded(geometry);
+    // A chase camera's rig over the road, at the widest frame there is.
+    const eye = { x: rider.x, y: 2, z: rider.z };
+    const pyramid = nearPyramid({ eye, target: { x: rider.x + 25, y: 1, z: rider.z } }, 6);
+    expect(belt.clearOf(pyramid)).toBe(0);
+    expect(positionsOf(geometry)).toEqual(whole);
+    for (const [name, each] of Object.entries(rangesOf(geometry))) expect(each, name).toEqual([]);
+  });
+
+  it('hides a house model with its plan, in the models’ buffer, and writes it back', () => {
+    const street = richmondStreetFixture();
+    const streetPlans = footprintPlans(
+      street.corridor,
+      landClassMask(street.corridor),
+      street.profile,
+      street.origin,
+    ).plans;
+    const houses = {
+      models: HOUSE_MODELS.map((_, index) => ({
+        position: Float32Array.from([index, 0, 0, index + 1, 2, 0, index, 0, 3]),
+        normal: Float32Array.from([1, 0, 0, 0, 0, 1, 0, 0, 1]),
+        uv: Float32Array.from([0, 0, 1, 0, 0, 1]),
+        triangles: 1,
+      })),
+      atlas: aTexture(),
+      triangles: HOUSE_MODELS.map((model) => model.triangles),
+    };
+    const frame = drawnRoadFrame(street.profile, street.origin, 1_100);
+    if (frame === undefined) throw new Error('the fixture road has no direction there');
+    const belt = new MappedBuildingBelt(mappedBuildingsOf(streetPlans), textures, houses);
+    belts.push(belt);
+    belt.refill(frame.x, frame.z, MAPPED_BUILDING_TRIANGLES);
+    let place = 0;
+    while ((belt.drawnAt(place)?.modelAt ?? 0) < 0) place += 1;
+    const drawn = belt.drawnAt(place);
+    if (drawn === undefined) throw new Error('no model drawn');
+    const plan = streetPlans[drawn.plan] as FootprintPlan;
+    const geometry = belt.modelMesh.geometry;
+    const whole = positionsOf(geometry);
+    uploaded(geometry);
+    belt.clearOf(pyramidInside(plan));
+    expect(belt.hiddenAt(place)).toBe(true);
+    expect(positionsOf(geometry).slice(drawn.modelAt * 3, drawn.modelAt * 3 + 9)).toEqual(
+      Array.from({ length: 9 }, () => 0),
+    );
+    expect(rangesOf(geometry).position).toEqual([{ start: drawn.modelAt * 3, count: 9 }]);
+    belt.clearOf(undefined);
+    expect(positionsOf(geometry)).toEqual(whole);
   });
 });

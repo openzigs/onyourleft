@@ -67,6 +67,18 @@
  * belts, and it drops exactly the items whose geometry the plane would cut —
  * the conifers at 6 : 1, and whatever a real route brings that close.
  *
+ * **Since #1835 the people and the mapped buildings too.** Neither is scatter,
+ * and from about 3.5 : 1 up — desktop windows, never a device — the plane
+ * meets people on the pavements round a bend and mapped walls at the press's
+ * least clearance (`near-field-street.test.ts` rides them). The owner's first
+ * option on #1835 was taken: filter them per frame, as the scatter is.
+ * {@link peopleClearOfTheCamera} is what the renderer hands its people belt,
+ * judged on a box; {@link mappedBuildingCut} is what
+ * `three-renderer.ts` §`MappedBuildingBelt.clearOf` hides a building by, judged
+ * on its triangles. The near plane is not moved (#1835's second option, which
+ * costs depth precision everywhere) and the widest frame is not narrowed (its
+ * third, an owner's ruling).
+ *
  * ⚠️ **Dropped, not moved and not faded.** Moving the placement would have to
  * know every line the camera can ride, and the placement is pinned to a digest
  * (`arrangement-unchanged.test.ts`), which this does not move: it decides what
@@ -87,6 +99,13 @@ import {
   type CameraRig,
   type RigPoint,
 } from './camera';
+import {
+  FOOTPRINT_ROLES,
+  FOOTPRINT_VERTEX_FLOATS,
+  type FootprintPlan,
+  type FootprintRole,
+} from './footprint-buildings';
+import type { PeopleInView, Person } from './people';
 import type { QualitySettings } from './quality';
 import type { SceneryKind, ScatterItem, StructureKind } from './scatter';
 import { LOT_PORCH_FOOTPRINT, STRUCTURE_FOOTPRINTS } from './settlements';
@@ -812,4 +831,136 @@ export function clearOfTheCamera(
     }
   }
   return kept ?? items;
+}
+
+/**
+ * How far a drawn person reaches from where they stand, in plan, either way
+ * along both of their own axes, in metres: **0.5**. `people.ts`
+ * §`PERSON_HALF_WIDTH_METRES` is 0.3 across the shoulders, and a stride and a
+ * swinging arm reach further — `near-field-street.test.ts` §`personBox`'s
+ * bound, which its rides hold the people to.
+ */
+const PERSON_REACH_METRES = 0.5;
+
+/** How far above a person's height their drawing is taken to reach: hair, and a runner's lift. */
+const PERSON_TOP_METRES = 0.1;
+
+/**
+ * Whether the near plane would cut a drawn person — #1835: their box, a
+ * {@link PERSON_REACH_METRES} square turned by their yaw, from 0.1 m below
+ * their feet to {@link PERSON_TOP_METRES} above their height, against the
+ * pyramid. A person is judged by the box alone: a body is a few hundred
+ * triangles that move every frame, so the box is the safe way round.
+ */
+function personCut(person: Person, pyramid: NearPyramid): boolean {
+  const eye = pyramid.points[0] as RigPoint;
+  // Let go on distance first: nearly everybody is metres away.
+  const plan = PERSON_REACH_METRES * Math.SQRT2;
+  if (Math.hypot(eye.x - person.x, eye.z - person.z) > plan + pyramid.radius) return false;
+  const cos = Math.cos(person.yaw);
+  const sin = Math.sin(person.yaw);
+  const across = vector(cos, 0, -sin);
+  const along = vector(sin, 0, cos);
+  const corners: RigPoint[] = [];
+  for (const x of [-PERSON_REACH_METRES, PERSON_REACH_METRES]) {
+    for (const z of [-PERSON_REACH_METRES, PERSON_REACH_METRES]) {
+      for (const y of [-0.1, person.height + PERSON_TOP_METRES]) {
+        corners.push(
+          vector(
+            person.x + across.x * x + along.x * z,
+            person.y + y,
+            person.z + across.z * x + along.z * z,
+          ),
+        );
+      }
+    }
+  }
+  const axes = [across, vector(0, 1, 0), along];
+  return meetsPyramid(corners, axes, axes, pyramid);
+}
+
+/**
+ * The people of one frame the near plane would not cut — #1835, what
+ * `three-renderer.ts` hands its people belt. A person on the pavement round a
+ * bend comes within the plane of a frame wider than about 3.5 : 1, a desktop
+ * window no device draws; they are dropped for that frame, as
+ * {@link clearOfTheCamera} drops a tree. ⚠️ **The same object when nobody is
+ * dropped**, which is every frame a device draws: nothing is copied for
+ * nothing (#240's NFR-3).
+ */
+export function peopleClearOfTheCamera(
+  people: PeopleInView | undefined,
+  pyramid: NearPyramid | undefined,
+): PeopleInView | undefined {
+  if (people === undefined || pyramid === undefined) return people;
+  const near = keptPeople(people.near, pyramid);
+  const far = keptPeople(people.far, pyramid);
+  return near === people.near && far === people.far ? people : { near, far };
+}
+
+function keptPeople(people: readonly Person[], pyramid: NearPyramid): readonly Person[] {
+  let kept: Person[] | undefined;
+  for (let index = 0; index < people.length; index += 1) {
+    const person = people[index] as Person;
+    if (personCut(person, pyramid)) {
+      kept ??= people.slice(0, index);
+    } else {
+      kept?.push(person);
+    }
+  }
+  return kept ?? people;
+}
+
+/**
+ * How far past its own reach about its centroid (`mapped-buildings.ts`
+ * §`MappedBuildings.radii`, its outline and its driveway) a mapped building's
+ * triangles are taken to stand, in metres: an awning (#1590), a porch (#1589)
+ * and the eaves stand past the outline. Generous, because it only decides
+ * which buildings have their triangles asked at all.
+ */
+const PLAN_OVERHANG_METRES = 5;
+
+/**
+ * Whether the near plane would cut a mapped building — #1835: whether any
+ * triangle of any of its roles meets the pyramid, `radius` being its reach
+ * about its centroid (`mapped-buildings.ts` §`MappedBuildings.radii`). Its
+ * triangles as the press built them, every role, which is every triangle a
+ * belt can draw for it at either level. ⚠️ **It makes no object**: the
+ * renderer asks it of every drawn building on every frame, and nearly every
+ * building is let go on distance before a triangle is read.
+ */
+export function mappedBuildingCut(
+  plan: FootprintPlan,
+  radius: number,
+  pyramid: NearPyramid,
+): boolean {
+  const eye = pyramid.points[0] as RigPoint;
+  const reach = pyramid.radius;
+  const apart = Math.hypot(plan.centroid.x - eye.x, plan.centroid.z - eye.z);
+  if (apart > radius + PLAN_OVERHANG_METRES + reach) return false;
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  const ex = eye.x;
+  const ey = eye.y;
+  const ez = eye.z;
+  for (let role = 0; role < FOOTPRINT_ROLES.length; role += 1) {
+    const floats = plan.triangles[FOOTPRINT_ROLES[role] as FootprintRole];
+    for (let at = 0; at + 3 * stride <= floats.length; at += 3 * stride) {
+      let beyond = false;
+      for (let axis = 0; axis < 3 && !beyond; axis += 1) {
+        const centre = axis === 0 ? ex : axis === 1 ? ey : ez;
+        const a = (floats[at + axis] as number) - centre;
+        const b = (floats[at + stride + axis] as number) - centre;
+        const c = (floats[at + 2 * stride + axis] as number) - centre;
+        beyond = (a > reach && b > reach && c > reach) || (a < -reach && b < -reach && c < -reach);
+      }
+      if (beyond) continue;
+      for (let corner = 0; corner < 3; corner += 1) {
+        TRIANGLE[corner * 3] = floats[at + corner * stride] as number;
+        TRIANGLE[corner * 3 + 1] = floats[at + corner * stride + 1] as number;
+        TRIANGLE[corner * 3 + 2] = floats[at + corner * stride + 2] as number;
+      }
+      if (packedTriangleMeets(pyramid)) return true;
+    }
+  }
+  return false;
 }
