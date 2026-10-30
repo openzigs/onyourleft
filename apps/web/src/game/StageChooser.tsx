@@ -929,10 +929,21 @@ export const DELIVERY_CHOICE_TEXT = {
     'is an ordinary ride.',
 } as const;
 
-/** The week's progress, in words: *"Day 2 of 7 · 8 houses on the round"* (#1818). */
+/**
+ * The week's progress, in words: *"Day 2 of 7 · up to 8 houses on the round"*
+ * (#1818, #1878).
+ *
+ * ⚠️ **"Up to", because the line is the day's count and the ride's round can
+ * be shorter.** The chooser cannot read the route's mapped houses (the houses
+ * are planned from the corridor at the press, and `stage-chooser-imports.test.ts`
+ * keeps the map out of this file), and a route with fewer reachable houses than
+ * the day's count rides a round of the houses it has. A line that stated the
+ * day's count flat read "8 houses" over a HUD that then showed 3. The count is
+ * the ceiling the ride will not exceed, so "up to" is true on every route.
+ */
 export function deliveryWeekText(week: Pick<WeekProgress, 'day' | 'houses'>): string {
   const houses = week.houses === 1 ? '1 house' : `${String(week.houses)} houses`;
-  return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · ${houses} on the round`;
+  return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · up to ${houses} on the round`;
 }
 
 const DELIVERY_WEEK_ID = 'oyl-game-delivery-week';

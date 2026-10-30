@@ -151,7 +151,9 @@ describe('#1818 — the Delivery choice in the chooser', () => {
     if (box === undefined) return;
     expect(box.type).toBe('checkbox');
     expect(box.closest('label')?.textContent).toBe(DELIVERY_CHOICE_TEXT.label);
-    expect(described(box)).toBe(`Day 3 of 7 · 9 houses on the round ${DELIVERY_CHOICE_TEXT.hint}`);
+    expect(described(box)).toBe(
+      `Day 3 of 7 · up to 9 houses on the round ${DELIVERY_CHOICE_TEXT.hint}`,
+    );
     expect(box.checked).toBe(false);
     expect(formatViolations(auditAccessibility(document))).toBe('');
     // Reached by keyboard like every other switch in the loadout.
