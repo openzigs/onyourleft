@@ -967,12 +967,21 @@ describe('other real riders on the road — #783', () => {
         ride: { ...atStartLine(setup.profile).ride, distance: metres(400) },
       },
       remoteRiders: [
-        { riderId: 3, distanceMetres: 420, speedMetresPerSecond: 9, label: 'Bea Ng' },
+        {
+          riderId: 3,
+          distanceMetres: 420,
+          speedMetresPerSecond: 9,
+          label: 'Bea Ng',
+          followed: true,
+        },
         { riderId: 8, distanceMetres: 430, speedMetresPerSecond: 9 },
       ],
     });
     const [named, unnamed] = frame.markers.filter((marker) => marker.kind === 'remote');
     expect(named?.label).toBe('Bea Ng');
+    // The followed flag rides along with the name, and only on the followed one.
+    expect(named?.followed).toBe(true);
+    expect('followed' in (unnamed ?? {})).toBe(false);
     expect('label' in (unnamed ?? {})).toBe(false);
     expect('label' in (frame.markers[0] ?? {})).toBe(false);
   });

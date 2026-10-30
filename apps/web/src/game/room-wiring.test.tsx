@@ -300,8 +300,11 @@ describe('a ride in a room — #782, #783', () => {
         (name) => name.textContent ?? '',
       );
 
+    let lastRoom: ScriptedRoom | undefined;
+
     async function ride(race: boolean): Promise<readonly SceneFrame[]> {
       const room = new ScriptedRoom();
+      lastRoom = room;
       const { drawn } = await rideInRoom(room);
       room.accept();
       room.welcome(0, race ? 'race' : 'ride');
@@ -354,6 +357,32 @@ describe('a ride in a room — #782, #783', () => {
       });
       await pump(2);
       expect(namesOnTheRoad()).toEqual(['Rider 2']);
+    });
+
+    it('takes the last name off the road when the followed rider leaves the drawn set', async () => {
+      await ride(false);
+      const follow = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+        (button) => (button.textContent ?? '').startsWith('Follow'),
+      );
+      await act(async () => {
+        follow?.click();
+        await Promise.resolve();
+      });
+      await pump(2);
+      expect(namesOnTheRoad()).toEqual(['Rider 2']);
+      // The followed rider (seat "Rider 2") is last placed well ahead, where
+      // their name is still on the road when the room stops sending them ...
+      const room = lastRoom;
+      room?.frame(5, [frameRider(0, 40), frameRider(1, 175)]);
+      await pump(46);
+      expect(namesOnTheRoad()).toEqual(['Rider 2']);
+      // ... then they leave the drawn set, the follow is let go and no marker
+      // has a label: the name must not stay frozen over the road.
+      for (let tick = 6; tick <= 8; tick += 1) {
+        room?.frame(tick, [frameRider(0, tick * 8)]);
+        await pump(30);
+      }
+      expect(namesOnTheRoad()).toEqual([]);
     });
   });
 
