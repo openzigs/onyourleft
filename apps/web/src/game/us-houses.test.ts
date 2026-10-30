@@ -73,6 +73,7 @@ import {
 import {
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   landBeside,
   mixedTownFixture,
   rectangleBeside,
@@ -521,7 +522,8 @@ describe('gutters, a downpipe and dormers — #1588', () => {
       const tan = Math.tan((plan.pitchDegrees * Math.PI) / 180);
       const roof = verticesOf(plan, 'roof');
       const eaveY = Math.min(...roof.map((vertex) => vertex.y));
-      const across = rectangle.halfShort + EAVES_OVERHANG_METRES;
+      // #1784: under its archetype's own overhang.
+      const across = rectangle.halfShort + eavesOverhangOf(plan);
       const outside = (vertex: Vertex): number =>
         Math.abs(
           -(vertex.x - rectangle.cx) * rectangle.uz + (vertex.z - rectangle.cz) * rectangle.ux,

@@ -47,6 +47,7 @@ import {
   FOOTPRINT_FIXTURE_VERDICTS,
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   denseTownFixture,
   footprintFixture,
   mixedTownFixture,
@@ -869,7 +870,8 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
       // #1785 at its steepest eave's pitch, a saltbox's front.
       const low = Math.min(...roof.map(([, y]) => y as number));
       const pitch = eavePitchOf(plan.roofVariant, plan.pitchDegrees);
-      const fall = EAVES_OVERHANG_METRES * Math.tan((pitch * Math.PI) / 180);
+      // #1784: by its archetype's own overhang.
+      const fall = eavesOverhangOf(plan) * Math.tan((pitch * Math.PI) / 180);
       expect(low).toBeCloseTo(eaves - fall, 3);
       // #1660's split roofs reach past their own rectangles, not this one: `split-roofs.test.ts`.
       if ((rectanglesOf(plan.footprint)?.length ?? 1) > 1) continue;
@@ -882,7 +884,7 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
         const across = Math.abs(-dx * rectangle.uz + dz * rectangle.ux);
         reach = Math.max(reach, across - rectangle.halfShort);
       }
-      expect(reach).toBeCloseTo(EAVES_OVERHANG_METRES, 3);
+      expect(reach).toBeCloseTo(eavesOverhangOf(plan), 3);
       // Its underside is painted trim: the soffit is there to be seen from the road.
       expect(plan.triangles.trim.length).toBeGreaterThan(0);
     }

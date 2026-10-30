@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1786 the archetypes' dormers, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, since #1626 the mapped doors' winter wreath, for a cost pair, since #1662 the rooms behind mapped glass, for both, and since #1665 the village lots' weathering and rooms, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-dormer-variants`, `-weathering`, `-facade-trims`, `-facade-wreath`, `-window-rooms`, `-lot-realism`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1786 the archetypes' dormers, for both, since #1784 the archetypes' porches and eaves, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, since #1626 the mapped doors' winter wreath, for a cost pair, since #1662 the rooms behind mapped glass, for both, and since #1665 the village lots' weathering and rooms, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-dormer-variants`, `-archetype-porches`, `-weathering`, `-facade-trims`, `-facade-wreath`, `-window-rooms`, `-lot-realism`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityStreetscapeFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class`; since #1782 `houses`, `footprint-fixtures-testing.ts` §`houseStreetFixture`'s street of each US house archetype in turn and its rural farmhouses, from 900 m to 2 100 m, whose before is `levers=-house-archetypes` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`, `houses`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
@@ -246,6 +246,16 @@ export type Layer = (typeof LAYERS)[number];
  *   cost pair (plan-time only: no call, no byte, no shader term); pair it with
  *   `town=houses`. The product always builds them.
  *
+ * - `archetype-porches` — #1784: the archetypes' full-width front porches on
+ *   posts (a Foursquare's, a bungalow's, a farmhouse's) and their own eaves
+ *   (`footprint-buildings.ts` §`FootprintPlanOptions`), 0.65 m on a bungalow
+ *   and a Foursquare and 0.15 m on a Cape. Off, every porch is #1589's seeded
+ *   width and every eave #1581's 0.4 m, every plan as before, byte for byte.
+ *   Read at load, as `dormer-variants` is. The owner's BY-EYE pair and the
+ *   tablet's cost pair; pair it with `town=houses`. The eave's shadow on the
+ *   wall stays at 0.4 m's either way (`docs/agents/game.md`). The product
+ *   always builds them.
+ *
  * - `facade-trims` — #1663: the mapped facades' trims — a lintel over each
  *   window's head (stone on brick, the trim's paint on render and clapboard,
  *   deeper over the ground floor), quoins up a brick wall's corners in
@@ -310,6 +320,7 @@ export type Layer = (typeof LAYERS)[number];
  */
 export const LEVERS = [
   'air',
+  'archetype-porches',
   'crag',
   'decorations',
   'dormer-variants',
@@ -652,6 +663,15 @@ export function roofVariantsWithLevers(leversOff: readonly Lever[]): boolean {
  */
 export function dormerVariantsWithLevers(leversOff: readonly Lever[]): boolean {
   return !leversOff.includes('dormer-variants');
+}
+
+/**
+ * Whether this run gives the archetypes their porches and eaves — #1784: the
+ * product always does; `-archetype-porches` builds #1589's porches and
+ * #1581's eaves, every plan as before. Read at load, as `dormer-variants` is.
+ */
+export function archetypePorchesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('archetype-porches');
 }
 
 /** A configuration from a query string. @see RealisticPageConfig */

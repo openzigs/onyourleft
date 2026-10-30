@@ -15,7 +15,6 @@ import type { BuildingFeature } from '@onyourleft/map-features';
 
 import {
   CHIMNEY,
-  EAVES_OVERHANG_METRES,
   eavePitchOf,
   FACADE_OFFSET,
   FOOTPRINT_MAX_FAR_TRIANGLES,
@@ -28,6 +27,7 @@ import {
   HALF_HIP,
   minimumAreaRectangle,
   SALTBOX,
+  VERGE_OVERHANG_METRES,
   STYLE_EAVES,
   STYLE_OFFSET,
   type FootprintPlan,
@@ -37,6 +37,7 @@ import {
 import {
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   houseStreetFixture,
   landBeside,
   mixedTownFixture,
@@ -537,7 +538,7 @@ describe('watertight, at the mapped eaves — #1785, on a rectangle and on #1660
         const pitch = eavePitchOf(variant, plan.pitchDegrees);
         const low = Math.min(...roof.map((vertex) => vertex.y));
         expect(low).toBeCloseTo(
-          plan.eaves - EAVES_OVERHANG_METRES * Math.tan((pitch * Math.PI) / 180),
+          plan.eaves - eavesOverhangOf(plan) * Math.tan((pitch * Math.PI) / 180),
           3,
         );
         // #1660's notch test: no roof or soffit hangs past its rectangles by more than the overhang.
@@ -555,7 +556,10 @@ describe('watertight, at the mapped eaves — #1785, on a rectangle and on #1660
               Math.max(0, Math.abs(a) - each.halfLong, Math.abs(c) - each.halfShort),
             );
           }
-          expect(least).toBeLessThanOrEqual(EAVES_OVERHANG_METRES + TOLERANCE);
+          // Since #1784 a Cape's eaves are tighter than every verge.
+          expect(least).toBeLessThanOrEqual(
+            Math.max(eavesOverhangOf(plan), VERGE_OVERHANG_METRES) + TOLERANCE,
+          );
         }
       }
     },
@@ -586,7 +590,7 @@ describe('gutters, a chimney and dormers on a variant — #1785', () => {
       let hung = 0;
       for (const plan of forced(variant, 6)) {
         const rectangle = minimumAreaRectangle(plan.footprint);
-        const across = rectangle.halfShort + EAVES_OVERHANG_METRES;
+        const across = rectangle.halfShort + eavesOverhangOf(plan);
         for (const side of [1, -1]) {
           const eave = verticesOf(plan, 'roof').filter(
             (vertex) => Math.abs(localOf(rectangle, vertex.x, vertex.z)[1] - side * across) < 1e-3,
@@ -763,7 +767,11 @@ describe('the archetypes’ variants and the lever — #1785', () => {
   it('plans every footprint as `origin/main` did with `-roof-variants`, and chooses no variant', () => {
     for (const name of ['mixed', 'houses'] as const) {
       // Since #1786 its dormers are off too: `main` had neither.
-      const off = planned(towns[name], { roofVariants: false, dormerVariants: false });
+      const off = planned(towns[name], {
+        roofVariants: false,
+        dormerVariants: false,
+        archetypePorches: false,
+      });
       expect(off.every((plan) => plan.roofVariant === 'plain')).toBe(true);
       expect(planFingerprint(off)).toBe(MAIN_FINGERPRINTS[name]);
     }
