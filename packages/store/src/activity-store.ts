@@ -2357,9 +2357,10 @@ export class ActivityStore {
   async listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]> {
     return this.#db.transaction('r', [this.#cameraFrames, this.#recentlyDeleted], async () => {
       const away = await this.#ridesInRecentlyDeleted(owner);
-      // ⚠️ The filter goes on BEFORE the limit: Dexie applies them in order,
-      // so a limit taken first would count a deleted ride's snapshots against
-      // the export's budget and then drop them, writing fewer than it could.
+      // ⚠️ Filtered in the query, not on the rows it returns: Dexie's limit
+      // counts only rows the filter accepts, so a deleted ride's snapshots do
+      // not use up the export's budget. Dropping them after `toArray` would
+      // write fewer pictures than the budget allows.
       let query = this.#cameraFrames
         .where(INDEX.cameraFrameByAthleteAndCapturedAt)
         .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
