@@ -3503,7 +3503,13 @@ test.describe(
       // The control: with the cull off the belt draws the person too.
       expect(near.peopleDrawn.without - near.peopleDrawn.withCull).toBe(near.cut.length);
       expect(near.noisePixels).toBe(0);
-      expect(near.shippedPixels).toBe(0);
+      // ⚠️ Not `shippedPixels` nought: the village's frame keeps its streets,
+      // and moving the near plane moves the depth buffer's precision under
+      // them. CI's runner read 2 pixels between the two planes with the cull
+      // AND without it (run 40985798273), so they are not the person; locally
+      // both read 0. What this frame can say in pixels is only that the cull
+      // never draws more between the planes than the uncut frame does.
+      expect(near.shippedPixels).toBeLessThanOrEqual(near.controlPixels);
     });
   },
 );
