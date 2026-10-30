@@ -152,6 +152,18 @@ export function buildingArchetypeOf(input: BuildingArchetypeInput): BuildingArch
  * (`house-archetypes.ts` §`ArchetypeFeatures`): a low hip or gable, clapboard
  * on half of them and brick on the rest, no garage, no picture window, no
  * dormer, and #1589's porch at its share.
+ *
+ * ⚠️ **No garage is no driveway, and the planting depends on it — #1922.** A
+ * driveway is a mapped building's ground (#1588): `mapped-buildings.ts`
+ * §`onMappedGround` clears its trees, shrubs and rocks and #1550's lots keep
+ * off it. Planned as before (`unknown`, or `-commercial-archetypes`), a
+ * footprint the garden apartment would be has #1588's seeded garage on its
+ * share, and so a driveway out to the road; as a garden apartment it has none,
+ * so that ground is planted as any ground beside a building, and the lever's
+ * pair differs there: trees where the control has a driveway. That is the
+ * only scenery the archetype moves (`browser/realistic/town.test.ts`), and it
+ * must move it: holding the planting still would mean trees on the control's
+ * driveway, or ground cleared round a driveway the archetype does not build.
  */
 export const GARDEN_APARTMENT_FEATURES: ArchetypeFeatures = {
   ...SEEDED_FEATURES,
