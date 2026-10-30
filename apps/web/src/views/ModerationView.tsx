@@ -735,10 +735,11 @@ function Appeals({
 
 /**
  * Said on a notice whose notifier details the instance erased (#1381), in
- * place of their words, name and address: six months after the decision.
+ * place of their words, name and address, with when: they are erased six
+ * months after the decision, or later if the instance was stopped then.
  */
 export function noticeDetailsErasedText(erasedAt: string): string {
-  return `Their name, email address and words were erased ${erasedAt}, six months after the decision.`;
+  return `Their name, email address and words were erased ${erasedAt}. They are erased six months after the decision.`;
 }
 
 /** The steps a moderator records on a notice, as the screen names them (#912). */

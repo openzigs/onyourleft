@@ -185,6 +185,10 @@ describe('erasing a closed notice’s notifier details (#1381)', () => {
         `SET received_at = 1`,
         `SET bona_fide = 0`,
         `SET kind = 'intimate_image'`,
+        // The erased details, written back: refused.
+        `SET location = 'back'`,
+        `SET notifier_name = 'back'`,
+        `SET notifier_email = 'back@example.com'`,
       ]) {
         expect(
           () => database.exec(`UPDATE notice ${change} WHERE id = ${String(erased)}`),

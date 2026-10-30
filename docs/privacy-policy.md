@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-10-27.** This is the policy for the On Your Left Android app
+**Last updated: 2026-10-30.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -324,9 +324,13 @@ items, where, and your name and email address only if you choose to give them �
 instance as you sent it, and shown only to the person who moderates it, who may write to the address
 you gave. It is kept as the record of what the instance was told and when. **Six months after the
 instance's moderator records what they decided about it**, the instance erases your name, your email
-address and the words you typed — why, and where — and keeps only the decision, when the report was
-received and decided, the items it named and its reference
-([#1381](https://github.com/openzigs/onyourleft/issues/1381)). The project's own
+address and the words you typed — why, and where
+([#1381](https://github.com/openzigs/onyourleft/issues/1381)). It keeps the rest: the report's
+reference, what kind of report it was, the items it named, whether you ticked the good-faith
+statement, whether you gave a name and whether you gave an email address, when it was received, and
+the moderator's decision with when they confirmed receipt, decided and told you. If the moderator
+named you in the reasons they gave the person the report was about, your name stays with those
+reasons. The project's own
 instance does not store your internet address with it: it counts reports from one address in memory
 only, for at most an hour.
 
