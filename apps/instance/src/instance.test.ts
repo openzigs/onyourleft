@@ -1565,6 +1565,8 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     readonly key?: 'operator' | 'own';
     /** Whose job it is: the operator's unless said. */
     readonly athleteId?: string;
+    /** The service the start names (#1796): the key's own origin unless said. */
+    readonly endpoint?: string;
   }) {
     const model = await startFakeModelServer([
       { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
@@ -1639,8 +1641,23 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       const jobs = instance.analysisJobs();
       if (jobs === undefined) throw new Error('no analysis jobs');
       const caller = { athleteId } as Caller;
-      const started = await jobs.start(caller, { ...jobBody(), source: 'instance-hosted' });
-      if (!started.ok) throw new Error(`not started: ${JSON.stringify(started)}`);
+      const started = await jobs.start(caller, {
+        ...jobBody(),
+        source: 'instance-hosted',
+        endpoint: options.endpoint ?? HOSTED.origin,
+      });
+      if (!started.ok) {
+        if (options.endpoint === undefined)
+          throw new Error(`not started: ${JSON.stringify(started)}`);
+        return {
+          refused: started,
+          events: [],
+          bodies: [...bodies],
+          requests: [...model.requests],
+          tested: undefined,
+          testRequests: [],
+        };
+      }
       await jobs.idle();
       const stream = await jobs.events(caller, started.value.jobId, null);
       const events = parseStream((await stream?.text()) ?? '').events;
@@ -1648,7 +1665,13 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       // #1251: then the test question, through the running instance's own
       // settings — which must pass the gate that job just did.
       const tested = await instance.hostedSettings()?.testQuestion(caller);
-      return { events, ...sent, tested, testRequests: model.requests.slice(sent.requests.length) };
+      return {
+        refused: undefined,
+        events,
+        ...sent,
+        tested,
+        testRequests: model.requests.slice(sent.requests.length),
+      };
     } finally {
       await model.close();
     }
@@ -1684,6 +1707,23 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     expect(JSON.stringify(testRequests[0])).not.toContain(PLANTED_TEXT);
   });
 
+  it('refuses a start that names another service than the rider’s consent, and the hosted server is sent nothing (#1796)', async () => {
+    const outcome = await hostedJob({
+      consent: true,
+      masking: GUARD_BODY,
+      key: 'own',
+      athleteId: RIDER,
+      endpoint: 'https://another-service.example',
+    });
+    expect(outcome.refused).toEqual({
+      ok: false,
+      code: 'validation_failed',
+      fields: [{ field: 'endpoint', problem: 'must be the service your recorded consent names' }],
+    });
+    expect(outcome.bodies).toStrictEqual([]);
+    expect(outcome.requests).toStrictEqual([]);
+  });
+
   it('runs a rider’s job on the key THEY stored, with their own consent, masked (#1199)', async () => {
     const { events, bodies, requests } = await hostedJob({
       consent: true,
@@ -1696,6 +1736,70 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
       expect(personalDetailFaults(body)).toStrictEqual([]);
     }
+  });
+
+  it('ends a test question that is out when the instance stops, rather than leaving it for its 30 s (#1796)', async () => {
+    // The service never answers: the request ends only when its signal does.
+    let reached: (signal: AbortSignal) => void = () => undefined;
+    const sent = new Promise<AbortSignal>((resolve) => {
+      reached = resolve;
+    });
+    const hostedFetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal ?? new AbortController().signal;
+      reached(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason as Error);
+        });
+      });
+    }) as typeof globalThis.fetch;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const write = openServingStore(path);
+    try {
+      await write.registerAthlete(registrationFixture(RIDER));
+      await write.putSyncItem({
+        athleteId: RIDER,
+        kind: 'masking',
+        key: MASKING_ITEM_KEY,
+        body: new TextEncoder().encode(GUARD_BODY),
+        digest: '1'.padStart(64, '0'),
+        now: 1_790_000_000,
+      });
+      await write.putHostedConsent({ athleteId: RIDER, origin: HOSTED.origin, recordedAt: 1 });
+      const secret = await importSecretKey(new Uint8Array(32).fill(SECRET_FILL));
+      await write.putAthleteHostedKey(RIDER, {
+        url: HOSTED.href,
+        model: 'hosted-model',
+        ...(await sealHostedKey(secret, {
+          athleteId: RIDER,
+          url: HOSTED.href,
+          model: 'hosted-model',
+          key: 'sk-own-0123456789abcdef',
+        })),
+        setAt: 1,
+      });
+    } finally {
+      await write.close();
+    }
+    const { instance } = await start(
+      path,
+      { secretKey: new Uint8Array(32).fill(SECRET_FILL) },
+      { hosted: { hostedFetch } },
+    );
+    await instance.jobsRecovered;
+    const settings = instance.hostedSettings();
+    if (settings === undefined) throw new Error('no hosted settings');
+    const caller = { athleteId: RIDER } as Caller;
+    const tested = settings.testQuestion(caller);
+    const signal = await sent;
+    expect(signal.aborted, 'the control: it is out, and waiting').toBe(false);
+    await instance.stop();
+    running = undefined;
+    expect(signal.aborted).toBe(true);
+    expect(await tested).toEqual({ result: 'failed', reasoned: false });
+    // And none is sent after it.
+    expect(await settings.testQuestion(caller)).toEqual({ result: 'not-ready', reasoned: false });
   });
 
   it.each([

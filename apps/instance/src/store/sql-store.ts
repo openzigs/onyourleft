@@ -1427,7 +1427,10 @@ export interface SqlStore {
   listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
   /**
    * Replace a live item with its tombstone — an activity's record goes with
-   * it. `false` when the athlete holds no such live item.
+   * it. `false` when the athlete holds no such live item. SCRUBBED (#1796):
+   * the old body is zeroed in its page and the log truncated, as a cleared
+   * key is, because an item can hold a place — a masking list's privacy
+   * zones, a ride's record, a note naming a street.
    */
   deleteSyncItem(athleteId: string, kind: SyncKind, key: string, now: number): Promise<boolean>;
   /** #776: the manifest, after `after`, in `(receivedAt, seq)` order, tombstones included. */
@@ -3818,33 +3821,37 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     deleteSyncItem: (athleteId, kind, key, now) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const held = await trx
-            .selectFrom('sync_item')
-            .select('deleted_at')
-            .where('athlete_id', '=', athleteId)
-            .where('kind', '=', kind)
-            .where('item_key', '=', key)
-            .executeTakeFirst();
-          if (held === undefined || held.deleted_at !== null) return false;
-          if (kind === 'activity') {
-            await trx
-              .deleteFrom('activity_record')
+        // #1796: every kind, not a list of the ones that hold a place — a new
+        // kind cannot fall out of a rule that names none.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('sync_item')
+              .select('deleted_at')
               .where('athlete_id', '=', athleteId)
-              .where('content_sha256', '=', key)
-              .execute();
-          }
-          await replaceSyncRow(trx, {
-            athleteId,
-            kind,
-            key,
-            digest: null,
-            body: null,
-            now,
-            deletedAt: now,
-          });
-          return true;
-        }),
+              .where('kind', '=', kind)
+              .where('item_key', '=', key)
+              .executeTakeFirst();
+            if (held === undefined || held.deleted_at !== null) return false;
+            if (kind === 'activity') {
+              await trx
+                .deleteFrom('activity_record')
+                .where('athlete_id', '=', athleteId)
+                .where('content_sha256', '=', key)
+                .execute();
+            }
+            await replaceSyncRow(trx, {
+              athleteId,
+              kind,
+              key,
+              digest: null,
+              body: null,
+              now,
+              deletedAt: now,
+            });
+            return true;
+          }),
+        ),
       ),
 
     listSyncManifest: (athleteId, after, limit) =>

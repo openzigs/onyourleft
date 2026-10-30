@@ -33,10 +33,17 @@ import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { creditsFrom, NOTHING_ASKED_LICENCES, SHIPPED_LICENCE_TEXTS } from '../credits/credits';
 import { parseAssetManifest } from '../credits/manifest';
 import { parseNotices, THIRD_PARTY_NOTICES_URL } from '../credits/notices';
-import { loadShippedLicence } from '../credits/licence-documents';
-import { loadNoticesDocument } from '../credits/notices-document';
+import * as licenceDocuments from '../credits/licence-documents';
+import * as noticesDocument from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  readsSettled,
+  settle,
+  type Mounted,
+} from '../testing/mount';
 import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
 import {
   ODBL_LICENCE_URL as FIT_ODBL_LICENCE_URL,
@@ -50,6 +57,7 @@ let mounted: Mounted | undefined;
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  vi.restoreAllMocks();
 });
 
 async function render(manifest?: string, notices?: string): Promise<Mounted> {
@@ -654,11 +662,14 @@ describe('the full notices, read inside the app — #664', () => {
   it('shows the real committed document by default', async () => {
     // Read back through the screen's own default, not a fixture: the screen a
     // rider opens renders what `check:notices` holds.
-    // Read once first, so the module is loaded and one `settle` is enough.
-    const committed = await loadNoticesDocument();
+    const committed = await noticesDocument.loadNoticesDocument();
+    // #1939: watched, not replaced, so the test can wait for the read the
+    // screen started rather than for a number of event-loop turns.
+    const reads = vi.spyOn(noticesDocument, 'loadNoticesDocument');
     mounted = await mount(<CreditsView />);
     await activateWithKeyboard(showNotices());
-    await settle();
+    expect(reads).toHaveBeenCalledTimes(1);
+    await readsSettled(reads);
     expect(shownDocument()).toBe(committed);
     expect(shownDocument()).toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
   });
@@ -759,14 +770,17 @@ describe('the licence texts this app ships, read inside the app — #1744', () =
   });
 
   it('shows the real shipped texts by default', async () => {
-    // Read back through the screen's own default, not a fixture. Read once
-    // first, so each module is loaded and one `settle` is enough.
-    const apache = await loadShippedLicence('Apache-2.0');
-    const ofl = await loadShippedLicence('OFL-1.1');
+    // Read back through the screen's own default, not a fixture.
+    const apache = await licenceDocuments.loadShippedLicence('Apache-2.0');
+    const ofl = await licenceDocuments.loadShippedLicence('OFL-1.1');
+    // #1939: watched, not replaced — the test waits for the reads the screen
+    // started, not for a number of event-loop turns.
+    const reads = vi.spyOn(licenceDocuments, 'loadShippedLicence');
     mounted = await mount(<CreditsView />);
     await activateWithKeyboard(readLicence('Apache-2.0'));
     await activateWithKeyboard(readLicence('OFL-1.1'));
-    await settle();
+    expect(reads.mock.calls).toEqual([['Apache-2.0'], ['OFL-1.1']]);
+    await readsSettled(reads);
     expect(shownLicence('Apache-2.0')).toBe(apache);
     expect(shownLicence('Apache-2.0')).toMatch(/^\s*Apache License\s+Version 2\.0, January 2004/);
     expect(shownLicence('OFL-1.1')).toBe(ofl);

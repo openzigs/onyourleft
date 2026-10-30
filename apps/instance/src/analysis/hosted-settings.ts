@@ -116,9 +116,17 @@ export interface HostedSettings {
    * `undefined`, with nothing sent, when the caller is over
    * {@link DEFAULT_HOSTED_TESTS} or already has a test in flight: the address
    * is the rider's to choose, so the test carries a job's kind of limit.
-   * `signal` ends the request to the service when the caller goes away.
+   * `signal` ends the request to the service when the caller goes away, and
+   * {@link HostedSettings.stop} ends every one.
    */
   testQuestion(caller: Caller, signal?: AbortSignal): Promise<HostedTestOutcome | undefined>;
+  /**
+   * The instance is stopping (#1796): every test question out now is aborted
+   * at once, rather than left for its 30 s bound (`hosted-test.ts`
+   * §`HOSTED_TEST_MILLISECONDS`), and any asked after it is `not-ready` with
+   * nothing sent.
+   */
+  stop(): void;
 }
 
 /**
@@ -127,6 +135,15 @@ export interface HostedSettings {
  * test is bounded as a job is (`DEFAULT_ANALYSIS_STARTS`).
  *
  * ## Provenance — the author's choice, not a measurement
+ *
+ * #1796 asked again, and it stays a choice: there is nothing yet to measure it
+ * against — no rider has used the test, and the instance counts no test
+ * question in `/metrics`. What bounds the cost is not this number: each test
+ * is one request of `hosted-test.ts` §`HOSTED_TEST_ANSWER_TOKENS` tokens on the rider's
+ * OWN key, to the address they chose, one at a time, and at most 30 s long.
+ * Six in ten minutes is room for a rider fixing a key or a model's name by
+ * trial, and little enough that a session cannot use the instance to call an
+ * address over and over.
  */
 export const DEFAULT_HOSTED_TESTS: RateLimit = { limit: 6, windowMs: 10 * 60 * 1000 };
 
@@ -183,6 +200,8 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
   const testLimit = createRateLimiter(options.tests ?? DEFAULT_HOSTED_TESTS, options.now);
   /** Riders whose test question is out now: one at a time. */
   const testing = new Set<string>();
+  /** Aborted by {@link HostedSettings.stop}: every test question out now, and none after (#1796). */
+  const stopping = new AbortController();
 
   /** Tombstone the athlete's masking list (#1251, owner ruling 2026-10-26). */
   async function forgetMasking(athleteId: string): Promise<void> {
@@ -312,16 +331,26 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
     },
 
     async testQuestion(caller, signal) {
-      if (options.sources === undefined) return { result: 'not-ready', reasoned: false };
+      if (options.sources === undefined || stopping.signal.aborted) {
+        return { result: 'not-ready', reasoned: false };
+      }
       if (testing.has(caller.athleteId)) return undefined;
       testLimit.sweep();
       if (!testLimit.allow(caller.athleteId)) return undefined;
       testing.add(caller.athleteId);
       try {
-        return await askHostedTestQuestion(caller.athleteId, options.sources, signal);
+        return await askHostedTestQuestion(
+          caller.athleteId,
+          options.sources,
+          signal === undefined ? stopping.signal : AbortSignal.any([signal, stopping.signal]),
+        );
       } finally {
         testing.delete(caller.athleteId);
       }
+    },
+
+    stop() {
+      stopping.abort();
     },
   };
 }

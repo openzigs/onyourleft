@@ -619,6 +619,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         // A hosted model needs only a secret to hold a rider's own key under
         // (#1199): a rider who has none is refused `hosted_unavailable`.
         available: async () => local !== undefined || (await secretKey) !== undefined,
+        // #1796: a hosted start names the service the rider's consent names.
+        hostedConsent: sources.recordedConsent,
         now,
         log,
         heartbeatMs: server.analysisHeartbeatMs,
@@ -760,6 +762,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       if (keysTimer !== undefined) clearTimeout(keysTimer);
       stopSweeping();
       stopRetrying();
+      // #1796: a test question out now is ended, not left for its 30 s bound.
+      hostedSettings?.stop();
       await analysisJobs?.stop();
       await router.stop();
       await listening.close();

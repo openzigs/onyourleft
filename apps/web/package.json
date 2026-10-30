@@ -16,6 +16,8 @@
     "build": "tsc --noEmit --project tsconfig.json && vite build",
     "build:demo": "vite build --config vite.demo.config.ts",
     "demo:bake": "node --experimental-transform-types --import ./tools/ts-extensionless-resolve.mjs tools/demo/bake-route.ts",
+    "demo:video": "node --import ./tools/ts-extensionless-resolve.mjs tools/demo/demo-video.ts",
+    "demo:video:check": "playwright test --config playwright.video.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
