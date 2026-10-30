@@ -521,12 +521,43 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // Data Safety: the Photos and videos row becomes shared."*). Flipping
     // this row is what changes the listing's face (ADR 0029 §"What
     // `docs/privacy-policy.md` and Play Data Safety would have to say").
+    //
+    // ⚠️ **Re-read by #1060 for ADR 0044 — the side camera's picture is now
+    // SHOWN on the tablet, and one the rider presses for is STORED there — and
+    // #1060 changes NO answer: collected: true, optional: true, and `shared`
+    // as #1106 set it above.** A reviewer who remembers this `why` saying *"never stored, shown
+    // or sent on (ADR 0033 D-6)"* is reading the old file: ADR 0044 D-1
+    // superseded D-6 on this path. Play's text, re-read first-hand 2026-10-04
+    // (Google Play Console Help, "Provide information for Google Play's Data
+    // safety section", answer 10787469): *"'Collect' means transmitting data
+    // from your app off a user's device"*; *"User data accessed by your app
+    // that is only processed locally on the user's device and not sent off
+    // device does not need to be disclosed"*; and *"'Sharing' refers to
+    // transferring user data collected from your app to a third party"*.
+    //
+    // - **A picture shown on the tablet's screen** is processed locally on
+    //   the rider's own device and sent nowhere: not collection.
+    // - **A snapshot stored in the tablet's IndexedDB** is the same: written
+    //   on the device, never transmitted by the app. ADR 0044 D-11 sends it to
+    //   no computer, no hosted model and no instance, and `privacy/
+    //   no-network.test.ts` still permits no new network call. It travels in
+    //   the account export only when the rider exports a file themselves,
+    //   which this declaration already says is not a collection.
+    // - **The phone-to-tablet link** is unchanged: end-to-end encrypted
+    //   between the rider's own devices, which Play exempts.
+    // - **So nothing here moves `collected` or `shared`.** The row stays
+    //   `collected: true` for #387's path and #553's stream, and `shared:
+    //   true` for #1106's second switch only: a snapshot is never sent to the
+    //   rider's computer, the instance or a hosted service, so it adds nothing
+    //   to either. Only the `why` changes, because it described the side
+    //   camera's pictures as never shown or stored, which ADR 0044 makes false
+    //   (D-10's table).
     dataType: 'Photos and videos',
     collected: true,
     shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. That picture is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key in the app (#518) is never sent a picture by the app, nor anything made from one. Since #1106 there is one way a picture reaches an instance, and one way it reaches a third party, both off by default: with a switch on the Camera page ticked beside a sentence saying so, the side camera’s pictures — about one a second while it films — go to the instance the rider is signed in to instead of being analysed on the tablet, sealed on the device for that instance alone (ADR 0047), so that Cloudflare, which carries a home instance’s and this project’s instance’s traffic, cannot read them; the instance shows each to a model on its own machine or its own private network and does not store it — not in its database, a file or a log. With a SECOND switch, also off by default and ticked beside a consent that names the service, the instance sends each picture on to a hosted model service the rider holds their own key for — a third party, hence shared — with one fixed question and nothing else; what that service keeps is under its own terms. Without the sealed connection no picture is sent at all',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. That picture is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet, shown on the tablet’s own screen while the rider has the side camera’s view on, and discarded once the next replaces it; the one picture the rider saves with each press of “Save snapshot” is stored on the tablet with its ride until the rider deletes it, the ride or everything, is in the account export the rider makes themselves, and is never sent on (ADR 0044 D-1, D-3, D-5, D-11). That is end-to-end encrypted transfer between the rider’s own devices and processing on the tablet alone, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key in the app (#518) is never sent a picture by the app, nor anything made from one. Since #1106 there is one way a picture reaches an instance, and one way it reaches a third party, both off by default: with a switch on the Camera page ticked beside a sentence saying so, the side camera’s pictures — about one a second while it films — go to the instance the rider is signed in to instead of being analysed on the tablet, sealed on the device for that instance alone (ADR 0047), so that Cloudflare, which carries a home instance’s and this project’s instance’s traffic, cannot read them; the instance shows each to a model on its own machine or its own private network and does not store it — not in its database, a file or a log. With a SECOND switch, also off by default and ticked beside a consent that names the service, the instance sends each picture on to a hosted model service the rider holds their own key for — a third party, hence shared — with one fixed question and nothing else; what that service keeps is under its own terms. Without the sealed connection no picture is sent at all',
   },
   {
     // ⚠️ **Re-answered by #777, and the answer CHANGED — collected: true.** A
