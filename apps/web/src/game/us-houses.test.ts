@@ -73,6 +73,7 @@ import {
 import {
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   landBeside,
   mixedTownFixture,
   rectangleBeside,
@@ -524,6 +525,11 @@ describe('gutters, a downpipe and dormers — #1588', () => {
       const across = (vertex: Vertex): number =>
         -(vertex.x - rectangle.cx) * rectangle.uz + (vertex.z - rectangle.cz) * rectangle.ux;
       const outside = (vertex: Vertex): number => Math.abs(across(vertex));
+      // #1784: under its archetype's own overhang, the furthest eave's reach.
+      expect(Math.max(...roof.map(outside))).toBeCloseTo(
+        rectangle.halfShort + eavesOverhangOf(plan),
+        3,
+      );
       for (const side of [1, -1]) {
         // Each long eave's own reach: since 2026-10-30 a saltbox's steep front overhangs less.
         const reach = Math.max(...roof.map((vertex) => side * across(vertex)));

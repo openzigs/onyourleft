@@ -11,6 +11,7 @@ import {
   DEFAULT_CONFIG,
   facadeTrimsWithLevers,
   firPrepassWithLevers,
+  archetypePorchesWithLevers,
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
   roofVariantsWithLevers,
@@ -382,6 +383,21 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(dormerVariantsWithLevers(parseConfig('?levers=-dormer-variants').leversOff)).toBe(false);
     expect(configQuery(parseConfig('?town=houses&levers=-dormer-variants'))).toBe(
       `?levers=${encodeURIComponent('-dormer-variants')}&town=houses`,
+    );
+  });
+
+  it('gives the archetypes their porches and eaves, as the product does, unless #1784’s lever takes them out', () => {
+    expect(LEVERS).toContain('archetype-porches');
+    expect(archetypePorchesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      archetypePorchesWithLevers(LEVERS.filter((lever) => lever !== 'archetype-porches')),
+    ).toBe(true);
+    expect(archetypePorchesWithLevers(parseConfig('?levers=-archetype-porches').leversOff)).toBe(
+      false,
+    );
+    expect(configQuery(parseConfig('?town=houses&levers=-archetype-porches'))).toBe(
+      `?levers=${encodeURIComponent('-archetype-porches')}&town=houses`,
     );
   });
 

@@ -257,6 +257,18 @@ export interface ArchetypeFeatures {
    * and #1588's count by the ridge's reach; with `-dormer-variants`, `dormer` as before.
    */
   readonly dormers: DormerCall;
+  /**
+   * #1784: how far its pitched roof's eaves overhang the walls across a slope,
+   * metres; `seeded`, `EAVES_OVERHANG_METRES` as before. With
+   * `-archetype-porches`, as before.
+   */
+  readonly eaves: number | 'seeded';
+  /**
+   * #1784: its front porch the front wall's whole width, less its end margins
+   * and any garage's bay, on four posts (`full`); or #1589's seeded width.
+   * With `-archetype-porches`, #1589's.
+   */
+  readonly porchWidth: 'full' | 'seeded';
 }
 
 /**
@@ -278,6 +290,8 @@ export const SEEDED_FEATURES: ArchetypeFeatures = {
   brickFoundation: 'seeded',
   roofVariant: 'none',
   dormers: 'none',
+  eaves: 'seeded',
+  porchWidth: 'seeded',
 };
 
 /**
@@ -286,6 +300,11 @@ export const SEEDED_FEATURES: ArchetypeFeatures = {
  * row also names its dormers ({@link DormerCall}): two gabled ones on a Cape,
  * one hipped one on a Foursquare's route-facing slope — its 30–35° under the
  * gabled dormer's 40° — and one wide shed dormer on a bungalow.
+ *
+ * Since #1784 its eaves and its porch's width too: wide eaves (**0.65 m**) on a
+ * bungalow and a Foursquare, tight ones (**0.15 m**) on a Cape, and a
+ * full-width front porch on posts on a Foursquare, a bungalow and a
+ * farmhouse. A sketch, tuned on the look pair (`levers=-archetype-porches`).
  *
  * Since #1785 four of them may wear a {@link RoofVariant} in its gable's or
  * hip's place, on a share of their footprints: the farmhouse a gambrel, the
@@ -317,6 +336,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     garage: 0,
     dormer: 1,
     dormers: ['gabled', 2],
+    eaves: 0.15,
   },
   colonial: {
     ...SEEDED_FEATURES,
@@ -341,6 +361,8 @@ export const ARCHETYPE_FEATURES: Readonly<
     garage: 0,
     dormer: 0,
     dormers: ['hipped', 1],
+    eaves: 0.65,
+    porchWidth: 'full',
   },
   bungalow: {
     ...SEEDED_FEATURES,
@@ -354,6 +376,8 @@ export const ARCHETYPE_FEATURES: Readonly<
     siding: 1,
     roofVariant: ['half-hipped', 0.4],
     dormers: ['shed', 1],
+    eaves: 0.65,
+    porchWidth: 'full',
   },
   farmhouse: {
     ...SEEDED_FEATURES,
@@ -367,6 +391,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     siding: 1,
     brickFoundation: 1,
     roofVariant: ['gambrel', 0.4],
+    porchWidth: 'full',
   },
 };
 

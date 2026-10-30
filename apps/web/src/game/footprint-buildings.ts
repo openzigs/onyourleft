@@ -256,6 +256,7 @@ import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import type { AnchorKind } from './decorations';
 import {
   FRONT_PORCH,
+  fullPorchSpanOf,
   hipFits,
   porchPieces,
   porchPitchOf,
@@ -2055,6 +2056,8 @@ interface RoofDress {
    * `ground`; none where absent.
    */
   readonly gutters?: { readonly side: number; readonly end: number; readonly ground: number };
+  /** #1784: how far the eaves overhang the walls across a slope; {@link EAVES_OVERHANG_METRES} where absent. */
+  readonly overhang?: number;
 }
 
 /** A face of a box {@link boxFaces} draws: its normal, along the long axis, across it, or down. */
@@ -2150,10 +2153,11 @@ function pitchedRoof(
   const sin = Math.sin(pitch);
   const cos = Math.cos(pitch);
   const ridgeTop = eaves + halfShort * tan;
-  const across = halfShort + EAVES_OVERHANG_METRES;
-  const along = halfLong + (shape === 'gable' ? VERGE_OVERHANG_METRES : EAVES_OVERHANG_METRES);
+  const overhang = dress.overhang ?? EAVES_OVERHANG_METRES;
+  const across = halfShort + overhang;
+  const along = halfLong + (shape === 'gable' ? VERGE_OVERHANG_METRES : overhang);
   // Overhanging, the eaves line falls below the wall top by the overhang's drop.
-  const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+  const eaveY = eaves - overhang * tan;
   const ridgeHalf = shape === 'gable' ? along : Math.max(0, halfLong - halfShort);
   const thick = ROOF_THICKNESS_METRES;
   const corner = (a: number, c: number, y: number): Vec => [
@@ -2472,7 +2476,8 @@ function variantRoof(
     }
   };
 
-  const out = halfShort + EAVES_OVERHANG_METRES;
+  const overhang = dress.overhang ?? EAVES_OVERHANG_METRES;
+  const out = halfShort + overhang;
   const pitch = radians(pitchDegrees);
   const tan = Math.tan(pitch);
   const gableReach = halfLong + VERGE_OVERHANG_METRES;
@@ -2489,7 +2494,7 @@ function variantRoof(
       const knee = halfShort * (1 - GAMBREL.lowerShare);
       const kneeY = eaves + (halfShort - knee) * Math.tan(lower);
       const top = kneeY + knee * Math.tan(upper);
-      const eaveY = eaves - EAVES_OVERHANG_METRES * Math.tan(lower);
+      const eaveY = eaves - overhang * Math.tan(lower);
       const a = gableReach;
       for (const side of [1, -1]) {
         slope(
@@ -2549,8 +2554,8 @@ function variantRoof(
       const a = gableReach;
       // Both eaves level (owner, 2026-10-30): the back's overhang drops at the plan's pitch, and
       // the steeper front's is shortened to drop the same, so the two eave lines are one height.
-      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
-      const frontOut = halfShort + (EAVES_OVERHANG_METRES * tan) / Math.tan(front);
+      const eaveY = eaves - overhang * tan;
+      const frontOut = halfShort + (overhang * tan) / Math.tan(front);
       const outOf = (side: number): number => (side === placing.front ? frontOut : out);
       for (const side of [1, -1]) {
         const its = side === placing.front ? front : pitch;
@@ -2599,7 +2604,7 @@ function variantRoof(
       const footC = clip + VERGE_OVERHANG_METRES;
       const footY = clipY - VERGE_OVERHANG_METRES * tan;
       const ridgeEnd = halfLong - clip;
-      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+      const eaveY = eaves - overhang * tan;
       for (const side of [1, -1]) {
         slope(
           [
@@ -2660,9 +2665,9 @@ function variantRoof(
     case 'side-hipped': {
       const hip = placing.end;
       const top = eaves + halfShort * tan;
-      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+      const eaveY = eaves - overhang * tan;
       const gableA = -hip * gableReach;
-      const hipA = hip * (halfLong + EAVES_OVERHANG_METRES);
+      const hipA = hip * (halfLong + overhang);
       // The hip's ridge end: the hip rises at the slopes' pitch over the half-width.
       const ridgeEnd = hip * Math.max(0, halfLong - halfShort);
       for (const side of [1, -1]) {
@@ -3492,10 +3497,12 @@ export function porchWallTopOf(
   eaves: number,
   roof: FootprintRoof,
   pitchDegrees: number,
+  overhang = EAVES_OVERHANG_METRES,
 ): number {
   const storey = floor + STOREY_METRES - 0.05;
   if (roof === 'flat') return Math.min(storey, eaves - 0.15);
-  const eaveY = eaves - EAVES_OVERHANG_METRES * Math.tan((pitchDegrees * Math.PI) / 180);
+  // #1784: an archetype's own overhang drops its eaves further, or less.
+  const eaveY = eaves - overhang * Math.tan((pitchDegrees * Math.PI) / 180);
   return Math.min(storey, eaveY - GUTTER.below - GUTTER.depth - 0.03);
 }
 
@@ -3513,6 +3520,12 @@ export interface PorchSite {
   readonly lowest: number;
   /** Whether a ring of `(a, n)` corners in the porch's frame is clear of the road, every footprint, and every porch and driveway placed. */
   readonly clear: (corners: readonly (readonly [number, number])[]) => boolean;
+  /**
+   * #1784: an archetype's full-width porch — the whole wall less its end
+   * margins and a garage's bay, on four posts — rather than the seeded width.
+   * A front too narrow for four posts, with steps in the middle bay, has no porch.
+   */
+  readonly full?: boolean;
 }
 
 /** A front porch's seeded draws, each in `[0, 1)`. */
@@ -3562,12 +3575,15 @@ export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | un
     if (along > 0) right = Math.min(right, along - bay / 2 - endMargin);
     else left = Math.min(left, -along - bay / 2 - endMargin);
   }
-  const span = porchSpanOf(
-    { left, right },
-    width.least + (width.most - width.least) * draws.width,
-    draws.posts < FRONT_PORCH.fourPostShare,
-    draws.side < 0.5 ? 1 : -1,
-  );
+  const span =
+    site.full === true
+      ? fullPorchSpanOf({ left, right })
+      : porchSpanOf(
+          { left, right },
+          width.least + (width.most - width.least) * draws.width,
+          draws.posts < FRONT_PORCH.fourPostShare,
+          draws.side < 0.5 ? 1 : -1,
+        );
   if (span === undefined) return undefined;
   const { stepsAt } = span;
   for (
@@ -4254,6 +4270,7 @@ export function footprintPlans(
           on: options.houseArchetypes ?? true,
           dropped: 0,
           dormers: options.dormerVariants ?? true,
+          porches: options.archetypePorches ?? true,
         },
       ),
     );
@@ -5054,6 +5071,13 @@ export interface FootprintPlanOptions {
    * (`?levers=-dormer-variants`).
    */
   readonly dormerVariants?: boolean;
+  /**
+   * #1784: an archetype's own eaves — wide on a bungalow and a Foursquare,
+   * tight on a Cape — and its full-width front porch on a Foursquare, a
+   * bungalow and a farmhouse; `true` by default. Off, every plan is as before
+   * (`?levers=-archetype-porches`).
+   */
+  readonly archetypePorches?: boolean;
 }
 
 /**
@@ -5065,6 +5089,8 @@ interface ArchetypeChoice {
   readonly dropped: number;
   /** #1786: whether its called-for dormers are built (`-dormer-variants` off), or #1588's. */
   readonly dormers?: boolean;
+  /** #1784: whether its own eaves and porch width are built (`-archetype-porches` off), or #1589's. */
+  readonly porches?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -5178,6 +5204,9 @@ function planFootprint(
       : 'gable';
   const pitchDegrees =
     roof === 'flat' ? 0 : (pitches[Math.floor(share(STREAM_PITCH) * pitches.length)] as number);
+  // #1784: the archetype's eaves across a slope, while the lever is on; else #1581's.
+  const overhang =
+    choice.porches === true && features.eaves !== 'seeded' ? features.eaves : EAVES_OVERHANG_METRES;
   const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < chimneyShare;
   // Which end of the ridge the chimney stands toward; a side-hipped roof hips the other (#1785).
   const chimneyEnd = share(STREAM_CHIMNEY) < chimneyShare / 2 ? 1 : -1;
@@ -5330,7 +5359,15 @@ function planFootprint(
               ? {}
               : { garage: { along: garage.along, width: garage.width } }),
             floor,
-            wallTop: porchWallTopOf(floor, eaves, roof, eavePitchOf(variant, pitchDegrees)),
+            wallTop: porchWallTopOf(
+              floor,
+              eaves,
+              roof,
+              eavePitchOf(variant, pitchDegrees),
+              overhang,
+            ),
+            // #1784: the archetype's full-width porch on posts.
+            full: choice.porches === true && features.porchWidth === 'full',
             lowest,
             groundAt: (a, n) =>
               groundAt(
@@ -5483,6 +5520,7 @@ function planFootprint(
       const ridge = roofOver(main, {
         roof: roofStyle,
         gable: wallStyle,
+        overhang,
         ...(residential
           ? { gutters: { side: facing, end: -garageEnd, ground: base + FOUNDATION_METRES } }
           : {}),
@@ -5491,7 +5529,7 @@ function planFootprint(
       // The chimney stands on the highest ridge — the widest rectangle's — so it clears them all.
       let stack = { rectangle: main, ridge };
       for (const other of roofRectangles.slice(1)) {
-        const its = roofOver(other, { roof: roofStyle, gable: wallStyle });
+        const its = roofOver(other, { roof: roofStyle, gable: wallStyle, overhang });
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
       if (withChimney) {

@@ -12,7 +12,13 @@
 import type { RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
-import { FOOTPRINT_ROLES, type FootprintPlan, type FootprintVerdict } from './footprint-buildings';
+import {
+  EAVES_OVERHANG_METRES,
+  FOOTPRINT_ROLES,
+  type FootprintPlan,
+  type FootprintVerdict,
+} from './footprint-buildings';
+import { ARCHETYPE_FEATURES } from './house-archetypes';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { FIXTURE_LATITUDE, northRoute, plannerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
@@ -936,4 +942,17 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
     }
   }
   return hash.toString(16).padStart(8, '0');
+}
+
+/**
+ * How far a plan's eaves overhang its walls across a slope, as the product
+ * plans it — #1784: its archetype's own, or {@link EAVES_OVERHANG_METRES}.
+ * Not for a plan made with `archetypePorches: false`, whose every overhang is
+ * the constant. It reads the same table production does, so a test using it
+ * checks consistency; the values themselves are pinned as literals in
+ * `archetype-porches.test.ts`.
+ */
+export function eavesOverhangOf(plan: FootprintPlan): number {
+  const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
+  return eaves === 'seeded' ? EAVES_OVERHANG_METRES : eaves;
 }
