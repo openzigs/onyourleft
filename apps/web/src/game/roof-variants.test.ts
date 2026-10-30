@@ -690,9 +690,9 @@ describe('gutters, a chimney and dormers on a variant — #1785', () => {
       const roof = verticesOf(plan, 'porch-roof');
       if (roof.length === 0) continue; // a canopy, not a front porch
       porched += 1;
-      // The steepest eave drops EAVES_OVERHANG × tan(lower) below the walls' top; the gutter hangs
+      // The steepest eave drops its overhang × tan(lower) below the walls' top; the gutter hangs
       // under it, and the porch's roof meets the wall below the gutter's foot (#1589).
-      const drop = EAVES_OVERHANG_METRES * Math.tan((GAMBREL.lowerDegrees * Math.PI) / 180);
+      const drop = eavesOverhangOf(plan) * Math.tan((GAMBREL.lowerDegrees * Math.PI) / 180);
       const gutterFoot = plan.eaves - drop - GUTTER.below - GUTTER.depth;
       expect(Math.max(...roof.map((vertex) => vertex.y))).toBeLessThan(gutterFoot);
     }
