@@ -265,7 +265,7 @@ export const HOSTED_UNREADABLE =
  * withdrawn — had no answer this can read (#1796). The request may have
  * reached the instance, and been done, before its answer was lost, so this
  * says it cannot tell and never that nothing changed. None of the four sends
- * anything to a service. ⚠️ Draft wording awaiting the owner's approval (#1796).
+ * anything to a service.
  */
 export const HOSTED_CHANGE_UNKNOWN =
   'Your instance did not answer, or answered something this app cannot read, so this app ' +

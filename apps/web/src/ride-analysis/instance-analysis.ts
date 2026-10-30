@@ -257,7 +257,6 @@ export const INSTANCE_ASK_TEXT = {
   'masking-not-sent':
     'This device could not give your instance your list of words to mask and your privacy zones, so nothing was sent to the service and nothing was kept.',
   // #1796: the key was replaced, and agreed to again, for another service on another device.
-  // ⚠️ Draft wording awaiting the owner's approval (#1935).
   'service-moved':
     'Your instance now sends write-ups to a different service than the one named here, so nothing was sent and nothing was kept. Open Instance in Settings to see which it is, then ask again.',
   failed: 'The write-up did not finish, so nothing was kept.',
