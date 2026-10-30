@@ -27,6 +27,7 @@ import {
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
   weatheringWithLevers,
+  windowRoomsWithLevers,
 } from './config';
 import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
 import { PLACES } from '../../src/demo/synthetic-road';
@@ -257,6 +258,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'utf8',
     );
     expect(harness).toContain('weatheringOf(view, weatheringWithLevers(config.leversOff));');
+  });
+
+  it('builds the rooms behind mapped glass, as the product does, unless #1662’s lever takes them out', () => {
+    expect(LEVERS).toContain('window-rooms');
+    expect(windowRoomsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(windowRoomsWithLevers(LEVERS.filter((lever) => lever !== 'window-rooms'))).toBe(true);
+    expect(windowRoomsWithLevers(parseConfig('?levers=-window-rooms').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-window-rooms'))).toBe(
+      `?levers=${encodeURIComponent('-window-rooms')}&town=mixed`,
+    );
+    // And #1659's and #1661's levers are not this one.
+    expect(windowRevealsWithLevers(parseConfig('?levers=-window-rooms').leversOff)).toBe(true);
+    expect(weatheringWithLevers(parseConfig('?levers=-window-rooms').leversOff)).toBe(true);
+  });
+
+  it('hands #1662’s parsed lever to the owner’s page, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('windowRoomsOf(view, windowRoomsWithLevers(config.leversOff));');
   });
 
   it('builds the mapped facades’ trims, as the product does, unless #1663’s lever takes them out', () => {

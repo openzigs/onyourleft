@@ -1060,6 +1060,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `oylRevealOf`, reading the face frame `oylFaceN`,
                         `oylFaceU`, `oylFaceUp`, `oylToSunV`, `oylToEyeV`);
                         the realistic page's `-window-reveals` builds it out.
+                        Since #1662 every pane shows a procedural room
+                        behind it (`interiorAt`, the shader's `oylInterior`,
+                        whose signature #1636 and #1665 call) and gives back
+                        the sky by Schlick's Fresnel at metalness 0, not 0.35;
+                        `-window-rooms` builds it out.
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`

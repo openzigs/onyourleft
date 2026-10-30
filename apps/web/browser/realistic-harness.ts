@@ -99,6 +99,7 @@ import {
   villageModelsShownOf,
   weatheringOf,
   windowRevealsOf,
+  windowRoomsOf,
   type VillageHouseStats,
 } from '../src/game/three-renderer';
 import {
@@ -115,6 +116,7 @@ import {
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
   weatheringWithLevers,
+  windowRoomsWithLevers,
   facadeTrimsWithLevers,
   countrysideWithLevers,
   type Layer,
@@ -501,6 +503,9 @@ async function run(): Promise<void> {
   // #1663's cost pair: the mapped facades without their lintels, quoins and
   // string courses, the term out of the facade's program, as the weathering's is.
   facadeTrimsOf(view, facadeTrimsWithLevers(config.leversOff));
+  // #1662's cost pair: the mapped panes without the rooms behind them and
+  // their Fresnel, the term out of the facade's program, as the weathering's is.
+  windowRoomsOf(view, windowRoomsWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.

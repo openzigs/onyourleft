@@ -3891,6 +3891,30 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(reveal.jambOff) - luminance(reveal.glassOff))).toBeLessThan(4);
   });
 
+  test('#1662 two neighbouring mapped sashes seen head-on from 15 m show different rooms, and the same flat room with -window-rooms', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { windowRooms: rooms } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `two sashes ${rooms.metres.toFixed(0)} m off, square on (pair ${String(rooms.pairsTried)} read): ` +
+      `${rgb(rooms.left)} against ${rgb(rooms.right)}; ${rgb(rooms.leftOff)} and ` +
+      `${rgb(rooms.rightOff)} with -window-rooms`;
+    testInfo.annotations.push({ type: 'the rooms behind mapped glass', description: measured });
+    console.log(`the rooms behind mapped glass — ${measured}`);
+    const apart = (x: readonly number[], y: readonly number[]): number =>
+      Math.max(...x.map((value, channel) => Math.abs(value - (y[channel] ?? 0))));
+    expect(rooms.aimed).toBe(true);
+    for (const values of [rooms.left, rooms.right, rooms.leftOff, rooms.rightOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // THE CONTROL: with the term out of the program the two are #1581's same
+    // flat room, inside the gate's tolerance of 4 that #1659's control is held to.
+    expect(apart(rooms.leftOff, rooms.rightOff)).toBeLessThan(4);
+    // With the rooms, two rooms: past that tolerance.
+    expect(apart(rooms.left, rooms.right)).toBeGreaterThan(4);
+  });
+
   test('#1658 a sunlit mapped wall is in its eaves’ shadow 0.3 m under them and not 1.5 m under, and neither with -overhang-shadows', async ({
     harnessRun,
   }, testInfo) => {
