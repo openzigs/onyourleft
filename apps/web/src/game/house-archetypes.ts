@@ -207,6 +207,23 @@ export type RoofVariant = 'plain' | (typeof ROOF_VARIANTS)[number];
 export type VariantShare =
   readonly [variant: Exclude<RoofVariant, 'plain'>, share: number] | 'none';
 
+/**
+ * A dormer's kind — #1786, built by `footprint-buildings.ts` §`dormers` and
+ * §`dormerOf`: #1588's `gabled` dormer, a `shed` dormer (one wide front under
+ * a single slope lower than the roof's), and a `hipped` one (its roof hipped
+ * at its front).
+ */
+export const DORMER_KINDS = ['gabled', 'shed', 'hipped'] as const;
+
+/** One of {@link DORMER_KINDS}. */
+export type DormerKind = (typeof DORMER_KINDS)[number];
+
+/**
+ * The dormers an archetype calls for — #1786: their kind, and how many on the
+ * roof's front slope; or none, where its `dormer` share and #1588's rule hold.
+ */
+export type DormerCall = readonly [kind: DormerKind, count: number] | 'none';
+
 /** The features one archetype admits; `planFootprint` draws only inside them. */
 export interface ArchetypeFeatures {
   /** A hip rather than a gable — `HIP_SHARE`. */
@@ -235,6 +252,11 @@ export interface ArchetypeFeatures {
   readonly brickFoundation: FeatureShare;
   /** #1785: the roof variant it may wear in place of its gable or hip. */
   readonly roofVariant: VariantShare;
+  /**
+   * #1786: the dormers it calls for, which take the place of `dormer`'s share
+   * and #1588's count by the ridge's reach; with `-dormer-variants`, `dormer` as before.
+   */
+  readonly dormers: DormerCall;
 }
 
 /**
@@ -255,13 +277,15 @@ export const SEEDED_FEATURES: ArchetypeFeatures = {
   siding: 'seeded',
   brickFoundation: 'seeded',
   roofVariant: 'none',
+  dormers: 'none',
 };
 
 /**
  * What each archetype admits — the "together" column of the module's table.
- * A feature its row does not name keeps its seeded share. The Foursquare's
- * one front dormer waits for the dormers issue under #1656: the gabled dormer
- * there is stands only on `DORMER_MIN_PITCH_DEGREES`, which its 30–35° is not.
+ * A feature its row does not name keeps its seeded share. Since #1786 each
+ * row also names its dormers ({@link DormerCall}): two gabled ones on a Cape,
+ * one hipped one on a Foursquare's route-facing slope — its 30–35° under the
+ * gabled dormer's 40° — and one wide shed dormer on a bungalow.
  *
  * Since #1785 four of them may wear a {@link RoofVariant} in its gable's or
  * hip's place, on a share of their footprints: the farmhouse a gambrel, the
@@ -292,6 +316,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     picture: 0,
     garage: 0,
     dormer: 1,
+    dormers: ['gabled', 2],
   },
   colonial: {
     ...SEEDED_FEATURES,
@@ -315,6 +340,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     picture: 0,
     garage: 0,
     dormer: 0,
+    dormers: ['hipped', 1],
   },
   bungalow: {
     ...SEEDED_FEATURES,
@@ -327,6 +353,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     dormer: 0,
     siding: 1,
     roofVariant: ['half-hipped', 0.4],
+    dormers: ['shed', 1],
   },
   farmhouse: {
     ...SEEDED_FEATURES,
@@ -355,7 +382,7 @@ export function droppedFeatures(features: ArchetypeFeatures, dropped: number): A
   const gone = new Set(ARCHETYPE_DROPS.slice(0, dropped));
   return {
     ...features,
-    ...(gone.has('dormers') ? { dormer: 0 } : {}),
+    ...(gone.has('dormers') ? { dormer: 0, dormers: 'none' as const } : {}),
     ...(gone.has('porch') ? { canopy: 0, frontPorch: 0 } : {}),
   };
 }

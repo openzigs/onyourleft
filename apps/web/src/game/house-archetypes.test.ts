@@ -620,9 +620,16 @@ describe('the caps — #1782', () => {
     const cape = ARCHETYPE_FEATURES.cape;
     expect(droppedFeatures(cape, 0)).toStrictEqual(cape);
     const once = droppedFeatures(cape, 1);
-    expect(once).toStrictEqual({ ...cape, dormer: 0 });
+    // Since #1786 its called-for dormers go with them.
+    expect(once).toStrictEqual({ ...cape, dormer: 0, dormers: 'none' });
     const twice = droppedFeatures(cape, 2);
-    expect(twice).toStrictEqual({ ...cape, dormer: 0, canopy: 0, frontPorch: 0 });
+    expect(twice).toStrictEqual({
+      ...cape,
+      dormer: 0,
+      dormers: 'none',
+      canopy: 0,
+      frontPorch: 0,
+    });
     expect(droppedFeatures(SEEDED_FEATURES, 0)).toStrictEqual(SEEDED_FEATURES);
   });
 });

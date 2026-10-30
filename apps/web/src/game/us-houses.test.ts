@@ -79,6 +79,7 @@ import {
   ringBeside,
 } from './footprint-fixtures-testing';
 import { FOUNDATION_METRES } from './buildings';
+import { ARCHETYPE_FEATURES } from './house-archetypes';
 import { landClassMask } from './land-class';
 import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './road-grid';
 import { rectanglesOf } from './rectilinear-roofs';
@@ -605,7 +606,15 @@ describe('gutters, a downpipe and dormers — #1588', () => {
 
   it('stands dormers on steep residential roofs only, inside the roof and under its ridge', () => {
     let built = 0;
-    for (const plan of town) {
+    // #1786: a Foursquare's hipped dormer and a bungalow's shed one are held in
+    // `dormer-variants.test.ts`; this is #1588's gabled one.
+    const gabled = town.filter((plan) => {
+      const call =
+        plan.archetype === 'unknown' ? 'none' : ARCHETYPE_FEATURES[plan.archetype].dormers;
+      return call === 'none' || call[0] === 'gabled';
+    });
+    expect(gabled.length).toBeGreaterThan(town.length - 20);
+    for (const plan of gabled) {
       const dormer = verticesOf(plan, 'dormer');
       const roof = verticesOf(plan, 'dormer-roof');
       if (plan.dormers === 0) {
@@ -642,7 +651,7 @@ describe('gutters, a downpipe and dormers — #1588', () => {
     expect(Math.max(...town.map((plan) => plan.dormers))).toBe(2);
     // Control: steep enough roofs do get them, and none below the pitch.
     expect(
-      town.some((plan) => plan.pitchDegrees < DORMER_MIN_PITCH_DEGREES && plan.dormers > 0),
+      gabled.some((plan) => plan.pitchDegrees < DORMER_MIN_PITCH_DEGREES && plan.dormers > 0),
     ).toBe(false);
   });
 

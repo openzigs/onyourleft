@@ -275,6 +275,8 @@ import {
   houseArchetypeOf,
   SEEDED_FEATURES,
   type FeatureShare,
+  type DormerCall,
+  type DormerKind,
   type HouseArchetype,
   type RoofVariant,
 } from './house-archetypes';
@@ -912,6 +914,39 @@ export const DORMER = { width: 1.5, front: 1.5, setBack: 0.5, belowRidge: 0.25 }
  */
 export const DORMER_ONE_REACH_METRES = 1.8;
 export const DORMER_TWO_REACH_METRES = 2 * DORMER_ONE_REACH_METRES;
+
+/**
+ * The least pitch each kind of dormer stands on — #1786: the gabled dormer
+ * keeps #1588's {@link DORMER_MIN_PITCH_DEGREES}; a hipped one stands on a
+ * Foursquare's 30°, and a shed one on a bungalow's 25°.
+ */
+export const DORMER_KIND_MIN_PITCH_DEGREES: Readonly<Record<DormerKind, number>> = {
+  gabled: DORMER_MIN_PITCH_DEGREES,
+  hipped: 30,
+  shed: 25,
+};
+
+/**
+ * A hipped dormer — #1786: #1588's {@link DORMER} in its width, its set-back
+ * and its clearance under the ridge, but a lower front (**1.3 m**), so that it
+ * stands under a 30° roof; its roof at the roof's pitch, hipped at its front.
+ */
+export const HIPPED_DORMER = { front: 1.3 } as const;
+
+/**
+ * A shed dormer — #1786: its widest (**3 m**); the least height of its front
+ * that holds `facade.ts` §`DORMER_SASH` (**0.9 m**), and where a front would be
+ * lower it is not built; how much lower than the roof's its roof's pitch is
+ * (**15°**); how far inside the wall's line its front stands (none: on it);
+ * and how far along the ridge it keeps from a chimney (**0.1 m**).
+ */
+export const SHED_DORMER = {
+  width: 3,
+  leastFront: 0.9,
+  lessDegrees: 15,
+  setBack: 0,
+  clear: 0.1,
+} as const;
 
 /** The shortest front wall that has a shop front — #1590: **4 m**; a shorter one keeps its door alone. */
 export const SHOP_FRONT_MIN_WALL_METRES = 4;
@@ -2845,6 +2880,215 @@ function dormers(
   return places.length;
 }
 
+/**
+ * A roof slope for a dormer to stand on — #1786: a point on the ridge's line
+ * in the slope's middle, the way along its eaves (`a`), the way out and down
+ * it (`c`), and how far the wall's line is from the ridge's. A long side's
+ * slope, or a hip's end, whose slope is the sides' turned a right angle.
+ */
+interface SlopeFrame {
+  readonly ox: number;
+  readonly oz: number;
+  readonly ax: number;
+  readonly az: number;
+  readonly cx: number;
+  readonly cz: number;
+  readonly run: number;
+}
+
+/**
+ * One dormer of #1786's kinds on `frame`'s slope, in its middle, standing up
+ * from the slope at the roof's pitch, under the ridge at `ridgeTop` by
+ * {@link DORMER}'s `belowRidge`. The front (`dormer`) wears the walls'
+ * cladding and a sash in it ({@link FACADE_DORMER}, laid out as #1588's is, by
+ * the front's width and height), as do the cheeks; the roof (`dormer-roof`)
+ * the roof's.
+ *
+ * - `hipped`: {@link DORMER}'s width, a {@link HIPPED_DORMER} front, and a
+ *   roof at the roof's pitch, two slopes and a hip at its front.
+ * - `shed`: a front as wide as {@link SHED_DORMER} admits, clear along the
+ *   ridge of a chimney at {@link CHIMNEY_ALONG_RIDGE} of `reach`, under one
+ *   slope from just under the ridge, {@link SHED_DORMER}'s `lessDegrees` lower
+ *   than the roof's.
+ *
+ * A hipped dormer keeps off the chimney across the ridge: its roof's back is
+ * at least {@link DORMER}'s `belowRidge` under the ridge, further from the
+ * ridge's line than the chimney's half-breadth on every roof the Foursquare's
+ * cue admits (`dormer-variants.test.ts` holds it over both towns). Returns how
+ * many it built: none where it would not stand under the ridge and over the
+ * eaves, or a shed's front would be too low for its sash.
+ */
+function dormerOf(
+  writing: Writing,
+  frame: SlopeFrame,
+  heights: readonly [eaves: number, floor: number],
+  ridgeTop: number,
+  pitchDegrees: number,
+  placing: { readonly kind: Exclude<DormerKind, 'gabled'>; readonly reach: number },
+  styles: { readonly wall: Style; readonly roof: Style },
+): number {
+  const { ox, oz, ax, az, cx, cz, run } = frame;
+  const [eaves, floor] = heights;
+  const pitch = (pitchDegrees * Math.PI) / 180;
+  const tan = Math.tan(pitch);
+  const at = (a: number, c: number, y: number): Vec => [
+    ox + ax * a + cx * c,
+    y,
+    oz + az * a + cz * c,
+  ];
+  const storeys = (y: number): number => (y - floor) / STOREY_METRES;
+  const outward: Vec = [cx, 0, cz];
+  /** The front, from `foot` to `head`, `width` wide: a sash in it. */
+  const frontFace = (front: number, width: number, foot: number, head: number): void => {
+    const half = width / 2;
+    const tall = head - foot;
+    quad(
+      writing.dormer,
+      [
+        at(-half, front, foot),
+        at(half, front, foot),
+        at(half, front, head),
+        at(-half, front, head),
+      ],
+      outward,
+      [
+        [0, storeys(foot)],
+        [width / BAY_METRES, storeys(foot)],
+        [width / BAY_METRES, storeys(head)],
+        [0, storeys(head)],
+      ],
+      { top: FACADE_DORMER, skip: -1, style: [styles.wall[0], styles.wall[1], width, tall] },
+      [
+        [0, 0],
+        [width, 0],
+        [width, tall],
+        [0, tall],
+      ],
+    );
+  };
+  /** A cheek at `a`, from the front's foot and head back to `(back, top)`, where it meets the slope. */
+  const cheek = (
+    a: number,
+    sign: number,
+    front: number,
+    foot: number,
+    head: number,
+    back: number,
+    top: number,
+  ): void => {
+    const uv: Three<Pair> = [
+      [0, storeys(foot)],
+      [0, storeys(head)],
+      [(front - back) / BAY_METRES, storeys(top)],
+    ];
+    triangle(
+      writing.dormer,
+      [at(a, front, foot), at(a, front, head), at(a, back, top)],
+      [ax * sign, 0, az * sign],
+      uv,
+      plainIn(styles.wall),
+      uv,
+    );
+  };
+  if (placing.kind === 'hipped') {
+    const half = DORMER.width / 2;
+    const front = run - DORMER.setBack;
+    const foot = ridgeTop - front * tan;
+    const head = foot + HIPPED_DORMER.front;
+    const apex = head + half * tan;
+    if (!(apex <= ridgeTop - DORMER.belowRidge) || !(foot >= eaves)) return 0;
+    const back = (ridgeTop - head) / tan;
+    const end = (ridgeTop - apex) / tan;
+    // Its ridge from where its front hip meets it back to the slope.
+    const ridgeFront = Math.max(end, front - half);
+    frontFace(front, DORMER.width, foot, head);
+    cheek(-half, -1, front, foot, head, back, head);
+    cheek(half, 1, front, foot, head, back, head);
+    const sin = Math.sin(pitch);
+    const cos = Math.cos(pitch);
+    const slopeLength = half / cos;
+    for (const [eave, sign] of [
+      [-half, -1],
+      [half, 1],
+    ] as const) {
+      const uv: Four<Pair> = [
+        [front / STOREY_METRES, 0],
+        [ridgeFront / STOREY_METRES, slopeLength / STOREY_METRES],
+        [end / STOREY_METRES, slopeLength / STOREY_METRES],
+        [back / STOREY_METRES, 0],
+      ];
+      quad(
+        writing['dormer-roof'],
+        [at(eave, front, head), at(0, ridgeFront, apex), at(0, end, apex), at(eave, back, head)],
+        [ax * sign * sin, cos, az * sign * sin],
+        uv,
+        plainIn(styles.roof),
+        [
+          [front, 0],
+          [ridgeFront, slopeLength],
+          [end, slopeLength],
+          [back, 0],
+        ],
+      );
+    }
+    // Its front's hip, out over the front at the same pitch.
+    const hipUv: Three<Pair> = [
+      [-half / STOREY_METRES, 0],
+      [half / STOREY_METRES, 0],
+      [0, slopeLength / STOREY_METRES],
+    ];
+    triangle(
+      writing['dormer-roof'],
+      [at(-half, front, head), at(half, front, head), at(0, ridgeFront, apex)],
+      [cx * sin, cos, cz * sin],
+      hipUv,
+      plainIn(styles.roof),
+      [
+        [-half, 0],
+        [half, 0],
+        [0, slopeLength],
+      ],
+    );
+    return 1;
+  }
+  // A shed: its roof from just under the ridge, out over its front at a lower pitch.
+  const shed = ((pitchDegrees - SHED_DORMER.lessDegrees) * Math.PI) / 180;
+  const top = ridgeTop - DORMER.belowRidge;
+  const back = DORMER.belowRidge / tan;
+  const front = run - SHED_DORMER.setBack;
+  const foot = ridgeTop - front * tan;
+  const head = top - (front - back) * Math.tan(shed);
+  const width = Math.min(
+    SHED_DORMER.width,
+    2 * (CHIMNEY_ALONG_RIDGE * placing.reach - CHIMNEY.along / 2 - SHED_DORMER.clear),
+  );
+  if (head - foot < SHED_DORMER.leastFront || foot < eaves - 1e-9 || width < DORMER.width) return 0;
+  const half = width / 2;
+  frontFace(front, width, foot, head);
+  cheek(-half, -1, front, foot, head, back, top);
+  cheek(half, 1, front, foot, head, back, top);
+  const length = (front - back) / Math.cos(shed);
+  quad(
+    writing['dormer-roof'],
+    [at(-half, front, head), at(half, front, head), at(half, back, top), at(-half, back, top)],
+    [cx * Math.sin(shed), Math.cos(shed), cz * Math.sin(shed)],
+    [
+      [-half / STOREY_METRES, 0],
+      [half / STOREY_METRES, 0],
+      [half / STOREY_METRES, length / STOREY_METRES],
+      [-half / STOREY_METRES, length / STOREY_METRES],
+    ],
+    plainIn(styles.roof),
+    [
+      [-half, 0],
+      [half, 0],
+      [half, length],
+      [-half, length],
+    ],
+  );
+  return 1;
+}
+
 /** The outer ring's edge a front door goes on, and how far its middle is from the road. */
 interface DoorEdge {
   readonly edge: number;
@@ -3997,7 +4241,11 @@ export function footprintPlans(
           flat: false,
           variants: options.roofVariants === false ? 'off' : (options.roofVariant ?? 'archetype'),
         },
-        { on: options.houseArchetypes ?? true, dropped: 0 },
+        {
+          on: options.houseArchetypes ?? true,
+          dropped: 0,
+          dormers: options.dormerVariants ?? true,
+        },
       ),
     );
   }
@@ -4790,6 +5038,13 @@ export interface FootprintPlanOptions {
    * the shapes' tests; absent, each archetype's own.
    */
   readonly roofVariant?: Exclude<RoofVariant, 'plain'>;
+  /**
+   * #1786: an archetype's called-for dormers — two gabled ones on a Cape, a
+   * hipped one on a Foursquare, a shed one on a bungalow; `true` by default.
+   * Off, every dormer is #1588's, and every plan as before
+   * (`?levers=-dormer-variants`).
+   */
+  readonly dormerVariants?: boolean;
 }
 
 /**
@@ -4799,6 +5054,8 @@ export interface FootprintPlanOptions {
 interface ArchetypeChoice {
   readonly on: boolean;
   readonly dropped: number;
+  /** #1786: whether its called-for dormers are built (`-dormer-variants` off), or #1588's. */
+  readonly dormers?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -5130,11 +5387,14 @@ function planFootprint(
       : (garage.plan.x - main.cx) * main.ux + (garage.plan.z - main.cz) * main.uz >= 0
         ? 1
         : -1;
+  // #1786: the archetype's called-for dormers, each kind on its own least pitch; else #1588's.
+  const call: DormerCall = choice.dormers === true ? features.dormers : 'none';
+  const dormerKind: DormerKind = call === 'none' ? 'gabled' : call[0];
   const withDormers =
     roof !== 'flat' &&
     residential &&
-    pitchDegrees >= DORMER_MIN_PITCH_DEGREES &&
-    share(STREAM_DORMER) < shareOf(features.dormer, DORMER_SHARE) &&
+    pitchDegrees >= DORMER_KIND_MIN_PITCH_DEGREES[dormerKind] &&
+    (call !== 'none' || share(STREAM_DORMER) < shareOf(features.dormer, DORMER_SHARE)) &&
     // #1785: a half-hipped or side-hipped roof's slopes are the gable's, and carry them; a
     // gambrel's and a saltbox's are not, and do not.
     variant !== 'gambrel' &&
@@ -5228,11 +5488,44 @@ function planFootprint(
       if (withChimney) {
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], chimneyEnd);
       }
-      if (withDormers) {
+      if (withDormers && dormerKind !== 'gabled') {
+        // #1786: on the route-facing slope — a long side's, or a hip's end where the front is
+        // across the ridge — clear of the chimney.
+        const { ux, uz, cx, cz, halfShort } = main;
+        const ends =
+          roof === 'hip' &&
+          frontFrame !== undefined &&
+          Math.abs(frontFrame.nx * ux + frontFrame.nz * uz) >
+            Math.abs(-frontFrame.nx * uz + frontFrame.nz * ux);
+        const end =
+          frontFrame !== undefined && frontFrame.nx * ux + frontFrame.nz * uz >= 0 ? 1 : -1;
+        const frame: SlopeFrame = ends
+          ? {
+              ox: cx + ux * end * ridge.half,
+              oz: cz + uz * end * ridge.half,
+              ax: -uz,
+              az: ux,
+              cx: ux * end,
+              cz: uz * end,
+              run: halfShort,
+            }
+          : { ox: cx, oz: cz, ax: ux, az: uz, cx: -uz * facing, cz: ux * facing, run: halfShort };
+        drew.dormers = dormerOf(
+          writing,
+          frame,
+          [eaves, floor],
+          ridge.top,
+          pitchDegrees,
+          { kind: dormerKind, reach: Math.min(ridge.half, main.halfLong) },
+          { wall: wallStyle, roof: roofStyle },
+        );
+      } else if (withDormers) {
         // Clear of the chimney: one in the middle, or two either side of it.
         const reach = Math.min(ridge.half, main.halfLong);
-        const count =
+        const byReach =
           reach >= DORMER_TWO_REACH_METRES ? 2 : reach >= DORMER_ONE_REACH_METRES ? 1 : 0;
+        // #1786: an archetype's count, where the reach admits that many.
+        const count = call === 'none' ? byReach : Math.min(call[1], byReach);
         if (count > 0) {
           drew.dormers = dormers(
             writing,
