@@ -119,6 +119,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   appeal: `INSERT INTO appeal VALUES (1, 1, 'b', 'Grounds', 29, NULL, NULL, NULL, NULL, NULL)`,
   notice: `INSERT INTO notice VALUES (1, 27, 'illegal_content', 'Why', '["room:0123456789abcdef0123456789abcdef"]', NULL, NULL, NULL, 0)`,
   notice_step: `INSERT INTO notice_step VALUES (1, 1, 'decided', 'a', 'Not illegal', 1, 30)`,
+  notice_erasure: `INSERT INTO notice_erasure VALUES (1, 0, 0, 32)`,
   hidden_item: `INSERT INTO hidden_item VALUES (1, 'room:0123456789abcdef0123456789abcdef', 'b', 31, NULL)`,
 };
 
@@ -135,6 +136,7 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0028-appeals': 'appeal',
   '0029-notice-steps': 'notice_step',
   '0030-hidden-items': 'hidden_item',
+  '0036-notice-erasure': 'notice_erasure',
 };
 
 interface Snapshot {
@@ -329,6 +331,26 @@ describe('the migrations (#769)', () => {
     expect(snapshot(path)).toEqual(before);
     await withKysely(path, async (db) => {
       expect((await appliedMigrations(db)).at(-1)).toBe('0026-notices');
+    });
+  });
+
+  it('refuses to undo 0036 while a notice’s notifier details have been erased, and changes nothing (#1381)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0036-notice-erasure') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const before = snapshot(path);
+    expect(before.rows.notice_erasure).toBe(1);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /notifier details have been erased/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0036-notice-erasure');
     });
   });
 

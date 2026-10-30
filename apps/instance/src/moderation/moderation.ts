@@ -79,7 +79,8 @@ import type {
   Appeal,
   NoticeStep,
 } from '../store/sql-store.ts';
-import { exportRecord, type ModerationRecord } from './record.ts';
+import { exportRecord, stepsOf, type ModerationRecord } from './record.ts';
+import { noticeDetailsDueAt } from './notice-retention.ts';
 import { parseModerationItem } from '@onyourleft/domain';
 import { publishedOrder } from '../rooms/publication.ts';
 import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
@@ -301,6 +302,12 @@ export interface Moderation {
   ): Promise<ModerationResult<null>>;
   /** The record of every notice and appeal, with no personal detail of a notifier (#912). */
   record(): Promise<ModerationRecord>;
+  /**
+   * Erase the notifier details of every notice closed six months ago or more
+   * (#1381, `notice-retention.ts`), and answer how many were erased. The
+   * instance runs it on the hour; nobody asks for it.
+   */
+  eraseExpiredNoticeDetails(): Promise<number>;
   /** The moderators' queue of appeals, oldest first, each with the statement it appeals (#911). */
   openAppeals(): Promise<readonly OpenAppeal[]>;
   /**
@@ -878,6 +885,19 @@ export function createModeration(options: ModerationOptions): Moderation {
         store.listEveryAppeal(),
       ]);
       return exportRecord(notices, steps, appeals);
+    },
+
+    async eraseExpiredNoticeDetails() {
+      const at = seconds();
+      const [notices, steps] = await Promise.all([store.listNotices(), store.listNoticeSteps()]);
+      let erased = 0;
+      for (const notice of notices) {
+        if (notice.erased !== null) continue;
+        const { decidedAt } = stepsOf(notice.id, steps);
+        if (decidedAt === null || at < noticeDetailsDueAt(decidedAt)) continue;
+        if ((await store.eraseNoticeDetails(notice.id, at)) === 'erased') erased += 1;
+      }
+      return erased;
     },
 
     async appeal(athleteId, statementId, grounds) {
