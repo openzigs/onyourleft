@@ -30,8 +30,9 @@
  * Gamepad input deliberately bypasses the #1432 touch lock, as keys do,
  * under ADR 0059 D-5.
  *
- * Mounted only on a ride that hands the HUD a throw or a steer port, which
- * until #1816 is none.
+ * Mounted only on a ride that hands the HUD a throw or a steer port:
+ * `GameView` hands both on a Delivery round (#1816, #1853), and
+ * `delivery-wiring.test.tsx` rides one with a pad.
  */
 
 import { useEffect, useRef } from 'react';
