@@ -77,17 +77,19 @@
  * is neither, so a mis-pressed *End ride* costs no more than the houses
  * already behind the rider.
  *
- * ## A town with too few houses for the round has no round
+ * ## A route with fewer houses than the day's rides a shorter round
  *
  * The round holds the week's count of houses, every one a house
  * `targets.ts` §`pickRoundTargets` found the town draws, so every house on
  * it has a doorstep to throw at. Where the pick finds fewer than the week
- * asks for — none at all included, which is #1856's town with no house in
- * reach — there is no round and the ride is an ordinary one (#1818): a
- * shorter round would set the next day's count from its own length, so a
- * perfect round of three would leave the week with four houses tomorrow.
- * With no round nothing is kept, so the week is as it was. What the rider is
- * told is `hud/delivery-announce.ts` §`NO_ROUND_TEXT`.
+ * asks for, the round is every house it found (the owner's ruling of
+ * 2026-10-29 on #1818), and it stands for the day's count
+ * (`round.ts` §`Round.dayHouses`), so being short never lowers tomorrow's
+ * count (`round.ts` §`endRound`). A pick of fewer than
+ * `round.ts` §`FEWEST_DELIVERY_HOUSES` — none at all included, which is
+ * #1856's town with no house in reach — is no round, and the ride is an
+ * ordinary one. With no round nothing is kept, so the week is as it was.
+ * What the rider is told is `hud/delivery-announce.ts` §`TOO_FEW_HOUSES_TEXT`.
  *
  * ## Nothing here leaves the ride (DL11)
  *
@@ -116,6 +118,7 @@ import {
 } from './obstacles';
 import {
   endRound,
+  FEWEST_DELIVERY_HOUSES,
   recordMiss,
   roundTally,
   startRound,
@@ -193,8 +196,9 @@ export interface DeliveryRideStart {
 /**
  * Start the round the week asks for, at the press: its houses picked, its
  * obstacles placed, both from one seed drawn here and kept by nothing.
- * `undefined` when the town has fewer houses the round could take than the
- * week asks for (#1818). @see the header
+ * A pick short of the week's count rides every house it found, and
+ * `undefined` is a short pick of fewer than {@link FEWEST_DELIVERY_HOUSES}
+ * (#1818). @see the header
  */
 export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | undefined {
   const week = readDeliveryProgress(input.storage);
@@ -211,7 +215,9 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     seed,
   );
   const last = pick.targets.at(-1);
-  if (!pick.complete || last === undefined) return undefined;
+  if (last === undefined || (!pick.complete && pick.targets.length < FEWEST_DELIVERY_HOUSES)) {
+    return undefined;
+  }
   const obstacles = placeObstacles(
     { from: input.riderDistance, to: last.distance + TARGET_WINDOW_HALF_METRES },
     seed,
@@ -228,7 +234,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       side: target.side === 1 ? 'right' : 'left',
       clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
     })),
-    round: startRound(pick.targets.length, { assisted: assist.noFail }),
+    round: startRound(pick.targets.length, { assisted: assist.noFail, dayHouses: week.houses }),
     throws: NO_PARCELS,
     obstacles,
     obstacleState: startObstacles(obstacles),

@@ -81,7 +81,7 @@ import type { PacerChoice } from './pacer-choice';
 import { realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
-import { DAYS_IN_WEEK, type WeekProgress } from './delivery/round';
+import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 
 /** One route the rider could ride, as the picker needs it. */
@@ -170,9 +170,10 @@ export interface RecordingOffer {
  * `stage-chooser-imports.test.ts` holds it to no renderer, no map and no
  * network, and the houses are planned from the corridor at the press. So it
  * offers the round wherever the world is the realistic one, and the ride
- * decides at the press: a town with too few houses for the week's round is an
- * ordinary ride, and the HUD says so (`hud/delivery-announce.ts`
- * §`NO_ROUND_TEXT`).
+ * decides at the press: a route with fewer houses than the week's round rides
+ * a shorter one, and one with fewer than `FEWEST_DELIVERY_HOUSES`, or with no
+ * houses read, is an ordinary ride the HUD says is one
+ * (`hud/delivery-announce.ts` §`oweNoRound`).
  */
 export interface DeliveryOffer {
   /** Whether the rider switched the round on. */
@@ -866,62 +867,6 @@ export const RIDER_GHOST_TEXT = {
 
 const RIDER_GHOST_HINT_ID = 'oyl-game-rider-ghost-hint';
 
-/**
- * The rider-facing words of #1818's choice, for the owner's approval: the
- * project's own (DL1), naming no other game.
- *
- * The label says what is switched on; the hint says what a round is, that
- * nothing in it reaches the trainer (DL5, true in every trainer state, a
- * workout's included), and what happens where the towns cannot hold one,
- * because the chooser cannot tell beforehand.
- */
-export const DELIVERY_CHOICE_TEXT = {
-  label: 'Ride a Delivery round',
-  hint:
-    'Throw parcels to the doorsteps of the houses on the round as you ride through a town. ' +
-    'Nothing in the round changes what your trainer is sent. If the route’s towns have too ' +
-    'few mapped houses for the round, the ride is an ordinary one.',
-} as const;
-
-/** The week's progress, in words: *"Day 2 of 7 · 8 houses on the round"* (#1818). */
-export function deliveryWeekText(week: Pick<WeekProgress, 'day' | 'houses'>): string {
-  const houses = week.houses === 1 ? '1 house' : `${String(week.houses)} houses`;
-  return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · ${houses} on the round`;
-}
-
-const DELIVERY_WEEK_ID = 'oyl-game-delivery-week';
-const DELIVERY_HINT_ID = 'oyl-game-delivery-hint';
-
-/**
- * Whether this ride runs a Delivery round — #1818. A switch, as the ghost,
- * the pacer and the wind beside it are, described by the week's progress and
- * by what a round is. Last in the loadout: it is the one choice that is about
- * the game rather than the ride's company or its air.
- */
-function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element {
-  return (
-    <div className="oyl-game__delivery tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
-      <label>
-        <input
-          type="checkbox"
-          role="switch"
-          checked={props.offer.chosen}
-          aria-describedby={`${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`}
-          onChange={(event) => {
-            props.offer.onChoose(event.target.checked);
-          }}
-        />
-        {DELIVERY_CHOICE_TEXT.label}
-      </label>
-      <p id={DELIVERY_WEEK_ID} className="tw:m-0">
-        {deliveryWeekText(props.offer.week)}
-      </p>
-      <p id={DELIVERY_HINT_ID} className="tw:m-0">
-        {DELIVERY_CHOICE_TEXT.hint}
-      </p>
-    </div>
-  );
-}
 const RIDER_GHOST_PROBLEM_ID = 'oyl-game-rider-ghost-problem';
 
 /**
@@ -962,6 +907,64 @@ function RiderGhostControl(props: {
           {props.problem}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of #1818's choice, for the owner's approval: the
+ * project's own (DL1), naming no other game.
+ *
+ * The label says what is switched on; the hint says what a round is, that
+ * nothing in it reaches the trainer (DL5, true in every trainer state, a
+ * workout's included), and what happens where the route cannot hold one,
+ * because the chooser cannot tell beforehand.
+ */
+export const DELIVERY_CHOICE_TEXT = {
+  label: 'Ride a Delivery round',
+  hint:
+    'Throw parcels to the doorsteps of the houses on the round as you ride through a town. ' +
+    'Nothing in the round changes what your trainer is sent. A route with fewer mapped houses ' +
+    `than the round rides a shorter one, and one with fewer than ${String(FEWEST_DELIVERY_HOUSES)} ` +
+    'is an ordinary ride.',
+} as const;
+
+/** The week's progress, in words: *"Day 2 of 7 · 8 houses on the round"* (#1818). */
+export function deliveryWeekText(week: Pick<WeekProgress, 'day' | 'houses'>): string {
+  const houses = week.houses === 1 ? '1 house' : `${String(week.houses)} houses`;
+  return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · ${houses} on the round`;
+}
+
+const DELIVERY_WEEK_ID = 'oyl-game-delivery-week';
+const DELIVERY_HINT_ID = 'oyl-game-delivery-hint';
+
+/**
+ * Whether this ride runs a Delivery round — #1818. A switch, as the ghost,
+ * the pacer and the wind beside it are, described by the week's progress and
+ * by what a round is. Last in the loadout: it is the one choice that is about
+ * the game rather than the ride's company or its air.
+ */
+function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element {
+  return (
+    <div className="oyl-game__delivery tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={props.offer.chosen}
+          aria-describedby={`${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`}
+          onChange={(event) => {
+            props.offer.onChoose(event.target.checked);
+          }}
+        />
+        {DELIVERY_CHOICE_TEXT.label}
+      </label>
+      <p id={DELIVERY_WEEK_ID} className="tw:m-0">
+        {deliveryWeekText(props.offer.week)}
+      </p>
+      <p id={DELIVERY_HINT_ID} className="tw:m-0">
+        {DELIVERY_CHOICE_TEXT.hint}
+      </p>
     </div>
   );
 }

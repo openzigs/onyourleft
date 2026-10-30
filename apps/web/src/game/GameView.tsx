@@ -200,13 +200,14 @@ import type { ThrowInputPort } from './delivery/throw-input-port';
 import {
   deliveryEvents,
   deliverySpoken,
+  HOUSES_NOT_READY_TEXT,
   NO_ROUND_LABEL,
-  NO_ROUND_TEXT,
   NOTHING_OWED,
   oweCrash,
   oweNoRound,
   oweRoundChange,
   oweRoundOver,
+  TOO_FEW_HOUSES_TEXT,
   type DeliveryOwed,
 } from './hud/delivery-announce';
 import { lineOffsetAt, racingLine } from './racing-line';
@@ -481,8 +482,8 @@ export interface GameViewProps {
   /**
    * Run a Delivery round in the ride — #1816, ADR 0059 (epic #1803). Read at
    * the press, and only for a solo ride on a corridor with mapped houses: a
-   * ride in a room never runs one (DL9), and a town the pick finds too few
-   * houses in for the week's round has none (#1818). Absent — the product —
+   * ride in a room never runs one (DL9), and a route the pick finds fewer
+   * than three houses on has none (#1818). Absent — the product —
    * the chooser's *Ride a Delivery round* decides, with the realistic world
    * chosen (#1818, DL6), or the developer route (`shell/routes.ts`
    * §`gameDeliveryFromHash`, `#/game?delivery=on`). A test sets it.
@@ -807,11 +808,14 @@ export function GameView(props: GameViewProps): JSX.Element {
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
   /**
-   * The ride time from which the HUD says a Delivery round was asked for and
-   * the town had too few houses for it — #1818, on the world notice's rule.
-   * `undefined` on every ride that runs the round it asked for, or asked none.
+   * What the HUD says of a Delivery round asked for and not ridden, and the
+   * ride time it says it from — #1818, on the world notice's rule: too few
+   * houses in reach, or no houses read to count. `undefined` on every ride
+   * that runs the round it asked for, or asked none.
    */
-  const [noRoundFrom, setNoRoundFrom] = useState<number | undefined>(undefined);
+  const [noRound, setNoRound] = useState<
+    { readonly text: string; readonly from: number } | undefined
+  >(undefined);
   /**
    * The lap that has just ended, and the ride time it ended at — #1312. On
    * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
@@ -1700,6 +1704,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       // realistic world (DL6); and too few houses for the week's round is an
       // ordinary ride the HUD says is one — and keeps nothing, so the week is
       // as it was. A ride in a room runs none, and says nothing of it (DL9).
+      // The HUD says which: the houses were read and too few are in reach,
+      // or there were no houses to count (the map still being read, a read
+      // that failed, offline, the tiles off), which is never "too few".
       const deliveryAsked =
         props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
       deliveryOwedRef.current = NOTHING_OWED;
@@ -1717,9 +1724,18 @@ export function GameView(props: GameViewProps): JSX.Element {
               storage: deviceStorage(),
             })
           : undefined;
-      const noRound = deliveryAsked && roomId === undefined && deliveryRef.current === undefined;
-      if (noRound) deliveryOwedRef.current = oweNoRound();
-      setNoRoundFrom(noRound ? simulation.state.elapsed : undefined);
+      const noRoundText: string | undefined =
+        !deliveryAsked || roomId !== undefined || deliveryRef.current !== undefined
+          ? undefined
+          : mappedBuildingsRef.current === undefined
+            ? HOUSES_NOT_READY_TEXT
+            : TOO_FEW_HOUSES_TEXT;
+      if (noRoundText !== undefined) deliveryOwedRef.current = oweNoRound(noRoundText);
+      setNoRound(
+        noRoundText === undefined
+          ? undefined
+          : { text: noRoundText, from: simulation.state.elapsed },
+      );
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -3035,14 +3051,14 @@ export function GameView(props: GameViewProps): JSX.Element {
               {worldNotice.text}
             </StatusMessage>
           ),
-          // #1818: a Delivery round asked for, and too few mapped houses for
-          // it. The world notice's rule — STANDING_NOTICE_SECONDS of ride and
-          // then out of the way, and not `live`: the HUD's one region says it
-          // (`hud/delivery-announce.ts` §`NO_ROUND_TEXT`, with announcements on).
-          noRoundFrom === undefined ||
-          (state?.elapsed ?? 0) - noRoundFrom >= STANDING_NOTICE_SECONDS ? undefined : (
+          // #1818: a Delivery round asked for, and none ridden. The world
+          // notice's rule — STANDING_NOTICE_SECONDS of ride and then out of
+          // the way, and not `live`: the HUD's one region says it
+          // (`hud/delivery-announce.ts` §`oweNoRound`, with announcements on).
+          noRound === undefined ||
+          (state?.elapsed ?? 0) - noRound.from >= STANDING_NOTICE_SECONDS ? undefined : (
             <StatusMessage key="no-round" tone="info" label={NO_ROUND_LABEL}>
-              {NO_ROUND_TEXT}
+              {noRound.text}
             </StatusMessage>
           ),
         ]}

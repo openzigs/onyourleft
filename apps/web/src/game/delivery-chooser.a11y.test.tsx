@@ -2,8 +2,8 @@
 // @vitest-environment jsdom
 
 /**
- * A Delivery round offered in the chooser, and the notice for a town with too
- * few houses for it — #1818, audited inside `test:a11y`.
+ * A Delivery round offered in the chooser, and the notice for a ride with no
+ * round — #1818, audited inside `test:a11y`.
  *
  * Mounted through the real `GameView`, inside the landmark and heading the
  * shell supplies (`picker.a11y.test.tsx`'s reason), with the realistic world
@@ -12,7 +12,8 @@
  * once *Ride* is pressed on a route with no mapped houses, the notice on the
  * HUD, shown without a live region of its own, and the sentence the HUD's one
  * region says (#445: the notices are not regions; `hud/delivery-announce.ts`
- * §`NO_ROUND_TEXT`).
+ * §`HOUSES_NOT_READY_TEXT`, the sentence for no houses read; its
+ * too-few-houses twin is drawn by the same notice).
  */
 
 import { act } from 'react';
@@ -34,7 +35,7 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { DELIVERY_PROGRESS_STORAGE_KEY } from './delivery/delivery-progress';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
-import { NO_ROUND_LABEL, NO_ROUND_TEXT } from './hud/delivery-announce';
+import { HOUSES_NOT_READY_TEXT, NO_ROUND_LABEL } from './hud/delivery-announce';
 import type { GameRenderer } from './port';
 import { DELIVERY_CHOICE_TEXT } from './StageChooser';
 import { writeRealisticWorldChoice } from './world-preference';
@@ -53,7 +54,7 @@ function flatRoute(): RidableRoute {
   return { id: 'route-flat', name: 'Flat', profile: routeProfile(points), attempts: 0 };
 }
 
-/** No corridor is read, so the route has no mapped house: the fallback's town. */
+/** No corridor is read, so the press has no mapped houses to count: the fallback's ride. */
 const PORT: GamePort = {
   listRoutes: () => Promise.resolve([flatRoute()]),
   loadGhost: () => Promise.resolve(undefined),
@@ -162,7 +163,7 @@ describe('#1818 — the Delivery choice in the chooser', () => {
   });
 });
 
-describe('#1818 — the notice for a route with too few mapped houses', () => {
+describe('#1818 — the notice for a ride whose map’s houses were not ready', () => {
   it('is shown on the HUD without a region of its own, said once by the one region, with no violation', async () => {
     await game();
     await click(deliverySwitch());
@@ -179,12 +180,14 @@ describe('#1818 — the notice for a route with too few mapped houses', () => {
     }
     await settle();
     const shown = [...document.querySelectorAll('.oyl-hud__notices .oyl-status')].find((element) =>
-      (element.textContent ?? '').includes(NO_ROUND_TEXT),
+      (element.textContent ?? '').includes(HOUSES_NOT_READY_TEXT),
     );
     expect(shown, 'the fallback is not on the HUD').toBeDefined();
     expect(shown?.textContent).toContain(NO_ROUND_LABEL);
     expect(shown?.getAttribute('role'), 'the notice is a second voice').toBeNull();
-    expect(document.querySelector('[data-oyl-announcer="hud"]')?.textContent).toBe(NO_ROUND_TEXT);
+    expect(document.querySelector('[data-oyl-announcer="hud"]')?.textContent).toBe(
+      HOUSES_NOT_READY_TEXT,
+    );
     // An ordinary ride: no throw control to reach.
     expect(document.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
     expect(formatViolations(auditAccessibility(document))).toBe('');

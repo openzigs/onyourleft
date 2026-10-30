@@ -65,7 +65,7 @@ import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
-import { roundTally, type WeekProgress } from './delivery/round';
+import { FEWEST_DELIVERY_HOUSES, roundTally, type WeekProgress } from './delivery/round';
 import { LANE_OFFSETS_METRES, startSteer, steerToward, type SteerIntent } from './delivery/steer';
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
@@ -75,7 +75,7 @@ import {
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
-import { NO_ROUND_TEXT } from './hud/delivery-announce';
+import { HOUSES_NOT_READY_TEXT, TOO_FEW_HOUSES_TEXT } from './hud/delivery-announce';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { GameRenderer, SceneFrame } from './port';
@@ -87,7 +87,7 @@ import { corridorOrigin } from './terrain';
 import { DELIVERY_CHOICE_TEXT } from './StageChooser';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { urbanClassMap } from './urban-class';
-import type { WorldCorridor } from './world-data/corridor';
+import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { writeRealisticWorldChoice } from './world-preference';
 
 /**
@@ -830,11 +830,13 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect([...steered.values()].every((each) => each === undefined)).toBe(true);
     expect(field('Houses')).toBeUndefined();
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
-    // DL9: a ride in a room says nothing of Delivery, not even the no-round notice.
-    expect(mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '').not.toContain(
-      NO_ROUND_TEXT,
-    );
-    expect(said).not.toContain(NO_ROUND_TEXT);
+    // DL9: a ride in a room says nothing of Delivery, not even a no-round notice.
+    for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
+      expect(
+        mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '',
+      ).not.toContain(text);
+      expect(said).not.toContain(text);
+    }
     await clickThrough(buttonStarting('End ride'));
     expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
   });
@@ -1091,7 +1093,7 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
   );
 });
 
-describe('offered in the chooser, with the too-few-houses fallback — #1818', () => {
+describe('offered in the chooser, with the short round and the no-round fallback — #1818', () => {
   /** A renderer for a ride that chose the realistic world, which does not load here. */
   function realisticNotLoaded(): GameRenderer {
     return {
@@ -1101,11 +1103,16 @@ describe('offered in the chooser, with the too-few-houses fallback — #1818', (
     };
   }
 
-  it('fixture: the short town has houses to pick, but fewer than the round’s', () => {
-    const short = deliveryTown(ROUTE.id, { lastAlong: 220 });
-    const pick = pickRoundTargets({ ...short, riderDistance: 0, houses: WEEK.houses }, script.seed);
-    expect(pick.targets.length).toBeGreaterThan(0);
-    expect(pick.complete).toBe(false);
+  it('fixture: the short towns have houses to pick, one fewer than the fewest and one as many', () => {
+    const pickIn = (lastAlong: number, houses: number) =>
+      pickRoundTargets(
+        { ...deliveryTown(ROUTE.id, { lastAlong }), riderDistance: 0, houses },
+        script.seed,
+      );
+    const two = pickIn(220, WEEK.houses);
+    expect(two.targets.length).toBeGreaterThan(0);
+    expect(two.targets.length).toBeLessThan(FEWEST_DELIVERY_HOUSES);
+    expect(pickIn(300, 8).targets).toHaveLength(FEWEST_DELIVERY_HOUSES);
   });
 
   /** The chooser's switch, by its label. */
@@ -1127,14 +1134,17 @@ describe('offered in the chooser, with the too-few-houses fallback — #1818', (
    */
   async function chooseAndRide(options: {
     readonly corridor?: WorldCorridor | undefined;
+    /** The corridor's read as the port gives it, in place of `corridor`'s. */
+    readonly load?: GamePort['loadWorldCorridor'];
     readonly choose: boolean;
     readonly frames: number;
   }): Promise<void> {
     writeRealisticWorldChoice(localStorage, true);
     stubSeed(script.seed);
+    const base = portWith('corridor' in options ? options.corridor : town.corridor);
     mounted = await mount(
       <GameView
-        port={portWith('corridor' in options ? options.corridor : town.corridor)}
+        port={options.load === undefined ? base : { ...base, loadWorldCorridor: options.load }}
         renderer={() => Promise.resolve(realisticNotLoaded())}
         now={() => nowMs}
       />,
@@ -1168,44 +1178,115 @@ describe('offered in the chooser, with the too-few-houses fallback — #1818', (
     expect(field('Houses')).toEqual({ value: '3', detail: '0\u00a0delivered, 0\u00a0missed' });
     expect(field('Score')?.detail).toBe(`Day ${String(WEEK.day)} of 7`);
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).not.toBeNull();
-    expect(notices()).not.toContain(NO_ROUND_TEXT);
+    for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
+      expect(notices()).not.toContain(text);
+    }
   });
 
   it('starts an ordinary ride, saying nothing of Delivery, when it is not chosen', async () => {
     await chooseAndRide({ choose: false, frames: 5 });
     expect(field('Houses')).toBeUndefined();
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
-    expect(notices()).not.toContain(NO_ROUND_TEXT);
-    expect(said).not.toContain(NO_ROUND_TEXT);
+    for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
+      expect(notices()).not.toContain(text);
+      expect(said).not.toContain(text);
+    }
   });
 
+  it(
+    'rides a shorter round on a route with fewer houses than the day’s, and keeps the day’s count',
+    { timeout: 16_000 },
+    async () => {
+      // A week of eight, and a route with three houses in reach: a round of three.
+      const eight: WeekProgress = { day: 2, houses: 8, score: 4 };
+      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(eight));
+      await chooseAndRide({
+        corridor: deliveryTown(ROUTE.id, { lastAlong: 300 }).corridor,
+        choose: true,
+        frames: FRAMES,
+      });
+      for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
+        expect(said).not.toContain(text);
+      }
+      // Every house passed with no throw, so each of the three missed, as the HUD says.
+      expect(field('Houses')).toEqual({ value: '0', detail: '0\u00a0delivered, 3\u00a0missed' });
+      await clickThrough(buttonStarting('End ride'));
+      // Tomorrow: the day's eight less the three missed, not the round's three less three,
+      // which would have left none and ended the week. Read back by the real reader.
+      expect(readDeliveryProgress(localStorage)).toEqual({ day: 3, houses: 5, score: 4 });
+    },
+  );
+
+  /** A corridor read that has told the chooser `state` and goes no further. */
+  const stopsAt =
+    (state: CorridorState): GamePort['loadWorldCorridor'] =>
+    (_route, _signal, shown) => {
+      shown?.(state);
+      return new Promise<CorridorState>(() => undefined);
+    };
+
   it.each([
-    // Houses for the first 220 m only: two to pick, fewer than the round's three.
-    // Ridden past them, so a short round would have missed them and moved the week.
+    // Houses for the first 220 m only: two to pick, fewer than FEWEST_DELIVERY_HOUSES.
+    // Ridden past them, so a round would have missed them and moved the week.
     {
-      town: 'too few houses',
+      cause: 'two houses in reach, fewer than the fewest',
       corridor: deliveryTown(ROUTE.id, { lastAlong: 220 }).corridor,
       frames: 330,
+      text: TOO_FEW_HOUSES_TEXT,
     },
     // #1856: every front step past a parcel's reach, so the pick finds none.
     {
-      town: 'no house in reach',
+      cause: 'no house in reach',
       corridor: deliveryTown(ROUTE.id, { lateral: 30 }).corridor,
       frames: 20,
+      text: TOO_FEW_HOUSES_TEXT,
     },
-    // No corridor read at all: no mapped house anywhere.
-    { town: 'no corridor', corridor: undefined, frames: 20 },
+    // No houses read at all, so none counted: never "too few".
+    {
+      cause: 'no corridor to read',
+      corridor: undefined,
+      frames: 20,
+      text: HOUSES_NOT_READY_TEXT,
+    },
+    {
+      cause: 'the map still being read at the press',
+      load: stopsAt({ kind: 'reading', done: 1, of: 4 }),
+      frames: 20,
+      text: HOUSES_NOT_READY_TEXT,
+    },
+    {
+      cause: 'the device offline',
+      load: stopsAt({ kind: 'unavailable', why: 'offline' }),
+      frames: 20,
+      text: HOUSES_NOT_READY_TEXT,
+    },
+    {
+      cause: 'the map tiles off',
+      load: stopsAt({ kind: 'off', why: 'map-tiles-off' }),
+      frames: 20,
+      text: HOUSES_NOT_READY_TEXT,
+    },
+    {
+      cause: 'a read the map refused',
+      load: () => Promise.resolve<CorridorState>({ kind: 'unavailable', why: 'refused' }),
+      frames: 20,
+      text: HOUSES_NOT_READY_TEXT,
+    },
   ])(
-    'says so in words over a town with $town, rides an ordinary ride, and keeps the week',
+    'says so in words with $cause, rides an ordinary ride, and keeps the week',
     { timeout: 16_000 },
-    async ({ corridor, frames }) => {
-      await chooseAndRide({ corridor, choose: true, frames });
+    async ({ frames, text, ...source }) => {
+      await chooseAndRide({ ...source, choose: true, frames });
       // An ordinary ride: no field, no throw control.
       expect(field('Houses')).toBeUndefined();
       expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
       // Told in words: on the HUD's notices only while it stands, and said once through the region.
-      if (frames <= 20) expect(notices()).toContain(NO_ROUND_TEXT);
-      expect(said.filter((text) => text === NO_ROUND_TEXT)).toHaveLength(1);
+      if (frames <= 20) expect(notices()).toContain(text);
+      expect(said.filter((each) => each === text)).toHaveLength(1);
+      // And never the other cause's sentence.
+      const other = text === TOO_FEW_HOUSES_TEXT ? HOUSES_NOT_READY_TEXT : TOO_FEW_HOUSES_TEXT;
+      expect(notices()).not.toContain(other);
+      expect(said).not.toContain(other);
       await clickThrough(buttonStarting('End ride'));
       // The week as it was, read back from the device by the real reader.
       expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
@@ -1214,11 +1295,11 @@ describe('offered in the chooser, with the too-few-houses fallback — #1818', (
 
   it('takes the notice down once it has stood its time', { timeout: 16_000 }, async () => {
     await chooseAndRide({ corridor: undefined, choose: true, frames: 20 });
-    expect(notices()).toContain(NO_ROUND_TEXT);
+    expect(notices()).toContain(HOUSES_NOT_READY_TEXT);
     // 15 s of ride, at four steps a frame: 75 frames, and a few over.
     for (let index = 0; index < 80; index += 1) await pump();
     await settle();
-    expect(notices()).not.toContain(NO_ROUND_TEXT);
+    expect(notices()).not.toContain(HOUSES_NOT_READY_TEXT);
   });
 
   it(

@@ -658,11 +658,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and
-                        `obstacles.ts` places the obstacles (#1811). Fewer
-                        houses than the week's round, none included, is no
-                        round: an ordinary ride, `hud/delivery-announce.ts`
-                        §`NO_ROUND_TEXT` on the HUD and said once, and the
-                        week kept as it was. **Each simulation step that
+                        `obstacles.ts` places the obstacles (#1811). A short
+                        pick rides a shorter round standing for the day's
+                        count (`round.ts` §`Round.dayHouses`), and one of
+                        fewer than §`FEWEST_DELIVERY_HOUSES` is no round: an
+                        ordinary ride, `hud/delivery-announce.ts`
+                        §`TOO_FEW_HOUSES_TEXT` (or §`HOUSES_NOT_READY_TEXT`
+                        with no houses read) on the HUD and said once, and
+                        the week kept as it was. **Each simulation step that
                         ran**: the throw (`throw-input.ts`, #1810), lane
                         (`steer.ts`, #1820) and gamepad (`gamepad-input.ts`,
                         #1821) intents come in through their ports, and
@@ -712,7 +715,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         round's end or the ride's. `GameView` holds one per
                         ride, solo only (DL9), asked for by the chooser since
                         #1818 (or the developer route `#/game?delivery=on`),
-                        and none where the pick is short. ⚠️ **Nothing
+                        and none where the pick is under 3 houses. ⚠️ **Nothing
                         of it reaches the trainer** (DL5): it reads the
                         simulation and writes to itself, the HUD and the frame;
                         `game/delivery-wiring.test.tsx` rides one power trace
