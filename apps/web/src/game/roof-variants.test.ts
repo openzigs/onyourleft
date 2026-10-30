@@ -276,6 +276,10 @@ function standsOver(
 const forced = (variant: Variant, count = 1): readonly FootprintPlan[] =>
   plansOf(rectangles(TEN_BY_SEVEN, count), { roofVariant: variant });
 
+/** Like {@link forced}, but with no archetype, so the seeded hip and porch shares apply. */
+const seeded = (variant: Variant, count: number): readonly FootprintPlan[] =>
+  plansOf(rectangles(TEN_BY_SEVEN, count), { roofVariant: variant, houseArchetypes: false });
+
 describe('each variant’s shape, read back from the plan — #1785', () => {
   it('builds every variant it is asked for on the 10 × 7 m rectangle, and the plain gable without it', () => {
     for (const variant of ROOF_VARIANTS) {
@@ -676,6 +680,38 @@ describe('gutters, a chimney and dormers on a variant — #1785', () => {
       expect(plans.every((plan) => plan.triangles.dormer.length === 0)).toBe(true);
       // Control: with the variants off, the same footprints carry dormers.
       expect(plansOf(steep, { roofVariants: false }).some((plan) => plan.dormers > 0)).toBe(true);
+    },
+  );
+
+  it('ties a front porch’s roof under the gambrel’s lower gutter, not the plain pitch’s', () => {
+    let porched = 0;
+    for (const plan of seeded('gambrel', 60)) {
+      if (!plan.porch) continue;
+      const roof = verticesOf(plan, 'porch-roof');
+      if (roof.length === 0) continue; // a canopy, not a front porch
+      porched += 1;
+      // The steepest eave drops EAVES_OVERHANG × tan(lower) below the walls' top; the gutter hangs
+      // under it, and the porch's roof meets the wall below the gutter's foot (#1589).
+      const drop = EAVES_OVERHANG_METRES * Math.tan((GAMBREL.lowerDegrees * Math.PI) / 180);
+      const gutterFoot = plan.eaves - drop - GUTTER.below - GUTTER.depth;
+      expect(Math.max(...roof.map((vertex) => vertex.y))).toBeLessThan(gutterFoot);
+    }
+    expect(porched).toBeGreaterThan(2);
+  });
+
+  it.each(ROOF_VARIANTS)(
+    'draws no hip on the %s roof, whatever the seeded hip draw: it is a gable with its variant',
+    (variant) => {
+      const plans = seeded(variant, 60);
+      expect(plans.every((plan) => plan.roof === 'gable' && plan.roofVariant === variant)).toBe(
+        true,
+      );
+      // Control: the plain roof on the same footprints draws some hips.
+      expect(
+        plansOf(rectangles(TEN_BY_SEVEN, 60), { houseArchetypes: false }).some(
+          (plan) => plan.roof === 'hip',
+        ),
+      ).toBe(true);
     },
   );
 });

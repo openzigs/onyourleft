@@ -181,7 +181,7 @@ describe('each archetype’s dormers, read back from the plan — #1786', () => 
       const [vertex] = front as [Vertex];
       // Wider than #1588's gabled one, and high enough for its sash.
       expect(vertex.width).toBeGreaterThan(2);
-      expect(vertex.height).toBeGreaterThanOrEqual(SHED_DORMER.leastFront);
+      expect(vertex.height).toBeGreaterThanOrEqual(0.9);
       const planes = dormerRoofPlanes(each, [vertex.nx, vertex.nz]);
       expect(planes).toHaveLength(1);
       const [shed] = planes as [{ readonly out: number; readonly pitch: number }];
@@ -336,7 +336,11 @@ describe('inside the roof — #1786, over every dormered plan of the two towns',
     );
     expect(plans.every((each) => each.archetype === 'bungalow')).toBe(true);
     expect(plans.filter((each) => each.triangles.chimney.length > 0).length).toBeGreaterThan(3);
-    for (const each of plans) expect(dormerMeetsChimney(each)).toBe(false);
+    for (const each of plans) {
+      expect(dormerMeetsChimney(each)).toBe(false);
+      // None built at all: the width floor, not only the chimney clearance, keeps a sliver out.
+      expect(each.dormers).toBe(0);
+    }
   });
 });
 
