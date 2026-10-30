@@ -205,6 +205,51 @@ describe('one frame of a room ride — #782, #783', () => {
     memory.following = 1;
     expect(roomFrame(inARace, memory, simulation(), 0).hud.chosen?.label).toBe('Rider 2');
   });
+
+  it('names a rider on the road by the name the HUD gives them, and nobody else — #783', () => {
+    const memory = roomRideState();
+    const labels = (room: RoomConnection): readonly (string | undefined)[] =>
+      roomFrame(room, memory, simulation(), 0).remoteRiders.map((each) => each.label);
+    const others = [rider(1, 20), rider(2, 40), rider(3, 60)];
+    // A group ride's room names nobody (ADR 0051 D-3): no name on the road…
+    expect(labels(connection(others))).toEqual([undefined, undefined, undefined]);
+    // …but the one rider followed, by the seat the HUD calls them.
+    memory.following = 3;
+    expect(labels(connection(others))).toEqual([undefined, undefined, seatLabel(3)]);
+    // A race's room names its riders, and the followed one by the room's name.
+    const inARace: RoomConnection = {
+      ...connection(others),
+      standings: () => ({
+        tick: 1,
+        rows: [1, 3].map((riderId) => ({
+          riderId,
+          displayName: riderId === 1 ? 'Ann' : 'Cai',
+          you: false,
+          gapSeconds: 0,
+          wattsPerKilogram: 3,
+          flags: 0,
+        })),
+      }),
+    };
+    const frame = roomFrame(inARace, memory, simulation(), 0);
+    expect(frame.remoteRiders.map((each) => each.label)).toEqual(['Ann', undefined, 'Cai']);
+    expect(frame.hud.chosen?.label).toBe('Cai');
+    // And nothing about a rider rides with the name: the input carries no
+    // figure, so no W/kg and no watts can reach the road (ruling Q17).
+    for (const each of frame.remoteRiders) {
+      expect(Object.keys(each).sort()).toEqual(
+        [
+          'distanceMetres',
+          'riderId',
+          'speedMetresPerSecond',
+          ...(each.label === undefined ? [] : ['label']),
+          ...(each.riderId === 3 ? ['followed'] : []),
+        ].sort(),
+      );
+    }
+    // The followed rider is marked, so their name is kept first on the road.
+    expect(frame.remoteRiders.map((each) => each.followed)).toEqual([undefined, undefined, true]);
+  });
 });
 
 describe('who is followed next — by seat, never by who is ahead', () => {

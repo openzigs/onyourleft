@@ -28,6 +28,7 @@ import { lineStands, linesNear } from './gantry';
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
 import {
+  BICYCLE_FRONT_METRES,
   BICYCLE_LENGTH_METRES,
   RIDER_HALF_WIDTH_METRES,
   bicycleRoll,
@@ -302,7 +303,8 @@ export interface SceneInput {
    *
    * The rider is drawn there exactly, the offset the obstacles meet, and a
    * bot or ghost level with them makes the room instead (#1853,
-   * {@link lateralOf}).
+   * {@link lateralOf}) — or just behind them, until it is behind the camera
+   * (#1863).
    *
    * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
    * names: a Delivery ride that forgot it draws the rider on the line while
@@ -320,6 +322,10 @@ export interface RemoteRiderInput {
   /** Along the route, the room's odometer, in metres. */
   readonly distanceMetres: number;
   readonly speedMetresPerSecond: number;
+  /** What to write over them on the road, if anything. @see RiderMarker.label */
+  readonly label?: string | undefined;
+  /** The one rider *Follow* chose. @see RiderMarker.followed */
+  readonly followed?: boolean | undefined;
 }
 
 /** Builds one frame. */
@@ -667,6 +673,22 @@ const SIDE_BY_SIDE_METRES = 1.2;
 const LEVEL_FADE_METRES = 2;
 
 /**
+ * How far behind a rider a Delivery round steered (#1820) another rider is held
+ * aside of them: until its front wheel is level with the chase camera's eye,
+ * {@link CAMERA_BEHIND_METRES} + {@link BICYCLE_FRONT_METRES} = **5.36 m** —
+ * #1863. Nearer than that, some of it is between the camera and the rider,
+ * large in the foreground; beyond it, it eases back to its own line over
+ * {@link LEVEL_FADE_METRES}, wholly behind the eye, where no frame shows it.
+ * At 30 km/h the hold and the fade are 0.9 s of road.
+ *
+ * Exact on a straight. `behind` is measured along the road, while the eye sits
+ * {@link CAMERA_BEHIND_METRES} straight back along the rider's heading, so on a
+ * bend the front wheel is level with the eye only to within a fraction of a
+ * metre (about 0.5 m sideways on a 20 m hairpin, outside the frustum).
+ */
+const HELD_BEHIND_METRES = CAMERA_BEHIND_METRES + BICYCLE_FRONT_METRES;
+
+/**
  * How far from the centre a rider is ever drawn: **3.2 m** — half a handlebar
  * and 0.1 m inside the 7 m road's edge. Wider than the line's own
  * {@link LINE_LIMIT_METRES}, because a rider moved aside for another has to go
@@ -734,6 +756,10 @@ interface Rider {
   readonly lane?: number | undefined;
   /** Where a Delivery round steered it, in place of the line — the rider's only. @see SceneInput.steeredLateral */
   readonly steered?: number | undefined;
+  /** A remote rider's name on the road. @see RiderMarker.label */
+  readonly label?: string | undefined;
+  /** @see RiderMarker.followed */
+  readonly followed?: boolean | undefined;
 }
 
 /**
@@ -816,6 +842,8 @@ function ridersOnTheRoad(
       crankAngle: pedalling(remote.distanceMetres),
       pedalling: remote.speedMetresPerSecond > 0,
       lane: remote.riderId % 2 === 0 ? -1 : 1,
+      label: remote.label,
+      followed: remote.followed,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a
@@ -835,8 +863,17 @@ function ridersOnTheRoad(
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
     const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
+    const cranked = crankAngle === undefined ? marker : { ...marker, crankAngle };
     return {
-      marker: crankAngle === undefined ? marker : { ...marker, crankAngle },
+      // #783: the name the room gave them, carried to the frame as words only.
+      marker:
+        rider.label === undefined
+          ? cranked
+          : {
+              ...cranked,
+              label: rider.label,
+              ...(rider.followed === true ? { followed: true } : {}),
+            },
       lateral,
     };
   });
@@ -871,9 +908,13 @@ function levelness(one: Rider, other: Rider): number {
  * own side of them — the bot to the negative side, the ghost to the positive.
  * Within a bicycle's length, where the levelness is 1, it is there, so nobody
  * is drawn inside the rider; beyond, the bicycles are a length apart along the
- * road, #499's own rule. Nobody jumps across the rider as they steer, because
- * a side never changes and every term is continuous. A lane is at most 1.75 m
- * from the centre, so that place is at most `1.75 + 1.2 = 2.95 m` out, inside
+ * road, #499's own rule — ahead of the rider. BEHIND them it is held there
+ * until its front wheel is behind the camera's eye ({@link heldBehind}, #1863),
+ * because nearer it is between the camera and the rider: let go at #499's fade,
+ * it was drawn large in the foreground and swept across it to its own line.
+ * Nobody jumps across the rider as they steer, because a side never changes
+ * and every term is continuous. A lane is at most 1.75 m from the centre, so
+ * that place is at most `1.75 + 1.2 = 2.95 m` out, inside
  * {@link DRAWN_LIMIT_METRES}.
  */
 function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
@@ -891,7 +932,21 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): nu
   if (steered?.steered === undefined) return drawn;
   const clear = steered.steered + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(drawn, clear) : Math.max(drawn, clear);
-  return drawn + (aside - drawn) * levelness(rider, steered);
+  return drawn + (aside - drawn) * Math.max(levelness(rider, steered), heldBehind(rider, steered));
+}
+
+/**
+ * How much of its place aside a rider behind a steered one keeps — #1863: 1 from
+ * level with them back to {@link HELD_BEHIND_METRES}, 0 at
+ * {@link LEVEL_FADE_METRES} beyond, eased between, and 0 for a rider ahead.
+ */
+function heldBehind(rider: Rider, steered: Rider): number {
+  const behind = steered.distance - rider.distance;
+  if (behind <= 0) return 0;
+  return Math.min(
+    1,
+    Math.max(0, (HELD_BEHIND_METRES + LEVEL_FADE_METRES - behind) / LEVEL_FADE_METRES),
+  );
 }
 
 /**
