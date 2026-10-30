@@ -492,10 +492,10 @@ describe('#1818 — a Delivery round in the loadout', () => {
     expect(box?.closest('.oyl-chooser__loadout')).not.toBeNull();
     const loadout = queryAll(tree.container, '.oyl-chooser__loadout > div');
     expect(loadout.at(-1)?.classList.contains('oyl-game__delivery')).toBe(true);
-    expect(tree.container.textContent).toContain('Day 2 of 7 · 9 houses on the round');
+    expect(tree.container.textContent).toContain('Day 2 of 7 · up to 9 houses on the round');
     if (box === undefined) throw new Error('no Delivery switch');
     expect(description(box)).toBe(
-      `Day 2 of 7 · 9 houses on the round ${DELIVERY_CHOICE_TEXT.hint}`,
+      `Day 2 of 7 · up to 9 houses on the round ${DELIVERY_CHOICE_TEXT.hint}`,
     );
   });
 
@@ -507,8 +507,10 @@ describe('#1818 — a Delivery round in the loadout', () => {
   });
 
   it('says one house in the singular', () => {
-    expect(deliveryWeekText({ day: 7, houses: 1 })).toBe('Day 7 of 7 · 1 house on the round');
-    expect(deliveryWeekText({ day: 1, houses: 8 })).toBe('Day 1 of 7 · 8 houses on the round');
+    expect(deliveryWeekText({ day: 7, houses: 1 })).toBe('Day 7 of 7 · up to 1 house on the round');
+    expect(deliveryWeekText({ day: 1, houses: 8 })).toBe(
+      'Day 1 of 7 · up to 8 houses on the round',
+    );
   });
 
   it('starts a ride with a round only once it is switched on', async () => {

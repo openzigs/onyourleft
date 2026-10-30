@@ -1130,7 +1130,8 @@ describe('offered in the chooser, with the short round and the no-round fallback
   /**
    * Mount the game as a rider reaches it — no `delivery` prop — with the
    * realistic world chosen unless `world` is false, switch the round on when
-   * `choose`, press *Ride* and ride `frames` frames with no throw.
+   * `choose`, press *Ride* and ride `frames` frames with no throw. Returns the
+   * chooser's progress line as the rider read it, before the press (#1878).
    */
   async function chooseAndRide(options: {
     readonly corridor?: WorldCorridor | undefined;
@@ -1138,7 +1139,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
     readonly load?: GamePort['loadWorldCorridor'];
     readonly choose: boolean;
     readonly frames: number;
-  }): Promise<void> {
+  }): Promise<string> {
     writeRealisticWorldChoice(localStorage, true);
     stubSeed(script.seed);
     const base = portWith('corridor' in options ? options.corridor : town.corridor);
@@ -1150,10 +1151,13 @@ describe('offered in the chooser, with the short round and the no-round fallback
       />,
     );
     await settle();
+    // The line the rider read in the chooser, before they pressed Ride.
+    const chooserLine = document.getElementById('oyl-game-delivery-week')?.textContent ?? '';
     if (options.choose) await clickThrough(deliverySwitch());
     await clickThrough(buttonStarting('Ride '));
     for (let index = 0; index < options.frames; index += 1) await pump();
     await settle();
+    return chooserLine;
   }
 
   it('offers the round only with the realistic world chosen, the week’s progress beside it', async () => {
@@ -1170,7 +1174,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
     await settle();
     expect(deliverySwitch()?.checked).toBe(false);
     // The week the device kept, read through the real reader.
-    expect(mounted.container.textContent).toContain('Day 2 of 7 · 3 houses on the round');
+    expect(mounted.container.textContent).toContain('Day 2 of 7 · up to 3 houses on the round');
   });
 
   it('starts a ride with the round on once it is chosen: its houses on the HUD', async () => {
@@ -1214,6 +1218,36 @@ describe('offered in the chooser, with the short round and the no-round fallback
       // Tomorrow: the day's eight less the three missed, not the round's three less three,
       // which would have left none and ended the week. Read back by the real reader.
       expect(readDeliveryProgress(localStorage)).toEqual({ day: 3, houses: 5, score: 4 });
+    },
+  );
+
+  it.each([
+    // #1878: three houses in reach of a week of eight, so the HUD shows 3.
+    { cause: 'a route with fewer houses than the day’s', lastAlong: 300, houses: 8 },
+    // A route that holds the day's whole round: the line and the HUD give one number.
+    { cause: 'a route that holds the day’s whole round', lastAlong: undefined, houses: 3 },
+  ])(
+    'the chooser’s line and the HUD’s Houses agree, or the line says the round may be shorter: $cause',
+    { timeout: 16_000 },
+    async ({ lastAlong, houses }) => {
+      localStorage.setItem(
+        DELIVERY_PROGRESS_STORAGE_KEY,
+        JSON.stringify({ day: 2, houses, score: 4 } satisfies WeekProgress),
+      );
+      const line = await chooseAndRide({
+        corridor: deliveryTown(ROUTE.id, lastAlong === undefined ? {} : { lastAlong }).corridor,
+        choose: true,
+        frames: 5,
+      });
+      const hud = field('Houses')?.value;
+      expect(hud).toBe('3');
+      // The line states a count: read it back, as a rider does, from the words.
+      const stated = /(\d+) houses? on the round/.exec(line)?.[1];
+      expect(stated).toBe(String(houses));
+      // The HUD never shows more than the line allows ...
+      expect(Number(hud)).toBeLessThanOrEqual(Number(stated));
+      // ... and where it shows fewer, the line has said the round may be shorter.
+      if (Number(hud) !== Number(stated)) expect(line).toContain('up to');
     },
   );
 
