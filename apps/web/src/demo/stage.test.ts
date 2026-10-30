@@ -171,7 +171,7 @@ describe('the demo stage — #1647', () => {
       expect(snapshots.every((each) => each.realisticLoading)).toBe(true);
     });
 
-    it.each([
+    it.each<[string, RealisticWorldOutcome]>([
       ['loaded', { loaded: true }],
       ['refused', { loaded: false, offline: false, detail: 'refused' }],
     ])('and no longer once they are %s, on a paused stage', async (_name, outcome) => {

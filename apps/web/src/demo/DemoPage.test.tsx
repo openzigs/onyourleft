@@ -279,7 +279,7 @@ describe('the demo page as an embed — #1654', { timeout: RIDE_TIMEOUT_MS }, ()
   const statusText = (): string | null | undefined =>
     mounted?.container.querySelector('[role="status"]:not([data-oyl-announcer])')?.textContent;
 
-  it.each([
+  it.each<[string, RealisticWorldOutcome, string]>([
     ['loads', { loaded: true }, ''],
     [
       'cannot load',
