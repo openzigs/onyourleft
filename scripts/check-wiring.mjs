@@ -457,6 +457,13 @@ const isFunctionLike = (node) =>
  * A method, an accessor, or a property holding a function. A property holding
  * anything else is evaluated when its object literal is built, so it belongs to
  * whatever built it.
+ *
+ * ⚠️ **A `#private` one too, since #1595**, keyed `member:#name`: the `#` is
+ * part of the name TypeScript reports, so it can never meet a public member's
+ * key, and `this.#name` is the read that reaches it. Until then a `#private`
+ * method's body was credited to its class, so a seam called only from a
+ * `#private` method nothing calls read as reached — #230's shape, one keyword
+ * along.
  */
 function methodLikeName(node) {
   const bodied =
@@ -466,7 +473,13 @@ function methodLikeName(node) {
     ((ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node)) &&
       isFunctionLike(node.initializer));
   if (!bodied || node.name === undefined) return undefined;
-  if (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) return node.name.text;
+  if (
+    ts.isIdentifier(node.name) ||
+    ts.isStringLiteral(node.name) ||
+    ts.isPrivateIdentifier(node.name)
+  ) {
+    return node.name.text;
+  }
   return undefined;
 }
 
@@ -565,7 +578,7 @@ export function collectReferences(node, into, members, namespaces = new Set()) {
     return;
   }
   if (ts.isPropertyAccessExpression(node)) {
-    if (ts.isIdentifier(node.name)) {
+    if (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) {
       into.add(
         `${namespaceRead(node.expression, namespaces) ? 'value' : 'member'}:${node.name.text}`,
       );
@@ -576,6 +589,11 @@ export function collectReferences(node, into, members, namespaces = new Set()) {
   if (ts.isElementAccessExpression(node)) {
     if (ts.isStringLiteral(node.argumentExpression)) {
       into.add(`member:${node.argumentExpression.text}`);
+    } else {
+      // #1595: `floats[from + STYLE_OFFSET]` names `STYLE_OFFSET`. The index
+      // was never walked, so an export read only inside a subscript read as
+      // unwired — which #1594 took for a `#private` method's body unseen.
+      collectReferences(node.argumentExpression, into, members, namespaces);
     }
     collectReferences(node.expression, into, members, namespaces);
     return;
