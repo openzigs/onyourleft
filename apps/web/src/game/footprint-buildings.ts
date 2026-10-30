@@ -889,7 +889,8 @@ export const HALF_HIP = { share: 0.4 } as const;
 /**
  * A saltbox — #1785: how far toward the front its ridge stands, as a share of
  * the half-width. Its back slope is at the plan's pitch and runs the long way
- * down; its front, shorter, is steeper. Both eaves stay at the mapped height.
+ * down; its front, shorter, is steeper. Both eaves stay at the mapped height,
+ * and both eave lines level: the front's overhang is the shorter.
  */
 export const SALTBOX = { offset: 0.35 } as const;
 
@@ -2327,15 +2328,14 @@ interface VariantPlacing {
 }
 
 /**
- * The pitch, degrees, of a roof's steepest eave — #1785: a gambrel's lower
- * slope, a saltbox's front, and otherwise `pitchDegrees`. What a porch's roof
- * must pass under ({@link porchWallTopOf}).
+ * The pitch, degrees, at which a roof's lowest eave drops its overhang below
+ * the walls' top — #1785: a gambrel's lower slope, and otherwise
+ * `pitchDegrees`. A saltbox's steeper front shortens its overhang to keep
+ * both eaves level (owner, 2026-10-30), so its drop is the back's. What a
+ * porch's roof must pass under ({@link porchWallTopOf}).
  */
 export function eavePitchOf(variant: RoofVariant, pitchDegrees: number): number {
-  if (variant === 'gambrel') return GAMBREL.lowerDegrees;
-  if (variant !== 'saltbox') return pitchDegrees;
-  const rise = Math.tan((pitchDegrees * Math.PI) / 180) * (1 + SALTBOX.offset);
-  return (Math.atan(rise / (1 - SALTBOX.offset)) * 180) / Math.PI;
+  return variant === 'gambrel' ? GAMBREL.lowerDegrees : pitchDegrees;
 }
 
 /** A point in a rectangle's frame: along its long axis, across it toward `+v`, and up. */
@@ -2357,7 +2357,8 @@ type Local = readonly [a: number, c: number, y: number];
  *   half-width, so each gable end is a trapezoid.
  * - `saltbox`: the ridge {@link SALTBOX}'s `offset` toward `placing.front`,
  *   the back slope at `pitchDegrees` and the front steeper, both eaves at the
- *   walls' top.
+ *   walls' top; the front's overhang shortened so that its eave line is level
+ *   with the back's.
  * - `side-hipped`: the gable's slopes, a hip at `placing.end` and a gable at
  *   the other.
  *
@@ -2478,6 +2479,8 @@ function variantRoof(
   // Each long side's eave height, `+v` then `−v`, and the eave line's ends along the axis.
   let eaveYs: Pair;
   let span: Pair = [-gableReach, gableReach];
+  // Each long side's eave line out from the axis, `+v` then `−v`: a saltbox's front is nearer.
+  let outs: Pair = [out, out];
   let ridge: Ridge;
   switch (variant) {
     case 'gambrel': {
@@ -2544,15 +2547,18 @@ function variantRoof(
       const top = eaves + (halfShort + SALTBOX.offset * halfShort) * tan;
       const front = Math.atan((top - eaves) / (halfShort - SALTBOX.offset * halfShort));
       const a = gableReach;
-      const eaveYOf = (side: number): number =>
-        eaves - EAVES_OVERHANG_METRES * Math.tan(side === placing.front ? front : pitch);
+      // Both eaves level (owner, 2026-10-30): the back's overhang drops at the plan's pitch, and
+      // the steeper front's is shortened to drop the same, so the two eave lines are one height.
+      const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+      const frontOut = halfShort + (EAVES_OVERHANG_METRES * tan) / Math.tan(front);
+      const outOf = (side: number): number => (side === placing.front ? frontOut : out);
       for (const side of [1, -1]) {
         const its = side === placing.front ? front : pitch;
-        const eaveY = eaveYOf(side);
+        const reach = outOf(side);
         slope(
           [
-            [-a, out * side, eaveY],
-            [a, out * side, eaveY],
+            [-a, reach * side, eaveY],
+            [a, reach * side, eaveY],
             [a, offset, top],
             [-a, offset, top],
           ],
@@ -2561,7 +2567,7 @@ function variantRoof(
           eaveY,
           true,
         );
-        fascia(corner([-a, out * side, eaveY]), corner([a, out * side, eaveY]), [
+        fascia(corner([-a, reach * side, eaveY]), corner([a, reach * side, eaveY]), [
           vx * side,
           0,
           vz * side,
@@ -2574,12 +2580,13 @@ function variantRoof(
           [-halfShort, eaves],
         ]);
         verge(a * end, end, [
-          [out, eaveYOf(1)],
+          [outOf(1), eaveY],
           [offset, top],
-          [-out, eaveYOf(-1)],
+          [-outOf(-1), eaveY],
         ]);
       }
-      eaveYs = [eaveYOf(1), eaveYOf(-1)];
+      eaveYs = [eaveY, eaveY];
+      outs = [outOf(1), outOf(-1)];
       ridge = { top, half: a, offset };
       break;
     }
@@ -2709,13 +2716,15 @@ function variantRoof(
     // As #1588 hangs them: a gutter under each long eave, a little under the roof's edge.
     const bottomOf = (side: number): number =>
       (side === 1 ? eaveYs[0] : eaveYs[1]) - GUTTER.below - GUTTER.depth;
+    const reachOf = (side: number): number => (side === 1 ? outs[0] : outs[1]);
     for (const side of [1, -1]) {
       const bottom = bottomOf(side);
+      const reach = reachOf(side);
       boxFaces(
         writing.trim,
         rectangle,
         side,
-        [span, [out, out + GUTTER.width], [bottom, bottom + GUTTER.depth]],
+        [span, [reach, reach + GUTTER.width], [bottom, bottom + GUTTER.depth]],
         ['c+', 'y-', 'a+', 'a-'],
       );
     }
@@ -2735,7 +2744,7 @@ function variantRoof(
       writing.trim,
       rectangle,
       side,
-      [pipe, [halfShort, out + GUTTER.width / 2], [bottom - DOWNPIPE.size, bottom]],
+      [pipe, [halfShort, reachOf(side) + GUTTER.width / 2], [bottom - DOWNPIPE.size, bottom]],
       ['y-', 'a+', 'a-'],
     );
   }
