@@ -219,8 +219,9 @@ and erasing an account does not delete a notice about it. `migrate … down` ref
 and the words they typed, both why and where. It keeps the decision, every step's date, the items
 the notice names, its reference and whether they gave a name and an address, so the record below
 still says whether a receipt was owed. The instance does this on its own, on the hour and as it
-starts, with nothing for you to do, and the Moderation screen shows the notice as erased. A notice
-with no decision recorded keeps everything, so record one when you have decided. After the erasure
+starts, with nothing for you to do, and the Moderation screen shows the notice as erased. **A notice
+with no decision recorded loses the same details twelve months after it arrived** (#1923, the owner's
+ruling of 2026-10-30), and keeps the same things, so record a decision when you have made one. After the erasure
 there is no address to confirm receipt to or tell, so do both before then. Migration 0036's schema
 allows that one change to a notice and no other, and `migrate … down` refuses to undo it once a
 notice has been erased. ⚠️ **A backup taken before the erasure still holds what was erased**, until

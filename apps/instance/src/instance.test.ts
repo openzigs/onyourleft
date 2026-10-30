@@ -48,6 +48,7 @@ import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
 import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
 import {
   noticeDetailsDueAt,
+  undecidedNoticeDetailsDueAt,
   NOTICE_RETENTION_SWEEP_PERIOD_MS,
 } from './moderation/notice-retention.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
@@ -242,15 +243,19 @@ describe('the running instance forgets every rate-limited address when its windo
   }, 30_000);
 });
 
-describe('the running instance erases a closed notice’s notifier details when they are due — #1381', () => {
+describe('the running instance erases a notice’s notifier details when they are due — #1381, #1923', () => {
   it('erases what fell due while it was stopped as it starts, and what falls due later on the hour', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     const decided = 1_790_000_000;
     const store = await openSqlStore(path);
-    const notice = async (marker: string, decidedAt: number): Promise<number> => {
+    const notice = async (
+      marker: string,
+      decidedAt: number | null,
+      receivedAt = decided - 60,
+    ): Promise<number> => {
       const noticeId = await store.putNotice({
-        receivedAt: decided - 60,
+        receivedAt,
         kind: 'illegal_content',
         explanation: `${marker}-explanation`,
         items: [],
@@ -259,6 +264,7 @@ describe('the running instance erases a closed notice’s notifier details when 
         notifierEmail: `${marker}-email@example.com`,
         bonaFide: true,
       });
+      if (decidedAt === null) return noticeId;
       expect(
         await store.putNoticeStep({
           noticeId,
@@ -275,6 +281,12 @@ describe('the running instance erases a closed notice’s notifier details when 
     // Due as the instance starts, and due ten minutes later.
     const first = await notice('first', decided);
     const second = await notice('second', decided + 10 * 60);
+    // #1923: undecided, received long enough ago to be due as it starts —
+    // and undecided, received with the others, so not due for months.
+    const undecidedReceived = decided - 200 * 24 * 60 * 60;
+    expect(undecidedNoticeDetailsDueAt(undecidedReceived)).toBeLessThanOrEqual(due);
+    const undecided = await notice('undecided', null, undecidedReceived);
+    const open = await notice('open', null);
     await store.close();
 
     const clock = { ms: due * 1000 };
@@ -319,6 +331,9 @@ describe('the running instance erases a closed notice’s notifier details when 
     let erased = await erasedOnceOf(first);
     expect(erased.get(first)).toBe(due);
     expect(erased.get(second)).toBeNull();
+    erased = await erasedOnceOf(undecided);
+    expect(erased.get(undecided)).toBe(due);
+    expect(erased.get(open)).toBeNull();
 
     // The next hour's boundary, by the notices' own sweep.
     const hourly = pending.filter((entry) => entry.at % NOTICE_RETENTION_SWEEP_PERIOD_MS === 0);
@@ -330,6 +345,7 @@ describe('the running instance erases a closed notice’s notifier details when 
     }
     erased = await erasedOnceOf(second);
     expect(erased.get(second)).toBe(Math.floor(clock.ms / 1000));
+    expect(erased.get(open)).toBeNull();
   }, 30_000);
 });
 

@@ -80,7 +80,7 @@ import type {
   NoticeStep,
 } from '../store/sql-store.ts';
 import { exportRecord, stepsOf, type ModerationRecord } from './record.ts';
-import { noticeDetailsDueAt } from './notice-retention.ts';
+import { noticeDetailsDueAt, undecidedNoticeDetailsDueAt } from './notice-retention.ts';
 import { parseModerationItem } from '@onyourleft/domain';
 import { publishedOrder } from '../rooms/publication.ts';
 import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
@@ -304,7 +304,9 @@ export interface Moderation {
   record(): Promise<ModerationRecord>;
   /**
    * Erase the notifier details of every notice closed six months ago or more
-   * (#1381, `notice-retention.ts`), and answer how many were erased. The
+   * (#1381), and of every notice received twelve months ago or more with no
+   * decision recorded (#1923; both in `notice-retention.ts`), and answer how
+   * many were erased. The
    * instance runs it on the hour; nobody asks for it.
    */
   eraseExpiredNoticeDetails(): Promise<number>;
@@ -894,8 +896,13 @@ export function createModeration(options: ModerationOptions): Moderation {
       for (const notice of notices) {
         if (notice.erased !== null) continue;
         const { decidedAt } = stepsOf(notice.id, steps);
-        if (decidedAt === null || at < noticeDetailsDueAt(decidedAt)) continue;
-        if ((await store.eraseNoticeDetails(notice.id, at)) === 'erased') erased += 1;
+        const due =
+          decidedAt === null
+            ? undecidedNoticeDetailsDueAt(notice.receivedAt)
+            : noticeDetailsDueAt(decidedAt);
+        if (at < due) continue;
+        const after = decidedAt === null ? 'receipt' : 'decision';
+        if ((await store.eraseNoticeDetails(notice.id, at, after)) === 'erased') erased += 1;
       }
       return erased;
     },

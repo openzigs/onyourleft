@@ -6,13 +6,14 @@
  * name, the email address and the words the notifier typed are erased — from
  * the moderators' queue and from the database file — and the decision, its
  * dates, the items and the reference stay, as does the record's word on
- * whether the notifier gave a name and an address.
+ * whether the notifier gave a name and an address. A notice whose decision is
+ * never recorded loses them twelve months after it arrived (#1923).
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../store/node-sqlite.ts';
-import { noticeDetailsDueAt } from './notice-retention.ts';
+import { noticeDetailsDueAt, undecidedNoticeDetailsDueAt } from './notice-retention.ts';
 import { startModerationWorld, type ModerationWorld, type Rider } from './moderation-testing.ts';
 
 let world: ModerationWorld | undefined;
@@ -76,6 +77,97 @@ describe('when a notice’s notifier details are due (#1381)', () => {
     ['the end of February in a leap year', '2027-08-31T12:00:00Z', '2028-02-29T12:00:00Z'],
   ])('%s', (_, decided, due) => {
     expect(noticeDetailsDueAt(at(decided))).toBe(at(due));
+  });
+});
+
+describe('when an undecided notice’s notifier details are due (#1923)', () => {
+  it.each([
+    ['the same day and time, twelve months on', '2026-01-15T10:20:30Z', '2027-01-15T10:20:30Z'],
+    ['29 February, on the 28th a year on', '2028-02-29T08:00:00Z', '2029-02-28T08:00:00Z'],
+  ])('%s', (_, received, due) => {
+    expect(undecidedNoticeDetailsDueAt(at(received))).toBe(at(due));
+  });
+});
+
+describe('erasing an undecided notice’s notifier details (#1923)', () => {
+  it('erases them twelve months after it arrived when no decision is recorded by then, and keeps the rest', async () => {
+    const w = (world = await startModerationWorld());
+    const undecided = await notice(w, 'undecided');
+    const late = await notice(w, 'late');
+    const receivedAt = Math.floor(w.clock.ms / 1000);
+    expect((await step(w, undecided, { step: 'acknowledged' })).status).toBe(204);
+    const due = undecidedNoticeDetailsDueAt(receivedAt);
+
+    // `late`'s decision comes a minute before the twelve months are up: its six months count.
+    w.clock.ms = (due - 60) * 1000;
+    const decidedAt = due - 60;
+    expect((await step(w, late, { step: 'decided', decision: 'Not illegal.' })).status).toBe(204);
+
+    // A second before it is due, nothing is erased.
+    w.clock.ms = (due - 1) * 1000;
+    expect(await erase(w)).toBe(0);
+    expect(await queued(w, undecided)).toMatchObject({
+      notifierName: 'undecided-name',
+      detailsErasedAt: null,
+    });
+
+    // On the second it is due, the undecided notice's go: read back through the queue.
+    w.clock.ms = due * 1000;
+    expect(await erase(w)).toBe(1);
+    expect(await queued(w, undecided)).toEqual({
+      noticeId: undecided,
+      receivedAt,
+      kind: 'illegal_content',
+      explanation: '',
+      items: [`route:${ROOM}`],
+      location: null,
+      notifierName: null,
+      notifierEmail: null,
+      bonaFide: true,
+      detailsErasedAt: due,
+      acknowledgedAt: receivedAt,
+      decidedAt: null,
+      decision: null,
+      logId: null,
+      notifierToldAt: null,
+    });
+    expect(await queued(w, late)).toMatchObject({
+      notifierName: 'late-name',
+      detailsErasedAt: null,
+      decidedAt,
+    });
+
+    // The record still says they gave a name and an address.
+    const record = await w.as(await signedIn(w), 'GET', '/v1/moderation/record');
+    expect((record.body as { notices: unknown[] }).notices).toContainEqual(
+      expect.objectContaining({
+        noticeId: undecided,
+        notifierGaveName: true,
+        notifierGaveEmail: true,
+        decidedAt: null,
+      }),
+    );
+
+    // Gone from the file, and the late-decided notice's are not.
+    const bytes = await w.databaseBytes();
+    for (const marker of [
+      'undecided-explanation',
+      'undecided-location',
+      'undecided-name',
+      'undecided-email',
+    ]) {
+      expect(bytes, marker).not.toContain(marker);
+    }
+    expect(bytes).toContain('late-name');
+
+    // A decision recorded after still lands, and nothing is erased twice.
+    expect((await step(w, undecided, { step: 'decided', decision: 'Not illegal.' })).status).toBe(
+      204,
+    );
+    expect(await queued(w, undecided)).toMatchObject({ detailsErasedAt: due, decidedAt: due });
+    w.clock.ms = noticeDetailsDueAt(due) * 1000;
+    expect(await erase(w)).toBe(1);
+    expect(await queued(w, late)).toMatchObject({ notifierName: null });
   });
 });
 
@@ -156,21 +248,57 @@ describe('erasing a closed notice’s notifier details (#1381)', () => {
     const w = (world = await startModerationWorld());
     const noticeId = await notice(w, 'store');
     const now = Math.floor(w.clock.ms / 1000);
-    expect(await w.freshRead((s) => s.eraseNoticeDetails(999, now))).toBe('not_found');
-    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now))).toBe('not_closed');
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(999, now, 'decision'))).toBe('not_found');
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now, 'decision'))).toBe(
+      'not_closed',
+    );
     await step(w, noticeId, { step: 'decided', decision: 'Not illegal.' });
-    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now))).toBe('erased');
-    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now))).toBe('already');
+    // #1923: once a decision is recorded, the twelve months from receipt no longer count.
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now, 'receipt'))).toBe(
+      'not_open',
+    );
+    expect(await queued(w, noticeId)).toMatchObject({ detailsErasedAt: null });
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now, 'decision'))).toBe(
+      'erased',
+    );
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now, 'decision'))).toBe(
+      'already',
+    );
     expect(await queued(w, noticeId)).toMatchObject({ detailsErasedAt: now, notifierName: null });
+  });
+
+  it('erases an open notice’s after its receipt, once (#1923)', async () => {
+    const w = (world = await startModerationWorld());
+    const noticeId = await notice(w, 'store');
+    const now = Math.floor(w.clock.ms / 1000);
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(999, now, 'receipt'))).toBe('not_found');
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now, 'receipt'))).toBe('erased');
+    expect(await w.freshRead((s) => s.eraseNoticeDetails(noticeId, now, 'receipt'))).toBe(
+      'already',
+    );
+    expect(await queued(w, noticeId)).toMatchObject({
+      detailsErasedAt: now,
+      notifierName: null,
+      decidedAt: null,
+    });
   });
 
   it('is the only change the schema lets anybody make to a notice', async () => {
     const w = (world = await startModerationWorld());
     const kept = await notice(w, 'kept');
     const erased = await notice(w, 'erased');
+    // #1923: and one erased twelve months after it arrived with no decision.
+    const undecided = await notice(w, 'undecided');
+    const receivedAt = Math.floor(w.clock.ms / 1000);
     await step(w, erased, { step: 'decided', decision: 'Not illegal.' });
-    w.clock.ms = noticeDetailsDueAt(Math.floor(w.clock.ms / 1000)) * 1000;
+    w.clock.ms = noticeDetailsDueAt(receivedAt) * 1000;
     expect(await erase(w)).toBe(1);
+    // `kept` is decided a minute before its twelve months are up, so it keeps its details.
+    w.clock.ms = (undecidedNoticeDetailsDueAt(receivedAt) - 60) * 1000;
+    await step(w, kept, { step: 'decided', decision: 'Not illegal.' });
+    w.clock.ms = undecidedNoticeDetailsDueAt(receivedAt) * 1000;
+    expect(await erase(w)).toBe(1);
+    expect(await queued(w, undecided)).toMatchObject({ notifierName: null, decidedAt: null });
     const database = openDatabase(w.path);
     try {
       const erasing = `SET explanation = '', location = NULL, notifier_name = NULL, notifier_email = NULL`;
@@ -190,10 +318,12 @@ describe('erasing a closed notice’s notifier details (#1381)', () => {
         `SET notifier_name = 'back'`,
         `SET notifier_email = 'back@example.com'`,
       ]) {
-        expect(
-          () => database.exec(`UPDATE notice ${change} WHERE id = ${String(erased)}`),
-          change,
-        ).toThrow(/append-only/);
+        for (const id of [erased, undecided]) {
+          expect(
+            () => database.exec(`UPDATE notice ${change} WHERE id = ${String(id)}`),
+            `${change} on ${String(id)}`,
+          ).toThrow(/append-only/);
+        }
       }
       expect(() => database.exec('DELETE FROM notice')).toThrow(/append-only/);
       expect(() => database.exec('UPDATE notice_erasure SET gave_name = 0')).toThrow(/append-only/);
