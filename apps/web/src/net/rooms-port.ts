@@ -48,6 +48,7 @@ import type { PrivacyZoneRecord } from '@onyourleft/store';
 
 import {
   heldAccountSession,
+  heldInstanceSession,
   isSealedRequired,
   type HeldAccountSession,
   type InstanceStorage,
@@ -66,6 +67,7 @@ import {
   type RoomRouteRefusal,
   type RoomRouteSource,
 } from '../rooms/share';
+import { instancePageUrl, NOTICE_PAGE_PATH } from '../views/InstancePages';
 
 /** Where a rider's hands are, fixed by the room for everybody in it (ADR 0028 D-1). */
 export type RoomRidingPosition = 'upright' | 'hoods' | 'drops';
@@ -227,6 +229,13 @@ export interface RoomsPort {
    * who is on it, and blocks only a rider it names to this rider.
    */
   blockRider(roomId: string, row: number): Promise<RaceBlockAnswer>;
+  /**
+   * #1381: the address of the notice page on the instance these rooms are on
+   * — where anybody reports content they think is illegal (`apps/instance`
+   * §`notices.ts`), the same page About links to. Only an address: asking for
+   * it sends nothing. `undefined` on a device holding no instance session.
+   */
+  noticePage(): string | undefined;
 }
 
 export interface RoomsPortOptions {
@@ -555,6 +564,13 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
       } catch {
         return { kind: 'unreachable' };
       }
+    },
+
+    // #1381: the origin About reads (`instance-port.ts` §`current`), and the
+    // notice page's path there.
+    noticePage() {
+      const origin = heldInstanceSession(options.storage, options.send)?.http.origin;
+      return origin === undefined ? undefined : instancePageUrl(origin, NOTICE_PAGE_PATH);
     },
   };
 }

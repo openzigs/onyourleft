@@ -574,3 +574,68 @@ export function riderFrameBox(aspect: number, leanRadians = 0): FrameBox {
  * @test-facing a bound two test suites hold the composition to.
  */
 export const MINIMUM_RIDER_FRAME_SHARE = 0.25;
+
+/**
+ * A point in the frame — fractions of its width and height from the top left,
+ * as {@link FrameBox} has them — and how far in front of the eye it is.
+ *
+ * @see projectToFrame
+ */
+export interface FramePoint {
+  readonly left: number;
+  readonly top: number;
+  /** Metres from the eye along the view axis. */
+  readonly depth: number;
+}
+
+/**
+ * Where a point in the corridor's local metres lands in a frame of this
+ * aspect, seen through `rig` — #783's names over the other riders, which are
+ * DOM laid over the world rather than drawn into it, so they cost the scene no
+ * draw call and no triangle in either world.
+ *
+ * It is the projection `three-renderer.ts` §`#placeCamera` and §`#applySize`
+ * set up, stated without `three` for this file's reason: a camera at
+ * `rig.eye` looking at `rig.target` with world up `+y` (three's `lookAt`, so
+ * the frame's right is `forward × up` — the road's normal, the rider's RIGHT),
+ * and the vertical lens {@link verticalHalfTangent} gives the aspect.
+ * `camera.test.ts` holds it to {@link riderFrameBox}, and the browser gate
+ * (`game.browser.spec.ts` §"#783") to a rider the renderer actually drew.
+ *
+ * `undefined` for a point nearer the eye than {@link NEAR_PLANE_METRES} or
+ * behind it, which the frame does not show. A point beside the frame is
+ * returned all the same, outside 0 … 1: what to do with it is the caller's.
+ */
+export function projectToFrame(
+  rig: CameraRig,
+  aspect: number,
+  point: RigPoint,
+): FramePoint | undefined {
+  const along = Math.hypot(
+    rig.target.x - rig.eye.x,
+    rig.target.y - rig.eye.y,
+    rig.target.z - rig.eye.z,
+  );
+  if (!(along > 0) || !(aspect > 0)) return undefined;
+  const fx = (rig.target.x - rig.eye.x) / along;
+  const fy = (rig.target.y - rig.eye.y) / along;
+  const fz = (rig.target.z - rig.eye.z) / along;
+  // Right: forward × (0, 1, 0), level by construction.
+  const level = Math.hypot(fx, fz);
+  if (level === 0) return undefined;
+  const rx = -fz / level;
+  const rz = fx / level;
+  // Up: right × forward.
+  const ux = -rz * fy;
+  const uy = rz * fx - rx * fz;
+  const uz = rx * fy;
+  const dx = point.x - rig.eye.x;
+  const dy = point.y - rig.eye.y;
+  const dz = point.z - rig.eye.z;
+  const depth = dx * fx + dy * fy + dz * fz;
+  if (!(depth >= NEAR_PLANE_METRES)) return undefined;
+  const t = verticalHalfTangent(aspect);
+  const across = (dx * rx + dz * rz) / (depth * t * aspect);
+  const above = (dx * ux + dy * uy + dz * uz) / (depth * t);
+  return { left: (1 + across) / 2, top: (1 - above) / 2, depth };
+}

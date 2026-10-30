@@ -617,6 +617,7 @@ const RACE_PORTS =
           start: () => Promise.resolve({ kind: 'started' as const }),
           results: () => Promise.resolve({ kind: 'unreachable' as const }),
           blockRider: () => Promise.resolve({ kind: 'unreachable' as const }),
+          noticePage: () => undefined,
         },
       };
 

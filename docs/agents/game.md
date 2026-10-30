@@ -141,7 +141,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ The camera pitches with the ROAD — both the eye and
                         the look-at ride the corridor's own heights — so a
                         pacer 50 m ahead stays put on a 20 % hill where a level
-                        gaze put it behind the rider's back
+                        gaze put it behind the rider's back. Since #783
+                        `projectToFrame` restates the renderer's camera
+                        without `three`, for the names below
+    src/game/name-tags.ts
+                        other riders' names on the road (#783): DOM laid over
+                        the world, so no draw call and no triangle in either
+                        world. Only `RiderMarker.label` — a race room's public
+                        name, or the followed rider's seat — and no figure.
+                        ⚠️ Only over riders the realistic world draws too
+                        (`realisticRemoteSplit`'s rule), within 60 m, at most
+                        8, the followed rider's first and a name that would
+                        cover another left out. `game.browser.spec.ts` §"#783"
+                        holds a name over the rider the renderer drew
     src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
                         parts as numbers rather than an asset, the two-bone knee
                         that puts each foot on its own pedal, and the one rule
@@ -997,6 +1009,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         since #1660 an L, T, U or Z pitched over its 2–3
                         rectangles (`rectilinear-roofs.ts`), flat where a
                         split would pass the caps (`-split-roofs`);
+                        since #1782 a house's US archetype — ranch, Cape,
+                        Colonial, Foursquare, bungalow or gable-front
+                        farmhouse (`house-archetypes.ts`) — setting its roof,
+                        pitch, porch, shutters, picture window, dormers,
+                        garage and cladding together, `unknown` planned as
+                        before (`-house-archetypes`, `town=houses`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
@@ -1058,6 +1076,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         weathered (`WEATHERING`, `weatheringAt`, the shader's
                         `oylWeather*`; the photograph laid per building by
                         `photographShiftOf`); `-weathering` builds it out.
+                        Since #1663 the trims (`TRIM`, `trimPartAt`, the
+                        shader's `trimsGlsl`): a lintel over each window's
+                        head on brick (stone) and render (the trim's paint),
+                        quoins up a brick wall's corners unless it is
+                        `STYLE_TERRACED`, and a string course on each storey
+                        line with windows above it (`windowStoreysOf`, never
+                        `DEFAULT_STOREYS`); `-facade-trims` builds them out.
                         Since #1636 a `city-centre` front wall
                         has a shop front whatever its use, and a tower of
                         `GLAZED_MIN_STOREYS` a curtain wall (`STYLE_GLAZED`,

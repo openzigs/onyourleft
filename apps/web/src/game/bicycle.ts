@@ -702,11 +702,10 @@ export const RIDER_HALF_WIDTH_METRES = HANDLEBAR_LENGTH_METRES / 2;
  * How far AHEAD of the point a rider is placed at the top of their helmet is:
  * 0.19 m. @see BICYCLE_REAR_CONTACT_METRES
  *
- * @test-facing the renderer builds the rider from the parts below and never
- * needs where the helmet is; three projects them. What names this is
- * `camera.ts` §`riderFrameBox`, a statement of the composition that two browser
- * gates and `camera.test.ts` hold the layout and the renderer to — so nothing
- * that SHIPS reads it, and that is true.
+ * The renderer builds the rider from the parts below and never needs where
+ * the helmet is; three projects them. `camera.ts` §`riderFrameBox` names it,
+ * and since #783 so does `name-tags.ts`, which hangs another rider's name over
+ * their helmet — so it ships.
  */
 export const RIDER_HELMET_AHEAD_METRES = HELMET_Z;
 
