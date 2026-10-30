@@ -8,10 +8,9 @@
   and #1628's open question 3.
 - **Number**: **0031.** `docs/spikes/` holds 0001 to 0020 and 0022 to 0029 on `origin/main` at
   `d44743e8`; 0021 is claimed by [#1057](https://github.com/openzigs/onyourleft/issues/1057), and
-  0030 is named as the next free number in the body of
-  [#1896](https://github.com/openzigs/onyourleft/issues/1896), which was queued the same day. No
-  open pull request carried a spike on 2026-10-30. This file takes 0031 so that the two do not
-  collide (`SPIKE001`).
+  0030 is taken by [#1896](https://github.com/openzigs/onyourleft/issues/1896)'s spike, open as
+  [#1928](https://github.com/openzigs/onyourleft/pull/1928) on 2026-10-30, the only other open
+  pull request carrying one. This file takes 0031 so that the two do not collide (`SPIKE001`).
 
 A spike is a dated measurement that decides nothing (`docs/agents/conventions.md` §7). The one
 change it informs, the land-class table, is made by #1630 itself, and the reasons are below.
