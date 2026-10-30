@@ -1065,6 +1065,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `oylRevealOf`, reading the face frame `oylFaceN`,
                         `oylFaceU`, `oylFaceUp`, `oylToSunV`, `oylToEyeV`);
                         the realistic page's `-window-reveals` builds it out.
+                        Since #1662 every pane shows a procedural room
+                        behind it (`interiorAt`, the shader's `oylInterior`,
+                        whose signature #1636 and #1665 call) and gives back
+                        the sky by Schlick's Fresnel at metalness 0, not 0.35;
+                        `-window-rooms` builds it out.
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`
@@ -1104,7 +1109,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         shops are painted as a lot is, a model wears its wall
                         entry as a hue (`lotModelPaint`), and the joinery's
                         timber (`planks`) is stained by its `trim` entry, the
-                        wall's and roof's summed
+                        wall's and roof's summed. Since #1665 a lot's lit walls
+                        and roofs carry #1661's weathering (`withLotPaint`
+                        calls `oylWeatherTile`, `oylWeatherGrime`,
+                        `oylWeatherMoss`) and its lit glass #1662's rooms
+                        (`withLotGlass`, `oylInterior`), each pane's rectangle
+                        in the glass's otherwise unread `uv`
+                        (`buildings.ts` §`glassPaneCoordinates`);
+                        `-lot-realism` builds both out
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

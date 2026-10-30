@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, and since #1626 the mapped doors' winter wreath, for a cost pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-weathering`, `-facade-trims`, `-facade-wreath`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, since #1626 the mapped doors' winter wreath, for a cost pair, since #1662 the rooms behind mapped glass, for both, and since #1665 the village lots' weathering and rooms, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-weathering`, `-facade-trims`, `-facade-wreath`, `-window-rooms`, `-lot-realism`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityStreetscapeFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class`; since #1782 `houses`, `footprint-fixtures-testing.ts` §`houseStreetFixture`'s street of each US house archetype in turn and its rural farmhouses, from 900 m to 2 100 m, whose before is `levers=-house-archetypes` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`, `houses`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
@@ -260,6 +260,29 @@ export type Layer = (typeof LAYERS)[number];
  *   owner's BY-EYE pair. Pair it with `town=mixed`: on `route.ts`' road there
  *   is no mapped building. The product always builds the weathering.
  *
+ * - `window-rooms` — #1662: the rooms behind every mapped pane — each pane's
+ *   ray followed into a procedural room, painted from a seeded palette — and
+ *   the glass's reflection weighted by Schlick's Fresnel rather than a
+ *   constant metalness (`three-renderer.ts` §`windowRoomsOf`). Off builds the
+ *   facade program without the term — the function, its calls and the
+ *   finish's change left out, not a uniform at zero, as `road-wear` does — so
+ *   every pane is #1581's dark room and gradient at metalness 0.35: the
+ *   tablet's COST pair and the owner's BY-EYE pair. Pair it with `town=mixed`:
+ *   on `route.ts`' road there is no mapped building. The product always
+ *   builds the rooms.
+ *
+ * - `lot-realism` — #1665: #1661's weathering on the procedural lots' walls
+ *   and roofs — the photograph's repeat broken, splash grime at a wall's
+ *   foot, moss on a roof — and #1662's rooms behind their glass
+ *   (`three-renderer.ts` §`lotRealismOf`). Off builds the lots' wall, roof and
+ *   glass programs without the terms — their functions and splices left out,
+ *   not a uniform at zero, as `road-wear` does — so every lot is drawn as
+ *   before #1665: the tablet's COST pair and the owner's BY-EYE pair. Pair it
+ *   with `route=village` and `-village-models`: on `route=village` the houses
+ *   are #1585's models, which this lever does not touch, so the pair is
+ *   identical there until the models are off (the models' weathering is a
+ *   follow-up under #1656). The product always builds it.
+ *
  * - `village-models` — #1566: the procedural villages' houses and
  *   main-street blocks drawn as #1585's models (`three-renderer.ts`
  *   §`VillageHouseBelt`). Off draws every plot as its procedural building,
@@ -293,6 +316,7 @@ export const LEVERS = [
   'house-archetypes',
   'land-boundaries',
   'land-planting',
+  'lot-realism',
   'mapped-blobs',
   'overhang-shadows',
   'people',
@@ -307,6 +331,7 @@ export const LEVERS = [
   'village-models',
   'weathering',
   'window-reveals',
+  'window-rooms',
 ] as const;
 
 /** One of {@link LEVERS}. */
@@ -553,6 +578,24 @@ export function facadeTrimsWithLevers(leversOff: readonly Lever[]): boolean {
  */
 export function weatheringWithLevers(leversOff: readonly Lever[]): boolean {
   return !leversOff.includes('weathering');
+}
+
+/**
+ * Whether this run builds the rooms behind mapped glass — #1662: as the
+ * product does, unless `window-rooms` is off. `realistic-harness.ts` hands it
+ * to `three-renderer.ts` §`windowRoomsOf`.
+ */
+export function windowRoomsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('window-rooms');
+}
+
+/**
+ * Whether this run builds the procedural lots' weathering and rooms — #1665:
+ * as the product does, unless `lot-realism` is off. `realistic-harness.ts`
+ * hands it to `three-renderer.ts` §`lotRealismOf`.
+ */
+export function lotRealismWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('lot-realism');
 }
 
 /**

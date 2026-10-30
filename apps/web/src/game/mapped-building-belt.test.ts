@@ -194,8 +194,9 @@ describe('the mapped buildings’ materials — #1549', () => {
     expect(shader.fragmentShader).toContain('if (oylTop > 0.0)');
     expect(shader.fragmentShader).toContain(`const float oylWinL = ${String(WINDOW_IN_BAY.left)};`);
     expect(shader.fragmentShader).toContain('roughnessFactor = mix(mix(roughnessFactor');
+    // Since #1662 a pane is a dielectric, its reflection three's Fresnel's.
     expect(shader.fragmentShader).toContain(
-      'metalnessFactor = mix(metalnessFactor, 0.35, oylGlass);',
+      'metalnessFactor = mix(metalnessFactor, 0.0, oylGlass);',
     );
     expect(shader.fragmentShader).toContain('normal = normalize(mix(normal, nonPerturbedNormal');
     expect(shader.fragmentShader.indexOf('varying vec3 vOylTint;')).toBeLessThan(
