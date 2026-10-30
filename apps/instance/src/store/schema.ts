@@ -328,7 +328,8 @@ export interface ModerationLogTable {
 
 /**
  * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
- * the schema refuses an UPDATE or a DELETE. No column is a client address.
+ * the schema refuses a DELETE, and every UPDATE but the erasure of its notifier
+ * details (#1381, migration 0036). No column is a client address.
  */
 export interface NoticeTable {
   readonly id: Generated<number>;
@@ -386,6 +387,17 @@ export interface NoticeStepTable {
   readonly actor_athlete_id: string;
   readonly decision: string | null;
   readonly log_id: number | null;
+  readonly at: number;
+}
+
+/**
+ * A notice whose notifier details were erased (#1381, migration 0036): when,
+ * and whether the notifier had given a name and an email. Append-only.
+ */
+export interface NoticeErasureTable {
+  readonly notice_id: number;
+  readonly gave_name: 0 | 1;
+  readonly gave_email: 0 | 1;
   readonly at: number;
 }
 
@@ -687,5 +699,6 @@ export interface InstanceDatabase {
   readonly statement: StatementTable;
   readonly appeal: AppealTable;
   readonly notice_step: NoticeStepTable;
+  readonly notice_erasure: NoticeErasureTable;
   readonly hidden_item: HiddenItemTable;
 }

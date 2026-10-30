@@ -102,6 +102,8 @@ const noticeSchema = object({
   notifierName: nullableString,
   notifierEmail: nullableString,
   bonaFide: { type: 'boolean' },
+  /** When the notifier details were erased, six months after the decision (#1381), or `null`. */
+  detailsErasedAt: nullableInteger,
   ...noticeSteps,
 });
 
@@ -435,7 +437,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
     operationId: 'listNotices',
     reaches: 'moderation',
     summary:
-      'The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them.',
+      'The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them. Six months after a notice’s decision its notifier details are erased (#1381): its explanation is then empty, its location, name and email `null`, and `detailsErasedAt` says when.',
     identity: true,
     auth: 'session',
     errors: ['unauthenticated'],
@@ -457,6 +459,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
           notifierName: notice.notifierName,
           notifierEmail: notice.notifierEmail,
           bonaFide: notice.bonaFide,
+          detailsErasedAt: notice.erased?.at ?? null,
           ...stepsOf(notice.id, steps),
         })),
       });

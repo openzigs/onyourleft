@@ -90,8 +90,9 @@ export function exportRecord(
       receivedAt: notice.receivedAt,
       kind: notice.kind,
       items: notice.items,
-      notifierGaveName: notice.notifierName !== null,
-      notifierGaveEmail: notice.notifierEmail !== null,
+      // Once erased (#1381), what they gave is the erasure's to say.
+      notifierGaveName: notice.erased?.gaveName ?? notice.notifierName !== null,
+      notifierGaveEmail: notice.erased?.gaveEmail ?? notice.notifierEmail !== null,
       ...stepsOf(notice.id, steps),
     })),
     appeals: appeals.map((appeal) => ({

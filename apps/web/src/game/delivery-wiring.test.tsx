@@ -73,6 +73,7 @@ import {
   type ThrowSide,
 } from './delivery/throw';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
+import type { PadSnapshot } from './gamepad-port';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { HOUSES_NOT_READY_TEXT, TOO_FEW_HOUSES_TEXT } from './hud/delivery-announce';
@@ -940,6 +941,144 @@ describe('lane steering inside a game ride — #1853', () => {
     await pressSteer('lane-left');
     for (let index = 0; index < 5; index += 1) await pump();
     expect(steeredInputs.at(-1)).toBeLessThan(before as number);
+  });
+});
+
+/**
+ * A gamepad inside a game ride — #1821, read through the ride a rider rides:
+ * the real `GameView` hands the HUD its throw and steer ports, the HUD's
+ * `GamepadIntents` polls `navigator.getGamepads()` on the same animation
+ * frames as the ride, and what is read back is where each drawn frame put the
+ * rider and which parcels it drew in the air. `hud/HudPanel.gamepad.test.tsx`
+ * holds the HUD to stand-in ports; this holds the ports to the round.
+ */
+describe('a gamepad inside a game ride — #1821', () => {
+  /** What `navigator.getGamepads()` lists now. */
+  let pads: (PadSnapshot | null)[] = [];
+
+  beforeEach(() => {
+    pads = [];
+    Object.defineProperty(window.navigator, 'getGamepads', {
+      configurable: true,
+      value: () => pads,
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, 'getGamepads');
+  });
+
+  /** A pad in the W3C standard mapping, holding `down` by button index. */
+  function standardPad(down: readonly number[], connected = true): PadSnapshot {
+    return {
+      connected,
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, (_, index) => ({ pressed: down.includes(index) })),
+    };
+  }
+
+  async function padEvent(type: 'gamepadconnected' | 'gamepaddisconnected'): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(new Event(type));
+      await Promise.resolve();
+    });
+  }
+
+  async function frames(count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) await pump();
+  }
+
+  /** Mount the game with a round on, press Ride, and ride 20 frames with no pad. */
+  async function rideARound(drawn: SceneFrame[]): Promise<void> {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await frames(20);
+  }
+
+  /** The most parcels any of `drawn` showed in the air. */
+  const mostInTheAir = (drawn: readonly SceneFrame[]): number =>
+    Math.max(0, ...drawn.map((frame) => frame.delivery?.parcels.length ?? 0));
+
+  it('changes lane once for a d-pad held over many frames, and again for the next press', async () => {
+    await rideARound([]);
+    const start = startSteer(lineOffsetAt(racingLine(town.profile), 0));
+    // Fixture: a lane with two more beside it, so a second press has somewhere to go.
+    expect(start.lane === 0 || start.lane === LANE_OFFSETS_METRES.length - 1).toBe(true);
+    const toward = start.lane === 0 ? 1 : -1;
+    const button = toward < 0 ? 14 : 15;
+    const laneAt = (steps: number): number =>
+      LANE_OFFSETS_METRES[start.lane + toward * steps] as number;
+    expect(steeredInputs.at(-1)).toBe(laneAt(0));
+
+    // Held across 15 frames, 3 s — seven lane changes' worth: one lane.
+    pads = [standardPad([button])];
+    await padEvent('gamepadconnected');
+    await frames(15);
+    expect(steeredInputs.at(-1)).toBe(laneAt(1));
+
+    // Let go, then pressed again: the next lane.
+    pads = [standardPad([])];
+    await frames(3);
+    expect(steeredInputs.at(-1)).toBe(laneAt(1));
+    pads = [standardPad([button])];
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(laneAt(2));
+  });
+
+  it('throws one parcel for a face button held over many frames, and another for the next press', async () => {
+    const drawn: SceneFrame[] = [];
+    await rideARound(drawn);
+    expect(mostInTheAir(drawn)).toBe(0);
+
+    // X, held 1 s: past the throw's 0.5 s cooldown, inside a parcel's 1.2 s
+    // flight, so a second throw from the same press would be two in the air.
+    pads = [standardPad([2])];
+    await padEvent('gamepadconnected');
+    const held = drawn.length;
+    await frames(5);
+    expect(mostInTheAir(drawn.slice(held))).toBe(1);
+
+    // Let go until it has landed, then pressed again: a parcel in the air again.
+    pads = [standardPad([])];
+    await frames(10);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(0);
+    pads = [standardPad([2])];
+    await frames(2);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
+  });
+
+  it('asks nothing of the round once its pad goes, and the round goes on: its keys still throw', async () => {
+    const drawn: SceneFrame[] = [];
+    await rideARound(drawn);
+    pads = [standardPad([])];
+    await padEvent('gamepadconnected');
+    await frames(2);
+
+    // The pad goes mid-round: first listed as no longer connected, its X still
+    // reading down, then not listed at all.
+    pads = [standardPad([2], false)];
+    await padEvent('gamepaddisconnected');
+    const gone = drawn.length;
+    await frames(5);
+    pads = [null];
+    await frames(10);
+    expect(drawn.length - gone).toBe(15);
+    expect(mostInTheAir(drawn.slice(gone))).toBe(0);
+
+    // The round went on: the key throws, as it did before any pad.
+    await pressThrow('left');
+    await frames(2);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
   });
 });
 
