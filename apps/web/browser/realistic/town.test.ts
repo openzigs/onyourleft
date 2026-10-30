@@ -11,7 +11,8 @@
  * dormers without it, and none with it; and since #1784 `-archetype-porches`:
  * the bungalows' wide eaves without it, and #1581's with it; and since #1783
  * `-commercial-archetypes`: the commercial street's archetypes without it,
- * and none with it.
+ * and none with it — and since #1922, the pair's frames planted alike but on
+ * the driveways a garden apartment gives up.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +21,9 @@ import {
   FOOTPRINT_ROLES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
+  mappedTown,
   minimumAreaRectangle,
+  type FootprintPlan,
 } from '../../src/game/footprint-buildings';
 import {
   commercialStreetFixture,
@@ -29,9 +32,14 @@ import {
 } from '../../src/game/footprint-fixtures-testing';
 import { BUILDING_ARCHETYPES } from '../../src/game/building-archetypes';
 import { HOUSE_ARCHETYPES, ROOF_VARIANTS } from '../../src/game/house-archetypes';
+import { mappedBuildingsOf, onMappedGround } from '../../src/game/mapped-buildings';
+import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
+import type { ScatterItem } from '../../src/game/scatter';
+import { SETTLEMENT_CLEARED_KINDS } from '../../src/game/settlements';
 
 import { parseConfig } from './config';
+import { rideFrame } from './frame';
 import { plannedTown } from './town';
 
 describe('the realistic page’s `split-roofs` lever — #1660', () => {
@@ -239,4 +247,72 @@ describe('the realistic page’s `commercial-archetypes` lever — #1783', () =>
       }
     });
   });
+
+  // #1922: the owner's pair showed roadside trees moving with the lever. The one
+  // way it reaches the planting is the driveway a garden apartment gives up
+  // (`building-archetypes.ts` §`GARDEN_APARTMENT_FEATURES`): with the lever off
+  // its seeded garage has one, whose ground #1588 clears; with it on there is
+  // none, so that ground is planted as any other. Nothing else may move.
+  it('moves no tree, shrub or structure but those on a driveway a garden apartment gives up — #1922', () => {
+    const top = REALISTIC_LADDER[0] as QualitySettings;
+    /** The page's town for `query`, built as `realistic-harness.ts` builds it. */
+    const town = (query: string) => {
+      const { land, plans, urban } = plannedTown(street, parseConfig(query).leversOff);
+      return {
+        plans,
+        town: {
+          corridor: street.corridor,
+          land,
+          buildings: mappedBuildingsOf(plans),
+          lots: mappedTown(street.corridor, plans, urban),
+        },
+      };
+    };
+    const on = town('?town=commercial&levers=-people');
+    const off = town('?town=commercial&levers=-people,-commercial-archetypes');
+    // The driveways the lever takes away: a garden apartment's, whose plan has one without it.
+    const dropped = mappedBuildingsOf(
+      off.plans.filter((plan, index) => {
+        const archetyped = on.plans[index] as FootprintPlan;
+        return (
+          plan.driveway.length > 0 &&
+          archetyped.driveway.length === 0 &&
+          archetyped.buildingArchetype === 'garden-apartment'
+        );
+      }),
+    );
+    const key = (item: ScatterItem): string => `${item.kind} ${String(item.x)} ${String(item.z)}`;
+    let planted = 0;
+    for (let distance = 900; distance <= 2_700; distance += 100) {
+      const frame = (built: ReturnType<typeof town>): readonly ScatterItem[] =>
+        rideFrame({
+          profile: street.profile,
+          origin: street.origin,
+          distance,
+          elapsed: 1,
+          rung: top,
+          peopleOff: true,
+          town: built.town,
+        }).scatter;
+      const archetyped = frame(on);
+      const control = frame(off);
+      const archetypedKeys = new Set(archetyped.map(key));
+      // Everything the pair's control draws, the product draws too: the lever only plants.
+      for (const item of control) {
+        expect(archetypedKeys.has(key(item)), `${key(item)} at ${String(distance)} m`).toBe(true);
+      }
+      const controlKeys = new Set(control.map(key));
+      for (const item of archetyped) {
+        if (controlKeys.has(key(item))) continue;
+        // And what it plants stands on a dropped driveway's ground, and on no building's.
+        expect(SETTLEMENT_CLEARED_KINDS.has(item.kind), key(item)).toBe(true);
+        expect(onMappedGround(dropped, item.x, item.z), key(item)).toBe(true);
+        expect(onMappedGround(on.town.buildings, item.x, item.z), key(item)).toBe(false);
+        planted += 1;
+      }
+    }
+    // The control: the street has a dropped driveway with planting on its ground, as the owner saw.
+    expect(dropped.plans.length).toBeGreaterThan(0);
+    expect(planted).toBeGreaterThan(0);
+  }, 30_000);
 });
