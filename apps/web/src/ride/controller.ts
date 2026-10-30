@@ -3209,9 +3209,22 @@ export function createRideController(options: RideControllerOptions): RideContro
     return said.kind === 'confirmed' && said.target === holding ? holding : undefined;
   };
 
-  /** A channel's reading if it is live at `at`, by the rule the metric grid shows it under. */
+  /**
+   * A channel's reading if it is live at `at`, by the rule the metric grid
+   * shows it under.
+   *
+   * ⚠️ The SAME rule, link included (#1313). This passed `true` for paired,
+   * so for up to {@link METRIC_STALE_AFTER_SECONDS} after a trainer's link
+   * dropped the graph said "You 250 W", and drew it, while the grid beside
+   * it showed no power at all.
+   */
   const liveReading = (capability: MeasurementCapability, at: UnixSeconds): number | undefined => {
-    const state = metricStateFor(latest.get(capability), true, at, staleAfterSeconds);
+    const state = metricStateFor(
+      latest.get(capability),
+      isPaired(capability),
+      at,
+      staleAfterSeconds,
+    );
     return state.kind === 'live' ? state.value : undefined;
   };
 
