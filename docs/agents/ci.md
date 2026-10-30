@@ -462,7 +462,27 @@ gives them (`gh api repos/openzigs/onyourleft/actions/runs/<id>/jobs`), not coun
 queued.
 
 <!-- nightly-measurements:start -->
+| Run | Event | heavy | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
+|---|---|--:|--:|--:|--:|--:|--:|
+| [40974080277](https://github.com/openzigs/onyourleft/actions/runs/40974080277) attempt 1 | `pull_request` | 565 | 896 | 551 | 431 | 277 | 344 |
+| [40974044131](https://github.com/openzigs/onyourleft/actions/runs/40974044131) | `workflow_dispatch` | 571 | 808 | 491 | 289 | 332 | 496 |
+| 40974080277 attempt 2 | `pull_request` | 588 | 906 | 344 | 292 | 278 | 307 |
 <!-- nightly-measurements:end -->
+
+The stops are 1 800 s for `heavy` and `coverage` and 1 200 s for each browser shard, so the slowest
+readings are 33 %, 50 %, 46 %, 36 %, 28 % and 41 % of them. `Tests under coverage` itself took 873,
+783 and 882 s. The CPUs, in column order:
+
+- Attempt 1: all EPYC 7763 except `browser-4`, an EPYC 9V74.
+- The dispatch: EPYC 7763 for `heavy`, `browser-2` and `browser-4`, EPYC 9V74 for `coverage` and
+  `browser-3`, and a Xeon Platinum 8370C for `browser-5`. That run went red: #1636's city-centre
+  case reached its 300 s test timeout there, so its 496 s includes a case that hung.
+- Attempt 2: a Xeon Platinum 8370C for `heavy`, an EPYC 7763 for `coverage`, a Xeon Platinum
+  8573C for `browser-2`, and EPYC 9V74 for the other three.
+
+The coverage job is the one closest to its bound: 60 % of 1 800 s is 1 080 s, 174 s more than its
+slowest reading. When a new row turns this red, split `test:coverage` between two jobs, as #1675
+split the browser checks. Do not lengthen the stop or change the 60 %.
 
 
 #### 23m39s of 25 — #1051

@@ -153,12 +153,14 @@ const REQUIRED_CHECK = 'Repository rules';
  * ⚠️ **It still cannot notice a shard that got slower since the last row.**
  * The one job grew about 21 s a day in the week to 2026-10-12; the table's
  * newest row is how old these bounds are.
+ *
+ * Since #1701 the nightly jobs' table too, between the two
+ * `nightly-measurements` markers, read the same way.
  */
-function measuredShards(): (column: string) => number[] {
+function measuredShards(table = 'shard-measurements'): (column: string) => number[] {
   const doc = read(ROOT, 'docs', 'agents', 'ci.md');
   const block =
-    /<!-- shard-measurements:start -->\n([\s\S]*?)<!-- shard-measurements:end -->/.exec(doc)?.[1] ??
-    '';
+    new RegExp(`<!-- ${table}:start -->\\n([\\s\\S]*?)<!-- ${table}:end -->`).exec(doc)?.[1] ?? '';
   const cells = (line: string): string[] =>
     line
       .split('|')
@@ -597,6 +599,24 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
         loads * SLOWEST_REALISTIC_LOAD_S,
         `${name}: ${String(loads)} loads of the realistic page`,
       ).toBeLessThanOrEqual(budget);
+    }
+  });
+
+  it('holds every nightly job’s slowest measured run inside 60 % of its own stop — #1701', () => {
+    // #1701's acceptance, as #1698 holds each realistic shard's loads: `heavy`
+    // reached 1 242 s of its 1 800 s stop with the coverage report in it (run
+    // 40853930991). The figures are the table in docs/agents/ci.md §4c
+    // §"Coverage in a job of its own — #1701", one column per job id, so a job
+    // added without being measured is a red case. `report` runs only after a
+    // red run, so it has no reading to hold.
+    const measured = measuredShards('nightly-measurements');
+    for (const [id, job] of jobsOf(nightly)) {
+      if (id === 'report') continue;
+      const stop = Number(jobField(job, 'timeout-minutes')) * 60;
+      const slowest = Math.max(...measured(id));
+      // A figure under a minute is a typo, not a job that installs.
+      expect(slowest, id).toBeGreaterThan(60);
+      expect(slowest, id).toBeLessThanOrEqual(NIGHTLY_SHARE * stop);
     }
   });
 
