@@ -219,7 +219,10 @@ describe('no request module names a picture read (#1063’s review)', () => {
     expect(REQUEST_PATH).toContain('instance/sync.ts');
     expect(REQUEST_PATH).toContain('ride-analysis/read-input.ts');
     expect(REQUEST_PATH).toContain(`${ANALYSIS_ROOT}/input.ts`);
-    expect(REQUEST_PATH).toContain(`${ANALYSIS_ROOT}/runner.ts`);
+    // #1103 removed the on-device runner: the write-up is asked of the
+    // instance, and that job request is the module to hold.
+    expect(REQUEST_PATH).toContain(`${ANALYSIS_ROOT}/history.ts`);
+    expect(REQUEST_PATH).toContain('ride-analysis/instance-job.ts');
   });
 
   it.each(REQUEST_PATH)('%s names no picture read and no picture record', (path) => {

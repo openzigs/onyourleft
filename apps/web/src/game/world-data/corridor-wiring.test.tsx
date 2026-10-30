@@ -432,7 +432,7 @@ describe('main.tsx supplies the corridor to the game and to both route saves', (
 
   it('wraps the routes screen’s and the files screen’s store so a save reads the corridor', () => {
     expect(main).toMatch(/routes=\{buildRoutePort\(worldCorridorPort\)\}/);
-    expect(main).toMatch(/transfer=\{buildTransferPort\(worldCorridorPort\)\}/);
+    expect(main).toMatch(/transfer=\{buildTransferPort\(worldCorridorPort(?:, sideSnapshots)?\)\}/);
     expect(main.match(/readingCorridorOnSave\(localStore\(\), corridors\)/g)).toHaveLength(2);
   });
 });
