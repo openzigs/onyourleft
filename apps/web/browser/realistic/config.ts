@@ -247,8 +247,10 @@ export type Layer = (typeof LAYERS)[number];
  *   glass programs without the terms — their functions and splices left out,
  *   not a uniform at zero, as `road-wear` does — so every lot is drawn as
  *   before #1665: the tablet's COST pair and the owner's BY-EYE pair. Pair it
- *   with `route=village`, whose villages are lots. The product always builds
- *   it.
+ *   with `route=village` and `-village-models`: on `route=village` the houses
+ *   are #1585's models, which this lever does not touch, so the pair is
+ *   identical there until the models are off (the models' weathering is a
+ *   follow-up under #1656). The product always builds it.
  *
  * - `village-models` — #1566: the procedural villages' houses and
  *   main-street blocks drawn as #1585's models (`three-renderer.ts`

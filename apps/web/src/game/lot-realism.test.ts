@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   BUILDING_VARIANTS,
+  BUILT_KINDS,
   buildingPlan,
   glassPaneCoordinates,
   glassPanesOf,
@@ -41,7 +42,7 @@ import {
   realisticStructureGeometry,
 } from './three-renderer';
 
-const BUILT: readonly BuiltKind[] = ['building', 'barn', 'church', 'shop-row'];
+const BUILT = BUILT_KINDS;
 
 const POSE: CameraPose = {
   x: 0,
@@ -235,37 +236,40 @@ describe('each lot pane knows its own rectangle — #1665', () => {
     expect(checked).toBeGreaterThan(100);
   });
 
+  /** Every vertex of `position`, decoded through its own `uv` and window, is where the vertex is. */
+  const expectPaired = (
+    position: ArrayLike<number>,
+    uv: ArrayLike<number>,
+    windows: ReturnType<typeof glassPanesOf>,
+  ) => {
+    for (let vertex = 0; vertex < position.length / 3; vertex += 1) {
+      const x = uv[vertex * 2] as number;
+      const index = Math.floor((x + PANE_STRIDE / 2) / PANE_STRIDE);
+      const window = windows[index];
+      if (window === undefined) throw new Error('no window');
+      const us = window.outline.map(([u]) => u);
+      const vs = window.outline.map(([, v]) => v);
+      const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
+      const u = u0 + ((x - PANE_STRIDE * index + 1) / 2) * (u1 - u0);
+      const v = v0 + (((uv[vertex * 2 + 1] as number) + 1) / 2) * (v1 - v0);
+      const { origin, right, normal } = window.face;
+      const at = [0, 1, 2].map(
+        (k) =>
+          (origin[k] as number) +
+          (right[k] as number) * u +
+          (k === 1 ? v : 0) -
+          (normal[k] as number) * OPENING_RECESS_METRES,
+      );
+      for (const k of [0, 1, 2]) {
+        expect(position[vertex * 3 + k] as number).toBeCloseTo(at[k] as number, 4);
+      }
+    }
+  };
+
   it('puts each vertex at its own place in its own window: decoded, it is where the vertex is', () => {
     for (const kind of BUILT) {
       const { plan, uv, windows } = panes(kind, 0);
-      const glass = plan.triangles.glass;
-      for (let vertex = 0; vertex < glass.length / 3; vertex += 1) {
-        const x = uv[vertex * 2] as number;
-        const index = Math.floor((x + PANE_STRIDE / 2) / PANE_STRIDE);
-        const window = windows[index];
-        if (window === undefined) throw new Error('no window');
-        const us = window.outline.map(([u]) => u);
-        const vs = window.outline.map(([, v]) => v);
-        const [u0, u1, v0, v1] = [
-          Math.min(...us),
-          Math.max(...us),
-          Math.min(...vs),
-          Math.max(...vs),
-        ];
-        const u = u0 + ((x - PANE_STRIDE * index + 1) / 2) * (u1 - u0);
-        const v = v0 + (((uv[vertex * 2 + 1] as number) + 1) / 2) * (v1 - v0);
-        const { origin, right, normal } = window.face;
-        const at = [0, 1, 2].map(
-          (k) =>
-            (origin[k] as number) +
-            (right[k] as number) * u +
-            (k === 1 ? v : 0) -
-            (normal[k] as number) * OPENING_RECESS_METRES,
-        );
-        for (const k of [0, 1, 2]) {
-          expect(glass[vertex * 3 + k] as number).toBeCloseTo(at[k] as number, 4);
-        }
-      }
+      expectPaired(plan.triangles.glass, uv, windows);
     }
   });
 
@@ -276,6 +280,12 @@ describe('each lot pane knows its own rectangle — #1665', () => {
         if (geometry === undefined) continue;
         const read = Array.from(geometry.getAttribute('uv').array as ArrayLike<number>);
         expect(read).toEqual(Array.from(glassPaneCoordinates(buildingPlan(kind, variant))));
+        // And paired: the geometry's own position is where its own uv says.
+        expectPaired(
+          geometry.getAttribute('position').array as ArrayLike<number>,
+          geometry.getAttribute('uv').array as ArrayLike<number>,
+          glassPanesOf(buildingPlan(kind, variant)),
+        );
         geometry.dispose();
       }
     }
