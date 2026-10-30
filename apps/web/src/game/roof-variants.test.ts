@@ -771,6 +771,7 @@ describe('the archetypes’ variants and the lever — #1785', () => {
         roofVariants: false,
         dormerVariants: false,
         archetypePorches: false,
+        commercialArchetypes: false,
       });
       expect(off.every((plan) => plan.roofVariant === 'plain')).toBe(true);
       expect(planFingerprint(off)).toBe(MAIN_FINGERPRINTS[name]);
