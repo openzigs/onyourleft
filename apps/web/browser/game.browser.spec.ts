@@ -33,10 +33,12 @@ import type {
   BendMeasurement,
   LineMeasurement,
   NearFieldMeasurement,
+  StreetNearFieldMeasurement,
   PresenceCostMeasurement,
   RideStartMeasurement,
   HorizonReading,
   LogoMeasurement,
+  NameTagMeasurement,
   OrientationAgreement,
   RealisticMeasurement,
   StylisedTextureMeasurement,
@@ -124,6 +126,11 @@ interface GameHarnessResult {
   readonly roadFarPixel: Pixel;
   readonly roadProbeRows: readonly [number, number];
   readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+  /** #783. @see game-harness.ts §`nameTagProbe` */
+  readonly nameTag: {
+    readonly landscape: NameTagMeasurement;
+    readonly portrait: NameTagMeasurement;
+  };
   readonly line: {
     readonly on: LineMeasurement;
     readonly onUpright: LineMeasurement;
@@ -133,6 +140,8 @@ interface GameHarnessResult {
   };
   readonly bend: { readonly right: BendMeasurement; readonly mirrored: BendMeasurement };
   readonly nearField: NearFieldMeasurement;
+  readonly nearFieldWall: StreetNearFieldMeasurement;
+  readonly nearFieldPerson: StreetNearFieldMeasurement;
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
   readonly resourcesAfterSecondSweep: number;
@@ -3237,6 +3246,45 @@ test.describe('the rider is prominent — #424', () => {
 });
 
 /**
+ * #783 — another rider's name lands over the rider the RENDERER drew.
+ *
+ * A name is DOM laid over the world (`name-tags.ts`), placed by `camera.ts`
+ * §`projectToFrame`, which restates the renderer's camera without `three`.
+ * jsdom holds the restatement to `riderFrameBox`; only a real draw can say it
+ * agrees with the camera three was actually given. `game-harness.ts`
+ * §`nameTagProbe` draws one named remote rider off to the side of the line,
+ * reads where they landed off the drawing buffer, and reports where the name
+ * was put.
+ */
+test.describe('another rider’s name is over the rider the renderer drew — #783', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
+  test('across the frame inside the rider, and just above their helmet, landscape and upright', async ({
+    harnessRun,
+  }) => {
+    const { nameTag } = await harness(harnessRun);
+    for (const { tag, drawn } of [nameTag.landscape, nameTag.portrait]) {
+      // Non-vacuity: a rider was drawn, and a name was put somewhere.
+      expect(drawn.pixels).toBeGreaterThan(50);
+      expect(tag).toBeDefined();
+      const left = tag?.left ?? Number.NaN;
+      const top = tag?.top ?? Number.NaN;
+      expect(left).toBeGreaterThanOrEqual(drawn.left);
+      expect(left).toBeLessThanOrEqual(drawn.right);
+      // Above the top of the drawn helmet — `NAME_TAG_ABOVE_METRES` is under
+      // a tenth of the rider’s height — by less than a quarter of the
+      // rider's own drawn height and a little.
+      expect(top).toBeLessThan(drawn.top);
+      expect(drawn.top - top).toBeLessThan((drawn.bottom - drawn.top) * 0.25 + 0.01);
+      // ⚠️ The control: the same name mirrored across the middle of the
+      // frame — what a projection with its right-hand axis the wrong way round
+      // would give — is NOT over the rider, so the check above can fail.
+      expect(1 - left < drawn.left || 1 - left > drawn.right).toBe(true);
+    }
+  });
+});
+
+/**
  * The racing line and the lean, read off the drawing buffer — #499.
  *
  * `line-on-the-road.test.ts` holds the FRAME to the line: the marker is where
@@ -3448,6 +3496,65 @@ test.describe(
       expect(near.controlPixels).toBeGreaterThan(100);
       // And with it, nothing stands between the two planes.
       expect(near.shippedPixels).toBe(0);
+    });
+
+    test('shows no cut mapped wall at its closest pass at 6 : 1, where the same frame uncut shows it — #1835', async ({
+      harnessRun,
+    }) => {
+      // `game-harness.ts` §`nearFieldStreetProbe`: the kerbside town round the
+      // planner's bends at the widest frame the stylesheet allows, where
+      // `near-field-street.test.ts` finds the plane meeting mapped walls.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearFieldWall;
+      console.info(
+        `#1835 mapped wall at ${String(near.distance)} m in the ${near.world} world, the cull ` +
+          `dropped ${String(near.cut.length)}, the nearest ${near.pivotMetres.toFixed(2)} m from ` +
+          `the eye: ${String(near.shippedPixels)} pixels cut with the cull, ` +
+          `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+      );
+      // Non-vacuity: the realistic world, and a frame with something to drop.
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      expect(near.noisePixels).toBe(0);
+      // The control — the defect, drawn: uncut, the wall's sliver shows.
+      expect(near.controlPixels).toBeGreaterThan(100);
+      // And with the cull, nothing stands between the two planes.
+      expect(near.shippedPixels).toBe(0);
+    });
+
+    test('draws no person the plane meets at their closest pass at 6 : 1, and draws them with the cull off — #1835', async ({
+      harnessRun,
+    }) => {
+      // The same probe on the villages' pavements round the bends. ⚠️ A person
+      // is culled on a box (`near-field.ts` §`personCut`), which is the safe
+      // way round: at the nearest pass the box meets the plane and no pixel of
+      // the body is cut, so the pixels' control has nothing to show here
+      // (logged, not asserted). What is asserted is that the view's people
+      // belt is handed the cull's people — read back off its meshes.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearFieldPerson;
+      console.info(
+        `#1835 person at ${String(near.distance)} m in the ${near.world} world, the cull ` +
+          `dropped ${String(near.cut.length)}, the nearest ${near.pivotMetres.toFixed(2)} m from ` +
+          `the eye: ${String(near.peopleDrawn.withCull)} people drawn with the cull, ` +
+          `${String(near.peopleDrawn.without)} without it; ${String(near.shippedPixels)} pixels ` +
+          `cut with the cull, ${String(near.controlPixels)} without it, ` +
+          `${String(near.noisePixels)} drawing it twice`,
+      );
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      // The control: with the cull off the belt draws the person too.
+      expect(near.peopleDrawn.without - near.peopleDrawn.withCull).toBe(near.cut.length);
+      expect(near.noisePixels).toBe(0);
+      // ⚠️ Not `shippedPixels` nought: the village's frame keeps its streets,
+      // and moving the near plane moves the depth buffer's precision under
+      // them. CI's runner read 2 pixels between the two planes with the cull
+      // AND without it (run 40985798273), so they are not the person; locally
+      // both read 0. What this frame can say in pixels is only that the cull
+      // never draws more between the planes than the uncut frame does.
+      expect(near.shippedPixels).toBeLessThanOrEqual(near.controlPixels);
     });
   },
 );
@@ -3805,19 +3912,33 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     for (const values of [shadow.near, shadow.far, shadow.nearOff, shadow.farOff]) {
       expect(values).toHaveLength(3);
     }
-    // In the shadow, the wall's colour keeps about 0.6 of its light: past the
-    // gate's tolerance of 4 that #1659's control is held to, three times over.
-    // Measured locally (SwiftShader, 2026-10-24), a wall 5 m high from 5 m:
-    // 126/138/143 0.3 m under the eaves against 142/154/159 1.5 m under;
-    // 146/158/164 and 142/154/159 with the lever.
-    expect(luminance(shadow.far) - luminance(shadow.near)).toBeGreaterThan(12);
+    // ⚠️ RATIOS, since #1718, not differences of luminance: a difference held
+    // to an absolute floor moves with how bright the wall the probe picks is,
+    // and the control's `> -4` sat at its bound on a wall whose two places
+    // differ by 3 % with the term out. A ratio reads the same on a brighter wall.
+    const ratio = (a: readonly number[], b: readonly number[]): number =>
+      luminance(a) / luminance(b);
+    // In the shadow the near place keeps under 0.92 of the far place's light —
+    // the old `> 12` on a wall this bright. Measured locally (SwiftShader,
+    // 2026-10-29), a wall 7 m high from 5 m, each place read across the 0.3 m
+    // of plain wall the probe chose (#1715): 112/101/86 0.3 m under the eaves
+    // against 131/118/102 1.5 m under, 0.86; 133/121/105 and 131/118/102 with
+    // the lever, 1.02. Before #1715, read as a three-pixel column on a 5 m
+    // wall, CI printed 0.82 and, with the lever, 0.97.
+    expect(ratio(shadow.near, shadow.far)).toBeLessThan(0.92);
     // THE CONTROL: with the term out of the program, #1588's 0.6 m band reaches
-    // neither place, so the near one is no darker than the far one (it read
-    // 4 lighter: the same wall, a metre higher) ...
-    expect(luminance(shadow.nearOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
-    // ... and it is the shadow, not the wall, that darkened the near place.
-    expect(luminance(shadow.nearOff) - luminance(shadow.near)).toBeGreaterThan(12);
-    expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
+    // neither place, so the two are the same wall within 5 %, either way — the
+    // same wall a metre higher, which read 0.97 to 1.03 on every wall the probe
+    // has picked. Two-sided, where the old floor bounded it from below only ...
+    expect(Math.abs(ratio(shadow.nearOff, shadow.farOff) - 1)).toBeLessThan(0.05);
+    // ... and it is the shadow, not the wall, that darkened the near place:
+    // against the same two places with the term out, the near one keeps under
+    // 0.92 of its share of the far one's light (0.84 locally) ...
+    expect(ratio(shadow.near, shadow.far) / ratio(shadow.nearOff, shadow.farOff)).toBeLessThan(
+      0.92,
+    );
+    // ... while the far place, out of the shadow, is the same with it or without.
+    expect(Math.abs(ratio(shadow.far, shadow.farOff) - 1)).toBeLessThan(0.03);
   });
 
   test('#1679 a sunlit mapped wall and its parapet are in its cornice’s shadow and not 1 m under its top, and neither with -overhang-shadows', async ({
@@ -3930,6 +4051,32 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apartOff).toBeLessThan(6);
     // ... and the grime is what more than that is, past the gate's tolerance of 4.
     expect(apart - apartOff).toBeGreaterThan(4);
+  });
+
+  test('#1663 a mapped brick wall is its lintel 0.1 m over a window’s head and brick 0.5 m over, and brick at both with -facade-trims', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { facadeTrim: trim } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a brick wall seen from ${trim.metres.toFixed(0)} m: ${rgb(trim.lintel)} 0.1 m over a ` +
+      `window's head against ${rgb(trim.over)} 0.5 m over; ${rgb(trim.lintelOff)} and ` +
+      `${rgb(trim.overOff)} with -facade-trims`;
+    testInfo.annotations.push({ type: 'a mapped window’s lintel', description: measured });
+    console.log(`a mapped window’s lintel — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(trim.aimed).toBe(true);
+    for (const values of [trim.lintel, trim.over, trim.lintelOff, trim.overOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The stone lintel is lighter than the brick round it, past the gate's tolerance of 4.
+    expect(Math.abs(luminance(trim.lintel) - luminance(trim.over))).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program both are the brick ...
+    expect(Math.abs(luminance(trim.lintelOff) - luminance(trim.overOff))).toBeLessThan(4);
+    // ... and it is the lintel, not the wall, that changed the lower place.
+    expect(Math.abs(luminance(trim.lintel) - luminance(trim.lintelOff))).toBeGreaterThan(12);
+    expect(Math.abs(luminance(trim.over) - luminance(trim.overOff))).toBeLessThan(4);
   });
 
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({

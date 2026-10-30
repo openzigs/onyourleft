@@ -141,7 +141,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ The camera pitches with the ROAD — both the eye and
                         the look-at ride the corridor's own heights — so a
                         pacer 50 m ahead stays put on a 20 % hill where a level
-                        gaze put it behind the rider's back
+                        gaze put it behind the rider's back. Since #783
+                        `projectToFrame` restates the renderer's camera
+                        without `three`, for the names below
+    src/game/name-tags.ts
+                        other riders' names on the road (#783): DOM laid over
+                        the world, so no draw call and no triangle in either
+                        world. Only `RiderMarker.label` — a race room's public
+                        name, or the followed rider's seat — and no figure.
+                        ⚠️ Only over riders the realistic world draws too
+                        (`realisticRemoteSplit`'s rule), within 60 m, at most
+                        8, the followed rider's first and a name that would
+                        cover another left out. `game.browser.spec.ts` §"#783"
+                        holds a name over the rider the renderer drew
     src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
                         parts as numbers rather than an asset, the two-bone knee
                         that puts each foot on its own pedal, and the one rule
@@ -647,6 +659,39 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that had stopped listening while every target reported
                         success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
+    src/game/delivery/
+                        Delivery (epic #1803, ADR 0059), in the order a ride
+                        runs it. **The chooser** (#1818): `StageChooser.tsx`
+                        §`DeliveryControl` offers *Ride a Delivery round* only
+                        with the realistic world chosen (DL6), the week's day
+                        and houses from `delivery-progress.ts` beside it, worded
+                        "up to N houses" (#1878); it
+                        cannot know the town's houses (no map in its graph),
+                        so the press decides and the HUD's *Houses* may be fewer. **The press**, in `GameView`:
+                        `ride-round.ts` §`startDeliveryRide` reads the week
+                        and `assist-preference.ts` (#1813), draws ONE seed,
+                        and `targets.ts` picks the houses (#1808, #1856) and
+                        `obstacles.ts` places the obstacles (#1811). A short
+                        pick rides a shorter round standing for the day's
+                        count (`round.ts` §`Round.dayHouses`), and one of
+                        fewer than §`FEWEST_DELIVERY_HOUSES` is no round: an
+                        ordinary ride, `hud/delivery-announce.ts`
+                        §`TOO_FEW_HOUSES_TEXT` (or §`HOUSES_NOT_READY_TEXT`
+                        with no houses read) on the HUD and said once, and
+                        the week kept as it was. **Each simulation step that
+                        ran**: the throw (`throw-input.ts`, #1810), lane
+                        (`steer.ts`, #1820) and gamepad (`gamepad-input.ts`,
+                        #1821) intents come in through their ports, and
+                        §`stepDeliveryRide` runs `throw.ts` (#1809), the
+                        misses, `obstacles.ts` and `round.ts` (#1806); the
+                        HUD says it (`hud/delivery-announce.ts`, #1812) and
+                        the frame draws it (`in-view.ts`, #1814). **The
+                        round's end or the ride's**: §`endDeliveryRide`, and
+                        §`keepDeliveryWeek` writes the three counts. Two
+                        guarantees hold it, each a red test: DL5, nothing
+                        reaches the trainer (#1807, the next entry, and
+                        `delivery-wiring.test.tsx`), and DL11, no target
+                        leaves the ride (#1817, the entry after it)
     src/game/delivery/delivery-cannot-reach-trainer.test.ts
                         DL5 (ADR 0059 D-2, #1807): no module under
                         `delivery/` reaches, by any static import chain,
@@ -681,8 +726,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         through `obstacles.ts` §`roundScore` (crashes in it,
                         never below nought), and the week's counts kept at the
                         round's end or the ride's. `GameView` holds one per
-                        ride, solo only (DL9), read from the developer route
-                        `#/game?delivery=on` until #1818 offers it. ⚠️ **Nothing
+                        ride, solo only (DL9), asked for by the chooser since
+                        #1818 (or the developer route `#/game?delivery=on`),
+                        and none where the pick is under 3 houses. ⚠️ **Nothing
                         of it reaches the trainer** (DL5): it reads the
                         simulation and writes to itself, the HUD and the frame;
                         `game/delivery-wiring.test.tsx` rides one power trace
@@ -735,7 +781,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         always clear. Wired into the ride by #1853: the
                         round holds the steer state and steps it, and the
                         rider is drawn exactly where the obstacles meet them,
-                        a level bot or ghost making the room
+                        a level bot or ghost making the room. One just behind
+                        is held aside until its front wheel is behind the
+                        camera's eye, then eases to its line (#1863)
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
@@ -961,6 +1009,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         since #1660 an L, T, U or Z pitched over its 2–3
                         rectangles (`rectilinear-roofs.ts`), flat where a
                         split would pass the caps (`-split-roofs`);
+                        since #1782 a house's US archetype — ranch, Cape,
+                        Colonial, Foursquare, bungalow or gable-front
+                        farmhouse (`house-archetypes.ts`) — setting its roof,
+                        pitch, porch, shutters, picture window, dormers,
+                        garage and cladding together, `unknown` planned as
+                        before (`-house-archetypes`, `town=houses`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
@@ -1017,6 +1071,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         weathered (`WEATHERING`, `weatheringAt`, the shader's
                         `oylWeather*`; the photograph laid per building by
                         `photographShiftOf`); `-weathering` builds it out.
+                        Since #1663 the trims (`TRIM`, `trimPartAt`, the
+                        shader's `trimsGlsl`): a lintel over each window's
+                        head on brick (stone) and render (the trim's paint),
+                        quoins up a brick wall's corners unless it is
+                        `STYLE_TERRACED`, and a string course on each storey
+                        line with windows above it (`windowStoreysOf`, never
+                        `DEFAULT_STOREYS`); `-facade-trims` builds them out.
                         Since #1636 a `city-centre` front wall
                         has a shop front whatever its use, and a tower of
                         `GLAZED_MIN_STOREYS` a curtain wall (`STYLE_GLAZED`,

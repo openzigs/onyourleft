@@ -27,9 +27,28 @@
  * then; `gamepaddisconnected` fires when it goes. {@link GamepadPort.onConnectionChange}
  * carries both, so the HUD polls only while a pad is there.
  *
- * ⚠️ **Whether the Android shell's WebView delivers gamepads at all is
- * unmeasured**: that is spike 0027 (#1819), on the owner's tablet. This
- * works in a desktop browser, which is all that is tested here.
+ * Spike 0027 (#1819) measured the Android shell's WebView on the owner's
+ * tablet: it lists a standard pad with every button, and a generic pad with
+ * its axes but none of its buttons.
+ *
+ * ## The shell's numbered buttons (#1858)
+ *
+ * Android raises a generic pad's buttons as KEYCODE_BUTTON_1 to 16, and the
+ * WebView drops them. So `MainActivity.java` forwards each press and release
+ * of one, from a joystick or a gamepad, by calling
+ * {@link FORWARDED_BUTTON_GLOBAL} on the page with the button's number and
+ * whether it is down. With `shell` set, the port installs that function while
+ * a listener is subscribed, and {@link GamepadPort.pads} lists the buttons
+ * first, in slot 0, as one pad of their own: `mapping` is
+ * {@link FORWARDED_MAPPING}, and button `n` is at index `n − 1`, as a
+ * browser lists a generic pad's. The slot is `null` while no button is down,
+ * so the HUD stops polling, and each press or release calls the listener,
+ * which wakes it. Without `shell` — every browser — the list is the
+ * platform's, and nothing is installed.
+ *
+ * ⚠️ **A press and its release between two polls still counts**: a press is
+ * held for the next read as well as while it is down, so a tap shorter than
+ * a frame is one throw, not none.
  *
  * ## Untrusted input
  *
@@ -37,8 +56,27 @@
  * may be NaN or outside −1..1, and it may report any number of buttons. This
  * file only copies the reading; `gamepad-input.ts` bounds it. A browser that
  * refuses the API (a permissions policy without `gamepad`) throws from
- * `getGamepads()`, and that reads here as no pads.
+ * `getGamepads()`, and that reads here as no pads. A forwarded button is
+ * bounded on both sides: `MainActivity` sends only 1 to 16, and here
+ * anything but an integer from 1 to 16 and a literal `true` or `false` is
+ * dropped.
  */
+
+/**
+ * The name of the function `MainActivity.java` calls on the page's `window`
+ * for each numbered button. `apps/mobile/src/android/gamepad-button-source.test.ts`
+ * holds the Java to this name.
+ */
+export const FORWARDED_BUTTON_GLOBAL = '__oylGamepadButton';
+
+/** The `mapping` of the pad the shell's forwarded buttons are listed as. Not a W3C value: no browser reports it. */
+export const FORWARDED_MAPPING = 'oyl-android-numbered';
+
+/** How many numbered buttons Android has: KEYCODE_BUTTON_1 to KEYCODE_BUTTON_16. */
+export const FORWARDED_BUTTONS = 16;
+
+/** What `MainActivity` calls: a button number and whether it is down, both untrusted. */
+type ForwardButton = (button: unknown, pressed: unknown) => void;
 
 /** One pad as one poll read it: the parts of `Gamepad` Delivery reads, and nothing else. */
 export interface PadSnapshot {
@@ -63,27 +101,67 @@ export interface GamepadHost {
   };
   addEventListener(type: 'gamepadconnected' | 'gamepaddisconnected', listener: () => void): void;
   removeEventListener(type: 'gamepadconnected' | 'gamepaddisconnected', listener: () => void): void;
+  /** Installed by a shell port while it has a listener; see the module header. */
+  [FORWARDED_BUTTON_GLOBAL]?: ForwardButton | undefined;
 }
 
-/** The platform's pads, through `host` — `window` in production. */
-export function navigatorGamepads(host: GamepadHost): GamepadPort {
+/** A button number `MainActivity` may send: an integer from 1 to {@link FORWARDED_BUTTONS}. */
+function isButtonNumber(button: unknown): button is number {
+  return (
+    Number.isInteger(button) && (button as number) >= 1 && (button as number) <= FORWARDED_BUTTONS
+  );
+}
+
+/**
+ * The platform's pads, through `host` — `window` in production — and, when
+ * `shell` is set (`support/capacitor.ts` §`isNativeShell`), the numbered
+ * buttons the Android shell forwards, in slot 0.
+ */
+export function navigatorGamepads(host: GamepadHost, shell = false): GamepadPort {
+  const down = new Set<number>();
+  /** Pressed since the last read: read as down once more, so a tap between polls counts. */
+  const pressedSinceRead = new Set<number>();
+  const platform = (): readonly (PadSnapshot | null)[] => {
+    const read = host.navigator.getGamepads;
+    if (typeof read !== 'function') return [];
+    try {
+      return read.call(host.navigator);
+    } catch {
+      // A permissions policy that refuses `gamepad` throws a SecurityError: no pads.
+      return [];
+    }
+  };
+  const forwarded = (): PadSnapshot | null => {
+    if (down.size === 0 && pressedSinceRead.size === 0) return null;
+    const buttons = Array.from({ length: FORWARDED_BUTTONS }, (_, index) => ({
+      pressed: down.has(index + 1) || pressedSinceRead.has(index + 1),
+    }));
+    pressedSinceRead.clear();
+    return { connected: true, mapping: FORWARDED_MAPPING, axes: [], buttons };
+  };
   return {
-    pads: () => {
-      const read = host.navigator.getGamepads;
-      if (typeof read !== 'function') return [];
-      try {
-        return read.call(host.navigator);
-      } catch {
-        // A permissions policy that refuses `gamepad` throws a SecurityError: no pads.
-        return [];
-      }
-    },
+    pads: () => (shell ? [forwarded(), ...platform()] : platform()),
     onConnectionChange: (listener) => {
       host.addEventListener('gamepadconnected', listener);
       host.addEventListener('gamepaddisconnected', listener);
+      const forward: ForwardButton | undefined = shell
+        ? (button, isDown) => {
+            if (!isButtonNumber(button) || typeof isDown !== 'boolean') return;
+            if (!isDown) down.delete(button);
+            else if (!down.has(button)) {
+              down.add(button);
+              pressedSinceRead.add(button);
+            }
+            listener();
+          }
+        : undefined;
+      if (forward !== undefined) host[FORWARDED_BUTTON_GLOBAL] = forward;
       return () => {
         host.removeEventListener('gamepadconnected', listener);
         host.removeEventListener('gamepaddisconnected', listener);
+        if (forward !== undefined && host[FORWARDED_BUTTON_GLOBAL] === forward) {
+          host[FORWARDED_BUTTON_GLOBAL] = undefined;
+        }
       };
     },
   };
