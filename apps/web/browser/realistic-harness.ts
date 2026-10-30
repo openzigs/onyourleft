@@ -82,6 +82,7 @@ import {
   decorationKindTriangles,
   decorationKindsOf,
   deliveryDrawnOf,
+  facadeTrimsOf,
   facadeWreathOf,
   firDepthPrepassOf,
   foliageOrderedOf,
@@ -114,6 +115,7 @@ import {
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
   weatheringWithLevers,
+  facadeTrimsWithLevers,
   countrysideWithLevers,
   type Layer,
   type Lever,
@@ -496,6 +498,9 @@ async function run(): Promise<void> {
   // #1661's cost pair: the mapped facades without their weathering, the term
   // out of both of the facade's programs, as the shadows' is.
   weatheringOf(view, weatheringWithLevers(config.leversOff));
+  // #1663's cost pair: the mapped facades without their lintels, quoins and
+  // string courses, the term out of the facade's program, as the weathering's is.
+  facadeTrimsOf(view, facadeTrimsWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.
