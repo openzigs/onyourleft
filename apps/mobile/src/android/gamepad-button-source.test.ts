@@ -128,10 +128,25 @@ describe('which key events MainActivity forwards to the page (#1858)', () => {
 describe('how MainActivity forwards them (#1858)', () => {
   const dispatch = bodyOf('public boolean dispatchKeyEvent(KeyEvent event)');
 
+  it('judges the pad by its device too: a generic pad’s buttons carry the keyboard source alone', () => {
+    // Measured on the owner's tablet, 2026-10-30: the Twin USB receiver (KEYBOARD | JOYSTICK)
+    // raised BTN_TOP and the rest as key events whose own source was plain KEYBOARD, and
+    // forwarding on the event's source alone dropped every press.
+    const sources = bodyOf('static int sourcesOf(KeyEvent event)');
+    expect(sources).toMatch(
+      /return event\.getSource\(\) \| \(device == null \? 0 : device\.getSources\(\)\);/,
+    );
+    expect(sources).toContain('InputDevice device = event.getDevice();');
+    // What dispatch hands forwardedButton for that pad: the keyboard event's source, or'd with
+    // the device's, forwards; a keyboard's own numbered code (none exists) would not.
+    expect(forwardedButton(KEYCODE_BUTTON_1 + 3, SOURCE_KEYBOARD | GENERIC_PAD)).toBe(4);
+    expect(forwardedButton(KEYCODE_BUTTON_1 + 3, SOURCE_KEYBOARD)).toBe(0);
+  });
+
   it('overrides the activity’s key dispatch, and sends every event it does not forward to super', () => {
     expect(activity).toMatch(/@Override\s+public boolean dispatchKeyEvent\(KeyEvent event\)/);
     expect(dispatch).toContain(
-      'int button = forwardedButton(event.getKeyCode(), event.getSource());',
+      'int button = forwardedButton(event.getKeyCode(), sourcesOf(event));',
     );
     expect(dispatch).toMatch(
       /if \(button == 0 \|\| bridge == null \|\| bridge\.getWebView\(\) == null\) \{\s*return super\.dispatchKeyEvent\(event\);\s*\}/,

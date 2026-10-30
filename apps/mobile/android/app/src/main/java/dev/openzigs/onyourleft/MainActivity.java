@@ -56,13 +56,19 @@ public class MainActivity extends BridgeActivity {
      * before, {@code super.dispatchKeyEvent}, untouched. The script is a constant plus a number
      * from 1 to 16 and a boolean, so nothing a page or a pad holds is ever written into it.
      *
+     * <p>⚠️ The pad is judged by its device, not only by the event: a generic pad Android lists
+     * as KEYBOARD | JOYSTICK (no GAMEPAD, the spike's Twin USB receiver) raises its buttons through
+     * its keyboard mapper, so the key event's own source is plain KEYBOARD. Measured on the owner's
+     * tablet on 2026-10-30, every press was dropped until the device's sources were added in
+     * {@link #sourcesOf}. A real keyboard raises no numbered button, so this admits no keyboard.
+     *
      * <p>CI does not build Android: {@code apps/mobile/src/android/gamepad-button-source.test.ts}
      * reads this source and runs {@link #forwardedButton} over each class of key event; whether a
      * pad throws on a device is #1858's tablet step.
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        int button = forwardedButton(event.getKeyCode(), event.getSource());
+        int button = forwardedButton(event.getKeyCode(), sourcesOf(event));
         Bridge bridge = getBridge();
         if (button == 0 || bridge == null || bridge.getWebView() == null) {
             return super.dispatchKeyEvent(event);
@@ -74,6 +80,15 @@ public class MainActivity extends BridgeActivity {
             forwardButton(bridge.getWebView(), button, false);
         }
         return true;
+    }
+
+    /**
+     * The event's source together with its device's sources: a generic pad's buttons arrive with
+     * the keyboard source alone, and only the device says it is a joystick (see above).
+     */
+    static int sourcesOf(KeyEvent event) {
+        InputDevice device = event.getDevice();
+        return event.getSource() | (device == null ? 0 : device.getSources());
     }
 
     /**
