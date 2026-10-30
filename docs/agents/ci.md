@@ -364,8 +364,9 @@ the four default-world files 111 s together.
 
 - `test:browser:nightly:shard-1`, in the `heavy` job: every nightly spec but the realistic page.
 - `test:browser:nightly:shard-2`, in `browser-2`: `realistic.browser.spec.ts`, whose levers each
-  add a load of the owner's page, alone on its runner. ⚠️ Since #1698 that page is three files in
-  three jobs: see "Four nightly browser shards — #1698" below.
+  add a load of the owner's page, alone on its runner. ⚠️ Since #1698 that page is split across
+  four jobs — six spec files since #1626 and #1815, five nightly browser jobs in all: see "Four
+  nightly browser shards — #1698" below.
 
 Split **by file**, not with Playwright's `--shard`, which balances by test count and would have
 put the game spec's 54 cases alone in one half; the game spec's loads share a worker fixture, so
@@ -396,8 +397,9 @@ between two jobs, not a longer stop. The first half has not yet been measured on
 
 #### Four nightly browser shards — #1698
 
-⚠️ **The owner's realistic page is three spec files in three jobs since
-[#1698](https://github.com/openzigs/onyourleft/issues/1698)**, and a reviewer who remembers
+⚠️ **The owner's realistic page is split across four jobs since
+[#1698](https://github.com/openzigs/onyourleft/issues/1698)** — three spec files in three jobs as
+#1698 left it, and since #1626 and #1815 six files in four (the table below) — and a reviewer who remembers
 `browser-2` running every realistic case is reading the old file. On combined PR #1693's run
 [40188796060](https://github.com/openzigs/onyourleft/actions/runs/40188796060) (EPYC 7763) that one
 file's eight cases, 17 loads of the page, all passed and still reached the 840 s stop: 68 s for

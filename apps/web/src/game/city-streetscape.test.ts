@@ -4,7 +4,7 @@
  * #1637: a city centre's street — its wider pavements, its denser street
  * furniture and its terraced blocks — read back through `streetsAt` and
  * `sceneFrame`, the functions a ride's frame is built by, over corridors
- * built from arithmetic (`footprint-fixtures-testing.ts` §`cityCentreFixture`;
+ * built from arithmetic (`footprint-fixtures-testing.ts` §`cityStreetscapeFixture`;
  * no OpenStreetMap data, and nothing here is a real place). A village, a
  * town and a ride with no urban class are the controls.
  */
@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import type { RouteProfile } from '@onyourleft/domain';
 
 import type { Junction } from './cross-streets';
-import { cityCentreFixture, denseTownFixture, landBeside } from './footprint-fixtures-testing';
+import { cityStreetscapeFixture, denseTownFixture, landBeside } from './footprint-fixtures-testing';
 import {
   FACADE_OFFSET,
   FACADE_PLAIN,
@@ -109,7 +109,7 @@ function alongOf(profile: RouteProfile, item: FurnitureItem): number {
 
 /** The city centre, its mask, its class and its plans, as the press builds them. */
 function pressed(urbanOf: (land: LandClassMask) => UrbanClassMap | undefined) {
-  const fixture = cityCentreFixture();
+  const fixture = cityStreetscapeFixture();
   const land = landClassMask(fixture.corridor);
   const urban = urbanOf(land);
   const { plans } = footprintPlans(
@@ -126,7 +126,7 @@ function pressed(urbanOf: (land: LandClassMask) => UrbanClassMap | undefined) {
 
 /** The city centre's own class, by #1633's map. */
 const CITY = pressed((land) => {
-  const { corridor, profile } = cityCentreFixture();
+  const { corridor, profile } = cityStreetscapeFixture();
   return urbanClassMap(corridor, land, profile);
 });
 
@@ -505,7 +505,7 @@ describe('a city centre’s lots — #1637', () => {
   });
 
   it('is a shop below whatever the land: on land the map calls houses, too', () => {
-    const fixture = cityCentreFixture(undefined, 'residential');
+    const fixture = cityStreetscapeFixture(undefined, 'residential');
     const land = landClassMask(fixture.corridor);
     const { plans } = footprintPlans(
       fixture.corridor,

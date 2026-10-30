@@ -669,8 +669,12 @@ import {
 } from './terrain';
 import {
   clearOfTheCamera,
+  mappedBuildingCut,
+  nearPyramid,
+  peopleClearOfTheCamera,
   prepareShape,
   type DrawnWorld,
+  type NearPyramid,
   type ShapeTriangles,
   type ShapesOf,
 } from './near-field';
@@ -2169,6 +2173,35 @@ const FURNITURE_STYLE: Readonly<
     ],
   },
 };
+
+/**
+ * One part's box in its piece's own frame, `+z` to the road.
+ *
+ * @unwired the shape of {@link furniturePartBounds}' answer, which only
+ * `near-field-street.test.ts` asks for
+ */
+export interface FurniturePartBounds {
+  readonly min: readonly [number, number, number];
+  readonly max: readonly [number, number, number];
+}
+
+/**
+ * Each part of a furniture kind, as the box its geometry fills, in the order
+ * {@link FURNITURE_STYLE} builds them — #1835.
+ *
+ * @test-facing `near-field-street.test.ts` §"the probe" stands a near pyramid
+ * at each part's corners, so a box that file built too small for the part goes
+ * red; nothing in the render path needs to ask
+ */
+export function furniturePartBounds(kind: FurnitureKind): readonly FurniturePartBounds[] {
+  return FURNITURE_STYLE[kind].parts.map((part) => {
+    const geometry = part.geometry();
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox as Box3;
+    geometry.dispose();
+    return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
+  });
+}
 
 /**
  * Every colour a kind is drawn in when no model stands in for it: its own, and
@@ -17005,6 +17038,10 @@ export class MappedBuildingBelt {
   /** Each drawn building's first vertex in its wall surface's range and in its roof's. */
   readonly #wallAt: Int32Array;
   readonly #roofAt: Int32Array;
+  /** Each drawn building's vertex after its model, or -1 for an extrusion — #1835. */
+  readonly #modelEnd: Int32Array;
+  /** Which drawn buildings the near plane would cut this frame, so are drawn as nothing — #1835. @see clearOf */
+  readonly #hidden: Uint8Array;
   #stats: MappedBuildingStats = {
     buildings: 0,
     near: 0,
@@ -17071,6 +17108,8 @@ export class MappedBuildingBelt {
     // #1585: the house models' own buffer, of the same capacity — the budget
     // is shared, and the models may take all of it.
     this.#modelAt = new Int32Array(this.#selection.plans.length);
+    this.#modelEnd = new Int32Array(this.#selection.plans.length);
+    this.#hidden = new Uint8Array(this.#selection.plans.length);
     const models = new BufferGeometry();
     this.#modelPosition = attribute(3);
     this.#modelNormal = attribute(3);
@@ -17198,14 +17237,18 @@ export class MappedBuildingBelt {
     for (let at = 0; at < selection.count; at += 1) {
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
       // #1585: a modelled plan's triangles are its model's, in the models' buffer.
+      // #1835: a refill writes every building whole; `clearOf` hides again.
+      this.#hidden[at] = 0;
       if (selection.modelled[at] === 1 && plan.model !== undefined) {
         this.#modelAt[at] = modelEnd;
         this.#wallAt[at] = -1;
         this.#roofAt[at] = -1;
         modelEnd = this.#appendModel(plan, plan.model, modelEnd);
+        this.#modelEnd[at] = modelEnd;
         continue;
       }
       this.#modelAt[at] = -1;
+      this.#modelEnd[at] = -1;
       const wall = surfaces.indexOf(plan.surfaces.wall);
       const roof = surfaces.indexOf(plan.surfaces.roof);
       this.#wallAt[at] = this.#cursors[wall] as number;
@@ -17399,6 +17442,93 @@ export class MappedBuildingBelt {
       trim[to * 3 + 2] = trimBlue;
     }
     return at + vertices;
+  }
+
+  /**
+   * Hides each drawn building the near plane would cut, and draws again each
+   * hidden one it would not — #1835. `pyramid` is the frame's
+   * (`near-field.ts` §`nearPyramid`), or `undefined` with the cull off, which
+   * draws every building. Returns how many are hidden.
+   *
+   * A frame wider than about 3.5 : 1 — a desktop window, never a device — can
+   * bring a kerbside wall round a bend inside the plane, which would draw the
+   * part of it beyond the plane as a sliver standing on nothing. The building
+   * is dropped from that frame whole, as `near-field.ts` §`clearOfTheCamera`
+   * drops a tree: dropped, not moved and not faded.
+   *
+   * ⚠️ **Hidden in the buffer, not by a group.** The buildings are merged a
+   * surface a group (#1549's six calls), so one cannot be left out of the
+   * draw: its vertices are written to one point, which draws no triangle, and
+   * written back from its plan (or its model) when the plane lets it go. Only
+   * the positions are uploaded, and only that building's range. A frame that
+   * hides or shows nothing writes nothing and allocates nothing.
+   */
+  clearOf(pyramid: NearPyramid | undefined): number {
+    const selection = this.#selection;
+    let hidden = 0;
+    for (let at = 0; at < selection.count; at += 1) {
+      const index = selection.plans[at] as number;
+      const plan = this.buildings.plans[index] as FootprintPlan;
+      const cut =
+        pyramid !== undefined &&
+        mappedBuildingCut(plan, this.buildings.radii[index] as number, pyramid);
+      if (cut) hidden += 1;
+      if (cut === (this.#hidden[at] === 1)) continue;
+      this.#hidden[at] = cut ? 1 : 0;
+      if (this.#modelAt[at] !== -1) {
+        this.#rewriteModel(at, plan, cut);
+      } else {
+        this.#rewriteExtrusion(at, plan, cut);
+      }
+    }
+    return hidden;
+  }
+
+  /** Whether the drawn building at `place` is hidden from this frame — #1835. @see clearOf */
+  hiddenAt(place: number): boolean {
+    return this.#hidden[place] === 1;
+  }
+
+  /** A drawn extrusion's vertices as one point (`hide`), or as its plan has them again. */
+  #rewriteExtrusion(at: number, plan: FootprintPlan, hide: boolean): void {
+    const position = this.#position.array as Float32Array;
+    let wall = this.#wallAt[at] as number;
+    let roof = this.#roofAt[at] as number;
+    const wallFrom = wall;
+    const roofFrom = roof;
+    // A wall's surface is never a roof's (`footprint-buildings.ts`
+    // §`FOOTPRINT_SURFACES`), so a refill wrote two runs, as here.
+    for (const role of this.#selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
+      const floats = plan.triangles[role];
+      const vertices = roleTriangles(plan, role) * 3;
+      const onRoof = ROOF_ROLES.has(role);
+      const from = onRoof ? roof : wall;
+      for (let vertex = 0; vertex < vertices; vertex += 1) {
+        const source = vertex * FOOTPRINT_VERTEX_FLOATS;
+        const to = (from + vertex) * 3;
+        position[to] = hide ? 0 : (floats[source] as number);
+        position[to + 1] = hide ? 0 : (floats[source + 1] as number);
+        position[to + 2] = hide ? 0 : (floats[source + 2] as number);
+      }
+      if (onRoof) roof += vertices;
+      else wall += vertices;
+    }
+    if (wall > wallFrom) this.#position.addUpdateRange(wallFrom * 3, (wall - wallFrom) * 3);
+    if (roof > roofFrom) this.#position.addUpdateRange(roofFrom * 3, (roof - roofFrom) * 3);
+    this.#position.needsUpdate = true;
+  }
+
+  /** A drawn house model's vertices as one point (`hide`), or written again where it stands. */
+  #rewriteModel(at: number, plan: FootprintPlan, hide: boolean): void {
+    const from = this.#modelAt[at] as number;
+    const to = this.#modelEnd[at] as number;
+    if (hide) {
+      (this.#modelPosition.array as Float32Array).fill(0, from * 3, to * 3);
+    } else if (plan.model !== undefined) {
+      this.#appendModel(plan, plan.model, from);
+    }
+    if (to > from) this.#modelPosition.addUpdateRange(from * 3, (to - from) * 3);
+    this.#modelPosition.needsUpdate = true;
   }
 
   /**
@@ -18303,6 +18433,8 @@ class RealisticDrawing {
     view: MappedBuildingsInView | undefined,
     scatter: readonly ScatterItem[],
     billboards: number,
+    /** #1835: the frame's near pyramid, whose cut buildings are hidden; none with the cull off. */
+    near?: NearPyramid,
   ): void {
     if (view === undefined || !this.#mappedOn) {
       this.#mapped?.setCarried(view !== undefined);
@@ -18331,6 +18463,7 @@ class RealisticDrawing {
     );
     if (cap !== undefined) this.#mappedCap = cap;
     this.#capStructures(this.#mappedCap);
+    this.#mapped.clearOf(near);
   }
 
   /** Holds the procedural structures to `cap` items. @see updateMapped */
@@ -19869,9 +20002,21 @@ class ThreeGameView implements GameView {
         )
       : frame.scatter;
     this.#scatter.update(scenery, frame.camera);
+    // #1835: the near pyramid the people and the mapped buildings are cleared
+    // of — only in the realistic world, the one that draws them, and only with
+    // the cull on.
+    const near =
+      this.#clearOfTheCamera && this.#drawing === 'realistic'
+        ? nearPyramid(rig, this.#camera.aspect)
+        : undefined;
     // #1549: the buildings from map data, refilled only at a chunk — before
     // the structures, whose share of the rung it may change.
-    this.#realistic?.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+    this.#realistic?.updateMapped(
+      frame.mappedBuildings,
+      frame.scatter,
+      frame.billboards.length,
+      near,
+    );
     this.#realistic?.updateScenery(scenery, frame.camera);
     this.#realistic?.groundScenery(
       scenery,
@@ -19912,7 +20057,8 @@ class ThreeGameView implements GameView {
     );
     this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
-    this.#realistic?.people.update(frame.people);
+    // #1835: and none the near plane would cut, at a frame wide enough to.
+    this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
     // #1814: and a Delivery round's pieces, on a frame that carries one.
     this.#updateDelivery(frame.delivery);
     this.#updateMarkers(

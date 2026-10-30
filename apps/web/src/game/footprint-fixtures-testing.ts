@@ -13,7 +13,8 @@ import type { RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
 import type { FootprintVerdict } from './footprint-buildings';
-import { FIXTURE_LATITUDE, northRoute } from './route-fixtures-testing';
+import { ROAD_CLEARANCE_METRES } from './landform';
+import { FIXTURE_LATITUDE, northRoute, plannerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -667,7 +668,7 @@ export function terraceStreetFixture(latitude = FIXTURE_LATITUDE): {
  * stand on. No street is mapped. `use` is the land's: `residential` is the
  * same blocks on land the map calls houses.
  */
-export function cityCentreFixture(
+export function cityStreetscapeFixture(
   latitude = FIXTURE_LATITUDE,
   use: 'commercial' | 'residential' = 'commercial',
 ): {
@@ -744,6 +745,65 @@ export function countrysideFixture(latitude = FIXTURE_LATITUDE): {
         land('farmland', 1_850, 2_100, -300, -4),
       ],
       buildings: [],
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
+export const INSIDE_CLEARANCE_METRES = 2;
+
+/**
+ * The closest pass a map can make: houses and shops whose front walls stand
+ * `ROAD_CLEARANCE_METRES` and a few centimetres from the road — the least the
+ * press keeps (`footprint-buildings.ts` rule 3) — every 9 m along both sides
+ * of the planner's route, round its bends, on residential land and then
+ * commercial, one storey to four. Every fifth is mapped nearer still, its
+ * front {@link INSIDE_CLEARANCE_METRES} from the road, which the press must
+ * drop. What the press drops, it drops; what is left is what a ride draws.
+ *
+ * `near-field-street.test.ts` rides it, and since #1835 the browser gate's
+ * `game-harness.ts` §`nearFieldStreetProbe` draws its closest pass.
+ */
+export function kerbsideFixture(options: { readonly mirrored?: boolean } = {}): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = plannerRoute(options);
+  const origin = corridorOrigin(profile);
+  const heights = [3.5, 6, 9, 12] as const;
+  const kept = ROAD_CLEARANCE_METRES + 0.05;
+  const buildings = [];
+  const half = profile.totalDistance / 2;
+  for (let along = 20, index = 0; along < profile.totalDistance - 20; along += 9, index += 1) {
+    const front = index % 5 === 4 ? INSIDE_CLEARANCE_METRES : kept;
+    for (const side of [1, -1]) {
+      const depth = 8;
+      buildings.push(
+        buildingBeside(
+          profile,
+          origin,
+          [rectangleBeside(along, side * (front + depth / 2), 7, depth)],
+          heights[index % heights.length],
+        ),
+      );
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'kerbside',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -5_000, maxX: 5_000, minZ: -5_000, maxZ: 5_000 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 0, half, -40, 40),
+        landBeside(profile, origin, 'landuse', 'commercial', half, profile.totalDistance, -40, 40),
+      ],
+      buildings,
       paths: [],
       streets: [],
     },
