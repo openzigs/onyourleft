@@ -32,7 +32,13 @@ import {
   type DeliveryRide,
 } from './ride-round';
 import { deliveryInView } from './in-view';
-import { FIRST_DAY_HOUSES, FRESH_WEEK, roundTally, type WeekProgress } from './round';
+import {
+  FEWEST_DELIVERY_HOUSES,
+  FIRST_DAY_HOUSES,
+  FRESH_WEEK,
+  roundTally,
+  type WeekProgress,
+} from './round';
 import type { DeliveryTarget } from './targets';
 import {
   ASSISTED_THROW_SCALE,
@@ -218,6 +224,82 @@ describe('a round at the press — #1816', () => {
       storage: storageOf(),
     });
     expect(none).toBeUndefined();
+  });
+});
+
+describe('a route with fewer houses than the day’s count — #1818, the owner’s ruling of 2026-10-29', () => {
+  // Houses for the first 300 m: three to pick. For the first 200 m: two.
+  const three = deliveryTown('delivery-short', { lastAlong: 300 });
+  const two = deliveryTown('delivery-shorter', { lastAlong: 200 });
+  const WEEK: WeekProgress = { day: 3, houses: FIRST_DAY_HOUSES, score: 9 };
+
+  function startIn(
+    short: ReturnType<typeof deliveryTown>,
+    week: WeekProgress,
+  ): { ride: DeliveryRide | undefined; storage: ReturnType<typeof storageOf> } {
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    const ride = startDeliveryRide({
+      buildings: short.buildings,
+      profile: short.profile,
+      origin: short.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage,
+    });
+    // Nothing is kept at the press, round or none.
+    expect(readDeliveryProgress(storage)).toEqual(week);
+    return { ride, storage };
+  }
+
+  /** Ride the whole of `ride`'s round, delivering to every house unless `deliver` is false. */
+  function rideAll(ride: DeliveryRide, deliver: boolean): DeliveryRide {
+    let now = withoutObstacles(ride);
+    for (const target of now.throwTargets) {
+      now = rideTo(now, throwPoint(target)).ride;
+      if (deliver) now = rideTo(now, now.along + 1, target.side).ride;
+    }
+    return rideTo(now, (now.throwTargets.at(-1)?.along ?? 0) + 20).ride;
+  }
+
+  it('rides a shorter round of every house it found, standing for the day’s count', () => {
+    const { ride } = startIn(three, WEEK);
+    expect(ride?.week).toEqual(WEEK);
+    expect(ride?.round.houses).toEqual(['expecting', 'expecting', 'expecting']);
+    expect(ride?.round.dayHouses).toBe(FIRST_DAY_HOUSES);
+  });
+
+  it('keeps tomorrow at one more than the day’s count after a perfect short round, read back from the device', () => {
+    const { ride, storage } = startIn(three, WEEK);
+    const done = rideAll(ride as DeliveryRide, true);
+    expect(done.outcome).toMatchObject({ delivered: 3, missed: 0, perfect: true });
+    expect(keepDeliveryWeek(storage, endDeliveryRide(done))).toBe(true);
+    // Not 4, the short round's own length plus one: the day's 8, plus one.
+    expect(readDeliveryProgress(storage)).toEqual({
+      day: WEEK.day + 1,
+      houses: FIRST_DAY_HOUSES + 1,
+      score: WEEK.score + 3,
+    });
+  });
+
+  it('takes each house missed on a short round off the day’s count, and no more', () => {
+    const { ride, storage } = startIn(three, WEEK);
+    const done = rideAll(ride as DeliveryRide, false);
+    expect(done.outcome).toMatchObject({ delivered: 0, missed: 3, weekOver: false });
+    expect(keepDeliveryWeek(storage, endDeliveryRide(done))).toBe(true);
+    // The five houses the route could not offer are not missed.
+    expect(readDeliveryProgress(storage)).toEqual({
+      day: WEEK.day + 1,
+      houses: FIRST_DAY_HOUSES - 3,
+      score: WEEK.score,
+    });
+  });
+
+  it(`is no round with fewer than ${String(FEWEST_DELIVERY_HOUSES)} houses to pick, and keeps nothing`, () => {
+    expect(FEWEST_DELIVERY_HOUSES).toBe(3);
+    expect(startIn(two, WEEK).ride).toBeUndefined();
+    // The control: the same two houses are a round when the day's count is two,
+    // so the refusal is the floor and not the town.
+    expect(startIn(two, { day: 5, houses: 2, score: 9 }).ride?.round.houses).toHaveLength(2);
   });
 });
 

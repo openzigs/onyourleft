@@ -4,12 +4,15 @@
  * #1660's lever reaches the thing it names: the realistic page's town, planned
  * from the page's own parsed config, has its L-shaped houses pitched without
  * `-split-roofs` and flat with it. Red if the lever is parsed but not handed
- * to the planner.
+ * to the planner. Since #1782 `-house-archetypes` likewise: the street of
+ * houses has its archetypes without it, and none, planned as before, with it.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
+import { FOOTPRINT_ROLES, footprintPlans } from '../../src/game/footprint-buildings';
+import { houseStreetFixture, mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
+import { HOUSE_ARCHETYPES } from '../../src/game/house-archetypes';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
 
 import { parseConfig } from './config';
@@ -34,5 +37,38 @@ describe('the realistic page’s `split-roofs` lever — #1660', () => {
     const control = pitchedSplit('?town=mixed&levers=-split-roofs');
     expect(control.split).toBeGreaterThan(0);
     expect(control.pitched).toBe(0);
+  });
+});
+
+describe('the realistic page’s `house-archetypes` lever — #1782', () => {
+  const street = houseStreetFixture();
+
+  it('gives the street of houses every archetype on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=houses').leversOff);
+    const archetypes = new Set(plans.map((plan) => plan.archetype));
+    for (const archetype of HOUSE_ARCHETYPES) expect(archetypes).toContain(archetype);
+  });
+
+  it('plans every house with none, as the planner with them off does, with `levers=-house-archetypes`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=houses&levers=-house-archetypes').leversOff,
+    );
+    expect(plans.every((plan) => plan.archetype === 'unknown')).toBe(true);
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { houseArchetypes: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    plans.forEach((plan, index) => {
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
+      }
+    });
   });
 });

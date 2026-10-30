@@ -62,6 +62,7 @@ import {
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
   cityCentreFixture as cityStreetscapeFixture,
   countrysideFixture,
+  houseStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
@@ -425,7 +426,9 @@ async function run(): Promise<void> {
               ? cityCentreFixture(latitude)
               : config.town === 'city-street'
                 ? cityStreetscapeFixture(latitude)
-                : undefined;
+                : config.town === 'houses'
+                  ? houseStreetFixture(latitude)
+                  : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

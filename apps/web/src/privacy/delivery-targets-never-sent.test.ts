@@ -296,6 +296,8 @@ const THROWS: Readonly<Record<string, readonly (readonly [string, () => unknown]
   ],
   'round.ts': [
     ['the round size', () => startRound(FIRST.distance)],
+    // #1818: a short round standing for a day's count it cannot stand for.
+    ['the round’s day', () => startRound(3, { dayHouses: FIRST.distance })],
     ['the round position', () => recordMiss(startRound(3), FIRST.z)],
   ],
   'steer.ts': [

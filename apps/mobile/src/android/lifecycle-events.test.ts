@@ -119,7 +119,7 @@ describe('the lifecycle events the shell sends a page — #480', () => {
     ]);
   });
 
-  it('is called by no plugin this app installs, and by the app’s own Java only about back', () => {
+  it('is called by no plugin this app installs, and by the app’s own Java only about back and pads', () => {
     const others = [
       join(
         dirname(require.resolve('@capacitor-community/bluetooth-le/package.json')),
@@ -133,10 +133,16 @@ describe('the lifecycle events the shell sends a page — #480', () => {
     // #1512: the one evaluation is `MainActivity`'s back press asking the page,
     // which sends no lifecycle event and runs only on a press — and guards a
     // page without the function, so a blank document answers "leave" rather
-    // than throwing (`back-source.test.ts`).
+    // than throwing (`back-source.test.ts`). #1858: the other is a generic
+    // pad's numbered button, forwarded to the page on a press or release; it
+    // sends no lifecycle event either, and guards a page without the function
+    // (`gamepad-button-source.test.ts`).
     expect(
       linesMatching(others, /triggerEvent|trigger(JS|WindowJS|DocumentJS)Event|evaluateJavascript/),
-    ).toEqual(['MainActivity.java: webView.evaluateJavascript(']);
+    ).toEqual([
+      'MainActivity.java: webView.evaluateJavascript(',
+      'MainActivity.java: webView.evaluateJavascript(',
+    ]);
   });
 
   it('sends a page "pause" and "resume" and nothing else', () => {
