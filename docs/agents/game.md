@@ -768,7 +768,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         always clear. Wired into the ride by #1853: the
                         round holds the steer state and steps it, and the
                         rider is drawn exactly where the obstacles meet them,
-                        a level bot or ghost making the room
+                        a level bot or ghost making the room. One just behind
+                        is held aside until its front wheel is behind the
+                        camera's eye, then eases to its line (#1863)
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
