@@ -168,6 +168,55 @@ describe('navigatorGamepads in the shell (#1858)', () => {
     expect(page[FORWARDED_BUTTON_GLOBAL]).toBeUndefined();
   });
 
+  it('lets go of every forwarded button when a pad disconnects, if no release ever comes (#1893)', () => {
+    const page = host(() => []);
+    const port = navigatorGamepads(page, true);
+    let told = 0;
+    port.onConnectionChange(() => {
+      told += 1;
+    });
+    press(page, 4, true);
+    press(page, 2, true);
+    expect(down(port.pads()[0])).toEqual([2, 4]);
+    told = 0;
+    page.dispatchEvent(new Event('gamepaddisconnected'));
+    expect(port.pads()).toEqual([null]);
+    // The HUD is woken, and polls once more to find nothing held.
+    expect(told).toBe(1);
+    // The release that comes late changes nothing, and the next press is a press.
+    press(page, 4, false);
+    expect(port.pads()).toEqual([null]);
+    press(page, 4, true);
+    expect(down(port.pads()[0])).toEqual([4]);
+  });
+
+  it('reads a press not yet read once, though its pad disconnects before the read (#1893)', () => {
+    const page = host(() => []);
+    const port = navigatorGamepads(page, true);
+    port.onConnectionChange(() => undefined);
+    press(page, 3, true);
+    page.dispatchEvent(new Event('gamepaddisconnected'));
+    expect(down(port.pads()[0])).toEqual([3]);
+    expect(port.pads()).toEqual([null]);
+  });
+
+  it('lets go of nothing on a connect, and hears no disconnect once stopped (#1893)', () => {
+    const page = host(() => []);
+    const port = navigatorGamepads(page, true);
+    let told = 0;
+    const stop = port.onConnectionChange(() => {
+      told += 1;
+    });
+    press(page, 4, true);
+    page.dispatchEvent(new Event('gamepadconnected'));
+    expect(down(port.pads()[0])).toEqual([4]);
+    stop();
+    told = 0;
+    page.dispatchEvent(new Event('gamepaddisconnected'));
+    expect(told).toBe(0);
+    expect(down(port.pads()[0])).toEqual([4]);
+  });
+
   it('changes nothing in a browser: no slot 0, and no function installed', () => {
     const page = host(() => [PAD]);
     const port = navigatorGamepads(page);

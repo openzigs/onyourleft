@@ -46,6 +46,11 @@ import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
 import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
 import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
+import {
+  noticeDetailsDueAt,
+  NOTICE_RETENTION_SWEEP_PERIOD_MS,
+} from './moderation/notice-retention.ts';
+import { openSqlStore } from './store/open-sql-store.ts';
 import { PHASE_ONE_SEALED_ROUTES, SEALED_FAMILIES } from './sealed/phase-one.ts';
 import { sealedAt } from './sealed/sealed-testing.ts';
 import { openDatabase } from './store/node-sqlite.ts';
@@ -193,7 +198,7 @@ describe('the running instance forgets every rate-limited address when its windo
     // #784: the rooms' sweep is armed beside it, on the next ten-minute
     // boundary, through the same timers. Held apart here, so what follows
     // reads the rate limits' alone.
-    expect(pending).toHaveLength(3);
+    expect(pending).toHaveLength(4);
     const roomsSweep = pending.find((entry) => entry.at % ROOM_SWEEP_PERIOD_MS === 0);
     expect(roomsSweep?.at).toBe(Math.ceil(clock.ms / ROOM_SWEEP_PERIOD_MS) * ROOM_SWEEP_PERIOD_MS);
     pending.splice(pending.indexOf(roomsSweep!), 1);
@@ -203,6 +208,12 @@ describe('the running instance forgets every rate-limited address when its windo
       Math.ceil(clock.ms / ANALYSIS_SWEEP_PERIOD_MS) * ANALYSIS_SWEEP_PERIOD_MS,
     );
     pending.splice(pending.indexOf(jobsSweep!), 1);
+    // #1381: and the notices' hourly erasure, on the next hour too.
+    const noticeSweep = pending.find((entry) => entry.at % NOTICE_RETENTION_SWEEP_PERIOD_MS === 0);
+    expect(noticeSweep?.at).toBe(
+      Math.ceil(clock.ms / NOTICE_RETENTION_SWEEP_PERIOD_MS) * NOTICE_RETENTION_SWEEP_PERIOD_MS,
+    );
+    pending.splice(pending.indexOf(noticeSweep!), 1);
     await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
@@ -225,9 +236,100 @@ describe('the running instance forgets every rate-limited address when its windo
     expect(pending).toHaveLength(1);
     await instance.stop();
     running = undefined;
-    // Every sweep is stopped: the rate limits', the rooms' and the jobs'.
-    expect(cleared).toBe(3);
+    // Every sweep is stopped: the rate limits', the rooms', the jobs' and the notices'.
+    expect(cleared).toBe(4);
     expect(pending).toHaveLength(0);
+  }, 30_000);
+});
+
+describe('the running instance erases a closed notice’s notifier details when they are due — #1381', () => {
+  it('erases what fell due while it was stopped as it starts, and what falls due later on the hour', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const decided = 1_790_000_000;
+    const store = await openSqlStore(path);
+    const notice = async (marker: string, decidedAt: number): Promise<number> => {
+      const noticeId = await store.putNotice({
+        receivedAt: decided - 60,
+        kind: 'illegal_content',
+        explanation: `${marker}-explanation`,
+        items: [],
+        location: `${marker}-location`,
+        notifierName: `${marker}-name`,
+        notifierEmail: `${marker}-email@example.com`,
+        bonaFide: true,
+      });
+      expect(
+        await store.putNoticeStep({
+          noticeId,
+          step: 'decided',
+          actorAthleteId: 'moderator',
+          decision: 'Not illegal.',
+          logId: null,
+          at: decidedAt,
+        }),
+      ).toBe('recorded');
+      return noticeId;
+    };
+    const due = noticeDetailsDueAt(decided);
+    // Due as the instance starts, and due ten minutes later.
+    const first = await notice('first', decided);
+    const second = await notice('second', decided + 10 * 60);
+    await store.close();
+
+    const clock = { ms: due * 1000 };
+    const pending: { at: number; run: () => void }[] = [];
+    const timers: SweepTimers = {
+      now: () => clock.ms,
+      setTimeout: (run, delayMs) => {
+        const entry = { at: clock.ms + delayMs, run };
+        pending.push(entry);
+        return entry;
+      },
+      clearTimeout: (handle) => {
+        const at = pending.indexOf(handle as { at: number; run: () => void });
+        if (at >= 0) pending.splice(at, 1);
+      },
+    };
+    const { instance } = await start(
+      path,
+      {},
+      { timing: { now: () => clock.ms, sweepTimers: timers } },
+    );
+    await instance.opened;
+    const erasedOf = async () => {
+      const reading = await openSqlStore(path);
+      try {
+        return new Map(
+          (await reading.listNotices()).map((each) => [each.id, each.erased?.at ?? null]),
+        );
+      } finally {
+        await reading.close();
+      }
+    };
+    /** The erasure runs off the request path: read until `noticeId`'s has landed. */
+    const erasedOnceOf = async (noticeId: number) => {
+      for (let tries = 0; tries < 500; tries += 1) {
+        const read = await erasedOf();
+        if (read.get(noticeId) !== null) return read;
+        await new Promise((done) => setTimeout(done, 10));
+      }
+      throw new Error(`notice ${String(noticeId)} was never erased`);
+    };
+    let erased = await erasedOnceOf(first);
+    expect(erased.get(first)).toBe(due);
+    expect(erased.get(second)).toBeNull();
+
+    // The next hour's boundary, by the notices' own sweep.
+    const hourly = pending.filter((entry) => entry.at % NOTICE_RETENTION_SWEEP_PERIOD_MS === 0);
+    expect(hourly.length).toBeGreaterThan(0);
+    clock.ms = hourly[0]!.at;
+    for (const entry of hourly) {
+      pending.splice(pending.indexOf(entry), 1);
+      entry.run();
+    }
+    erased = await erasedOnceOf(second);
+    expect(erased.get(second)).toBe(Math.floor(clock.ms / 1000));
   }, 30_000);
 });
 

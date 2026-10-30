@@ -42,6 +42,7 @@ import {
   INTIMATE_IMAGE_DEADLINE_TEXT,
   NOTICES_SHORT_TEXT,
   NOTICES_UNREADABLE_TEXT,
+  noticeDetailsErasedText,
   REPORT_CONFLICT_TEXT,
   REPORT_OWN_CONFLICT_TEXT,
   roomReportText,
@@ -860,6 +861,7 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: 'me@x.org?bcc=attacker%40evil.com&subject=hi',
         bonaFide: true,
+        detailsErasedAt: null,
         acknowledgedAt: null,
         decidedAt: null,
         decision: null,
@@ -870,6 +872,37 @@ describe('the notices — #907', () => {
     await open(scripted);
     expect(item('Notice 4').querySelector('a')).toBeNull();
     expect(text(item('Notice 4'))).toContain('me@x.org?bcc=attacker%40evil.com');
+  });
+
+  it('shows a notice whose notifier details were erased as erased, with no reply and no empty words (#1381)', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 5,
+        receivedAt: 1_790_005_000,
+        kind: 'illegal_content',
+        explanation: '',
+        items: ['route:0123456789abcdef0123456789abcdef'],
+        location: null,
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: true,
+        detailsErasedAt: 1_805_900_000,
+        acknowledgedAt: 1_790_005_100,
+        decidedAt: 1_790_006_000,
+        decision: 'Not illegal.',
+        logId: null,
+        notifierToldAt: 1_790_006_100,
+      },
+    ];
+    await open(scripted);
+    const shown = text(item('Notice 5'));
+    expect(shown).toContain(noticeDetailsErasedText('2027-03-24 14:53 UTC'));
+    expect(shown).toContain('The decision: Not illegal.');
+    expect(shown).toContain('route:0123456789abcdef0123456789abcdef');
+    expect(shown).not.toContain('Why they think it is illegal');
+    expect(shown).not.toContain('They gave no name');
+    expect(shown).not.toContain('cannot be told what you decide');
   });
 
   it('says a notice with no email cannot be answered, and says so when the notices could not be read', async () => {
@@ -885,6 +918,7 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: null,
         bonaFide: false,
+        detailsErasedAt: null,
         acknowledgedAt: null,
         decidedAt: null,
         decision: null,
@@ -1051,6 +1085,7 @@ describe('the record of each notice — #912', () => {
         notifierName: null,
         notifierEmail: null,
         bonaFide: false,
+        detailsErasedAt: null,
         acknowledgedAt: null,
         decidedAt: null,
         decision: null,
