@@ -1017,6 +1017,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         weathered (`WEATHERING`, `weatheringAt`, the shader's
                         `oylWeather*`; the photograph laid per building by
                         `photographShiftOf`); `-weathering` builds it out.
+                        Since #1663 the trims (`TRIM`, `trimPartAt`, the
+                        shader's `trimsGlsl`): a lintel over each window's
+                        head on brick (stone) and render (the trim's paint),
+                        quoins up a brick wall's corners unless it is
+                        `STYLE_TERRACED`, and a string course on each storey
+                        line with windows above it (`windowStoreysOf`, never
+                        `DEFAULT_STOREYS`); `-facade-trims` builds them out.
                         Since #1636 a `city-centre` front wall
                         has a shop front whatever its use, and a tower of
                         `GLAZED_MIN_STOREYS` a curtain wall (`STYLE_GLAZED`,

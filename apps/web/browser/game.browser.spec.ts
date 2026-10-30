@@ -3932,6 +3932,32 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart - apartOff).toBeGreaterThan(4);
   });
 
+  test('#1663 a mapped brick wall is its lintel 0.1 m over a window’s head and brick 0.5 m over, and brick at both with -facade-trims', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { facadeTrim: trim } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a brick wall seen from ${trim.metres.toFixed(0)} m: ${rgb(trim.lintel)} 0.1 m over a ` +
+      `window's head against ${rgb(trim.over)} 0.5 m over; ${rgb(trim.lintelOff)} and ` +
+      `${rgb(trim.overOff)} with -facade-trims`;
+    testInfo.annotations.push({ type: 'a mapped window’s lintel', description: measured });
+    console.log(`a mapped window’s lintel — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(trim.aimed).toBe(true);
+    for (const values of [trim.lintel, trim.over, trim.lintelOff, trim.overOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The stone lintel is lighter than the brick round it, past the gate's tolerance of 4.
+    expect(Math.abs(luminance(trim.lintel) - luminance(trim.over))).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program both are the brick ...
+    expect(Math.abs(luminance(trim.lintelOff) - luminance(trim.overOff))).toBeLessThan(4);
+    // ... and it is the lintel, not the wall, that changed the lower place.
+    expect(Math.abs(luminance(trim.lintel) - luminance(trim.lintelOff))).toBeGreaterThan(12);
+    expect(Math.abs(luminance(trim.over) - luminance(trim.overOff))).toBeLessThan(4);
+  });
+
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
     harnessRun,
   }, testInfo) => {

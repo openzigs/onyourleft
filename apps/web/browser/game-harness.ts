@@ -135,6 +135,7 @@ import {
   SASH_TOP_SHARE,
   SHOP_FRONT,
   shopFrontPartAt,
+  trimPartAt,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
 } from '../src/game/facade';
@@ -255,8 +256,10 @@ import {
   windowRevealsOf,
   overhangShadowsOf,
   weatheringOf,
+  facadeTrimsOf,
 } from '../src/game/three-renderer';
 import {
+  facadeTrimsWithLevers,
   overhangShadowsWithLevers,
   parseConfig,
   weatheringWithLevers,
@@ -5044,6 +5047,255 @@ function weatheringProbe(
   }
 }
 
+/** What {@link facadeTrimProbe} publishes — #1663. */
+interface FacadeTrimMeasurement {
+  /** Whether a mapped brick wall's window was found facing the road, with plain wall over its lintel. */
+  readonly aimed: boolean;
+  /** How far the camera is from the wall, metres. */
+  readonly metres: number;
+  /** The wall {@link FACADE_TRIM_PROBE_ABOVE} over the window's head, trimmed: in its lintel, and over it. */
+  readonly lintel: readonly number[];
+  readonly over: readonly number[];
+  /** The same two places with `-facade-trims`: main's program, the brick at both. */
+  readonly lintelOff: readonly number[];
+  readonly overOff: readonly number[];
+}
+
+/** How far over a window's head {@link facadeTrimProbe} reads the wall: **0.1 m** and **0.5 m**. */
+const FACADE_TRIM_PROBE_ABOVE = [0.1, 0.5] as const;
+
+/** How far {@link facadeTrimProbe}'s camera is from the wall: **4 m**. */
+const FACADE_TRIM_PROBE_METRES = 4;
+
+const NO_FACADE_TRIM: FacadeTrimMeasurement = {
+  aimed: false,
+  metres: 0,
+  lintel: [],
+  over: [],
+  lintelOff: [],
+  overOff: [],
+};
+
+/**
+ * #1663: a lintel reaches the screen. #1581's mixed town (`?town=mixed`'s):
+ * of the brick walls with sash windows (not clapboard) that face the road, 8
+ * to 40 m from it somewhere from 1 000 m along it, on a house with no porch,
+ * garage or shop front, the nearest window whose wall 0.1 m over its head is
+ * its lintel and 0.5 m over is plain wall, both by the twin (`facade.ts`
+ * §`trimPartAt`, §`facadePartAt`), and a camera {@link FACADE_TRIM_PROBE_METRES}
+ * out from it, level, between the two, the sun square to the wall at #1658's
+ * 60°. Read with the trims built, and with them taken out as the owner's
+ * `&levers=-facade-trims` takes them (`facadeTrimsOf`): main's program, in
+ * which both are the brick's photograph. #1658's shadow and #1661's
+ * weathering are out for both, as #1658's probe takes the weathering out:
+ * each has its own probe.
+ */
+function facadeTrimProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): FacadeTrimMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Opening {
+    /** The window's middle at its head, on the wall; the wall's outward normal and its direction. */
+    readonly head: Point3;
+    readonly nx: number;
+    readonly nz: number;
+    readonly ex: number;
+    readonly ez: number;
+  }
+  const [lintelAbove, overAbove] = FACADE_TRIM_PROBE_ABOVE;
+  const sashHead = WINDOW_SILL_METRES + SASH.height;
+  const openings: Opening[] = [];
+  for (const plan of plans) {
+    if (plan.porch || plan.garage || plan.shop.front) continue;
+    if (plan.surfaces.wall !== 'brick' || plan.cladding.wall !== 'photograph') continue;
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const skip = f(0, FACADE_OFFSET + 3);
+      const flags = f(0, STYLE_OFFSET + 1);
+      if (!(top > 0) || (flags & STYLE_SASH) === 0) continue;
+      const style = { flags, width: f(0, STYLE_OFFSET + 2), extra: f(0, STYLE_OFFSET + 3) };
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 1) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      const bay = length / bays;
+      const face = { surface: 'brick' as const, bays };
+      const ex = (b.x - a.x) / length;
+      const ez = (b.z - a.z) / length;
+      // Across the window's middle at both heights, and a little either side: the twin's part there.
+      const reads = (
+        k: number,
+        storey: number,
+        above: number,
+        part: 'lintel' | undefined,
+      ): boolean =>
+        [-0.3, 0, 0.3].every((off) =>
+          [-0.04, 0, 0.04].every((dy) => {
+            const u = k + 0.5 + off / bay;
+            const v = storey + (sashHead + above + dy) / STOREY_METRES;
+            return (
+              trimPartAt(u, v, top, skip, style, face) === part &&
+              facadePartAt(u, v, top, skip, style) === 'wall'
+            );
+          }),
+        );
+      for (let storey = 0; storey + 1 <= top; storey += 1) {
+        for (let k = 0; k < bays; k += 1) {
+          if (!reads(k, storey, lintelAbove, 'lintel') || !reads(k, storey, overAbove, undefined)) {
+            continue;
+          }
+          openings.push({
+            head: {
+              x: a.x + ex * (k + 0.5) * bay,
+              y: floor + storey * STOREY_METRES + sashHead,
+              z: a.z + ez * (k + 0.5) * bay,
+            },
+            nx: f(0, 3),
+            nz: f(0, 5),
+            ex,
+            ez,
+          });
+        }
+      }
+    }
+  }
+  const start = atStartLine(profile);
+  let chosen: { readonly along: number; readonly opening: Opening } | undefined;
+  for (let along = 1_000; along <= 2_000 && chosen === undefined; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const opening of openings) {
+      const distance = Math.hypot(road.x - opening.head.x, road.z - opening.head.z);
+      const facing =
+        ((road.x - opening.head.x) * opening.nx + (road.z - opening.head.z) * opening.nz) /
+        distance;
+      if (distance < 8 || distance > 40 || facing < 0.7) continue;
+      if (distance < nearest) {
+        nearest = distance;
+        chosen = { along, opening };
+      }
+    }
+  }
+  if (chosen === undefined) return NO_FACADE_TRIM;
+  const { opening } = chosen;
+  // A point `above` metres over the window's head and `across` along the wall, a little proud of it.
+  const over = (above: number, across = 0): Point3 => ({
+    x: opening.head.x + opening.nx * 0.01 + opening.ex * across,
+    y: opening.head.y + above,
+    z: opening.head.z + opening.nz * 0.01 + opening.ez * across,
+  });
+  const eye = {
+    x: opening.head.x + opening.nx * FACADE_TRIM_PROBE_METRES,
+    y: opening.head.y + (lintelAbove + overAbove) / 2,
+    z: opening.head.z + opening.nz * FACADE_TRIM_PROBE_METRES,
+  };
+  const headingX = -opening.nx;
+  const headingZ = -opening.nz;
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(chosen.along) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings,
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  // The sun square to the wall, as #1658's probe sets it, so that both heights are lit alike.
+  const elevation = (OVERHANG_PROBE_SUN_DEGREES * Math.PI) / 180;
+  const across = Math.hypot(opening.nx, opening.nz);
+  const frame: SceneFrame = {
+    ...base,
+    scatter: [],
+    markers: [],
+    world: {
+      ...base.world,
+      sun: {
+        ...base.world.sun,
+        x: (opening.nx / across) * Math.cos(elevation),
+        y: Math.sin(elevation),
+        z: (opening.nz / across) * Math.cos(elevation),
+      },
+    },
+    camera: {
+      ...base.camera,
+      x: eye.x + headingX * CAMERA_BEHIND_METRES,
+      z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+      targetRoadY: eye.y,
+    },
+  };
+  const meanAt = (above: number): number[] => {
+    // A strip 0.6 m across the window's middle and 0.08 m tall: several bricks
+    // wide, so that the read is the wall's and not one brick's or one joint's.
+    const left = pixelFor(frame, canvas, over(above, -0.3));
+    const right = pixelFor(frame, canvas, over(above, 0.3));
+    const top = pixelFor(frame, canvas, over(above + 0.04));
+    const bottom = pixelFor(frame, canvas, over(above - 0.04));
+    const x = Math.round(Math.min(left.x, right.x));
+    const width = Math.max(1, Math.round(Math.abs(right.x - left.x)));
+    const y0 = Math.round(Math.min(top.y, bottom.y));
+    const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
+    const pixels = readRegion(gl, x, y0, width, rows);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixels.length / 4));
+  };
+  // The trims alone: #1658's shadow and #1661's weathering have their own probes.
+  overhangShadowsOf(view, false);
+  weatheringOf(view, false);
+  try {
+    view.render(frame);
+    view.render(frame);
+    const lintel = meanAt(lintelAbove);
+    const overLintel = meanAt(overAbove);
+    // The owner's lever, read as the page reads it.
+    facadeTrimsOf(view, facadeTrimsWithLevers(parseConfig('?levers=-facade-trims').leversOff));
+    view.render(frame);
+    view.render(frame);
+    return {
+      aimed: true,
+      metres: FACADE_TRIM_PROBE_METRES,
+      lintel,
+      over: overLintel,
+      lintelOff: meanAt(lintelAbove),
+      overOff: meanAt(overAbove),
+    };
+  } finally {
+    facadeTrimsOf(view, true);
+    overhangShadowsOf(view, true);
+    weatheringOf(view, true);
+  }
+}
+
 /** What {@link townEdgeProbe} publishes — #1586. */
 interface TownEdgeMeasurement {
   /** The procedural structures and billboards in the frame: the issue's frame fills the cap with them. */
@@ -7574,6 +7826,8 @@ export interface RealisticMeasurement {
   readonly awningShadow: OverhangPairMeasurement;
   /** #1661: a mapped render wall's foot and above it, weathered and not. @see weatheringProbe */
   readonly weathering: WeatheringMeasurement;
+  /** #1663: a mapped brick wall over a window's head, in its lintel and over it, trimmed and not. @see facadeTrimProbe */
+  readonly facadeTrim: FacadeTrimMeasurement;
   /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
@@ -9700,6 +9954,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   corniceShadow: NO_OVERHANG_PAIR,
   awningShadow: NO_OVERHANG_PAIR,
   weathering: NO_WEATHERING,
+  facadeTrim: NO_FACADE_TRIM,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
   tint: {
@@ -11282,6 +11537,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const weathering = weatheringProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped wall’s weathering — #1661');
 
+  // #1663, on the same view: a mapped brick wall over a window's head, trimmed and not.
+  const facadeTrim = facadeTrimProbe(view, gl, canvas);
+  phaseEnds('realistic: a mapped window’s lintel — #1663');
+
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
   const townEdge = townEdgeProbe(view);
   phaseEnds('realistic: a town’s edge — #1586');
@@ -11538,6 +11797,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     corniceShadow,
     awningShadow,
     weathering,
+    facadeTrim,
     townEdge,
     lots,
     tint,

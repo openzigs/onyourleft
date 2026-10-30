@@ -293,6 +293,7 @@ import {
   SIGN_MOULDING_METRES,
   SILL,
   streakShareOf,
+  TRIM,
   WEATHERING,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
@@ -336,6 +337,7 @@ import {
   STYLE_OFFSET,
   STYLE_SASH,
   STYLE_SHUTTERS,
+  STYLE_TERRACED,
   type FootprintPlan,
   type FootprintRole,
 } from './footprint-buildings';
@@ -15272,6 +15274,12 @@ let overhangShadowsBuilt = true;
 let weatheringBuilt = true;
 
 /**
+ * Whether the facade's program is built with #1663's trims: always, in the
+ * product. @see facadeTrimsOf
+ */
+let facadeTrimsBuilt = true;
+
+/**
  * The define a facade material carries for {@link windowRevealsBuilt} — 1
  * built, 0 not — read by its `onBeforeCompile`. ⚠️ **A define, not the cache
  * key**: `withAtmosphere`, spliced after the facade, captures the key it
@@ -15287,6 +15295,9 @@ const OVERHANG_SHADOWS_DEFINE = 'OYL_OVERHANG_SHADOWS';
 
 /** The define for {@link weatheringBuilt} — #1661, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
 const WEATHERING_DEFINE = 'OYL_WEATHERING';
+
+/** The define for {@link facadeTrimsBuilt} — #1663, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
+const FACADE_TRIMS_DEFINE = 'OYL_FACADE_TRIMS';
 
 /** Whether `material` is built with #1659's window reveals, by its define. */
 function revealsBuiltIn(material: Material): boolean {
@@ -15305,11 +15316,17 @@ function weatheringBuiltIn(material: Material): boolean {
   return (material as { defines?: Record<string, unknown> }).defines?.[WEATHERING_DEFINE] !== 0;
 }
 
+/** Whether `material` is built with #1663's trims, by its define. */
+function trimsBuiltIn(material: Material): boolean {
+  return (material as { defines?: Record<string, unknown> }).defines?.[FACADE_TRIMS_DEFINE] !== 0;
+}
+
 /**
  * Sets `material`'s {@link WINDOW_REVEALS_DEFINE} to {@link windowRevealsBuilt}
  * and, since #1658, its {@link OVERHANG_SHADOWS_DEFINE} to
  * {@link overhangShadowsBuilt}; since #1661 its {@link WEATHERING_DEFINE} to
- * {@link weatheringBuilt}.
+ * {@link weatheringBuilt}; since #1663 its {@link FACADE_TRIMS_DEFINE} to
+ * {@link facadeTrimsBuilt}.
  */
 function defineFacadeLevers(material: Material): void {
   const carrier = material as { defines?: Record<string, unknown> };
@@ -15318,6 +15335,7 @@ function defineFacadeLevers(material: Material): void {
     [WINDOW_REVEALS_DEFINE]: windowRevealsBuilt ? 1 : 0,
     [OVERHANG_SHADOWS_DEFINE]: overhangShadowsBuilt ? 1 : 0,
     [WEATHERING_DEFINE]: weatheringBuilt ? 1 : 0,
+    [FACADE_TRIMS_DEFINE]: facadeTrimsBuilt ? 1 : 0,
   };
 }
 
@@ -15373,6 +15391,23 @@ export function overhangShadowsOf(view: GameView, on: boolean): void {
  */
 export function weatheringOf(view: GameView, on: boolean): void {
   weatheringBuilt = on;
+  if (view instanceof ThreeGameView) view.facadesRecompiled();
+}
+
+/**
+ * Builds every mapped building's facade with #1663's trims — a lintel over
+ * each window, quoins up a brick wall's corners, a string course on each of
+ * its storey lines — or, `on` false, without them: the term and its splice
+ * left out of the program ({@link trimsGlsl}), as {@link weatheringOf} leaves
+ * #1661's. A setting of the module's, and the materials already in `view`'s
+ * scene are compiled again.
+ *
+ * @test-facing the owner's page's `-facade-trims` lever (`realistic-harness.ts`)
+ * and the browser gate's read of it (`game-harness.ts` §`facadeTrimProbe`);
+ * the product always builds them
+ */
+export function facadeTrimsOf(view: GameView, on: boolean): void {
+  facadeTrimsBuilt = on;
   if (view instanceof ThreeGameView) view.facadesRecompiled();
 }
 
@@ -15911,26 +15946,118 @@ const WEATHER_DRIP_GLSL = /* glsl */ `
         diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y);
       }`;
 
+/** Whether a mapped surface's walls take #1663's lintels: brick, and render, which clapboard is drawn on. */
+function lintelledSurface(surface: StructureSurface): boolean {
+  return surface === 'brick' || surface === 'render';
+}
+
+/**
+ * #1663's trims, in GLSL — `facade.ts` §`trimPartAt`, from the same numbers
+ * ({@link TRIM}), spliced into §2 of {@link facadeFragmentGlsl} after the
+ * windows, so a trim is painted on the wall round them: on `brick`, a stone
+ * lintel over each window's head, the ground floor's deeper, quoins up the
+ * corners in alternating long and short blocks unless the wall is terraced
+ * (`STYLE_TERRACED`), and a stone string course on each storey line with a
+ * row of windows above it, the first the deeper ground-floor band; on
+ * `render`, a lintel in the trim's paint alone; on every other surface,
+ * nothing. None on a curtain wall.
+ *
+ * A wall's far corner is at `u = bays`, which no attribute carries: the
+ * vertex hands on `u²` beside `u` (`vOylUu`), and since both are interpolated
+ * by the same weights over a wall's quad, whose ends are at `u = 0` and
+ * `u = bays`, their ratio is `bays` at every fragment of it.
+ *
+ * With `facade-trims` off (`realistic/config.ts` §`LEVERS`) none of it is
+ * built: the splice, its constants and its varying are left out, as
+ * `road-wear`'s are.
+ */
+function trimsGlsl(surface: StructureSurface): string {
+  if (!lintelledSurface(surface)) return '';
+  const masonry = surface === 'brick';
+  return /* glsl */ `
+      // #1663: the trims, on the wall round the windows; none on a curtain wall.
+      if (oylFlag(oylFlags, oylGlazedFlag) < 0.5) {
+        const float oylLintelUp = ${glslFloat(TRIM.lintel)};
+        const float oylLintelGround = ${glslFloat(TRIM.groundLintel)};
+        const float oylLintelOver = ${glslFloat(TRIM.overrun)};
+        const vec3 oylTrimStoneC = ${glslVec(TRIM.stoneColour)};
+        // A lintel over the head of the window this cell shows, as wide as it and a little more.
+        float oylTrimBay = vOylStyle.z;
+        float oylTrimPicture = (1.0 - step(0.5, oylCell.y)) * (1.0 - step(0.5, abs(oylCell.x - vOylStyle.w)));
+        float oylTrimPaired = step(oylPairMin, oylTrimBay) * (1.0 - oylTrimPicture);
+        float oylTrimSashW = mix(oylSashW, min(oylTrimBay - oylPicMargin, oylPicMost), oylTrimPicture);
+        float oylLintelSpan = mix(
+          (mix(oylWinR, oylCwR, oylComOn) - mix(oylWinL, oylCwL, oylComOn)) * 0.5 * oylTrimBay,
+          mix(oylTrimSashW * 0.5, oylTrimSashW + oylMullion * 0.5, oylTrimPaired),
+          oylSashOn
+        ) + oylLintelOver;
+        float oylLintelHead = mix(mix(oylWinT, oylCwT, oylComOn) * oylStoreyM, oylSillM + oylSashH, oylSashOn);
+        float oylLintelDepth = mix(oylLintelUp, oylLintelGround, 1.0 - step(0.5, oylCell.y));
+        vec2 oylLintelAt = vec2((oylAt.x - 0.5) * oylTrimBay, oylAt.y * oylStoreyM);
+        float oylLintel = oylShown * step(vOylFacade.y, oylTop) * oylRect(
+          oylLintelAt,
+          vec2(-oylLintelSpan, oylLintelHead),
+          vec2(oylLintelSpan, oylLintelHead + oylLintelDepth),
+          oylMw
+        );
+        diffuseColor.rgb = mix(diffuseColor.rgb, ${masonry ? 'oylTrimStoneC' : 'vOylTrim'}, oylLintel);
+        oylFlat = max(oylFlat, oylLintel);${
+          masonry
+            ? /* glsl */ `
+        const float oylStringDepth = ${glslFloat(TRIM.stringCourse)};
+        const float oylGroundBand = ${glslFloat(TRIM.groundBand)};
+        const float oylQuoinLong = ${glslFloat(TRIM.quoin)};
+        const float oylQuoinShort = ${glslFloat(TRIM.quoinShort)};
+        const float oylQuoinCourse = ${glslFloat(TRIM.quoinCourse)};
+        const float oylQuoinJoint = ${glslFloat(TRIM.quoinJoint)};
+        const float oylTerracedFlag = ${glslFloat(STYLE_TERRACED)};
+        // A string course on every storey line with a row of windows above it: the plan's storeys.
+        float oylRows = oylTop >= oylTopShare ? floor(oylTop - oylTopShare + 0.0001) + 1.0 : 0.0;
+        float oylLineAt = floor(vOylFacade.y + 0.5);
+        float oylStringH = mix(oylStringDepth, oylGroundBand, 1.0 - step(0.5, abs(oylLineAt - 1.0)));
+        float oylString = step(0.5, oylLineAt) * step(oylLineAt + 0.5, oylRows) * oylBand(
+          oylM.y,
+          oylLineAt * oylStoreyM - oylStringH * 0.5,
+          oylLineAt * oylStoreyM + oylStringH * 0.5,
+          oylMw.y
+        );
+        // Quoins up both corners, long and short in turn; none on a terraced building's.
+        float oylBaysAll = vOylUu / max(vOylFacade.x, 0.0001);
+        float oylFromCorner = min(oylM.x, (oylBaysAll - vOylFacade.x) * oylTrimBay);
+        float oylQuoinReach = mix(oylQuoinLong, oylQuoinShort, mod(floor(oylM.y / oylQuoinCourse), 2.0));
+        float oylQuoin = (1.0 - oylFlag(oylFlags, oylTerracedFlag)) * step(vOylFacade.y, oylTop)
+          * (1.0 - smoothstep(oylQuoinReach - oylMw.x, oylQuoinReach + oylMw.x, oylFromCorner));
+        float oylQuoinBed = oylLine(oylM.y / oylQuoinCourse, oylQuoinJoint * 0.5 / oylQuoinCourse, oylMw.y / oylQuoinCourse);
+        diffuseColor.rgb = mix(diffuseColor.rgb, oylTrimStoneC, oylString);
+        diffuseColor.rgb = mix(diffuseColor.rgb, oylTrimStoneC * (1.0 - 0.35 * oylQuoinBed), oylQuoin);
+        oylFlat = max(oylFlat, max(oylString, oylQuoin));`
+            : ''
+        }
+      }`;
+}
+
 /**
  * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal
  * ({@link revealGlsl}) and its sash window, which since #1659 takes the eye
  * and the sun in the face's frame (`e`, `s`) for the reveal, and gives back
  * the opening's `side` seen past the glass, whether it is `sideLit`, and the
  * wall in its sill's shadow (`sillShade`); since #1658 the overhang's
- * shadow ({@link overhangGlsl}).
+ * shadow ({@link overhangGlsl}); since #1663, with `trims`, the varying a
+ * quoin finds a wall's far corner by ({@link trimsGlsl}).
  */
 function facadeCommonGlsl(
   reveals: boolean,
   overhangs: boolean,
   weathering: boolean,
   surface: StructureSurface,
+  trims = false,
 ): string {
   return /* glsl */ `
   uniform float oylFacadeOn;
   uniform vec3 oylSunWorld;
   varying vec4 vOylFacade;
   varying vec4 vOylStyle;
-  varying vec3 vOylTrim;
+  varying vec3 vOylTrim;${trims ? '\n  varying float vOylUu;' : ''}
   ${CLADDING_HELPERS_GLSL}
   ${revealGlsl(reveals)}
   ${overhangGlsl(overhangs)}
@@ -16141,11 +16268,20 @@ export const FACADE_SHOWN_GLSL =
  * the openings, the wall under each sill streaked; in the shade, a flat
  * roof's wall dripped on from its parapet. Without it, none of it is built.
  *
+ * Since #1663, with `trims`, step 2 ends with the trims round the windows on
+ * a `surface` that takes them ({@link trimsGlsl}): lintels, quoins and string
+ * courses. Without it, none of it is built.
+ *
  * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
  * after every declaration — so that one window in five is a lit room by
  * where it is on which building, not the same window on every house.
  */
-function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
+function facadeFragmentGlsl(
+  overhangs: boolean,
+  weathering: boolean,
+  trims = false,
+  surface: StructureSurface = 'render',
+): string {
   return /* glsl */ `
   float oylGlass = 0.0;
   float oylFlat = 0.0;
@@ -16383,7 +16519,7 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
         ${weathering ? WEATHER_CASEMENT_STREAK_GLSL : ''}
         oylGlass = oylPaneShare * (1.0 - oylFade);
         oylFlat = max(oylFlat, max(oylOuter, oylSill) * (1.0 - oylFade));
-      }
+      }${trims ? trimsGlsl(surface) : ''}
       // 3. The shade: under overhanging eaves, and at the wall's foot.
       float oylUnderEaves = oylFlag(oylFlags, oylEavesFlag)
         * (1.0 - smoothstep(0.0, oylAoEavesM, (oylTop - vOylFacade.y) * oylStoreyM));
@@ -16651,32 +16787,34 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
     shader.uniforms.oylRoofSnow = SEASON.oylRoofSnow;
     // #1661: the photograph laid per building, and the world for the weathering's noise.
     const weathered = weatheringBuiltIn(material);
+    // #1663: the trims, and the varying a quoin finds a wall's far corner by.
+    const trimmed = trimsBuiltIn(material);
     // #1626: the winter lights' wreath on the front door.
     shader.uniforms.oylWreath = SEASON.oylWreath;
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;${weathered ? `\nvarying vec3 vOylWorld;\nflat varying float vOylAge;\n${WEATHER_PHOTO_GLSL}` : ''}`,
+        `#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;${trimmed ? '\nvarying float vOylUu;' : ''}${weathered ? `\nvarying vec3 vOylWorld;\nflat varying float vOylAge;\n${WEATHER_PHOTO_GLSL}` : ''}`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
-      `#include <begin_vertex>\nvOylFacade = oylFacade;\nvOylStyle = oylStyle;\nvOylTrim = oylTrim;${weathered ? WEATHER_VERTEX_GLSL : ''}`,
+      `#include <begin_vertex>\nvOylFacade = oylFacade;\nvOylStyle = oylStyle;\nvOylTrim = oylTrim;${trimmed ? '\nvOylUu = oylFacade.x * oylFacade.x;' : ''}${weathered ? WEATHER_VERTEX_GLSL : ''}`,
       'vertex',
       spliced,
     );
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface, trimmed)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
       'fragment',
       spliced,
     );
     fragment = replacedOrThrown(
       fragment,
       '#include <color_fragment>',
-      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material), weathered)}`,
+      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material), weathered, trimmed, surface)}`,
       'fragment',
       spliced,
     );

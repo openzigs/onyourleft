@@ -9,6 +9,7 @@ import {
   configQuery,
   countrysideWithLevers,
   DEFAULT_CONFIG,
+  facadeTrimsWithLevers,
   firPrepassWithLevers,
   LAYERS,
   LEVERS,
@@ -242,6 +243,27 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'utf8',
     );
     expect(harness).toContain('weatheringOf(view, weatheringWithLevers(config.leversOff));');
+  });
+
+  it('builds the mapped facades’ trims, as the product does, unless #1663’s lever takes them out', () => {
+    expect(LEVERS).toContain('facade-trims');
+    expect(facadeTrimsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(facadeTrimsWithLevers(LEVERS.filter((lever) => lever !== 'facade-trims'))).toBe(true);
+    expect(facadeTrimsWithLevers(parseConfig('?levers=-facade-trims').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-facade-trims'))).toBe(
+      `?levers=${encodeURIComponent('-facade-trims')}&town=mixed`,
+    );
+    // And #1661's lever is not this one.
+    expect(weatheringWithLevers(parseConfig('?levers=-facade-trims').leversOff)).toBe(true);
+  });
+
+  it('hands #1663’s parsed lever to the owner’s page, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('facadeTrimsOf(view, facadeTrimsWithLevers(config.leversOff));');
   });
 
   it('plans the town with its urban class, as the press does, unless #1634’s lever takes it out', () => {

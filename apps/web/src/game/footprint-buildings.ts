@@ -500,6 +500,14 @@ export const STYLE_FLAT_ROOF = 64;
  */
 export const STYLE_CORNICE = 128;
 
+/**
+ * `flags`: a terraced building's walls — #1663: one with a party wall
+ * (#1635's {@link partyWallsOf}), whose corners are its row's, so no quoin is
+ * drawn at any of them (`facade.ts` §`trimPartAt`). Bit **256**: 128 is
+ * #1679's. @see STYLE_FLOATS
+ */
+export const STYLE_TERRACED = 256;
+
 /** What a plan is clad in — #1588. */
 export interface FootprintCladding {
   readonly wall: 'clapboard' | 'photograph';
@@ -4287,7 +4295,9 @@ function planFootprint(
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
     (use === 'commercial' ? STYLE_COMMERCIAL : 0) +
     // #1636: a tower in a covered urban class is glazed; with no class, as before.
-    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0);
+    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0) +
+    // #1663: a terraced building's corners are its row's, and carry no quoin.
+    (terraced ? STYLE_TERRACED : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
   const roofStyle: Style = shingled
     ? [cladOf(CLAD_SHINGLE, SHINGLE_COURSE_METRES), 0, 0, -1]
