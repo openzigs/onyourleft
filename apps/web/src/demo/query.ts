@@ -9,7 +9,7 @@
  * | `route` | a baked route's map data and road, read from `routes/` (#1652, `baked-route.ts`) | a route id `demo:bake` wrote; absent rides the synthetic road |
  * | `showcase` | the feature-showcase timeline (#1653, `showcase.ts`), ridden by the `group` preset | present, with no value; `preset`, if given, must be `group` |
  * | `autoplay` | whether the demo starts moving on load (#1654) | `1` (default) or `0`: a still frame and a *Play* button, as reduced motion gives |
- * | `controls` | whether the HUD's *Play* and *Stop* are shown (#1654) | `1` (default) or `0`; shown anyway while the demo starts still |
+ * | `controls` | whether the HUD's *Stop* is shown (#1654) | `1` (default) or `0`; *Pause* and *Play* are always shown (owner, 2026-10-30) |
  * | `units` | the HUD's units (#1654) | `metric` (default) or `imperial` |
  *
  * Each of the last three is in the query only when it is not the default, as
@@ -53,7 +53,7 @@ export type DemoQuery =
       readonly showcase?: true;
       /** #1654: `?autoplay=0`, the demo starts on a still frame. */
       readonly autoplay?: false;
-      /** #1654: `?controls=0`, the HUD's *Play* and *Stop* are hidden while it moves. */
+      /** #1654: `?controls=0`, the HUD's *Stop* is left out; *Pause* and *Play* never are. */
       readonly controls?: false;
       /** #1654: `?units=imperial`. */
       readonly units?: 'imperial';

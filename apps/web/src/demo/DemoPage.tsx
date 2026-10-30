@@ -157,10 +157,12 @@ function MapDataNotice(props: { readonly bundlePath: string }) {
 /** The page. */
 export function DemoPage(props: DemoPageProps) {
   const query = useMemo(() => parseDemoQuery(props.search), [props.search]);
-  // #1654: a still start, for reduced motion or `?autoplay=0`; and then the
-  // controls are shown whatever `?controls` says, or nothing could start it.
+  // #1654: a still start, for reduced motion or `?autoplay=0`.
   const startsStill = props.reducedMotion || (query.ok && query.autoplay === false);
-  const withControls = startsStill || !query.ok || query.controls !== false;
+  // #1654, owner ruling of 2026-10-30: `?controls=0` leaves out *Stop* only.
+  // *Pause* and *Play* are always offered, so the demo meets WCAG 2.2 SC 2.2.2
+  // by itself, whatever the site embedding it does.
+  const withoutStop = query.ok && query.controls === false;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<DemoStage | undefined>(undefined);
   const [status, setStatus] = useState<DemoStatus>(startsStill ? 'paused' : 'playing');
@@ -300,9 +302,7 @@ export function DemoPage(props: DemoPageProps) {
           ) : null}
           <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <section
-              // #1654: `?controls=0` hides the HUD's actions panel (`demo.css`),
-              // honoured only while the demo moves by itself.
-              className={`oyl-game oyl-game--riding${withControls ? '' : ' oyl-demo--no-controls'}`}
+              className="oyl-game oyl-game--riding"
               aria-label="Demo ride"
               // The game's stage, held to this box rather than the viewport.
               style={{ position: 'absolute' }}
@@ -326,6 +326,7 @@ export function DemoPage(props: DemoPageProps) {
                   touchLock={false}
                   // The demo has no pacer: no *Pacer —* (owner, 2026-10-25).
                   withoutPacer
+                  withoutEnd={withoutStop}
                   paused={!playing}
                   onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}
                   onEnd={() => stageRef.current?.stop()}

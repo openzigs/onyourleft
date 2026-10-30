@@ -845,7 +845,7 @@ test.describe('the demo, built and served — #1648', () => {
       expect(watched.requests).toContain(`${DEMO_ORIGIN}/${query}`);
     });
 
-    test('with ?controls=0, plays with neither Pause nor Stop', async ({ context, page }) => {
+    test('with ?controls=0, plays with Pause and no Stop', async ({ context, page }) => {
       test.setTimeout(2 * FRAMES_BUDGET_MS);
       await page.setViewportSize({ width: 768, height: 432 });
       const query = '?preset=sprint&controls=0';
@@ -860,8 +860,12 @@ test.describe('the demo, built and served — #1648', () => {
         .toBeGreaterThan(0);
       expect((await last(frame))?.state).toBe('playing');
       await expect(frame.locator('.oyl-hud__fields--primary')).toBeVisible();
-      await expect(frame.getByRole('button')).toHaveCount(0);
-      await expect(frame.locator('.oyl-hud__actions')).toBeHidden();
+      // Owner, 2026-10-30: Stop alone is left out; Pause always stays (SC 2.2.2).
+      await expect(frame.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+      await expect(frame.getByRole('button')).toHaveCount(1);
+      await frame.getByRole('button', { name: 'Pause' }).click();
+      await expect.poll(async () => (await last(frame))?.state).toBe('paused');
+      await expect(frame.getByRole('button', { name: 'Play' })).toBeVisible();
       expect(await findings(context, frame, watched)).toEqual([]);
     });
 

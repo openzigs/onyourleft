@@ -321,39 +321,56 @@ describe('the demo page as an embed — #1654', { timeout: RIDE_TIMEOUT_MS }, ()
     expect(shown.last()?.distance).toBeGreaterThan(0);
   });
 
-  /** Whether the stage carries the class `demo.css` hides the HUD's actions panel by. */
-  const withoutControls = (): boolean =>
-    mounted?.container.querySelector('.oyl-game')?.classList.contains('oyl-demo--no-controls') ===
-    true;
+  /** The HUD's buttons, by name, in document order. */
+  const buttonNames = (): (string | undefined)[] =>
+    [...(mounted?.container.querySelectorAll('.oyl-hud__actions button') ?? [])].map((each) =>
+      each.textContent?.trim(),
+    );
 
   it.each([
-    ['?preset=climb', false],
-    ['?preset=climb&controls=1', false],
-    ['?preset=climb&controls=0', true],
-  ])('%j plays, and hides the HUD’s Pause and Stop: %s', async (search, hidden) => {
+    ['?preset=climb', ['Pause', 'Stop']],
+    ['?preset=climb&controls=1', ['Pause', 'Stop']],
+    ['?preset=climb&controls=0', ['Pause']],
+  ])('%j plays, and offers the HUD’s %j — #1654', async (search, names) => {
     const shown = await page({ search });
     await shown.step(60);
     expect(shown.last()?.state).toBe('playing');
     expect(shown.last()?.distance).toBeGreaterThan(0);
-    expect(withoutControls()).toBe(hidden);
+    expect(buttonNames()).toEqual(names);
     // The readings are the HUD's either way.
     expect(mounted?.container.querySelector('.oyl-hud__fields--primary')).not.toBeNull();
+  });
+
+  it('with ?controls=0, Pause pauses and Play plays again (WCAG 2.2 SC 2.2.2, owner 2026-10-30)', async () => {
+    const shown = await page({ search: '?preset=climb&controls=0' });
+    await shown.step(60);
+    await activateWithKeyboard(shown.button('Pause') as HTMLButtonElement);
+    await shown.step(10);
+    expect(shown.last()?.state).toBe('paused');
+    const held = shown.last()?.distance;
+    await shown.step(60);
+    expect(shown.last()?.distance).toBe(held);
+    expect(buttonNames()).toEqual(['Play']);
+    await activateWithKeyboard(shown.button('Play') as HTMLButtonElement);
+    await shown.step(60);
+    expect(shown.last()?.state).toBe('playing');
+    expect(buttonNames()).toEqual(['Pause']);
   });
 
   it.each([
     ['&autoplay=0', false],
     ['', true],
   ])(
-    'with ?controls=0 and a still start (%j, reduced motion %s), still offers Play',
+    'with ?controls=0 and a still start (%j, reduced motion %s), offers Play and no Stop',
     async (extra, reducedMotion) => {
       const shown = await page({ search: `?preset=climb&controls=0${extra}`, reducedMotion });
       await shown.step(10);
       expect(shown.last()?.state).toBe('paused');
-      expect(withoutControls()).toBe(false);
+      expect(buttonNames()).toEqual(['Play']);
       await activateWithKeyboard(shown.button('Play') as HTMLButtonElement);
       await shown.step(60);
       expect(shown.last()?.state).toBe('playing');
-      expect(withoutControls()).toBe(false);
+      expect(buttonNames()).toEqual(['Pause']);
     },
   );
 

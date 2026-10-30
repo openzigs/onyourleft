@@ -108,7 +108,9 @@ gate plays it inside a cross-origin frame with `crossOriginIsolated` false. The 
   policy does not apply to it.
 - **Stopping.** While the page is hidden or the frame is scrolled out of view, the demo requests no
   frames and rides none of the time (#1647). The HUD's _Pause_ and _Stop_ pause and stop it, as
-  WCAG 2.2 SC 2.2.2 asks of anything that moves for longer than five seconds.
+  WCAG 2.2 SC 2.2.2 asks of anything that moves for longer than five seconds. _Pause_ (or _Play_)
+  is always shown, whatever the URL says, so the demo meets SC 2.2.2 by itself and the site
+  embedding it owes nothing more for it.
 - **Sizing.** The page is the frame's whole box and never scrolls, at any size from 320 × 180 to
   3840 × 2160 CSS pixels. The HUD takes the product's own layout for the frame's size:
   - **736 × 360 and over** (`46rem` × `22.5rem`), the readings sit in the stage's corners over the
@@ -116,7 +118,9 @@ gate plays it inside a cross-origin frame with `crossOriginIsolated` false. The 
     1920 × 1080 with every element inside the frame and every HUD panel inside the stage.
   - **Under that**, the HUD stacks under the world, as on an upright phone, and the stage scrolls
     within itself to reach it; the page around it does not. The browser gate measures 320 × 180.
-    For readings over the world, give the frame at least 736 × 360.
+    For readings over the world, give the frame at least 736 × 360. A compact HUD that fits a
+    smaller frame without scrolling is
+    [#1945](https://github.com/openzigs/onyourleft/issues/1945).
 
 ## The URL parameters
 
@@ -129,7 +133,7 @@ page rather than ignored, so a mistyped link shows itself.
 | `route`    | the id of a route `demo:bake` wrote, e.g. `upstate-climb` | none: the synthetic road | Rides the preset on that route's real roads, with its map data and credit                                                                                                                                                                                                         |
 | `showcase` | present, with no value                                    | absent                   | The feature tour (#1653), ridden by the `group` preset; `preset`, if given, must be `group`                                                                                                                                                                                       |
 | `autoplay` | `1`, `0`                                                  | `1`                      | `0` starts on a still frame with a _Play_ button                                                                                                                                                                                                                                  |
-| `controls` | `1`, `0`                                                  | `1`                      | `0` hides the HUD's _Pause_ and _Stop_ while the demo moves by itself. A demo that starts still shows them anyway, or nothing could start it. A site that hides them owes the visitor another way to stop the movement (WCAG 2.2 SC 2.2.2), such as a button that hides the frame |
+| `controls` | `1`, `0`                                                  | `1`                      | `0` hides the HUD's _Stop_. _Pause_ and _Play_ are always shown, so the demo can always be paused (WCAG 2.2 SC 2.2.2) |
 | `units`    | `metric`, `imperial`                                      | `metric`                 | The HUD's units                                                                                                                                                                                                                                                                   |
 
 For example, `?preset=group&showcase&units=imperial`, or `?preset=sprint&autoplay=0`.
