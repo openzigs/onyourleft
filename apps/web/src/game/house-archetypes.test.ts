@@ -496,16 +496,18 @@ describe('the fallback and the lever — #1782', () => {
   });
 
   it('plans every footprint as `origin/main` did with the lever off', () => {
-    const offPlans = plan(mixed, { houseArchetypes: false });
+    // Since #1783 the mixed town's main-street blocks are an archetype of their own, behind
+    // their own lever: `main` had none, so it is off too.
+    const off = { houseArchetypes: false, commercialArchetypes: false } as const;
+    const offPlans = plan(mixed, off);
     expect(offPlans.every((each) => each.archetype === 'unknown')).toBe(true);
     expect(fingerprint(offPlans)).toBe(MAIN_FINGERPRINTS.mixed);
-    expect(fingerprint(plan(houses, { houseArchetypes: false }))).toBe(MAIN_FINGERPRINTS.houses);
+    expect(fingerprint(plan(houses, off))).toBe(MAIN_FINGERPRINTS.houses);
     const land = landClassMask(mixed.corridor);
     expect(
       fingerprint(
-        footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin, undefined, undefined, {
-          houseArchetypes: false,
-        }).plans,
+        footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin, undefined, undefined, off)
+          .plans,
       ),
     ).toBe(MAIN_FINGERPRINTS.mixedUnclassed);
   });
@@ -620,9 +622,16 @@ describe('the caps — #1782', () => {
     const cape = ARCHETYPE_FEATURES.cape;
     expect(droppedFeatures(cape, 0)).toStrictEqual(cape);
     const once = droppedFeatures(cape, 1);
-    expect(once).toStrictEqual({ ...cape, dormer: 0 });
+    // Since #1786 its called-for dormers go with them.
+    expect(once).toStrictEqual({ ...cape, dormer: 0, dormers: 'none' });
     const twice = droppedFeatures(cape, 2);
-    expect(twice).toStrictEqual({ ...cape, dormer: 0, canopy: 0, frontPorch: 0 });
+    expect(twice).toStrictEqual({
+      ...cape,
+      dormer: 0,
+      dormers: 'none',
+      canopy: 0,
+      frontPorch: 0,
+    });
     expect(droppedFeatures(SEEDED_FEATURES, 0)).toStrictEqual(SEEDED_FEATURES);
   });
 });

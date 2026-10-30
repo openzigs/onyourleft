@@ -594,6 +594,14 @@ describe('an awning’s depth — #1590, shopOf', () => {
     expect(low?.sign).toBe(0);
     expect(shopOf(10, STOREY_METRES + 1, reachingTo(10), draws)?.sign).toBe(SIGN_BAND.height);
   });
+
+  it('lowers a signed strip front under its sign band even on an untagged storey of 3 m — #1783', () => {
+    const signed = shopOf(10, STOREY_METRES, reachingTo(10), { ...draws, signed: true });
+    expect(signed?.sign).toBe(SIGN_BAND.height);
+    expect(signed?.height).toBeCloseTo(2.3, 9);
+    // Control: a room too low even for the lowered front gives none, signed or not.
+    expect(shopOf(10, 2.6, reachingTo(10), { ...draws, signed: true })).toBeUndefined();
+  });
 });
 
 describe('drawn — #1590, through the belt', () => {
