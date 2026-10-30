@@ -201,7 +201,16 @@ export function InstanceWriteUpControl({
 
   const ask = (source: InstanceJobSource): void => {
     if (following.current !== undefined || riding) return;
-    run((view, signal) => port.ask(activityId, source, view, signal));
+    // #1796: the service named beside the press is the one the start names.
+    run((view, signal) =>
+      port.ask(
+        activityId,
+        source,
+        view,
+        signal,
+        source === 'instance-hosted' ? hostedEndpoint : undefined,
+      ),
+    );
   };
 
   const busy = state.kind === 'following';

@@ -27,8 +27,10 @@
  * coordinate, no absolute altitude, no date, no name, no id), the template
  * version and the source — and, since #1229, the ride's own id when the ride
  * is already synced with this instance, which the instance then holds anyway,
- * so its history tool can date the rider's other rides against this one. No
- * other key. It is a `departing` boundary (`privacy/boundaries.test.ts`), and
+ * so its history tool can date the rider's other rides against this one; and,
+ * since #1796, on a hosted job, the origin of the service the press named,
+ * which the instance holds already (the rider's consent names it) and refuses
+ * the job unless it still does. No other key. It is a `departing` boundary (`privacy/boundaries.test.ts`), and
  * `camera/no-picture-reachable.test.ts` walks this module and holds the body
  * to carrying no picture.
  *
@@ -63,6 +65,13 @@ export interface AnalysisJobRequest {
    * instance (#1229), which refuses any other as `validation_failed`.
    */
   readonly rideId?: string;
+  /**
+   * On a hosted job only: the origin of the service the press named (#1796).
+   * The instance refuses the job unless the rider's recorded consent names
+   * it, so a key replaced on another device sends this ride nowhere this
+   * page did not say.
+   */
+  readonly endpoint?: string;
 }
 
 /**
@@ -74,12 +83,16 @@ export function analysisJobRequest(
   templateVersion: string,
   source: InstanceJobSource,
   syncedRideId?: string,
+  hostedEndpoint?: string,
 ): AnalysisJobRequest {
   return {
     input,
     templateVersion,
     source,
     ...(syncedRideId === undefined ? {} : { rideId: syncedRideId }),
+    ...(source === 'instance-hosted' && hostedEndpoint !== undefined
+      ? { endpoint: hostedEndpoint }
+      : {}),
   };
 }
 
@@ -199,7 +212,27 @@ export type StartedJob =
    * instance no longer holds, though this device's sync base says it was
    * synced.
    */
-  | { readonly kind: 'refused'; readonly code?: string; readonly rideRefused?: true }
+  | {
+      readonly kind: 'refused';
+      readonly code?: string;
+      readonly rideRefused?: true;
+      /**
+       * The refusal named the service (#1796): the rider's consent on the
+       * instance now names another than the one this device showed. Only the
+       * instance's own words for that ({@link NOT_THE_SERVICE}); any other
+       * refusal of `endpoint` is an ordinary `validation_failed`.
+       */
+      readonly serviceMoved?: true;
+      /**
+       * The instance does not know the `endpoint` field at all (#1796): one
+       * older than #1796 refuses every key it does not know with these exact
+       * words. Such an instance makes no check of the service, and the start
+       * may be sent again without the field, as an app before #1796 sent it.
+       * An instance that knows the field never answers this of `endpoint`, so
+       * a refusal of the service itself is never sent again.
+       */
+      readonly endpointUnknown?: true;
+    }
   /** No answer: nothing is known to have been queued. */
   | { readonly kind: 'unreachable' };
 
@@ -225,17 +258,37 @@ export async function startJob(
   return {
     kind: 'refused',
     ...(code === undefined ? {} : { code }),
-    ...(refusesRide(answer.body) ? { rideRefused: true } : {}),
+    ...(refusesField(answer.body, 'rideId') ? { rideRefused: true } : {}),
+    ...(refusesField(answer.body, 'endpoint', NOT_THE_SERVICE) ? { serviceMoved: true } : {}),
+    ...(refusesField(answer.body, 'endpoint', NOT_A_FIELD) ? { endpointUnknown: true } : {}),
   };
 }
 
-/** Whether a `validation_failed` refusal names the ride id among its fields (#1229). */
-function refusesRide(body: unknown): boolean {
+/**
+ * `apps/instance` §`jobs.ts` §`NOT_THE_SERVICE`'s problem: the rider's
+ * recorded consent names another service than the start's `endpoint` (#1796).
+ */
+const NOT_THE_SERVICE = 'must be the service your recorded consent names';
+
+/**
+ * `apps/instance` §`jobs.ts`'s problem for a body key it does not know — what
+ * an instance older than #1796 answers of `endpoint`.
+ */
+const NOT_A_FIELD = 'is not a field of a job';
+
+/**
+ * Whether a `validation_failed` refusal names `field` among its fields: the
+ * ride id (#1229), the service (#1796) — with exactly `problem`, when given.
+ */
+function refusesField(body: unknown, field: 'rideId' | 'endpoint', problem?: string): boolean {
   const error = (body as { error?: { code?: unknown; fields?: unknown } } | null)?.error;
   return (
     error?.code === 'validation_failed' &&
     Array.isArray(error.fields) &&
-    error.fields.some((each) => (each as { field?: unknown } | null)?.field === 'rideId')
+    error.fields.some((each) => {
+      const named = each as { field?: unknown; problem?: unknown } | null;
+      return named?.field === field && (problem === undefined || named.problem === problem);
+    })
   );
 }
 

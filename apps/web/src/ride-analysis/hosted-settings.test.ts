@@ -39,6 +39,7 @@ import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from '../instance/testing';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import {
   HOSTED_ANSWER_REFUSAL_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_MASKING_NOT_SENT,
   HOSTED_NOT_ACCEPTED,
   HOSTED_NOT_OFFERED,
@@ -594,6 +595,39 @@ describe('an instance is untrusted input', () => {
       text: HOSTED_TEST_UNREADABLE,
     });
   });
+
+  // #1796: a change whose answer was lost may have been made, so it is never
+  // said to have changed nothing — whether the call timed out after it left
+  // or its answer could not be read. A read changed nothing either way.
+  it.each([
+    ['no answer', new InstanceUnreachableError('no-answer')],
+    ['an answer it cannot read', { status: 200, body: null }],
+    ['a server error', { status: 500, body: null }],
+  ] as const)(
+    'says it cannot tell whether a change was made when it had %s',
+    async (_name, answer) => {
+      const changes: [string, (port: HostedSettingsPort) => Promise<unknown>][] = [
+        ['store', (port) => port.storeHostedKey(ANSWERS)],
+        ['remove', (port) => port.removeHostedKey()],
+        ['agree', (port) => port.agreeToHostedService(SERVICE)],
+        ['withdraw', (port) => port.withdrawHostedAgreement()],
+      ];
+      for (const [change, press] of changes) {
+        // The agreement sends the masking list first, which the instance takes.
+        const answers = change === 'agree' ? [{ status: 200, body: {} }, answer] : [answer];
+        const { port } = scripted([...answers]);
+        expect(await press(port), change).toStrictEqual({
+          kind: 'failed',
+          text: HOSTED_CHANGE_UNKNOWN,
+        });
+      }
+      const { port } = scripted([answer]);
+      expect(await port.readHostedSettings()).toStrictEqual({
+        kind: 'failed',
+        text: HOSTED_UNREADABLE,
+      });
+    },
+  );
 
   it('says so when the instance does not answer, and does not swallow a bug', async () => {
     const quiet = scripted([
