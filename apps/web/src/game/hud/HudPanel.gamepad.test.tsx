@@ -10,6 +10,10 @@
  * pads for and no display to pace. Behind the HUD's ports is a ride in
  * miniature, as `HudPanel.steer.test.tsx`'s: a lane change is read off the
  * round's steer state, and a throw off what the throw port was handed.
+ *
+ * #1858 — in the Android shell (a `Capacitor` global that says it is native),
+ * a generic pad's d-pad steers and the numbered buttons `MainActivity`
+ * forwards throw, called on `window` as the Java calls them.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,7 +33,7 @@ import { startSteer, steerToward, type SteerState } from '../delivery/steer';
 import type { SteerInputPort } from '../delivery/steer-port';
 import type { ThrowIntent } from '../delivery/throw-input';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
-import type { PadSnapshot } from '../gamepad-port';
+import { FORWARDED_BUTTON_GLOBAL, type PadSnapshot } from '../gamepad-port';
 import { atStartLine } from '../simulation';
 import { HudPanel } from './HudPanel';
 
@@ -56,6 +60,7 @@ afterEach(() => {
   mounted = undefined;
   vi.useRealTimers();
   Reflect.deleteProperty(window.navigator, 'getGamepads');
+  Reflect.deleteProperty(globalThis, 'Capacitor');
 });
 
 function route(): ReturnType<typeof routeProfile> {
@@ -257,5 +262,103 @@ describe('a gamepad on a Delivery ride — #1821', () => {
     frames(5);
     expect(asked).toBe(0);
     expect(thrown).toEqual([]);
+  });
+});
+
+/** A pad the browser does not map, as spike 0027's generic USB pad: its d-pad on axis 0. */
+function generic(dpadX: number): PadSnapshot {
+  return {
+    connected: true,
+    mapping: '',
+    axes: [dpadX, 0, 0, 0],
+    buttons: Array.from({ length: 16 }, () => ({ pressed: false })),
+  };
+}
+
+/** What `MainActivity.java` calls for one numbered button. */
+function forward(button: number, pressed: boolean): void {
+  act(() => {
+    const page = window as unknown as Record<string, unknown>;
+    const handler = page[FORWARDED_BUTTON_GLOBAL];
+    expect(handler).toBeTypeOf('function');
+    (handler as (button: unknown, pressed: unknown) => void)(button, pressed);
+  });
+}
+
+function inTheShell(): void {
+  Object.defineProperty(globalThis, 'Capacitor', {
+    configurable: true,
+    value: { isNativePlatform: () => true },
+  });
+}
+
+describe('a generic pad on a Delivery ride in the Android shell — #1858', () => {
+  it('steers from its d-pad and throws from the forwarded buttons, once a press', async () => {
+    inTheShell();
+    await ride();
+    listed = [generic(1)];
+    event('gamepadconnected');
+    frames(5);
+    expect(steered?.lane).toBe(2);
+
+    listed = [generic(0)];
+    frames(2);
+    forward(4, true);
+    frames(10);
+    forward(4, false);
+    frames(2);
+    expect(thrown).toEqual(['left']);
+
+    // A tap shorter than a frame still throws, once.
+    forward(2, true);
+    forward(2, false);
+    frames(5);
+    forward(3, true);
+    frames(5);
+    expect(thrown).toEqual(['left', 'right', 'next-house']);
+    expect(steered?.lane).toBe(2);
+  });
+
+  it('wakes from no polling on a forwarded press, and stops again when it is released', async () => {
+    inTheShell();
+    await ride();
+    frames(5);
+    expect(asked).toBe(1);
+    forward(2, true);
+    frames(5);
+    expect(thrown).toEqual(['right']);
+    forward(2, false);
+    frames(3);
+    const after = asked;
+    frames(20);
+    expect(asked).toBe(after);
+  });
+
+  it('stops on a disconnect mid-round: Android’s cancelled release lets go, and nothing more is thrown', async () => {
+    inTheShell();
+    await ride();
+    forward(4, true);
+    frames(3);
+    listed = [null];
+    forward(4, false); // the release Android sends as the device goes
+    event('gamepaddisconnected');
+    frames(20);
+    expect(thrown).toEqual(['left']);
+  });
+
+  it('installs nothing for the shell to call outside the shell, or after the round', async () => {
+    const endRide = (): void => {
+      mounted?.unmount();
+      mounted = undefined;
+    };
+    await ride();
+    expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeUndefined();
+    endRide();
+
+    inTheShell();
+    await ride();
+    expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeTypeOf('function');
+    endRide();
+    expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeUndefined();
   });
 });
