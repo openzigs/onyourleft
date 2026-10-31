@@ -706,6 +706,12 @@ bash scripts/check-instance-image.test.sh
 bash scripts/mirror-base-image.sh
 bash scripts/mirror-base-image.test.sh
 
+# The basemap build's suite (#1557). build.sh itself is run by hand on the
+# owner's machine (apps/web/tools/basemap/README.md); its suite fakes `curl`,
+# `git`, `java` and `mvn`, downloads nothing and builds no tile, and runs in the
+# required `checks` shard.
+bash apps/web/tools/basemap/build.test.sh
+
 # The same image by hand. The commit is a REQUIRED build argument: the build
 # fails without it, rather than an instance that cannot say which source it
 # is. ⚠️ The context is the REPOSITORY ROOT since #780 (`-f`), and the server

@@ -13,6 +13,7 @@
     "realistic:fetch": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/fetch-assets.ts",
     "realistic:process": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/process-assets.ts",
     "realistic:stage": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/stage-into-apk.ts",
+    "basemap:compare": "node tools/basemap/run-compare.mjs",
     "build": "tsc --noEmit --project tsconfig.json && vite build",
     "build:demo": "vite build --config vite.demo.config.ts",
     "demo:bake": "node --experimental-transform-types --import ./tools/ts-extensionless-resolve.mjs tools/demo/bake-route.ts",

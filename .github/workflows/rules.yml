@@ -274,6 +274,9 @@ jobs:
       #   section 4c). Its suite fakes `docker` on PATH and needs no Docker.
       #   mirror script tests -- #1231. The suite of the script
       #   mirror-base-image.yml runs; a fake `skopeo`, no registry.
+      #   basemap build script tests -- #1557. The suite of
+      #   apps/web/tools/basemap/build.sh; fake `curl`, `git`, `java` and
+      #   `mvn`, no network and no tiles.
       #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
@@ -320,6 +323,7 @@ jobs:
           'instance image' 'bash scripts/check-instance-image.sh'
           'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
           'mirror script tests' 'bash scripts/mirror-base-image.test.sh'
+          'basemap build script tests' 'bash apps/web/tools/basemap/build.test.sh'
           'shard results checker tests' 'bash scripts/check-shard-results.test.sh'
 
       # The generated-artefact gate (#299). `cap sync` writes two files this

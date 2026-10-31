@@ -1,0 +1,14 @@
+diff --git a/tiles/src/main/java/com/protomaps/basemap/layers/Buildings.java b/tiles/src/main/java/com/protomaps/basemap/layers/Buildings.java
+index fc5a0e0..621005e 100644
+--- a/tiles/src/main/java/com/protomaps/basemap/layers/Buildings.java
++++ b/tiles/src/main/java/com/protomaps/basemap/layers/Buildings.java
+@@ -117,6 +117,9 @@ public class Buildings implements ForwardingProfile.LayerPostProcessor {
+         feature.setAttr("kind_detail", sf.getString("building:part"));
+         feature.setAttr(MIN_HEIGHT_KEY, height.min_height());
+       }
++
++      // On Your Left (#1557): this project's z15-only building fields.
++      dev.openzigs.onyourleft.basemap.BuildingTags.apply(sf, feature);
+     }
+ 
+     if (sf.hasTag("addr:housenumber")) {
