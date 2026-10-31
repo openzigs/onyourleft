@@ -74,6 +74,8 @@ import {
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
+  STYLISED_SCENE_DRAW_CALLS,
+  stylisedSceneDrawCallCeiling,
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { SIDE_ROAD_FRAME_TRIANGLES } from '../src/game/cross-streets';
@@ -157,6 +159,10 @@ interface GameHarnessResult {
   readonly roomDrawCalls: number;
   readonly roomDrawCallsEachOwnMesh: number;
   readonly remoteRidersInRoom: number;
+  /** #1903. @see game-harness.ts */
+  readonly lapRaceDrawCalls: number;
+  readonly lapRaceRacers: number;
+  readonly lapRaceDrawn: Readonly<Record<'pickUps' | 'hazards' | 'hits', number>>;
   readonly sceneryPixelsChanged: number;
   readonly sceneryPixelWith: Pixel;
   readonly sceneryPixelWithout: Pixel;
@@ -2096,6 +2102,37 @@ test.describe('the road reads as a road — #242', () => {
     expect(result.roomDrawCallsEachOwnMesh).toBeGreaterThan(SCENE_DRAW_CALLS);
     expect(result.roomDrawCallsEachOwnMesh).toBeGreaterThanOrEqual(
       SCENE_DRAW_CALLS + MAXIMUM_DRAWN_SET,
+    );
+  });
+
+  /**
+   * #1903, ADR 0060 D-10.2: a lap race's frame has its own ceiling,
+   * `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`, and only a frame
+   * carrying a race is held to it. The same scenery-free frame with the
+   * rider and seven bots, five hit, every pick-up point of a three-lap race
+   * and ten puddles (`game-harness.ts` §`withLapRace`) is at or under it, and
+   * over the ordinary frame's {@link SCENE_DRAW_CALLS}: the belt was drawn.
+   * The ordinary frame is held to exactly that, which the product's
+   * `STYLISED_SCENE_DRAW_CALLS` restates. The village's 50 and Delivery's 53
+   * are `realistic-town.browser.spec.ts`' and `realistic-delivery.browser.spec.ts`',
+   * unchanged.
+   */
+  test('holds a lap race’s frame at or under its own ceiling, and the ordinary frame at the stylised budget — #1903', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
+    console.log(
+      `#1903 lap race frame: ${String(result.lapRaceDrawCalls)} calls, ordinary ${String(result.drawCallsWithoutScatter)}; ` +
+        `racers ${String(result.lapRaceRacers)}, drawn ${JSON.stringify(result.lapRaceDrawn)}`,
+    );
+    expect(SCENE_DRAW_CALLS).toBe(STYLISED_SCENE_DRAW_CALLS);
+    expect(result.drawCallsWithoutScatter).toBe(stylisedSceneDrawCallCeiling({}));
+    // The controls: eight racers, every pick-up point, ten puddles and five hits drawn.
+    expect(result.lapRaceRacers).toBe(8);
+    expect(result.lapRaceDrawn).toEqual({ pickUps: 9, hazards: 10, hits: 5 });
+    expect(result.lapRaceDrawCalls).toBeGreaterThan(SCENE_DRAW_CALLS);
+    expect(result.lapRaceDrawCalls).toBeLessThanOrEqual(
+      stylisedSceneDrawCallCeiling({ lapRace: { pickUps: [], hazards: [] } }),
     );
   });
 });
