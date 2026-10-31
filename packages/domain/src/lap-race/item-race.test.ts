@@ -120,21 +120,21 @@ describe('determinism: the room and the device agree', () => {
 });
 
 describe('effort is untouched (ADR 0060 D-4.3, D-5.2)', () => {
-  it('reads the same effort distances at every tick with items on as off, over 1,000 seeded races', () => {
+  it('reads the same effort distances at every tick with items on as off, over 400 seeded races', () => {
+    // #1963: this timed out under the nightly coverage report at 1,000 races, one `expect` a racer
+    // and tick. Now one comparison a race, and 400 races: every mutation that moves effort moves it
+    // in the first few, and the count of moved offsets below shows the races are not empty.
+    const efforts = (states: ItemRaceState[]): number[][] =>
+      states.map((state) => state.racers.map((entry) => entry.racer.effortDistance));
     let offsetsMoved = 0;
-    for (let seed = 1; seed <= 1_000; seed += 1) {
+    for (let seed = 1; seed <= 400; seed += 1) {
       const input = scenario(seed, 150);
       const on = run(input, seed, true);
       const off = run(input, seed, false);
-      on.forEach((state, tick) => {
-        const without = off[tick] as ItemRaceState;
-        state.racers.forEach((entry, index) => {
-          expect(entry.racer.effortDistance).toBe(
-            (without.racers[index] as ItemRaceState['racers'][number]).racer.effortDistance,
-          );
-          if (entry.racer.raceOffset !== 0) offsetsMoved += 1;
-        });
-      });
+      expect(efforts(on), `seed ${String(seed)}`).toEqual(efforts(off));
+      for (const state of on) {
+        for (const entry of state.racers) if (entry.racer.raceOffset !== 0) offsetsMoved += 1;
+      }
     }
     // The items did move offsets: the comparison is not between two empty races.
     expect(offsetsMoved).toBeGreaterThan(10_000);
