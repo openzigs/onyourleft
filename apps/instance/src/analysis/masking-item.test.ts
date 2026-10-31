@@ -164,3 +164,49 @@ describe('a deleted item leaves no bytes behind (#1796)', () => {
     expect(await world.databaseBytes()).not.toContain(LABEL);
   });
 });
+
+describe('an overwritten item leaves no bytes behind (#1944)', () => {
+  /** A place no other bytes in the database spell: a zone's label and its centre. */
+  const LABEL = 'Lamorna-1944-Cove';
+  const LATITUDE = 50.061_429;
+  const LIST = JSON.stringify({
+    words: ['x'],
+    zones: [{ label: LABEL, latitude: LATITUDE, longitude: -5.563_1, radius: 250 }],
+  } satisfies MaskingItemBody);
+  const WITHOUT_THE_ZONE = JSON.stringify({ words: ['x'], zones: [] } satisfies MaskingItemBody);
+
+  it('a removed privacy zone is in neither the database nor its log once the list is sent again', async () => {
+    const synced = await syncWorld(1);
+    world = synced.world;
+    const { token } = synced.riders[0]!;
+    const path = `/v1/sync/items/masking/${MASKING_ITEM_KEY}`;
+    expect((await authorised(world, token, 'POST', path, { body: LIST })).status).toBe(200);
+    expect((await world.databaseBytes()).includes(LABEL), 'the control: it was there').toBe(true);
+
+    // The device rewrites the list before every hosted job; this one has the zone removed.
+    const sent = await authorised(world, token, 'POST', path, { body: WITHOUT_THE_ZONE });
+    expect(sent.status).toBe(200);
+    // Read at once: a later request's own writes could checkpoint the log for it.
+    const after = await world.databaseBytes();
+    expect(after.includes(LABEL), 'the removed zone’s label').toBe(false);
+    expect(after.includes(String(LATITUDE)), 'the removed zone’s centre').toBe(false);
+    const read = await authorised(world, token, 'GET', path);
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as { body: string }).body).toBe(WITHOUT_THE_ZONE);
+  });
+
+  it('any other kind is scrubbed on an overwrite too: a note that named a street', async () => {
+    const synced = await syncWorld(1);
+    world = synced.world;
+    const { token } = synced.riders[0]!;
+    const path = '/v1/sync/items/note/n-1944';
+    const note = `Meet at ${LABEL}, by the gate.`;
+    expect((await authorised(world, token, 'POST', path, { body: note })).status).toBe(200);
+    expect((await world.databaseBytes()).includes(LABEL), 'the control: it was there').toBe(true);
+    const edited = 'Meet at the usual place.';
+    expect((await authorised(world, token, 'POST', path, { body: edited })).status).toBe(200);
+    expect((await world.databaseBytes()).includes(LABEL), 'the edited-out street').toBe(false);
+    const read = await authorised(world, token, 'GET', path);
+    expect(((await read.json()) as { body: string }).body).toBe(edited);
+  });
+});
