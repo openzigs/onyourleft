@@ -699,7 +699,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `gradient.ts`, `ride/trainer.ts` or any module
                         that writes to a trainer (found by rule, ADR 0059
                         §Amendments). Fails closed on `import.meta.glob`
-                        and on a worker it cannot name
+                        and on a worker it cannot name. Since #1898 the walk
+                        is `src/game/cannot-reach-trainer-testing.ts`, shared
+    src/game/lap-race/lap-race-cannot-reach-trainer.test.ts
+                        ADR 0060 D-2.2 (#1898): the same walk and forbidden
+                        set over the lap race's roots, `game/lap-race/` and
+                        `packages/domain/src/lap-race/`
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
