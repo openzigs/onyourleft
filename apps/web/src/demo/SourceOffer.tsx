@@ -21,8 +21,10 @@ export const DEMO_NOTICES_PATH = './licences/third-party.txt';
 /** The offer, as the page's footer. */
 export function DemoSourceOffer() {
   return (
-    <footer>
-      <p>
+    // #1654: small, and off the stage, so the offer is on screen in an iframe
+    // as small as 320 × 180 and covers nothing.
+    <footer style={{ fontSize: 'var(--oyl-font-size-sm)', lineHeight: 1.3 }}>
+      <p style={{ margin: 0, padding: 'var(--oyl-space-xs) var(--oyl-space-sm)' }}>
         Free and open source, under the GNU Affero General Public License, version 3 or later.{' '}
         <a href={SOURCE_CODE_URL} target="_blank" rel="noreferrer">
           Source code

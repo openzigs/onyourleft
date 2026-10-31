@@ -897,12 +897,45 @@ describe('the notices — #907', () => {
     ];
     await open(scripted);
     const shown = text(item('Notice 5'));
-    expect(shown).toContain(noticeDetailsErasedText('2027-03-24 14:53 UTC'));
+    expect(shown).toContain(noticeDetailsErasedText('2027-03-24 14:53 UTC', true));
+    expect(shown).toContain('six months after the decision');
     expect(shown).toContain('The decision: Not illegal.');
     expect(shown).toContain('route:0123456789abcdef0123456789abcdef');
     expect(shown).not.toContain('Why they think it is illegal');
     expect(shown).not.toContain('They gave no name');
     expect(shown).not.toContain('cannot be told what you decide');
+  });
+
+  it('says a notice erased with no decision was erased twelve months after it arrived, even once one is recorded (#1923)', async () => {
+    const erasedAt = 1_821_600_000;
+    const erasedUndecided = (noticeId: number, decidedAt: number | null) => ({
+      noticeId,
+      receivedAt: 1_790_005_000,
+      kind: 'illegal_content' as const,
+      explanation: '',
+      items: [],
+      location: null,
+      notifierName: null,
+      notifierEmail: null,
+      bonaFide: true,
+      detailsErasedAt: erasedAt,
+      acknowledgedAt: null,
+      decidedAt,
+      decision: decidedAt === null ? null : 'Not illegal.',
+      logId: null,
+      notifierToldAt: null,
+    });
+    const scripted = scriptedModeration();
+    // Still undecided; and decided in the same second the instance erased it, which
+    // it can only have done because no decision was recorded yet.
+    scripted.held.notices = [erasedUndecided(6, null), erasedUndecided(7, erasedAt)];
+    await open(scripted);
+    for (const name of ['Notice 6', 'Notice 7']) {
+      const shown = text(item(name));
+      expect(shown, name).toContain(noticeDetailsErasedText('2027-09-22 08:00 UTC', false));
+      expect(shown, name).toContain('twelve months after the notice arrived');
+      expect(shown, name).not.toContain('six months after the decision');
+    }
   });
 
   it('says a notice with no email cannot be answered, and says so when the notices could not be read', async () => {

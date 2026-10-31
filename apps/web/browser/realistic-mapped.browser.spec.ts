@@ -11,7 +11,8 @@
  *   mapped buildings' ground blobs out of the mixed town's frame, and nothing
  *   else.
  * - **The city centre** (#1636): `town=city`, held between its two towers,
- *   draws its shop fronts and its tower inside the page's 35 calls.
+ *   draws its shop fronts and its tower inside the page's 35 calls — on a
+ *   320 × 180 page since #1915 (`CITY_VIEWPORT`).
  *
  * This file's nightly describes are a job of their own (docs/agents/ci.md §4c
  * §"Four nightly browser shards — #1698", whose fifth shard this is);
@@ -56,7 +57,25 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
   });
 });
 
+/**
+ * The city centre's page, a sixteenth of the default 1280 × 720 and the same
+ * 16:9 shape — #1915.
+ *
+ * The case counts a frame's draw calls, which the frustum decides, and the
+ * frustum is the canvas's SHAPE, not its size: at 320 × 180 the city draws
+ * the same 22 calls and the same 45 664 and 44 614 triangles as at 1280 × 720
+ * (a Mac, 2026-10-30). What the size does decide is each frame's fill under
+ * SwiftShader, and the page publishes only after a second of frames each
+ * under `MAXIMUM_FRAME_GAP_MS` (1 s, `realistic/loop.ts`), a slower one being
+ * a stall that counts for nothing. On a slow runner a 1280 × 720 frame of the
+ * city, with #1884's rooms behind its glass, came near that second, so a load
+ * waited on chance: 25 s to over 160 s, and once past the case's 300 s.
+ */
+const CITY_VIEWPORT = { width: 320, height: 180 };
+
 test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, () => {
+  test.use({ viewport: CITY_VIEWPORT });
+
   test('draws a city centre’s shop fronts and its tower inside the page’s 35 calls', async ({
     page,
   }) => {
@@ -70,8 +89,13 @@ test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, 
       );
       console.log(
         `#1636 town=city at=${String(at)}: ${String(city.result.lastFrame.triangles)} triangles in ` +
-          `${String(city.result.lastFrame.calls)} draw calls`,
+          `${String(city.result.lastFrame.calls)} draw calls; frame p50 ` +
+          `${String(Math.round(city.result.frameMs.p50))} ms, p90 ` +
+          `${String(Math.round(city.result.frameMs.p90))} ms over ` +
+          `${String(city.result.frameMs.count)} frames, ${String(city.result.stalls)} stall(s)`,
       );
+      // Not vacuous: drawn at the small page, so its frames are the cheap ones.
+      expect(city.result.drawingBuffer).toEqual([CITY_VIEWPORT.width, CITY_VIEWPORT.height]);
       expect(city.result.lastFrame.calls).toBeGreaterThan(0);
       expect(city.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     }

@@ -397,6 +397,37 @@ describe('the distant hills a view draws — #458', () => {
     ring.update(relief, world, pose, HORIZON);
     expect(colours.getX(2)).toBeCloseTo(ground + (HORIZON.r - ground) * 0.7, 6);
   });
+
+  it('hazes the ridge from the ground it is handed, and from the world’s without one — #1686', () => {
+    // The view hands it the ground under the route's winter; a white one here,
+    // which no world's own ground is, so a ring that read the world's again is
+    // told apart from one that took what it was handed.
+    const SNOWED = 0xf2f4f7;
+    expect(SNOWED).not.toBe(world.groundColour);
+    const ring = new HorizonRing();
+    const air = { table: [[0.5, 0.5, 0.5] as const], share: 0.5, turn: 0 };
+    const hazed = (ground: number, foot: readonly number[]): readonly number[] =>
+      [16, 8, 0].map((shift, channel) => {
+        const from = srgbToLinear((ground >> shift) & 0xff);
+        return from + ((foot[channel] as number) - from) * 0.8;
+      });
+    // Both paths: the stylised (no air) and the realistic (#622's air).
+    for (const withAir of [undefined, air]) {
+      ring.update(relief, world, pose, HORIZON, Number.NEGATIVE_INFINITY, 0.8, withAir, SNOWED);
+      for (const segment of [0, HORIZON_SEGMENTS / 2]) {
+        const expected = hazed(SNOWED, ring.footAt(segment));
+        ring
+          .ridgeAt(segment)
+          .forEach((channel, index) => expect(channel).toBeCloseTo(expected[index] as number, 6));
+      }
+      // Left out, the ground is the world's own: the season-free picture.
+      ring.update(relief, world, pose, HORIZON, Number.NEGATIVE_INFINITY, 0.8, withAir);
+      const own = hazed(world.groundColour, ring.footAt(0));
+      ring
+        .ridgeAt(0)
+        .forEach((channel, index) => expect(channel).toBeCloseTo(own[index] as number, 6));
+    }
+  });
 });
 
 describe('the water and the bridges a view draws — #459', () => {
