@@ -17,6 +17,7 @@ import {
   CHIMNEY,
   CHIMNEY_SHARE,
   EAVES_OVERHANG_METRES,
+  eavePitchOf,
   FACADE_DOOR,
   FACADE_OFFSET,
   FOOTPRINT_MAX_FAR_TRIANGLES,
@@ -46,6 +47,7 @@ import {
   FOOTPRINT_FIXTURE_VERDICTS,
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   denseTownFixture,
   footprintFixture,
   mixedTownFixture,
@@ -839,8 +841,9 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
     const hips = pitched.filter((plan) => plan.roof === 'hip').length;
     expect(hips / pitched.length).toBeGreaterThan(HIP_SHARE - 0.15);
     expect(hips / pitched.length).toBeLessThan(HIP_SHARE + 0.15);
-    // Every slope is at the plan's pitch: a roof normal's rise is its cosine.
-    for (const plan of pitched) {
+    // Every slope is at the plan's pitch: a roof normal's rise is its cosine. A #1785
+    // variant's slopes are at its own: `roof-variants.test.ts`.
+    for (const plan of pitched.filter((each) => each.roofVariant === 'plain')) {
       const floats = plan.triangles.roof;
       const cos = Math.cos((plan.pitchDegrees * Math.PI) / 180);
       for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
@@ -863,9 +866,12 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
     for (const plan of pitched) {
       const roof = verticesOf(plan, 'roof');
       const eaves = eavesOf(plan);
-      // The lowest edge of the roof is the overhang's, its fall below the wall top.
+      // The lowest edge of the roof is the overhang's, its fall below the wall top — since
+      // #1785 at a gambrel's lower pitch; a saltbox's two eaves are level, at the plan's.
       const low = Math.min(...roof.map(([, y]) => y as number));
-      const fall = EAVES_OVERHANG_METRES * Math.tan((plan.pitchDegrees * Math.PI) / 180);
+      const pitch = eavePitchOf(plan.roofVariant, plan.pitchDegrees);
+      // #1784: by its archetype's own overhang.
+      const fall = eavesOverhangOf(plan) * Math.tan((pitch * Math.PI) / 180);
       expect(low).toBeCloseTo(eaves - fall, 3);
       // #1660's split roofs reach past their own rectangles, not this one: `split-roofs.test.ts`.
       if ((rectanglesOf(plan.footprint)?.length ?? 1) > 1) continue;
@@ -878,7 +884,7 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
         const across = Math.abs(-dx * rectangle.uz + dz * rectangle.ux);
         reach = Math.max(reach, across - rectangle.halfShort);
       }
-      expect(reach).toBeCloseTo(EAVES_OVERHANG_METRES, 3);
+      expect(reach).toBeCloseTo(eavesOverhangOf(plan), 3);
       // Its underside is painted trim: the soffit is there to be seen from the road.
       expect(plan.triangles.trim.length).toBeGreaterThan(0);
     }

@@ -37,8 +37,10 @@
  * Each is scanned for a target's point and distances as JSON spells them, as
  * float64 and float32 bytes, and rounded or cut to fewer places; its latitude
  * and longitude to three places and finer and as FIT semicircles; the seed in
- * decimal, hex and as bytes; and Delivery's own words. The last block plants
- * each kind of trace, so the scan is seen to go red.
+ * decimal, hex and as bytes; and Delivery's own words. A long run of hex — a
+ * key, a signature, a digest — is read as the bytes it spells, not as
+ * numbers (#1940). The last block plants each kind of trace, so the scan is
+ * seen to go red.
  *
  * `privacy/delivery-targets-never-sent.test.ts` holds the source half: no
  * module that builds an export, a recording or an instance's traffic imports
@@ -48,10 +50,11 @@
 import { act } from 'react';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { seconds, unixSeconds, watts } from '@onyourleft/domain';
+import { SIGNATURE_ALGORITHM, seconds, toHex, unixSeconds, watts } from '@onyourleft/domain';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import {
   activityId,
+  type DeviceKeyRecord,
   ensureDeviceSigningKey,
   lapId,
   recordingSessionId,
@@ -517,9 +520,35 @@ function semicircleBytes(degrees: number): Uint8Array {
   return bytes;
 }
 
-/** Every whole number in `text`, sign aside: a run of digits with at most one fraction, not inside a longer one. */
+/**
+ * Lower-case hex of 32 digits (16 bytes) or more, standing alone: a public
+ * key, a signature, a digest or a sync base's key — #1940.
+ *
+ * That is bytes spelled in hex, not decimal text. Its digits fall in runs
+ * between its letters, and a key's or a signature's runs are as good as
+ * random: a 64-digit key carries a given three-digit run, with letters either
+ * side, about once in 500 keys. Read as numbers, such a run is a target's
+ * whole metres by chance, which is how #1940's run on main found target 0's
+ * whole metres in the device's public key, in the sync payload and in the
+ * `deviceKeys` and `activityRecords` rows. So its digits are not numbers to
+ * {@link numbersIn}, and {@link scan} reads it as the bytes it spells
+ * instead, where a target's float64 or float32 would show. A text marker
+ * still finds its spelling anywhere, a hex run included; a run under 32
+ * digits is still read as text.
+ */
+const HEX_RUN = /(?<![0-9A-Za-z])[0-9a-f]{32,}(?![0-9A-Za-z])/g;
+
+/** The bytes a hex run spells, two digits each. */
+function hexBytes(run: string): Uint8Array {
+  return Uint8Array.from(run.match(/[0-9a-f]{2}/g) ?? [], (pair) => Number.parseInt(pair, 16));
+}
+
+/**
+ * Every whole number in `text`, sign aside: a run of digits with at most one
+ * fraction, not inside a longer one, and not inside a {@link HEX_RUN}.
+ */
 function numbersIn(text: string): Set<string> {
-  return new Set(text.match(/(?<![\d.])\d+(?:\.\d+)?(?!\.?\d)/g) ?? []);
+  return new Set(text.replace(HEX_RUN, ' ').match(/(?<![\d.])\d+(?:\.\d+)?(?!\.?\d)/g) ?? []);
 }
 
 function float64Bytes(value: number): Uint8Array {
@@ -630,6 +659,14 @@ function scan(
     }
     if (marker.bytes !== undefined && bytes !== undefined && containsBytes(bytes, marker.bytes)) {
       found.push(`${where}: ${marker.label}`);
+    }
+  }
+  for (const run of text.match(HEX_RUN) ?? []) {
+    const spelled = hexBytes(run);
+    for (const marker of markers) {
+      if (marker.bytes !== undefined && containsBytes(spelled, marker.bytes)) {
+        found.push(`${where}, hex: ${marker.label}`);
+      }
     }
   }
   // A rounded and a cut spelling can be one number: say it once.
@@ -756,6 +793,45 @@ function scriptedInstance(): { readonly sealed: SyncTransport; readonly sent: un
 }
 
 const NOW = unixSeconds(1_790_000_000);
+
+/** An Ed25519 private key in PKCS #8, before its 32-byte seed (RFC 8410 §7). */
+const ED25519_PKCS8_PREFIX = [
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+] as const;
+
+/**
+ * The device's signing key, the same on every run — #1940.
+ *
+ * Sync signs the ride with the device's key, so its public half and the
+ * signature are in the payload and in the `deviceKeys` and `activityRecords`
+ * rows, as hex. A key generated per run made those bytes different on every
+ * run, and once in a while their hex held a run of digits spelling a target's
+ * whole metres, which the scan read as the number (#1940's failure on main).
+ * The scan now reads hex as bytes ({@link HEX_RUN}); a fixed key keeps the
+ * key and the signatures made with it (Ed25519's are deterministic, RFC 8032
+ * §5.1.6) the same from run to run as well, so a result is repeatable.
+ * Stored before sync asks, so sync loads it through its own path.
+ */
+async function fixedDeviceKey(): Promise<DeviceKeyRecord> {
+  const pkcs8 = Uint8Array.from([
+    ...ED25519_PKCS8_PREFIX,
+    ...Array.from({ length: 32 }, (_, index) => 0x40 + index),
+  ]);
+  const algorithm = { name: SIGNATURE_ALGORITHM };
+  const readable = await crypto.subtle.importKey('pkcs8', pkcs8, algorithm, true, ['sign']);
+  const { x = '' } = await crypto.subtle.exportKey('jwk', readable);
+  const publicKey = Uint8Array.from(atob(x.replace(/-/g, '+').replace(/_/g, '/')), (char) =>
+    char.charCodeAt(0),
+  );
+  return {
+    athleteId: ATHLETE_A,
+    algorithm: SIGNATURE_ALGORITHM,
+    publicKey: toHex(publicKey),
+    privateKey: await crypto.subtle.importKey('pkcs8', pkcs8, algorithm, false, ['sign']),
+    createdAt: NOW,
+  };
+}
+
 const FORMATS = ['fit', 'gpx', 'tcx'] as const satisfies readonly ActivityFileFormat[];
 
 // ---------------------------------------------------------------------------
@@ -878,6 +954,8 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
   it('sends none of it in the payload sync builds for the ride', RIDE, async () => {
     const ride = await theRide();
     const instance = scriptedInstance();
+    const deviceKey = await fixedDeviceKey();
+    await ride.harness.write((store) => store.putDeviceKey(deviceKey));
     const report = await ride.harness.write((store) =>
       syncWithInstance({
         sealed: instance.sealed,
@@ -901,6 +979,8 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     );
     expect(pushes).toHaveLength(1);
     expect(base64Within(pushes).some(isFit)).toBe(true);
+    // Signed with the fixed key, not one made for this run: the scan reads the same bytes every run.
+    expect(jsonOf(pushes)).toContain(deviceKey.publicKey);
     expect(tracesInValue('sync', instance.sent, markersOf(ride.targets))).toStrictEqual([]);
   });
   // Last of the ride's cases, and in file order (Vitest's default, never shuffled here): sync
@@ -1006,6 +1086,28 @@ describe('the scan can go red — #1817', () => {
     expect(
       tracesInValue('streams', { distance: Float64Array.of(120.5049, 120.3749), y: 7.8 }, markers),
     ).toStrictEqual([]);
+  });
+
+  it('reads a key’s hex as the bytes it spells, and a number beside letters as a number — #1940', () => {
+    const [target] = planted;
+    if (target === undefined) throw new Error('no planted target');
+    // #1940: a public key whose hex has the target's whole metres between two letters is not the target.
+    const key = `${'c'.repeat(30)}${target.distance.toFixed(0)}${'d'.repeat(31)}`;
+    expect(key).toHaveLength(64);
+    expect(tracesInValue('deviceKeys', { publicKey: key }, markers)).toStrictEqual([]);
+    // The same digits as text are the target, and so are they in a run too short to be bytes.
+    const asText = ['ride: target 0 distance to 0 places', 'ride: target 0 z to 0 places'];
+    expect(
+      tracesInValue('ride', { name: `Ride ${target.distance.toFixed(0)} m` }, markers),
+    ).toEqual(asText);
+    expect(tracesInValue('ride', { id: `cc${target.distance.toFixed(0)}dd` }, markers)).toEqual(
+      asText,
+    );
+    // And a target's float64 spelled in hex is found, as the bytes it is.
+    const signature = toHex(float64Bytes(target.distance)).padStart(128, 'e');
+    expect(tracesInValue('activityRecords', { signature }, markers)).toEqual([
+      'activityRecords, hex: target 0 distance as float64',
+    ]);
   });
 
   it('finds the seed spelled in upper-case hex and as float64 bytes', () => {

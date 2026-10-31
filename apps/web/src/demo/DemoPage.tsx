@@ -46,6 +46,14 @@
  * region, in the HUD's tokens, above the stage, so it covers no panel and is
  * never read over a sentence.
  *
+ * ## The video render — #1655
+ *
+ * `?render` hands the stage the render's own clock (`render-clock.ts`, in
+ * `main.tsx`) and tells it it is stepped (`stage.ts` §"Stepped"). A render of
+ * a baked route ends on {@link ClosingCard}, which the render asks for through
+ * {@link DemoPageProps.registerClosingCard}: ADR 0056 D-8.3, the §4.3 notice
+ * and the plain-text addresses a video cannot link.
+ *
  * ## Hidden means paused
  *
  * `visibilitychange` and an `IntersectionObserver` on the canvas tell the
@@ -59,7 +67,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RouteProfile } from '@onyourleft/domain';
 
 import { HudCore } from '../game/hud/HudCore';
-import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
+import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
 import { OSM_COPYRIGHT_URL } from '../../tools/demo/route-bundle';
 import { PlanTrace } from '../game/hud/PlanTrace';
 import type { GameRenderer, GameView } from '../game/port';
@@ -78,6 +86,7 @@ import { createDemoPlayer, type DemoStatus } from './player';
 import { SHOWCASE_TIMELINE, showcaseRides } from './showcase';
 import { featuresInBuild } from './showcase-features';
 import { parseDemoQuery } from './query';
+import { REALISTIC_LOADING } from './realistic-loading';
 import { DemoSourceOffer } from './SourceOffer';
 import { startDemoStage, type DemoSnapshot, type DemoStage, type FrameScheduler } from './stage';
 
@@ -102,6 +111,11 @@ export interface DemoPageProps {
    * §`decorationBeltOf`'s — for the showcase (#1653).
    */
   readonly drawnDecorations?: ((view: GameView) => number) | undefined;
+  /**
+   * #1655: handed the way to show {@link ClosingCard}, once the page is up —
+   * the video render's (`main.tsx`). Absent everywhere else.
+   */
+  readonly registerClosingCard?: ((show: () => void) => void) | undefined;
 }
 
 /** What the HUD's two controls say on the demo. */
@@ -153,17 +167,59 @@ function MapDataNotice(props: { readonly bundlePath: string }) {
   );
 }
 
+/**
+ * The card a video of a baked route ends on — #1655, ADR 0056 D-8.3: the
+ * credit, ODbL §4.3's notice, and the addresses §4.3 a asks for written out,
+ * since a video cannot carry a link. Over the whole stage, in the HUD's tokens.
+ */
+function ClosingCard() {
+  return (
+    <div
+      className="oyl-demo__closing-card"
+      role="note"
+      aria-label="Map data"
+      style={{
+        alignItems: 'center',
+        background: 'var(--oyl-color-hud-surface)',
+        color: 'var(--oyl-color-hud-ink)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--oyl-space-md)',
+        inset: 0,
+        justifyContent: 'center',
+        padding: 'var(--oyl-space-xl)',
+        position: 'absolute',
+        textAlign: 'center',
+        zIndex: 1,
+      }}
+    >
+      <p style={{ fontSize: 'var(--oyl-font-size-xl)', margin: 0 }}>{OSM_ATTRIBUTION}</p>
+      <p style={{ margin: 0 }}>{ODBL_NOTICE}</p>
+      <p style={{ margin: 0 }}>OpenStreetMap: {OSM_COPYRIGHT_URL}</p>
+      <p style={{ margin: 0 }}>Open Database License: {ODBL_LICENCE_URL}</p>
+    </div>
+  );
+}
+
 /** The page. */
 export function DemoPage(props: DemoPageProps) {
   const query = useMemo(() => parseDemoQuery(props.search), [props.search]);
+  // #1654: a still start, for reduced motion or `?autoplay=0`.
+  const startsStill = props.reducedMotion || (query.ok && query.autoplay === false);
+  // #1654, owner ruling of 2026-10-30: `?controls=0` leaves out *Stop* only.
+  // *Pause* and *Play* are always offered, so the demo meets WCAG 2.2 SC 2.2.2
+  // by itself, whatever the site embedding it does.
+  const withoutStop = query.ok && query.controls === false;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<DemoStage | undefined>(undefined);
-  const [status, setStatus] = useState<DemoStatus>(props.reducedMotion ? 'paused' : 'playing');
+  const [status, setStatus] = useState<DemoStatus>(startsStill ? 'paused' : 'playing');
+  const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [caption, setCaption] = useState<string | undefined>(undefined);
   const [hud, setHud] = useState<HudView | undefined>(undefined);
   const { renderer, drawnWorld, frames, reducedMotion, observeInView, publish, readFile } = props;
-  const { drawnSeason, drawnDecorations } = props;
+  const { drawnSeason, drawnDecorations, registerClosingCard } = props;
+  const [closing, setClosing] = useState(false);
   const asked = query.ok ? query.route : undefined;
   const [load, setLoad] = useState<RouteLoad>(
     asked === undefined ? { kind: 'none' } : { kind: 'loading' },
@@ -186,6 +242,10 @@ export function DemoPage(props: DemoPageProps) {
   }, [asked, readFile]);
 
   useEffect(() => {
+    registerClosingCard?.(() => setClosing(true));
+  }, [registerClosingCard]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!query.ok || canvas === null || load.kind === 'loading') return undefined;
     const route = load.kind === 'ready' ? load.route : undefined;
@@ -195,7 +255,7 @@ export function DemoPage(props: DemoPageProps) {
         ? showcaseRides(SHOWCASE_TIMELINE, { reducedMotion, route })
         : undefined;
     const player = rides?.player ?? createDemoPlayer(query.preset, { reducedMotion, route });
-    if (!reducedMotion) player.play();
+    if (!startsStill) player.play();
     const stage = startDemoStage({
       canvas,
       renderer,
@@ -208,9 +268,12 @@ export function DemoPage(props: DemoPageProps) {
           : { timeline: SHOWCASE_TIMELINE, features: featuresInBuild(), village: rides.village },
       drawnSeason,
       drawnDecorations,
+      // #1655: the video render's clock.
+      stepped: query.render === true,
       publish: (snapshot, drawn) => {
         setStatus(snapshot.state);
         setNotice(snapshot.notice);
+        setLoading(snapshot.realisticLoading);
         setCaption(snapshot.showcase?.caption);
         // The drawn ride's numbers; the credit is keyed on the run's map data.
         setHud({
@@ -246,15 +309,25 @@ export function DemoPage(props: DemoPageProps) {
     drawnDecorations,
     frames,
     reducedMotion,
+    startsStill,
     observeInView,
     publish,
   ]);
 
   const playing = status === 'playing';
   const routeNotice = load.kind === 'failed' ? load.notice : undefined;
+  // #1655: a video is the label and the stage, the whole frame. The page's
+  // heading, its status line, the map-data disclosure and the source offer are
+  // a visitor's, and a video has its own credit (the HUD's, and the card).
+  const rendering = query.ok && query.render === true;
   return (
+    // #1654: the page is its iframe's whole box, and the stage takes what the
+    // lines above and below it leave, so nothing scrolls from 320 × 180 up
+    // (`shell-demo.browser.spec.ts` measures three sizes). The heading is for a
+    // screen reader: a visible one cost a small frame its stage, and the site
+    // embedding the demo names it.
     <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', margin: 0 }}>
-      <h1>On Your Left</h1>
+      {rendering ? null : <h1 className="oyl-visually-hidden">On Your Left</h1>}
       {query.ok ? (
         <>
           <p
@@ -306,11 +379,12 @@ export function DemoPage(props: DemoPageProps) {
                   heartRate={hud.sensors.heartRate}
                   // The ride clock: it stops while the demo is paused.
                   movingSeconds={hud.rideSeconds}
-                  units="metric"
+                  units={query.units ?? 'metric'}
                   labels={DEMO_LABELS}
                   touchLock={false}
                   // The demo has no pacer: no *Pacer —* (owner, 2026-10-25).
                   withoutPacer
+                  withoutEnd={withoutStop}
                   paused={!playing}
                   onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}
                   onEnd={() => stageRef.current?.stop()}
@@ -323,20 +397,36 @@ export function DemoPage(props: DemoPageProps) {
                   attribution={hud.mapData ? OSM_ATTRIBUTION : undefined}
                 />
               )}
+              {closing && hud?.mapData === true ? <ClosingCard /> : null}
             </section>
           </div>
-          {load.kind === 'ready' && hud?.mapData === true ? (
+          {!rendering && load.kind === 'ready' && hud?.mapData === true ? (
             <MapDataNotice bundlePath={load.route.bundlePath} />
           ) : null}
           {/* Mounted before it has text, so a screen reader announces the change. */}
-          <p role="status">
-            {[routeNotice, notice].filter((each) => each !== undefined).join(' ')}
-          </p>
+          {rendering ? null : (
+            <p
+              role="status"
+              className="oyl-demo__status"
+              // #1654: small, as the source offer is, so a 320 × 180 frame keeps
+              // a stage under a two-line notice (CI's fonts left it none at 1 rem).
+              style={{
+                fontSize: 'var(--oyl-font-size-sm)',
+                lineHeight: 1.3,
+                margin: 0,
+                padding: '0 var(--oyl-space-sm)',
+              }}
+            >
+              {[loading ? REALISTIC_LOADING : undefined, routeNotice, notice]
+                .filter((each) => each !== undefined)
+                .join(' ')}
+            </p>
+          )}
         </>
       ) : (
         <p>{query.message}</p>
       )}
-      <DemoSourceOffer />
+      {rendering ? null : <DemoSourceOffer />}
     </main>
   );
 }

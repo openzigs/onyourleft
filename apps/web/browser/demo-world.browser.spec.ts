@@ -14,6 +14,10 @@
  * load then SETTLES — the stylised world and `realisticWorldNotice` — instead
  * of drawing the stylised world forever, which is what #1683 found.
  *
+ * #1654: while the realistic files arrive the page says so, and once they have
+ * it says so no longer — read off every snapshot's `realisticLoading`, and off
+ * the page's text at the end.
+ *
  * ⚠️ **Every snapshot is recorded, not only the last.** On SwiftShader the
  * quality ladder (`quality.ts` §`nextWorldQuality`) steps a ride out of the
  * realistic world soon after it is drawn, and says so with
@@ -37,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { build } from 'vite';
 
+import { REALISTIC_LOADING } from '../src/demo/realistic-loading';
 import { filesUnder } from '../tools/demo/demo-output';
 
 const WEB = fileURLToPath(new URL('../', import.meta.url));
@@ -88,10 +93,10 @@ async function serve(page: Page, html: string): Promise<Served> {
   });
   await page.addInitScript(() => {
     const seen: string[] = [];
-    const published: { world: string; notice?: string }[] = [];
+    const published: { world: string; notice?: string; realisticLoading?: boolean }[] = [];
     const record = window as unknown as {
       violations: string[];
-      published: { world: string; notice?: string }[];
+      published: { world: string; notice?: string; realisticLoading?: boolean }[];
     };
     record.violations = seen;
     record.published = published;
@@ -102,9 +107,13 @@ async function serve(page: Page, html: string): Promise<Served> {
     Object.defineProperty(window, '__oylDemo', {
       configurable: true,
       get: () => last,
-      set: (snapshot: { world: string; notice?: string }) => {
+      set: (snapshot: { world: string; notice?: string; realisticLoading?: boolean }) => {
         last = snapshot;
-        published.push({ world: snapshot.world, notice: snapshot.notice });
+        published.push({
+          world: snapshot.world,
+          notice: snapshot.notice,
+          realisticLoading: snapshot.realisticLoading,
+        });
       },
     });
   });
@@ -117,6 +126,8 @@ interface Seen {
   readonly worlds: string[];
   /** Every notice it has said, each once. */
   readonly notices: string[];
+  /** #1654: every `realisticLoading` it has said, in order, each once. */
+  readonly loading: string[];
   readonly violations: string[];
 }
 
@@ -124,13 +135,14 @@ function seen(page: Page): Promise<Seen> {
   return page.evaluate(() => {
     const record = window as unknown as {
       violations: string[];
-      published: { world: string; notice?: string }[];
+      published: { world: string; notice?: string; realisticLoading?: boolean }[];
     };
     const once = (each: (string | undefined)[]): string[] =>
       each.filter((one, at): one is string => one !== undefined && each[at - 1] !== one);
     return {
       worlds: once(record.published.map((each) => each.world)),
       notices: [...new Set(record.published.flatMap((each) => each.notice ?? []))],
+      loading: once(record.published.map((each) => String(each.realisticLoading))),
       violations: [...record.violations],
     };
   });
@@ -159,6 +171,9 @@ test.describe('the demo’s built page and the realistic world — #1683', () =>
       .toContain('realistic');
     const after = await seen(page);
     expect(after.worlds.slice(0, 2)).toEqual(['stylised', 'realistic']);
+    // #1654: said loading from the start, and not once the files had arrived.
+    await expect.poll(async () => (await seen(page)).loading).toEqual(['true', 'false']);
+    await expect(page.getByText(REALISTIC_LOADING)).toHaveCount(0);
     expect(after.violations).toEqual([]);
     expect(after.notices.filter((each) => COULD_NOT_LOAD.test(each))).toEqual([]);
     expect(served.elsewhere).toEqual([]);
