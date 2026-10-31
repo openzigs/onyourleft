@@ -323,7 +323,7 @@ describe('the caps — #1783', () => {
             profile,
             origin,
             'landuse',
-            archetype === 'garden-apartment' ? 'residential' : 'retail',
+            archetype === 'garden-apartment' ? 'residential' : 'commercial',
             900,
             2_000,
             -150,

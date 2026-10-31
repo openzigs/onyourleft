@@ -538,7 +538,7 @@ function awningDepthOf(plan: FootprintPlan): number {
   return most === 0 ? 0 : Math.sqrt((most - AWNING.valance) ** 2 - AWNING.drop ** 2);
 }
 
-/** Buildings on retail land beside a straight road, planned together. */
+/** Buildings on commercial land beside a straight road, planned together. */
 function plannedOnRetail(
   routeId: string,
   buildings: (profile: RouteProfile, origin: CorridorOrigin) => BuildingFeature[],
@@ -550,7 +550,7 @@ function plannedOnRetail(
     origin,
     covered: () => true,
     coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
-    landUse: [landBeside(profile, origin, 'landuse', 'retail', 900, 1_200, -80, 80)],
+    landUse: [landBeside(profile, origin, 'landuse', 'commercial', 900, 1_200, -80, 80)],
     buildings: buildings(profile, origin),
     paths: [],
     streets: [],
