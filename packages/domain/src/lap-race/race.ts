@@ -42,20 +42,28 @@
  * `apps/web/src/game/course-laps.ts` §`courseLapsDone` on a loop, so the HUD's
  * lap and the model's cannot disagree; an `apps/web` test calls both.
  *
- * ## The finish, and why a finished racer is frozen
+ * ## The finish, and what it fixes
  *
  * {@link settle} counts a racer's laps at its drawn distance and, the first
  * time that distance reaches `laps × lapLength`, stamps `finishedAtMs` with
- * the instant the caller passes in. From then on the racer's race state is
- * final: {@link withEffortDistance} and {@link applyOffset} return it
- * unchanged. Without that, two racers who crossed in the same tick would be
- * ordered by where they had got to since, and a finish order could change
- * after the race.
+ * the instant the caller passes in and `lineMetres` with the drawn distance
+ * then. From then on the race result is final: `finishedAtMs`, `lineMetres`
+ * and `lapsDone` never change again, and {@link applyOffset} returns the
+ * racer unchanged, because no item reaches a finished racer. Without
+ * `lineMetres`, two racers who crossed in the same tick would be ordered by
+ * where they had got to since, and a finish order could change after the race.
+ *
+ * ⚠️ **`effortDistance` keeps following the physics after the finish.**
+ * {@link withEffortDistance} still writes it, because it is the rider's own
+ * ride and not the race's (D-2.4). Freezing it at the line would make a racer
+ * whom items brought home sooner hold a different effort distance from the
+ * same ride without items. That breaks #1899's "effort is untouched" test,
+ * which is how this was found.
  *
  * ## Ties, stated
  *
  * {@link standings}: finished racers first, by `finishedAtMs`; those who
- * finished at the same instant by their drawn distance at the line, furthest
+ * finished at the same instant by `lineMetres`, their drawn distance at the line, furthest
  * first (the one further past the line crossed it earlier in the tick); then
  * racers still riding by drawn distance, furthest first; and **every remaining
  * tie by `id`, in code-unit order** (not `localeCompare`, whose answer depends
@@ -102,6 +110,8 @@ export interface RacerState {
   readonly lapsDone: number;
   /** The instant the drawn distance first reached the race length, or `null` while still riding. */
   readonly finishedAtMs: number | null;
+  /** The drawn distance at that instant, or `null` while still riding: a same-instant finish's tie-break. */
+  readonly lineMetres: number | null;
 }
 
 /** A race course, checked. @throws {LapRaceError} for a lap length or count that cannot be raced. */
@@ -120,7 +130,14 @@ export function raceCourse(lapLengthMetres: number, laps: number): RaceCourse {
 
 /** A racer on the line: no effort, no offset, no laps, not finished. */
 export function startingRacer(id: string): RacerState {
-  return { id, effortDistance: 0, raceOffset: 0, lapsDone: 0, finishedAtMs: null };
+  return {
+    id,
+    effortDistance: 0,
+    raceOffset: 0,
+    lapsDone: 0,
+    finishedAtMs: null,
+    lineMetres: null,
+  };
 }
 
 /** Where the racer is drawn and ranked: `effortDistance + raceOffset` (D-3.3). */
@@ -141,8 +158,9 @@ export function lapsAt(lapLengthMetres: number, distance: number): number {
 }
 
 /**
- * The racer with the effort distance the physics gave it. A finished racer is
- * returned unchanged: its race is over.
+ * The racer with the effort distance the physics gave it, before and after the
+ * finish alike: the effort is the ride's, and the result is fixed by
+ * `finishedAtMs` and `lineMetres`.
  *
  * @throws {LapRaceError} for a distance that is not finite.
  */
@@ -153,7 +171,7 @@ export function withEffortDistance(racer: RacerState, effortDistance: number): R
       'effortDistance must be a finite number of metres',
     );
   }
-  return racer.finishedAtMs === null ? { ...racer, effortDistance } : racer;
+  return { ...racer, effortDistance };
 }
 
 /**
@@ -204,6 +222,7 @@ export function settle(racer: RacerState, course: RaceCourse, atMs: number): Rac
     ...racer,
     lapsDone: Math.min(course.laps, lapsAt(course.lapLengthMetres, at)),
     finishedAtMs: finished ? atMs : null,
+    lineMetres: finished ? at : null,
   };
 }
 
@@ -215,7 +234,9 @@ function byId(a: RacerState, b: RacerState): number {
 /** The racer ahead first, by the rule in the header. */
 function ahead(a: RacerState, b: RacerState): number {
   if (a.finishedAtMs !== null && b.finishedAtMs !== null) {
-    return a.finishedAtMs - b.finishedAtMs || racePosition(b) - racePosition(a) || byId(a, b);
+    return (
+      a.finishedAtMs - b.finishedAtMs || (b.lineMetres ?? 0) - (a.lineMetres ?? 0) || byId(a, b)
+    );
   }
   if (a.finishedAtMs !== null) return -1;
   if (b.finishedAtMs !== null) return 1;

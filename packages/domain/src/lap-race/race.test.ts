@@ -159,14 +159,23 @@ describe('laps and the finish, at the drawn distance', () => {
     expect(settle(withEffortDistance(racer, 9_000), course, 30).lapsDone).toBe(3);
   });
 
-  it('stamps the finish once, at the instant passed in, and freezes the racer there', () => {
+  it('stamps the finish once, at the instant passed in, and fixes the result there', () => {
     const riding = settle(withEffortDistance(startingRacer('r'), 2_999), course, 10);
     expect(riding.finishedAtMs).toBeNull();
+    expect(riding.lineMetres).toBeNull();
     const finished = settle(withEffortDistance(riding, 3_001), course, 20);
     expect(finished.finishedAtMs).toBe(20);
+    expect(finished.lineMetres).toBe(3_001);
     expect(finished.lapsDone).toBe(3);
+    // No item reaches a finished racer, and the result does not move.
+    expect(applyOffset(finished, -10)).toBe(finished);
     const later = settle(applyOffset(withEffortDistance(finished, 3_500), -10), course, 30);
-    expect(later).toBe(finished);
+    expect(later).toEqual({ ...finished, effortDistance: 3_500 });
+  });
+
+  it('keeps following the physics after the finish: the effort is the ride’s, not the race’s', () => {
+    const finished = settle(withEffortDistance(startingRacer('r'), 3_001), course, 20);
+    expect(withEffortDistance(finished, 3_400).effortDistance).toBe(3_400);
   });
 
   it('keeps a same-tick finish order fixed after the line, however the two ride on', () => {
