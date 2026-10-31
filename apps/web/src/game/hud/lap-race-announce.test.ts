@@ -247,3 +247,48 @@ describe('a lap race’s place, rate-limited (#1904)', () => {
     expect(caller.said).toEqual(['You are 2 of 4.']);
   });
 });
+
+describe('what a tick owes, read off the race (#1904)', () => {
+  /** Rider holding `kind` at 20 m of a 100 m lap; one tick takes them through the pick-up at 25 m. */
+  function throughPickUp(used: boolean): LapRaceOwed {
+    const start = holding(startRace({ laps: 3, lap: 100 }), RIDER, 'puddle');
+    const before = tick(start, { atMs: 1_000, effortDistances: { [RIDER]: 20 } });
+    const after = tick(before, {
+      atMs: 2_000,
+      effortDistances: { [RIDER]: 30 },
+      ...(used ? { uses: [RIDER] } : {}),
+    });
+    return oweRaceTick(lapRaceOwedAtStart(start, RIDER), before, after, RIDER, used);
+  }
+
+  it('does not say an item again at a pick-up passed while still holding one', () => {
+    const owed = throughPickUp(false);
+    expect(owed.item).toBeUndefined();
+  });
+
+  it('says the item drawn in the tick the rider used the one they held', () => {
+    const owed = throughPickUp(true);
+    expect(owed.item).toBeDefined();
+  });
+
+  it('lets the finish supersede a hit, a lap and an item still owed', () => {
+    const start = startRace({ laps: 1, lap: 100, itemsOn: false });
+    const done = tick(start, { atMs: 20_000, effortDistances: { [RIDER]: 101 } });
+    const owed: LapRaceOwed = {
+      ...lapRaceOwedAtStart(start, RIDER),
+      hit: 'puddle',
+      lap: 1,
+      item: 'puddle',
+    };
+    const after = oweRaceTick(owed, start, done, RIDER, false);
+    expect([after.hit, after.lap, after.item]).toEqual([undefined, undefined, undefined]);
+    expect(lapRaceEvents(after, 20).map((event) => event.kind)).toEqual(['lap-race-finish']);
+  });
+
+  it('counts a lap’s sentence as the place sentence', () => {
+    const owed: LapRaceOwed = { ...lapRaceOwedAtStart(startRace({}), RIDER), lap: 1, place: 2 };
+    const said = lapRaceSpoken(owed, 'lap-race-lap', 5);
+    expect([said.saidPlace, said.placeSaidAt]).toEqual([2, 5]);
+    expect(lapRaceEvents(said, 60)).toEqual([]);
+  });
+});

@@ -9,10 +9,12 @@ import {
   BOT_TIERS,
   GUST_REACH_METRES,
   ITEM_KINDS,
+  createItemRace,
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  raceCourse,
   routeProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -153,6 +155,16 @@ describe('the lap race’s fields (#1904)', () => {
     expect(field(lapRaceReadings(hudOf(far)), LAP_RACE_ITEM_KEY)?.alert).toBeUndefined();
   });
 
+  it('gives a rider over the line no warning, though a bot behind still holds a gust', () => {
+    let race = startRace({ laps: 1, lap: 500 });
+    race = tick(race, { atMs: 60_000, effortDistances: efforts(505, [480, 300, 200]) });
+    race = holding(race, 'bot-1', 'crosswind-gust');
+    expect(incomingHit(race, RIDER)).toBeUndefined();
+    const item = field(lapRaceReadings(hudOf(race)), LAP_RACE_ITEM_KEY);
+    expect(item?.alert).toBeUndefined();
+    expect(item?.detail).toBeUndefined();
+  });
+
   it('warns of another racer’s puddle ahead in the rider’s lane, and not of its own', () => {
     let race = startRace({ laps: 3, lap: 1_000 });
     race = tick(race, { atMs: 1_000, effortDistances: efforts(200, [230, 10, 10]) });
@@ -255,5 +267,30 @@ describe('the lap race’s standings, as a room’s (#1904, ADR 0051)', () => {
       'A rider',
       'A rider',
     ]);
+  });
+
+  it('never reads an entrant off Object.prototype, however a racer is named', () => {
+    const race = createItemRace({
+      course: raceCourse(1_000, 3),
+      seed: 1,
+      itemsOn: false,
+      racerIds: [RIDER, 'constructor', 'toString'],
+      startMs: 0,
+    });
+    const view = lapRaceStandings({ ...hudOf(race), entrants: {} });
+    expect(view.lines.filter((line) => !line.you).map((line) => [line.who, line.figure])).toEqual([
+      ['A rider', NO_READING],
+      ['A rider', NO_READING],
+    ]);
+  });
+
+  it('shows a dash, never NaN, for a W/kg that is not a number', () => {
+    const race = startRace({ laps: 3 });
+    const view = lapRaceStandings({
+      ...hudOf(race),
+      riderWattsPerKilogram: Number.NaN,
+      entrants: { 'bot-1': { name: 'Brisk bot 1', wattsPerKilogram: Number.POSITIVE_INFINITY } },
+    });
+    expect(view.lines.map((line) => line.figure)).toEqual(view.lines.map(() => NO_READING));
   });
 });
