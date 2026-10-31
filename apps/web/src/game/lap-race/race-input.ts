@@ -4,10 +4,9 @@
  * The rider's lane changes and item uses in a lap race, between one race tick
  * and the next — #1901, ADR 0060 D-5.4, D-6 and D-13.
  *
- * @unwired #1906 runs the solo lap race inside `GameView`, which implements
- * the HUD's `SteerInputPort` and `ItemInputPort` with this module and hands
- * {@link riderTick}'s lanes and uses to `stepRace`; until it lands no ride
- * runs a race, so nothing in production imports this.
+ * Since #1906 `GameView` implements the HUD's `SteerInputPort` and
+ * `ItemInputPort` with this module, through `ride-race.ts`, which hands
+ * {@link riderTick}'s lanes and uses to `stepRace` on every tick.
  *
  * ## Delivery's steering, not a second set
  *

@@ -1945,11 +1945,12 @@ html {
  * under WCAG 2.2 SC 2.5.8's 24×24 (Level AA — the MINIMUM criterion; 44×44 is
  * SC 2.5.5, AAA). Declared, and `shell.browser.spec.ts` measures it with a
  * control that strips it. #1813's Delivery assist switches take the same
- * size; their section is not `.oyl-announce`, whose tests find the
- * announcements' own controls by it.
+ * size, and since #1905 the lap race's; their sections are not
+ * `.oyl-announce`, whose tests find the announcements' own controls by it.
  */
 .oyl-announce input[type='checkbox'],
-.oyl-delivery-assist input[type='checkbox'] {
+.oyl-delivery-assist input[type='checkbox'],
+.oyl-lap-race-assist input[type='checkbox'] {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
@@ -7413,7 +7414,11 @@ select.oyl-input {
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding
-    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room, > .oyl-hud__field--delivery)
+    .oyl-hud__fields--secondary:has(
+      > .oyl-hud__field--room,
+      > .oyl-hud__field--delivery,
+      > .oyl-hud__field--lap-race
+    )
     > .oyl-hud__field--gives-way {
     position: absolute;
     width: 1px;
@@ -7431,6 +7436,31 @@ select.oyl-input {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+/*
+ * A LAP RACE ON THE HUD — #1904 (ADR 0060).
+ *
+ * ⚠️ #419 asks that what gives way be recorded, so: **on a phone, in a lap
+ * race, the pacer's gap, the ghost's gap and the wind give way** to the race's
+ * *Place* and *Item*, as they do to a room's readings and a Delivery round's
+ * (the rule above): what a racer rides against is the field. On a tablet
+ * nothing gives way. The two fields size their track by its width, never
+ * their phrase, for the Delivery reason below.
+ *
+ * A field warning of a hit coming (`fields.ts` §`HudReading.alert`) is drawn
+ * with a thick DASHED outline: a shape, so the warning is never colour alone
+ * (SC 1.4.1), and the phrase under the item says what is coming. An outline
+ * takes no space, so the warning coming and going moves nothing.
+ * `lap-race-hud.browser.spec.ts` holds both on the stage.
+ */
+.oyl-game--riding .oyl-hud__field--lap-race {
+  contain: inline-size;
+}
+
+.oyl-hud__field--alert {
+  outline: 3px dashed currentcolor;
+  outline-offset: -3px;
 }
 
 /*

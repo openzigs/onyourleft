@@ -45,7 +45,7 @@ import {
 } from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
-import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
+import type { CameraPose, RaceHitLook, RiderMarker, SceneFrame, WaterFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import {
   LINE_LIMIT_METRES,
@@ -313,6 +313,38 @@ export interface SceneInput {
    * on every other ride, a room ride included (DL9).
    */
   readonly steeredLateral?: number | undefined;
+  /**
+   * A lap race's bots, where to draw them — #1902: each a `bot` marker, an
+   * instance in the riders' own meshes (#368), so seven of them cost the
+   * frame no draw call. Only those on the corridor this frame built are
+   * drawn, for {@link remoteRiders}' reason. Absent on every other ride.
+   */
+  readonly raceBots?: readonly RaceBotInput[] | undefined;
+  /**
+   * The rider's own lap-race hit effect, while one runs on them — #1902
+   * (`lap-race/in-view.ts` §`hitLook`). @see RiderMarker.hit
+   */
+  readonly riderHit?: RaceHitLook | undefined;
+}
+
+/**
+ * A lap-race bot, where to draw it — #1902. @see SceneInput.raceBots
+ *
+ * ⚠️ **Its distance is the DRAWN one** (ADR 0060 D-3.3: `effortDistance +
+ * raceOffset`), as an odometer on this ride's road; what it rode is never
+ * read here.
+ */
+export interface RaceBotInput {
+  readonly distanceMetres: number;
+  readonly speedMetresPerSecond: number;
+  /**
+   * Its lane's place across the road, metres, positive to the rider's right
+   * (`lap-race/in-view.ts` §`laneLateral`). It is drawn there, and moved
+   * aside only to make room for the rider when level with them ({@link lateralOf}).
+   */
+  readonly lateralMetres: number;
+  /** Its hit effect, while one runs on it. @see RiderMarker.hit */
+  readonly hit?: RaceHitLook | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -760,6 +792,10 @@ interface Rider {
   readonly label?: string | undefined;
   /** @see RiderMarker.followed */
   readonly followed?: boolean | undefined;
+  /** A lap-race bot's lane, across the road, in place of the line. @see RaceBotInput.lateralMetres */
+  readonly laned?: number | undefined;
+  /** @see RiderMarker.hit */
+  readonly hit?: RaceHitLook | undefined;
 }
 
 /**
@@ -786,6 +822,7 @@ function ridersOnTheRoad(
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
       steered: input.steeredLateral,
+      hit: input.riderHit,
     },
   ];
   const bot = input.state.bot;
@@ -846,6 +883,21 @@ function ridersOnTheRoad(
       followed: remote.followed,
     });
   }
+  // #1902: a lap race's bots, on the corridor this frame built, for the
+  // remote riders' reason.
+  for (const bot of input.raceBots ?? []) {
+    if (first === undefined || last === undefined) break;
+    if (bot.distanceMetres < first.along || bot.distanceMetres > last.along) continue;
+    riders.push({
+      kind: 'bot',
+      distance: bot.distanceMetres,
+      speed: bot.speedMetresPerSecond,
+      crankAngle: pedalling(bot.distanceMetres),
+      pedalling: bot.speedMetresPerSecond > 0,
+      laned: bot.lateralMetres,
+      hit: bot.hit,
+    });
+  }
   // #625: the ride's own clock, which a held or paused ride holds — never a
   // wall clock. @see RiderMarker.rideSeconds
   const rideClock: number = ghostClock(input.state);
@@ -863,7 +915,9 @@ function ridersOnTheRoad(
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
     const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
-    const cranked = crankAngle === undefined ? marker : { ...marker, crankAngle };
+    const turned = crankAngle === undefined ? marker : { ...marker, crankAngle };
+    // #1902: a lap-race hit effect rides on the marker, so it is drawn where the rider is.
+    const cranked = rider.hit === undefined ? turned : { ...turned, hit: rider.hit };
     return {
       // #783: the name the room gave them, carried to the frame as words only.
       marker:
@@ -919,6 +973,7 @@ function levelness(one: Rider, other: Rider): number {
  */
 function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
   if (rider.steered !== undefined) return rider.steered;
+  if (rider.laned !== undefined) return lanedLateral(rider, rider.laned, riders, line);
   let level = 0;
   for (const other of riders) {
     if (other === rider) continue;
@@ -933,6 +988,37 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): nu
   const clear = steered.steered + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(drawn, clear) : Math.max(drawn, clear);
   return drawn + (aside - drawn) * Math.max(levelness(rider, steered), heldBehind(rider, steered));
+}
+
+/**
+ * Where a lap-race bot is drawn across the road — #1902: in its lane
+ * (`laned`), and moved aside only to make room for the rider, by
+ * {@link lateralOf}'s rule for a steered rider: eased by levelness, and held
+ * aside while just behind them ({@link heldBehind}), to the side of the rider
+ * its LANE is on: a lane right of the centre is the positive side, any other the
+ * negative, wherever the rider is, so a bot level with the rider never jumps
+ * across them as they steer (the side is the lane's, not a comparison with the
+ * rider's continuous place). A bot in the rider's own place goes outward from
+ * it, not toward the centre. Never past {@link DRAWN_LIMIT_METRES}: a lane is at most 1.75 m out and the
+ * rider at most {@link LINE_LIMIT_METRES}, and the bot is only ever moved
+ * away from the rider toward its own side of them, which is at most
+ * `1.75 + 1.2 = 2.95 m` out.
+ *
+ * ⚠️ Two bots level in ONE lane are drawn in one place: a lane is a race's
+ * state (ADR 0060 D-6), and where they are drawn is where an item meets them.
+ */
+function lanedLateral(
+  rider: Rider,
+  laned: number,
+  riders: readonly Rider[],
+  line: RacingLine,
+): number {
+  const own = riders[0] as Rider;
+  const ownLateral = lateralOf(own, riders, line);
+  const side = laned > 0 ? 1 : -1;
+  const clear = ownLateral + side * SIDE_BY_SIDE_METRES;
+  const aside = side < 0 ? Math.min(laned, clear) : Math.max(laned, clear);
+  return laned + (aside - laned) * Math.max(levelness(rider, own), heldBehind(rider, own));
 }
 
 /**

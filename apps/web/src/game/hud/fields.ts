@@ -53,6 +53,7 @@ import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
+import { lapRaceReadings, type LapRaceHud } from './lap-race-hud';
 import { planLap, planProgress } from './plan';
 
 /** What a HUD shows where it has no trustworthy number. An em dash. */
@@ -142,6 +143,15 @@ export interface HudReading {
    * cannot see it loses nothing. Absent on every other field.
    */
   readonly gauge?: number | undefined;
+  /**
+   * That the field is warning of something — #1904, a lap race's hit coming
+   * (`lap-race-hud.ts` §`incomingHit`). It draws the field with a thick dashed
+   * outline (`theme.css` §"A LAP RACE ON THE HUD"), a shape rather than a
+   * tint, so the warning is never carried by colour alone (SC 1.4.1).
+   * ⚠️ **Never the only carrier**: {@link detail} says what is coming in
+   * words. Absent on every other field.
+   */
+  readonly alert?: boolean | undefined;
 }
 
 /**
@@ -333,6 +343,12 @@ export interface HudInput {
    */
   readonly delivery?: DeliveryHud | undefined;
   /**
+   * A solo lap race, on a ride running one — #1904 (ADR 0060). Absent on every
+   * other ride, so an ordinary ride's HUD reads exactly as it did, and chosen
+   * at the start of the ride and held for it, as {@link delivery} is.
+   */
+  readonly lapRace?: LapRaceHud | undefined;
+  /**
    * Which units the rider reads in (#238).
    *
    * ⚠️ **An ordinary parameter, not a React context.** This file is pure —
@@ -476,6 +492,8 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
     ...deliveryReadings(input.delivery),
+    // #1904: a lap race's, last for the same reason. A ride runs one mode.
+    ...lapRaceReadings(input.lapRace),
   ];
 }
 

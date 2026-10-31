@@ -548,6 +548,74 @@ export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery'>): num
 }
 
 /**
+ * The stylised world's own draw-call budget — #240's NFR-2: the scenery-free
+ * frame `game-harness.ts` draws at the start line at the contact rung,
+ * **11** calls. `game.browser.spec.ts` §`SCENE_DRAW_CALLS` writes it out as
+ * the sum of its terms, so a red run says which term moved, and holds that
+ * sum equal to this; it is restated here only so that
+ * {@link stylisedSceneDrawCallCeiling} can choose between it and
+ * {@link LAP_RACE_SCENE_DRAW_CALLS}.
+ *
+ * @test-facing held equal to the spec's sum by `game.browser.spec.ts`, and
+ * read by `realistic-budget-lap-race.test.ts`
+ */
+export const STYLISED_SCENE_DRAW_CALLS = 11;
+
+/**
+ * The most draw calls the stylised world's scenery-free frame may make
+ * **while a lap race runs** — #1903, ADR 0060 D-10.2: **14**, approved by
+ * the owner, 2026-10-31 (desktop measurement; tablet reading after #1906).
+ *
+ * ⚠️ **The stylised world's, not the village's.** ADR 0060 D-14 Q5 chose the
+ * stylised world first, so the ceiling sits beside that world's own budget,
+ * {@link STYLISED_SCENE_DRAW_CALLS}, as Delivery's sits beside the village's.
+ * {@link REALISTIC_VILLAGE_DRAW_CALLS} stays frozen at 50 and
+ * {@link DELIVERY_VILLAGE_DRAW_CALLS} at 53: this neither reuses nor
+ * changes either, and {@link villageDrawCallCeiling} never returns it.
+ *
+ * ⚠️ **It applies only while a frame carries a lap race**
+ * (`port.ts` §`SceneFrame.lapRace`); every other stylised frame is held to
+ * {@link STYLISED_SCENE_DRAW_CALLS}. {@link stylisedSceneDrawCallCeiling} is
+ * the one place that choice is made.
+ *
+ * ## Where 14 comes from
+ *
+ * The scenery-free frame's 11, plus the three calls `three-renderer.ts`
+ * §`LapRaceBelt` adds (#1902): one instanced call each for the pick-up
+ * points, the puddles and the hit effects, whatever their count. The race's
+ * seven bots add none: they are instances of the riders' four meshes (#368).
+ * Measured by `game.browser.spec.ts` §"#1903" on that frame carrying the rider
+ * and seven bots, five hit, every pick-up point of a three-lap race and ten
+ * puddles. Nothing is rounded up past it, for {@link DELIVERY_VILLAGE_DRAW_CALLS}'
+ * reason: the belt's count does not move with the pieces' number or place.
+ *
+ * ⚠️ **The call count is the desktop half.** It does not depend on the GPU,
+ * so the pinned Chromium counts what the tablet would; what the three calls
+ * COST there is the tablet step for #733, which the owner reads against
+ * this number while #1523 holds the tablet's GPU at its ceiling.
+ *
+ * @test-facing held by `game.browser.spec.ts` §"#1903", which counts the lap
+ * race's frame at the WebGL entry points, and by
+ * `realistic-budget-lap-race.test.ts`; nothing in the product applies a
+ * draw-call ceiling at run time
+ */
+export const LAP_RACE_SCENE_DRAW_CALLS = 14;
+
+/**
+ * Which ceiling a stylised scenery-free frame is held to — #1903: the lap
+ * race's while the frame carries one, and the stylised world's own on every
+ * other frame, Delivery's included. A race with nothing in view is still a
+ * race running.
+ *
+ * @test-facing `game.browser.spec.ts` holds the lap race's frame and the
+ * ordinary one to it, and `realistic-budget-lap-race.test.ts` holds an
+ * ordinary frame one call over 11 to be over it
+ */
+export function stylisedSceneDrawCallCeiling(frame: Pick<SceneFrame, 'lapRace'>): number {
+  return frame.lapRace === undefined ? STYLISED_SCENE_DRAW_CALLS : LAP_RACE_SCENE_DRAW_CALLS;
+}
+
+/**
  * The trees as they were drawn before #617 — the nearest six as full meshes,
  * a hard swap to the impostor, no middle level and no band — ranked together,
  * as {@link REALISTIC_TREE_LEVELS} ranks them.

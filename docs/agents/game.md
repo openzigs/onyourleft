@@ -705,6 +705,33 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ADR 0060 D-2.2 (#1898): the same walk and forbidden
                         set over the lap race's roots, `game/lap-race/` and
                         `packages/domain/src/lap-race/`
+    src/game/lap-race/ride-race.ts
+                        a solo lap race inside a game ride (#1906, ADR 0060):
+                        `GameView` holds one per ride, asked for by the
+                        chooser (#1907: `StageChooser.tsx` §`LapRaceControl`
+                        offers *Ride a lap race* on a loop only, saying why
+                        in words on any other, with its laps, field, tier and
+                        items from `lap-race/choice.ts`, and turns a Delivery
+                        round off as it is turned on) or a test's `lapRace`
+                        prop, on a LOOP route,
+                        solo (no room, D-7.3) and never beside a Delivery
+                        round. A race rides the STYLISED world whatever
+                        Settings chose (D-10.1), so the village's frozen 50
+                        never holds one. Started at the press (assist read
+                        from the device, ONE seed nothing keeps), stepped one
+                        tick a simulation step that ran (bots through
+                        `@onyourleft/physics` §`stepBotRace`), the rider
+                        DRAWN at effort distance plus race offset (D-3.3)
+                        and the bots in their lanes, the HUD's place, item
+                        and standings, its sentences owed. Nothing kept at
+                        the end. ⚠️ **Nothing of it reaches the trainer**:
+                        the grade is still sampled at the simulation's
+                        odometer, BEFORE the race steps;
+                        `game/lap-race-wiring.test.tsx` rides one power trace
+                        as an ordinary ride and as a race with items off and
+                        on (the rider hit), and holds every write and its time
+                        equal, and the recorded ride's channels and laps. ⚠️
+                        The bots ride still air on a windy ride: stated
     src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
                         a lap race's lanes and item use (#1901, ADR 0060
                         D-5.4, D-13): race INPUTS only, a lane and "use the
@@ -715,8 +742,51 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pad's throw buttons use the item. `race-input.test.ts`
                         rides one power trace with and without presses and
                         reads every tick's effort distance and speed back
-                        equal. ⚠️ `race-input.ts` is `@unwired` until #1906
-                        runs the race in `GameView`
+                        equal. Since #1906 `GameView`'s steer and item ports
+                        hand it the presses, through `ride-race.ts`
+    src/game/lap-race/assist-preference.ts, src/game/lap-race/assist.ts
+                        the lap race's assisted setting (#1905, Delivery's
+                        #1813 pattern): items off, auto-use, no knock-back on
+                        me, gentler bots. Kept on the device, read only by
+                        Settings and `game/lap-race/`. "No knock-back" is the
+                        model's own: `createItemRace`'s `shieldedIds`, and a
+                        hit on a shielded racer does nothing (`items.ts`
+                        §"A shielded racer"), solo races only. Since #1906
+                        `ride-race.ts` applies it at the press and each tick
+    src/game/lap-race/in-view.ts
+                        what a lap-race frame draws (#1902, ADR 0060 D-10.4):
+                        every pick-up point of every lap on the frame's road,
+                        each puddle in its lane until it dries, and each
+                        racer's hit effect (`hitLook`) while a slow-down runs
+                        on them. #1899's items resolve on the tick they are
+                        used, so NOTHING is ever in flight to draw. It reaches
+                        the view on `port.ts` §`SceneFrame.lapRace`, the hit on
+                        `RiderMarker.hit` (so it is drawn where `scene.ts` drew
+                        the racer), and the bots as `bot` markers through
+                        `SceneInput.raceBots`, in their lane and moved aside
+                        only to make room for the rider. `three-renderer.ts`
+                        §`LapRaceBelt` draws it in THREE instanced calls
+                        whatever the count, and the bots cost none: they are
+                        instances of the riders' meshes (#368). ⚠️ **WCAG
+                        2.3.1**: the hit's brightness swings on the RACE's
+                        clock at 0.4 Hz, so a second hit never restarts it,
+                        and under reduced motion it is steady; `in-view.test.ts`
+                        counts the luminance changes over the timeline in both
+                        forms. Since #1906 `ride-race.ts` is its caller.
+                        ⚠️ **Its own ceiling is the STYLISED world's** (#1903,
+                        ADR 0060 D-10.2, stylised first by D-14 Q5):
+                        `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`,
+                        14 — approved by the owner, 2026-10-31 (desktop
+                        measurement; tablet reading after #1906) — the
+                        scenery-free start-line frame's 11
+                        (§`STYLISED_SCENE_DRAW_CALLS`, held equal to
+                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS`) and the
+                        belt's three, only while a frame carries a race;
+                        §`stylisedSceneDrawCallCeiling` is the one place that
+                        choice is made. The village's 50 and Delivery's 53
+                        are unchanged, and `villageDrawCallCeiling` never
+                        returns 14. `game.browser.spec.ts` §"#1903" counts the
+                        race's frame
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
@@ -909,6 +979,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`ride-round.ts` §`DeliveryRide.score`), never
                         `round.ts` §`RoundTally.score`, which counts
                         deliveries only
+    src/game/hud/lap-race-hud.ts, src/game/hud/lap-race-announce.ts
+                        a solo lap race on the HUD (#1904, ADR 0060): *Place*
+                        (with `lap-text.ts` §`lapOfLaps` under it) and *Item*
+                        (with a hit coming under it, outlined dashed: a shape,
+                        never a tint), last and absent on any other ride; the
+                        standings in a room's panel (`RaceStandings.tsx`, W/kg,
+                        never watts, never a live region). Its five sentences
+                        are rank 5h, OWED as Delivery's are, the place at most
+                        once every 10 s. `GameView` feeds `HudInput.lapRace`
+                        on a ride running a race (#1906);
+                        `browser/lap-race-hud.browser.spec.ts` holds the
+                        layout on the HUD harness's stage, not in a real ride
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost
