@@ -66,6 +66,10 @@ packages/             Apache-2.0, without exception
     ghost/              racing your own previous attempt (#93) — a replay of
                         recorded distance against recorded time, never a
                         re-simulation, and no athlete id anywhere in it
+    lap-race/           the lap race (#1897, ADR 0060) — effort distance and a
+                        race offset clamped to ±10 m, laps and the finish
+                        counted at their sum, nothing moving one into the
+                        other; lint refuses `Date` and `Math.random` here
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an
