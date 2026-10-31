@@ -572,7 +572,10 @@ describe('a solo lap race inside a game ride — #1906', () => {
       const grades = ordinary.writes.map((each) => each.parameters.grade);
       expect(Math.max(...grades)).toBeGreaterThan(1);
       expect(Math.min(...grades)).toBeLessThan(-1);
+      // The items-off race ran, and drew no pick-up point: nothing is picked up there.
       expect(off.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
+      expect(off.drawn.every((frame) => frame.lapRace?.pickUps.length === 0)).toBe(true);
+      expect(on.drawn.some((frame) => (frame.lapRace?.pickUps.length ?? 0) > 0)).toBe(true);
       expect(script.hits).toBeGreaterThanOrEqual(2);
       expect(off.writes).toStrictEqual(ordinary.writes);
       expect(on.writes).toStrictEqual(ordinary.writes);

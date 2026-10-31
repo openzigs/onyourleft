@@ -368,11 +368,20 @@ export function lapRaceDrawing(
   };
 }
 
-/** The race's pick-ups and puddles on the frame's corridor: `port.ts` §`SceneFrame.lapRace`. */
+/** A race with items off draws no pick-up point: there is nothing to pick up there. */
+const NOTHING_TO_DRAW: LapRaceInView = Object.freeze({ pickUps: [], hazards: [] });
+
+/**
+ * The race's pick-ups and puddles on the frame's corridor: `port.ts`
+ * §`SceneFrame.lapRace`. None with items off, whether the rider chose no
+ * items or the assisted setting took them away: a marker on the road that
+ * gives nothing would be a promise the race does not keep.
+ */
 export function lapRaceFrame(
   ride: LapRaceRide,
   corridor: Parameters<typeof lapRaceInView>[0]['corridor'],
 ): LapRaceInView {
+  if (!ride.race.itemsOn) return NOTHING_TO_DRAW;
   return lapRaceInView({ corridor, race: ride.race, startAlong: ride.startAlong });
 }
 
