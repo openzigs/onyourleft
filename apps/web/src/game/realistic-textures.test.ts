@@ -55,6 +55,7 @@ import { siteAt, siteSpacing, type Site } from './settlements';
 import { streetsAt } from './streets';
 import { corridorOrigin } from './terrain';
 import { sceneFrame } from './scene';
+import { REALISTIC_HORIZON_HAZE_SHARE } from './realistic-light';
 import { seasonOn, type Season } from './season';
 import { atStartLine } from './simulation';
 import {
@@ -1751,10 +1752,22 @@ function blindCanvas(): HTMLCanvasElement {
   } as unknown as HTMLCanvasElement;
 }
 
-/** What a three view holds that this reads: the ground mesh, and the mapped buildings' belt. */
+/**
+ * What a three view holds that this reads: the ground mesh, the mapped
+ * buildings' belt and its house models' mesh, and the horizon ridge's colours.
+ */
 interface StagedView {
   readonly terrainMesh: { readonly material: unknown };
-  readonly mappedBuildings: { materialOf(surface: 'roof-tiles'): unknown } | undefined;
+  readonly mappedBuildings:
+    | {
+        materialOf(surface: 'roof-tiles'): unknown;
+        readonly modelMesh: { readonly material: unknown };
+      }
+    | undefined;
+  readonly horizonColours: {
+    readonly ridge: readonly [number, number, number];
+    readonly ridgeFoot: readonly [number, number, number];
+  };
 }
 
 describe('the route’s winter, staged by a view on the loaded world — #1623', () => {
@@ -1817,9 +1830,11 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
         (
           (view as unknown as StagedView).terrainMesh.material as { color: { getHex(): number } }
         ).color.getHex();
-      const roofSnow = (): unknown => {
-        const roof = (realistic as unknown as StagedView).mappedBuildings?.materialOf(
-          'roof-tiles',
+      // #1686: a mapped roof's, or the house models' beside it.
+      const roofSnow = (of: 'mapped' | 'model' = 'mapped'): unknown => {
+        const mapped = (realistic as unknown as StagedView).mappedBuildings;
+        const roof = (
+          of === 'mapped' ? mapped?.materialOf('roof-tiles') : mapped?.modelMesh.material
         ) as { onBeforeCompile(shader: unknown, renderer: unknown): void } | undefined;
         if (roof === undefined) throw new Error('the frame drew no mapped roof');
         const shader = {
@@ -1850,10 +1865,36 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
         return shader.uniforms['oylVergeSlush']?.value;
       };
 
+      /**
+       * #1686: the ground the horizon ridge was hazed from, sRGB channels out of
+       * 255, recovered from the ridge and the foot it leans toward by the share
+       * the drawn world hazes it by.
+       */
+      const ridgeGroundOf = (view: GameView, share: number): readonly number[] => {
+        const { ridge, ridgeFoot } = (view as unknown as StagedView).horizonColours;
+        return ridge.map((channel, at) => {
+          const linear = (channel - (ridgeFoot[at] as number) * share) / (1 - share);
+          return 255 * (linear <= 0.0031308 ? linear * 12.92 : 1.055 * linear ** (1 / 2.4) - 0.055);
+        });
+      };
+      const channelsOf = (hex: number): readonly number[] => [
+        (hex >> 16) & 0xff,
+        (hex >> 8) & 0xff,
+        hex & 0xff,
+      ];
+      const hazedFrom = (view: GameView, share: number, hex: number): void => {
+        const recovered = ridgeGroundOf(view, share);
+        channelsOf(hex).forEach((channel, at) => expect(recovered[at]).toBeCloseTo(channel, 2));
+      };
+
       realistic.setSeason(winter);
       realistic.render(framed());
       expect(groundOf(realistic)).toBe(snowedGround);
       expect(roofSnow()).toBe(roofSnowIn(frame.world, 1));
+      // #1686: the house models' roofs read the same snow, by the same uniform.
+      expect(roofSnow('model')).toBe(roofSnowIn(frame.world, 1));
+      // #1686: and the far ridge is hazed from the very ground the near mesh is drawn in.
+      hazedFrom(realistic, REALISTIC_HORIZON_HAZE_SHARE, snowedGround);
       expect(vergeSlushIn(frame.world, 1)).toBeGreaterThan(0.5);
       expect(vergeSlush(realistic)).toBe(vergeSlushIn(frame.world, 1));
 
@@ -1863,6 +1904,8 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
       stylised.render(framed());
       expect(groundOf(stylised)).toBe(frame.world.groundColour);
       expect(roofSnow()).toBe(0);
+      expect(roofSnow('model')).toBe(0);
+      hazedFrom(stylised, renderer.HORIZON_HAZE_SHARE, frame.world.groundColour);
       expect(vergeSlush(realistic)).toBe(0);
 
       // And the realistic world's summer is today's ground, with bare roofs.
@@ -1870,6 +1913,8 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
       realistic.render(framed());
       expect(groundOf(realistic)).toBe(frame.world.groundColour);
       expect(roofSnow()).toBe(0);
+      expect(roofSnow('model')).toBe(0);
+      hazedFrom(realistic, REALISTIC_HORIZON_HAZE_SHARE, frame.world.groundColour);
       expect(vergeSlush(realistic)).toBe(0);
     } finally {
       stylised.destroy();
