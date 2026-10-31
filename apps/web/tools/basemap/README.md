@@ -95,5 +95,11 @@ profile.
 - **Size**: the live Protomaps US archive is 19,155,814,749 bytes. The research
   of 2026-10-27 estimated growth of 0.2–0.5 % for these fields, and about 2–3 KB
   raw for a 2 000-footprint corridor. `BuildingTagsTest` prints the synthetic
-  corridor's measured growth, and the build record holds the archive's size.
-- **Time**: measured from the build record (`seconds`), per region.
+  corridor's measured growth (64,670 bytes raw before, 69,060 after: +4,390
+  bytes), and the build record holds the archive's size. The US build of
+  2026-10-31, from the dated Geofabrik extract of 2026-10-30, is
+  18,258,708,801 bytes. That is smaller than the live archive, which was built
+  by Protomaps from a different OSM date with its own settings, so the two
+  sizes do not isolate the fields' cost.
+- **Time**: measured from the build record (`seconds`), per region. The US
+  build of 2026-10-31 took 6,670 s on the owner's Mac.
