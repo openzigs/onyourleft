@@ -169,8 +169,20 @@ describe('an overwritten item leaves no bytes behind (#1944)', () => {
   /** A place no other bytes in the database spell: a zone's label and its centre. */
   const LABEL = 'Lamorna-1944-Cove';
   const LATITUDE = 50.061_429;
+  /**
+   * Enough words that the list spans several database pages (about 8 KB over
+   * 4 KB pages), and a list sent again that fits in one. A one-page list is
+   * rewritten whole, so truncating the log clears it without `secure_delete`;
+   * here the zone sits in an overflow page the short list frees, which only
+   * `secure_delete` zeroes, so this test is red without either half.
+   */
+  const WORDS = Array.from(
+    { length: 100 },
+    (_unused, index) =>
+      `${String(index).padStart(3, '0')}${'w'.repeat(MAXIMUM_MASKED_WORD_LENGTH - 3)}`,
+  );
   const LIST = JSON.stringify({
-    words: ['x'],
+    words: WORDS,
     zones: [{ label: LABEL, latitude: LATITUDE, longitude: -5.563_1, radius: 250 }],
   } satisfies MaskingItemBody);
   const WITHOUT_THE_ZONE = JSON.stringify({ words: ['x'], zones: [] } satisfies MaskingItemBody);
