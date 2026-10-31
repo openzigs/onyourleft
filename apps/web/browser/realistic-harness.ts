@@ -71,8 +71,8 @@ import {
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
-import { villageDrawCallCeiling } from '../src/game/realistic-budget';
-import type { SceneFrame } from '../src/game/port';
+import { stylisedSceneDrawCallCeiling, villageDrawCallCeiling } from '../src/game/realistic-budget';
+import type { GameView, SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
@@ -88,6 +88,7 @@ import {
   firDepthPrepassOf,
   foliageOrderedOf,
   groundBlendOf,
+  lapRaceDrawnOf,
   loadRealisticWorld,
   loadSceneryModels,
   mappedBlobsShownOf,
@@ -128,6 +129,7 @@ import {
 } from './realistic/config';
 import { deliveryAhead } from './realistic/delivery';
 import { drawCounter } from './realistic/draws';
+import { RACE_HIT, lapRaceAhead, raceBotsAhead } from './realistic/lap-race';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
@@ -147,6 +149,8 @@ const VILLAGE_TREE_KIND = HOLIDAY_DECORATIONS['winter-lights']?.find(
 );
 const VILLAGE_TREE_TRIANGLES =
   VILLAGE_TREE_KIND === undefined ? 0 : decorationKindTriangles(VILLAGE_TREE_KIND);
+/** #1972: the rung's scenery budgets with nothing in them, for `race=worst`'s frame. */
+const SCENERY_FREE = { scatterItems: 0, structureItems: 0, people: 0 } as const;
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
 /** Where a long ride starts, wraps back to, and how much road it rides before it does. */
@@ -333,8 +337,45 @@ declare global {
        * otherwise. Absent with the result.
        */
       readonly villageCeiling?: number;
+      /**
+       * #1972: what a lap race was on the last frame before the result was
+       * published — the racers the frame carried and what the view's belt
+       * drew of each piece, read back off its instances
+       * (`three-renderer.ts` §`lapRaceDrawnOf`). Absent unless `?race=` asked
+       * for a race. @see realistic/lap-race.ts
+       */
+      readonly race?: LapRaceDrawn;
+      /**
+       * #1972: the scene ceiling that same frame is held to,
+       * `realistic-budget.ts` §`stylisedSceneDrawCallCeiling` of the frame the
+       * page drew — the lap race's 14 while it carries a race. Absent unless
+       * `?race=` asked for one, because the stylised world's own 11 is the
+       * scenery-free frame's and this page's ordinary frames carry scenery.
+       */
+      readonly raceCeiling?: number;
     };
   }
+}
+
+/** What a lap race drew — #1972. @see Window.__oylRealistic */
+export interface LapRaceDrawn {
+  /** The racers the frame carried: the rider and the bots. */
+  readonly racers: number;
+  /** What the view's belt drew of the pick-up points, puddles and hit effects. */
+  readonly pickUps: number;
+  readonly hazards: number;
+  readonly hits: number;
+}
+
+/** The race the view drew on its last frame, read back off the belt's own instances. */
+function raceDrawnOf(view: GameView, frame: SceneFrame): LapRaceDrawn {
+  return {
+    racers: frame.markers.filter((marker) => marker.kind === 'rider' || marker.kind === 'bot')
+      .length,
+    pickUps: lapRaceDrawnOf(view, 'pickUps').length,
+    hazards: lapRaceDrawnOf(view, 'hazards').length,
+    hits: lapRaceDrawnOf(view, 'hits').length,
+  };
 }
 
 const errors: string[] = [];
@@ -622,19 +663,27 @@ async function run(): Promise<void> {
       origin,
       distance,
       elapsed: config.at === undefined ? elapsed : 0,
-      rung: worldRung(state),
+      // #1972: a race is held to the SCENERY-FREE frame's ceiling, so it carries none.
+      rung: config.race === undefined ? worldRung(state) : SCENERY_FREE,
       // #1534's pair: the villages' ground left wooded.
       settlementsWooded: config.leversOff.includes('settlement-clearing'),
       // #1541's pair: the people off.
       peopleOff: config.leversOff.includes('people'),
       // #1542's three, each off on its own.
       countrysideOff: countrysideWithLevers(config.leversOff),
+      // #1972: a lap race's bots in the pacer's place, on the scenery-free
+      // frame `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of.
+      ...(config.race === undefined
+        ? {}
+        : { race: { bots: raceBotsAhead(distance), riderHit: RACE_HIT } }),
       ...(town === undefined ? {} : { town }),
     });
     // #1815: a Delivery round's worst case on the road ahead, or no round at all.
     if (config.delivery !== undefined) {
       drawn = { ...drawn, delivery: deliveryAhead(drawn, distance, config.delivery) };
     }
+    // #1972: a lap race's pieces on the road ahead, or no race at all.
+    if (config.race !== undefined) drawn = lapRaceAhead(drawn, distance);
     view.render(drawn);
     lastFrameCalls = counter.takeCalls();
     callsInWindow += lastFrameCalls;
@@ -682,6 +731,8 @@ async function run(): Promise<void> {
               markers: deliveryDrawnOf(view, 'markers').length,
               obstacles: deliveryDrawnOf(view, 'obstacles').length,
             };
+      const race =
+        config.race === undefined || drawn === undefined ? undefined : raceDrawnOf(view, drawn);
       publish({
         result,
         layers,
@@ -689,11 +740,21 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(delivery === undefined ? {} : { delivery }),
-        ...(drawn === undefined ? {} : { villageCeiling: villageDrawCallCeiling(drawn) }),
+        // A race is the stylised world's frame; the village's ceiling is no part of it.
+        ...(drawn === undefined || config.race !== undefined
+          ? {}
+          : { villageCeiling: villageDrawCallCeiling(drawn) }),
+        ...(race === undefined || drawn === undefined
+          ? {}
+          : { race, raceCeiling: stylisedSceneDrawCallCeiling(drawn) }),
       });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
-      console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);
+      // #1972: a race run says so on this line too, and what its belt drew, so the
+      // reading taken off `adb logcat` alone cannot be of a frame with no race in it.
+      console.log(
+        `OYL-REALISTIC ${JSON.stringify(race === undefined ? result : { ...result, race })}`,
+      );
       // #616: a share read with something the switch could not place still on
       // is a share of an unknown thing, so a run that switched a layer off says so.
       if (config.layersOff.length > 0 && layers.unplaced.length > 0) {
@@ -734,6 +795,9 @@ async function run(): Promise<void> {
         clock,
         buffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
         notice,
+        ...(config.race === undefined || drawn === undefined
+          ? {}
+          : { race: raceDrawnOf(view, drawn) }),
       });
     }
   };

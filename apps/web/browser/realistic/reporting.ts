@@ -24,6 +24,16 @@ export interface ReadoutInput {
   readonly clock: MeasurementClock;
   readonly buffer: readonly [number, number];
   readonly notice: string | undefined;
+  /**
+   * #1972: the lap race the frame carries and what its belt drew, or absent
+   * for a ride with none. A page that drew a race says so on its screen.
+   */
+  readonly race?: {
+    readonly racers: number;
+    readonly pickUps: number;
+    readonly hazards: number;
+    readonly hits: number;
+  };
 }
 
 /**
@@ -42,6 +52,10 @@ export function readoutLine(input: ReadoutInput): string {
     `${input.world} world · ${input.rung} · ` +
     `${input.frameCap === 'display' ? 'display rate' : `capped at ${String(input.frameCap)} fps`} · ` +
     `${input.phase}` +
+    (input.race === undefined
+      ? ''
+      : ` · lap race: ${String(input.race.racers)} racers, ${String(input.race.pickUps)} pick-ups, ` +
+        `${String(input.race.hazards)} puddles, ${String(input.race.hits)} hits`) +
     ` · frame p50 ${readoutMs(live.p50)} · ` +
     `buffer ${String(input.buffer[0])}×${String(input.buffer[1])}` +
     (input.notice === undefined ? '' : `\n${input.notice}`)

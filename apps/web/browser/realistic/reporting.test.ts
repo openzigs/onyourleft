@@ -76,3 +76,16 @@ describe('the realistic page’s readout line — #480', () => {
     expect(line(measuredClock())).toContain('realistic · display rate · measured');
   });
 });
+
+describe('the realistic page’s readout line, racing — #1972', () => {
+  it('says a lap race was drawn and what the belt drew of it', () => {
+    const racing = line(measuredClock(), {
+      race: { racers: 8, pickUps: 9, hazards: 10, hits: 5 },
+    });
+    expect(racing).toContain('lap race: 8 racers, 9 pick-ups, 10 puddles, 5 hits');
+  });
+
+  it('says nothing of a race on a ride with none', () => {
+    expect(line(measuredClock())).not.toContain('lap race');
+  });
+});

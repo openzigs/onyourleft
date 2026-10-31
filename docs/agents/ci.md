@@ -1311,6 +1311,8 @@ climb, went to the shard with the most room, `browser-3` (its `chromium` part 3.
 **And 14 since [#1816](https://github.com/openzigs/onyourleft/issues/1816)**:
 `ride-delivery.browser.spec.ts`, three cases that ride a Delivery round in the real game stage (one
 of them on Playwright's clock, about 25 s on a Mac), beside `ride-room.browser.spec.ts`.
+**And `browser-1` names `realistic-lap-race.browser.spec.ts` since [#1972](https://github.com/openzigs/onyourleft/issues/1972)**:
+three cases, one stylised load each (about 4 s on a Mac), beside the other realistic-page specs.
 
 `playwright test --list` over each script's arguments gives 887 + 439 + 434 cases in 14 + 18 + 12
 files, the 1 760 cases in 44 files of the whole `chromium` project (the other four listed files
