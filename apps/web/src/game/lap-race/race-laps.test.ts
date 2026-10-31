@@ -4,8 +4,10 @@
  * #1897: the lap race counts laps by the game's own arithmetic. The model is
  * `@onyourleft/domain` §`lapsAt`, the game's count is `course-laps.ts`
  * §`courseLapsDone`, and this calls both over the same loop and the same
- * odometer readings, so the lap the HUD shows and the lap the race counts
- * cannot drift apart.
+ * odometer readings, so the two arithmetics cannot drift apart. The HUD and
+ * the race are not handed the same reading — the HUD counts at the effort
+ * distance and the race at the drawn distance (ADR 0060 D-3.3) — so within B
+ * of a lap line their laps may differ by one, by design.
  */
 
 import {

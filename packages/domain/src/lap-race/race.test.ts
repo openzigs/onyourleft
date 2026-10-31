@@ -131,6 +131,12 @@ describe('applyOffset never moves effortDistance (ADR 0060 D-3.4)', () => {
     expect(applyOffset(racer, -25).raceOffset).toBe(-B);
     expect(applyOffset(racer, 3).raceOffset).toBe(3);
     expect(applyOffset(applyOffset(racer, 8), 4, 5).raceOffset).toBe(5);
+    expect(applyOffset(racer, 25, B).raceOffset).toBe(B);
+  });
+
+  it('refuses a bound above B: raising B needs a superseding ADR (ADR 0060)', () => {
+    expect(() => applyOffset(startingRacer('r'), 1, B + 0.5)).toThrow(LapRaceError);
+    expect(() => applyOffset(startingRacer('r'), 1, B * 4)).toThrow(LapRaceError);
   });
 
   it('withEffortDistance changes the effort and leaves the offset', () => {
@@ -171,6 +177,48 @@ describe('laps and the finish, at the drawn distance', () => {
     expect(applyOffset(finished, -10)).toBe(finished);
     const later = settle(applyOffset(withEffortDistance(finished, 3_500), -10), course, 30);
     expect(later).toEqual({ ...finished, effortDistance: 3_500 });
+  });
+
+  it('finishes on the lap count, never a lap short within an ulp of the line', () => {
+    // Past lapLength × laps by `>=`, but floor(distance / length) is 12: the
+    // finish and the lap count must not disagree, or the result freezes on lap 12.
+    const lap = 2655.900242345683;
+    const line = raceCourse(lap, 13);
+    const atLine = settle(withEffortDistance(startingRacer('r'), 34526.70315049388), line, 7);
+    expect(atLine.lapsDone).toBe(12);
+    expect(atLine.finishedAtMs).toBeNull();
+    expect(atLine.lineMetres).toBeNull();
+  });
+
+  it('agrees on laps and the finish at every reading near the line (seeded)', () => {
+    const random = seeded(1949);
+    // A full 53-bit lap length: 32-bit draws make products too exact to reach the edge.
+    const fine = (): number => random() + random() / 4_294_967_296;
+    const bits = new Float64Array(1);
+    const word = new BigInt64Array(bits.buffer);
+    /** `value` moved `ulps` representable doubles up (or down, for a negative count). */
+    const nudged = (value: number, ulps: number): number => {
+      bits[0] = value;
+      word[0] = (word[0] ?? 0n) + BigInt(ulps);
+      return bits[0] ?? Number.NaN;
+    };
+    let edges = 0;
+    for (let index = 0; index < 5_000; index += 1) {
+      const lap = 200 + fine() * 4_000;
+      const laps = 1 + Math.floor(random() * 30);
+      const product = lap * laps;
+      for (let ulps = -4; ulps <= 4; ulps += 1) {
+        const at = nudged(product, ulps);
+        // The old expression would have finished this racer a lap short.
+        if (at >= product && lapsAt(lap, at) < laps) edges += 1;
+        const racer = settle(withEffortDistance(startingRacer('r'), at), raceCourse(lap, laps), 1);
+        const label = `lap ${String(lap)} laps ${String(laps)} at ${String(at)}`;
+        expect(racer.finishedAtMs !== null, label).toBe(racer.lapsDone === laps);
+        expect(racer.finishedAtMs !== null, label).toBe(lapsAt(lap, at) >= laps);
+      }
+    }
+    // The cases reach the edge where `>=` and `floor` disagree, often.
+    expect(edges).toBeGreaterThan(100);
   });
 
   it('keeps following the physics after the finish: the effort is the ride’s, not the race’s', () => {
@@ -244,12 +292,15 @@ describe('refusals name the field and the constraint, never the value (ADR 0004 
     ],
     ['offset-not-finite', 'deltaMetres', () => applyOffset(startingRacer('r'), Number.NaN)],
     ['bound-out-of-range', 'bound', () => applyOffset(startingRacer('r'), 1, -0.1278)],
+    ['bound-out-of-range', 'bound', () => applyOffset(startingRacer('r'), 1, 40)],
+    ['bound-out-of-range', 'bound', () => applyOffset(startingRacer('r'), 1, 10.5)],
     ['instant-not-finite', 'atMs', () => settle(startingRacer('r'), raceCourse(1, 1), Number.NaN)],
   ] as const)('%s names %s', (code, field, act) => {
     const error = refused(act);
     expect(error.code).toBe(code);
     expect(error.name).toBe('LapRaceError');
     expect(error.message).toContain(field);
-    expect(error.message).not.toMatch(/-?\d+\.\d|NaN|Infinity/);
+    // Any digit at all: a decimal, an integer (`40`) or the bound itself.
+    expect(error.message).not.toMatch(/\d|NaN|Infinity/);
   });
 });

@@ -21,7 +21,7 @@ export type LapRaceErrorCode =
   | 'effort-distance-not-finite'
   /** An offset change that is not a finite number of metres. */
   | 'offset-not-finite'
-  /** An offset bound that is not a finite number of metres above zero. */
+  /** An offset bound that is not a finite number of metres above zero, or one above B. */
   | 'bound-out-of-range'
   /** An instant that is not a finite number of milliseconds. */
   | 'instant-not-finite';

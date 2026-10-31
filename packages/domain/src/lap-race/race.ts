@@ -39,13 +39,16 @@
  * ## Laps, by the odometer's arithmetic
  *
  * {@link lapsAt} is `floor(distance / length)` with the same guards as
- * `apps/web/src/game/course-laps.ts` §`courseLapsDone` on a loop, so the HUD's
- * lap and the model's cannot disagree; an `apps/web` test calls both.
+ * `apps/web/src/game/course-laps.ts` §`courseLapsDone` on a loop, so the two
+ * give the same count **for the same distance**; an `apps/web` test calls
+ * both. They are not handed the same distance: the HUD counts at the rider's
+ * effort distance and this model at the drawn distance (D-3.3), so within B of
+ * a lap line the HUD's lap and the race's may differ by one, by design.
  *
  * ## The finish, and what it fixes
  *
  * {@link settle} counts a racer's laps at its drawn distance and, the first
- * time that distance reaches `laps × lapLength`, stamps `finishedAtMs` with
+ * time that count reaches the race's laps, stamps `finishedAtMs` with
  * the instant the caller passes in and `lineMetres` with the drawn distance
  * then. From then on the race result is final: `finishedAtMs`, `lineMetres`
  * and `lapsDone` never change again, and {@link applyOffset} returns the
@@ -108,7 +111,7 @@ export interface RacerState {
   readonly raceOffset: number;
   /** Laps completed at the drawn distance, at most the race's laps. */
   readonly lapsDone: number;
-  /** The instant the drawn distance first reached the race length, or `null` while still riding. */
+  /** The instant the laps at the drawn distance first reached the race's laps, or `null` while still riding. */
   readonly finishedAtMs: number | null;
   /** The drawn distance at that instant, or `null` while still riding: a same-instant finish's tie-break. */
   readonly lineMetres: number | null;
@@ -179,7 +182,11 @@ export function withEffortDistance(racer: RacerState, effortDistance: number): R
  * `effortDistance` is never read or written here (D-3.4). A finished racer is
  * returned unchanged.
  *
- * @throws {LapRaceError} for a change that is not finite, or a bound that is not a finite number above zero.
+ * `bound` may be smaller than B, never larger: raising B needs a superseding
+ * ADR (ADR 0060), so a caller cannot raise it by passing a wider bound.
+ *
+ * @throws {LapRaceError} for a change that is not finite, or a bound that is
+ * not a number of metres above zero and at most {@link RACE_OFFSET_BOUND_METRES}.
  */
 export function applyOffset(
   racer: RacerState,
@@ -195,6 +202,12 @@ export function applyOffset(
       'bound must be a finite number of metres above zero',
     );
   }
+  if (bound > RACE_OFFSET_BOUND_METRES) {
+    throw new LapRaceError(
+      'bound-out-of-range',
+      'bound must be at most RACE_OFFSET_BOUND_METRES, which only a superseding ADR raises',
+    );
+  }
   if (racer.finishedAtMs !== null) {
     return racer;
   }
@@ -204,7 +217,11 @@ export function applyOffset(
 
 /**
  * Count the racer's laps at its drawn distance, and stamp the finish the first
- * time that distance reaches the race length. Call it after every change to
+ * time that count reaches the race's laps. The finish is derived from the lap
+ * count and not from `at >= lapLength × laps`: the two disagree within an ulp
+ * of the line (a lap of 2655.900242345683 m, 13 laps, at 34526.70315049388 m
+ * is past the product and on lap 12 by `floor`), and a result frozen on a
+ * disagreement would be wrong for good. Call it after every change to
  * either distance, with the instant the change belongs to.
  *
  * @throws {LapRaceError} for an instant that is not finite.
@@ -217,10 +234,11 @@ export function settle(racer: RacerState, course: RaceCourse, atMs: number): Rac
     return racer;
   }
   const at = racePosition(racer);
-  const finished = at >= course.lapLengthMetres * course.laps;
+  const laps = lapsAt(course.lapLengthMetres, at);
+  const finished = laps >= course.laps;
   return {
     ...racer,
-    lapsDone: Math.min(course.laps, lapsAt(course.lapLengthMetres, at)),
+    lapsDone: Math.min(course.laps, laps),
     finishedAtMs: finished ? atMs : null,
     lineMetres: finished ? at : null,
   };
