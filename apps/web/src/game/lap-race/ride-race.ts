@@ -187,6 +187,23 @@ function drawRaceSeed(): number {
 }
 
 /**
+ * Whether a choice is one {@link startLapRaceRide} can race: a whole number of
+ * bots, 1 to {@link LAP_RACE_MOST_BOTS}, and a whole number of laps, at least
+ * one (`@onyourleft/domain` §`raceCourse`). Asked before a ride's first side
+ * effect, so a choice that cannot be raced rides an ordinary ride rather than
+ * throwing once the ride has begun.
+ */
+export function lapRaceChoiceRaceable(choice: LapRaceChoice): boolean {
+  return (
+    Number.isInteger(choice.bots) &&
+    choice.bots >= 1 &&
+    choice.bots <= LAP_RACE_MOST_BOTS &&
+    Number.isInteger(choice.laps) &&
+    choice.laps >= 1
+  );
+}
+
+/**
  * Start the race the rider chose, on the line, at the press: or `undefined`
  * on a route that is not a loop, which has no lap to race (ADR 0060 D-11.1).
  *
