@@ -120,7 +120,7 @@ describe('the lap race’s fields (#1904)', () => {
     race = tick(race, { atMs: 1_000, effortDistances: efforts(1_005, [10, 10, 10]) });
     race = holding(race, RIDER, 'crosswind-gust');
     const readings = lapRaceReadings(hudOf(race));
-    expect(field(readings, LAP_RACE_ITEM_KEY)?.value).toBe('Crosswind gust');
+    expect(field(readings, LAP_RACE_ITEM_KEY)?.value).toBe('Gust');
     expect(field(readings, LAP_RACE_ITEM_KEY)?.word).toBe(true);
     expect(field(readings, LAP_RACE_PLACE_KEY)?.detail).toBe('Lap 2 of 3');
   });
@@ -193,6 +193,8 @@ describe('the lap race’s fields (#1904)', () => {
   it('names every item and every tier in words, none of them the key', () => {
     for (const kind of ITEM_KINDS) {
       expect(ITEM_TEXT[kind].name).not.toBe(kind);
+      // One word on the HUD: a second word is a second line in a 93 px value box.
+      expect(ITEM_TEXT[kind].name).toMatch(/^\S+$/);
       expect(ITEM_TEXT[kind].said.toLowerCase()).toContain(ITEM_TEXT[kind].name.toLowerCase());
     }
     for (const tier of BOT_TIERS) {

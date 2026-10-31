@@ -79,15 +79,27 @@ import {
 import { NO_READING, type HudReading } from './fields';
 import { lapOfLaps } from './lap-text';
 
-/** What an item is called on the HUD, and how a sentence says it. ⚠️ For the owner's approval. */
+/**
+ * What an item is called on the HUD, and how a sentence says it. ⚠️ For the
+ * owner's approval.
+ *
+ * ⚠️ **The HUD's name is ONE word.** *Crosswind gust* was the first cut, and
+ * on the CI runner's fonts *Crosswind* alone ran past the *Item* field's
+ * value box at every corners layout (PR #1957's first run), where on a Mac it
+ * fitted by a pixel (92 px in 93). The widest name now, *Tailwind*, measures
+ * 70 px there, under the ghost's *Finished* (73 px), which
+ * `hud.browser.spec.ts` lays out at the same word size. A sentence has no
+ * width, so it says the item in full. `lap-race-hud.browser.spec.ts` holds
+ * every name on the stage, one stage each.
+ */
 export const ITEM_TEXT: Readonly<
   Record<ItemKind, { readonly name: string; readonly said: string }>
 > = {
   tailwind: { name: 'Tailwind', said: 'a tailwind' },
   tow: { name: 'Tow', said: 'a tow' },
   puddle: { name: 'Puddle', said: 'a puddle' },
-  'crosswind-gust': { name: 'Crosswind gust', said: 'a crosswind gust' },
-  'rain-cape': { name: 'Rain cape', said: 'a rain cape' },
+  'crosswind-gust': { name: 'Gust', said: 'a crosswind gust' },
+  'rain-cape': { name: 'Cape', said: 'a rain cape' },
 };
 
 /**

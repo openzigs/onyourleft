@@ -20,7 +20,14 @@
  * - `start`: a race of twelve on its first lap, nothing held;
  * - `warned`: the same race on its last lap, the rider 11th of 12 holding a
  *   crosswind gust, with a bot behind in the rider's lane holding another —
- *   the widest place, the widest item name and the warning under it.
+ *   the widest place and the warning under the item;
+ * - `held-…`: the `warned` race with the rider holding each other item, so
+ *   every item's name is laid out under the runner's fonts.
+ *
+ * ⚠️ **Every item's HUD name is one word**, and the first cut's
+ * *Crosswind gust* is why: on the CI runner's fonts *Crosswind* alone ran
+ * past the *Item* field's value box at every corners layout (PR #1957's first
+ * run), where on a Mac it fitted by a pixel. The `held-…` stages hold all five.
  *
  * ⚠️ **What it does not prove**: the stage is not `GameView`'s. No lap race
  * runs inside a game ride until #1906, and the notices a real ride can put
@@ -77,7 +84,7 @@ export interface Box {
 
 /** One stage, measured. */
 export interface LapRaceStageMeasurement {
-  /** `none`, `start` or `warned`. */
+  /** `none`, `start`, `warned`, or `held-` and an item. */
   readonly stage: string;
   /** Every HUD panel laid out at a size, by its classes. */
   readonly panels: readonly { readonly name: string; readonly box: Box }[];
@@ -210,6 +217,10 @@ const STAGES: readonly { readonly stage: string; readonly race: ItemRaceState | 
     stage: 'warned',
     race: holding(holding(raceAt(8_100, 10), RIDER, 'crosswind-gust'), 'bot-11', 'crosswind-gust'),
   },
+  ...(['tailwind', 'tow', 'puddle', 'rain-cape'] as const).map((kind) => ({
+    stage: `held-${kind}`,
+    race: holding(holding(raceAt(8_100, 10), RIDER, kind), 'bot-11', 'crosswind-gust'),
+  })),
 ];
 
 function Harness(): JSX.Element {

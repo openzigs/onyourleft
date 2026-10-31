@@ -24,7 +24,8 @@
  * - the race's standings are a panel of their own on a tablet and visually
  *   hidden on a phone (ADR 0051 D-7);
  * - the warning is a SHAPE: the *Item* field is drawn with a dashed outline
- *   on the warned stage and with none on the start stage (SC 1.4.1).
+ *   on the warned stages and with none on the start stage (SC 1.4.1);
+ * - every item's name fits the *Item* field, one stage per item.
  *
  * ## The controls
  *
@@ -42,6 +43,15 @@ import type { Box, LapRaceStageMeasurement } from './lap-race-hud-harness';
 
 const TABLETS = new Set(['1280×800', '1024×768', '800×1280']);
 const RACE_READINGS = ['Place', 'Item'] as const;
+
+/** The stages with a hit coming: the gust held, then each other item (`lap-race-hud-harness.tsx`). */
+const WARNED_STAGES = [
+  'warned',
+  'held-tailwind',
+  'held-tow',
+  'held-puddle',
+  'held-rain-cape',
+] as const;
 const GIVES_WAY = ['Pacer', 'Your best', 'Wind'] as const;
 
 const GIVE_WAY_UNDONE = `
@@ -154,10 +164,10 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       page,
     }) => {
       const measured = await open(page, viewport);
-      expect(measured.map((each) => each.stage)).toEqual(['none', 'start', 'warned']);
+      expect(measured.map((each) => each.stage)).toEqual(['none', 'start', ...WARNED_STAGES]);
       const none = stageOf(measured, 'none');
       expect(none.fields.some((each) => each.label === 'Place')).toBe(false);
-      for (const name of ['start', 'warned']) {
+      for (const name of ['start', ...WARNED_STAGES]) {
         const stage = stageOf(measured, name);
         const at = `${viewport.name}, ${name}`;
         expect(stage.panels.length, at).toBeGreaterThanOrEqual(4);
@@ -202,10 +212,12 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           expect(laidOut(standings), `${at}: standings shown`).toBe(isTablet(viewport));
         }
       }
-      // The warning is a shape on the warned stage, and there is none on the start.
-      const warned = field(stageOf(measured, 'warned'), 'Item');
-      expect(warned.outlineStyle).toBe('dashed');
-      expect(warned.outlineWidth).toBeGreaterThanOrEqual(2);
+      // The warning is a shape on the warned stages, and there is none on the start.
+      for (const name of WARNED_STAGES) {
+        const warned = field(stageOf(measured, name), 'Item');
+        expect(warned.outlineStyle, name).toBe('dashed');
+        expect(warned.outlineWidth, name).toBeGreaterThanOrEqual(2);
+      }
       expect(field(stageOf(measured, 'start'), 'Item').outlineStyle).toBe('none');
     });
   });
