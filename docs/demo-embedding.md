@@ -112,15 +112,25 @@ gate plays it inside a cross-origin frame with `crossOriginIsolated` false. The 
   is always shown, whatever the URL says, so the demo meets SC 2.2.2 by itself and the site
   embedding it owes nothing more for it.
 - **Sizing.** The page is the frame's whole box and never scrolls, at any size from 320 × 180 to
-  3840 × 2160 CSS pixels. The HUD takes the product's own layout for the frame's size:
-  - **736 × 360 and over** (`46rem` × `22.5rem`), the readings sit in the stage's corners over the
-    world, as on a tablet or a phone on its side. The browser gate measures 768 × 432 and
-    1920 × 1080 with every element inside the frame and every HUD panel inside the stage.
-  - **Under that**, the HUD stacks under the world, as on an upright phone, and the stage scrolls
-    within itself to reach it; the page around it does not. The browser gate measures 320 × 180.
-    For readings over the world, give the frame at least 736 × 360. A compact HUD that fits a
-    smaller frame without scrolling is
-    [#1945](https://github.com/openzigs/onyourleft/issues/1945).
+  3840 × 2160 CSS pixels. The HUD's layout follows the frame's size:
+  - **768 × 432 and over** (`46rem` wide and `27rem` tall), the product's own layout: every
+    reading in the stage's corners over the world, as on a tablet or a phone on its side. The
+    browser gate measures 768 × 432 and 1920 × 1080 with every element inside the frame and every
+    HUD panel inside the stage.
+  - **Under 432 px tall, or under 736 px wide and under 752 px tall, from 320 × 180** (#1945), a
+    compact HUD for embeds. The world fills the stage, and along its bottom edge sit power,
+    cadence and heart rate (power and cadence alone under 480 px wide) and _Pause_ and _Stop_.
+    The demo's status line, such as _Loading the realistic world…_, lies over the top of the
+    world, and the source offer shows its three links; its sentence is still read by a screen
+    reader. Nothing scrolls, not even the stage. The browser gate measures 320 × 180, 480 × 270,
+    640 × 360 and 736 × 414: nothing outside the frame, no panel over another, a stage at least
+    half the frame, every control and link reached by Tab, and _Pause_ pressed from the keyboard.
+  - **Under 736 px wide and 752 px tall or more** (`47rem`), an upright frame, the product's
+    single-column layout, as on an upright phone. The gate does not measure a frame of that shape.
+
+  Any 16 : 9 frame from 320 × 180 shows the demo with its readings and its controls. For every
+  reading the ride HUD has (speed, gradient, distance to go, the elevation strip and the route's
+  plan), give the frame at least 768 × 432.
 
 ## The URL parameters
 

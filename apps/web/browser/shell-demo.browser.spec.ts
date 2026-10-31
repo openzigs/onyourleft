@@ -91,10 +91,12 @@
  * demo's `index.html` is answered with the `frame-ancestors` header the guide
  * tells a site to send. The demo plays in that frame, with
  * `crossOriginIsolated` false, and asks nothing of the network, Bluetooth or
- * storage from inside it; the host's viewport is then set to 768, 1920 and
- * 320 CSS pixels wide, which the snippet's 16 : 9 wrapper makes frames of
- * 768 × 432, 1920 × 1080 and 320 × 180. Its control is the same page with
- * `frame-ancestors 'none'`, which the browser refuses to frame.
+ * storage from inside it; the host's viewport is then set to 768, 1920, 320,
+ * 480, 640 and 736 CSS pixels wide, which the snippet's 16 : 9 wrapper makes
+ * frames of 768 × 432 and 1920 × 1080 (the product's corners layout) and, since
+ * #1945, 320 × 180, 480 × 270, 640 × 360 and 736 × 414 (`demo.css`'s compact
+ * one). Its control is the same page with `frame-ancestors 'none'`, which the
+ * browser refuses to frame.
  */
 
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -729,6 +731,13 @@ test.describe('the demo, built and served — #1648', () => {
       readonly stageScrolls: boolean;
       /** How tall the stage's box is, in CSS pixels: what the lines around it leave the world. */
       readonly stageHeight: number;
+      /**
+       * #1945: every two boxes drawn over the stage that overlap — the HUD's
+       * panels, the map credit, and the status line when it says something.
+       */
+      readonly overlaps: string[];
+      /** #1945: whether the status line, when it says something, is drawn on top where it is. */
+      readonly statusShown: boolean;
     }
 
     function fit(frame: Frame): Promise<Fit> {
@@ -767,6 +776,31 @@ test.describe('the demo, built and served — #1648', () => {
             );
           })
           .map(name);
+        const drawn = [
+          ...document.querySelectorAll('.oyl-hud__panel, .oyl-hud__attribution, .oyl-demo__status'),
+        ].filter((each) => {
+          const at = each.getBoundingClientRect();
+          return at.width > 0 && at.height > 0 && (each.textContent ?? '').trim() !== '';
+        });
+        const overlaps: string[] = [];
+        drawn.forEach((one, index) => {
+          const a = one.getBoundingClientRect();
+          for (const other of drawn.slice(index + 1)) {
+            const b = other.getBoundingClientRect();
+            const across = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const down = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (across > 0.5 && down > 0.5) overlaps.push(`${name(one)} × ${name(other)}`);
+          }
+        });
+        const status = document.querySelector('.oyl-demo__status');
+        const said = status?.getBoundingClientRect();
+        const atStatus =
+          said === undefined
+            ? null
+            : document.elementFromPoint(said.left + 4, said.top + said.height / 2);
+        const statusShown =
+          (status?.textContent ?? '') === '' ||
+          (atStatus !== null && status !== null && status.contains(atStatus));
         const scroller = document.scrollingElement ?? document.documentElement;
         return {
           document: [scroller.scrollWidth, scroller.scrollHeight, innerWidth, innerHeight],
@@ -774,11 +808,13 @@ test.describe('the demo, built and served — #1648', () => {
           panelsOffStage,
           stageScrolls,
           stageHeight: Math.round(box.height),
+          overlaps,
+          statusShown,
         };
       });
     }
 
-    test('plays in the guide’s snippet, cross-origin and not isolated, and fills its frame at three sizes', async ({
+    test('plays in the guide’s snippet, cross-origin and not isolated, and fills its frame at six sizes', async ({
       context,
       page,
     }) => {
@@ -821,25 +857,97 @@ test.describe('the demo, built and served — #1648', () => {
             stageScrolls: false,
           });
       }
-      // The smallest: the page still does not scroll, and only the stage scrolls
-      // within itself, to the HUD stacked under the world as on an upright phone.
+      // #1945: the small frames, in `demo.css`'s compact layout. Nothing scrolls,
+      // not even the stage within itself (until #1945 it did, to the HUD
+      // stacked under the world), every panel is on the stage, none is over
+      // another or under the status line, and the stage is at least half the
+      // frame: "usable", where #1654 could only hold it above 0 px (39 px on a
+      // Mac at 320 × 180). The realistic world answers 404 here, so the status
+      // line carries its failure notice, the longest it says. 736 × 414 is the
+      // widest 16 : 9 frame below 27 rem tall, the compact layout's edge.
+      for (const width of [320, 480, 640, 736]) {
+        const height = Math.round((width * 9) / 16);
+        await frameWidth(page, frame, width);
+        await expect
+          .poll(() => fit(frame))
+          .toMatchObject({
+            document: [width, height, width, height],
+            outside: [],
+            panelsOffStage: [],
+            stageScrolls: false,
+            overlaps: [],
+            statusShown: true,
+          });
+        const small = await fit(frame);
+        // Printed, for the arithmetic: what the label, the offer and the fonts leave.
+        console.info(
+          `demo in a ${String(width)} × ${String(height)} frame: a stage ${String(small.stageHeight)} px tall`,
+        );
+        expect(small.stageHeight).toBeGreaterThanOrEqual(height / 2);
+        // The control for `statusShown` and `overlaps`: the notice is there to measure.
+        await expect(frame.locator('.oyl-demo__status')).toContainText('could not be loaded');
+        // Fewer readings, but readings, and Pause where it can be pressed (SC 2.2.2).
+        await expect(frame.locator('.oyl-hud__fields--primary')).toBeInViewport();
+        await expect(frame.locator('.oyl-hud__fields--secondary')).toBeHidden();
+        await expect(frame.getByRole('button', { name: 'Pause' })).toBeInViewport({ ratio: 1 });
+        await expect(frame.getByRole('link', { name: 'Source code' })).toBeInViewport();
+        await expect(frame.getByText('Demo: scripted riders, not a real ride')).toBeInViewport();
+      }
+
+      // #1945, the accessibility of the smallest frame, which jsdom's audit
+      // (`DemoPage.a11y.test.tsx`) cannot lay out: every control and link is
+      // reached by Tab, in the frame and not under anything when it is (SC
+      // 2.4.11), each control at least SC 2.5.5's 44 px, and Pause still
+      // pauses from the keyboard.
       await frameWidth(page, frame, 320);
-      await expect
-        .poll(() => fit(frame))
-        .toMatchObject({
-          document: [320, 180, 320, 180],
-          outside: [],
-          stageScrolls: true,
+      await expect.poll(() => fit(frame)).toMatchObject({ stageScrolls: false, overlaps: [] });
+      const reachable = await frame.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('a[href], button, summary')].map((each) =>
+          (each.textContent ?? '').trim(),
+        ),
+      );
+      expect(reachable).toEqual(
+        expect.arrayContaining(['Pause', 'Stop', 'Source code', 'Third-party notices']),
+      );
+      // From the host page: the frame is all it has, so the first Tab goes into it.
+      const focused: string[] = [];
+      for (let step = 0; step <= reachable.length; step += 1) {
+        await page.keyboard.press('Tab');
+        const at = await frame.evaluate(() => {
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement) || active === document.body) return undefined;
+          const box = active.getBoundingClientRect();
+          // The first line's box: a link that wraps has a bounding box whose
+          // middle can be the space beside it.
+          const line = active.getClientRects()[0] ?? box;
+          const top = document.elementFromPoint(
+            line.left + line.width / 2,
+            line.top + line.height / 2,
+          );
+          return {
+            text: (active.textContent ?? '').trim(),
+            control: active.tagName === 'BUTTON',
+            inFrame:
+              box.left >= -0.5 &&
+              box.top >= -0.5 &&
+              box.right <= innerWidth + 0.5 &&
+              box.bottom <= innerHeight + 0.5,
+            uncovered: top !== null && (top === active || active.contains(top)),
+            size: [Math.round(box.width), Math.round(box.height)],
+          };
         });
-      // Printed, for the arithmetic: what a two-line notice and the offer leave.
-      const smallest = await fit(frame);
-      console.info(`demo in a 320 × 180 frame: a stage ${String(smallest.stageHeight)} px tall`);
-      // Some stage is left under the realistic world's two-line failure notice:
-      // with that line at 1 rem, CI's fonts left none and the page ran 2 px past
-      // the frame. How much is left goes with the fonts (39 px on a Mac).
-      expect(smallest.stageHeight).toBeGreaterThan(0);
-      await expect(frame.getByRole('link', { name: 'Source code' })).toBeInViewport();
-      await expect(frame.getByText('Demo: scripted riders, not a real ride')).toBeInViewport();
+        if (at === undefined) continue;
+        focused.push(at.text);
+        expect(at, at.text).toMatchObject({ inFrame: true, uncovered: true });
+        if (at.control) {
+          expect(Math.min(...at.size), at.text).toBeGreaterThanOrEqual(44);
+        }
+      }
+      expect(focused).toEqual(expect.arrayContaining(['Pause', 'Stop', 'Source code']));
+      await frame.getByRole('button', { name: 'Pause' }).focus();
+      await page.keyboard.press('Enter');
+      await expect.poll(async () => (await last(frame))?.state).toBe('paused');
+      await expect(frame.getByRole('button', { name: 'Play' })).toBeInViewport({ ratio: 1 });
 
       expect(await findings(context, frame, watched)).toEqual([]);
       expect(watched.requests).toContain(`${DEMO_ORIGIN}/${query}`);
