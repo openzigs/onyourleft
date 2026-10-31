@@ -17,7 +17,7 @@
  * bots never do (ADR 0060 D-2), and `lap-race-cannot-reach-trainer.test.ts`
  * walks this directory.
  *
- * @unwired #1906 starts a lap race inside a game ride with these; until then only tests reach this module.
+ * Since #1906 `ride-race.ts` applies all four when a ride starts and steps a race.
  */
 
 import {

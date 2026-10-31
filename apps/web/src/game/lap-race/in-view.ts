@@ -14,13 +14,12 @@
  * they add none. This module decides **where** each piece is and how a hit
  * effect moves, and nothing about how anything looks.
  *
- * @unwired Nothing runs a lap race inside a ride yet. #1906 gives this
- * module its production caller when it runs a solo race in a game ride and
+ * Since #1906 `ride-race.ts` is its production caller: a ride running a race
  * hands {@link lapRaceInView}'s result to the view on `SceneFrame.lapRace`,
  * each racer's {@link hitLook} on its marker, and the bots through
- * `SceneInput.raceBots`; until then only its tests and the browser gate's
- * `lap-race-harness.ts` reach it. The frame's types are `port.ts`', so the
- * view reaches none of the lap race's modules.
+ * `SceneInput.raceBots`; the browser gate's `lap-race-harness.ts` draws it
+ * too. The frame's types are `port.ts`', so the view reaches none of the lap
+ * race's modules.
  *
  * ## What there is to draw
  *

@@ -292,7 +292,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * item control, the item key or a pad's button asks to use the held item.
    * With it the HUD shows `ItemControl` in its actions panel, inside the
    * touch lock and exempt from none of it; `undefined` on every ride that
-   * runs no lap race, which until #1906 is every ride.
+   * runs no lap race (#1906).
    */
   readonly items?: ItemInputPort | undefined;
 }

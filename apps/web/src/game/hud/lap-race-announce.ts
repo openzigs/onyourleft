@@ -4,7 +4,8 @@
  * A solo lap race, through the HUD's one live region — #1904 (epic #1894,
  * ADR 0060), on `hud/delivery-announce.ts`'s pattern.
  *
- * @unwired #1906 runs a lap race inside a game ride; until then only tests reach this module.
+ * Since #1906 `lap-race/ride-race.ts` owes each tick's changes here, and
+ * `GameView` offers {@link lapRaceEvents} to the region on every frame.
  *
  * ## What it decides
  *
