@@ -51,6 +51,16 @@ describe("the demo page's query — #1647", () => {
   });
 
   it.each([
+    ['?render', { ok: true, preset: CLIMB_PRESET, render: true }],
+    [
+      '?preset=group&route=fixture&render=',
+      { ok: true, preset: GROUP_PRESET, route: 'fixture', render: true },
+    ],
+  ])('%j is the video render’s page — #1655', (search, expected) => {
+    expect(parseDemoQuery(search)).toEqual(expected);
+  });
+
+  it.each([
     ['?speed=2', 'This demo has no setting called “speed”.'],
     ['?preset=climb&world=stylised', 'This demo has no setting called “world”.'],
     ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, not “sprnt”.'],
@@ -69,6 +79,7 @@ describe("the demo page's query — #1647", () => {
     ['?autoplay=0&autoplay=1', 'This demo’s “autoplay” setting is given more than once.'],
     ['?units=miles', 'This demo’s units are one of metric, imperial, not “miles”.'],
     ['?units=Imperial', 'This demo’s units are one of metric, imperial, not “Imperial”.'],
+    ['?render=1', 'This demo’s “render” setting takes no value, not “1”.'],
   ])('refuses %j, saying why, rather than riding the default', (search, message) => {
     expect(parseDemoQuery(search)).toEqual({ ok: false, message });
   });

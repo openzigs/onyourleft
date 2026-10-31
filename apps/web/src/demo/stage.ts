@@ -51,10 +51,18 @@
  * Each frame's time is the timestamp {@link FrameScheduler.request} hands its
  * callback: `requestAnimationFrame`'s in a browser, a stepped number in a test
  * and in the video render (#1655).
+ *
+ * ## Stepped — the video render, #1655
+ *
+ * Given `stepped`, every tick draws, and no tick's time reaches the quality
+ * ladder: a tick is the render's step (`render-clock.ts`), not a measurement of
+ * the device, and a ladder fed it would change the world at whatever frame
+ * rate the render was asked for. So a render is drawn at the rung the stage
+ * starts on, the realistic world's top unless it could not load.
  */
 
 import type { GameRenderer, GameView, SceneFrame } from '../game/port';
-import { FramePacer } from '../game/frame-pacer';
+import { FramePacer, type PacedFrame } from '../game/frame-pacer';
 import {
   INITIAL_QUALITY,
   INITIAL_REALISTIC_QUALITY,
@@ -185,7 +193,12 @@ export interface DemoStageOptions {
    * §`decorationBeltOf`'s, in the demo (#1653).
    */
   readonly drawnDecorations?: ((view: GameView) => number) | undefined;
+  /** #1655: the video render's clock drives the stage — the header's §"Stepped". */
+  readonly stepped?: boolean | undefined;
 }
+
+/** What a stepped stage makes of every tick: drawn, and no sample for the ladder. */
+const STEPPED_FRAME: PacedFrame = { draw: true, frameMs: undefined };
 
 /** FNV-1a over a frame's scenery kinds: changes when the countryside does. */
 function sceneryDigest(frame: SceneFrame): number {
@@ -345,7 +358,8 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
       pass += 1;
     }
     applyShowcase();
-    const paced = pacer.frame(nowMs, worldRung(quality).frameCap);
+    const paced =
+      options.stepped === true ? STEPPED_FRAME : pacer.frame(nowMs, worldRung(quality).frameCap);
     if (paced.frameMs !== undefined && paced.frameMs <= LONGEST_FRAME_MS) {
       const next = nextWorldQuality(quality, { frameMs: paced.frameMs });
       if (next.realistic !== quality.realistic || next.quality.level !== quality.quality.level) {

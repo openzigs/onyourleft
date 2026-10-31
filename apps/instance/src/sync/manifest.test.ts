@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import { ITEM_KINDS, sha256Bytes } from './sync.ts';
-import { authorised, corpusFile, syncWorld, uploadBody } from './sync-testing.ts';
+import { authorised, corpusFile, itemText, syncWorld, uploadBody } from './sync-testing.ts';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -144,9 +144,17 @@ describe('three athletes, the same keys, the same file (#776)', () => {
         for (const kind of ITEM_KINDS) {
           // The SAME key for all three, and a body each can tell apart.
           await readJson(
-            await put(world, rider, kind, 'same-key', `${kind} of ${rider.athleteId}`),
+            await put(
+              world,
+              rider,
+              kind,
+              'same-key',
+              itemText(kind, `${kind} of ${rider.athleteId}`),
+            ),
           );
-          await readJson(await put(world, rider, kind, `only-${rider.athleteId}`, 'mine'));
+          await readJson(
+            await put(world, rider, kind, `only-${rider.athleteId}`, itemText(kind, 'mine')),
+          );
         }
       }
 
@@ -172,7 +180,7 @@ describe('three athletes, the same keys, the same file (#776)', () => {
           const mine: { body: string } = await readJson(
             await authorised(world, rider.token, 'GET', `/v1/sync/items/${kind}/same-key`),
           );
-          expect(mine.body).toBe(`${kind} of ${rider.athleteId}`);
+          expect(mine.body).toBe(itemText(kind, `${kind} of ${rider.athleteId}`));
           for (const other of others) {
             const theirs = await authorised(
               world,

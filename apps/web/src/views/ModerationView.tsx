@@ -733,6 +733,32 @@ function Appeals({
   );
 }
 
+/**
+ * Said on a notice whose notifier details the instance erased (#1381), in
+ * place of their words, name and address, with when and why: six months after
+ * the decision, or twelve after the notice arrived when no decision was
+ * recorded by then (#1923) — or later, if the instance was stopped then.
+ * `afterDecision` is {@link erasedAfterDecision}.
+ */
+export function noticeDetailsErasedText(erasedAt: string, afterDecision: boolean): string {
+  return `Their name, email address and words were erased ${erasedAt}. ${
+    afterDecision
+      ? 'They are erased six months after the decision.'
+      : 'They are erased twelve months after the notice arrived when no decision is recorded by then.'
+  }`;
+}
+
+/**
+ * Whether an erased notice's details went after its decision (#1381) rather
+ * than twelve months after it arrived undecided (#1923). The instance erases
+ * after a decision only six months after it, so that decision is EARLIER than
+ * the erasure; it erases an undecided notice only while no decision is
+ * recorded, so one recorded after is no earlier than the erasure.
+ */
+function erasedAfterDecision(decidedAt: number | null, erasedAt: number): boolean {
+  return decidedAt !== null && decidedAt < erasedAt;
+}
+
 /** The steps a moderator records on a notice, as the screen names them (#912). */
 export const NOTICE_STEP_TEXT = {
   acknowledge: 'I have confirmed receipt',
@@ -963,27 +989,38 @@ function Notices({
                   </ul>
                 </>
               )}
-              {notice.location === null ? null : (
+              {notice.detailsErasedAt !== null || notice.location === null ? null : (
                 <p className="oyl-moderation__quoted">Where, in their words: {notice.location}</p>
               )}
-              <p className="oyl-moderation__quoted">
-                Why they think it is illegal: {notice.explanation}
-              </p>
+              {notice.detailsErasedAt !== null ? null : (
+                <p className="oyl-moderation__quoted">
+                  Why they think it is illegal: {notice.explanation}
+                </p>
+              )}
               <p>
-                {notice.notifierName === null
-                  ? 'They gave no name.'
-                  : `From ${notice.notifierName}.`}{' '}
-                {notice.notifierEmail === null ? (
-                  'They gave no email address, so they cannot be told what you decide.'
+                {notice.detailsErasedAt !== null ? (
+                  noticeDetailsErasedText(
+                    when(notice.detailsErasedAt),
+                    erasedAfterDecision(notice.decidedAt, notice.detailsErasedAt),
+                  )
                 ) : (
                   <>
-                    Write to them at{' '}
-                    {LINKABLE_EMAIL.test(notice.notifierEmail) ? (
-                      <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>
+                    {notice.notifierName === null
+                      ? 'They gave no name.'
+                      : `From ${notice.notifierName}.`}{' '}
+                    {notice.notifierEmail === null ? (
+                      'They gave no email address, so they cannot be told what you decide.'
                     ) : (
-                      notice.notifierEmail
+                      <>
+                        Write to them at{' '}
+                        {LINKABLE_EMAIL.test(notice.notifierEmail) ? (
+                          <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>
+                        ) : (
+                          notice.notifierEmail
+                        )}
+                        .
+                      </>
                     )}
-                    .
                   </>
                 )}{' '}
                 {notice.bonaFide

@@ -48,6 +48,7 @@ import type { InstanceProbes, SidePose } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
+import { NOTICE_RETENTION_SWEEP_PERIOD_MS } from './moderation/notice-retention.ts';
 import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
@@ -618,6 +619,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         // A hosted model needs only a secret to hold a rider's own key under
         // (#1199): a rider who has none is refused `hosted_unavailable`.
         available: async () => local !== undefined || (await secretKey) !== undefined,
+        // #1796: a hosted start names the service the rider's consent names.
+        hostedConsent: sources.recordedConsent,
         now,
         log,
         heartbeatMs: server.analysisHeartbeatMs,
@@ -641,10 +644,26 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         { periodMs: ANALYSIS_SWEEP_PERIOD_MS, run: sweepJobs },
         options.sweepTimers,
       );
+      // #1381: a closed notice's notifier details go six months after its
+      // decision, and an undecided one's twelve months after receipt (#1923;
+      // the owner's rulings of 2026-10-30): once now, for whatever fell due
+      // while the instance was stopped, and every hour after.
+      const moderation = identity.moderation;
+      const eraseNoticeDetails = (): void => {
+        void moderation.eraseExpiredNoticeDetails().catch((error: unknown) => {
+          logUnhandled(log, null, error);
+        });
+      };
+      eraseNoticeDetails();
+      const stopErasingNoticeDetails = sweepOnBoundaries(
+        { periodMs: NOTICE_RETENTION_SWEEP_PERIOD_MS, run: eraseNoticeDetails },
+        options.sweepTimers,
+      );
       stopSweeping = () => {
         stopRateLimitSweep();
         stopEndingRooms();
         stopSweepingJobs();
+        stopErasingNoticeDetails();
       };
     }
     // Replaced, not mutated (above): the accounts when there is an origin, and
@@ -743,6 +762,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       if (keysTimer !== undefined) clearTimeout(keysTimer);
       stopSweeping();
       stopRetrying();
+      // #1796: a test question out now is ended, not left for its 30 s bound.
+      hostedSettings?.stop();
       await analysisJobs?.stop();
       await router.stop();
       await listening.close();

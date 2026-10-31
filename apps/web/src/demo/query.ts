@@ -8,6 +8,7 @@
  * | `preset` | which preset is ridden (`presets.ts`) | `climb`, `sprint`, `group`; default `climb` |
  * | `route` | a baked route's map data and road, read from `routes/` (#1652, `baked-route.ts`) | a route id `demo:bake` wrote; absent rides the synthetic road |
  * | `showcase` | the feature-showcase timeline (#1653, `showcase.ts`), ridden by the `group` preset | present, with no value; `preset`, if given, must be `group` |
+ * | `render` | the video render's stepped clock (#1655, `tools/demo/render-video.ts`): the page moves only when the render steps it | present, with no value |
  * | `autoplay` | whether the demo starts moving on load (#1654) | `1` (default) or `0`: a still frame and a *Play* button, as reduced motion gives |
  * | `controls` | whether the HUD's *Stop* is shown (#1654) | `1` (default) or `0`; *Pause* and *Play* are always shown (owner, 2026-10-30) |
  * | `units` | the HUD's units (#1654) | `metric` (default) or `imperial` |
@@ -27,7 +28,7 @@ import { DEMO_PRESETS } from './presets';
 import type { DemoPreset } from './script';
 
 /** The parameters the page understands. */
-const KNOWN = new Set(['preset', 'route', 'showcase', 'autoplay', 'controls', 'units']);
+const KNOWN = new Set(['preset', 'route', 'showcase', 'render', 'autoplay', 'controls', 'units']);
 
 /** A switch's two values — #1654. */
 const SWITCH = ['0', '1'] as const;
@@ -51,6 +52,8 @@ export type DemoQuery =
       readonly route?: string;
       /** #1653: whether the showcase timeline runs. */
       readonly showcase?: true;
+      /** #1655: the video render drives the page's clock (`render-clock.ts`). */
+      readonly render?: true;
       /** #1654: `?autoplay=0`, the demo starts on a still frame. */
       readonly autoplay?: false;
       /** #1654: `?controls=0`, the HUD's *Stop* is left out; *Pause* and *Play* never are. */
@@ -70,6 +73,10 @@ export function parseDemoQuery(search: string): DemoQuery {
     if (params.getAll(key).length > 1) {
       return { ok: false, message: `This demo’s “${key}” setting is given more than once.` };
     }
+  }
+  const render = params.get('render');
+  if (render !== null && render !== '') {
+    return { ok: false, message: `This demo’s “render” setting takes no value, not “${render}”.` };
   }
   const showcase = params.get('showcase');
   if (showcase !== null && showcase !== '') {
@@ -112,6 +119,7 @@ export function parseDemoQuery(search: string): DemoQuery {
     preset,
     ...(route === null ? {} : { route }),
     ...(showcase === null ? {} : { showcase: true as const }),
+    ...(render === null ? {} : { render: true as const }),
     ...(params.get('autoplay') === '0' ? { autoplay: false as const } : {}),
     ...(params.get('controls') === '0' ? { controls: false as const } : {}),
     ...(units === 'imperial' ? { units: 'imperial' as const } : {}),

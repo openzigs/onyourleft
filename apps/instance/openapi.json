@@ -1763,7 +1763,7 @@
     "/v1/analysis/jobs": {
       "post": {
         "operationId": "startAnalysisJob",
-        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. `endpoint`, on a hosted job only and required there, is the service your device showed you beside its press, and `validation_failed` on `endpoint` unless it is the one your recorded consent names (#1796). Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
         "security": [
           {
             "session": []
@@ -1792,6 +1792,9 @@
                     ]
                   },
                   "rideId": {
+                    "type": "string"
+                  },
+                  "endpoint": {
                     "type": "string"
                   }
                 },
@@ -5941,7 +5944,7 @@
     "/v1/moderation/notices": {
       "get": {
         "operationId": "listNotices",
-        "summary": "The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them.",
+        "summary": "The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them. Six months after a notice’s decision its notifier details are erased (#1381), or twelve months after it arrived when no decision is recorded by then (#1923): its explanation is then empty, its location, name and email `null`, and `detailsErasedAt` says when.",
         "security": [
           {
             "session": []
@@ -6004,6 +6007,12 @@
                           "bonaFide": {
                             "type": "boolean"
                           },
+                          "detailsErasedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
                           "acknowledgedAt": {
                             "type": [
                               "integer",
@@ -6045,6 +6054,7 @@
                           "notifierName",
                           "notifierEmail",
                           "bonaFide",
+                          "detailsErasedAt",
                           "acknowledgedAt",
                           "decidedAt",
                           "decision",

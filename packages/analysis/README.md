@@ -6,9 +6,8 @@ The platform-free core of a model-written ride write-up: the rules, never the en
 | Module | What it is |
 |---|---|
 | `src/budget.ts` | The longest a write-up may take, which the instance's agent reads (ADR 0046 D-7). All that is left of `runner.ts` (#811), which ran a template's steps on the device until #1103 removed it with the device's own write-up paths |
-| `src/template/` | The templates — each step's prompt, bounds and reply contract — and their recorded digests (#810, #835). A shipped prompt changes only as a new template version |
+| `src/template/` | The instance agent's template — what the agent is told, and the fence a tool result arrives in — and its recorded digest (#1098). A shipped prompt changes only as a new template version. The chain's step templates (#810, #835), their reply acceptors and the history passages went in #1797, once #1103 had removed the runner that was their only caller |
 | `src/input.ts` | What a model is sent about a ride: at most eight sections of numbers, no coordinate, no date, no name (#809) |
-| `src/history.ts` | The rider's history passages and the fence they arrive in (#835) |
 | `src/screen/` | The write-up screen and the angle matchers it shares with `apps/web`'s source scan — one set of matchers (ADR 0035 D-4) |
 | `src/pose-summary.ts` | The side camera's pose summary, as numbers (#801) |
 | `src/hosted-mask.ts`, `src/masked-words.ts` | What is masked before anything goes to a hosted model (#839) |
