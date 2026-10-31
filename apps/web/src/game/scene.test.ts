@@ -18,7 +18,7 @@ import { qualitySettings } from './quality';
 import { SCATTER_KINDS, SCATTER_MAX_ITEMS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { northRoute } from './route-fixtures-testing';
-import { cameraPose, ghostFinished, sceneFrame } from './scene';
+import { cameraPose, ghostFinished, placedRiders, sceneFrame, type SceneInput } from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
 import {
   GameSimulation,
@@ -984,5 +984,84 @@ describe('other real riders on the road — #783', () => {
     expect('followed' in (unnamed ?? {})).toBe(false);
     expect('label' in (unnamed ?? {})).toBe(false);
     expect('label' in (frame.markers[0] ?? {})).toBe(false);
+  });
+});
+
+describe('a lap race’s bots on the road — #1902', () => {
+  const setup = straightRoute();
+  const RIDER = 400;
+  const input = (extra: Partial<SceneInput>): SceneInput => ({
+    profile: setup.profile,
+    origin: corridorOrigin(setup.profile),
+    state: {
+      ...atStartLine(setup.profile),
+      ride: { ...atStartLine(setup.profile).ride, distance: metres(RIDER) },
+    },
+    ...extra,
+  });
+  const HIT = { glow: 0.8, scale: 1, spin: 0 } as const;
+
+  it('draws each as a bot marker, after the rider, and none past the road it built', () => {
+    const frame = sceneFrame(
+      input({
+        raceBots: [
+          { distanceMetres: 430, speedMetresPerSecond: 9, lateralMetres: -1.75 },
+          { distanceMetres: 380, speedMetresPerSecond: 9, lateralMetres: 0 },
+          { distanceMetres: 1_900, speedMetresPerSecond: 9, lateralMetres: 1.75 },
+        ],
+      }),
+    );
+    expect(frame.markers.map((marker) => marker.kind)).toEqual(['rider', 'bot', 'bot']);
+  });
+
+  it('draws a bot in its lane away from the rider, its cranks turned from its own odometer', () => {
+    const lanes = [-1.75, 0, 1.75];
+    const placed = (bots: SceneInput['raceBots']) => {
+      const made = input({ raceBots: bots });
+      return placedRiders(made, sceneFrame(made).corridor);
+    };
+    const far = placed(
+      lanes.map((lateralMetres, index) => ({
+        distanceMetres: 440 + 20 * index,
+        speedMetresPerSecond: 9,
+        lateralMetres,
+      })),
+    );
+    expect(far.slice(1).map((rider) => rider.lateral)).toEqual(lanes);
+    expect(far[1]?.marker.crankAngle).toBeCloseTo(simulatedCrankAngle(440), 9);
+    const stopped = placed([{ distanceMetres: 440, speedMetresPerSecond: 0, lateralMetres: 0 }]);
+    expect(stopped[1]?.marker.pedalling).toBe(0);
+  });
+
+  it('moves a bot level with the rider aside of them, never inside them, and never off the road', () => {
+    for (const lateralMetres of [-1.75, 0, 1.75]) {
+      for (const steeredLateral of [undefined, -1.75, 0, 1.75]) {
+        const made = input({
+          steeredLateral,
+          raceBots: [{ distanceMetres: RIDER, speedMetresPerSecond: 9, lateralMetres }],
+        });
+        const [rider, bot] = placedRiders(made, sceneFrame(made).corridor);
+        const label = `lane ${lateralMetres}, steered ${String(steeredLateral)}`;
+        const apart = Math.abs((bot?.lateral ?? 0) - (rider?.lateral ?? 0));
+        expect(apart, label).toBeGreaterThanOrEqual(1.2 - 1e-9);
+        expect(Math.abs(bot?.lateral ?? 0), label).toBeLessThanOrEqual(3.2);
+      }
+    }
+  });
+
+  it('carries each racer’s hit effect to its own marker, and none to a racer nothing hit', () => {
+    const frame = sceneFrame(
+      input({
+        riderHit: HIT,
+        raceBots: [
+          { distanceMetres: 430, speedMetresPerSecond: 9, lateralMetres: 0, hit: HIT },
+          { distanceMetres: 450, speedMetresPerSecond: 9, lateralMetres: 0 },
+        ],
+      }),
+    );
+    expect(frame.markers.map((marker) => marker.hit)).toEqual([HIT, HIT, undefined]);
+    expect('hit' in (frame.markers[2] ?? {})).toBe(false);
+    const ordinary = sceneFrame(input({}));
+    expect('hit' in (ordinary.markers[0] ?? {})).toBe(false);
   });
 });

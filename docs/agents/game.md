@@ -705,6 +705,38 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ADR 0060 D-2.2 (#1898): the same walk and forbidden
                         set over the lap race's roots, `game/lap-race/` and
                         `packages/domain/src/lap-race/`
+    src/game/lap-race/in-view.ts
+                        what a lap-race frame draws (#1902, ADR 0060 D-10.4):
+                        every pick-up point of every lap on the frame's road,
+                        each puddle in its lane until it dries, and each
+                        racer's hit effect (`hitLook`) while a slow-down runs
+                        on them. #1899's items resolve on the tick they are
+                        used, so NOTHING is ever in flight to draw. It reaches
+                        the view on `port.ts` §`SceneFrame.lapRace`, the hit on
+                        `RiderMarker.hit` (so it is drawn where `scene.ts` drew
+                        the racer), and the bots as `bot` markers through
+                        `SceneInput.raceBots`, in their lane and moved aside
+                        only to make room for the rider. `three-renderer.ts`
+                        §`LapRaceBelt` draws it in THREE instanced calls
+                        whatever the count, and the bots cost none: they are
+                        instances of the riders' meshes (#368). ⚠️ **WCAG
+                        2.3.1**: the hit's brightness swings on the RACE's
+                        clock at 0.4 Hz, so a second hit never restarts it,
+                        and under reduced motion it is steady; `in-view.test.ts`
+                        counts the luminance changes over the timeline in both
+                        forms. `@unwired` until #1906 runs a race in a ride.
+                        ⚠️ **Its own ceiling is the STYLISED world's** (#1903,
+                        ADR 0060 D-10.2, stylised first by D-14 Q5):
+                        `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`,
+                        14, the scenery-free start-line frame's 11
+                        (§`STYLISED_SCENE_DRAW_CALLS`, held equal to
+                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS`) and the
+                        belt's three, only while a frame carries a race;
+                        §`stylisedSceneDrawCallCeiling` is the one place that
+                        choice is made. The village's 50 and Delivery's 53
+                        are unchanged, and `villageDrawCallCeiling` never
+                        returns 14. `game.browser.spec.ts` §"#1903" counts the
+                        race's frame; the tablet's reading is owed
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
