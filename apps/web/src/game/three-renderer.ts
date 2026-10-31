@@ -9705,9 +9705,12 @@ export const DECORATION_GLOW_ATTRIBUTE = 'oylGlow';
  * mapping and the fog, so a glowing part still goes into the fog as anything
  * else does.
  *
- * ⚠️ **Steady** (WCAG 2.3.1): it adds no uniform at all — nothing here, or
- * anywhere that updates the belt, changes it from frame to frame, so a rider
- * under `prefers-reduced-motion` sees exactly what anyone else does.
+ * ⚠️ **Steady** (WCAG 2.3.1): it adds no uniform at all — nothing here
+ * changes it from frame to frame, so a rider under `prefers-reduced-motion`
+ * sees exactly what anyone else does. That covers the SHADER only: the lap
+ * race's hit effect writes the instance colour of its materials every frame,
+ * and its steadiness is `hitLook`'s (`lap-race/in-view.ts`), applied by
+ * {@link LapRaceBelt}.
  *
  * Chained after whatever the material already does, and keyed apart, for
  * {@link withSurfaceDetail}'s reason; a three bump that moved a chunk throws.
@@ -10769,6 +10772,8 @@ export interface DrawnLapRacePiece {
   readonly z: number;
   /** How large it was drawn: the instance matrix's scale. */
   readonly scale: number;
+  /** How far it was turned about the vertical, radians: the instance matrix's yaw. */
+  readonly yaw: number;
   /** For a hit effect, the brightness it was drawn at; `undefined` for the others. */
   readonly glow: number | undefined;
 }
@@ -11031,6 +11036,7 @@ export class LapRaceBelt {
           matrices[base + 1] as number,
           matrices[base + 2] as number,
         ),
+        yaw: Math.atan2(-(matrices[base + 2] as number), matrices[base] as number),
         glow: what === 'hits' ? colours?.[at * 3] : undefined,
       });
     }

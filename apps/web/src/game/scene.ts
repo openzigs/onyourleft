@@ -995,8 +995,11 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): nu
  * (`laned`), and moved aside only to make room for the rider, by
  * {@link lateralOf}'s rule for a steered rider: eased by levelness, and held
  * aside while just behind them ({@link heldBehind}), to the side of the rider
- * its lane is on (toward the centre when it is in the rider's own place).
- * Never past {@link DRAWN_LIMIT_METRES}: a lane is at most 1.75 m out and the
+ * its LANE is on: a lane right of the centre is the positive side, any other the
+ * negative, wherever the rider is, so a bot level with the rider never jumps
+ * across them as they steer (the side is the lane's, not a comparison with the
+ * rider's continuous place). A bot in the rider's own place goes outward from
+ * it, not toward the centre. Never past {@link DRAWN_LIMIT_METRES}: a lane is at most 1.75 m out and the
  * rider at most {@link LINE_LIMIT_METRES}, and the bot is only ever moved
  * away from the rider toward its own side of them, which is at most
  * `1.75 + 1.2 = 2.95 m` out.
@@ -1012,7 +1015,7 @@ function lanedLateral(
 ): number {
   const own = riders[0] as Rider;
   const ownLateral = lateralOf(own, riders, line);
-  const side = laned > ownLateral ? 1 : -1;
+  const side = laned > 0 ? 1 : -1;
   const clear = ownLateral + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(laned, clear) : Math.max(laned, clear);
   return laned + (aside - laned) * Math.max(levelness(rider, own), heldBehind(rider, own));

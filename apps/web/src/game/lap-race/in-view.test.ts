@@ -277,10 +277,17 @@ describe('hitLook — #1902, WCAG 2.3.1', () => {
       brightness([first], 1_000 + 100 * index, false),
     );
     expect(Math.max(...glows) - Math.min(...glows)).toBeGreaterThan(HIT_GLOW_SWING);
-    // A second hit at 2.2 s regrows the ring but leaves the brightness where the clock has it.
+    // A second hit at 2.2 s neither regrows the ring nor moves the brightness off the clock.
     const second = slowDown('crosswind-gust', 2_200);
     expect(hitLook([first, second], 2_200, false)?.glow).toBe(hitLook([first], 2_200, false)?.glow);
-    expect(hitLook([first, second], 2_200, false)?.scale).toBeCloseTo(HIT_GROW_FROM, 9);
+    expect(hitLook([first, second], 2_200, false)?.scale).toBe(1);
+    // Hits stacked a slow-down apart never snap the ring back; one after a gap grows in afresh.
+    const chain = [first, second, slowDown('puddle', 5_000)];
+    for (let at = 1_300; at < 9_000; at += 10) {
+      expect(hitLook(chain, at, false)?.scale, `at ${at}`).toBe(1);
+    }
+    const later = slowDown('puddle', 20_000);
+    expect(hitLook([first, later], 20_000, false)?.scale).toBeCloseTo(HIT_GROW_FROM, 9);
     expect(1 / HIT_PULSE_HZ / 2).toBeGreaterThan(1);
   });
 });
