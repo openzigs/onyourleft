@@ -65,6 +65,11 @@ import {
 } from './lap-race/ride-race';
 import type { GameRenderer, SceneFrame } from './port';
 import { lineOffsetAt, racingLine } from './racing-line';
+import {
+  LAP_RACE_SCENE_DRAW_CALLS,
+  STYLISED_SCENE_DRAW_CALLS,
+  stylisedSceneDrawCallCeiling,
+} from './realistic-budget';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { GameSimulation, SIMULATION_STEP_SECONDS, type RiderInput } from './simulation';
@@ -537,6 +542,10 @@ describe('a solo lap race inside a game ride — #1906', () => {
       // Every drawn frame carried the race and its seven bots' inputs.
       expect(ride.drawn.length).toBeGreaterThan(100);
       expect(ride.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
+      // So every frame of the race is held to its own ceiling (#1903, ADR 0060 D-10.2).
+      for (const frame of ride.drawn) {
+        expect(stylisedSceneDrawCallCeiling(frame)).toBe(LAP_RACE_SCENE_DRAW_CALLS);
+      }
       const drawnInputs = [...ride.inputs.values()];
       expect(drawnInputs.every((input) => input.bots !== undefined)).toBe(true);
       expect(drawnInputs.some((input) => input.bots === 7)).toBe(true);
@@ -601,6 +610,10 @@ describe('a solo lap race inside a game ride — #1906', () => {
       const ordinary = await plain();
       expect(ordinary.drawn.length).toBeGreaterThan(100);
       expect(ordinary.drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
+      // An ordinary ride's frame keeps the stylised world's own budget.
+      for (const frame of ordinary.drawn) {
+        expect(stylisedSceneDrawCallCeiling(frame)).toBe(STYLISED_SCENE_DRAW_CALLS);
+      }
       expect([...ordinary.inputs.values()].every((input) => input.bots === undefined)).toBe(true);
       expect(ordinary.fields).toEqual([]);
       expect(ordinary.said.filter((text) => /^(Finished|Lap \d of \d done)/u.test(text))).toEqual(

@@ -59,14 +59,17 @@
 
 import {
   altitudeMetres,
+  createItemRace,
   elevationAt,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
   metres,
   metresPerSecond,
+  raceCourse,
   routeProfile,
   seconds,
+  type Hazard,
   type RouteProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -81,6 +84,7 @@ import {
   type RigPoint,
 } from '../src/game/camera';
 import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
+import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
@@ -192,6 +196,7 @@ import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, glassPanesOf, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   bicycleTreadOf,
+  lapRaceDrawnOf,
   riderKitOf,
   compressedRealisticLoaders,
   drawnWorldOf,
@@ -733,6 +738,16 @@ declare global {
       readonly roomDrawCallsEachOwnMesh: number;
       /** How many remote markers that frame carried — so the room was really there. */
       readonly remoteRidersInRoom: number;
+      /**
+       * #1903: the same scenery-free frame carrying a lap race — the rider
+       * and seven bots, five of the eight hit, every pick-up point of a
+       * three-lap race and ten puddles — and the draw calls it cost, held to
+       * `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`.
+       */
+      readonly lapRaceDrawCalls: number;
+      /** How many racers that frame carried, and what the view's belt drew: the controls. */
+      readonly lapRaceRacers: number;
+      readonly lapRaceDrawn: Readonly<Record<'pickUps' | 'hazards' | 'hits', number>>;
       /**
        * How many pixels beside the road changed when the scenery was added.
        *
@@ -13133,6 +13148,9 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     roomDrawCalls: 0,
     roomDrawCallsEachOwnMesh: 0,
     remoteRidersInRoom: 0,
+    lapRaceDrawCalls: 0,
+    lapRaceRacers: 0,
+    lapRaceDrawn: { pickUps: 0, hazards: 0, hits: 0 },
     sceneryPixelsChanged: 0,
     sceneryPixelWith: NOWHERE,
     sceneryPixelWithout: NOWHERE,
@@ -13380,6 +13398,71 @@ function withRoom(frame: SceneFrame, count: number): SceneFrame {
   return { ...frame, markers: [...frame.markers, ...remote] };
 }
 
+/**
+ * #1903: `frame` carrying a lap race at its worst case for #1902 — seven bots
+ * ahead of the rider in place of the pacer, a lane each in turn, the rider and every other bot hit,
+ * every pick-up point of a three-lap race of 40 m laps from the rider's
+ * place, and ten puddles across the three lanes. The bots are `bot` markers,
+ * as `scene.ts` §`SceneInput.raceBots` makes them; the race's pieces are
+ * placed by the product's own `lapRaceInView`.
+ */
+function withLapRace(frame: SceneFrame): SceneFrame {
+  const rider = frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) return frame;
+  const hit = hitLook([{ rateMetresPerSecond: -2, fromMs: 0, untilMs: 4_000 }], 500, false);
+  const bots: RiderMarker[] = Array.from({ length: 7 }, (_, index) => {
+    const ahead = 6 + index * 4;
+    const across = laneLateral(index % 3);
+    return {
+      ...rider,
+      kind: 'bot',
+      x: rider.x + rider.headingX * ahead - rider.headingZ * across,
+      z: rider.z + rider.headingZ * ahead + rider.headingX * across,
+      ...(index % 2 === 0 ? { hit } : {}),
+    };
+  });
+  // The race starts where the rider is: the corridor point nearest them.
+  let start = frame.corridor.centre[0];
+  for (const point of frame.corridor.centre) {
+    if (
+      start === undefined ||
+      Math.hypot(point.x - rider.x, point.z - rider.z) <
+        Math.hypot(start.x - rider.x, start.z - rider.z)
+    ) {
+      start = point;
+    }
+  }
+  const race = createItemRace({
+    course: raceCourse(40, 3),
+    seed: 1,
+    itemsOn: true,
+    racerIds: ['rider', ...bots.map((_, index) => `bot-${String(index + 1)}`)],
+    startMs: 0,
+  });
+  const hazards: Hazard[] = Array.from({ length: 10 }, (_, index) => ({
+    position: 10 + index,
+    lane: index % 3,
+    ownerId: 'bot-1',
+    untilMs: 30_000,
+    hitIds: [],
+  }));
+  return {
+    ...frame,
+    markers: [
+      // The pacer gives way to the race's seven: eight racers, as #1902's frame.
+      ...frame.markers
+        .filter((marker) => marker.kind !== 'bot')
+        .map((marker) => (marker === rider && hit !== undefined ? { ...marker, hit } : marker)),
+      ...bots,
+    ],
+    lapRace: lapRaceInView({
+      corridor: frame.corridor,
+      race: { ...race, hazards },
+      startAlong: start?.along ?? 0,
+    }),
+  };
+}
+
 async function run(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>('#world');
   const errors: string[] = [];
@@ -13493,6 +13576,9 @@ async function run(): Promise<void> {
   let roomDrawCalls = 0;
   let roomDrawCallsEachOwnMesh = 0;
   let remoteRidersInRoom = 0;
+  let lapRaceDrawCalls = 0;
+  let lapRaceRacers = 0;
+  let lapRaceDrawn = { pickUps: 0, hazards: 0, hits: 0 };
   let sceneryPixelsChanged = 0;
   let sceneryPixelWith: Pixel = NOWHERE;
   let sceneryPixelWithout: Pixel = NOWHERE;
@@ -13786,6 +13872,24 @@ async function run(): Promise<void> {
           remoteRiderControlOf(view, 'none');
           view.render(withoutScenery);
           phaseEnds('default: a room of other riders');
+
+          // #1903: and a lap race in the same scenery-free frame, drawn twice
+          // and the second read, so an upload is not counted as a draw.
+          const raced = withLapRace(withoutScenery);
+          lapRaceRacers = raced.markers.filter(
+            (marker) => marker.kind === 'rider' || marker.kind === 'bot',
+          ).length;
+          view.render(raced);
+          const beforeRace = calls();
+          view.render(raced);
+          lapRaceDrawCalls = calls() - beforeRace;
+          lapRaceDrawn = {
+            pickUps: lapRaceDrawnOf(view, 'pickUps').length,
+            hazards: lapRaceDrawnOf(view, 'hazards').length,
+            hits: lapRaceDrawnOf(view, 'hits').length,
+          };
+          view.render(withoutScenery);
+          phaseEnds('default: a lap race');
         }
 
         // ------------------------------------------------ the light — #286
@@ -14163,6 +14267,9 @@ async function run(): Promise<void> {
     roomDrawCalls,
     roomDrawCallsEachOwnMesh,
     remoteRidersInRoom,
+    lapRaceDrawCalls,
+    lapRaceRacers,
+    lapRaceDrawn,
     sceneryPixelsChanged,
     sceneryPixelWith,
     sceneryPixelWithout,
