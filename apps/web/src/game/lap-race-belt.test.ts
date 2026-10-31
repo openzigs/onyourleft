@@ -212,6 +212,17 @@ describe('the lap race’s belt — #1902', () => {
     belt.dispose();
   });
 
+  it('turns each hit effect by its racer’s heading plus the look’s spin', () => {
+    const belt = new LapRaceBelt('stylised');
+    const frame = frameOf([]);
+    const marker = frame.markers[0] as RiderMarker;
+    const hit = { glow: 0.8, scale: 1, spin: 0.7 };
+    belt.update(frame.lapRace, [{ ...marker, hit }]);
+    const heading = Math.atan2(marker.headingX, marker.headingZ);
+    expect(belt.drawn('hits')[0]?.yaw).toBeCloseTo(heading + 0.7, 5);
+    belt.dispose();
+  });
+
   it('marks every instance buffer it rewrites for upload, on every frame that carries pieces', () => {
     const belt = new LapRaceBelt('stylised');
     const frame = frameOf(puddles(3));

@@ -1049,6 +1049,26 @@ describe('a lap race’s bots on the road — #1902', () => {
     }
   });
 
+  it('moves a bot continuously as the rider steers across its lane, never jumping across them', () => {
+    for (const lateralMetres of [-1.75, 0, 1.75]) {
+      let before: number | undefined;
+      for (let step = -200; step <= 200; step += 1) {
+        const made = input({
+          steeredLateral: step / 100,
+          raceBots: [{ distanceMetres: RIDER, speedMetresPerSecond: 9, lateralMetres }],
+        });
+        const bot = placedRiders(made, sceneFrame(made).corridor)[1]?.lateral ?? 0;
+        if (before !== undefined) {
+          expect(
+            Math.abs(bot - before),
+            `lane ${lateralMetres}, steered ${step / 100}`,
+          ).toBeLessThan(0.1);
+        }
+        before = bot;
+      }
+    }
+  });
+
   it('carries each racer’s hit effect to its own marker, and none to a racer nothing hit', () => {
     const frame = sceneFrame(
       input({

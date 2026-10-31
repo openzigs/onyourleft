@@ -218,12 +218,18 @@ export function hitLook(
   atMs: number,
   reducedMotion: boolean,
 ): RaceHitLook | undefined {
+  // The start of the continuous run of slow-downs `atMs` is in: a second hit
+  // during the first does not restart the grow-in, so the ring never snaps back.
+  const slowDowns = effects
+    .filter((effect) => effect.rateMetresPerSecond < 0 && effect.fromMs <= atMs)
+    .sort((a, b) => a.fromMs - b.fromMs);
   let latest: number | undefined;
-  for (const effect of effects) {
-    if (effect.rateMetresPerSecond < 0 && effect.fromMs <= atMs && atMs < effect.untilMs) {
-      latest = latest === undefined ? effect.fromMs : Math.max(latest, effect.fromMs);
-    }
+  let runEnd = -Infinity;
+  for (const effect of slowDowns) {
+    if (effect.fromMs > runEnd) latest = effect.fromMs;
+    runEnd = Math.max(runEnd, effect.untilMs);
   }
+  if (!(atMs < runEnd)) latest = undefined;
   if (latest === undefined) return undefined;
   if (reducedMotion) return { glow: HIT_GLOW_MEAN, scale: 1, spin: 0 };
   const seconds = atMs / 1_000;
