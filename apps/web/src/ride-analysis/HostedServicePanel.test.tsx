@@ -27,6 +27,7 @@ import {
 import {
   HOSTED_AGREED,
   HOSTED_AGREED_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_KEY_OPERATOR_CAN_READ,
   HOSTED_KEY_REMOVED,
   HOSTED_KEY_SEALED_ONLY,
@@ -37,6 +38,8 @@ import {
   HOSTED_REMOVE_BUTTON,
   HOSTED_STORE_BUTTON,
   HOSTED_TEST_BUTTON,
+  HOSTED_TEST_UNREADABLE,
+  HOSTED_UNREADABLE,
   HOSTED_WITHDRAWN,
   hostedAgreeLabel,
   hostedConsentElsewhere,
@@ -340,6 +343,27 @@ describe('the test question', () => {
     await settle();
     expect(text()).toContain('models.example answered the test question.');
     expect(text()).not.toContain('store your key again');
+  });
+
+  // #1796: a press that threw may have reached the instance, and a test
+  // question that threw may have reached the service.
+  it('says it cannot tell whether a change was made when a press threw, never that nothing changed', async () => {
+    const scripted = scriptedHostedSettings();
+    scripted.port.storeHostedKey = () => Promise.reject(new Error('the answer was lost'));
+    await open(scripted);
+    await storeKey();
+    expect(text()).toContain(HOSTED_CHANGE_UNKNOWN);
+    expect(text()).not.toContain(HOSTED_UNREADABLE);
+  });
+
+  it('never says nothing was sent when the test question threw', async () => {
+    const scripted = scriptedHostedSettings(AGREED);
+    scripted.port.sendHostedTestQuestion = () => Promise.reject(new Error('the answer was lost'));
+    await open(scripted);
+    await activateWithKeyboard(button(HOSTED_TEST_BUTTON));
+    await settle();
+    expect(text()).toContain(HOSTED_TEST_UNREADABLE);
+    expect(text()).not.toContain('nothing was sent to a service');
   });
 
   it('shows the sentence when the test could not be asked', async () => {

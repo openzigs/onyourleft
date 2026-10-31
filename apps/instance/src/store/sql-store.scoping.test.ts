@@ -340,7 +340,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listNoticeSteps: { notAScopedRead: 'the moderators’ record of every notice (#912)' },
   eraseNoticeDetails: {
     notAScopedRead:
-      'the instance’s own sweep, erasing a closed notice’s notifier details by its id (#1381); notice-retention.test.ts',
+      'the instance’s own sweep, erasing a notice’s notifier details by its id, once its decision or its twelve months have passed (#1381, #1923); notice-retention.test.ts',
   },
   hideItem: { notAScopedRead: 'a moderator’s write; items.test.ts' },
   listHiddenItemsOfRoom: {

@@ -10,7 +10,9 @@
  * 1. `start` checks the body (`job-input.ts`: no picture, the input's exact
  *    shape), counts the request against the athlete's start limit, and queues
  *    the job — refused `job_running` while the athlete has one queued or
- *    running, in the same transaction as the insert.
+ *    running, in the same transaction as the insert. A hosted start names the
+ *    service the device showed beside its press (`endpoint`, #1796), and is
+ *    refused unless that is the origin the rider's recorded consent names.
  * 2. **One worker** claims the oldest queued job of any athlete and hands it to
  *    the {@link AnalysisEngine} — a port: in production the agent
  *    (`engine.ts`, #1098), in tests a scripted engine. Every event the engine
@@ -97,6 +99,7 @@ import { pictureFaults, readRideInput } from './job-input.ts';
 import type { ReplanFailure } from './replan-agent.ts';
 import { readReplanInput, type ReplanInput } from './replan-input.ts';
 import { REPLAN_TEMPLATE } from './replan-template.ts';
+import { hostedOriginOf } from './hosted-key.ts';
 import type { AnalysisSource, SourceFailure } from './source.ts';
 
 /** How often a quiet stream writes a heartbeat: the room socket's 25 s ping (ADR 0046 D-11). */
@@ -264,6 +267,15 @@ export interface AnalysisJobsOptions {
    * every start is `analysis_off` and nothing is queued.
    */
   readonly available: () => boolean | Promise<boolean>;
+  /**
+   * The origin `athleteId`'s own recorded hosted consent names, or `undefined`
+   * when they have none (#1796): `source.ts` §`SourceOptions.recordedConsent`,
+   * the same function, so the start and the run read one consent. A hosted
+   * start naming another service is refused. Absent, no consent is read and a
+   * hosted start is checked only for its shape; the run's own gate still
+   * refuses a job with no consent.
+   */
+  readonly hostedConsent?: (athleteId: string) => Promise<string | undefined>;
   /** Unix milliseconds. */
   readonly now: () => number;
   readonly log?: LogSink;
@@ -394,13 +406,51 @@ const refused = (fields: readonly FieldProblem[]): Outcome<never> => ({
   fields,
 });
 
-const BODY_KEYS = ['input', 'templateVersion', 'source', 'rideId'] as const;
+const BODY_KEYS = ['input', 'templateVersion', 'source', 'rideId', 'endpoint'] as const;
 
 /** #1229's refusal of a `rideId` that is not one of the caller's synced rides — the history route's own words. */
 const NOT_A_SYNCED_RIDE: FieldProblem = {
   field: 'rideId',
   problem: 'must be the synced id of one of your rides',
 };
+
+/**
+ * #1796's refusal of a hosted start that does not name the service the
+ * rider's recorded consent names — missing, not an `https:` origin, or
+ * another one. The device reads the `endpoint` field and says the service
+ * changed (`apps/web` §`instance-job.ts` §`startJob`). It names no origin:
+ * the rider's settings say which service it is.
+ */
+const NOT_THE_SERVICE: FieldProblem = {
+  field: 'endpoint',
+  problem: 'must be the service your recorded consent names',
+};
+
+/**
+ * What a start's `endpoint` makes of it (#1796), or `undefined` when it may
+ * go on. A local job names none. A hosted one names the origin the device
+ * showed beside its press, and it must be the consent's: a key replaced on
+ * another device moves the consent with it, and this ride must not go to a
+ * service the page that sent it did not name. With no consent recorded the
+ * start is let through to the run's own gate (`source.ts`), which refuses it
+ * `hosted_unavailable` as before.
+ */
+async function endpointProblem(
+  source: AnalysisSource,
+  endpoint: unknown,
+  consent: (() => Promise<string | undefined>) | undefined,
+): Promise<FieldProblem | undefined> {
+  if (source === 'instance-local') {
+    return endpoint === undefined
+      ? undefined
+      : { field: 'endpoint', problem: 'is not a field of a job on this instance’s own model' };
+  }
+  const named = typeof endpoint === 'string' ? hostedOriginOf(endpoint) : undefined;
+  if (named === undefined) return NOT_THE_SERVICE;
+  const recorded = consent === undefined ? undefined : await consent();
+  const consented = recorded === undefined ? undefined : hostedOriginOf(recorded);
+  return consented === undefined || consented === named ? undefined : NOT_THE_SERVICE;
+}
 const SOURCES: readonly AnalysisSource[] = ['instance-local', 'instance-hosted'];
 const REPLAN_BODY_KEYS = ['input', 'templateVersion', 'source'] as const;
 
@@ -662,6 +712,14 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       }
       const input = readRideInput(body.input);
       if (!input.ok) return refused(input.fields);
+      const source = body.source as AnalysisSource;
+      const { hostedConsent } = options;
+      const moved = await endpointProblem(
+        source,
+        body.endpoint,
+        hostedConsent === undefined ? undefined : () => hostedConsent(caller.athleteId),
+      );
+      if (moved !== undefined) return refused([moved]);
       // #1229: a named ride must be one of the CALLER's live synced rides —
       // read from their own records, so another athlete's ride id, a deleted
       // ride and one never synced are each refused, and no other athlete's

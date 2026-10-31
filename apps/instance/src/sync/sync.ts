@@ -77,6 +77,7 @@ import {
   STREAM_CHANNELS,
   type StreamChannel,
 } from './activity-file.ts';
+import { parseMaskingItem } from '../analysis/masking-item.ts';
 import { createContentLock } from './content-lock.ts';
 import { ghostSpeed, type RiderGhost } from './race-ghost.ts';
 
@@ -764,6 +765,12 @@ export function createSync(options: SyncOptions): Sync {
       const known = itemKind(kind);
       if (known === undefined) return refuse('not_found');
       if (typeof body !== 'string') return invalid('body', 'must be the item, as text');
+      // #1796: a masking list this instance could not read would let the
+      // device believe it may ask for a hosted job that then fails every time.
+      // Refused now, naming the rule and never a word or a coordinate of it.
+      if (known === 'masking' && parseMaskingItem(body) === undefined) {
+        return invalid('body', 'must be a masking list of words and privacy zones');
+      }
       // Kept byte for byte: a write-up is the device's screened copy (#776).
       const bytes = new TextEncoder().encode(body);
       const digest = toHex(await sha256Bytes(bytes));

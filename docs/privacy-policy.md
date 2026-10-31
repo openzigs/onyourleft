@@ -330,7 +330,9 @@ reference, what kind of report it was, the items it named, whether you ticked th
 statement, whether you gave a name and whether you gave an email address, when it was received, and
 the moderator's decision with when they confirmed receipt, decided and told you. If the moderator
 named you in the reasons they gave the person the report was about, your name stays with those
-reasons. The project's own
+reasons. If the moderator has recorded no decision twelve months after the report was received, the
+instance erases the same details then, and keeps the same rest
+([#1923](https://github.com/openzigs/onyourleft/issues/1923)). The project's own
 instance does not store your internet address with it: it counts reports from one address in memory
 only, for at most an hour.
 

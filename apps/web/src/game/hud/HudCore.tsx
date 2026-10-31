@@ -106,6 +106,13 @@ export interface HudCoreProps extends SharedProps {
    * because there a pacer is one choice away. A chased rider's gap still shows.
    */
   readonly withoutPacer?: boolean;
+  /**
+   * Leaves out the second control, *End ride* (*Stop* on the demo), and keeps
+   * *Pause*. The demo's `?controls=0` (#1654, owner ruling of 2026-10-30): an
+   * embedding site may drop *Stop*, but *Pause* and *Play* always stay, so the
+   * demo meets WCAG 2.2 SC 2.2.2 on its own. A rider's ride never passes it.
+   */
+  readonly withoutEnd?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -203,20 +210,22 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           >
             {props.paused ? props.labels.resume : 'Pause'}
           </button>
-          <button
-            type="button"
-            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-            onClick={props.onEnd}
-            style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-            // #1482: never stopped by the touch lock. It ends the game's
-            // gradient session — what the app asks of the trainer — and a
-            // rider who wants that gone must not first have to unlock, the
-            // rule `End ERG` and `End workout` follow on the Ride screen. It
-            // does not end the recording (`GameView.tsx` §`teardown`).
-            {...{ [TOUCH_LOCK_EXEMPT]: '' }}
-          >
-            {props.labels.end}
-          </button>
+          {props.withoutEnd === true ? null : (
+            <button
+              type="button"
+              className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+              onClick={props.onEnd}
+              style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+              // #1482: never stopped by the touch lock. It ends the game's
+              // gradient session — what the app asks of the trainer — and a
+              // rider who wants that gone must not first have to unlock, the
+              // rule `End ERG` and `End workout` follow on the Ride screen. It
+              // does not end the recording (`GameView.tsx` §`teardown`).
+              {...{ [TOUCH_LOCK_EXEMPT]: '' }}
+            >
+              {props.labels.end}
+            </button>
+          )}
           {props.touchLock ? (
             <TouchLockButton
               locked={touchLocked}

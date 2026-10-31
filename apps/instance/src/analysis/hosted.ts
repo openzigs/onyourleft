@@ -43,39 +43,19 @@
  * and guarantees nothing (`hosted-mask.ts` §"What is NOT masked").
  */
 
-import {
-  degreesLatitude,
-  degreesLongitude,
-  geographicPosition,
-  type GeographicPosition,
-} from '@onyourleft/domain';
-import {
-  maskForHosted,
-  parseMaskedWords,
-  tidyMaskedWord,
-  type MaskingGuard,
-} from '@onyourleft/analysis';
+import { maskForHosted, type MaskingGuard } from '@onyourleft/analysis';
 
 import { createHostedModel } from './model.ts';
 import type { AgentMessage, ModelConnection, ToolCallRequest } from './model-turn.ts';
 import type { OpenedHostedKey } from './source.ts';
 
-import { MASKING_ITEM_KEY } from './masking-item.ts';
+import { MASKING_ITEM_KEY, parseMaskingItem, type MaskingItemBody } from './masking-item.ts';
 
-/** The key of the one `masking` item an athlete holds. */
-export { MASKING_ITEM_KEY };
+/** The key of the one `masking` item an athlete holds, and its body (`masking-item.ts`). */
+export { MASKING_ITEM_KEY, parseMaskingItem, type MaskingItemBody };
 
-/** The `masking` item's body, as the device writes it. */
-export interface MaskingItemBody {
-  /** The rider's words-to-mask list (`@onyourleft/analysis` §`parseMaskedWords`). */
-  readonly words: readonly string[];
-  /** Their privacy zones: a label, a centre in degrees and a radius in metres. */
-  readonly zones: readonly {
-    readonly label: string;
-    readonly latitude: number;
-    readonly longitude: number;
-    readonly radius: number;
-  }[];
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** The one read the guard needs. `SqlStore` satisfies it as it stands. */
@@ -85,65 +65,6 @@ export interface MaskingReads {
     kind: 'masking',
     key: string,
   ): Promise<{ readonly body: Uint8Array | null } | undefined>;
-}
-
-function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function position(latitude: unknown, longitude: unknown): GeographicPosition | undefined {
-  if (typeof latitude !== 'number' || typeof longitude !== 'number') return undefined;
-  try {
-    return geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * A `masking` item's body as a guard, or `undefined` when ANY part of it is
- * not what {@link MaskingItemBody} says — a guard read in part would look
- * masked and not be, so a malformed item masks nothing and sends nothing.
- */
-export function parseMaskingItem(text: string): MaskingGuard | undefined {
-  let body: unknown;
-  try {
-    body = JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
-  if (!isObject(body) || !Array.isArray(body.words) || !Array.isArray(body.zones)) {
-    return undefined;
-  }
-  const keys = Object.keys(body);
-  if (keys.some((key) => key !== 'words' && key !== 'zones')) return undefined;
-  if (!body.words.every((word) => typeof word === 'string')) return undefined;
-  const zones: MaskingGuard['zones'][number][] = [];
-  for (const zone of body.zones as readonly unknown[]) {
-    if (!isObject(zone) || typeof zone.label !== 'string') return undefined;
-    const centre = position(zone.latitude, zone.longitude);
-    const radius = zone.radius;
-    if (
-      centre === undefined ||
-      typeof radius !== 'number' ||
-      !Number.isFinite(radius) ||
-      radius <= 0
-    ) {
-      return undefined;
-    }
-    zones.push({ centre, radius, label: zone.label });
-  }
-  const words = parseMaskedWords(body.words);
-  // parseMaskedWords drops an over-long word and everything past the cap; for a
-  // privacy list a dropped word is sent in the clear, so refuse the whole item
-  // unless only blanks and case-insensitive repeats were dropped.
-  const distinct = new Set(
-    (body.words as readonly string[])
-      .map((word) => tidyMaskedWord(word).toLocaleLowerCase('en'))
-      .filter((word) => word !== ''),
-  );
-  if (words.length !== distinct.size) return undefined;
-  return { words, zones };
 }
 
 /**
