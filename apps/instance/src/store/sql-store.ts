@@ -1416,7 +1416,11 @@ export interface SqlStore {
     limit: number,
   ): Promise<readonly ListedActivity[]>;
 
-  /** #776: store an item, or answer `unchanged` when the athlete already holds these exact bytes. */
+  /**
+   * #776: store an item, or answer `unchanged` when the athlete already holds
+   * these exact bytes. Replacing a live item with different bytes is SCRUBBED
+   * as {@link deleteSyncItem} is (#1944): a re-sent masking list drops a zone.
+   */
   putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
   getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
   /**
@@ -3762,35 +3766,51 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       }),
 
     putSyncItem: (item) =>
-      exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          if ((item.kind as SyncKind) === 'activity') {
-            throw new Error(
-              'An activity is synced through ingestActivity, with its signature checked.',
-            );
-          }
-          const held = await trx
-            .selectFrom('sync_item')
-            .select(['digest', 'deleted_at'])
-            .where('athlete_id', '=', item.athleteId)
-            .where('kind', '=', item.kind)
-            .where('item_key', '=', item.key)
-            .executeTakeFirst();
-          if (held !== undefined && held.deleted_at === null && held.digest === item.digest) {
-            return 'unchanged' as const;
-          }
-          await replaceSyncRow(trx, {
-            athleteId: item.athleteId,
-            kind: item.kind,
-            key: item.key,
-            digest: item.digest,
-            body: item.body,
-            now: item.now,
-            deletedAt: null,
+      exclusive(async () => {
+        if ((item.kind as SyncKind) === 'activity') {
+          throw new Error(
+            'An activity is synced through ingestActivity, with its signature checked.',
+          );
+        }
+        const write = () =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('sync_item')
+              .select(['digest', 'deleted_at'])
+              .where('athlete_id', '=', item.athleteId)
+              .where('kind', '=', item.kind)
+              .where('item_key', '=', item.key)
+              .executeTakeFirst();
+            if (held !== undefined && held.deleted_at === null && held.digest === item.digest) {
+              return 'unchanged' as const;
+            }
+            await replaceSyncRow(trx, {
+              athleteId: item.athleteId,
+              kind: item.kind,
+              key: item.key,
+              digest: item.digest,
+              body: item.body,
+              now: item.now,
+              deletedAt: null,
+            });
+            return 'stored' as const;
           });
-          return 'stored' as const;
-        }),
-      ),
+        // #1944: replacing a live body scrubs the old one, as a delete does
+        // (#1796), for every kind and not a list of them. The device rewrites
+        // its masking list before every hosted job, so a zone the rider removed
+        // would otherwise stay in a free page and the log. A first write, a
+        // write over a tombstone (scrubbed when it was deleted) and an unchanged
+        // one have no old body, so they pay no checkpoint.
+        const live = await db
+          .selectFrom('sync_item')
+          .select('digest')
+          .where('athlete_id', '=', item.athleteId)
+          .where('kind', '=', item.kind)
+          .where('item_key', '=', item.key)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        return live !== undefined && live.digest !== item.digest ? scrubbing(write) : write();
+      }),
 
     getSyncItem: (athleteId, kind, key) =>
       exclusive(async () => {
