@@ -69,8 +69,9 @@ import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
 import type { RaceStandingsView } from '../room-ride';
-import type { SteerInputPort } from '../delivery/steer-port';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
+import type { ItemInputPort } from '../lap-race/item-input-port';
+import type { SteerInputPort } from '../steer-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
@@ -280,12 +281,20 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    */
   readonly throwing?: ThrowInputPort | undefined;
   /**
-   * A Delivery round's steering — #1820: where a lane key hands the lane
-   * change the rider asked for. With it the HUD listens for
-   * `steer.ts` §`STEER_KEYS` (`SteerKeys.tsx`), and draws nothing; `undefined`
-   * on every ride that runs no round (#1853).
+   * A Delivery round's or a lap race's steering — #1820, #1901: where a lane
+   * key hands the lane change the rider asked for. With it the HUD listens
+   * for `lanes.ts` §`STEER_KEYS` (`SteerKeys.tsx`), and draws nothing;
+   * `undefined` on every ride that runs neither (#1853, #1906).
    */
   readonly steering?: SteerInputPort | undefined;
+  /**
+   * A lap race's item use — #1901, ADR 0060 D-13: where a press on the HUD's
+   * item control, the item key or a pad's button asks to use the held item.
+   * With it the HUD shows `ItemControl` in its actions panel, inside the
+   * touch lock and exempt from none of it; `undefined` on every ride that
+   * runs no lap race, which until #1906 is every ride.
+   */
+  readonly items?: ItemInputPort | undefined;
 }
 
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */
