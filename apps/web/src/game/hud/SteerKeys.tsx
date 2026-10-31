@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The HUD's Delivery steering keys — #1820.
+ * The HUD's steering keys — #1820, for a Delivery round and, since #1901, a
+ * lap race.
  *
  * Nothing drawn: while it is mounted, a key from a keyboard, or from a
  * Bluetooth remote the system pairs as one, asks for the lane change
- * `steer.ts` §`STEER_KEYS` maps it to, and the intent goes to the ride's
+ * `lanes.ts` §`STEER_KEYS` maps it to, and the intent goes to the ride's
  * {@link SteerInputPort}. There is no lane button, so there is no new
  * control for the accessibility gate and no new wording.
  *
@@ -13,13 +14,13 @@
  * (`ThrowControl.tsx`).
  *
  * Mounted only on a ride that hands the HUD a port: one running a Delivery
- * round (#1853).
+ * round (#1853), or a lap race (#1906).
  */
 
 import { useEffect } from 'react';
 
-import type { SteerInputPort } from '../delivery/steer-port';
-import { steerIntentOfKey } from '../delivery/steer';
+import { steerIntentOfKey } from '../lanes';
+import type { SteerInputPort } from '../steer-port';
 
 export interface SteerKeysProps {
   readonly port: SteerInputPort;
