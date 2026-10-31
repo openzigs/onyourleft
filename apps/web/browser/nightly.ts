@@ -82,7 +82,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     spec: 'game.browser.spec.ts',
     describe: 'the realistic world — ADR 0026',
     seconds:
-      '101 s: the `?realistic` load (#866); since #1947 its mapped town’s cases read the `?realistic&town` load above',
+      '169–170 s on the AMD EPYC 7763: the `?realistic` load (#866, measured on #1947); since #1947 its mapped town’s cases read the `?realistic&town` load above',
     why:
       'how the opt-in realistic world looks and what it costs. The DEFAULT world’s halves of ' +
       'its cases — #501’s shader compile and D-7’s "fetches none of the realistic set" — are ' +

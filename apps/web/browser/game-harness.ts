@@ -13324,8 +13324,16 @@ async function realisticTownRun(): Promise<TownRun> {
   view.resize(640, 360);
   const gl = canvas.getContext('webgl2');
   let town = NO_TOWN;
+  // #1947's review, for #644's reason: the world this load's view drew in, which
+  // the spec asserts is the realistic one. The `?realistic` load asserted it for
+  // these probes when they shared it; a load of their own has to assert its own,
+  // or a case whose numbers the stylised world also meets passes on a fallback.
+  let drawnWorld = '';
   try {
-    if (gl !== null) town = townProbes(view, gl, canvas);
+    if (gl !== null) {
+      drawnWorld = drawnWorldOf(view);
+      town = townProbes(view, gl, canvas);
+    }
   } finally {
     view.destroy();
   }
@@ -13337,7 +13345,13 @@ async function realisticTownRun(): Promise<TownRun> {
   const nearFieldPerson = nearFieldStreetProbe(1_200, 200, top, 'person');
   phaseEnds('near field, the street');
   return {
-    realistic: { ...NO_REALISTIC, ...town, measured: gl !== null, loaded: outcome.loaded },
+    realistic: {
+      ...NO_REALISTIC,
+      ...town,
+      measured: gl !== null,
+      loaded: outcome.loaded,
+      drawnWorld,
+    },
     nearField,
     nearFieldWall,
     nearFieldPerson,

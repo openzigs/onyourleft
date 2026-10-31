@@ -3665,6 +3665,11 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       const { result } = await run(query);
       expect(result.errors).toEqual([]);
       expect(result.realistic.measured).toBe(true);
+      // #1947's review, #644's precedent (`trees.drawnWorld`): every load these
+      // cases read asserts that the realistic world loaded and drew, so a case
+      // whose numbers the stylised world also meets cannot pass on a fallback.
+      expect(result.realistic.loaded).toBe(true);
+      expect(result.realistic.drawnWorld).toBe('realistic');
       return result.realistic;
     };
   const realistic = measuredBy('?realistic');
