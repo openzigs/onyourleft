@@ -231,6 +231,31 @@ describe('a lap race on the HUD — #1904', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('says the item a pick-up gives once: never again at a pick-up passed holding it, and again when one is used and another drawn in the same tick', async () => {
+    // Laps of 1 000 m: pick-ups at 250, 500 and 750 m. The bots stay behind, so no place is owed.
+    const ride = new Ride(startRace({ laps: 3 }));
+    mounted = await mount(panel(ride.race, ''));
+    await ride.step(1, 100, [50, 40, 30]);
+    await ride.step(6, 260, [60, 50, 40]);
+    const items = (): string[] => ride.heard.filter((each) => each.startsWith('You have '));
+    const first = ride.race.racers.find((entry) => entry.racer.id === RIDER)?.held;
+    expect(first).not.toBeNull();
+    expect(items()).toHaveLength(1);
+    // Past the second pick-up still holding it: it draws nothing and nothing is said.
+    await ride.step(11, 510, [70, 60, 50]);
+    await ride.step(16, 600, [80, 70, 60]);
+    expect(ride.race.racers.find((entry) => entry.racer.id === RIDER)?.held).toBe(first);
+    expect(items()).toHaveLength(1);
+    // Used in the tick that passes the third, and another drawn: that one is said.
+    await ride.step(21, 760, [90, 80, 70], [RIDER]);
+    await ride.step(26, 800, [100, 90, 80]);
+    expect(ride.race.racers.find((entry) => entry.racer.id === RIDER)?.held).not.toBeNull();
+    expect(items()).toHaveLength(2);
+    expect(field('Item')).toMatch(/^Item /);
+    expect(document.querySelectorAll('[role="status"], [aria-live]')).toHaveLength(1);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it(`overtaking five times in two seconds reads at most one change of place out of the region (one per ${String(PLACE_ANNOUNCE_SECONDS)} s)`, async () => {
     const ride = new Ride(startRace({ laps: 50, lap: 10_000, itemsOn: false }));
     mounted = await mount(panel(ride.race, ''));
