@@ -707,8 +707,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `packages/domain/src/lap-race/`
     src/game/lap-race/ride-race.ts
                         a solo lap race inside a game ride (#1906, ADR 0060):
-                        `GameView` holds one per ride, asked for by its
-                        `lapRace` prop (#1907's chooser), on a LOOP route,
+                        `GameView` holds one per ride, asked for by the
+                        chooser (#1907: `StageChooser.tsx` §`LapRaceControl`
+                        offers *Ride a lap race* on a loop only, saying why
+                        in words on any other, with its laps, field, tier and
+                        items from `lap-race/choice.ts`, and turns a Delivery
+                        round off as it is turned on) or a test's `lapRace`
+                        prop, on a LOOP route,
                         solo (no room, D-7.3) and never beside a Delivery
                         round. A race rides the STYLISED world whatever
                         Settings chose (D-10.1), so the village's frozen 50

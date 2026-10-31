@@ -60,9 +60,12 @@ import { Check, Info } from 'lucide-react';
 import { useId, useRef, useState, type JSX, type RefObject } from 'react';
 
 import {
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  BOT_TIERS,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   type BotPacerPlan,
+  type BotTier,
   type Metres,
   type RouteProfile,
   type Wind,
@@ -83,6 +86,8 @@ import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
+import { BOT_TIER_TEXT } from './hud/lap-race-hud';
+import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
 
 /** One route the rider could ride, as the picker needs it. */
 export interface RidableRoute {
@@ -186,6 +191,27 @@ export interface DeliveryOffer {
   readonly week: Pick<WeekProgress, 'day' | 'houses'>;
 }
 
+/**
+ * A lap race, as the chooser offers it — #1907 (epic #1894, ADR 0060): on a
+ * LOOP route only, because a race is laps of one (D-11.1); on any other the
+ * chooser says why in words and asks for no race. Offered in either world: a
+ * race rides the standard world whatever Settings chose (D-10.1), and says so.
+ */
+export interface LapRaceOffer {
+  /** Whether the rider switched the race on. */
+  readonly chosen: boolean;
+  readonly onChoose: (value: boolean) => void;
+  /** The race's laps, field, tier and items. */
+  readonly choice: LapRaceChoice;
+  readonly onChoice: (choice: LapRaceChoice) => void;
+  /**
+   * Whether any part of the assisted race setting is on, on this device
+   * (#1905). The setting is changed in Settings; the chooser says which way
+   * it stands and links there.
+   */
+  readonly assisted: boolean;
+}
+
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
   readonly routes: readonly RidableRoute[] | undefined;
@@ -267,6 +293,8 @@ interface RoutePickerProps {
    * (DL6); `undefined` draws nothing. @see DeliveryOffer
    */
   readonly delivery?: DeliveryOffer | undefined;
+  /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
+  readonly lapRace?: LapRaceOffer | undefined;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
@@ -277,6 +305,8 @@ interface RoutePickerProps {
     riderGhost?: boolean,
     /** #1818: ride a Delivery round. Never without the realistic world (DL6). */
     delivery?: boolean,
+    /** #1907: ride this lap race. A route that is not a loop rides none (the press decides). */
+    lapRace?: LapRaceChoice,
   ) => Promise<void>;
 }
 
@@ -500,6 +530,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
                 props.position,
                 riderGhost,
                 deliveryOffer?.chosen === true,
+                // #1907: the race switched on. The press decides on the
+                // route: one that is not a loop rides no race (`GameView`).
+                props.lapRace?.chosen === true ? props.lapRace.choice : undefined,
               );
             }}
           >
@@ -567,6 +600,14 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           field={props.air.field}
         />
         {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
+        {props.lapRace === undefined ? null : (
+          <LapRaceControl
+            offer={props.lapRace}
+            route={chosen}
+            worldChosen={props.worldChosen}
+            idPrefix={ids}
+          />
+        )}
       </div>
     </div>
   );
@@ -976,6 +1017,161 @@ function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element 
       <p id={DELIVERY_HINT_ID} className="tw:m-0">
         {DELIVERY_CHOICE_TEXT.hint}
       </p>
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of #1907's choice, for the owner's approval: the
+ * project's own, naming no other game (ADR 0060 D-1.5). "Lap race" is the
+ * mode's name (the owner, 2026-10-31); the tiers' names are #1904's.
+ */
+export const LAP_RACE_CHOICE_TEXT = {
+  label: 'Ride a lap race',
+  hint:
+    'Race laps of this loop against bots, picking up items round the lap. ' +
+    'Nothing in the race changes what your trainer is sent.',
+  standardWorld: 'A lap race is ridden in the standard world.',
+  notALoop:
+    'No lap race on this route: a lap race needs a loop, a route that ends where it starts.',
+  laps: 'Laps',
+  bots: 'Bots',
+  tier: 'How fast the bots ride',
+  tierHint: (): string =>
+    `${BOT_TIERS.map(
+      (tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`,
+    ).join(', ')} watts per kilogram.`,
+  items: 'Race with items',
+  assistedOn: 'Your assisted race setting is on.',
+  assistedOff: 'An assisted race setting can make a race easier.',
+  assistedLink: 'Change in Settings',
+} as const;
+
+/**
+ * Whether this ride runs a lap race, and which — #1907. A switch, as the
+ * Delivery round's above it, described by what a race is; once on, its laps
+ * and field (native `<select>`s: more than three options each, `theme.css`
+ * §`.oyl-segmented`), its tier (chips, four options) and its items (a switch),
+ * each labelled, and a line saying how the assisted setting stands with the
+ * way to Settings. On a route that is not a loop, none of it: the reason, in
+ * words.
+ */
+function LapRaceControl(props: {
+  readonly offer: LapRaceOffer;
+  readonly route: RidableRoute;
+  readonly worldChosen: boolean;
+  readonly idPrefix: string;
+}): JSX.Element {
+  const { offer } = props;
+  const id = (part: string): string => `${props.idPrefix}-lap-race-${part}`;
+  const change = (next: Partial<LapRaceChoice>): void => {
+    offer.onChoice({ ...offer.choice, ...next });
+  };
+  if (!props.route.profile.loop) {
+    return (
+      <div className="oyl-game__lap-race tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+        <p className="tw:m-0" id={id('not-a-loop')}>
+          {LAP_RACE_CHOICE_TEXT.notALoop}
+        </p>
+      </div>
+    );
+  }
+  const counts = (most: number): number[] => Array.from({ length: most }, (_, index) => index + 1);
+  return (
+    <div className="oyl-game__lap-race tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={offer.chosen}
+          aria-describedby={props.worldChosen ? `${id('hint')} ${id('world')}` : id('hint')}
+          onChange={(event) => {
+            offer.onChoose(event.target.checked);
+          }}
+        />
+        {LAP_RACE_CHOICE_TEXT.label}
+      </label>
+      <p id={id('hint')} className="tw:m-0">
+        {LAP_RACE_CHOICE_TEXT.hint}
+      </p>
+      {props.worldChosen ? (
+        <p id={id('world')} className="tw:m-0">
+          {LAP_RACE_CHOICE_TEXT.standardWorld}
+        </p>
+      ) : null}
+      {offer.chosen ? (
+        <>
+          <label htmlFor={id('laps')}>{LAP_RACE_CHOICE_TEXT.laps}</label>
+          <select
+            id={id('laps')}
+            className="oyl-input"
+            value={String(offer.choice.laps)}
+            onChange={(event) => {
+              change({ laps: Number(event.target.value) });
+            }}
+          >
+            {counts(LAP_RACE_MOST_LAPS).map((count) => (
+              <option key={count} value={String(count)}>
+                {String(count)}
+              </option>
+            ))}
+          </select>
+          <label htmlFor={id('bots')}>{LAP_RACE_CHOICE_TEXT.bots}</label>
+          <select
+            id={id('bots')}
+            className="oyl-input"
+            value={String(offer.choice.bots)}
+            onChange={(event) => {
+              change({ bots: Number(event.target.value) });
+            }}
+          >
+            {counts(LAP_RACE_MOST_BOTS).map((count) => (
+              <option key={count} value={String(count)}>
+                {String(count)}
+              </option>
+            ))}
+          </select>
+          <fieldset className="oyl-chips tw:mb-0">
+            <legend>{LAP_RACE_CHOICE_TEXT.tier}</legend>
+            <div className="oyl-chips__options">
+              {BOT_TIERS.map((tier: BotTier) => (
+                <label key={tier} htmlFor={id(`tier-${tier}`)}>
+                  <input
+                    type="radio"
+                    id={id(`tier-${tier}`)}
+                    name={id('tier')}
+                    value={tier}
+                    checked={offer.choice.tier === tier}
+                    aria-describedby={id('tiers')}
+                    onChange={() => {
+                      change({ tier });
+                    }}
+                  />
+                  {BOT_TIER_TEXT[tier]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <p id={id('tiers')} className="tw:m-0">
+            {LAP_RACE_CHOICE_TEXT.tierHint()}
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={offer.choice.itemsOn}
+              onChange={(event) => {
+                change({ itemsOn: event.target.checked });
+              }}
+            />
+            {LAP_RACE_CHOICE_TEXT.items}
+          </label>
+          <p className="tw:m-0">
+            {offer.assisted ? LAP_RACE_CHOICE_TEXT.assistedOn : LAP_RACE_CHOICE_TEXT.assistedOff}{' '}
+            <a href={hrefFor(routeById('settings'))}>{LAP_RACE_CHOICE_TEXT.assistedLink}</a>
+          </p>
+        </>
+      ) : null}
     </div>
   );
 }

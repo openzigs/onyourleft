@@ -16,14 +16,13 @@ import { LAP_RACE_ASSIST_STORAGE_KEY } from './assist-preference';
 import {
   askRaceItem,
   askRaceLane,
-  LAP_RACE_MOST_BOTS,
   lapRaceBotConditions,
   lapRaceHeard,
   startLapRaceRide,
   stepLapRaceRide,
-  type LapRaceChoice,
   type LapRaceRide,
 } from './ride-race';
+import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 
 const LOOP = circuitRoute(40);
 

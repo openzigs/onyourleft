@@ -64,7 +64,6 @@ import {
   racePosition,
   raceCourse,
   seconds,
-  type BotTier,
   type ItemRaceState,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -90,7 +89,8 @@ import type { LapRaceInView, RaceHitLook } from '../port';
 import type { RaceBotInput } from '../scene';
 
 import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
-import { readLapRaceAssist, type LapRaceAssist } from './assist-preference';
+import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './assist-preference';
+import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
 import {
   askLane,
@@ -104,23 +104,8 @@ import {
 /** The race's length of one tick: the simulation's step, `simulation.ts` §`SIMULATION_STEP_SECONDS`. */
 export const LAP_RACE_TICK_SECONDS = 0.05;
 
-/** The most bots a field holds: seven, the field #1903's draw-call ceiling was measured with. */
-export const LAP_RACE_MOST_BOTS = 7;
-
 /** The rider's id in the race. Never shown: the HUD names the rider's own line itself. */
 export const LAP_RACE_RIDER_ID = 'rider';
-
-/** What race to run: chosen by the rider (#1907), or handed in by a test. */
-export interface LapRaceChoice {
-  /** How many laps of the loop. A whole number, at least one. */
-  readonly laps: number;
-  /** How many bots, 1 to {@link LAP_RACE_MOST_BOTS}. */
-  readonly bots: number;
-  /** The bots' tier, before the assisted setting's gentler bots. */
-  readonly tier: BotTier;
-  /** Whether the race has items, before the assisted setting's items off. */
-  readonly itemsOn: boolean;
-}
 
 /** A lap race being ridden, in memory for the ride only. */
 export interface LapRaceRide {
@@ -177,6 +162,17 @@ export function lapRaceBotConditions(
       ? {}
       : { integrationStepSeconds: air.integrationStepSeconds }),
   };
+}
+
+/**
+ * Whether any part of the assisted race setting is on, on this device — what
+ * the stage chooser says beside the race (#1907). Read here, among the lap
+ * race's own modules, because nothing else may read the setting (#1905's
+ * `assist-preference-readers.test.ts`).
+ */
+export function lapRaceAssisted(storage: PreferenceStorage | undefined): boolean {
+  const assist = readLapRaceAssist(storage);
+  return LAP_RACE_ASSIST_PARTS.some((part) => assist[part]);
 }
 
 /** The race's seed, from the platform's cryptographic random source: one draw, at the press. */

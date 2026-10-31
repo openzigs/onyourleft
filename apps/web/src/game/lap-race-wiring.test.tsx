@@ -60,9 +60,9 @@ import {
   lapRaceBotConditions,
   startLapRaceRide,
   stepLapRaceRide,
-  type LapRaceChoice,
   type LapRaceRide,
 } from './lap-race/ride-race';
+import type { LapRaceChoice } from './lap-race/choice';
 import type { GameRenderer, SceneFrame } from './port';
 import { lineOffsetAt, racingLine } from './racing-line';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
