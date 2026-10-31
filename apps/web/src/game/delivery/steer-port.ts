@@ -1,24 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * What the HUD's steering keys hand the ride — #1820.
+ * What the HUD's steering keys hand a Delivery round — #1820.
  *
- * ⚠️ **A `*-port.ts` on purpose**, as `throw-input-port.ts` is:
- * `check:wiring` then requires its one method to have a production caller
- * (§4j, `WIRE003`). `hud/SteerKeys.tsx` calls it for each lane key. `GameView`
- * implements it on a ride running a Delivery round (#1853): it turns the
- * intent into the round's next steer state with `steer.ts` §`steerToward`,
- * and `ride-round.ts` steps that on the simulation tick.
- *
- * ⚠️ **One method, and it asks for a lane change and nothing else.** No game
- * event may change what the trainer is sent (ADR 0059 D-2), so nothing a
- * rider presses to steer has a way to ask for anything more. The test holds
- * the interface to this one method.
+ * The port is `../steer-port.ts`', lifted out of this file by #1901 so a lap
+ * race takes lane changes through the same one; this re-exports it, so
+ * Delivery and its tests read it where they always did. Its one method, and
+ * why it has only one, are documented there.
  */
 
-import type { SteerIntent } from './steer';
-
-export interface SteerInputPort {
-  /** The rider asked for a lane change, by a key from a keyboard or a bar remote. */
-  steer(intent: SteerIntent): void;
-}
+export type { SteerInputPort } from '../steer-port';

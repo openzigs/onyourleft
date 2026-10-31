@@ -705,6 +705,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ADR 0060 D-2.2 (#1898): the same walk and forbidden
                         set over the lap race's roots, `game/lap-race/` and
                         `packages/domain/src/lap-race/`
+    src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
+                        a lap race's lanes and item use (#1901, ADR 0060
+                        D-5.4, D-13): race INPUTS only, a lane and "use the
+                        held item" handed to `stepRace`'s next tick. The
+                        lanes and keys are Delivery's (`lanes.ts`); the item
+                        key is W, the HUD's `hud/ItemControl.tsx` is one
+                        button inside the touch lock (never exempt), and a
+                        pad's throw buttons use the item. `race-input.test.ts`
+                        rides one power trace with and without presses and
+                        reads every tick's effort distance and speed back
+                        equal. ⚠️ `race-input.ts` is `@unwired` until #1906
+                        runs the race in `GameView`
     src/game/lap-race/assist-preference.ts, src/game/lap-race/assist.ts
                         the lap race's assisted setting (#1905, Delivery's
                         #1813 pattern): items off, auto-use, no knock-back on
@@ -782,10 +794,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `realistic-delivery.browser.spec.ts` (nightly); that an
                         ordinary frame is never held to 53 is
                         `realistic-budget-village.test.ts`
-    src/game/delivery/steer.ts
+    src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
-                        D through `hud/SteerKeys.tsx` and `steer-port.ts`. A
+                        D through `hud/SteerKeys.tsx` and `steer-port.ts`.
+                        Since #1901 the lanes, keys, steer state and port
+                        are `game/lanes.ts` and `game/steer-port.ts`, which
+                        the lap race shares; `delivery/steer.ts` re-exports
+                        them and keeps its own two refusals (#1817 counts
+                        them there). A
                         DRAWING: it reaches `scene.ts` §`lateralOf` through
                         `SceneInput.steeredLateral` (the rider only) and the
                         obstacles through their rider offset, never
