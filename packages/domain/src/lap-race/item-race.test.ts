@@ -206,3 +206,22 @@ describe('a tick’s refusals', () => {
     expect(kept.racers[0]?.racer.effortDistance).toBe(40);
   });
 });
+
+describe('a racer id that is an Object.prototype key', () => {
+  it('is an ordinary racer: its lane and effort are read as its own, or as absent', () => {
+    const start = createItemRace({
+      course: raceCourse(500, 1),
+      seed: 1,
+      itemsOn: true,
+      racerIds: ['constructor', 'toString'],
+      startMs: 0,
+    });
+    const moved = stepRace(start, { atMs: 1_000, effortDistances: { toString: 12 }, lanes: {} });
+    const byId = (id: string) => moved.racers.find((entry) => entry.racer.id === id);
+    expect(byId('constructor')?.racer.effortDistance).toBe(0);
+    expect(byId('constructor')?.lane).toBe(1);
+    expect(byId('toString')?.racer.effortDistance).toBe(12);
+    const laned = stepRace(moved, { atMs: 2_000, effortDistances: {}, lanes: { constructor: 2 } });
+    expect(laned.racers.find((entry) => entry.racer.id === 'constructor')?.lane).toBe(2);
+  });
+});

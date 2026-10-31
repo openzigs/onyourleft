@@ -17,6 +17,18 @@
  * Every offset change goes through `race.ts` §`applyOffset`, so it is clamped
  * to `[−B, +B]` after every change (D-3.2).
  *
+ * **The tick instants are part of the determinism contract (for #1909).** The
+ * clamp runs once a tick, on the sum of that tick's effects; the drift
+ * ({@link OFFSET_DRIFT_METRES_PER_SECOND}) runs after it on the part of the
+ * tick no effect covered; and a pick-up, a puddle or a reach is judged by
+ * where racers are at a tick's end. So the same inputs at a different tick
+ * spacing can give a different race near the bound (a racer at 9 m under a
+ * tailwind for 0 to 4 s and a gust for 2 to 6 s ends at 5 m on six 1 s ticks
+ * and at 7 m on one 6 s tick, before any drift). **The device and the room
+ * must step on the same instants**: #1909 has the device replay the room's
+ * tick instants rather than its own frame times, or the two disagree near
+ * the bound.
+ *
  * An effect is a **rate in metres per second over a duration**, integrated
  * tick by tick: a racer is never teleported, and no rate exceeds
  * {@link MAXIMUM_EFFECT_RATE_METRES_PER_SECOND}.
@@ -44,10 +56,36 @@
  * | Key | Behaviour | Strength (m) |
  * |---|---|---|
  * | `tailwind` | the holder gains +1.5 m/s of offset for 4 s | 6 |
- * | `slipstream` | a tow toward the racer ahead: +2 m/s for 4 s, only when a racer is within {@link SLIPSTREAM_REACH_METRES} ahead; otherwise used up for nothing | 8 |
- * | `puddle` | dropped at the holder's drawn distance in the holder's lane; the first other racer to ride through it in that lane loses 1.5 m/s for 4 s. It dries after {@link PUDDLE_LIFETIME_MS} | 6 |
- * | `crosswind-gust` | sent up the road in the holder's lane at the nearest racer ahead: −2 m/s for 4 s if that racer is in the lane, a miss if not | 8 |
+ * | `tow` | a tow toward the racer ahead: +2 m/s for 4 s, only when a racer is within {@link TOW_REACH_METRES} ahead (inclusive); otherwise used up for nothing | 8 |
+ * | `puddle` | a lane-wide hazard placed in the holder's lane at the **next pick-up point ahead of the holder** ({@link nextPickUpPoint}); every other racer who rides through it in that lane loses 1.5 m/s for 4 s, once each. It dries after {@link PUDDLE_LIFETIME_MS}. With no pick-up point left before the finish it is used up for nothing | 6 per racer slowed |
+ * | `crosswind-gust` | hits **every** racer in the holder's lane within {@link GUST_REACH_METRES} ahead by drawn distance (inclusive): −2 m/s for 4 s each; a miss if there is none | 8 per racer hit |
  * | `rain-cape` | absorbs the next hit within {@link RAIN_CAPE_DURATION_MS}; moves nothing | 0 |
+ *
+ * **Offset drift** (the owner's ruling of 2026-10-31, under ADR 0060 D-3.4's
+ * "by its own rule"): while no effect runs on a racer, its offset eases back
+ * toward 0 at {@link OFFSET_DRIFT_METRES_PER_SECOND}, through `applyOffset`,
+ * and stops at 0 rather than crossing it. It is paused for any part of a tick
+ * an effect covers. It never reads or writes `effortDistance`. A rain cape is
+ * not an effect: it moves nothing, so it does not pause the drift.
+ *
+ * **Why the puddle goes at the next pick-up point ahead.** The ruling puts it
+ * at "a pick-up point". The next one ahead of the holder is the one racers
+ * still have to ride through, which is what makes it a hazard: a point behind
+ * the holder has already been passed by the holder and by anyone ahead, and
+ * only the racers behind would ever meet it, which is the old "dropped behind"
+ * shape the ruling replaced. A point exactly at the holder's drawn distance
+ * counts as passed ({@link pickUpsPassed}), so "ahead" is strict.
+ *
+ * **The placer is immune** to its own puddle: it chose a point it is about to
+ * ride through, so without the exemption the item would mostly slow its own
+ * holder. The owner check is kept.
+ *
+ * **When a puddle hits.** A racer is slowed when, in a tick that ends before
+ * the puddle dries (`untilMs > atMs`), its drawn distance goes from below the
+ * puddle's position to at or past it, in the puddle's lane. A tick that ends
+ * after the puddle dries hits no one, even a racer who crossed early in that
+ * tick: crossings are judged at tick ends, as everything else here is.
+ * Everyone who crosses in the same tick is slowed, so no id decides who.
  *
  * A strength is the most offset the item can move, in metres: its rate times
  * its duration. The rain cape's is 0 because it moves no one.
@@ -61,9 +99,9 @@
  * decades-old genre practice; spike 0030 §4.2 found no claim reading on it.
  * The numbers are this project's, chosen for a field of a handful of racers:
  *
- * - **Front**: no `slipstream` and no `crosswind-gust`, because both aim at a
- *   racer ahead and the leader has none. Mostly the small `tailwind` and the
- *   `puddle`, which defends from behind.
+ * - **Front**: no `tow` and no `crosswind-gust`, because both need a racer
+ *   ahead and the leader has none. Mostly the small `tailwind` and the
+ *   `puddle`, which lies in wait for the racers behind.
  * - **Middle**: everything, evenly.
  * - **Back**: mostly the two 8 m items, almost no defensive ones.
  *
@@ -71,6 +109,9 @@
  * 7.1 m at the back: a margin of {@link BACK_OVER_FRONT_STRENGTH_METRES} =
  * 2.6 m. That is small next to 2B = 20 m, which keeps D-4's promise readable:
  * items make a close race closer and cannot reverse one won on the pedals.
+ * A strength is per racer moved: a gust or a puddle may slow more than one
+ * racer, but no racer more than its rate times its duration, and every
+ * racer's offset stays within ±B whatever hits it (D-3.2).
  *
  * ## Pick-up points: by fraction of the lap, never by geometry
  *
@@ -85,12 +126,12 @@ import { nextUnit, type RaceRandom } from './random';
 import { applyOffset, racePosition, standings, type RaceCourse, type RacerState } from './race';
 
 /** The items, by key. Names are keys, never rider-facing words (#1904 brings those). */
-export type ItemKind = 'tailwind' | 'slipstream' | 'puddle' | 'crosswind-gust' | 'rain-cape';
+export type ItemKind = 'tailwind' | 'tow' | 'puddle' | 'crosswind-gust' | 'rain-cape';
 
 /** Every item, in a fixed order: the order {@link drawItem} reads the table in. */
 export const ITEM_KINDS: readonly ItemKind[] = [
   'tailwind',
-  'slipstream',
+  'tow',
   'puddle',
   'crosswind-gust',
   'rain-cape',
@@ -105,10 +146,19 @@ export const STARTING_LANE = 1;
 /** No item moves an offset faster than this. */
 export const MAXIMUM_EFFECT_RATE_METRES_PER_SECOND = 2;
 
-/** How far ahead, by drawn distance, a racer must be for a `slipstream` to tow. */
-export const SLIPSTREAM_REACH_METRES = 20;
+/** How far ahead, by drawn distance, a racer may be for a `tow` to pull (inclusive). */
+export const TOW_REACH_METRES = 20;
 
-/** How long a dropped `puddle` lies on the road before it dries. */
+/** How far ahead in the holder's lane, by drawn distance, a `crosswind-gust` reaches (inclusive). */
+export const GUST_REACH_METRES = 30;
+
+/**
+ * How fast a racer's offset eases back toward 0 while no effect runs on it, in
+ * metres per second (the owner's ruling of 2026-10-31). It never crosses 0.
+ */
+export const OFFSET_DRIFT_METRES_PER_SECOND = 0.25;
+
+/** How long a placed `puddle` lies on the road before it dries. */
 export const PUDDLE_LIFETIME_MS = 30_000;
 
 /** How long a `rain-cape` waits for a hit to absorb. */
@@ -126,7 +176,7 @@ export interface ItemRule {
 /** The catalogue's rules. See the table in the header. */
 export const ITEM_RULES: Readonly<Record<ItemKind, ItemRule>> = {
   tailwind: { rateMetresPerSecond: 1.5, durationMs: 4_000 },
-  slipstream: { rateMetresPerSecond: 2, durationMs: 4_000 },
+  tow: { rateMetresPerSecond: 2, durationMs: 4_000 },
   puddle: { rateMetresPerSecond: -1.5, durationMs: 4_000 },
   'crosswind-gust': { rateMetresPerSecond: -2, durationMs: 4_000 },
   'rain-cape': { rateMetresPerSecond: 0, durationMs: 0 },
@@ -143,9 +193,9 @@ export type PositionBand = 'front' | 'middle' | 'back';
 
 /** The draw's weights, out of 100, by band. See the header for the reasoning. */
 export const ITEM_TABLE: Readonly<Record<PositionBand, Readonly<Record<ItemKind, number>>>> = {
-  front: { tailwind: 40, slipstream: 0, puddle: 35, 'crosswind-gust': 0, 'rain-cape': 25 },
-  middle: { tailwind: 25, slipstream: 20, puddle: 20, 'crosswind-gust': 20, 'rain-cape': 15 },
-  back: { tailwind: 20, slipstream: 35, puddle: 5, 'crosswind-gust': 35, 'rain-cape': 5 },
+  front: { tailwind: 40, tow: 0, puddle: 35, 'crosswind-gust': 0, 'rain-cape': 25 },
+  middle: { tailwind: 25, tow: 20, puddle: 20, 'crosswind-gust': 20, 'rain-cape': 15 },
+  back: { tailwind: 20, tow: 35, puddle: 5, 'crosswind-gust': 35, 'rain-cape': 5 },
 };
 
 /** The mean strength drawn in a band, in metres, from {@link ITEM_TABLE}. */
@@ -203,6 +253,20 @@ export function pickUpsPassed(course: RaceCourse, distance: number): number {
   );
 }
 
+/**
+ * The race distance of the next pick-up point strictly ahead of drawn
+ * distance `distance`, or `null` when none is left before the finish. A point
+ * exactly at the distance has been passed ({@link pickUpsPassed}), so it is
+ * not ahead. Where a `puddle` is placed.
+ */
+export function nextPickUpPoint(course: RaceCourse, distance: number): number | null {
+  const next = pickUpsPassed(course, distance);
+  if (next >= course.laps * PICK_UP_FRACTIONS.length) return null;
+  const lap = Math.floor(next / PICK_UP_FRACTIONS.length);
+  const fraction = PICK_UP_FRACTIONS[next % PICK_UP_FRACTIONS.length] as number;
+  return (lap + fraction) * course.lapLengthMetres;
+}
+
 /** An offset effect a racer is under: a rate, from one instant until another. */
 export interface OffsetEffect {
   readonly rateMetresPerSecond: number;
@@ -224,12 +288,16 @@ export interface LapRacer {
   readonly pickUpsPassed: number;
 }
 
-/** A `puddle` on the road. */
+/** A `puddle` on the road: lane-wide, at a pick-up point, until it dries. */
 export interface Hazard {
+  /** Race distance, metres: a pick-up point ({@link nextPickUpPoint}). */
   readonly position: number;
   readonly lane: number;
+  /** The racer who placed it, whom it never slows. */
   readonly ownerId: string;
   readonly untilMs: number;
+  /** The racers it has slowed, in the order it slowed them: each once. */
+  readonly hitIds: readonly string[];
 }
 
 /** A whole race's state: plain data, so the device and the room can compare it byte for byte. */
@@ -255,6 +323,37 @@ export function checkedLane(lane: number): number {
     throw new LapRaceError('lane-out-of-range', 'lane must be a whole number below LANE_COUNT');
   }
   return lane;
+}
+
+/**
+ * How long, between two instants, no effect in `effects` ran, in
+ * milliseconds: the time the drift runs for. Effects are merged as intervals,
+ * so two overlapping effects are not counted twice.
+ */
+function idleBetween(effects: readonly OffsetEffect[], fromMs: number, toMs: number): number {
+  const spans = effects
+    .map((effect) => [Math.max(fromMs, effect.fromMs), Math.min(toMs, effect.untilMs)] as const)
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0]);
+  let covered = 0;
+  let reached = fromMs;
+  for (const [start, end] of spans) {
+    if (end <= reached) continue;
+    covered += end - Math.max(start, reached);
+    reached = end;
+  }
+  return toMs - fromMs - covered;
+}
+
+/**
+ * The racer with its offset eased toward 0 for `idleMs`, at
+ * {@link OFFSET_DRIFT_METRES_PER_SECOND}, through `applyOffset`, never past 0.
+ */
+function drift(racer: RacerState, idleMs: number): RacerState {
+  const offset = racer.raceOffset;
+  if (offset === 0 || idleMs <= 0) return racer;
+  const metres = Math.min(Math.abs(offset), (OFFSET_DRIFT_METRES_PER_SECOND * idleMs) / 1_000);
+  return applyOffset(racer, offset > 0 ? -metres : metres);
 }
 
 /** How much offset `effects` add between two instants, in metres. */
@@ -320,33 +419,42 @@ export function resolveItems(
   const fromMs = state.atMs;
   let random = state.random;
 
-  // 1. The effects already running, integrated through the clamp.
+  // 1. The effects already running, integrated through the clamp, then the
+  //    drift toward 0 over the part of the tick no effect covered. Every
+  //    effect starts at a tick instant, so that part is the tick's end.
   let racers: LapRacer[] = state.racers.map((entry) => {
     if (entry.racer.finishedAtMs !== null) return entry;
     const metres = offsetBetween(entry.effects, fromMs, atMs);
+    const moved = metres === 0 ? entry.racer : applyOffset(entry.racer, metres);
     return {
       ...entry,
-      racer: metres === 0 ? entry.racer : applyOffset(entry.racer, metres),
+      racer: drift(moved, idleBetween(entry.effects, fromMs, atMs)),
       effects: entry.effects.filter((effect) => effect.untilMs > atMs),
+      // A cape nobody hit has gone by now: a reader sees no cape, not a stale instant.
+      capeUntilMs:
+        entry.capeUntilMs !== null && entry.capeUntilMs <= atMs ? null : entry.capeUntilMs,
     };
   });
 
-  // 2. Puddles: the first other racer, in id order, to ride through one in its lane.
+  // 2. Puddles: every other racer who rides through one in its lane, once each.
   const hazards: Hazard[] = [];
   for (const hazard of state.hazards) {
-    const victim = racers.findIndex(
-      (entry) =>
+    if (!(hazard.untilMs > atMs)) continue;
+    const hitIds = [...hazard.hitIds];
+    racers.forEach((entry, index) => {
+      if (
         entry.racer.id !== hazard.ownerId &&
         entry.racer.finishedAtMs === null &&
         entry.lane === hazard.lane &&
+        !hitIds.includes(entry.racer.id) &&
         (before.get(entry.racer.id) ?? 0) < hazard.position &&
-        racePosition(entry.racer) >= hazard.position,
-    );
-    if (victim >= 0) {
-      racers[victim] = hit(racers[victim] as LapRacer, 'puddle', atMs);
-    } else if (hazard.untilMs > atMs) {
-      hazards.push(hazard);
-    }
+        racePosition(entry.racer) >= hazard.position
+      ) {
+        racers[index] = hit(entry, 'puddle', atMs);
+        hitIds.push(entry.racer.id);
+      }
+    });
+    hazards.push({ ...hazard, hitIds });
   }
 
   // 3. Items used, in id order.
@@ -357,27 +465,40 @@ export function resolveItems(
     let user: LapRacer = { ...entry, held: null };
     if (kind === 'tailwind') {
       user = { ...user, effects: [...user.effects, effectOf(kind, atMs)] };
-    } else if (kind === 'slipstream') {
+    } else if (kind === 'tow') {
       const ahead = nearestAhead(racers, index);
       const gap =
         ahead === undefined
           ? Number.POSITIVE_INFINITY
           : racePosition((racers[ahead] as LapRacer).racer) - racePosition(entry.racer);
-      if (gap <= SLIPSTREAM_REACH_METRES) {
+      if (gap <= TOW_REACH_METRES) {
         user = { ...user, effects: [...user.effects, effectOf(kind, atMs)] };
       }
     } else if (kind === 'puddle') {
-      hazards.push({
-        position: racePosition(entry.racer),
-        lane: entry.lane,
-        ownerId: entry.racer.id,
-        untilMs: atMs + PUDDLE_LIFETIME_MS,
-      });
-    } else if (kind === 'crosswind-gust') {
-      const ahead = nearestAhead(racers, index);
-      if (ahead !== undefined && (racers[ahead] as LapRacer).lane === entry.lane) {
-        racers[ahead] = hit(racers[ahead] as LapRacer, kind, atMs);
+      const position = nextPickUpPoint(state.course, racePosition(entry.racer));
+      if (position !== null) {
+        hazards.push({
+          position,
+          lane: entry.lane,
+          ownerId: entry.racer.id,
+          untilMs: atMs + PUDDLE_LIFETIME_MS,
+          hitIds: [],
+        });
       }
+    } else if (kind === 'crosswind-gust') {
+      const own = racePosition(entry.racer);
+      racers.forEach((other, at) => {
+        const gap = racePosition(other.racer) - own;
+        if (
+          at !== index &&
+          other.racer.finishedAtMs === null &&
+          other.lane === entry.lane &&
+          gap > 0 &&
+          gap <= GUST_REACH_METRES
+        ) {
+          racers[at] = hit(other, kind, atMs);
+        }
+      });
     } else {
       user = { ...user, capeUntilMs: atMs + RAIN_CAPE_DURATION_MS };
     }

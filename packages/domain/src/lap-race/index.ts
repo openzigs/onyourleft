@@ -35,6 +35,7 @@ export type {
 export {
   BACK_OVER_FRONT_STRENGTH_METRES,
   drawItem,
+  GUST_REACH_METRES,
   isLane,
   ITEM_KINDS,
   ITEM_RULES,
@@ -43,13 +44,15 @@ export {
   LANE_COUNT,
   MAXIMUM_EFFECT_RATE_METRES_PER_SECOND,
   meanStrength,
+  nextPickUpPoint,
+  OFFSET_DRIFT_METRES_PER_SECOND,
   PICK_UP_FRACTIONS,
   pickUpsPassed,
   positionBand,
   PUDDLE_LIFETIME_MS,
   RAIN_CAPE_DURATION_MS,
-  SLIPSTREAM_REACH_METRES,
   STARTING_LANE,
+  TOW_REACH_METRES,
 } from './items';
 
 export type { ItemRaceSetup, RaceTickInput } from './item-race';
