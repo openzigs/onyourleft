@@ -322,11 +322,12 @@ export function DemoPage(props: DemoPageProps) {
   const rendering = query.ok && query.render === true;
   return (
     // #1654: the page is its iframe's whole box, and the stage takes what the
-    // lines above and below it leave, so nothing scrolls from 320 × 180 up
-    // (`shell-demo.browser.spec.ts` measures three sizes). The heading is for a
-    // screen reader: a visible one cost a small frame its stage, and the site
-    // embedding the demo names it.
-    <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', margin: 0 }}>
+    // lines above and below it leave, so the page never scrolls. #1945: in a
+    // frame under 27 rem tall `demo.css` lays a compact HUD over the world, so
+    // the stage does not either (`shell-demo.browser.spec.ts` measures six
+    // sizes). The heading is for a screen reader: a visible one cost a small
+    // frame its stage, and the site embedding the demo names it.
+    <main className="oyl-demo">
       {rendering ? null : <h1 className="oyl-visually-hidden">On Your Left</h1>}
       {query.ok ? (
         <>
@@ -358,9 +359,13 @@ export function DemoPage(props: DemoPageProps) {
               {caption}
             </p>
           ) : null}
-          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          <div
+            className="oyl-demo__stage-box"
+            style={{ flex: 1, minHeight: 0, position: 'relative' }}
+          >
             <section
-              className="oyl-game oyl-game--riding"
+              // #1945: `oyl-demo__stage` is what `demo.css` lays out in a small frame.
+              className="oyl-game oyl-game--riding oyl-demo__stage"
               aria-label="Demo ride"
               // The game's stage, held to this box rather than the viewport.
               style={{ position: 'absolute' }}
@@ -405,18 +410,9 @@ export function DemoPage(props: DemoPageProps) {
           ) : null}
           {/* Mounted before it has text, so a screen reader announces the change. */}
           {rendering ? null : (
-            <p
-              role="status"
-              className="oyl-demo__status"
-              // #1654: small, as the source offer is, so a 320 × 180 frame keeps
-              // a stage under a two-line notice (CI's fonts left it none at 1 rem).
-              style={{
-                fontSize: 'var(--oyl-font-size-sm)',
-                lineHeight: 1.3,
-                margin: 0,
-                padding: '0 var(--oyl-space-sm)',
-              }}
-            >
+            // #1654: small, as the source offer is (`demo.css`); #1945: in a small
+            // frame it is laid over the top of the stage, so it costs the stage nothing.
+            <p role="status" className="oyl-demo__status">
               {[loading ? REALISTIC_LOADING : undefined, routeNotice, notice]
                 .filter((each) => each !== undefined)
                 .join(' ')}
