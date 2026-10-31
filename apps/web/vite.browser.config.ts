@@ -243,6 +243,10 @@ export default defineConfig({
         // three calls, eight racers drawn in the riders' own, in a real
         // context. `lap-race-harness.ts` says what it draws.
         'lap-race': 'browser/lap-race.html',
+        // #1904: a lap race's fields, its warning and its standings on the
+        // real HUD and stylesheet, beside the leaning rider's box.
+        // `lap-race-hud-harness.tsx` says what it does not prove.
+        'lap-race-hud': 'browser/lap-race-hud.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

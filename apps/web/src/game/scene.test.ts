@@ -1050,6 +1050,10 @@ describe('a lap race’s bots on the road — #1902', () => {
   });
 
   it('moves a bot continuously as the rider steers across its lane, never jumping across them', () => {
+    // #1963: the corridor is the road at the rider's distance, which neither the steering nor the
+    // bots change, so it is built once. Building the whole scene for each of these 1,203 placings
+    // timed out under the nightly coverage report; `placedRiders` is what is under test.
+    const corridor = sceneFrame(input({})).corridor;
     for (const lateralMetres of [-1.75, 0, 1.75]) {
       let before: number | undefined;
       for (let step = -200; step <= 200; step += 1) {
@@ -1057,7 +1061,7 @@ describe('a lap race’s bots on the road — #1902', () => {
           steeredLateral: step / 100,
           raceBots: [{ distanceMetres: RIDER, speedMetresPerSecond: 9, lateralMetres }],
         });
-        const bot = placedRiders(made, sceneFrame(made).corridor)[1]?.lateral ?? 0;
+        const bot = placedRiders(made, corridor)[1]?.lateral ?? 0;
         if (before !== undefined) {
           expect(
             Math.abs(bot - before),
