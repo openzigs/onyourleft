@@ -146,6 +146,12 @@ import {
   writeDeliveryAssist,
   type DeliveryAssist,
 } from '../game/delivery/assist-preference';
+import {
+  LAP_RACE_ASSIST_PARTS,
+  readLapRaceAssist,
+  writeLapRaceAssist,
+  type LapRaceAssist,
+} from '../game/lap-race/assist-preference';
 import { presentationFor } from '../ride/MetricGrid';
 import type { RideMetricId } from '../ride/metrics';
 import {
@@ -638,6 +644,11 @@ export function SettingsView({
           §`ROW_BALANCE_LIMIT`); here it evens this card's row instead.
         */}
         <DeliveryAssistPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
+
+        {/* #1905: how the rider races the lap race, beside how they play Delivery. */}
+        <LapRaceAssistPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
         />
 
@@ -1553,6 +1564,122 @@ function DeliveryAssistPanel({
           {text.noFailLabel}
         </label>
       </p>
+      <KeptVisible>
+        <p className="oyl-muted">{text.stays}</p>
+      </KeptVisible>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What the lap race's assisted setting says — #1905. ⚠️ Draft wording for the
+ * owner's approval, as "Lap race" itself is (ADR 0060 D-1.1: the mode's name
+ * is the owner's). Each part's sentence says what it changes.
+ */
+export const LAP_RACE_ASSIST_TEXT = {
+  heading: 'Lap race',
+  about:
+    'A lap race is a race of laps against bots in the trainer game, with items to pick up round the lap. These choices make a race easier.',
+  stays: DELIVERY_ASSIST_STAYS_HERE,
+  parts: {
+    itemsOff: {
+      label: 'Race without items',
+      detail: 'There are no items to pick up, and nothing can knock you back.',
+    },
+    autoUse: {
+      label: 'Use items straight away',
+      detail: 'An item you pick up is used at once, so you never need to press for it.',
+    },
+    noKnockBack: {
+      label: 'Nothing knocks me back',
+      detail:
+        'A gust or a puddle that would knock you back does nothing to you. Your own items still work.',
+    },
+    gentlerBots: {
+      label: 'Gentler bots',
+      detail:
+        'Every bot rides one level easier than the one you choose. The easiest stays the easiest.',
+    },
+  },
+} as const satisfies {
+  readonly [part: string]: unknown;
+  readonly parts: Readonly<
+    Record<(typeof LAP_RACE_ASSIST_PARTS)[number], { label: string; detail: string }>
+  >;
+};
+
+/**
+ * The lap race's assisted setting — #1905, on {@link DeliveryAssistPanel}'s
+ * pattern: four switches, each described through `aria-describedby` by its
+ * sentence in the section's help, behind its ⓘ (#1031), and the privacy
+ * sentence kept on the screen under them (#666). A device choice
+ * (`game/lap-race/assist-preference.ts`), kept the moment it is changed.
+ *
+ * The switches take the announcement switch's 24×24 target from `theme.css`
+ * by this section's own class, `oyl-lap-race-assist`, which is also the
+ * tests' hook.
+ */
+function LapRaceAssistPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [assist, setAssist] = useState<LapRaceAssist>(() => readLapRaceAssist(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  function keep(next: LapRaceAssist): void {
+    setAssist(next);
+    setMessage(
+      writeLapRaceAssist(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+  const text = LAP_RACE_ASSIST_TEXT;
+  return (
+    <section
+      className="oyl-panel oyl-lap-race-assist"
+      aria-labelledby="oyl-lap-race-assist-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-lap-race-assist-heading"
+        help={
+          <>
+            <p className="oyl-muted">{text.about}</p>
+            <dl className="oyl-muted">
+              {LAP_RACE_ASSIST_PARTS.map((part) => (
+                <div key={part}>
+                  <dt>{text.parts[part].label}</dt>
+                  <dd id={`oyl-lap-race-${part}-detail`}>{text.parts[part].detail}</dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        }
+      >
+        {text.heading}
+      </SectionHeading>
+      {LAP_RACE_ASSIST_PARTS.map((part) => (
+        <p key={part}>
+          <label className="oyl-announce__switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={assist[part]}
+              aria-describedby={`oyl-lap-race-${part}-detail`}
+              onChange={(event) => {
+                keep({ ...assist, [part]: event.currentTarget.checked });
+              }}
+            />{' '}
+            {text.parts[part].label}
+          </label>
+        </p>
+      ))}
       <KeptVisible>
         <p className="oyl-muted">{text.stays}</p>
       </KeptVisible>
