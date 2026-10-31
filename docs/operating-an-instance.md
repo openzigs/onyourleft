@@ -373,7 +373,12 @@ leaves the key unreadable, and the instance says so and carries on with its loca
 run with SQLite's `secure_delete` on, so the old ciphertext is overwritten with zeros in the
 database file rather than left in a free page, and then checkpoint and truncate the write-ahead log,
 which held copies of the old pages. Since #1796 every sync delete does the same — a rider's masking
-list when they withdraw, a ride, a note — because an item can hold a place. ⚠️ Two copies are beyond that: **a snapshot taken while the key
+list when they withdraw, a ride, a note — because an item can hold a place. Since #1944 so does every
+sync write that **replaces** a held item with a different one, of any kind: the app sends its
+masking list again before every hosted job, so a privacy zone the rider removed is scrubbed from the
+file and the log by the next job. The cost is one truncating checkpoint per replaced item, which
+can wait up to the busy timeout (5 s) while another connection reads; a first write, a write of an
+unchanged item and a write over a deleted one replace no body and pay nothing. ⚠️ Two copies are beyond that: **a snapshot taken while the key
 was held** still holds its ciphertext, and opens with the secret, so delete those snapshots or
 rotate the secret; and if another connection (the running server, when the command is run beside it) is reading at
 that moment, the truncation does not happen and the log's old pages stay until SQLite next writes

@@ -385,7 +385,7 @@ describe('a main street — #1590, over the mixed town', () => {
       origin,
       covered: () => true,
       coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
-      landUse: [landBeside(profile, origin, 'landuse', 'retail', 900, 1_200, -80, 80)],
+      landUse: [landBeside(profile, origin, 'landuse', 'commercial', 900, 1_200, -80, 80)],
       buildings,
       paths: [],
       streets: [],
@@ -402,7 +402,7 @@ describe('a main street — #1590, over the mixed town', () => {
     expect(few.shop.cornice).toBe(true);
   });
 
-  /** One building on retail land beside a straight road, planned alone. */
+  /** One building on commercial land beside a straight road, planned alone. */
   function plannedAlone(
     profile: RouteProfile,
     origin: CorridorOrigin,
@@ -413,7 +413,7 @@ describe('a main street — #1590, over the mixed town', () => {
       origin,
       covered: () => true,
       coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
-      landUse: [landBeside(profile, origin, 'landuse', 'retail', 900, 1_200, -80, 80)],
+      landUse: [landBeside(profile, origin, 'landuse', 'commercial', 900, 1_200, -80, 80)],
       buildings: [building],
       paths: [],
       streets: [],
@@ -468,7 +468,7 @@ describe('a main street — #1590, over the mixed town', () => {
   });
 });
 
-/** A row of 12 × 10 m two-storey shops on retail land, their fronts `gap` metres past the road's clearance. */
+/** A row of 12 × 10 m two-storey shops on commercial land, their fronts `gap` metres past the road's clearance. */
 function shopsAt(gap: number): {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
@@ -486,7 +486,7 @@ function shopsAt(gap: number): {
     origin,
     covered: () => true,
     coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
-    landUse: [landBeside(profile, origin, 'landuse', 'retail', 100, 2_700, -60, 60)],
+    landUse: [landBeside(profile, origin, 'landuse', 'commercial', 100, 2_700, -60, 60)],
     buildings,
     paths: [],
     streets: [],
@@ -517,7 +517,7 @@ describe('an awning keeps the road’s clearance — #1590', () => {
 });
 
 /**
- * A row of 12 × 10 m two-storey shops on retail land, well back from the
+ * A row of 12 × 10 m two-storey shops on commercial land, well back from the
  * road, each with a fin of wall standing out from the right-hand end of its
  * front: `acute`, leaning back over the front from the corner, so the corner
  * between them is reflex past a right angle; else square to it. Every edge
@@ -552,7 +552,7 @@ function finnedShops(acute: boolean): readonly FootprintPlan[] {
     origin,
     covered: () => true,
     coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
-    landUse: [landBeside(profile, origin, 'landuse', 'retail', 100, 2_700, -60, 60)],
+    landUse: [landBeside(profile, origin, 'landuse', 'commercial', 100, 2_700, -60, 60)],
     buildings,
     paths: [],
     streets: [],
