@@ -40,6 +40,11 @@ export interface ItemRaceSetup {
   readonly racerIds: readonly string[];
   /** The instant the race starts. */
   readonly startMs: number;
+  /**
+   * The racers no hit moves: the assisted setting's "no knock-back on me"
+   * (#1905), for a solo race. Each must be in {@link racerIds}. None when absent.
+   */
+  readonly shieldedIds?: readonly string[];
 }
 
 /** What one tick brings in. Every field is an input; no outcome is ever handed in (D-5.4). */
@@ -58,11 +63,20 @@ function own(record: Readonly<Record<string, number>>, id: string): number | und
   return Object.hasOwn(record, id) ? record[id] : undefined;
 }
 
-/** A race on the line. @throws {LapRaceError} for an empty field, a repeated id, or a seed or instant that cannot start one. */
+/**
+ * A race on the line. @throws {LapRaceError} for an empty field, a repeated
+ * id, a shielded id not in the field, or a seed or instant that cannot start one.
+ */
 export function createItemRace(setup: ItemRaceSetup): ItemRaceState {
   const ids = [...setup.racerIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   if (ids.length === 0 || new Set(ids).size !== ids.length) {
     throw new LapRaceError('field-invalid', 'racerIds must name at least one racer, each once');
+  }
+  const shielded = [...new Set(setup.shieldedIds ?? [])].sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  if (shielded.some((id) => !ids.includes(id))) {
+    throw new LapRaceError('field-invalid', 'shieldedIds must name racers in the field');
   }
   if (!Number.isFinite(setup.startMs)) {
     throw new LapRaceError('instant-not-finite', 'startMs must be a finite number of milliseconds');
@@ -81,6 +95,7 @@ export function createItemRace(setup: ItemRaceSetup): ItemRaceState {
       pickUpsPassed: 0,
     })),
     hazards: [],
+    shielded,
   };
 }
 

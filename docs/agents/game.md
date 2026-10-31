@@ -717,6 +717,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reads every tick's effort distance and speed back
                         equal. ⚠️ `race-input.ts` is `@unwired` until #1906
                         runs the race in `GameView`
+    src/game/lap-race/assist-preference.ts, src/game/lap-race/assist.ts
+                        the lap race's assisted setting (#1905, Delivery's
+                        #1813 pattern): items off, auto-use, no knock-back on
+                        me, gentler bots. Kept on the device, read only by
+                        Settings and `game/lap-race/`. "No knock-back" is the
+                        model's own: `createItemRace`'s `shieldedIds`, and a
+                        hit on a shielded racer does nothing (`items.ts`
+                        §"A shielded racer"), solo races only. `assist.ts`
+                        is unwired until #1906 starts a race in a ride
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
