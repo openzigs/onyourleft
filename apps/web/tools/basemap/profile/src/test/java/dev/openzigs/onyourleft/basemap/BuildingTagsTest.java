@@ -278,7 +278,21 @@ class BuildingTagsTest {
     String huge = "house".repeat(64 * 1024 / 5) + "-1";
     assertEquals(Map.of(), fields(tags(key, huge)));
     assertEquals(Map.of(), fields(tags(key, "1".repeat(64 * 1024))));
+    // A value the field would accept, padded past the length limit with whitespace that trimming
+    // would remove: only the length guard keeps it out, so this line is what holds the guard.
+    String valid = VALID_VALUE.get(key);
+    assertFalse(fields(tags(key, valid)).isEmpty(), key + "=" + valid + " is read unpadded");
+    assertEquals(Map.of(), fields(tags(key, " ".repeat(64 * 1024) + valid)));
   }
+
+  private static final Map<String, String> VALID_VALUE = Map.ofEntries(
+    Map.entry("building", "house"), Map.entry("building:levels", "3"), Map.entry("roof:levels", "1"),
+    Map.entry("roof:shape", "gabled"), Map.entry("roof:orientation", "along"),
+    Map.entry("roof:direction", "90"), Map.entry("building:colour", "white"),
+    Map.entry("roof:colour", "red"), Map.entry("building:material", "brick"),
+    Map.entry("roof:material", "slate"), Map.entry("start_date", "1900"),
+    Map.entry("amenity", "school")
+  );
 
   @Test
   void noRawTagStringIsEverWritten() {

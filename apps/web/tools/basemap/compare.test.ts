@@ -4,6 +4,7 @@ import {
   EARTH,
   FIXTURE_TILE,
   encodeTile,
+  holeRing,
   line,
   outerRing,
   polygon,
@@ -109,6 +110,39 @@ describe('compareTile on a strict pair (the same extract through upstream’s pr
 
     expect(summary.decoder.disagreeingTiles).toBe(1);
     expect(strictPasses(summary)).toBe(false);
+  });
+
+  it('fails a strict pair on a decoder disagreement alone', () => {
+    const summary = emptySummary();
+    expect(strictPasses(summary)).toBe(true);
+    summary.decoder.disagreeingTiles = 1;
+    expect(strictPasses(summary)).toBe(false);
+  });
+
+  it('counts a tile the client’s decoder refuses, for the archive it came from', () => {
+    // One outer ring and 256 holes is one ring over the decoder's per-polygon limit, so it
+    // refuses the tile.
+    const holes = Array.from({ length: 256 }, (_, i) =>
+      holeRing(
+        rectangle(
+          10 + (i % 16) * 20,
+          10 + Math.floor(i / 16) * 20,
+          20 + (i % 16) * 20,
+          20 + Math.floor(i / 16) * 20,
+        ),
+      ),
+    );
+    const rings = [outerRing(rectangle(0, 0, 400, 400)), ...holes];
+    const refused = tile([{ ...building(100), geometry: polygon(rings) }]);
+    const accepted = tile([building(100)]);
+
+    const oursRefused = emptySummary();
+    compareTile(oursRefused, FIXTURE_TILE, refused, accepted, YEAR);
+    expect(oursRefused.decoder).toMatchObject({ tiles: 1, refusedOurs: 1, refusedTheirs: 0 });
+
+    const theirsRefused = emptySummary();
+    compareTile(theirsRefused, FIXTURE_TILE, accepted, refused, YEAR);
+    expect(theirsRefused.decoder).toMatchObject({ tiles: 1, refusedOurs: 0, refusedTheirs: 1 });
   });
 
   it('counts a changed road as a differing tile in that layer, not in buildings', () => {
