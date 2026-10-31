@@ -728,7 +728,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ **Its own ceiling is the STYLISED world's** (#1903,
                         ADR 0060 D-10.2, stylised first by D-14 Q5):
                         `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`,
-                        14, the scenery-free start-line frame's 11
+                        14 — approved by the owner, 2026-10-31 (desktop
+                        measurement; tablet reading after #1906) — the
+                        scenery-free start-line frame's 11
                         (§`STYLISED_SCENE_DRAW_CALLS`, held equal to
                         `game.browser.spec.ts` §`SCENE_DRAW_CALLS`) and the
                         belt's three, only while a frame carries a race;
@@ -736,7 +738,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         choice is made. The village's 50 and Delivery's 53
                         are unchanged, and `villageDrawCallCeiling` never
                         returns 14. `game.browser.spec.ts` §"#1903" counts the
-                        race's frame; the tablet's reading is owed
+                        race's frame
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round

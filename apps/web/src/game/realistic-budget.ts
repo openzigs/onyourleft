@@ -563,9 +563,8 @@ export const STYLISED_SCENE_DRAW_CALLS = 11;
 
 /**
  * The most draw calls the stylised world's scenery-free frame may make
- * **while a lap race runs** — #1903, ADR 0060 D-10.2: **14**, proposed for
- * the owner's approval on #1903's pull request from the desktop browser gate;
- * the tablet's reading is owed.
+ * **while a lap race runs** — #1903, ADR 0060 D-10.2: **14**, approved by
+ * the owner, 2026-10-31 (desktop measurement; tablet reading after #1906).
  *
  * ⚠️ **The stylised world's, not the village's.** ADR 0060 D-14 Q5 chose the
  * stylised world first, so the ceiling sits beside that world's own budget,
