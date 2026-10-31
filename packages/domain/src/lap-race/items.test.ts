@@ -13,6 +13,7 @@ import { createItemRace, stepRace } from './item-race';
 import {
   BACK_OVER_FRONT_STRENGTH_METRES,
   drawItem,
+  GUST_REACH_METRES,
   ITEM_KINDS,
   ITEM_RULES,
   ITEM_TABLE,
@@ -20,12 +21,14 @@ import {
   LANE_COUNT,
   MAXIMUM_EFFECT_RATE_METRES_PER_SECOND,
   meanStrength,
+  nextPickUpPoint,
+  OFFSET_DRIFT_METRES_PER_SECOND,
   pickUpsPassed,
   positionBand,
   PUDDLE_LIFETIME_MS,
   RAIN_CAPE_DURATION_MS,
-  SLIPSTREAM_REACH_METRES,
   STARTING_LANE,
+  TOW_REACH_METRES,
   type ItemKind,
   type ItemRaceState,
   type LapRacer,
@@ -144,7 +147,7 @@ describe('the table and the bands', () => {
     for (const band of ['front', 'middle', 'back'] as const) {
       expect(ITEM_KINDS.reduce((sum, kind) => sum + ITEM_TABLE[band][kind], 0)).toBe(100);
     }
-    expect(ITEM_TABLE.front.slipstream).toBe(0);
+    expect(ITEM_TABLE.front.tow).toBe(0);
     expect(ITEM_TABLE.front['crosswind-gust']).toBe(0);
     expect(meanStrength('front')).toBeCloseTo(4.5, 10);
     expect(meanStrength('middle')).toBeCloseTo(5.9, 10);
@@ -236,7 +239,7 @@ describe('pick-ups, by fraction of the lap', () => {
 
 describe('each item, on the race offset only', () => {
   it('tailwind: the holder gains 1.5 m/s for 4 s, then nothing', () => {
-    const after = ride(field([{ id: 'a', at: 100, held: 'tailwind' }]), 6, { uses: ['a'] });
+    const after = ride(field([{ id: 'a', at: 100, held: 'tailwind' }]), 5, { uses: ['a'] });
     // Used at the first tick's instant; runs for the four seconds after it.
     expect(racer(after, 'a').racer.raceOffset).toBeCloseTo(6, 10);
     expect(racer(after, 'a').held).toBeNull();
@@ -244,11 +247,11 @@ describe('each item, on the race offset only', () => {
     expect(racer(after, 'a').racer.effortDistance).toBe(100);
   });
 
-  it('slipstream: tows toward a racer within reach ahead, and does nothing with none in reach', () => {
+  it('tow: tows toward a racer within reach ahead, and does nothing with none in reach', () => {
     const towed = ride(
       field([
-        { id: 'a', at: 100, held: 'slipstream' },
-        { id: 'b', at: 100 + SLIPSTREAM_REACH_METRES - 1 },
+        { id: 'a', at: 100, held: 'tow' },
+        { id: 'b', at: 100 + TOW_REACH_METRES - 1 },
       ]),
       5,
       { uses: ['a'] },
@@ -256,8 +259,8 @@ describe('each item, on the race offset only', () => {
     expect(racer(towed, 'a').racer.raceOffset).toBeCloseTo(8, 10);
     const alone = ride(
       field([
-        { id: 'a', at: 100, held: 'slipstream' },
-        { id: 'b', at: 100 + SLIPSTREAM_REACH_METRES + 1 },
+        { id: 'a', at: 100, held: 'tow' },
+        { id: 'b', at: 100 + TOW_REACH_METRES + 1 },
       ]),
       5,
       { uses: ['a'] },
@@ -266,66 +269,90 @@ describe('each item, on the race offset only', () => {
     expect(racer(alone, 'a').held).toBeNull();
   });
 
-  it('puddle: hits the next racer through it in the same lane', () => {
-    const dropped = ride(
+  it('puddle: is placed at the next pick-up point ahead of the holder, in its lane', () => {
+    const placed = ride(field([{ id: 'a', at: 120, lane: 0, held: 'puddle' }]), 1, {
+      uses: ['a'],
+    });
+    expect(placed.hazards).toEqual([
+      { position: 250, lane: 0, ownerId: 'a', untilMs: 1_000 + PUDDLE_LIFETIME_MS, hitIds: [] },
+    ]);
+    expect(racer(placed, 'a').held).toBeNull();
+  });
+
+  it('puddle: slows every other racer who rides through it in that lane, once each, and keeps lying', () => {
+    const placed = ride(
       field([
-        { id: 'a', at: 120, lane: 0, held: 'puddle' },
-        { id: 'b', at: 110, lane: 0 },
+        { id: 'a', at: 240, lane: 0, held: 'puddle' },
+        { id: 'b', at: 235, lane: 0 },
+        { id: 'c', at: 232, lane: 0 },
       ]),
       1,
       { uses: ['a'] },
     );
-    expect(dropped.hazards).toHaveLength(1);
-    // b rides through it at 10 m/s on the next tick, then serves the four seconds.
-    const after = ride(dropped, 5, {}, 10);
+    // All three ride through 250 m on the second tick; the placer is immune.
+    const crossed = ride(placed, 2, {}, 10);
+    expect(crossed.hazards[0]?.hitIds).toEqual(['b', 'c']);
+    const after = ride(crossed, 4, {}, 10);
     expect(racer(after, 'b').racer.raceOffset).toBeCloseTo(-6, 10);
-    expect(after.hazards).toEqual([]);
+    expect(racer(after, 'c').racer.raceOffset).toBeCloseTo(-6, 10);
     expect(racer(after, 'a').racer.raceOffset).toBe(0);
+    expect(after.hazards).toHaveLength(1);
   });
 
   it('puddle: misses a racer through it in a different lane, and dries in time', () => {
-    const dropped = ride(
+    const placed = ride(
       field([
-        { id: 'a', at: 120, lane: 0, held: 'puddle' },
-        { id: 'b', at: 110, lane: 2 },
+        { id: 'a', at: 240, lane: 0, held: 'puddle' },
+        { id: 'b', at: 235, lane: 2 },
       ]),
       1,
       { uses: ['a'] },
     );
-    const after = ride(dropped, 5, {}, 10);
+    const after = ride(placed, 5, {}, 10);
+    expect(racePosition(racer(after, 'b').racer)).toBeGreaterThan(250);
     expect(racer(after, 'b').racer.raceOffset).toBe(0);
     expect(after.hazards).toHaveLength(1);
     const dried = ride(after, PUDDLE_LIFETIME_MS / 1_000);
     expect(dried.hazards).toEqual([]);
   });
 
-  it('crosswind gust: hits the nearest racer ahead in the holder’s lane', () => {
+  it('puddle: is used up for nothing with no pick-up point left before the finish', () => {
+    const late = ride(field([{ id: 'a', at: 2_760, lane: 0, held: 'puddle' }]), 1, {
+      uses: ['a'],
+    });
+    expect(late.hazards).toEqual([]);
+    expect(racer(late, 'a').held).toBeNull();
+  });
+
+  it('crosswind gust: hits every racer in the holder’s lane within reach ahead, the reach included', () => {
     const after = ride(
       field([
         { id: 'a', at: 100, lane: 1, held: 'crosswind-gust' },
-        { id: 'b', at: 130, lane: 1 },
-        { id: 'c', at: 160, lane: 1 },
+        { id: 'b', at: 115, lane: 1 },
+        { id: 'c', at: 100 + GUST_REACH_METRES, lane: 1 },
+        { id: 'd', at: 101, lane: 2 },
       ]),
       5,
       { uses: ['a'] },
     );
     expect(racer(after, 'b').racer.raceOffset).toBeCloseTo(-8, 10);
-    expect(racer(after, 'c').racer.raceOffset).toBe(0);
+    expect(racer(after, 'c').racer.raceOffset).toBeCloseTo(-8, 10);
+    expect(racer(after, 'd').racer.raceOffset).toBe(0);
     expect(racer(after, 'a').racer.raceOffset).toBe(0);
   });
 
-  it('crosswind gust: misses when the nearest racer ahead is in a different lane', () => {
+  it('crosswind gust: misses at the reach plus a hair, in another lane, and behind', () => {
     const after = ride(
       field([
         { id: 'a', at: 100, lane: 1, held: 'crosswind-gust' },
-        { id: 'b', at: 130, lane: 2 },
-        { id: 'c', at: 160, lane: 1 },
+        { id: 'b', at: 100 + GUST_REACH_METRES + 1e-6, lane: 1 },
+        { id: 'c', at: 110, lane: 2 },
+        { id: 'r', at: 95, lane: 1 },
       ]),
       5,
       { uses: ['a'] },
     );
-    expect(racer(after, 'b').racer.raceOffset).toBe(0);
-    expect(racer(after, 'c').racer.raceOffset).toBe(0);
+    for (const id of ['b', 'c', 'r']) expect(racer(after, id).racer.raceOffset).toBe(0);
     expect(racer(after, 'a').held).toBeNull();
   });
 
@@ -387,13 +414,15 @@ describe('no item can push an offset past the bound', () => {
         reachedBound ||= Math.abs(offset) === B;
       };
       for (const kind of order) {
-        const before = racer(state, 't').racer.raceOffset;
         if (kind === 'puddle') {
           // Dropped just ahead of t in its lane, as f would have left it.
           const at = racePosition(racer(state, 't').racer) + 0.5;
           state = {
             ...state,
-            hazards: [...state.hazards, { position: at, lane: 1, ownerId: 'f', untilMs: 1e9 }],
+            hazards: [
+              ...state.hazards,
+              { position: at, lane: 1, ownerId: 'f', untilMs: 1e9, hitIds: [] },
+            ],
           };
           state = ride(state, 1, {}, 1);
         } else {
@@ -407,9 +436,12 @@ describe('no item can push an offset past the bound', () => {
           state = ride(state, 1, { uses: [user] }, 1);
         }
         check();
+        // A hit is an effect pushing back, not the drift easing a lead toward 0.
+        if (racer(state, 't').effects.some((effect) => effect.rateMetresPerSecond < 0)) {
+          knockedBack += 1;
+        }
         state = ride(state, 1, {}, 1);
         check();
-        if (racer(state, 't').racer.raceOffset < before) knockedBack += 1;
       }
       for (let second = 0; second < 6; second += 1) {
         state = ride(state, 1, {}, 1);
@@ -430,7 +462,7 @@ describe('no item can push an offset past the bound', () => {
     state = {
       ...state,
       racers: state.racers.map((entry) =>
-        entry.racer.id === 't' ? { ...entry, held: 'slipstream' } : entry,
+        entry.racer.id === 't' ? { ...entry, held: 'tow' } : entry,
       ),
     };
     state = ride(state, 5, { uses: ['t'] });
@@ -474,7 +506,7 @@ function finished(state: ItemRaceState, id: string): ItemRaceState {
 
 describe('the draw reads the racer’s real position (#1899 item 4)', () => {
   it('draws the leader from the front table and the last racer from the back one, through resolveItems', () => {
-    const aiming = new Set<ItemKind>(['slipstream', 'crosswind-gust']);
+    const aiming = new Set<ItemKind>(['tow', 'crosswind-gust']);
     let leaderAiming = 0;
     let trailerAiming = 0;
     for (let seed = 0; seed < 300; seed += 1) {
@@ -490,7 +522,7 @@ describe('the draw reads the racer’s real position (#1899 item 4)', () => {
       if (aiming.has(racer(after, 'lead').held as ItemKind)) leaderAiming += 1;
       if (aiming.has(racer(after, 'tail').held as ItemKind)) trailerAiming += 1;
     }
-    // The front table has no slipstream and no gust; the back one is 70% of them.
+    // The front table has no tow and no gust; the back one is 70% of them.
     expect(leaderAiming).toBe(0);
     expect(trailerAiming).toBeGreaterThan(150);
   });
@@ -505,9 +537,9 @@ describe('a finished racer takes no part in the items', () => {
       ]),
       'a',
     );
-    const dropped = ride(base, 1, { uses: ['a'] });
-    expect(dropped.hazards).toEqual([]);
-    expect(racer(dropped, 'a').held).toBe('puddle');
+    const placed = ride(base, 1, { uses: ['a'] });
+    expect(placed.hazards).toEqual([]);
+    expect(racer(placed, 'a').held).toBe('puddle');
     const gusting: ItemRaceState = {
       ...base,
       racers: base.racers.map((entry) =>
@@ -518,26 +550,48 @@ describe('a finished racer takes no part in the items', () => {
     expect(racer(after, 'b').racer.raceOffset).toBe(0);
   });
 
-  it('is not the racer a gust is aimed at: the next unfinished one ahead is', () => {
+  it('is not hit by a gust, and keeps its cape: the unfinished racers in reach are', () => {
     const base = finished(
       field([
         { id: 'a', at: 100, lane: 1, held: 'crosswind-gust' },
-        { id: 'f', at: 130, lane: 1 },
-        { id: 'z', at: 160, lane: 1 },
+        { id: 'f', at: 110, lane: 1 },
+        { id: 'z', at: 125, lane: 1 },
+      ]),
+      'f',
+    );
+    const caped: ItemRaceState = {
+      ...base,
+      racers: base.racers.map((entry) =>
+        entry.racer.id === 'f' ? { ...entry, capeUntilMs: 1e9 } : entry,
+      ),
+    };
+    const after = ride(caped, 5, { uses: ['a'] });
+    expect(racer(after, 'z').racer.raceOffset).toBeCloseTo(-8, 10);
+    expect(racer(after, 'f').effects).toEqual([]);
+    expect(racer(after, 'f').capeUntilMs).toBe(1e9);
+  });
+
+  it('is not a racer a tow pulls toward: with only a finished racer in reach, the tow does nothing', () => {
+    const base = finished(
+      field([
+        { id: 'a', at: 100, held: 'tow' },
+        { id: 'f', at: 110 },
+        { id: 'z', at: 100 + TOW_REACH_METRES + 5 },
       ]),
       'f',
     );
     const after = ride(base, 5, { uses: ['a'] });
-    expect(racer(after, 'z').racer.raceOffset).toBeCloseTo(-8, 10);
+    expect(racer(after, 'a').racer.raceOffset).toBe(0);
+    expect(racer(after, 'a').held).toBeNull();
   });
 });
 
 describe('a puddle’s edges', () => {
-  it('never hits the racer who dropped it, even riding over it', () => {
+  it('never hits the racer who placed it, even riding over it', () => {
     const start = field([{ id: 'a', at: 115, lane: 1 }]);
     const withPuddle: ItemRaceState = {
       ...start,
-      hazards: [{ position: 120, lane: 1, ownerId: 'a', untilMs: 100_000 }],
+      hazards: [{ position: 120, lane: 1, ownerId: 'a', untilMs: 100_000, hitIds: [] }],
     };
     const after = ride(withPuddle, 5, {}, 10);
     expect(racePosition(racer(after, 'a').racer)).toBeGreaterThan(120);
@@ -549,7 +603,7 @@ describe('a puddle’s edges', () => {
     const start = field([{ id: 'b', at: 115, lane: 1 }]);
     const withPuddle: ItemRaceState = {
       ...start,
-      hazards: [{ position: 120, lane: 1, ownerId: 'a', untilMs: 500 }],
+      hazards: [{ position: 120, lane: 1, ownerId: 'a', untilMs: 500, hitIds: [] }],
     };
     const after = ride(withPuddle, 5, {}, 10);
     expect(racer(after, 'b').racer.raceOffset).toBe(0);
@@ -566,16 +620,122 @@ describe('a rain cape that expires unused', () => {
   });
 });
 
-describe('the slipstream’s reach', () => {
+describe('the tow’s reach', () => {
   it('tows a racer exactly at the reach', () => {
     const towed = ride(
       field([
-        { id: 'a', at: 100, held: 'slipstream' },
-        { id: 'b', at: 100 + SLIPSTREAM_REACH_METRES },
+        { id: 'a', at: 100, held: 'tow' },
+        { id: 'b', at: 100 + TOW_REACH_METRES },
       ]),
       5,
       { uses: ['a'] },
     );
     expect(racer(towed, 'a').racer.raceOffset).toBeCloseTo(8, 10);
+  });
+});
+
+describe('a puddle slows a racer once', () => {
+  it('does not slow a racer it has already slowed, riding through it again', () => {
+    const start = field([{ id: 'b', at: 115, lane: 1 }]);
+    const withPuddle: ItemRaceState = {
+      ...start,
+      hazards: [{ position: 120, lane: 1, ownerId: 'a', untilMs: 100_000, hitIds: ['b'] }],
+    };
+    const after = ride(withPuddle, 5, {}, 10);
+    expect(racer(after, 'b').racer.raceOffset).toBe(0);
+    expect(after.hazards[0]?.hitIds).toEqual(['b']);
+  });
+});
+
+describe('the next pick-up point ahead', () => {
+  it('is strictly ahead, across laps, and none past the last one', () => {
+    expect(nextPickUpPoint(COURSE, 0)).toBe(250);
+    expect(nextPickUpPoint(COURSE, 249.9)).toBe(250);
+    expect(nextPickUpPoint(COURSE, 250)).toBe(500);
+    expect(nextPickUpPoint(COURSE, 760)).toBe(1_250);
+    expect(nextPickUpPoint(COURSE, 2_749)).toBe(2_750);
+    expect(nextPickUpPoint(COURSE, 2_750)).toBeNull();
+    expect(nextPickUpPoint(COURSE, 5_000)).toBeNull();
+  });
+});
+
+/** A copy of `state` with racer `id`'s offset set by hand. */
+function offsetBy(state: ItemRaceState, id: string, raceOffset: number): ItemRaceState {
+  return {
+    ...state,
+    racers: state.racers.map((entry) =>
+      entry.racer.id === id ? { ...entry, racer: { ...entry.racer, raceOffset } } : entry,
+    ),
+  };
+}
+
+describe('offset drift (the owner’s ruling of 2026-10-31)', () => {
+  it('eases an offset toward 0 at the stated rate, never crosses 0, and never touches effort', () => {
+    expect(OFFSET_DRIFT_METRES_PER_SECOND).toBe(0.25);
+    for (const start of [3, -3]) {
+      let state = offsetBy(field([{ id: 'a', at: 100 }]), 'a', start);
+      const seen: number[] = [];
+      for (let second = 0; second < 20; second += 1) {
+        state = ride(state, 1, {}, 5);
+        seen.push(racer(state, 'a').racer.raceOffset);
+        expect(racer(state, 'a').racer.effortDistance).toBe(100 + 5 * (second + 1));
+      }
+      expect(seen[0]).toBeCloseTo(start - Math.sign(start) * OFFSET_DRIFT_METRES_PER_SECOND, 10);
+      // 3 m at 0.25 m/s is 12 s; then 0, and never the other side of it.
+      expect(seen[11]).toBe(0);
+      for (const offset of seen) expect(offset * Math.sign(start)).toBeGreaterThanOrEqual(0);
+      expect(seen.slice(11).every((offset) => offset === 0)).toBe(true);
+    }
+  });
+
+  it('stops at 0 in one long tick rather than overshooting', () => {
+    const state = offsetBy(field([{ id: 'a', at: 100 }]), 'a', 3);
+    const after = stepRace(state, { atMs: 100_000, effortDistances: { a: 100 } });
+    expect(racer(after, 'a').racer.raceOffset).toBe(0);
+  });
+
+  it('is paused while an effect runs, and resumes for the part of a tick after it ends', () => {
+    let state = ride(field([{ id: 'a', at: 100, held: 'tailwind' }]), 1, { uses: ['a'] });
+    for (let second = 1; second <= 4; second += 1) {
+      state = ride(state, 1);
+      // Exactly the tailwind's rate, with nothing taken off by the drift.
+      expect(racer(state, 'a').racer.raceOffset).toBeCloseTo(1.5 * second, 10);
+    }
+    state = ride(state, 1);
+    expect(racer(state, 'a').racer.raceOffset).toBeCloseTo(6 - OFFSET_DRIFT_METRES_PER_SECOND, 10);
+
+    // One 6 s tick over a 4 s tailwind: 6 m from the effect, then 2 s of drift.
+    const used = ride(field([{ id: 'b', at: 100, held: 'tailwind' }]), 1, { uses: ['b'] });
+    const long = stepRace(used, { atMs: used.atMs + 6_000, effortDistances: { b: 100 } });
+    expect(racer(long, 'b').racer.raceOffset).toBeCloseTo(
+      6 - 2 * OFFSET_DRIFT_METRES_PER_SECOND,
+      10,
+    );
+  });
+
+  it('does not count two overlapping effects twice when it measures the idle time', () => {
+    let state = ride(field([{ id: 'a', at: 100, held: 'tailwind' }]), 1, { uses: ['a'] });
+    state = ride(state, 2);
+    // A second tailwind used at 4 s runs to 8 s, overlapping the first (1 to 5 s) from 4 s to 5 s.
+    state = ride({ ...state, racers: state.racers.map((e) => ({ ...e, held: 'tailwind' })) }, 1, {
+      uses: ['a'],
+    });
+    const long = stepRace(state, { atMs: state.atMs + 10_000, effortDistances: { a: 100 } });
+    // A 4 s to 14 s tick, covered from 4 s to 8 s: 6 s idle, 1.5 m of drift from +B.
+    // Counted twice, the overlap would leave 5 s idle and 8.75 m.
+    expect(racer(long, 'a').racer.raceOffset).toBeCloseTo(
+      B - 6 * OFFSET_DRIFT_METRES_PER_SECOND,
+      10,
+    );
+  });
+});
+
+describe('the catalogue as the owner ruled it on 2026-10-31', () => {
+  it('names the tow `tow`, with the old slipstream’s rule and reach unchanged', () => {
+    expect(ITEM_KINDS).toEqual(['tailwind', 'tow', 'puddle', 'crosswind-gust', 'rain-cape']);
+    expect(ITEM_RULES.tow).toEqual({ rateMetresPerSecond: 2, durationMs: 4_000 });
+    expect(TOW_REACH_METRES).toBe(20);
+    expect(GUST_REACH_METRES).toBe(30);
+    expect(Object.hasOwn(ITEM_RULES, 'slipstream')).toBe(false);
   });
 });
