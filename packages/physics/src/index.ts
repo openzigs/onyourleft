@@ -113,6 +113,15 @@ export {
 export type { BotCourse, BotPacerDriver, BotTick } from './pacer';
 export { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer } from './pacer';
 
+// --- Bots in a solo lap race (#1900, ADR 0060 D-7, D-9) ----------------------
+//
+// The #92 bot, racing: a W/kg tier's pace through `advanceBot`, and the
+// race's items and lanes through `@onyourleft/domain` §`stepRace`. No recorded
+// ride, no rubber-banding, no instance.
+
+export type { BotRaceStep, LapRaceBot, LapRaceBotConditions } from './lap-race-bot';
+export { lapRaceBot, stepBotRace } from './lap-race-bot';
+
 // --- The coefficient set a ride runs, and the version of the answer (#487) --
 //
 // Moved here from `apps/web/src/game/rider.ts` so that a race room, which may
