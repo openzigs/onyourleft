@@ -735,11 +735,28 @@ function Appeals({
 
 /**
  * Said on a notice whose notifier details the instance erased (#1381), in
- * place of their words, name and address, with when: they are erased six
- * months after the decision, or later if the instance was stopped then.
+ * place of their words, name and address, with when and why: six months after
+ * the decision, or twelve after the notice arrived when no decision was
+ * recorded by then (#1923) — or later, if the instance was stopped then.
+ * `afterDecision` is {@link erasedAfterDecision}.
  */
-export function noticeDetailsErasedText(erasedAt: string): string {
-  return `Their name, email address and words were erased ${erasedAt}. They are erased six months after the decision.`;
+export function noticeDetailsErasedText(erasedAt: string, afterDecision: boolean): string {
+  return `Their name, email address and words were erased ${erasedAt}. ${
+    afterDecision
+      ? 'They are erased six months after the decision.'
+      : 'They are erased twelve months after the notice arrived when no decision is recorded by then.'
+  }`;
+}
+
+/**
+ * Whether an erased notice's details went after its decision (#1381) rather
+ * than twelve months after it arrived undecided (#1923). The instance erases
+ * after a decision only six months after it, so that decision is EARLIER than
+ * the erasure; it erases an undecided notice only while no decision is
+ * recorded, so one recorded after is no earlier than the erasure.
+ */
+function erasedAfterDecision(decidedAt: number | null, erasedAt: number): boolean {
+  return decidedAt !== null && decidedAt < erasedAt;
 }
 
 /** The steps a moderator records on a notice, as the screen names them (#912). */
@@ -982,7 +999,10 @@ function Notices({
               )}
               <p>
                 {notice.detailsErasedAt !== null ? (
-                  noticeDetailsErasedText(when(notice.detailsErasedAt))
+                  noticeDetailsErasedText(
+                    when(notice.detailsErasedAt),
+                    erasedAfterDecision(notice.decidedAt, notice.detailsErasedAt),
+                  )
                 ) : (
                   <>
                     {notice.notifierName === null

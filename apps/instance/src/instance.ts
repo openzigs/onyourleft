@@ -645,8 +645,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         options.sweepTimers,
       );
       // #1381: a closed notice's notifier details go six months after its
-      // decision (the owner's ruling of 2026-10-30): once now, for whatever
-      // fell due while the instance was stopped, and every hour after.
+      // decision, and an undecided one's twelve months after receipt (#1923;
+      // the owner's rulings of 2026-10-30): once now, for whatever fell due
+      // while the instance was stopped, and every hour after.
       const moderation = identity.moderation;
       const eraseNoticeDetails = (): void => {
         void moderation.eraseExpiredNoticeDetails().catch((error: unknown) => {

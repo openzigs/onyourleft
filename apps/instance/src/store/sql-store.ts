@@ -603,12 +603,20 @@ export interface NoticeErasure {
 /** What a notice is stored with: everything but the id the store gives it, as received. */
 export type NewNotice = Omit<Notice, 'id' | 'erased'>;
 
+/**
+ * What a notice's notifier details are erased after: its decision (#1381), or
+ * its receipt when no decision is recorded on it (#1923).
+ */
+export type NoticeErasedAfter = 'decision' | 'receipt';
+
 /** What erasing a notice's notifier details did (#1381). */
 export type NoticeDetailsErased =
   | 'erased'
   | 'not_found'
-  /** No decision is recorded on it: an open notice keeps what its notifier gave. */
+  /** Asked after its decision, and no decision is recorded on it. */
   | 'not_closed'
+  /** Asked after its receipt (#1923), and a decision is recorded on it: that one counts. */
+  | 'not_open'
   /** They were erased already. */
   | 'already';
 
@@ -1660,14 +1668,20 @@ export interface SqlStore {
   /** Every step taken on every notice, oldest first (#912). */
   listNoticeSteps(): Promise<readonly NoticeStep[]>;
   /**
-   * Erase a closed notice's notifier details (#1381), in ONE transaction with
-   * the checks it rests on: the notice exists, its decision is recorded, and
-   * they are not erased already. The explanation is emptied and the location,
+   * Erase a notice's notifier details (#1381), in ONE transaction with the
+   * checks it rests on: the notice exists, they are not erased already, and
+   * a decision is recorded on it when `after` is `'decision'` — or none is,
+   * when it is `'receipt'` (#1923). When each is due is the caller's
+   * (`moderation/notice-retention.ts`). The explanation is emptied and the location,
    * name and email set to `null`; whether a name and an email were given is
    * kept, with `at` (Unix seconds). The decision, its dates, the items and
    * the notice's id stay. Scrubbed, as {@link SqlStore.eraseAthlete} is.
    */
-  eraseNoticeDetails(noticeId: number, at: number): Promise<NoticeDetailsErased>;
+  eraseNoticeDetails(
+    noticeId: number,
+    at: number,
+    after: NoticeErasedAfter,
+  ): Promise<NoticeDetailsErased>;
   /**
    * Hide one item (#913), in ONE transaction: the log entry, the statement of
    * reasons its owner is shown, and the hidden item — or, for an item already
@@ -4677,7 +4691,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ),
       ),
 
-    eraseNoticeDetails: (noticeId, at) =>
+    eraseNoticeDetails: (noticeId, at, after) =>
       exclusive(() =>
         // Scrubbed (#1097): what the notifier typed is not left in a free page or the log.
         scrubbing(() =>
@@ -4700,7 +4714,8 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .where('notice_id', '=', noticeId)
               .where('step', '=', 'decided')
               .executeTakeFirst();
-            if (decided === undefined) return 'not_closed';
+            if (after === 'decision' && decided === undefined) return 'not_closed';
+            if (after === 'receipt' && decided !== undefined) return 'not_open';
             // The erasure row first: migration 0036's trigger allows the update only after it.
             await trx
               .insertInto('notice_erasure')
