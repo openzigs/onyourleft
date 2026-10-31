@@ -55,7 +55,11 @@ export type LapRaceBotConditions = Omit<BotCourse, 'plan'>;
 export interface BotRaceStep {
   readonly elapsed: Seconds;
   readonly conditions: LapRaceBotConditions;
-  /** The race's seed: the bots' decisions are drawn from it. */
+  /**
+   * The race's own seed, the one `createItemRace` took: the bots' decisions
+   * are drawn from it. `botDecision` refuses one that is not a safe whole
+   * number.
+   */
   readonly seed: number;
   /** The rider's inputs this tick, as their client sends them. */
   readonly rider?: Omit<RaceTickInput, 'atMs'>;
@@ -83,7 +87,8 @@ export function stepBotRace(
   const lanes: Record<string, number> = { ...step.rider?.lanes };
   const uses: string[] = [...(step.rider?.uses ?? [])];
   const moved = bots.map((bot): LapRaceBot => {
-    const decision = botDecision(race, bot.id, step.seed);
+    // How far the bot will ride this tick, near enough: what its puddle look-ahead grows to.
+    const decision = botDecision(race, bot.id, step.seed, bot.ride.speed * step.elapsed);
     lanes[bot.id] = decision.lane;
     if (decision.use) uses.push(bot.id);
     const tick = advanceBot(bot.ride, step.elapsed, {

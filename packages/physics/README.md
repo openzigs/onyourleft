@@ -288,6 +288,15 @@ joining burst is a response to *the rider joining*, so implementing it here woul
 into bot behaviour, which #92's sixth criterion forbids. It belongs to whichever screen knows a rider
 has just joined.
 
+### What it deliberately does not model
+
+- **Reverse.** Speed is clamped at zero, so a rider who runs out of power on a climb stops rather
+  than rolling back. That is the safe wrong answer, and `MetresPerSecond` and `Metres` are both
+  non-negative in `packages/domain`, so a model with reverse could not report its state at all.
+- **Braking, cornering, drafting, gears and cadence.** None is in Martin's model or in #88's scope.
+- **Humidity and weather** in the air-density model. Both are documented in `air.ts` rather than
+  approximated: a wrong correction is harder to find than an absent one.
+
 ## 4b. Bots in a solo lap race (#1900)
 
 `lap-race-bot.ts` races the #92 bot. `stepBotRace` takes each bot's decision from
@@ -297,15 +306,9 @@ the rider's inputs. A bot's inputs are a tier, the pacing rule, the course and a
 signatures take no activity, stream or ghost type, which a type-level test holds. Its power never reads
 the race's standings: there is no rubber-banding (ADR 0060 D-9). `lap-race-bot.test.ts` replaces
 `advance` with a sentinel, as `pacer.test.ts` does, and requires the bot's race position to move.
-
-### What it deliberately does not model
-
-- **Reverse.** Speed is clamped at zero, so a rider who runs out of power on a climb stops rather
-  than rolling back. That is the safe wrong answer, and `MetresPerSecond` and `Metres` are both
-  non-negative in `packages/domain`, so a model with reverse could not report its state at all.
-- **Braking, cornering, drafting, gears and cadence.** None is in Martin's model or in #88's scope.
-- **Humidity and weather** in the air-density model. Both are documented in `air.ts` rather than
-  approximated: a wrong correction is harder to find than an absent one.
+The seed is the race's own, and `botDecision` refuses one that is not a safe whole number. Each
+bot's speed times the tick's length is passed as how far it will ride, so its puddle look-ahead
+grows with its speed (`packages/domain/src/lap-race/bots.ts`).
 
 ---
 

@@ -16,9 +16,10 @@
  * a target intensity for `pacer/pacing.ts` §`botPacerPlan`. Every tier rides
  * at {@link BOT_MASS_KILOGRAMS}, the #92 bot's fixed 75 kg, so the advertised
  * W/kg is a promise about the bot's speed. **The rider's own declared mass is
- * never read here, and never shown** (ADR 0028 D-3). The numbers are a
- * proposal for the owner, spread from a social pace to a strong club racer's.
- * They sit inside #92's 0.5–7 W/kg envelope.
+ * never read here, and never shown** (ADR 0028 D-3). The numbers, spread
+ * from a social pace to a strong club racer's, and the decision constants
+ * below were approved by the owner on 2026-10-31 (pull request #1955). They
+ * sit inside #92's 0.5–7 W/kg envelope.
  *
  * ## ⚠️ Never from a recorded ride (ADR 0007 D4, D-7.1)
  *
@@ -39,23 +40,65 @@
  *
  * ## The lane rule, in order
  *
- * 1. A puddle ahead in its lane within {@link BOT_PUDDLE_LOOKAHEAD_METRES}:
- *    move to the lane beside it.
+ * 1. Another racer's puddle lying ahead in its lane, within the look-ahead
+ *    (below): move to the lane beside it. Since the owner's ruling of
+ *    2026-10-31 a puddle lies at a pick-up point ahead of whoever placed it
+ *    (`items.ts` §`nextPickUpPoint`), so this is a bot steering round a
+ *    hazard on the road in front of it.
  * 2. Holding a gust, with a racer ahead within {@link BOT_AIM_METRES}: move
  *    into that racer's lane.
  * 3. A racer close behind in its lane: move out of it, on
- *    {@link BOT_DODGE} of ticks.
+ *    {@link BOT_DODGE} of ticks, **unless the bot holds a puddle**: staying
+ *    put then keeps the racer behind in the lane the puddle will lie in.
+ *
+ * ## The use rule
+ *
+ * - `tailwind`: whenever held.
+ * - `tow`: a racer within `items.ts` §`TOW_REACH_METRES` ahead.
+ * - `puddle`: a racer within {@link BOT_THREAT_METRES} behind **and** a
+ *   pick-up point still ahead before the finish, where the puddle would lie.
+ *   The racer behind need not be in the bot's lane yet: it has the run to the
+ *   pick-up point to stay in it or to leave it.
+ * - `crosswind-gust`: at least one unfinished racer ahead **in the lane the
+ *   bot rides this tick**, within `items.ts` §`GUST_REACH_METRES`, which is
+ *   what the gust hits.
+ * - `rain-cape`: a racer within {@link BOT_THREAT_METRES} behind.
+ *
+ * Each only on {@link BOT_REACTION} of the ticks where its rule holds.
+ *
+ * ## The puddle look-ahead scales with the bot's speed
+ *
+ * A hit is judged at a tick's end, and a lane change lands before the tick's
+ * items resolve (`item-race.ts`), so a bot clears a puddle by changing lane
+ * in the tick that would carry it through. It therefore looks ahead the
+ * larger of {@link BOT_PUDDLE_LOOKAHEAD_METRES} and how far it will ride in
+ * this tick (`travelMetres`, which `@onyourleft/physics` §`stepBotRace` passes
+ * as the bot's speed times the tick's length). A fixed 15 m would be shorter
+ * than one tick of travel above 15 m/s on 1 s ticks, and the puddle would go
+ * from ahead to behind between two looks.
  *
  * ## Decisions are seeded and pure
  *
- * {@link botDecision} is a function of the race state, the bot's id and the
- * race's seed. Its one random number per decision comes from this module's
- * `random.ts` keyed by those, so the same race gives the same decisions, and
- * the race's own item draws are not disturbed by it.
+ * {@link botDecision} is a function of the race state, the bot's id, the
+ * race's seed and how far the bot will ride this tick. **The seed must be the
+ * race's own**, the one `createItemRace` took, and it is checked by the same
+ * rule (`random.ts` §`raceRandom`: a safe whole number), so a `NaN` or a
+ * fraction is refused rather than silently folded into another seed. Its
+ * random numbers come from `random.ts` keyed by the seed, the bot and the
+ * instant, so the same race gives the same decisions, and the race's own item
+ * draws are not disturbed by them.
  */
 
 import { BOT_MASS_KILOGRAMS, botPacerPlan, type BotPacerPlan } from '../pacer/pacing';
-import { LANE_COUNT, SLIPSTREAM_REACH_METRES, type ItemRaceState, type LapRacer } from './items';
+import { LapRaceError } from './errors';
+import {
+  GUST_REACH_METRES,
+  LANE_COUNT,
+  nextPickUpPoint,
+  TOW_REACH_METRES,
+  type ItemRaceState,
+  type LapRacer,
+} from './items';
 import { nextUnit, raceRandom } from './random';
 import { racePosition } from './race';
 
@@ -78,13 +121,20 @@ export function botTierPlan(tier: BotTier): BotPacerPlan {
   return botPacerPlan(BOT_TIER_WATTS_PER_KILOGRAM[tier], BOT_MASS_KILOGRAMS);
 }
 
-/** How far ahead in its lane a bot looks for a puddle to ride round. */
+/**
+ * The least distance ahead in its lane a bot looks for a puddle to ride
+ * round: more when it will ride further than this in the tick (see the
+ * header).
+ */
 export const BOT_PUDDLE_LOOKAHEAD_METRES = 15;
 
-/** How close a racer ahead must be for a bot holding a gust to steer into its lane. */
-export const BOT_AIM_METRES = 30;
+/**
+ * How close a racer ahead must be for a bot holding a gust to steer into its
+ * lane: the gust's own reach, 30 m.
+ */
+export const BOT_AIM_METRES = GUST_REACH_METRES;
 
-/** How close a racer behind must be for a bot to drop a puddle on it, or put on a cape. */
+/** How close a racer behind must be for a bot to place a puddle ahead, or put on a cape. */
 export const BOT_THREAT_METRES = 15;
 
 /** The chance that a bot moves out of the lane of a racer close behind it, in a tick. */
@@ -137,8 +187,26 @@ function besides(lane: number, unit: number): number {
  * When to use the held item, and which lane to ride, from the race as it
  * stands. A bot that is finished, or not in the race, keeps its lane and uses
  * nothing.
+ *
+ * @param seed - the race's own seed, the one `createItemRace` took.
+ * @param travelMetres - how far the bot will ride this tick: what the puddle
+ *   look-ahead grows to above {@link BOT_PUDDLE_LOOKAHEAD_METRES}.
+ * @throws {LapRaceError} for a seed that is not a safe whole number, or a
+ *   travel that is not a finite number of metres of at least zero.
  */
-export function botDecision(race: ItemRaceState, botId: string, seed: number): BotDecision {
+export function botDecision(
+  race: ItemRaceState,
+  botId: string,
+  seed: number,
+  travelMetres = 0,
+): BotDecision {
+  raceRandom(seed);
+  if (!Number.isFinite(travelMetres) || travelMetres < 0) {
+    throw new LapRaceError(
+      'travel-out-of-range',
+      'travelMetres must be a finite number of metres of at least zero',
+    );
+  }
   const index = race.racers.findIndex((entry) => entry.racer.id === botId);
   const me = race.racers[index];
   if (me === undefined || me.racer.finishedAtMs !== null) {
@@ -155,7 +223,7 @@ export function botDecision(race: ItemRaceState, botId: string, seed: number): B
       hazard.ownerId !== botId &&
       hazard.lane === me.lane &&
       hazard.position > at &&
-      hazard.position - at <= BOT_PUDDLE_LOOKAHEAD_METRES,
+      hazard.position - at <= Math.max(BOT_PUDDLE_LOOKAHEAD_METRES, travelMetres),
   );
   const threatened = behind !== undefined && behind.gap <= BOT_THREAT_METRES;
   let lane = me.lane;
@@ -163,16 +231,32 @@ export function botDecision(race: ItemRaceState, botId: string, seed: number): B
     lane = besides(me.lane, steer);
   } else if (me.held === 'crosswind-gust' && ahead !== undefined && ahead.gap <= BOT_AIM_METRES) {
     lane = ahead.racer.lane;
-  } else if (threatened && behind.racer.lane === me.lane && steer < BOT_DODGE) {
-    // Out of the line a gust from behind would come up.
+  } else if (
+    threatened &&
+    me.held !== 'puddle' &&
+    behind.racer.lane === me.lane &&
+    steer < BOT_DODGE
+  ) {
+    // Out of the line a gust from behind would come up; not while holding a
+    // puddle, which wants the racer behind kept in this lane.
     lane = besides(me.lane, steer / BOT_DODGE);
   }
 
+  const gustTarget = race.racers.some((other, place) => {
+    const gap = racePosition(other.racer) - at;
+    return (
+      place !== index &&
+      other.racer.finishedAtMs === null &&
+      other.lane === lane &&
+      gap > 0 &&
+      gap <= GUST_REACH_METRES
+    );
+  });
   const wants =
     me.held === 'tailwind' ||
-    (me.held === 'slipstream' && ahead !== undefined && ahead.gap <= SLIPSTREAM_REACH_METRES) ||
-    (me.held === 'puddle' && threatened && behind.racer.lane === lane) ||
-    (me.held === 'crosswind-gust' && ahead !== undefined && ahead.racer.lane === lane) ||
+    (me.held === 'tow' && ahead !== undefined && ahead.gap <= TOW_REACH_METRES) ||
+    (me.held === 'puddle' && threatened && nextPickUpPoint(race.course, at) !== null) ||
+    (me.held === 'crosswind-gust' && gustTarget) ||
     (me.held === 'rain-cape' && threatened);
   return { use: wants && react < BOT_REACTION, lane };
 }

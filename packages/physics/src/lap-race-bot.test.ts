@@ -157,6 +157,41 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
   });
 });
 
+describe('the puddle look-ahead it hands the bot decision', () => {
+  it('is the bot’s speed times the tick, so a fast bot steers round a puddle beyond the fixed 15 m', () => {
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 1,
+      itemsOn: true,
+      racerIds: ['bot', 'x'],
+      startMs: 0,
+    });
+    // The bot at 100 m doing 20 m/s, a puddle of x's 25 m ahead in the bot's lane.
+    const ahead: ItemRaceState = {
+      ...start,
+      racers: start.racers.map((entry) => ({
+        ...entry,
+        racer: { ...entry.racer, effortDistance: entry.racer.id === 'bot' ? 100 : 400 },
+      })),
+      hazards: [{ position: 125, lane: 1, ownerId: 'x', untilMs: 1e9, hitIds: [] }],
+    };
+    const fast: LapRaceBot = {
+      ...lapRaceBot('bot', 'fierce'),
+      ride: { speed: metresPerSecond(20), distance: metres(100) },
+    };
+    const lane = (elapsed: number): number | undefined =>
+      stepBotRace(ahead, [fast], {
+        elapsed: seconds(elapsed),
+        conditions: conditions(FLAT),
+        seed: 1,
+      }).race.racers.find((entry) => entry.racer.id === 'bot')?.lane;
+    // A 1 s tick carries it 20 m, short of the puddle's 25 m, but past the fixed 15 m.
+    expect(lane(1)).toBe(1);
+    // A 1.5 s tick would carry it 30 m, through the puddle: it moves lane first.
+    expect(lane(1.5)).not.toBe(1);
+  });
+});
+
 describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 0007 D4)', () => {
   it('takes no activity, stream or ghost type anywhere in its public signatures', () => {
     expectTypeOf(lapRaceBot).parameters.toEqualTypeOf<[id: string, tier: BotTier]>();
@@ -179,10 +214,30 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
   });
 
   it('imports nothing from the domain’s ghost/ or recording/', () => {
+    // Every specifier, as `packages/domain/src/lap-race/bots.test.ts` reads
+    // them: `from '…'` (named, namespace, default and `export … from`), a bare
+    // side-effect `import '…'`, and a dynamic `import('…')`.
+    const specifiers = [...lapRaceBotSource.matchAll(/\b(?:from|import)\s*\(?\s*'([^']+)'/g)].map(
+      (match) => match[1] ?? '',
+    );
+    // The whole of what it reaches: the domain barrel, and two modules of its own package.
+    expect([...new Set(specifiers)].sort()).toEqual([
+      './pacer',
+      './simulate',
+      '@onyourleft/domain',
+    ]);
+    for (const specifier of specifiers) expect(specifier).not.toMatch(/ghost|recording/);
+    // The barrel reaches every domain export, so what is taken from it must be
+    // a list of names: no namespace import, no re-export, and no dynamic import.
+    expect(lapRaceBotSource).not.toMatch(/\bimport\s+(?:type\s+)?\*/);
+    expect(lapRaceBotSource).not.toMatch(/^\s*export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s*from\b/m);
+    expect(lapRaceBotSource).not.toMatch(/\bimport\s*\(/);
+
     const imported = [
       ...lapRaceBotSource.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g),
     ];
-    expect(imported.length).toBeGreaterThan(0);
+    // Every import is one of these braces: a default or side-effect import is not.
+    expect(imported.length).toBe(specifiers.length);
     const fromDomain = imported
       .filter((match) => match[3] === '@onyourleft/domain')
       .flatMap((match) => (match[2] ?? '').split(','))
@@ -202,9 +257,6 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
         'stepRace',
       ].sort(),
     );
-    for (const [, , , specifier] of imported) {
-      expect(specifier).not.toMatch(/ghost|recording/);
-    }
   });
 });
 
@@ -213,6 +265,9 @@ describe('tiers decide a race with no items', () => {
     'finishes three tiers in tier order on a flat 3-lap loop, every seed of 100',
     { timeout: 30_000 },
     () => {
+      // With items off a seed reaches only the bots' lanes, which nothing but
+      // a hit reads, so these are one race a hundred times: the AC's letter,
+      // and a guard that no seed-dependent path moves a racer.
       for (let seed = 1; seed <= 100; seed += 1) {
         const run = race(
           FLAT,
