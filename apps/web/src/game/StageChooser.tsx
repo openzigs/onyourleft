@@ -1070,9 +1070,7 @@ function LapRaceControl(props: {
   if (!props.route.profile.loop) {
     return (
       <div className="oyl-game__lap-race tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
-        <p className="tw:m-0" id={id('not-a-loop')}>
-          {LAP_RACE_CHOICE_TEXT.notALoop}
-        </p>
+        <p className="tw:m-0">{LAP_RACE_CHOICE_TEXT.notALoop}</p>
       </div>
     );
   }

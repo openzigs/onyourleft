@@ -330,7 +330,6 @@ describe('#1907 — the lap race in the chooser', () => {
       ...Object.values(LAP_RACE_CHOICE_TEXT).map((each) =>
         typeof each === 'function' ? each() : each,
       ),
-      LAP_RACE_CHOICE_TEXT.notALoop,
     ].join(' ');
     expect(said.length).toBeGreaterThan(200);
     expect(said).not.toMatch(/mario|kart|nintendo|zwift|rouvy|wahoo|systm|peloton|trainerroad/iu);
