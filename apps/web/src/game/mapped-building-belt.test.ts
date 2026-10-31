@@ -77,6 +77,7 @@ import {
   GROUNDED_SHADE,
   GROUNDING_METRES,
   isConstructedMaterial,
+  laysRoofSnow,
   MappedBuildingBelt,
   readsInstanceTint,
   readsTextureLodBias,
@@ -1013,6 +1014,79 @@ describe('a roof under snow, and a wall without it — #1623', () => {
 
   it('draws every roof exactly as before with no snow — the season-free picture', () => {
     for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(TILE);
+  });
+});
+
+/**
+ * Snow on the house models' roofs — #1686: #1585's models are not drawn
+ * through the facade, so their one material is taught the roofs' snow on its
+ * own (`three-renderer.ts` §`withRoofSnow`), the same function by the same
+ * uniform as a mapped roof beside them. Evaluated from the program three is
+ * handed, as #1623's describe above does for the facade.
+ */
+describe('a house model’s roof under snow, and its wall without it — #1686', () => {
+  const programOf = (
+    material: unknown,
+  ): { fragment: string; uniforms: Record<string, unknown> } => {
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    (material as { onBeforeCompile(shader: unknown, renderer: unknown): void }).onBeforeCompile(
+      shader,
+      undefined,
+    );
+    return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+  };
+  const linear = (packed: number): readonly number[] =>
+    [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff].map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+  /** An atlas texel of a model's roof, linear. */
+  const SHINGLE: readonly [number, number, number] = [0.22, 0.2, 0.19];
+  const snowed = (up: number, snow: number): readonly number[] => {
+    const drawn = glslFunction(programOf(aBelt().modelMesh.material).fragment, 'oylSnowedRoof')(
+      SHINGLE,
+      up,
+      snow,
+    );
+    if (typeof drawn === 'number') throw new Error('oylSnowedRoof returned a float');
+    return drawn;
+  };
+  const apart = (a: readonly number[], b: readonly number[]): number =>
+    Math.hypot(...a.map((each, at) => each - (b[at] ?? 0)));
+
+  it('is taught the roofs’ snow, after the normals, reading the very uniform a mapped roof reads', () => {
+    const belt = aBelt();
+    expect(laysRoofSnow(belt.modelMesh.material as never)).toBe(true);
+    const model = programOf(belt.modelMesh.material);
+    const at = model.fragment.indexOf(
+      'diffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), oylRoofSnow);',
+    );
+    expect(at).toBeGreaterThan(model.fragment.indexOf('#include <normal_fragment_maps>'));
+    expect(model.fragment).toContain('uniform float oylRoofSnow;');
+    // One uniform, the season's: what the view writes for a mapped roof reaches the models.
+    const mapped = programOf(belt.materialOf('roof-tiles'));
+    expect(model.uniforms['oylRoofSnow']).toBeDefined();
+    expect(model.uniforms['oylRoofSnow']).toBe(mapped.uniforms['oylRoofSnow']);
+  });
+
+  it('shades a model roof’s up-facing fragment toward the snow on a snowy day, and a wall not at all', () => {
+    const snow = linear(ROOF_SNOW);
+    const roof = snowed(Math.cos(Math.PI / 6), 1);
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(roof[channel]).toBeCloseTo(snow[channel] ?? 0, 5);
+    }
+    expect(apart(roof, snow)).toBeLessThan(apart(SHINGLE, snow));
+    expect(snowed(0, 1)).toEqual(SHINGLE);
+  });
+
+  it('draws every model exactly as before with no snow — the season-free picture', () => {
+    for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(SHINGLE);
   });
 });
 

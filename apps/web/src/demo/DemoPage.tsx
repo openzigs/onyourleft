@@ -86,6 +86,7 @@ import { createDemoPlayer, type DemoStatus } from './player';
 import { SHOWCASE_TIMELINE, showcaseRides } from './showcase';
 import { featuresInBuild } from './showcase-features';
 import { parseDemoQuery } from './query';
+import { REALISTIC_LOADING } from './realistic-loading';
 import { DemoSourceOffer } from './SourceOffer';
 import { startDemoStage, type DemoSnapshot, type DemoStage, type FrameScheduler } from './stage';
 
@@ -203,9 +204,16 @@ function ClosingCard() {
 /** The page. */
 export function DemoPage(props: DemoPageProps) {
   const query = useMemo(() => parseDemoQuery(props.search), [props.search]);
+  // #1654: a still start, for reduced motion or `?autoplay=0`.
+  const startsStill = props.reducedMotion || (query.ok && query.autoplay === false);
+  // #1654, owner ruling of 2026-10-30: `?controls=0` leaves out *Stop* only.
+  // *Pause* and *Play* are always offered, so the demo meets WCAG 2.2 SC 2.2.2
+  // by itself, whatever the site embedding it does.
+  const withoutStop = query.ok && query.controls === false;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<DemoStage | undefined>(undefined);
-  const [status, setStatus] = useState<DemoStatus>(props.reducedMotion ? 'paused' : 'playing');
+  const [status, setStatus] = useState<DemoStatus>(startsStill ? 'paused' : 'playing');
+  const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [caption, setCaption] = useState<string | undefined>(undefined);
   const [hud, setHud] = useState<HudView | undefined>(undefined);
@@ -247,7 +255,7 @@ export function DemoPage(props: DemoPageProps) {
         ? showcaseRides(SHOWCASE_TIMELINE, { reducedMotion, route })
         : undefined;
     const player = rides?.player ?? createDemoPlayer(query.preset, { reducedMotion, route });
-    if (!reducedMotion) player.play();
+    if (!startsStill) player.play();
     const stage = startDemoStage({
       canvas,
       renderer,
@@ -265,6 +273,7 @@ export function DemoPage(props: DemoPageProps) {
       publish: (snapshot, drawn) => {
         setStatus(snapshot.state);
         setNotice(snapshot.notice);
+        setLoading(snapshot.realisticLoading);
         setCaption(snapshot.showcase?.caption);
         // The drawn ride's numbers; the credit is keyed on the run's map data.
         setHud({
@@ -300,6 +309,7 @@ export function DemoPage(props: DemoPageProps) {
     drawnDecorations,
     frames,
     reducedMotion,
+    startsStill,
     observeInView,
     publish,
   ]);
@@ -311,8 +321,13 @@ export function DemoPage(props: DemoPageProps) {
   // a visitor's, and a video has its own credit (the HUD's, and the card).
   const rendering = query.ok && query.render === true;
   return (
+    // #1654: the page is its iframe's whole box, and the stage takes what the
+    // lines above and below it leave, so nothing scrolls from 320 × 180 up
+    // (`shell-demo.browser.spec.ts` measures three sizes). The heading is for a
+    // screen reader: a visible one cost a small frame its stage, and the site
+    // embedding the demo names it.
     <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', margin: 0 }}>
-      {rendering ? null : <h1>On Your Left</h1>}
+      {rendering ? null : <h1 className="oyl-visually-hidden">On Your Left</h1>}
       {query.ok ? (
         <>
           <p
@@ -364,11 +379,12 @@ export function DemoPage(props: DemoPageProps) {
                   heartRate={hud.sensors.heartRate}
                   // The ride clock: it stops while the demo is paused.
                   movingSeconds={hud.rideSeconds}
-                  units="metric"
+                  units={query.units ?? 'metric'}
                   labels={DEMO_LABELS}
                   touchLock={false}
                   // The demo has no pacer: no *Pacer —* (owner, 2026-10-25).
                   withoutPacer
+                  withoutEnd={withoutStop}
                   paused={!playing}
                   onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}
                   onEnd={() => stageRef.current?.stop()}
@@ -389,8 +405,21 @@ export function DemoPage(props: DemoPageProps) {
           ) : null}
           {/* Mounted before it has text, so a screen reader announces the change. */}
           {rendering ? null : (
-            <p role="status">
-              {[routeNotice, notice].filter((each) => each !== undefined).join(' ')}
+            <p
+              role="status"
+              className="oyl-demo__status"
+              // #1654: small, as the source offer is, so a 320 × 180 frame keeps
+              // a stage under a two-line notice (CI's fonts left it none at 1 rem).
+              style={{
+                fontSize: 'var(--oyl-font-size-sm)',
+                lineHeight: 1.3,
+                margin: 0,
+                padding: '0 var(--oyl-space-sm)',
+              }}
+            >
+              {[loading ? REALISTIC_LOADING : undefined, routeNotice, notice]
+                .filter((each) => each !== undefined)
+                .join(' ')}
             </p>
           )}
         </>

@@ -484,7 +484,7 @@ describe('no string in this client renders an absolute angle or the frontal plan
   );
 
   it('scans the templates in @onyourleft/analysis, and goes red on a degree sign planted in one (#1094)', () => {
-    const template = join(ANALYSIS_SOURCE_ROOT, 'template', 'template-v2.ts');
+    const template = join(ANALYSIS_SOURCE_ROOT, 'template', 'agent-v1.ts');
     // Deleting the package's root from SCAN_ROOTS takes the file out of the walk.
     expect(scannable()).toContain(template);
     const planted = (file: string): string => {

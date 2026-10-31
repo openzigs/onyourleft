@@ -112,8 +112,9 @@ export interface ReceivedNotice {
   readonly notifierEmail: string | null;
   readonly bonaFide: boolean;
   /**
-   * When the instance erased the notifier's name, email and words, six months
-   * after the decision (#1381), Unix seconds, or `null`. Once erased, the
+   * When the instance erased the notifier's name, email and words — six
+   * months after the decision (#1381), or twelve after the notice arrived
+   * when no decision was recorded by then (#1923) — Unix seconds, or `null`. Once erased, the
    * explanation is empty and the location, name and email are `null`. An
    * instance from before #1381 sends none: `null`.
    */

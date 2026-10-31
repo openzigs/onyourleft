@@ -67,7 +67,11 @@ interface ModerationInstance {
   freshRead<T>(
     read: (store: {
       putReport(report: Record<string, unknown>): Promise<number>;
-      eraseNoticeDetails(noticeId: number, at: number): Promise<string>;
+      eraseNoticeDetails(
+        noticeId: number,
+        at: number,
+        after: 'decision' | 'receipt',
+      ): Promise<string>;
     }) => Promise<T>,
   ): Promise<T>;
 }
@@ -972,7 +976,9 @@ describe('the notices — #907', () => {
       kind: 'done',
     });
     const at = Math.floor(world.world.clock.ms / 1000);
-    expect(await world.world.freshRead((store) => store.eraseNoticeDetails(id, at))).toBe('erased');
+    expect(
+      await world.world.freshRead((store) => store.eraseNoticeDetails(id, at, 'decision')),
+    ).toBe('erased');
     const [after] = asModerator(await world.moderator.read()).notices ?? [];
     expect(after).toMatchObject({
       noticeId: id,

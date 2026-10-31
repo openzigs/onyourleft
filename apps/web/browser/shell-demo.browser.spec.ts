@@ -83,12 +83,24 @@
  *   the preset's whole scripted length, which is up to fifteen minutes.
  * - **The HUD's power reading.** The demo has no HUD until #1650; the
  *   assertion that its power reading changes belongs with it.
+ *
+ * ## Embedded on another origin — #1654
+ *
+ * `docs/demo-embedding.md`'s own snippet, read from the file with only its
+ * URL changed, is the page of a second origin ({@link HOST_ORIGIN}), and the
+ * demo's `index.html` is answered with the `frame-ancestors` header the guide
+ * tells a site to send. The demo plays in that frame, with
+ * `crossOriginIsolated` false, and asks nothing of the network, Bluetooth or
+ * storage from inside it; the host's viewport is then set to 768, 1920 and
+ * 320 CSS pixels wide, which the snippet's 16 : 9 wrapper makes frames of
+ * 768 × 432, 1920 × 1080 and 320 × 180. Its control is the same page with
+ * `frame-ancestors 'none'`, which the browser refuses to frame.
  */
 
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Frame, type Page } from '@playwright/test';
 
 import { DEMO_ORIGIN } from '../playwright.config';
 import { OSM_ATTRIBUTION } from '../src/map/basemap';
@@ -100,6 +112,18 @@ const DIST = fileURLToPath(new URL('../demo/dist', import.meta.url));
 const FIXTURE_ROUTES = fileURLToPath(new URL('./dist/demo-routes', import.meta.url));
 const PRESETS = ['climb', 'sprint', 'group'] as const;
 const POLICY = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/>/;
+/**
+ * The site that embeds the demo in #1654's cases: a second origin, answered by
+ * `context.route`. ⚠️ Under `localhost`, so it is a secure context, as a real
+ * site on `https:` is: a frame inside an insecure page is not one, and has no
+ * service-worker or Cache Storage API for the storage read-back to read, and
+ * could never be cross-origin isolated, which would make that assertion empty.
+ */
+const HOST_ORIGIN = 'http://site.localhost';
+/** The embedding guide, whose snippet those cases load. */
+const EMBEDDING_GUIDE = fileURLToPath(new URL('../../../docs/demo-embedding.md', import.meta.url));
+/** The `src` the guide's snippet carries, which the cases replace with the demo's. */
+const SNIPPET_SRC = 'https://demo.example.org/on-your-left/?preset=climb';
 /**
  * How long a case may wait for frames. The demo starts the realistic world's
  * load at once (`stage.ts`), and on SwiftShader beside two other workers that
@@ -256,6 +280,11 @@ interface WatchOptions {
   /** Changes the page's HTML on its way in — a control's. */
   readonly rewrite?: (html: string) => string;
   /**
+   * #1654: a page served at {@link HOST_ORIGIN} as `/`, and the
+   * `frame-ancestors` the demo's `index.html` is answered with.
+   */
+  readonly embed?: { readonly host: string; readonly frameAncestors: string };
+  /**
    * Whether the realistic world's files are served. When `false` each is
    * answered 404 (and still recorded), so the demo draws the stylised world
    * and says why — see the header's §"One realistic load".
@@ -272,7 +301,7 @@ interface WatchOptions {
 async function watch(
   context: BrowserContext,
   page: Page,
-  { rewrite, realistic, routes }: WatchOptions,
+  { rewrite, realistic, routes, embed }: WatchOptions,
 ): Promise<Watched> {
   const files = new Set(filesUnder(DIST));
   for (const path of routes?.keys() ?? []) files.add(path.replace(/^\.\//, ''));
@@ -280,6 +309,9 @@ async function watch(
   await context.route('**/*', async (route) => {
     const url = new URL(route.request().url());
     watched.requests.push(url.href);
+    if (embed !== undefined && url.origin === HOST_ORIGIN && url.pathname === '/') {
+      return route.fulfill({ status: 200, contentType: 'text/html', body: embed.host });
+    }
     if (url.origin !== DEMO_ORIGIN) {
       watched.foreign.push(url.href);
       return route.abort();
@@ -308,6 +340,16 @@ async function watch(
       const response = await route.fetch();
       return route.fulfill({ response, body: rewrite(await response.text()) });
     }
+    if (embed !== undefined && path === 'index.html') {
+      const response = await route.fetch();
+      return route.fulfill({
+        response,
+        headers: {
+          ...response.headers(),
+          'content-security-policy': `frame-ancestors ${embed.frameAncestors}`,
+        },
+      });
+    }
     return route.continue();
   });
   page.on('websocket', (socket) => watched.foreign.push(socket.url()));
@@ -315,7 +357,7 @@ async function watch(
   return watched;
 }
 
-function gate(page: Page): Promise<Gate> {
+function gate(page: Page | Frame): Promise<Gate> {
   return page.evaluate(() => {
     const recorded = (window as unknown as { __oylGate: Gate }).__oylGate;
     return {
@@ -327,11 +369,11 @@ function gate(page: Page): Promise<Gate> {
   });
 }
 
-async function last(page: Page): Promise<Snapshot | undefined> {
+async function last(page: Page | Frame): Promise<Snapshot | undefined> {
   return (await gate(page)).snapshots.at(-1);
 }
 
-async function stored(context: BrowserContext, page: Page): Promise<Stored> {
+async function stored(context: BrowserContext, page: Page | Frame): Promise<Stored> {
   const inPage = await page.evaluate(async () => ({
     indexedDB: (await indexedDB.databases()).map((each) => String(each.name)),
     localStorage: localStorage.length,
@@ -358,7 +400,11 @@ const NOTHING_STORED: Stored = {
  * preset cases assert it empty and the controls assert it is not, so the
  * controls exercise exactly the check the preset cases make.
  */
-async function findings(context: BrowserContext, page: Page, watched: Watched): Promise<string[]> {
+async function findings(
+  context: BrowserContext,
+  page: Page | Frame,
+  watched: Watched,
+): Promise<string[]> {
   const found = [
     ...watched.foreign.map((url) => `request to another origin: ${url}`),
     ...watched.missing.map((path) => `request for a path not in demo/dist: ${path}`),
@@ -642,6 +688,204 @@ test.describe('the demo, built and served — #1648', () => {
       expect(snapshots.length).toBeGreaterThan(0);
       expect(snapshots.every((each) => each.state === 'paused' && each.distance === 0)).toBe(true);
       expect(await findings(context, page, watched)).toEqual([]);
+    });
+  });
+
+  test.describe('embedded in a frame on another origin — #1654', () => {
+    /** The guide's snippet, as a host page whose frame shows the demo with `query`. */
+    function hostPage(query: string): string {
+      const guide = readFileSync(EMBEDDING_GUIDE, 'utf8');
+      const snippet = /<!-- embed-snippet[^>]*-->\s*```html\n([\s\S]*?)```/.exec(guide)?.[1];
+      if (snippet === undefined) throw new Error('docs/demo-embedding.md has no embed snippet');
+      expect(snippet).toContain(SNIPPET_SRC);
+      const frame = snippet.replace(SNIPPET_SRC, `${DEMO_ORIGIN}/${query}`);
+      return `<!doctype html><html lang="en"><head><title>A site</title></head><body style="margin: 0">${frame}</body></html>`;
+    }
+
+    /** The demo's frame, once its document has loaded. */
+    async function demoFrame(page: Page): Promise<Frame> {
+      const frame = await (await page.locator('iframe').elementHandle())?.contentFrame();
+      if (frame === null || frame === undefined) throw new Error('the host page has no frame');
+      return frame;
+    }
+
+    /** Set the host's viewport to `width`, and so the snippet's frame to `width` × 9/16. */
+    async function frameWidth(page: Page, frame: Frame, width: number): Promise<void> {
+      const height = Math.round((width * 9) / 16);
+      await page.setViewportSize({ width, height });
+      await expect
+        .poll(() => frame.evaluate(() => [innerWidth, innerHeight]))
+        .toEqual([width, height]);
+    }
+
+    interface Fit {
+      /** The document's scrolling box beside the frame's viewport: equal when nothing scrolls. */
+      readonly document: readonly number[];
+      /** Every element outside the frame's viewport, but for any inside the stage's own scroller. */
+      readonly outside: string[];
+      /** Every HUD panel not wholly inside the stage. */
+      readonly panelsOffStage: string[];
+      /** Whether the stage scrolls within itself: the product's stacked layout. */
+      readonly stageScrolls: boolean;
+      /** How tall the stage's box is, in CSS pixels: what the lines around it leave the world. */
+      readonly stageHeight: number;
+    }
+
+    function fit(frame: Frame): Promise<Fit> {
+      return frame.evaluate(() => {
+        const name = (element: Element): string =>
+          `${element.tagName.toLowerCase()}.${String(element.className)}`;
+        const stage = document.querySelector('section.oyl-game');
+        if (stage === null) throw new Error('no stage');
+        const box = stage.getBoundingClientRect();
+        const stageScrolls = stage.scrollHeight > stage.clientHeight + 1;
+        const outside: string[] = [];
+        for (const element of document.body.querySelectorAll('*')) {
+          // Clipped to a pixel on purpose: the page's heading and the HUD's region.
+          if (element.closest('.oyl-visually-hidden') !== null) continue;
+          if (stageScrolls && stage.contains(element)) continue;
+          const at = element.getBoundingClientRect();
+          if (at.width === 0 && at.height === 0) continue;
+          if (
+            at.left < -0.5 ||
+            at.top < -0.5 ||
+            at.right > innerWidth + 0.5 ||
+            at.bottom > innerHeight + 0.5
+          ) {
+            outside.push(name(element));
+          }
+        }
+        const panelsOffStage = [...document.querySelectorAll('.oyl-hud__panel')]
+          .filter((panel) => {
+            const at = panel.getBoundingClientRect();
+            return (
+              at.width > 0 &&
+              (at.left < box.left - 0.5 ||
+                at.top < box.top - 0.5 ||
+                at.right > box.right + 0.5 ||
+                at.bottom > box.bottom + 0.5)
+            );
+          })
+          .map(name);
+        const scroller = document.scrollingElement ?? document.documentElement;
+        return {
+          document: [scroller.scrollWidth, scroller.scrollHeight, innerWidth, innerHeight],
+          outside,
+          panelsOffStage,
+          stageScrolls,
+          stageHeight: Math.round(box.height),
+        };
+      });
+    }
+
+    test('plays in the guide’s snippet, cross-origin and not isolated, and fills its frame at three sizes', async ({
+      context,
+      page,
+    }) => {
+      test.setTimeout(3 * FRAMES_BUDGET_MS);
+      await page.setViewportSize({ width: 768, height: 432 });
+      const query = '?preset=sprint&units=imperial';
+      const watched = await watch(context, page, {
+        realistic: false,
+        embed: { host: hostPage(query), frameAncestors: HOST_ORIGIN },
+      });
+      await page.goto(`${HOST_ORIGIN}/`);
+      const frame = await demoFrame(page);
+      expect(frame.url()).toBe(`${DEMO_ORIGIN}/${query}`);
+      await expect.poll(() => last(frame), { timeout: FRAMES_BUDGET_MS }).toBeDefined();
+      await expect
+        .poll(async () => (await last(frame))?.distance, { timeout: FRAMES_BUDGET_MS })
+        .toBeGreaterThan(0);
+      await expect
+        .poll(async () => (await last(frame))?.framesDrawn, { timeout: FRAMES_BUDGET_MS })
+        .toBeGreaterThanOrEqual(30);
+      // Playing, in a secure frame that no COOP or COEP isolated.
+      expect((await last(frame))?.state).toBe('playing');
+      expect(await frame.evaluate(() => [isSecureContext, crossOriginIsolated])).toEqual([
+        true,
+        false,
+      ]);
+      // The parameters reached the HUD: imperial speed, and the controls shown.
+      await expect(frame.locator('.oyl-hud__unit', { hasText: 'mph' })).toBeVisible();
+      await expect(frame.getByRole('button', { name: 'Pause' })).toBeVisible();
+
+      // Two overlay sizes: nothing outside the frame, every panel on the stage, nothing scrolls.
+      for (const width of [768, 1920]) {
+        await frameWidth(page, frame, width);
+        await expect
+          .poll(() => fit(frame))
+          .toMatchObject({
+            document: [width, Math.round((width * 9) / 16), width, Math.round((width * 9) / 16)],
+            outside: [],
+            panelsOffStage: [],
+            stageScrolls: false,
+          });
+      }
+      // The smallest: the page still does not scroll, and only the stage scrolls
+      // within itself, to the HUD stacked under the world as on an upright phone.
+      await frameWidth(page, frame, 320);
+      await expect
+        .poll(() => fit(frame))
+        .toMatchObject({
+          document: [320, 180, 320, 180],
+          outside: [],
+          stageScrolls: true,
+        });
+      // Printed, for the arithmetic: what a two-line notice and the offer leave.
+      const smallest = await fit(frame);
+      console.info(`demo in a 320 × 180 frame: a stage ${String(smallest.stageHeight)} px tall`);
+      // Some stage is left under the realistic world's two-line failure notice:
+      // with that line at 1 rem, CI's fonts left none and the page ran 2 px past
+      // the frame. How much is left goes with the fonts (39 px on a Mac).
+      expect(smallest.stageHeight).toBeGreaterThan(0);
+      await expect(frame.getByRole('link', { name: 'Source code' })).toBeInViewport();
+      await expect(frame.getByText('Demo: scripted riders, not a real ride')).toBeInViewport();
+
+      expect(await findings(context, frame, watched)).toEqual([]);
+      expect(watched.requests).toContain(`${DEMO_ORIGIN}/${query}`);
+    });
+
+    test('with ?controls=0, plays with Pause and no Stop', async ({ context, page }) => {
+      test.setTimeout(2 * FRAMES_BUDGET_MS);
+      await page.setViewportSize({ width: 768, height: 432 });
+      const query = '?preset=sprint&controls=0';
+      const watched = await watch(context, page, {
+        realistic: false,
+        embed: { host: hostPage(query), frameAncestors: HOST_ORIGIN },
+      });
+      await page.goto(`${HOST_ORIGIN}/`);
+      const frame = await demoFrame(page);
+      await expect
+        .poll(async () => (await last(frame))?.distance, { timeout: FRAMES_BUDGET_MS })
+        .toBeGreaterThan(0);
+      expect((await last(frame))?.state).toBe('playing');
+      await expect(frame.locator('.oyl-hud__fields--primary')).toBeVisible();
+      // Owner, 2026-10-30: Stop alone is left out; Pause always stays (SC 2.2.2).
+      await expect(frame.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+      await expect(frame.getByRole('button')).toHaveCount(1);
+      await frame.getByRole('button', { name: 'Pause' }).click();
+      await expect.poll(async () => (await last(frame))?.state).toBe('paused');
+      await expect(frame.getByRole('button', { name: 'Play' })).toBeVisible();
+      expect(await findings(context, frame, watched)).toEqual([]);
+    });
+
+    test('control: with frame-ancestors ’none’ the browser refuses to frame it', async ({
+      context,
+      page,
+    }) => {
+      await page.setViewportSize({ width: 768, height: 432 });
+      const query = '?preset=sprint';
+      const watched = await watch(context, page, {
+        realistic: false,
+        embed: { host: hostPage(query), frameAncestors: "'none'" },
+      });
+      await page.goto(`${HOST_ORIGIN}/`);
+      // The demo's document was asked for and answered: the refusal is the header's.
+      await expect.poll(() => watched.requests).toContain(`${DEMO_ORIGIN}/${query}`);
+      const frame = await demoFrame(page);
+      await expect.poll(() => frame.url()).not.toBe(`${DEMO_ORIGIN}/${query}`);
+      await page.waitForTimeout(3_000);
+      expect(watched.requests.some((url) => /\/assets\/[^/]+\.js$/.test(url))).toBe(false);
     });
   });
 

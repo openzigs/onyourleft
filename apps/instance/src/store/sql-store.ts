@@ -603,12 +603,20 @@ export interface NoticeErasure {
 /** What a notice is stored with: everything but the id the store gives it, as received. */
 export type NewNotice = Omit<Notice, 'id' | 'erased'>;
 
+/**
+ * What a notice's notifier details are erased after: its decision (#1381), or
+ * its receipt when no decision is recorded on it (#1923).
+ */
+export type NoticeErasedAfter = 'decision' | 'receipt';
+
 /** What erasing a notice's notifier details did (#1381). */
 export type NoticeDetailsErased =
   | 'erased'
   | 'not_found'
-  /** No decision is recorded on it: an open notice keeps what its notifier gave. */
+  /** Asked after its decision, and no decision is recorded on it. */
   | 'not_closed'
+  /** Asked after its receipt (#1923), and a decision is recorded on it: that one counts. */
+  | 'not_open'
   /** They were erased already. */
   | 'already';
 
@@ -1419,7 +1427,10 @@ export interface SqlStore {
   listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
   /**
    * Replace a live item with its tombstone — an activity's record goes with
-   * it. `false` when the athlete holds no such live item.
+   * it. `false` when the athlete holds no such live item. SCRUBBED (#1796):
+   * the old body is zeroed in its page and the log truncated, as a cleared
+   * key is, because an item can hold a place — a masking list's privacy
+   * zones, a ride's record, a note naming a street.
    */
   deleteSyncItem(athleteId: string, kind: SyncKind, key: string, now: number): Promise<boolean>;
   /** #776: the manifest, after `after`, in `(receivedAt, seq)` order, tombstones included. */
@@ -1657,14 +1668,20 @@ export interface SqlStore {
   /** Every step taken on every notice, oldest first (#912). */
   listNoticeSteps(): Promise<readonly NoticeStep[]>;
   /**
-   * Erase a closed notice's notifier details (#1381), in ONE transaction with
-   * the checks it rests on: the notice exists, its decision is recorded, and
-   * they are not erased already. The explanation is emptied and the location,
+   * Erase a notice's notifier details (#1381), in ONE transaction with the
+   * checks it rests on: the notice exists, they are not erased already, and
+   * a decision is recorded on it when `after` is `'decision'` — or none is,
+   * when it is `'receipt'` (#1923). When each is due is the caller's
+   * (`moderation/notice-retention.ts`). The explanation is emptied and the location,
    * name and email set to `null`; whether a name and an email were given is
    * kept, with `at` (Unix seconds). The decision, its dates, the items and
    * the notice's id stay. Scrubbed, as {@link SqlStore.eraseAthlete} is.
    */
-  eraseNoticeDetails(noticeId: number, at: number): Promise<NoticeDetailsErased>;
+  eraseNoticeDetails(
+    noticeId: number,
+    at: number,
+    after: NoticeErasedAfter,
+  ): Promise<NoticeDetailsErased>;
   /**
    * Hide one item (#913), in ONE transaction: the log entry, the statement of
    * reasons its owner is shown, and the hidden item — or, for an item already
@@ -3804,33 +3821,37 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     deleteSyncItem: (athleteId, kind, key, now) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const held = await trx
-            .selectFrom('sync_item')
-            .select('deleted_at')
-            .where('athlete_id', '=', athleteId)
-            .where('kind', '=', kind)
-            .where('item_key', '=', key)
-            .executeTakeFirst();
-          if (held === undefined || held.deleted_at !== null) return false;
-          if (kind === 'activity') {
-            await trx
-              .deleteFrom('activity_record')
+        // #1796: every kind, not a list of the ones that hold a place — a new
+        // kind cannot fall out of a rule that names none.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('sync_item')
+              .select('deleted_at')
               .where('athlete_id', '=', athleteId)
-              .where('content_sha256', '=', key)
-              .execute();
-          }
-          await replaceSyncRow(trx, {
-            athleteId,
-            kind,
-            key,
-            digest: null,
-            body: null,
-            now,
-            deletedAt: now,
-          });
-          return true;
-        }),
+              .where('kind', '=', kind)
+              .where('item_key', '=', key)
+              .executeTakeFirst();
+            if (held === undefined || held.deleted_at !== null) return false;
+            if (kind === 'activity') {
+              await trx
+                .deleteFrom('activity_record')
+                .where('athlete_id', '=', athleteId)
+                .where('content_sha256', '=', key)
+                .execute();
+            }
+            await replaceSyncRow(trx, {
+              athleteId,
+              kind,
+              key,
+              digest: null,
+              body: null,
+              now,
+              deletedAt: now,
+            });
+            return true;
+          }),
+        ),
       ),
 
     listSyncManifest: (athleteId, after, limit) =>
@@ -4670,7 +4691,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ),
       ),
 
-    eraseNoticeDetails: (noticeId, at) =>
+    eraseNoticeDetails: (noticeId, at, after) =>
       exclusive(() =>
         // Scrubbed (#1097): what the notifier typed is not left in a free page or the log.
         scrubbing(() =>
@@ -4693,7 +4714,8 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .where('notice_id', '=', noticeId)
               .where('step', '=', 'decided')
               .executeTakeFirst();
-            if (decided === undefined) return 'not_closed';
+            if (after === 'decision' && decided === undefined) return 'not_closed';
+            if (after === 'receipt' && decided !== undefined) return 'not_open';
             // The erasure row first: migration 0036's trigger allows the update only after it.
             await trx
               .insertInto('notice_erasure')
