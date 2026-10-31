@@ -705,6 +705,27 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ADR 0060 D-2.2 (#1898): the same walk and forbidden
                         set over the lap race's roots, `game/lap-race/` and
                         `packages/domain/src/lap-race/`
+    src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
+                        a lap race's lanes and item use (#1901, ADR 0060
+                        D-5.4, D-13): race INPUTS only, a lane and "use the
+                        held item" handed to `stepRace`'s next tick. The
+                        lanes and keys are Delivery's (`lanes.ts`); the item
+                        key is W, the HUD's `hud/ItemControl.tsx` is one
+                        button inside the touch lock (never exempt), and a
+                        pad's throw buttons use the item. `race-input.test.ts`
+                        rides one power trace with and without presses and
+                        reads every tick's effort distance and speed back
+                        equal. ⚠️ `race-input.ts` is `@unwired` until #1906
+                        runs the race in `GameView`
+    src/game/lap-race/assist-preference.ts, src/game/lap-race/assist.ts
+                        the lap race's assisted setting (#1905, Delivery's
+                        #1813 pattern): items off, auto-use, no knock-back on
+                        me, gentler bots. Kept on the device, read only by
+                        Settings and `game/lap-race/`. "No knock-back" is the
+                        model's own: `createItemRace`'s `shieldedIds`, and a
+                        hit on a shielded racer does nothing (`items.ts`
+                        §"A shielded racer"), solo races only. `assist.ts`
+                        is unwired until #1906 starts a race in a ride
     src/game/lap-race/in-view.ts
                         what a lap-race frame draws (#1902, ADR 0060 D-10.4):
                         every pick-up point of every lap on the frame's road,
@@ -739,18 +760,6 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         are unchanged, and `villageDrawCallCeiling` never
                         returns 14. `game.browser.spec.ts` §"#1903" counts the
                         race's frame
-    src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
-                        a lap race's lanes and item use (#1901, ADR 0060
-                        D-5.4, D-13): race INPUTS only, a lane and "use the
-                        held item" handed to `stepRace`'s next tick. The
-                        lanes and keys are Delivery's (`lanes.ts`); the item
-                        key is W, the HUD's `hud/ItemControl.tsx` is one
-                        button inside the touch lock (never exempt), and a
-                        pad's throw buttons use the item. `race-input.test.ts`
-                        rides one power trace with and without presses and
-                        reads every tick's effort distance and speed back
-                        equal. ⚠️ `race-input.ts` is `@unwired` until #1906
-                        runs the race in `GameView`
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
