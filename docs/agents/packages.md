@@ -69,7 +69,13 @@ packages/             Apache-2.0, without exception
     lap-race/           the lap race (#1897, ADR 0060) — effort distance and a
                         race offset clamped to ±10 m, laps and the finish
                         counted at their sum, nothing moving one into the
-                        other; lint refuses `Date` and `Math.random` here
+                        other; lint refuses `Date` and `Math.random` here.
+                        Since #1899 the items: pick-ups by lap fraction,
+                        position-weighted draws from the race's own seed,
+                        effects on the offset only, one item held, none
+                        combined; items off never reaches the item rules.
+                        With no effect running, an offset drifts back to 0
+                        at 0.25 m/s, never past it
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

@@ -24,7 +24,15 @@ export type LapRaceErrorCode =
   /** An offset bound that is not a finite number of metres above zero, or one above B. */
   | 'bound-out-of-range'
   /** An instant that is not a finite number of milliseconds. */
-  | 'instant-not-finite';
+  | 'instant-not-finite'
+  /** A race tick at an instant before the last one (#1899). */
+  | 'instant-out-of-order'
+  /** A race seed that is not a whole number (#1899). */
+  | 'seed-not-integer'
+  /** A lane that is not one of the race's lanes (#1899, ADR 0060 D-6.3: lanes are discrete). */
+  | 'lane-out-of-range'
+  /** A field that is empty, or names one racer twice (#1899). */
+  | 'field-invalid';
 
 /** Raised by the lap-race model. @see LapRaceErrorCode */
 export class LapRaceError extends Error {
