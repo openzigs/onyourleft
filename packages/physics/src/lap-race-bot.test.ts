@@ -89,7 +89,7 @@ function race(
   limit = 2_000,
 ): Run {
   let state = createItemRace({
-    course: raceCourse(profile.totalDistance as number, 3),
+    course: raceCourse(profile.totalDistance, 3),
     seed,
     itemsOn,
     racerIds: field.map((bot) => bot.id),
@@ -120,7 +120,7 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
     const sentinel: RideState = { speed: metresPerSecond(42), distance: metres(1234) };
     vi.mocked(advance).mockReturnValueOnce(sentinel);
     const start = createItemRace({
-      course: raceCourse(FLAT.totalDistance as number, 3),
+      course: raceCourse(FLAT.totalDistance, 3),
       seed: 1,
       itemsOn: false,
       racerIds: ['bot'],
@@ -138,7 +138,7 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
   it('rides at the bot’s 75 kg, with its tier’s power', () => {
     vi.mocked(advance).mockClear();
     const start = createItemRace({
-      course: raceCourse(FLAT.totalDistance as number, 3),
+      course: raceCourse(FLAT.totalDistance, 3),
       seed: 1,
       itemsOn: false,
       racerIds: ['bot'],
@@ -175,7 +175,7 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     // A recorded ride is not a bot, nor a step, nor a course.
     expectTypeOf<GhostTrack>().not.toMatchTypeOf<LapRaceBot>();
     expectTypeOf<GhostSamples>().not.toMatchTypeOf<BotRaceStep>();
-    expectTypeOf<RecordedSeries<number>>().not.toMatchTypeOf<LapRaceBotConditions>();
+    expectTypeOf<RecordedSeries<{ power: number }>>().not.toMatchTypeOf<LapRaceBotConditions>();
   });
 
   it('imports nothing from the domain’s ghost/ or recording/', () => {
@@ -289,7 +289,7 @@ describe('the same race gives the same decisions', () => {
 
   it('takes the rider’s inputs beside the bots’, and leaves the rider’s effort to them', () => {
     const start = createItemRace({
-      course: raceCourse(FLAT.totalDistance as number, 3),
+      course: raceCourse(FLAT.totalDistance, 3),
       seed: 1,
       itemsOn: true,
       racerIds: ['bot', 'rider'],

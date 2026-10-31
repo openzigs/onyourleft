@@ -273,7 +273,7 @@ it three ways, and the third is the one that cannot be faked:
 | the real `advance` is observed being called, with the bot's 75 kg | a bot that called it and then ignored the answer |
 | **`advance` replaced by a sentinel changes the bot's answer** | nothing — this is the one that distinguishes "calls it" from "is moved by it" |
 
-That third assertion is why this is the only file in the package that mocks a module. Everything else
+That third assertion is why this file mocks a module, as `lap-race-bot.test.ts` (§4b) does for the same reason. Everything else
 here compares numbers, and a number cannot say which function produced it.
 
 ⚠️ **Nothing in the bot's inputs is a recorded ride, and that is a design constraint** rather than a
@@ -287,6 +287,16 @@ mechanic. It is not one of #92's acceptance criteria, and it could not be one of
 joining burst is a response to *the rider joining*, so implementing it here would put rider state
 into bot behaviour, which #92's sixth criterion forbids. It belongs to whichever screen knows a rider
 has just joined.
+
+## 4b. Bots in a solo lap race (#1900)
+
+`lap-race-bot.ts` races the #92 bot. `stepBotRace` takes each bot's decision from
+`@onyourleft/domain` §`botDecision` (when to use its held item, which lane), rides its W/kg tier's
+pace through `advanceBot`, and hands the bots' effort distances and decisions to §`stepRace` with
+the rider's inputs. A bot's inputs are a tier, the pacing rule, the course and a seed. Its public
+signatures take no activity, stream or ghost type, which a type-level test holds. Its power never reads
+the race's standings: there is no rubber-banding (ADR 0060 D-9). `lap-race-bot.test.ts` replaces
+`advance` with a sentinel, as `pacer.test.ts` does, and requires the bot's race position to move.
 
 ### What it deliberately does not model
 

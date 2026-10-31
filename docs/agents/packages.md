@@ -73,7 +73,9 @@ packages/             Apache-2.0, without exception
                         Since #1899 the items: pick-ups by lap fraction,
                         position-weighted draws from the race's own seed,
                         effects on the offset only, one item held, none
-                        combined; items off never reaches the item rules
+                        combined; items off never reaches the item rules.
+                        Since #1900 the bots' W/kg tiers and seeded
+                        decisions; their effort is physics' `stepBotRace`
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an
