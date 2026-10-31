@@ -128,14 +128,21 @@ cp "${TILES}/${JAR}" "${WORK}/jars/onyourleft.jar"
 
 # --- The OSM extract --------------------------------------------------------
 # Geofabrik publishes an MD5 beside each extract; it is checked, and the
-# SHA-256 is what the build record carries.
+# SHA-256 is what the build record carries. The newest DATED extract
+# (`<area>-YYMMDD.osm.pbf`, listed on the region's page) is fetched, not
+# `-latest`: `-latest` is replaced daily, and a US download takes long enough
+# for the file to change under it, so its MD5 no longer matched (#1557,
+# 2026-10-31). `-latest` is the fallback only when the page lists no dated one.
 PBF="${WORK}/data/sources/${AREA}.osm.pbf"
 if [ ! -f "${PBF}" ]; then
-  curl -sSfL -o "${PBF}.part" "${GEOFABRIK}/${REGION}-latest.osm.pbf"
-  want="$(curl -sSfL "${GEOFABRIK}/${REGION}-latest.osm.pbf.md5" | cut -d' ' -f1)"
+  DATED="$(curl -sSfL "${GEOFABRIK}/${REGION}.html" | grep -oE "${AREA}-[0-9]{6}\.osm\.pbf" | sort -u | tail -1)"
+  NAME="${DATED:-${AREA}-latest.osm.pbf}"
+  SOURCE="${GEOFABRIK}/$(dirname "${REGION}")/${NAME}"
+  curl -sSfL -o "${PBF}.part" "${SOURCE}"
+  want="$(curl -sSfL "${SOURCE}.md5" | cut -d' ' -f1)"
   got="$(md5 -q "${PBF}.part" 2>/dev/null || md5sum "${PBF}.part" | cut -d' ' -f1)"
   if [ "${want}" != "${got}" ]; then
-    echo "build.sh: ${REGION}-latest.osm.pbf failed its MD5 check" >&2
+    echo "build.sh: ${NAME} failed its MD5 check" >&2
     rm -f "${PBF}.part"
     exit 1
   fi
