@@ -960,8 +960,8 @@ export function commercialStreetFixture(latitude = FIXTURE_LATITUDE): {
       covered: () => true,
       coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
       landUse: [
-        landBeside(profile, origin, 'landuse', 'retail', 950, 1_450, -40, 40),
-        landBeside(profile, origin, 'landuse', 'retail', 1_750, 2_650, 15, 80),
+        landBeside(profile, origin, 'landuse', 'commercial', 950, 1_450, -40, 40),
+        landBeside(profile, origin, 'landuse', 'commercial', 1_750, 2_650, 15, 80),
         landBeside(profile, origin, 'landuse', 'residential', 1_750, 2_650, -80, -15),
       ],
       buildings,
