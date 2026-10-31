@@ -215,9 +215,7 @@ function byId(a: RacerState, b: RacerState): number {
 /** The racer ahead first, by the rule in the header. */
 function ahead(a: RacerState, b: RacerState): number {
   if (a.finishedAtMs !== null && b.finishedAtMs !== null) {
-    return (
-      a.finishedAtMs - b.finishedAtMs || racePosition(b) - racePosition(a) || byId(a, b)
-    );
+    return a.finishedAtMs - b.finishedAtMs || racePosition(b) - racePosition(a) || byId(a, b);
   }
   if (a.finishedAtMs !== null) return -1;
   if (b.finishedAtMs !== null) return 1;

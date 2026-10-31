@@ -98,7 +98,11 @@ describe('effort dominates (ADR 0060 D-4.1)', () => {
 
   it('holds at the edge: a lead of 2B and a hair, the leader knocked back B and the other sent on B', () => {
     const course = raceCourse(1_000, 1);
-    const leader = settle(applyOffset(withEffortDistance(startingRacer('b'), 1_010), -50), course, 1);
+    const leader = settle(
+      applyOffset(withEffortDistance(startingRacer('b'), 1_010), -50),
+      course,
+      1,
+    );
     const trailer = settle(
       applyOffset(withEffortDistance(startingRacer('a'), 1_010 - 2 * B - 0.001), 50),
       course,
