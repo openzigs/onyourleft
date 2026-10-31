@@ -41,6 +41,15 @@
  * reads that as what keeps US 11,103,784's claims out of reach. A second slot
  * needs that reading re-run first.
  *
+ * ## A shielded racer (#1905)
+ *
+ * The assisted setting's "no knock-back on me" names the rider in
+ * {@link ItemRaceState.shielded}, and a hit on a shielded racer does nothing:
+ * no effect, and its rain cape is not spent on it. A puddle it rides through
+ * still counts it as ridden through, once. Its own items work as anyone's.
+ * It is a solo race's setting: a room's race would be unfair with it, and no
+ * room passes it.
+ *
  * ## Hits are resolved from race positions and lanes only (D-5.4)
  *
  * A hit is decided by drawn distance (`effortDistance + raceOffset`) and lane,
@@ -310,6 +319,12 @@ export interface ItemRaceState {
   /** The field, in id order: the order every rule visits it in. */
   readonly racers: readonly LapRacer[];
   readonly hazards: readonly Hazard[];
+  /**
+   * The ids no hit moves (#1905): the assisted setting's "no knock-back on
+   * me", in a solo race only. Sorted. Empty in every race that asks for none.
+   * @see the module note §"A shielded racer"
+   */
+  readonly shielded: readonly string[];
 }
 
 /** Whether a lane is one of the race's. */
@@ -366,8 +381,17 @@ function offsetBetween(effects: readonly OffsetEffect[], fromMs: number, toMs: n
   return metres;
 }
 
-/** A hit on `target` by an item of `kind` at `atMs`: absorbed by a cape, or an effect. */
-function hit(target: LapRacer, kind: ItemKind, atMs: number): LapRacer {
+/**
+ * A hit on `target` by an item of `kind` at `atMs`: nothing at all on a
+ * shielded racer, absorbed by a cape, or an effect.
+ */
+function hit(
+  target: LapRacer,
+  kind: ItemKind,
+  atMs: number,
+  shielded: ReadonlySet<string>,
+): LapRacer {
+  if (shielded.has(target.racer.id)) return target;
   if (target.capeUntilMs !== null && target.capeUntilMs > atMs) {
     return { ...target, capeUntilMs: null };
   }
@@ -418,6 +442,7 @@ export function resolveItems(
 ): ItemRaceState {
   const fromMs = state.atMs;
   let random = state.random;
+  const shielded = new Set(state.shielded);
 
   // 1. The effects already running, integrated through the clamp, then the
   //    drift toward 0 over the part of the tick no effect covered. Every
@@ -450,7 +475,7 @@ export function resolveItems(
         (before.get(entry.racer.id) ?? 0) < hazard.position &&
         racePosition(entry.racer) >= hazard.position
       ) {
-        racers[index] = hit(entry, 'puddle', atMs);
+        racers[index] = hit(entry, 'puddle', atMs, shielded);
         hitIds.push(entry.racer.id);
       }
     });
@@ -496,7 +521,7 @@ export function resolveItems(
           gap > 0 &&
           gap <= GUST_REACH_METRES
         ) {
-          racers[at] = hit(other, kind, atMs);
+          racers[at] = hit(other, kind, atMs, shielded);
         }
       });
     } else {

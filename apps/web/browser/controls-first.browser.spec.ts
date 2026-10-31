@@ -283,6 +283,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Your weight',
     // #1813: what Delivery is and what each of its assists changes.
     'Delivery',
+    // #1905: and the lap race's, the same way.
+    'Lap race',
     'Menu sounds',
     'Appearance',
     'Announcements',
