@@ -786,7 +786,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         choice is made. The village's 50 and Delivery's 53
                         are unchanged, and `villageDrawCallCeiling` never
                         returns 14. `game.browser.spec.ts` §"#1903" counts the
-                        race's frame
+                        race's frame. Since #1972 the owner's realistic page
+                        draws it for the tablet reading:
+                        `?world=stylised&race=worst` (REFUSED in the realistic
+                        world, and beside `delivery`, `town` and `route`)
+                        hands every frame the worst case on the scenery-free
+                        frame (`browser/realistic/lap-race.ts`) and publishes
+                        the 14 as `raceCeiling` (and no `villageCeiling`),
+                        what the belt drew as `race`, and both on its
+                        `OYL-REALISTIC` line and readout;
+                        `realistic-lap-race.browser.spec.ts` holds it
+                        (required, not nightly: the stylised world)
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
