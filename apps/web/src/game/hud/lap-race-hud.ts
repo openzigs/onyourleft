@@ -6,8 +6,8 @@
  * of a hit coming, and the field's standings.
  *
  * `fields.ts` reads {@link lapRaceReadings} into the HUD's fields, and
- * `HudCore.tsx` classes them; nothing supplies `HudInput.lapRace` until #1906
- * runs a race inside a game ride, so an ordinary ride's HUD is unchanged.
+ * `HudCore.tsx` classes them; `GameView` supplies `HudInput.lapRace` on a
+ * ride running a race (#1906), so an ordinary ride's HUD is unchanged.
  *
  * ## What it is handed, and nothing more
  *
@@ -104,7 +104,6 @@ export const ITEM_TEXT: Readonly<
 
 /**
  * What a bot tier is called. ⚠️ For the owner's approval.
- * @unwired #1906 builds the field's names with {@link botName} when it starts a race.
  */
 export const BOT_TIER_TEXT: Readonly<Record<BotTier, string>> = {
   steady: 'Steady',
@@ -115,7 +114,7 @@ export const BOT_TIER_TEXT: Readonly<Record<BotTier, string>> = {
 
 /**
  * A bot's name in the standings: its tier and its number in the field, `Brisk bot 2`.
- * @unwired #1906 names the field's bots with it when it starts a race.
+ * `lap-race/ride-race.ts` names the field's bots with it when a race starts (#1906).
  */
 export function botName(tier: BotTier, number: number): string {
   return `${BOT_TIER_TEXT[tier]} bot ${String(number)}`;
@@ -298,7 +297,6 @@ function powerToWeight(value: number | undefined): string {
  * The field's standings, as a room's panel shows them — every racer in
  * `standings` order, the rider's own line marked, windowed around it.
  * @see the module note §"The standings"
- * @unwired #1906 hands it to `HudPanel`'s `standings` on a ride running a race.
  */
 export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
   const { race, riderId } = hud;
