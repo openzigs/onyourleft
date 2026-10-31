@@ -273,7 +273,7 @@ it three ways, and the third is the one that cannot be faked:
 | the real `advance` is observed being called, with the bot's 75 kg | a bot that called it and then ignored the answer |
 | **`advance` replaced by a sentinel changes the bot's answer** | nothing — this is the one that distinguishes "calls it" from "is moved by it" |
 
-That third assertion is why this is the only file in the package that mocks a module. Everything else
+That third assertion is why this file mocks a module, as `lap-race-bot.test.ts` (§4b) does for the same reason. Everything else
 here compares numbers, and a number cannot say which function produced it.
 
 ⚠️ **Nothing in the bot's inputs is a recorded ride, and that is a design constraint** rather than a
@@ -296,6 +296,19 @@ has just joined.
 - **Braking, cornering, drafting, gears and cadence.** None is in Martin's model or in #88's scope.
 - **Humidity and weather** in the air-density model. Both are documented in `air.ts` rather than
   approximated: a wrong correction is harder to find than an absent one.
+
+## 4b. Bots in a solo lap race (#1900)
+
+`lap-race-bot.ts` races the #92 bot. `stepBotRace` takes each bot's decision from
+`@onyourleft/domain` §`botDecision` (when to use its held item, which lane), rides its W/kg tier's
+pace through `advanceBot`, and hands the bots' effort distances and decisions to §`stepRace` with
+the rider's inputs. A bot's inputs are a tier, the pacing rule, the course and a seed. Its public
+signatures take no activity, stream or ghost type, which a type-level test holds. Its power never reads
+the race's standings: there is no rubber-banding (ADR 0060 D-9). `lap-race-bot.test.ts` replaces
+`advance` with a sentinel, as `pacer.test.ts` does, and requires the bot's race position to move.
+The seed is the race's own, and `botDecision` refuses one that is not a safe whole number. Each
+bot's speed times the tick's length is passed as how far it will ride, so its puddle look-ahead
+grows with its speed (`packages/domain/src/lap-race/bots.ts`).
 
 ---
 

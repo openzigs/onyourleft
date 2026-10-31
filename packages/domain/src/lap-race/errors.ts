@@ -32,7 +32,9 @@ export type LapRaceErrorCode =
   /** A lane that is not one of the race's lanes (#1899, ADR 0060 D-6.3: lanes are discrete). */
   | 'lane-out-of-range'
   /** A field that is empty, or names one racer twice (#1899). */
-  | 'field-invalid';
+  | 'field-invalid'
+  /** A bot's travel this tick that is not a finite number of metres of at least zero (#1900). */
+  | 'travel-out-of-range';
 
 /** Raised by the lap-race model. @see LapRaceErrorCode */
 export class LapRaceError extends Error {

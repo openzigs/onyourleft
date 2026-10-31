@@ -57,3 +57,19 @@ export {
 
 export type { ItemRaceSetup, RaceTickInput } from './item-race';
 export { createItemRace, stepRace } from './item-race';
+
+// The bots (#1900): W/kg tiers at the #92 bot's fixed mass, and seeded
+// decisions over the race as it stands. Their effort is the physics' own
+// (`@onyourleft/physics` §`stepBotRace`).
+export type { BotDecision, BotTier } from './bots';
+export {
+  BOT_AIM_METRES,
+  BOT_DODGE,
+  BOT_PUDDLE_LOOKAHEAD_METRES,
+  BOT_REACTION,
+  BOT_THREAT_METRES,
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  BOT_TIERS,
+  botDecision,
+  botTierPlan,
+} from './bots';
