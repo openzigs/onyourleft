@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Builds this project's basemap archive (#1557): the Protomaps v4 basemap from
+# OpenStreetMap, by Planetiler, with upstream's profile at a pinned commit and
+# this project's z15-only building fields added by `profile/`. README.md beside
+# this file says what each pin is, its licence, and the build's time and size.
+#
+#   build.sh --region north-america/us/delaware            # a small region
+#   build.sh --region north-america/us --xmx 24g           # the US
+#   build.sh --region north-america/us/delaware --compare  # and upstream's, unmodified
+#
+# Everything it downloads or writes goes under --work (default
+# ~/.cache/onyourleft/basemap), never into the repository: the OSM extract for
+# the US is ~11 GB and the upstream clone carries its own *.test.ts files,
+# which this repository's Vitest would otherwise collect.
+#
+# It uploads nothing. Publishing an archive is a separate, owner-approved step
+# (#1557's ruling of 2026-10-31).
+set -euo pipefail
+
+# --- Pins -------------------------------------------------------------------
+# protomaps/basemaps (BSD-3-Clause code, CC0 visual design): tiles 4.15.2.
+UPSTREAM_REPO="https://github.com/protomaps/basemaps.git"
+UPSTREAM_SHA="42ffaaa4a85a41bfcb23e43cc0f5b492a5eca123"
+# Apache Maven (Apache-2.0), only to compile the profile. The SHA-512 is the one
+# Apache publishes beside the tarball.
+MAVEN_VERSION="3.9.16"
+MAVEN_SHA512="831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6"
+MAVEN_URL="https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+# Planetiler itself (Apache-2.0) is pinned by upstream's pom.xml: 0.10.2.
+GEOFABRIK="https://download.geofabrik.de"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK="${HOME}/.cache/onyourleft/basemap"
+REGION=""
+OUTPUT=""
+XMX="8g"
+COMPARE=0
+BUILD_YEAR=""
+
+usage() {
+  sed -n '3,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  echo "Options: --region <geofabrik path> --output <file.pmtiles> --work <dir> --xmx <heap> --build-year <yyyy> --compare"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --region) REGION="${2:?--region needs a value}"; shift 2 ;;
+    --output) OUTPUT="${2:?--output needs a value}"; shift 2 ;;
+    --work) WORK="${2:?--work needs a value}"; shift 2 ;;
+    --xmx) XMX="${2:?--xmx needs a value}"; shift 2 ;;
+    --build-year) BUILD_YEAR="${2:?--build-year needs a value}"; shift 2 ;;
+    --compare) COMPARE=1; shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) echo "build.sh: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "${REGION}" ]; then
+  echo "build.sh: --region is required, a Geofabrik path such as north-america/us/delaware" >&2
+  exit 2
+fi
+case "${REGION}" in
+  *[!a-z0-9/-]* | /* | */ | *..*)
+    echo "build.sh: --region must be a Geofabrik path of lower-case letters, digits, '-' and '/'" >&2
+    exit 2 ;;
+esac
+AREA="${REGION##*/}"
+OUTPUT="${OUTPUT:-${WORK}/out/${AREA}.pmtiles}"
+# Planetiler runs from ${WORK}, so a relative path is made absolute here.
+case "${OUTPUT}" in /*) ;; *) OUTPUT="${PWD}/${OUTPUT}" ;; esac
+case "${OUTPUT}" in *.pmtiles) ;; *) echo "build.sh: --output must end in .pmtiles" >&2; exit 2 ;; esac
+# The latest start year written (BuildingTags.BUILD_YEAR). Defaults to this
+# year; give the same value again to rebuild the same extract byte for byte.
+BUILD_YEAR="${BUILD_YEAR:-$(date -u +%Y)}"
+case "${BUILD_YEAR}" in
+  [12][0-9][0-9][0-9]) ;;
+  *) echo "build.sh: --build-year must be a four-digit year" >&2; exit 2 ;;
+esac
+
+sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
+bytes() { wc -c <"$1" | tr -d ' '; }
+
+# --- Java 21 ----------------------------------------------------------------
+JAVA_MAJOR="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java.specification.version = //p')"
+if [ -z "${JAVA_MAJOR}" ] || [ "${JAVA_MAJOR}" -lt 21 ]; then
+  echo "build.sh: Planetiler needs Java 21 or later; found '${JAVA_MAJOR:-none}'" >&2
+  exit 1
+fi
+
+mkdir -p "${WORK}/tools" "${WORK}/data/sources" "${WORK}/jars" "$(dirname "${OUTPUT}")"
+
+# --- Maven, pinned and verified ----------------------------------------------
+MVN="${WORK}/tools/apache-maven-${MAVEN_VERSION}/bin/mvn"
+if [ ! -x "${MVN}" ]; then
+  tarball="${WORK}/tools/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+  curl -sSfL -o "${tarball}" "${MAVEN_URL}"
+  echo "${MAVEN_SHA512}  ${tarball}" | shasum -a 512 -c - >/dev/null
+  tar -xzf "${tarball}" -C "${WORK}/tools"
+fi
+
+# --- The profile: upstream at the pin, then this project's fields -----------
+# Built twice from one clone: first unmodified (the `--compare` baseline, and
+# proof the pin's own suite passes), then with profile/ added. `mvn package`
+# runs each suite, so a red BuildingTagsTest stops the build before any tile.
+CLONE="${WORK}/upstream"
+if [ ! -d "${CLONE}/.git" ]; then
+  git clone --quiet "${UPSTREAM_REPO}" "${CLONE}"
+fi
+git -C "${CLONE}" fetch --quiet origin "${UPSTREAM_SHA}" 2>/dev/null || true
+git -C "${CLONE}" checkout --quiet --force "${UPSTREAM_SHA}"
+git -C "${CLONE}" clean -fdxq
+if [ "$(git -C "${CLONE}" rev-parse HEAD)" != "${UPSTREAM_SHA}" ]; then
+  echo "build.sh: the upstream clone is not at ${UPSTREAM_SHA}" >&2
+  exit 1
+fi
+
+TILES="${CLONE}/tiles"
+JAR="target/protomaps-basemap-HEAD-with-deps.jar"
+(cd "${TILES}" && "${MVN}" -B -q package) || exit 1
+cp "${TILES}/${JAR}" "${WORK}/jars/upstream.jar"
+
+git -C "${CLONE}" apply "${HERE}/profile/protomaps-basemaps.patch"
+cp -R "${HERE}/profile/src/." "${TILES}/src/"
+(cd "${TILES}" && "${MVN}" -B -q package) || exit 1
+cp "${TILES}/${JAR}" "${WORK}/jars/onyourleft.jar"
+
+# --- The OSM extract --------------------------------------------------------
+# Geofabrik publishes an MD5 beside each extract; it is checked, and the
+# SHA-256 is what the build record carries.
+PBF="${WORK}/data/sources/${AREA}.osm.pbf"
+if [ ! -f "${PBF}" ]; then
+  curl -sSfL -o "${PBF}.part" "${GEOFABRIK}/${REGION}-latest.osm.pbf"
+  want="$(curl -sSfL "${GEOFABRIK}/${REGION}-latest.osm.pbf.md5" | cut -d' ' -f1)"
+  got="$(md5 -q "${PBF}.part" 2>/dev/null || md5sum "${PBF}.part" | cut -d' ' -f1)"
+  if [ "${want}" != "${got}" ]; then
+    echo "build.sh: ${REGION}-latest.osm.pbf failed its MD5 check" >&2
+    rm -f "${PBF}.part"
+    exit 1
+  fi
+  mv "${PBF}.part" "${PBF}"
+fi
+
+# --- Tiles ------------------------------------------------------------------
+# Upstream's run(): every other source (Natural Earth, the OSM water and land
+# polygons, Daylight landcover, QRank, the pgf encoding) is downloaded into
+# data/sources by --download when it is missing, and reused when present.
+run_profile() {
+  local jar="$1" output="$2"
+  (cd "${WORK}" && java "-Xmx${XMX}" "-Doyl.build_year=${BUILD_YEAR}" -jar "${jar}" \
+    --area="${AREA}" --download --force --output="${output}" \
+    --nodemap-type=sparsearray --nodemap-storage=mmap)
+}
+
+started="$(date +%s)"
+run_profile "${WORK}/jars/onyourleft.jar" "${OUTPUT}"
+elapsed=$(( $(date +%s) - started ))
+
+if [ "${COMPARE}" -eq 1 ]; then
+  run_profile "${WORK}/jars/upstream.jar" "${OUTPUT%.pmtiles}.upstream.pmtiles"
+fi
+
+# --- The build record -------------------------------------------------------
+# Every input's digest, so the same inputs and these pins rebuild these bytes.
+RECORD="${OUTPUT%.pmtiles}.build.txt"
+{
+  echo "region ${REGION}"
+  echo "build_year ${BUILD_YEAR}"
+  echo "upstream ${UPSTREAM_REPO} ${UPSTREAM_SHA}"
+  echo "maven ${MAVEN_VERSION}"
+  echo "java $(java -version 2>&1 | head -1)"
+  echo "patch $(sha256 "${HERE}/profile/protomaps-basemaps.patch")"
+  echo "jar $(sha256 "${WORK}/jars/onyourleft.jar")"
+  for source in "${WORK}"/data/sources/*; do
+    [ -f "${source}" ] && echo "input $(basename "${source}") $(bytes "${source}") $(sha256 "${source}")"
+  done
+  echo "output $(basename "${OUTPUT}") $(bytes "${OUTPUT}") $(sha256 "${OUTPUT}")"
+  echo "seconds ${elapsed}"
+} >"${RECORD}"
+cat "${RECORD}"
