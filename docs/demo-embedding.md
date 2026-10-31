@@ -125,8 +125,10 @@ gate plays it inside a cross-origin frame with `crossOriginIsolated` false. The 
     reader. Nothing scrolls, not even the stage. The browser gate measures 320 × 180, 480 × 270,
     640 × 360 and 736 × 414: nothing outside the frame, no panel over another, a stage at least
     half the frame, every control and link reached by Tab, and _Pause_ pressed from the keyboard.
-  - **Under 736 px wide and 752 px tall or more** (`47rem`), an upright frame, the product's
-    single-column layout, as on an upright phone. The gate does not measure a frame of that shape.
+  - **From 360 px (`22.5rem`) to under 736 px wide and 752 px tall or more** (`47rem`), an upright
+    frame, the product's single-column layout, as on an upright phone. Below 360 px wide the
+    product's column query does not apply and such a frame gets the stacked layout, where the
+    stage scrolls. The gate does not measure a frame of either shape.
 
   Any 16 : 9 frame from 320 × 180 shows the demo with its readings and its controls. For every
   reading the ride HUD has (speed, gradient, distance to go, the elevation strip and the route's
@@ -137,14 +139,14 @@ gate plays it inside a cross-origin frame with `crossOriginIsolated` false. The 
 Each is optional. An unknown parameter, or a value not listed, is refused with a sentence on the
 page rather than ignored, so a mistyped link shows itself.
 
-| Parameter  | Values                                                    | Default                  | What                                                                                                                                                                                                                                                                              |
-| ---------- | --------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `preset`   | `climb`, `sprint`, `group`                                | `climb`                  | Which scripted ride: a climb, a sprint, or four riders in a group                                                                                                                                                                                                                 |
-| `route`    | the id of a route `demo:bake` wrote, e.g. `upstate-climb` | none: the synthetic road | Rides the preset on that route's real roads, with its map data and credit                                                                                                                                                                                                         |
-| `showcase` | present, with no value                                    | absent                   | The feature tour (#1653), ridden by the `group` preset; `preset`, if given, must be `group`                                                                                                                                                                                       |
-| `autoplay` | `1`, `0`                                                  | `1`                      | `0` starts on a still frame with a _Play_ button                                                                                                                                                                                                                                  |
+| Parameter  | Values                                                    | Default                  | What                                                                                                                  |
+| ---------- | --------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `preset`   | `climb`, `sprint`, `group`                                | `climb`                  | Which scripted ride: a climb, a sprint, or four riders in a group                                                     |
+| `route`    | the id of a route `demo:bake` wrote, e.g. `upstate-climb` | none: the synthetic road | Rides the preset on that route's real roads, with its map data and credit                                             |
+| `showcase` | present, with no value                                    | absent                   | The feature tour (#1653), ridden by the `group` preset; `preset`, if given, must be `group`                           |
+| `autoplay` | `1`, `0`                                                  | `1`                      | `0` starts on a still frame with a _Play_ button                                                                      |
 | `controls` | `1`, `0`                                                  | `1`                      | `0` hides the HUD's _Stop_. _Pause_ and _Play_ are always shown, so the demo can always be paused (WCAG 2.2 SC 2.2.2) |
-| `units`    | `metric`, `imperial`                                      | `metric`                 | The HUD's units                                                                                                                                                                                                                                                                   |
+| `units`    | `metric`, `imperial`                                      | `metric`                 | The HUD's units                                                                                                       |
 
 For example, `?preset=group&showcase&units=imperial`, or `?preset=sprint&autoplay=0`.
 

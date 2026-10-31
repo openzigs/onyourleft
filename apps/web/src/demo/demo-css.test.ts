@@ -41,7 +41,10 @@ describe('the demo’s stylesheet (#1945)', () => {
 
   it('lays out a small frame: the compact query, and the controls kept and resized', () => {
     const css = rules(DEMO_CSS);
-    expect(css).toContain('@media (height < 27rem), (width < 46rem) and (height < 47rem) {');
+    expect(css).toMatch(/@media \(height < 27rem\), \(width < 46rem\) and \(height < 47rem\) \{/);
+    // The narrow query is one condition: its other branch was a subset of it.
+    expect(css).toContain('@media (width < 30rem) and (height < 47rem) {');
+    expect(css).not.toContain('(height < 27rem) and (width < 30rem)');
     expect(css).toMatch(/\.oyl-hud__control \{[^}]*min-height: 44px !important;/);
     expect(css).not.toMatch(/\.oyl-hud__actions[^{]*\{[^}]*display: none/);
   });

@@ -215,7 +215,7 @@
   }
 }
 
-@media (height < 27rem) and (width < 30rem), (width < 30rem) and (height < 47rem) {
+@media (width < 30rem) and (height < 47rem) {
   .oyl-game--riding.oyl-demo__stage .oyl-hud__fields--primary > .oyl-hud__field:nth-child(n + 3) {
     display: none;
   }
