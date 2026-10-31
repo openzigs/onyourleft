@@ -235,6 +235,28 @@ export interface RiderMarker {
    * HUD's gap is to. Only ever on a `remote` rider; never an order.
    */
   readonly followed?: boolean | undefined;
+  /**
+   * How this rider's lap-race hit effect looks on this frame — #1902, only
+   * while an item's slow-down runs on them (`lap-race/in-view.ts`
+   * §`hitLook`). Carried on the marker so the effect is drawn exactly where
+   * the rider is, wherever `scene.ts` moved them across the road.
+   * `three-renderer.ts` §`LapRaceBelt` draws every marker's in ONE instanced
+   * call. Absent on every ordinary ride and on a racer nothing has hit.
+   */
+  readonly hit?: RaceHitLook | undefined;
+}
+
+/**
+ * A lap-race hit effect on one frame — #1902: a ring of spray about the
+ * wheels. Numbers only; how it looks is `three-renderer.ts`' choice.
+ */
+export interface RaceHitLook {
+  /** How bright, `0` to `1`: the instance colour it is drawn in. */
+  readonly glow: number;
+  /** How large, as a multiple of its full size. */
+  readonly scale: number;
+  /** How far it is turned about the vertical, radians. */
+  readonly spin: number;
 }
 
 /** One frame's worth of scene. */
@@ -363,6 +385,38 @@ export interface SceneFrame {
    * `delivery-harness.ts` hands a view one too.
    */
   readonly delivery?: DeliveryInView | undefined;
+  /**
+   * A lap race's pick-up points and the puddles on the road — #1902
+   * (`lap-race/in-view.ts` §`lapRaceInView`). Drawn with every marker's
+   * {@link RiderMarker.hit} in at most three instanced calls
+   * (`three-renderer.ts` §`LapRaceBelt`), whatever the count, and the view
+   * builds nothing of it until a frame carries one. **Absent on every
+   * ordinary ride.** The race's bots are ordinary `bot` markers, in the
+   * riders' own instanced meshes (`scene.ts` §`SceneInput.raceBots`).
+   */
+  readonly lapRace?: LapRaceInView | undefined;
+}
+
+/**
+ * One lap-race piece, in the corridor's local metres, and its yaw — #1902,
+ * {@link DeliveryPiece}'s shape.
+ */
+export interface LapRacePiece {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+}
+
+/**
+ * What {@link SceneFrame.lapRace} carries — #1902: placements, never meshes,
+ * on {@link SceneFrame.scatter}'s argument.
+ */
+export interface LapRaceInView {
+  /** Each pick-up point on the frame's road: one piece across the whole carriageway. */
+  readonly pickUps: readonly LapRacePiece[];
+  /** Each puddle still on the road, in the middle of its lane. */
+  readonly hazards: readonly LapRacePiece[];
 }
 
 /** What {@link SceneFrame.water} carries. */

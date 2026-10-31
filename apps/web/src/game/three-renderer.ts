@@ -645,6 +645,8 @@ import type {
   DeliveryPiece,
   GameRenderer,
   GameView,
+  LapRaceInView,
+  LapRacePiece,
   RiderMarker,
   SceneFrame,
 } from './port';
@@ -669,6 +671,7 @@ import {
   verticalFieldOfViewDegrees,
 } from './camera';
 import {
+  CENTRE_LINE_LIFT_METRES,
   ROAD_SURFACE_GRAIN,
   ROAD_WIDTH_METRES,
   VIEW_AHEAD_METRES,
@@ -10745,6 +10748,366 @@ export function deliveryKindProbe(
 }
 
 /**
+ * How many of each lap-race piece one frame can draw — #1902. Pick-up points
+ * stand three a lap (`items.ts` §`PICK_UP_FRACTIONS`), so the 460 m of a
+ * corridor (`terrain.ts` §`VIEW_AHEAD_METRES` and §`VIEW_BEHIND_METRES`)
+ * holds five on a 400 m lap and 28 on a 50 m one; a puddle stands at a
+ * pick-up point in one of three lanes and dries in 30 s; and a race has eight
+ * racers to hit. 32 is past each with room, and past the browser gate's nine
+ * pick-up points and ten puddles. A frame handed more draws the first 32 of
+ * each and not the rest; it is never a second call.
+ */
+export const LAP_RACE_PIECE_CAPACITY = 32;
+
+/** Which of a lap-race frame's three kinds of piece. @see LapRaceBelt */
+export type LapRacePieceKind = 'pickUps' | 'hazards' | 'hits';
+
+/** A piece the lap-race belt drew, read back off its instance buffers. @see LapRaceBelt.drawn */
+export interface DrawnLapRacePiece {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** How large it was drawn: the instance matrix's scale. */
+  readonly scale: number;
+  /** For a hit effect, the brightness it was drawn at; `undefined` for the others. */
+  readonly glow: number | undefined;
+}
+
+/**
+ * The lap race's paints — #1902, this project's own (ADR 0060 D-1): a
+ * glowing teal band across the road between two white posts, each with a teal
+ * pennant, for a pick-up point; a grey-blue puddle the colour of the sky it
+ * holds, with a paler sheen; and a pale-blue glowing ring of spray about the
+ * wheels for a hit. No item box, no symbol, no sprite and no colour scheme is
+ * taken from any game.
+ */
+const LAP_RACE_PAINT = {
+  pickUpBand: 0x22b8a6,
+  pickUpPost: 0xe6e4da,
+  puddle: 0x86a7bf,
+  puddleSheen: 0xd2e2ee,
+  spray: 0xcfe8ff,
+} as const;
+
+/**
+ * A pick-up point, its middle on the road's centre at the origin: a band
+ * 0.5 m along across the whole 7 m carriageway, lifted clear of the road by
+ * `terrain.ts` §`CENTRE_LINE_LIFT_METRES`'s depth allowance, and a
+ * post with a pennant just off each edge, all teal but the posts. The band
+ * and pennants glow, so a pick-up reads in any light.
+ */
+function pickUpShape(): BufferGeometry {
+  const half = ROAD_WIDTH_METRES / 2;
+  const parts: DeliveryPart[] = [
+    {
+      made: deliveryBox(ROAD_WIDTH_METRES, 0.02, 0.5, 0, CENTRE_LINE_LIFT_METRES + 0.01, 0),
+      colour: LAP_RACE_PAINT.pickUpBand,
+      glows: true,
+    },
+  ];
+  for (const side of [-1, 1]) {
+    const x = side * (half + 0.2);
+    parts.push(
+      { made: deliveryBox(0.06, 1.6, 0.06, x, 0.8, 0), colour: LAP_RACE_PAINT.pickUpPost },
+      {
+        made: deliveryBox(0.03, 0.3, 0.45, x, 1.42, -0.25),
+        colour: LAP_RACE_PAINT.pickUpBand,
+        glows: true,
+      },
+    );
+  }
+  return deliveryShape(parts);
+}
+
+/**
+ * A puddle, its middle at the origin, lying in its lane: an oval 1.5 m across
+ * and 3 m along, lifted clear of the road as a pick-up's band is, with a
+ * paler sheen inside it.
+ */
+function puddleShape(): BufferGeometry {
+  return deliveryShape([
+    {
+      made: new CylinderGeometry(0.75, 0.75, 0.01, 16, 1, false)
+        .scale(1, 1, 2)
+        .translate(0, CENTRE_LINE_LIFT_METRES + 0.005, 0),
+      colour: LAP_RACE_PAINT.puddle,
+    },
+    {
+      made: new CylinderGeometry(0.3, 0.3, 0.01, 12, 1, false)
+        .scale(1, 1, 2)
+        .translate(0.15, CENTRE_LINE_LIFT_METRES + 0.015, 0.4),
+      colour: LAP_RACE_PAINT.puddleSheen,
+    },
+  ]);
+}
+
+/**
+ * A hit effect, centred on the bicycle's origin: a ring of spray on the road
+ * about the wheels and six drops about it at two heights, all glowing, so
+ * its brightness is the instance colour alone ({@link LapRaceBelt}).
+ */
+function hitShape(): BufferGeometry {
+  const parts: DeliveryPart[] = [
+    {
+      made: new TorusGeometry(0.75, 0.05, 3, 16).rotateX(-Math.PI / 2).translate(0, 0.1, 0),
+      colour: LAP_RACE_PAINT.spray,
+      glows: true,
+    },
+  ];
+  for (let drop = 0; drop < 6; drop += 1) {
+    const turn = (drop / 6) * 2 * Math.PI;
+    parts.push({
+      made: new OctahedronGeometry(0.07, 0).translate(
+        0.8 * Math.sin(turn),
+        drop % 2 === 0 ? 0.35 : 0.55,
+        0.8 * Math.cos(turn),
+      ),
+      colour: LAP_RACE_PAINT.spray,
+      glows: true,
+    });
+  }
+  return deliveryShape(parts);
+}
+
+/** Reused by {@link LapRaceBelt}, so a frame allocates no matrix. */
+const LAP_RACE_MATRIX = new Matrix4();
+const LAP_RACE_SCALE = new Vector3();
+
+/**
+ * A lap race's pick-up points, the puddles on the road and every racer's hit
+ * effect — #1902, under ADR 0060 D-10.4: **three instanced meshes and at most
+ * THREE draw calls**, whatever the count, and none on a frame that carries no
+ * lap race. One puddle costs what ten do. The race's bots are `bot` markers
+ * in {@link RiderBelt}'s meshes (#368), so they cost none.
+ *
+ * ⚠️ **Built by the view only on the first frame that carries a lap race**
+ * (`SceneFrame.lapRace`), as {@link DeliveryBelt} is, so an ordinary ride has
+ * no mesh, no program and no buffer of it.
+ *
+ * A hit effect is drawn at each marker carrying `RiderMarker.hit`, so it is
+ * wherever `scene.ts` drew that racer; its brightness is the instance colour,
+ * multiplied into the glowing paint (three's `color_vertex` does `vColor *=
+ * instanceColor`), its size the instance matrix's scale, its turn about the
+ * vertical the matrix's rotation. `lap-race/in-view.ts` §`hitLook` decides
+ * all three, and holds reduced motion; nothing here animates.
+ *
+ * What it adds to a frame: no shadow caster, no shadow lookup, nothing
+ * transparent, no new pass. It wears the holiday decorations' materials
+ * ({@link decorationMaterials}), with the glow in the same program. ⚠️ **Not
+ * frustum-culled**, for {@link DeliveryBelt}'s reason.
+ */
+export class LapRaceBelt {
+  readonly #group = new Group();
+  readonly #meshes: Readonly<Record<LapRacePieceKind, InstancedMesh>>;
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  /**
+   * The hit effects' own: a mesh with an instance colour compiles another
+   * program from the same material, so sharing one would switch programs
+   * between the belt's calls every frame.
+   */
+  readonly #hitMaterials: { readonly lit: Material; readonly flat: Material };
+  readonly #tint = new Color();
+  #shown = true;
+
+  constructor(world: 'stylised' | 'realistic') {
+    this.#materials = decorationMaterials(world);
+    this.#hitMaterials = decorationMaterials(world);
+    const made = (geometry: BufferGeometry, tinted: boolean): InstancedMesh => {
+      const materials = tinted ? this.#hitMaterials : this.#materials;
+      const mesh = new InstancedMesh(geometry, materials.lit, LAP_RACE_PIECE_CAPACITY);
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+      // ⚠️ The hit effects' `instanceColor` is written here, while `count` is
+      // still the capacity: three sizes it from `count` when it is first
+      // written. @see RiderBelt
+      if (tinted) {
+        for (let slot = 0; slot < LAP_RACE_PIECE_CAPACITY; slot += 1) {
+          mesh.setColorAt(slot, this.#tint.setHex(0xffffff));
+        }
+        mesh.instanceColor?.setUsage(DynamicDrawUsage);
+      }
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      return mesh;
+    };
+    this.#meshes = {
+      pickUps: made(pickUpShape(), false),
+      hazards: made(puddleShape(), false),
+      hits: made(hitShape(), true),
+    };
+    for (const mesh of Object.values(this.#meshes)) this.#group.add(mesh);
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#group);
+  }
+
+  /**
+   * Everything the belt draws, for `lap-race-belt.test.ts`, which counts the
+   * visible meshes in it and cannot construct a `Scene` of its own
+   * (`three-seam.test.ts`). @see RiderBelt.group
+   */
+  get group(): Group {
+    return this.#group;
+  }
+
+  /** One kind's mesh. For the jsdom suite and the browser gate's probes. */
+  meshOf(what: LapRacePieceKind): InstancedMesh {
+    return this.#meshes[what];
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) for (const mesh of Object.values(this.#meshes)) mesh.visible = false;
+  }
+
+  /** Shades the pieces, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#meshes.pickUps.material = this.#materials[shading];
+    this.#meshes.hazards.material = this.#materials[shading];
+    this.#meshes.hits.material = this.#hitMaterials[shading];
+  }
+
+  /**
+   * This frame's pieces and the hit effects on `markers`, or none: a frame
+   * with no lap race draws nothing of it, whatever its markers carry.
+   */
+  update(view: LapRaceInView | undefined, markers: readonly RiderMarker[]): void {
+    this.#place(this.#meshes.pickUps, view?.pickUps ?? NO_LAP_RACE_PIECES);
+    this.#place(this.#meshes.hazards, view?.hazards ?? NO_LAP_RACE_PIECES);
+    const mesh = this.#meshes.hits;
+    let count = 0;
+    if (view !== undefined) {
+      for (const marker of markers) {
+        const hit = marker.hit;
+        if (hit === undefined || count >= LAP_RACE_PIECE_CAPACITY) continue;
+        LAP_RACE_MATRIX.makeRotationY(Math.atan2(marker.headingX, marker.headingZ) + hit.spin)
+          .scale(LAP_RACE_SCALE.setScalar(hit.scale))
+          .setPosition(marker.x, marker.y, marker.z);
+        mesh.setMatrixAt(count, LAP_RACE_MATRIX);
+        mesh.setColorAt(count, this.#tint.setScalar(hit.glow));
+        count += 1;
+      }
+    }
+    mesh.count = count;
+    if (count > 0) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    }
+    mesh.visible = this.#shown && count > 0;
+  }
+
+  #place(mesh: InstancedMesh, pieces: readonly LapRacePiece[]): void {
+    const count = Math.min(pieces.length, LAP_RACE_PIECE_CAPACITY);
+    for (let at = 0; at < count; at += 1) {
+      const piece = pieces[at] as LapRacePiece;
+      LAP_RACE_MATRIX.makeRotationY(piece.yaw).setPosition(piece.x, piece.y, piece.z);
+      mesh.setMatrixAt(at, LAP_RACE_MATRIX);
+    }
+    mesh.count = count;
+    if (count > 0) mesh.instanceMatrix.needsUpdate = true;
+    mesh.visible = this.#shown && count > 0;
+  }
+
+  /**
+   * What the last frame drew of `what`, read back off the belt's own instance
+   * buffers — the CPU copy three uploads, not the frame it was handed.
+   * Nothing where the mesh is not drawn.
+   */
+  drawn(what: LapRacePieceKind): readonly DrawnLapRacePiece[] {
+    const mesh = this.#meshes[what];
+    if (!mesh.visible) return [];
+    const matrices = mesh.instanceMatrix.array;
+    const colours = mesh.instanceColor?.array;
+    const drawn: DrawnLapRacePiece[] = [];
+    for (let at = 0; at < mesh.count; at += 1) {
+      const base = at * 16;
+      drawn.push({
+        x: matrices[base + 12] as number,
+        y: matrices[base + 13] as number,
+        z: matrices[base + 14] as number,
+        scale: Math.hypot(
+          matrices[base] as number,
+          matrices[base + 1] as number,
+          matrices[base + 2] as number,
+        ),
+        glow: what === 'hits' ? colours?.[at * 3] : undefined,
+      });
+    }
+    return drawn;
+  }
+
+  /** Takes the meshes out of whatever scene holds them, and releases every buffer and material. */
+  dispose(): void {
+    this.#group.removeFromParent();
+    for (const mesh of Object.values(this.#meshes)) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+      mesh.dispose();
+    }
+    for (const materials of [this.#materials, this.#hitMaterials]) {
+      materials.lit.dispose();
+      if (materials.flat !== materials.lit) materials.flat.dispose();
+    }
+  }
+}
+
+/** No pieces: what a frame with no lap race hands the belt. */
+const NO_LAP_RACE_PIECES: readonly LapRacePiece[] = [];
+
+/**
+ * What {@link lapRaceCallsProbe} counted: three's own draw calls with the
+ * belt shown and hidden, and how many of each piece it drew.
+ *
+ * @test-facing read by `browser/lap-race-harness.ts` and its spec
+ */
+export interface LapRaceCalls {
+  readonly shown: number;
+  readonly hidden: number;
+  readonly drawn: Readonly<Record<LapRacePieceKind, number>>;
+}
+
+/**
+ * The lap-race belt's draw calls in a real context — #1902, for the browser
+ * gate, which cannot import three (`three-seam.test.ts`): a
+ * {@link LapRaceBelt} in `world`'s materials holding `view` and the hit
+ * effects on `markers`, alone in a scene, drawn and then hidden and drawn
+ * again. Three's own `renderer.info.render.calls` for each.
+ *
+ * @test-facing read by `browser/lap-race-harness.ts`; the product's belt is
+ * drawn in the view's own frame, which the same harness also counts
+ */
+export function lapRaceCallsProbe(
+  canvas: HTMLCanvasElement,
+  world: 'stylised' | 'realistic',
+  view: LapRaceInView,
+  markers: readonly RiderMarker[],
+): LapRaceCalls {
+  const renderer = new WebGLRenderer({ canvas, antialias: false });
+  renderer.setSize(64, 32, false);
+  const belt = new LapRaceBelt(world);
+  const scene = new Scene();
+  belt.addTo(scene);
+  belt.update(view, markers);
+  const drawn = {
+    pickUps: belt.drawn('pickUps').length,
+    hazards: belt.drawn('hazards').length,
+    hits: belt.drawn('hits').length,
+  };
+  const eye = new PerspectiveCamera(60, 2, 0.1, 500);
+  eye.position.set(0, 30, 1);
+  eye.lookAt(0, 0, 0);
+  renderer.render(scene, eye);
+  const shown = renderer.info.render.calls;
+  belt.setShown(false);
+  renderer.render(scene, eye);
+  const hidden = renderer.info.render.calls;
+  belt.dispose();
+  renderer.dispose();
+  return { shown, hidden, drawn };
+}
+
+/**
  * The stylised world's wordmark, once loaded — #966. Module state for
  * {@link sceneryGeometries}' reason: a view is built synchronously, so the
  * texture is loaded first, by {@link loadGameWordmark}.
@@ -20154,6 +20517,22 @@ export function deliveryDrawnOf(
 }
 
 /**
+ * What a view's lap-race belt drew of `what` on its last frame — #1902, read
+ * back off the instance buffers three uploads, not off the frame the view
+ * was handed. Nothing on a view that has drawn no lap race.
+ *
+ * @test-facing read by `browser/lap-race-harness.ts`, whose spec reads the
+ * hit effects off the view's own instances; the product never asks what it
+ * drew
+ */
+export function lapRaceDrawnOf(
+  view: GameView,
+  what: LapRacePieceKind,
+): readonly DrawnLapRacePiece[] {
+  return view instanceof ThreeGameView ? view.lapRaceDrawn(what) : [];
+}
+
+/**
  * Draws a view's realistic firs with their depth pre-pass, without it, or —
  * the browser gate's control — with the EQUAL test and no pre-pass, which
  * draws no fir. Drawn and off must read back identical: the pre-pass is a
@@ -20396,6 +20775,12 @@ class ThreeGameView implements GameView {
    * when the world changes, so an ordinary ride never builds one. @see #updateDelivery
    */
   #delivery: DeliveryBelt | undefined;
+  /**
+   * A lap race's pick-up points, puddles and hit effects — #1902, built on
+   * the first frame that carries a lap race and dropped when the world
+   * changes, as {@link #delivery} is. @see #updateLapRace
+   */
+  #lapRace: LapRaceBelt | undefined;
   /** The cross streets — #1565: ONE belt for both worlds, in whatever the road wears. */
   readonly #sideRoads: SideRoadBelt;
   /**
@@ -20669,6 +21054,8 @@ class ThreeGameView implements GameView {
     this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
     // #1814: and a Delivery round's pieces, on a frame that carries one.
     this.#updateDelivery(frame.delivery);
+    // #1902: and a lap race's pieces and its racers' hit effects, likewise.
+    this.#updateLapRace(frame.lapRace, frame.markers);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -20691,6 +21078,26 @@ class ThreeGameView implements GameView {
       this.#delivery.addTo(this.#scene);
     }
     this.#delivery?.update(view);
+  }
+
+  /**
+   * A lap race's pieces — #1902: the belt built on the first frame that
+   * carries a race, in the world this view draws and at its rung's shading,
+   * and handed every frame after with the frame's markers, whose hit effects
+   * it draws. A frame with no race hides it.
+   */
+  #updateLapRace(view: LapRaceInView | undefined, markers: readonly RiderMarker[]): void {
+    if (view !== undefined && this.#lapRace === undefined) {
+      this.#lapRace = new LapRaceBelt(this.#drawing);
+      this.#lapRace.setShading(this.#quality.shading);
+      this.#lapRace.addTo(this.#scene);
+    }
+    this.#lapRace?.update(view, markers);
+  }
+
+  /** What the lap-race belt drew of `what` on the last frame. @see lapRaceDrawnOf */
+  lapRaceDrawn(what: LapRacePieceKind): readonly DrawnLapRacePiece[] {
+    return this.#lapRace?.drawn(what) ?? [];
   }
 
   /** What the Delivery belt drew of `what` on the last frame. @see deliveryDrawnOf */
@@ -20838,6 +21245,9 @@ class ThreeGameView implements GameView {
     // that carries a round builds it again in this one.
     this.#delivery?.dispose();
     this.#delivery = undefined;
+    // #1902: and so does the lap race's.
+    this.#lapRace?.dispose();
+    this.#lapRace = undefined;
     if (realistic && loaded !== undefined && this.#renderer !== undefined) {
       if (this.#realistic === undefined) {
         this.#realistic = new RealisticDrawing(
@@ -21365,6 +21775,7 @@ class ThreeGameView implements GameView {
     this.#furniture.setShading(shading);
     this.#decorations.setShading(shading);
     this.#delivery?.setShading(shading);
+    this.#lapRace?.setShading(shading);
   }
 
   /**
@@ -21467,6 +21878,7 @@ class ThreeGameView implements GameView {
     this.#furniture.dispose();
     this.#decorations.dispose();
     this.#delivery?.dispose();
+    this.#lapRace?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
