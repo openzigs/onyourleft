@@ -1945,11 +1945,12 @@ html {
  * under WCAG 2.2 SC 2.5.8's 24×24 (Level AA — the MINIMUM criterion; 44×44 is
  * SC 2.5.5, AAA). Declared, and `shell.browser.spec.ts` measures it with a
  * control that strips it. #1813's Delivery assist switches take the same
- * size; their section is not `.oyl-announce`, whose tests find the
- * announcements' own controls by it.
+ * size, and since #1905 the lap race's; their sections are not
+ * `.oyl-announce`, whose tests find the announcements' own controls by it.
  */
 .oyl-announce input[type='checkbox'],
-.oyl-delivery-assist input[type='checkbox'] {
+.oyl-delivery-assist input[type='checkbox'],
+.oyl-lap-race-assist input[type='checkbox'] {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
@@ -6601,11 +6602,14 @@ select.oyl-input {
 
    #1324: so is a waiting re-plan's sentence above *Keep the plan*.
 
-   #1810: and so is the throw control's, while the touch lock is on. */
+   #1810: and so is the throw control's, while the touch lock is on.
+
+   #1901: and the lap race's item control's, likewise. */
 .oyl-hud__trainer,
 .oyl-hud__side-camera,
 .oyl-hud__plan-change,
-.oyl-hud__throw-note {
+.oyl-hud__throw-note,
+.oyl-hud__item-note {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
@@ -6629,6 +6633,18 @@ select.oyl-input {
   display: flex;
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
+}
+
+/* #1901: A LAP RACE'S ITEM CONTROL, one ride-time control under *Pause* and
+   *End ride* where a round's throws stand, at #94's 72 px floor (set inline
+   from CONTROL_MINIMUM_PIXELS), with the touch lock's sentence under it. No
+   ride runs a lap race until #1906, which measures where it lands on the
+   stage in the browser gate. */
+.oyl-hud__item {
+  display: grid;
+  justify-items: start;
+  gap: var(--oyl-space-xs);
+  margin-block-start: var(--oyl-space-sm);
 }
 
 /*
