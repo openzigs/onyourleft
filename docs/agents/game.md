@@ -938,6 +938,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`ride-round.ts` §`DeliveryRide.score`), never
                         `round.ts` §`RoundTally.score`, which counts
                         deliveries only
+    src/game/hud/lap-race-hud.ts, src/game/hud/lap-race-announce.ts
+                        a solo lap race on the HUD (#1904, ADR 0060): *Place*
+                        (with `lap-text.ts` §`lapOfLaps` under it) and *Item*
+                        (with a hit coming under it, outlined dashed: a shape,
+                        never a tint), last and absent on any other ride; the
+                        standings in a room's panel (`RaceStandings.tsx`, W/kg,
+                        never watts, never a live region). Its five sentences
+                        are rank 5h, OWED as Delivery's are, the place at most
+                        once every 10 s. Nothing feeds `HudInput.lapRace` until
+                        #1906; `browser/lap-race-hud.browser.spec.ts` holds the
+                        layout on the HUD harness's stage, not in a real ride
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost

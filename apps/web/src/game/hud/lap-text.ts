@@ -75,6 +75,19 @@ export const LAP_WHILE_PAUSED = 'Ridden while the recording was paused.';
 /** The same, as it follows `Lap 3: ` in the sentence that is said. */
 export const LAP_WHILE_PAUSED_SAID = 'ridden while the recording was paused.';
 
+/**
+ * Which lap of a race of `laps` a racer is on, after `lapsDone` — #1904, the
+ * lap race's HUD (ADR 0060): `Lap 2 of 5`. The lap being ridden is the one
+ * after the last one done, and never past the race's last: a racer who has
+ * done every lap is on the last one still, and the HUD says *Finished*
+ * instead. Named here, beside {@link lapSummary}'s `Lap 3`, so the HUD says a
+ * lap one way whichever of the two is speaking.
+ */
+export function lapOfLaps(lapsDone: number, laps: number): string {
+  const riding = Math.min(laps, Math.max(0, Math.floor(lapsDone)) + 1);
+  return `Lap ${String(riding)} of ${String(laps)}`;
+}
+
 /** A finished lap, as the HUD shows it and as its one region says it. */
 export interface LapSummary {
   /** The notice's label: which lap. */
