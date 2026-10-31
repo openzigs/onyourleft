@@ -251,7 +251,12 @@ function decodeBoth(
   if (heights(aBuildings) !== heights(bBuildings)) summary.decoder.disagreeingTiles++;
 }
 
-/** Whether a strict pair passed: identical once the fields are removed, and every field admitted. */
+/**
+ * Whether a strict pair passed: identical once the fields are removed, every
+ * field admitted, and the client's decoder refusing as many tiles of one as of
+ * the other. A tile refused on one side only, where the other decodes no
+ * buildings, compares as no disagreement, so the refusal counts are checked too.
+ */
 export function strictPasses(summary: Summary): boolean {
   return (
     summary.tilesOnlyOurs === 0 &&
@@ -260,6 +265,7 @@ export function strictPasses(summary: Summary): boolean {
     summary.malformedTheirs === 0 &&
     summary.fieldViolations === 0 &&
     summary.decoder.disagreeingTiles === 0 &&
+    summary.decoder.refusedOurs === summary.decoder.refusedTheirs &&
     [...summary.layers.values()].every((layer) => layer.differingTiles === 0)
   );
 }

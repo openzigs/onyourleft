@@ -175,7 +175,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         Maven are TOOLS: nothing in CI runs them. `mvn package`
                         inside `build.sh` runs the JUnit suite, so a red suite
                         stops the build. `building-fields.test.ts` does run in
-                        CI and holds the TypeScript rules to the Java lists. It
+                        CI and holds the TypeScript rules to the Java lists, and
+                        `build.test.sh` holds `build.sh` with fake tools. It
                         uploads nothing; publishing is the owner's step
     tools/glyphs/       the map's label glyphs (#578) — a committed Roboto
                         v2.138, the LAST Apache-2.0 Roboto (v3 is OFL, which no

@@ -17,7 +17,7 @@ features whose tags are equal) is upstream's.
 
 | Path                                          | What                                                                                                                                                                                                      |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build.sh`                                    | The build. It pins every tool, downloads into `~/.cache/onyourleft/basemap` (never into the repository), runs both test suites through `mvn package`, and writes a build record of every input's SHA-256. |
+| `build.sh` | The build. It pins upstream by commit and Maven by SHA-512, checks the OSM extract against Geofabrik's MD5, downloads into `~/.cache/onyourleft/basemap` (never into the repository), runs both test suites through `mvn package`, and writes a build record of every input's SHA-256. What it does not pin is under the table below. Its suite is `build.test.sh`. |
 | `profile/`                                    | `BuildingTags.java` (the fields), `BuildingPalette.java` (the colour palette), their JUnit suite, and the patch. Compiled inside upstream's Maven project by `build.sh`.                                  |
 | `run-compare.mjs`, `compare-archives.ts`, `compare.ts`, `mvt.ts` | `pnpm --filter @onyourleft/web basemap:compare -- ours.pmtiles theirs.pmtiles [--strict]` walks two archives tile by tile and reads every z15 tile through the client's own `decodeTile`.                 |
 | `building-fields.ts`                          | The fields' rules, for the comparison. `building-fields.test.ts` holds them to the Java source, list for list.                                                                                            |
@@ -53,8 +53,49 @@ build record to rebuild the same extract byte for byte.
 | `protomaps/basemaps` (the profile)                                                             | `42ffaaa4a85a41bfcb23e43cc0f5b492a5eca123`, tiles 4.15.2      | BSD-3-Clause code, CC0 visual design (ADR 0010's table)                                                                                        |
 | Apache Maven                                                                                   | 3.9.16, SHA-512 checked                                       | Apache-2.0                                                                                                                                     |
 | A JDK, 21 or later                                                                             | not pinned: the machine's own                                 | a build tool only, never distributed                                                                                                           |
-| OpenStreetMap, via Geofabrik                                                                   | the extract's SHA-256 is in the build record                  | ODbL 1.0                                                                                                                                       |
-| Natural Earth, OSMCoastline land and water polygons, Daylight landcover, QRank, `pgf-encoding` | downloaded by upstream's `run()`, SHA-256 in the build record | The live Protomaps archive uses the same inputs. ⚠️ This build does not re-verify each licence, and should before the US archive is published. |
+| OpenStreetMap, via Geofabrik | the newest dated extract, cached as `data/extracts/<region>/<area>-YYMMDD.osm.pbf`; its name, URL, MD5 and SHA-256 are in the build record | ODbL 1.0 |
+| Natural Earth, OSMCoastline land and water polygons, Daylight landcover, QRank, `pgf-encoding` | downloaded by upstream's `run()`, SHA-256 in the build record | each in the next table |
+
+**Not pinned by hash.** The JDK is the machine's own. Planetiler and the rest
+of the Maven-resolved jars are pinned by version, through upstream's
+`pom.xml`, and checked only by Maven's default checksum policy. Upstream's
+`--download` sources below are pinned by nothing: their SHA-256 is recorded
+after use, so a rebuild can tell that one changed, not prevent it. The OSM
+extract is checked against the MD5 Geofabrik publishes beside it.
+
+### The downloaded data and its licences
+
+Checked on 2026-10-31 against upstream's own
+[`LICENSE_DATA.md`](https://github.com/protomaps/basemaps/blob/42ffaaa4a85a41bfcb23e43cc0f5b492a5eca123/LICENSE_DATA.md)
+at the pinned commit, which states the licence of every default input it
+names. Two of the inputs `run()` downloads, QRank and `pgf-encoding`, are not
+in that file, and the last column says where their licence was read instead.
+
+| Input (file in `data/sources/`)                                                         | From                                     | Licence                                                                                         | Attribution it requires                                                                                       | Stated in                                                                                                                                       |
+| --------------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| The OSM extract (`data/extracts/…`)                                                     | `download.geofabrik.de`                  | ODbL 1.0                                                                                        | `© OpenStreetMap`, which upstream's `attribution()` writes and the app shows                                  | `LICENSE_DATA.md`, "OpenStreetMap"                                                                                                              |
+| OSM water and land polygons (`water-polygons-split-3857.zip`, `land-polygons-split-3857.zip`) | `osmdata.openstreetmap.de`, made by osmcoastline | ODbL 1.0, as OSM-derived data                                                                   | the same `© OpenStreetMap`                                                                                    | `LICENSE_DATA.md`, "osmdata.openstreetmap.de"                                                                                                   |
+| Natural Earth (`natural_earth_vector.gpkg.zip`)                                         | `naciscdn.org`                           | public domain                                                                                   | none: "Crediting the authors is unnecessary"                                                                  | `LICENSE_DATA.md`, "Natural Earth"                                                                                                              |
+| Daylight landcover (`daylight-landcover.gpkg`)                                          | `r2-public.protomaps.com`                | CC BY 4.0, as derived from ESA WorldCover                                                       | yes, the WorldCover credit; `LICENSE_DATA.md` asks for it "if displaying the `landcover` basemap layer" and points to Overture's attribution guidelines | `LICENSE_DATA.md`, "Daylight Landcover"                                                                                                         |
+| QRank (`qrank.csv.gz`)                                                                  | `qrank.toolforge.org`                    | CC0 1.0                                                                                         | none                                                                                                          | not in `LICENSE_DATA.md`; read on 2026-10-31 on `qrank.toolforge.org` and in the README of `brawer/wikidata-qrank` ("Data: … CC0-1.0")          |
+| `pgf-encoding` (`pgf-encoding.zip`)                                                     | `wipfli.github.io/pgf-encoding`          | the encodings CC0 1.0; the zip's code MIT and its fonts SIL OFL, neither of which is in a tile | none for the encodings                                                                                        | not in `LICENSE_DATA.md`; read on 2026-10-31 in the downloaded zip's own `README.md` ("License"), `LICENSE` and `encoding/CC0-LICENSE`          |
+
+Every licence above is open data: ODbL, CC BY 4.0 and CC0 meet the Open
+Definition, and Natural Earth is public domain. One question is **not
+settled**, and it needs the owner's answer before the US archive is uploaded:
+
+- ⚠️ **The WorldCover credit.** `LICENSE_DATA.md` ties it to _displaying_ the
+  `landcover` layer, and the client displays none: the ride map reads `earth`,
+  `water`, `roads` and `places` (`src/map/basemap.ts`), and the world reads
+  `landuse`, `water`, `buildings`, `roads` and `places`
+  (`@onyourleft/map-features`'s `READ_LAYERS`). But the published archive
+  still holds the layer, and CC BY 4.0 asks for the credit when the material
+  is _shared_, not only when it is shown. That file does not say what the
+  publisher of an archive owes, and this README does not guess. The two
+  answers are to publish the WorldCover credit with the archive (ADR 0032
+  records its text, read first-hand on 2026-09-22), or to build without the
+  `landcover` layer. Upstream's `attribution()`, and so the archive's own
+  attribution string, names OpenStreetMap only.
 
 The archive's attribution is upstream's own, `© OpenStreetMap`, and this
 profile does not change it. So the ODbL attribution the app shows

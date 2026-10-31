@@ -67,6 +67,9 @@ case "${REGION}" in
     exit 2 ;;
 esac
 AREA="${REGION##*/}"
+# Every path below is ${WORK}/…, and the build runs `cd` into ${WORK} and into
+# the upstream clone, so a relative --work is made absolute here.
+case "${WORK}" in /*) ;; *) WORK="${PWD}/${WORK}" ;; esac
 OUTPUT="${OUTPUT:-${WORK}/out/${AREA}.pmtiles}"
 # Planetiler runs from ${WORK}, so a relative path is made absolute here.
 case "${OUTPUT}" in /*) ;; *) OUTPUT="${PWD}/${OUTPUT}" ;; esac
@@ -83,9 +86,13 @@ sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 bytes() { wc -c <"$1" | tr -d ' '; }
 
 # --- Java 21 ----------------------------------------------------------------
-JAVA_MAJOR="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java.specification.version = //p')"
-if [ -z "${JAVA_MAJOR}" ] || [ "${JAVA_MAJOR}" -lt 21 ]; then
-  echo "build.sh: Planetiler needs Java 21 or later; found '${JAVA_MAJOR:-none}'" >&2
+# A JDK before 9 reports `1.8`: its major is the part before the first dot,
+# and anything not all digits counts as none, so `1.8` is refused as 1.
+JAVA_SPEC="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java.specification.version = //p' || true)"
+JAVA_MAJOR="${JAVA_SPEC%%.*}"
+case "${JAVA_MAJOR}" in '' | *[!0-9]*) JAVA_MAJOR=0 ;; esac
+if [ "${JAVA_MAJOR}" -lt 21 ]; then
+  echo "build.sh: Planetiler needs Java 21 or later; found '${JAVA_SPEC:-none}'" >&2
   exit 1
 fi
 
@@ -127,26 +134,57 @@ cp -R "${HERE}/profile/src/." "${TILES}/src/"
 cp "${TILES}/${JAR}" "${WORK}/jars/onyourleft.jar"
 
 # --- The OSM extract --------------------------------------------------------
-# Geofabrik publishes an MD5 beside each extract; it is checked, and the
-# SHA-256 is what the build record carries. The newest DATED extract
-# (`<area>-YYMMDD.osm.pbf`, listed on the region's page) is fetched, not
-# `-latest`: `-latest` is replaced daily, and a US download takes long enough
-# for the file to change under it, so its MD5 no longer matched (#1557,
-# 2026-10-31). `-latest` is the fallback only when the page lists no dated one.
-PBF="${WORK}/data/sources/${AREA}.osm.pbf"
-if [ ! -f "${PBF}" ]; then
-  DATED="$(curl -sSfL "${GEOFABRIK}/${REGION}.html" | grep -oE "${AREA}-[0-9]{6}\.osm\.pbf" | sort -u | tail -1)"
-  NAME="${DATED:-${AREA}-latest.osm.pbf}"
-  SOURCE="${GEOFABRIK}/$(dirname "${REGION}")/${NAME}"
+# The newest DATED extract (`<area>-YYMMDD.osm.pbf`, listed on the region's
+# page) is fetched, not `-latest`: `-latest` is replaced daily, and a US
+# download takes long enough for the file to change under it, so its MD5 no
+# longer matched (#1557, 2026-10-31). Geofabrik publishes an MD5 beside each
+# extract; it is checked, and the record carries the file's name, URL, MD5 and
+# SHA-256.
+#
+# The cache is keyed by the WHOLE region and the dated name,
+# data/extracts/<region>/<area>-YYMMDD.osm.pbf, so europe/georgia and
+# north-america/us/georgia never share a file, and a newer dated extract is
+# fetched rather than last quarter's reused. Planetiler is pointed at it with
+# --osm_path. An extract an earlier build.sh left at data/sources/<area>.osm.pbf
+# is used, by a hard link, only when its MD5 is the dated file's; it is never
+# moved or deleted.
+md5of() { md5 -q "$1" 2>/dev/null || md5sum "$1" | cut -d' ' -f1; }
+PAGE="${GEOFABRIK}/${REGION}.html"
+LISTING="$(curl -sSfL "${PAGE}")" || { echo "build.sh: could not read ${PAGE}" >&2; exit 1; }
+DATED="$(printf '%s\n' "${LISTING}" | { grep -oE "${AREA}-[0-9]{6}\.osm\.pbf" || true; } | sort -u | tail -1)"
+if [ -n "${DATED}" ]; then
+  NAME="${DATED}"
+else
+  NAME="${AREA}-latest.osm.pbf"
+  echo "build.sh: ${PAGE} lists no dated extract; fetching ${NAME} instead, which Geofabrik replaces daily, so a long download can fail its MD5 check" >&2
+fi
+SOURCE="${GEOFABRIK}/$(dirname "${REGION}")/${NAME}"
+EXTRACTS="${WORK}/data/extracts/${REGION}"
+PBF="${EXTRACTS}/${NAME}"
+LEGACY="${WORK}/data/sources/${AREA}.osm.pbf"
+mkdir -p "${EXTRACTS}"
+want="$(curl -sSfL "${SOURCE}.md5" | cut -d' ' -f1)" || { echo "build.sh: could not read ${SOURCE}.md5" >&2; exit 1; }
+case "${want}" in
+  *[!0-9a-f]* | '') echo "build.sh: ${SOURCE}.md5 is not an MD5" >&2; exit 1 ;;
+esac
+if [ -n "${DATED}" ] && [ -f "${PBF}" ] && [ "$(cat "${PBF}.md5" 2>/dev/null || true)" = "${want}" ]; then
+  echo "build.sh: using the cached ${NAME}" >&2
+elif [ -n "${DATED}" ] && [ -f "${LEGACY}" ] && [ "$(md5of "${LEGACY}")" = "${want}" ]; then
+  echo "build.sh: data/sources/${AREA}.osm.pbf is ${NAME} (its MD5 matches); linking it, not downloading" >&2
+  rm -f "${PBF}"
+  ln "${LEGACY}" "${PBF}"
+  echo "${want}" >"${PBF}.md5"
+else
+  echo "build.sh: fetching ${SOURCE}" >&2
   curl -sSfL -o "${PBF}.part" "${SOURCE}"
-  want="$(curl -sSfL "${SOURCE}.md5" | cut -d' ' -f1)"
-  got="$(md5 -q "${PBF}.part" 2>/dev/null || md5sum "${PBF}.part" | cut -d' ' -f1)"
+  got="$(md5of "${PBF}.part")"
   if [ "${want}" != "${got}" ]; then
     echo "build.sh: ${NAME} failed its MD5 check" >&2
     rm -f "${PBF}.part"
     exit 1
   fi
   mv "${PBF}.part" "${PBF}"
+  echo "${want}" >"${PBF}.md5"
 fi
 
 # --- Tiles ------------------------------------------------------------------
@@ -156,7 +194,7 @@ fi
 run_profile() {
   local jar="$1" output="$2"
   (cd "${WORK}" && java "-Xmx${XMX}" "-Doyl.build_year=${BUILD_YEAR}" -jar "${jar}" \
-    --area="${AREA}" --download --force --output="${output}" \
+    --area="${AREA}" --osm_path="${PBF}" --download --force --output="${output}" \
     --nodemap-type=sparsearray --nodemap-storage=mmap)
 }
 
@@ -179,11 +217,12 @@ RECORD="${OUTPUT%.pmtiles}.build.txt"
   echo "java $(java -version 2>&1 | head -1)"
   echo "patch $(sha256 "${HERE}/profile/protomaps-basemaps.patch")"
   echo "jar $(sha256 "${WORK}/jars/onyourleft.jar")"
-  # Every shared source, but only this region's extract: data/sources also
-  # holds any other region built from the same --work.
+  echo "extract ${NAME} ${SOURCE} md5 ${want} $(bytes "${PBF}") $(sha256 "${PBF}")"
+  # Every shared source. An extract in data/sources is not this build's input:
+  # the extract is the line above.
   for source in "${WORK}"/data/sources/*; do
-    case "${source}" in *.osm.pbf) [ "${source}" = "${PBF}" ] || continue ;; esac
-    [ -f "${source}" ] && echo "input $(basename "${source}") $(bytes "${source}") $(sha256 "${source}")"
+    case "${source}" in *.osm.pbf) continue ;; esac
+    if [ -f "${source}" ]; then echo "input $(basename "${source}") $(bytes "${source}") $(sha256 "${source}")"; fi
   done
   echo "output $(basename "${OUTPUT}") $(bytes "${OUTPUT}") $(sha256 "${OUTPUT}")"
   echo "seconds ${elapsed}"

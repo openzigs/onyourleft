@@ -94,8 +94,10 @@ public final class BuildingTags {
   public static final int MIN_START_YEAR = 1600;
 
   /**
-   * The latest start year written: the build year, passed by {@code build.sh} as the OSM extract's
-   * year ({@code -Doyl.build_year}) so a rebuild of the same extract writes the same bytes.
+   * The latest start year written: the build's year, not the OSM extract's. {@code build.sh} passes
+   * it as {@code -Doyl.build_year}, by default the current UTC year, or {@code --build-year}'s value
+   * when given; the build record carries it, so a rebuild of the same extract with that value writes
+   * the same bytes. Without the property it is the current UTC year.
    */
   static final int BUILD_YEAR = Integer.getInteger("oyl.build_year", Year.now(ZoneOffset.UTC).getValue());
 

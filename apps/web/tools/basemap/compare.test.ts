@@ -119,6 +119,20 @@ describe('compareTile on a strict pair (the same extract through upstream’s pr
     expect(strictPasses(summary)).toBe(false);
   });
 
+  it('fails a strict pair when the decoder refuses more tiles of one archive than the other', () => {
+    const summary = emptySummary();
+    summary.decoder.refusedOurs = 1;
+    expect(strictPasses(summary)).toBe(false);
+
+    summary.decoder.refusedOurs = 0;
+    summary.decoder.refusedTheirs = 1;
+    expect(strictPasses(summary)).toBe(false);
+
+    // The same refusals on both sides are upstream's own, not this profile's.
+    summary.decoder.refusedOurs = 1;
+    expect(strictPasses(summary)).toBe(true);
+  });
+
   it('counts a tile the client’s decoder refuses, for the archive it came from', () => {
     // One outer ring and 256 holes is one ring over the decoder's per-polygon limit, so it
     // refuses the tile.
@@ -167,6 +181,52 @@ describe('compareTile on a strict pair (the same extract through upstream’s pr
 
     expect(summary.layers.get('roads')?.differingTiles).toBe(1);
     expect(summary.layers.get('buildings')?.differingTiles).toBe(0);
+    expect(strictPasses(summary)).toBe(false);
+  });
+
+  it('counts a layer one archive’s tile lacks as a differing tile in that layer', () => {
+    const summary = emptySummary();
+    const noRoads = encodeTile([EARTH, { name: 'buildings', features: [building(100)] }]);
+
+    compareTile(summary, FIXTURE_TILE, noRoads, tile([building(100)]), YEAR);
+
+    expect(summary.layers.get('roads')).toMatchObject({ tiles: 1, differingTiles: 1 });
+    expect(summary.layers.get('buildings')?.differingTiles).toBe(0);
+    expect(strictPasses(summary)).toBe(false);
+
+    const theirsLack = emptySummary();
+    compareTile(theirsLack, FIXTURE_TILE, tile([building(100)]), noRoads, YEAR);
+    expect(theirsLack.layers.get('roads')?.differingTiles).toBe(1);
+  });
+
+  it('counts a layer encoded at another extent as differing, though its features match', () => {
+    const summary = emptySummary();
+
+    compareTile(
+      summary,
+      FIXTURE_TILE,
+      tile([building(100)], { ...ROADS, extent: 8192 }),
+      tile([building(100)]),
+      YEAR,
+    );
+
+    expect(summary.layers.get('roads')?.differingTiles).toBe(1);
+    expect(strictPasses(summary)).toBe(false);
+  });
+
+  it('counts a building whose feature id differs, though the decoder sees the same building', () => {
+    const summary = emptySummary();
+
+    compareTile(
+      summary,
+      FIXTURE_TILE,
+      tile([{ ...building(100, FIELDS), id: 999 }]),
+      tile([building(100)]),
+      YEAR,
+    );
+
+    expect(summary.layers.get('buildings')?.differingTiles).toBe(1);
+    expect(summary.decoder.disagreeingTiles).toBe(0);
     expect(strictPasses(summary)).toBe(false);
   });
 
