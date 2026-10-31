@@ -248,7 +248,15 @@ export function raceStandings(room: RoomConnection): RaceStandingsView | undefin
   if (status !== 'joined') return undefined;
   const standings = room.standings();
   if (standings === undefined || standings.rows.length === 0) return undefined;
-  const all = standings.rows.map((row, index) => standingsLine(row, index + 1));
+  return windowedStandings(standings.rows.map((row, index) => standingsLine(row, index + 1)));
+}
+
+/**
+ * Every line of a race's standings, leader first, windowed to
+ * {@link STANDINGS_LINES} around the rider's own — the room's (#1347) and,
+ * since #1904, a solo lap race's, so the two panels read the same (ADR 0051).
+ */
+export function windowedStandings(all: readonly StandingsLine[]): RaceStandingsView {
   const own = all.findIndex((line) => line.you);
   const centre = own === -1 ? 0 : own;
   const half = Math.floor(STANDINGS_LINES / 2);

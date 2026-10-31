@@ -59,6 +59,20 @@ describe('the lap race cannot reach the trainer-command seam (ADR 0060 D-2.2, #1
     expect(seamViolations(lapRaceModules(), forbiddenInTheTree())).toEqual([]);
   });
 
+  it('reaches no trainer module from the lap race’s HUD and announcements either (#1904)', () => {
+    // They live beside the HUD they extend (`game/hud/`), outside the mode's
+    // directories, so they are walked by name here.
+    const hud = [
+      'apps/web/src/game/hud/lap-race-hud.ts',
+      'apps/web/src/game/hud/lap-race-announce.ts',
+    ];
+    const { modules } = walk(hud);
+    for (const path of hud) {
+      expect(modules, path).toContain(path);
+    }
+    expect(seamViolations(hud, forbiddenInTheTree())).toEqual([]);
+  });
+
   it('forbids the seam as check-wiring lists it, every writer found by rule, and the game’s three', () => {
     const forbidden = forbiddenInTheTree();
     for (const path of [...trainerCommandSeam(WIRING_SOURCE), ...GAME_TRAINER_MODULES]) {
