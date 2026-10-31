@@ -607,7 +607,8 @@ const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTo
  * than 13. A green run pays four loads — the plain page, `?shadow-map`,
  * since ADR 0026 `?realistic`, which #607 pays for in a hook of its own
  * (§`paysForTheRealisticLoad`), and since #644 `?realistic&trees`, which the
- * same hook pays for — and nothing here retries a load that failed,
+ * same hook pays for (and since #1947 a fifth, `?realistic&town`, paid the
+ * same way) — and nothing here retries a load that failed,
  * which is the flake-hiding `playwright.config.ts` refuses.
  */
 const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
@@ -835,6 +836,18 @@ async function harness(
  * Xeon 6973P-C, Xeon Platinum 8573C, AMD EPYC 9V74 and 9V45). 275 s is 1.51
  * times 182, the margin every budget in this file keeps; the nightly's
  * worst case beside it is §`paysForTheRealisticLoad`'s.
+ *
+ * ⚠️ **#1947: by October 30 the load was at this budget again, and the answer
+ * was #644's — move the cost, not the number.** On the 7763 it was killed at
+ * 275 s three times in one run (41132248051, attempts 1 to 3), and its first
+ * attempt had drawn every `realisticProbe` phase and #545's near field by
+ * 266 s, with #1835's street (25.7 s of a whole 232 s on an EPYC 9V74, the
+ * fourth attempt) still to draw: about 300 s whole. What grew was the mapped
+ * town: #1549's town 10.7 s to 23.7 s, and #1581, #1659, #1662, #1658, #1679,
+ * #1661, #1663, #1586, #1550 and #1665 after it, 78.1 s in all, then #1835's
+ * street. Those and the near field are `?realistic&town` now
+ * (§`TOWN_LOAD_BUDGET_MS`, `game-harness.ts` §`realisticTownRun`), which
+ * leaves this load about 172 s there, 63 % of this budget.
  */
 const REALISTIC_LOAD_BUDGET_MS = 275_000;
 /**
@@ -869,6 +882,21 @@ const REALISTIC_LOAD_BUDGET_MS = 275_000;
  * budget was raised, and re-measuring both on the 7763 is #1293's.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
+
+/**
+ * The mapped town's and the near field's own load — #1947. @see TOWN_LOAD_BUDGET_MS
+ */
+const TOWN_QUERY = '?realistic&town';
+/**
+ * What `?realistic&town` may take — #1947, which made it a load of its own
+ * for #644's reason (§`REALISTIC_LOAD_BUDGET_MS`). On the AMD EPYC 7763 its
+ * phases were about 128 s inside the `?realistic` load (run 41132248051:
+ * #1549 to #1665's town 78.1 s, #545's near field 16.9 s, and #1835's street,
+ * which that load never reached, 25.7 s on an EPYC 9V74 in 41132248051's
+ * fourth attempt and so about 33 s on the 7763). 200 s is about 1.5 times
+ * that with the world's own load, the margin every budget in this file keeps.
+ */
+const TOWN_LOAD_BUDGET_MS = 200_000;
 
 /**
  * #679: the least lettering contrast a banner strip must read (a variance of
@@ -1058,9 +1086,23 @@ const WHEEL_TRACK_CEILING = 0.08;
  * interrupted — which still reports, and names what was running. A green
  * nightly is far from it: 9.5 minutes of Playwright on the 7763
  * (39570460751), about 27 s more with the load at 182 s.
+ *
+ * ⚠️ **Since the nightly's shards (#1698, #1701) the sum is shard 1's, and
+ * since #1947 it is 275 + 200 + 160 = 635 s**: `?realistic`, `?realistic&town`
+ * (§`TOWN_LOAD_BUDGET_MS`) and `?realistic&trees`, the only loads shard 1's
+ * describes pay for (the plain page is required-only, and
+ * `realistic.browser.spec.ts`' two waits are shard 2's). Shard 1's other
+ * cases took 86 s of a green 414 s on an AMD EPYC 9V74 (41132248051, fourth
+ * attempt), about 110 s on the 7763, so a run where all three hung is about
+ * 635 + 30 + 110 = 775 s, 65 s inside 840.
  */
 function paysForTheRealisticLoad(): void {
   paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
+}
+
+/** Pays for the `?realistic&town` load — #1947. @see paysForTheRealisticLoad */
+function paysForTheTownLoad(): void {
+  paysForTheLoad(TOWN_QUERY, TOWN_LOAD_BUDGET_MS);
 }
 
 /**
@@ -3469,14 +3511,14 @@ test.describe(
   'scenery the camera passes is not cut by the near plane — #545',
   { tag: NIGHTLY },
   () => {
-    paysForTheRealisticLoad();
+    paysForTheTownLoad();
 
     test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
       harnessRun,
     }) => {
-      // The realistic load: the world the owner saw it in. It shares that one
-      // load with the realistic world's cases below.
-      const result = await harness(harnessRun, '?realistic');
+      // The realistic world: the world the owner saw it in. Since #1947 on the
+      // `?realistic&town` load, which it shares with the mapped town's cases below.
+      const result = await harness(harnessRun, TOWN_QUERY);
       expect(result.errors).toEqual([]);
       const near = result.nearField;
       console.info(
@@ -3504,7 +3546,7 @@ test.describe(
       // `game-harness.ts` §`nearFieldStreetProbe`: the kerbside town round the
       // planner's bends at the widest frame the stylesheet allows, where
       // `near-field-street.test.ts` finds the plane meeting mapped walls.
-      const result = await harness(harnessRun, '?realistic');
+      const result = await harness(harnessRun, TOWN_QUERY);
       expect(result.errors).toEqual([]);
       const near = result.nearFieldWall;
       console.info(
@@ -3532,7 +3574,7 @@ test.describe(
       // the body is cut, so the pixels' control has nothing to show here
       // (logged, not asserted). What is asserted is that the view's people
       // belt is handed the cull's people — read back off its meshes.
-      const result = await harness(harnessRun, '?realistic');
+      const result = await harness(harnessRun, TOWN_QUERY);
       expect(result.errors).toEqual([]);
       const near = result.nearFieldPerson;
       console.info(
@@ -3568,6 +3610,12 @@ test.describe(
  * other half of D-7, and since #878's review it is asserted in the REQUIRED
  * describe above, not here: this describe is nightly (#866), and a nightly
  * describe may not read the plain load (`nightly-split.test.ts`).
+ *
+ * ⚠️ **Two loads since #1947, and a reviewer who remembers one is reading the
+ * old file.** The mapped town's cases — #1549 to #1665, through
+ * `realisticTown` below — read `?realistic&town` (§`TOWN_LOAD_BUDGET_MS`),
+ * which the near field's describe above shares; every other case reads
+ * `?realistic`. This describe pays for both, in that order.
  */
 /**
  * #1523: how far, in steps of one channel of one pixel, the bounded road and
@@ -3604,15 +3652,19 @@ const FIR_PREPASS_MOST_CALLS = 4;
 
 test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
+  paysForTheTownLoad();
 
-  const realistic = async (
-    run: (query?: string) => Promise<HarnessRun>,
-  ): Promise<RealisticMeasurement> => {
-    const { result } = await run('?realistic');
-    expect(result.errors).toEqual([]);
-    expect(result.realistic.measured).toBe(true);
-    return result.realistic;
-  };
+  const measuredBy =
+    (query: string) =>
+    async (run: (query?: string) => Promise<HarnessRun>): Promise<RealisticMeasurement> => {
+      const { result } = await run(query);
+      expect(result.errors).toEqual([]);
+      expect(result.realistic.measured).toBe(true);
+      return result.realistic;
+    };
+  const realistic = measuredBy('?realistic');
+  /** #1947: the mapped town's measurements, which only `?realistic&town` takes. */
+  const realisticTown = measuredBy(TOWN_QUERY);
 
   test('holds a full room of other riders inside the frame’s triangles, and would not without its rule — #783', async ({
     harnessRun,
@@ -3806,7 +3858,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1549 a mapped town is drawn: its front wall reads building, in at most six calls with 10 and with 36', async ({
     harnessRun,
   }, testInfo) => {
-    const { mappedTown: town } = await realistic(harnessRun);
+    const { mappedTown: town } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `${String(town.buildings)} buildings in ${String(town.drawCalls)} calls, ` +
@@ -3841,7 +3893,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1581 a mapped house has windows: its upper window reads darker than its wall, and alike with the facade off', async ({
     harnessRun,
   }, testInfo) => {
-    const { mappedFacade: facade } = await realistic(harnessRun);
+    const { mappedFacade: facade } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured = `glass ${rgb(facade.glass)} and wall ${rgb(facade.wall)} drawn; ${rgb(facade.glassOff)} and ${rgb(facade.wallOff)} with the facade off`;
     testInfo.annotations.push({ type: 'a mapped house’s windows', description: measured });
@@ -3864,7 +3916,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1659 a mapped casement seen from the side shows its reveal at the far jamb, and none with -window-reveals', async ({
     harnessRun,
   }, testInfo) => {
-    const { windowReveal: reveal } = await realistic(harnessRun);
+    const { windowReveal: reveal } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `${reveal.commercial ? 'a commercial window' : 'a casement'} ` +
@@ -3894,7 +3946,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1662 two neighbouring mapped sashes seen head-on from 15 m show different rooms, and the same flat room with -window-rooms', async ({
     harnessRun,
   }, testInfo) => {
-    const { windowRooms: rooms } = await realistic(harnessRun);
+    const { windowRooms: rooms } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `two sashes ${rooms.metres.toFixed(0)} m off, square on (pair ${String(rooms.pairsTried)} read): ` +
@@ -3918,7 +3970,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1665 a lot’s wall is grimed 0.3 m up and not 1.5 m up, and two lot panes show two rooms, and neither with -lot-realism', async ({
     harnessRun,
   }, testInfo) => {
-    const { lotRealism: lot } = await realistic(harnessRun);
+    const { lotRealism: lot } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `a lot's side wall 0.3 m up ${rgb(lot.near)} against 1.5 m up ${rgb(lot.far)}; ` +
@@ -3959,7 +4011,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1658 a sunlit mapped wall is in its eaves’ shadow 0.3 m under them and not 1.5 m under, and neither with -overhang-shadows', async ({
     harnessRun,
   }, testInfo) => {
-    const { overhangShadow: shadow } = await realistic(harnessRun);
+    const { overhangShadow: shadow } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `a wall ${shadow.wallMetres.toFixed(1)} m high seen from ${shadow.metres.toFixed(0)} m, the sun ` +
@@ -4009,7 +4061,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1679 a sunlit mapped wall and its parapet are in its cornice’s shadow and not 1 m under its top, and neither with -overhang-shadows', async ({
     harnessRun,
   }, testInfo) => {
-    const { corniceShadow: shadow } = await realistic(harnessRun);
+    const { corniceShadow: shadow } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `a wall under a cornice ${shadow.projection.toFixed(2)} m proud seen from ` +
@@ -4056,7 +4108,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1679 a sunlit shop front is in its awning’s shadow above where it ends and not below, and neither with -overhang-shadows', async ({
     harnessRun,
   }, testInfo) => {
-    const { awningShadow: shadow } = await realistic(harnessRun);
+    const { awningShadow: shadow } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `a shop front's stile ${shadow.pixels.toFixed(1)} px wide under an awning ` +
@@ -4091,7 +4143,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1661 a mapped render wall is grimed 0.3 m above its floor and not 1.5 m up, and neither with -weathering', async ({
     harnessRun,
   }, testInfo) => {
-    const { weathering } = await realistic(harnessRun);
+    const { weathering } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `a render wall seen from ${weathering.metres.toFixed(0)} m: ${rgb(weathering.near)} 0.3 m ` +
@@ -4121,7 +4173,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1663 a mapped brick wall is its lintel 0.1 m over a window’s head and brick 0.5 m over, and brick at both with -facade-trims', async ({
     harnessRun,
   }, testInfo) => {
-    const { facadeTrim: trim } = await realistic(harnessRun);
+    const { facadeTrim: trim } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured =
       `a brick wall seen from ${trim.metres.toFixed(0)} m: ${rgb(trim.lintel)} 0.1 m over a ` +
@@ -4147,7 +4199,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
     harnessRun,
   }, testInfo) => {
-    const { townEdge: edge } = await realistic(harnessRun);
+    const { townEdge: edge } = await realisticTown(harnessRun);
     const measured =
       `${String(edge.structures)} structures in the frame; ${String(edge.buildings)} buildings ` +
       `in ${String(edge.drawCalls)} calls, lever off ${String(edge.drawCallsOff)}`;
@@ -4165,7 +4217,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1549 nothing in the wood: no plan kept there and no building pixel, where -landclass draws one', async ({
     harnessRun,
   }, testInfo) => {
-    const { mappedTown: town } = await realistic(harnessRun);
+    const { mappedTown: town } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured = `kept in the wood ${String(town.woodKept)}, ${String(town.woodKeptNoLand)} with -landclass; centre ${rgb(town.wood)} on, ${rgb(town.woodOff)} off; -landclass ${rgb(town.woodNoLand)} on, ${rgb(town.woodNoLandOff)} off`;
     testInfo.annotations.push({ type: 'nothing in the wood', description: measured });
@@ -4186,7 +4238,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   test('#1550 lots in an unmapped town: houses stand on mapped built-up land with no footprints, and none with -lots', async ({
     harnessRun,
   }, testInfo) => {
-    const { lots } = await realistic(harnessRun);
+    const { lots } = await realisticTown(harnessRun);
     const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
     const measured = `${String(lots.houses)} houses on built-up land in frame, ${String(lots.housesOff)} with -lots; the nearest ${rgb(lots.onRgb)} drawn, ${rgb(lots.offRgb)} with -lots`;
     testInfo.annotations.push({ type: 'lots in an unmapped town', description: measured });

@@ -72,7 +72,8 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'game.browser.spec.ts',
     describe: 'scenery the camera passes is not cut by the near plane — #545',
-    seconds: 'shares the `?realistic` load below',
+    seconds:
+      'since #1947 the `?realistic&town` load, about 135 s on the AMD EPYC 7763, shared with the mapped town’s cases below',
     why:
       'what the realistic world draws near the camera. The stylised world has no near-field ' +
       'case here, and `near-field.test.ts` (nightly too) is the arithmetic.',
@@ -80,7 +81,8 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'game.browser.spec.ts',
     describe: 'the realistic world — ADR 0026',
-    seconds: '101 s: the `?realistic` load',
+    seconds:
+      '101 s: the `?realistic` load (#866); since #1947 its mapped town’s cases read the `?realistic&town` load above',
     why:
       'how the opt-in realistic world looks and what it costs. The DEFAULT world’s halves of ' +
       'its cases — #501’s shader compile and D-7’s "fetches none of the realistic set" — are ' +

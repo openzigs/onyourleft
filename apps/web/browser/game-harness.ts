@@ -12447,50 +12447,6 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const levelling = levellingProbe(view);
   phaseEnds('realistic: a town on the flat — #1547');
 
-  // #1549, on the same view: a town from map data, merged, and nothing in the wood.
-  const mappedTown = mappedTownProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped town — #1549');
-
-  // #1581, on the same view: a mapped house's windows, drawn and switched off.
-  const mappedFacade = mappedFacadeProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped house’s windows — #1581');
-
-  // #1659, on the same view: a mapped casement's jamb from the side, with its reveal and without.
-  const windowReveal = windowRevealProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped window’s reveal — #1659');
-
-  // #1662, on the same view: two neighbouring rooms behind a mapped wall's glass, with the rooms and without.
-  const windowRooms = windowRoomsProbe(view, gl, canvas);
-  phaseEnds('realistic: the rooms behind mapped glass — #1662');
-
-  // #1658, on the same view: a sunlit mapped wall under its eaves, with the overhang's shadow and without.
-  const overhangShadow = overhangShadowProbe(view, gl, canvas);
-  phaseEnds('realistic: the shadow under a mapped wall’s eaves — #1658');
-
-  // #1679, on the same view: a sunlit wall under a cornice and a shop front under an awning.
-  const { cornice: corniceShadow, awning: awningShadow } = overhangPairProbes(view, gl, canvas);
-  phaseEnds('realistic: the shadows under a cornice and an awning — #1679');
-
-  // #1661, on the same view: a mapped render wall's foot and 1.5 m up, weathered and not.
-  const weathering = weatheringProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped wall’s weathering — #1661');
-
-  // #1663, on the same view: a mapped brick wall over a window's head, trimmed and not.
-  const facadeTrim = facadeTrimProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped window’s lintel — #1663');
-
-  // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
-  const townEdge = townEdgeProbe(view);
-  phaseEnds('realistic: a town’s edge — #1586');
-
-  // #1550, on the same view: procedural lots in a mapped town with no footprints.
-  const lots = lotsProbe(view, gl, canvas);
-  phaseEnds('realistic: lots in an unmapped town — #1550');
-
-  // #1665, on the same view: a lot wall's grime and two lot panes' rooms, with the realism and without.
-  const lotRealism = lotRealismProbe(view, gl, canvas);
-  phaseEnds('realistic: the lots’ weathering and rooms — #1665');
-
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -12732,18 +12688,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedPavement,
     people,
     levelling,
-    mappedTown,
-    mappedFacade,
-    windowReveal,
-    windowRooms,
-    overhangShadow,
-    corniceShadow,
-    awningShadow,
-    weathering,
-    facadeTrim,
-    townEdge,
-    lots,
-    lotRealism,
+    // #1947: measured by the `?realistic&town` load, not this one. @see realisticTownRun
+    ...NO_TOWN,
     tint,
     grounding,
     tread,
@@ -13245,6 +13191,160 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
 }
 
 /**
+ * What the `?realistic&town` load measures of {@link RealisticMeasurement} — #1947.
+ * @see realisticTownRun
+ */
+type TownMeasurement = Pick<
+  RealisticMeasurement,
+  | 'mappedTown'
+  | 'mappedFacade'
+  | 'windowReveal'
+  | 'windowRooms'
+  | 'overhangShadow'
+  | 'corniceShadow'
+  | 'awningShadow'
+  | 'weathering'
+  | 'facadeTrim'
+  | 'townEdge'
+  | 'lots'
+  | 'lotRealism'
+>;
+
+/** {@link TownMeasurement} unmeasured — what the `?realistic` load publishes for it since #1947. */
+const NO_TOWN: TownMeasurement = {
+  mappedTown: NO_MAPPED_TOWN,
+  mappedFacade: NO_MAPPED_FACADE,
+  windowReveal: NO_WINDOW_REVEAL,
+  windowRooms: NO_WINDOW_ROOMS,
+  overhangShadow: NO_OVERHANG_SHADOW,
+  corniceShadow: NO_OVERHANG_PAIR,
+  awningShadow: NO_OVERHANG_PAIR,
+  weathering: NO_WEATHERING,
+  facadeTrim: NO_FACADE_TRIM,
+  townEdge: NO_TOWN_EDGE,
+  lots: NO_LOTS,
+  lotRealism: NO_LOT_REALISM,
+};
+
+/**
+ * The mapped town's probes on the one view they are handed — #1549 to #1665,
+ * in the order `realisticProbe` ran them until #1947. Each restores in a
+ * `finally` what it switched off, so none reads another's switches.
+ */
+function townProbes(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): TownMeasurement {
+  // #1549, on the same view: a town from map data, merged, and nothing in the wood.
+  const mappedTown = mappedTownProbe(view, gl, canvas);
+  phaseEnds('town: a mapped town — #1549');
+
+  // #1581, on the same view: a mapped house's windows, drawn and switched off.
+  const mappedFacade = mappedFacadeProbe(view, gl, canvas);
+  phaseEnds('town: a mapped house’s windows — #1581');
+
+  // #1659, on the same view: a mapped casement's jamb from the side, with its reveal and without.
+  const windowReveal = windowRevealProbe(view, gl, canvas);
+  phaseEnds('town: a mapped window’s reveal — #1659');
+
+  // #1662, on the same view: two neighbouring rooms behind a mapped wall's glass, with the rooms and without.
+  const windowRooms = windowRoomsProbe(view, gl, canvas);
+  phaseEnds('town: the rooms behind mapped glass — #1662');
+
+  // #1658, on the same view: a sunlit mapped wall under its eaves, with the overhang's shadow and without.
+  const overhangShadow = overhangShadowProbe(view, gl, canvas);
+  phaseEnds('town: the shadow under a mapped wall’s eaves — #1658');
+
+  // #1679, on the same view: a sunlit wall under a cornice and a shop front under an awning.
+  const { cornice: corniceShadow, awning: awningShadow } = overhangPairProbes(view, gl, canvas);
+  phaseEnds('town: the shadows under a cornice and an awning — #1679');
+
+  // #1661, on the same view: a mapped render wall's foot and 1.5 m up, weathered and not.
+  const weathering = weatheringProbe(view, gl, canvas);
+  phaseEnds('town: a mapped wall’s weathering — #1661');
+
+  // #1663, on the same view: a mapped brick wall over a window's head, trimmed and not.
+  const facadeTrim = facadeTrimProbe(view, gl, canvas);
+  phaseEnds('town: a mapped window’s lintel — #1663');
+
+  // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
+  const townEdge = townEdgeProbe(view);
+  phaseEnds('town: a town’s edge — #1586');
+
+  // #1550, on the same view: procedural lots in a mapped town with no footprints.
+  const lots = lotsProbe(view, gl, canvas);
+  phaseEnds('town: lots in an unmapped town — #1550');
+
+  // #1665, on the same view: a lot wall's grime and two lot panes' rooms, with the realism and without.
+  const lotRealism = lotRealismProbe(view, gl, canvas);
+  phaseEnds('town: the lots’ weathering and rooms — #1665');
+  return {
+    mappedTown,
+    mappedFacade,
+    windowReveal,
+    windowRooms,
+    overhangShadow,
+    corniceShadow,
+    awningShadow,
+    weathering,
+    facadeTrim,
+    townEdge,
+    lots,
+    lotRealism,
+  };
+}
+
+/** What the `?realistic&town` load publishes — #1947. @see realisticTownRun */
+interface TownRun {
+  readonly realistic: RealisticMeasurement;
+  readonly nearField: NearFieldMeasurement;
+  readonly nearFieldWall: StreetNearFieldMeasurement;
+  readonly nearFieldPerson: StreetNearFieldMeasurement;
+}
+
+/**
+ * The `?realistic&town` load — #1947, for #644's reason. The `?realistic` load
+ * reached its budget on the AMD EPYC 7763 (run 41132248051, killed with
+ * #1835's street still to draw), and what had grown in it was the town:
+ * #1549 to #1665's probes, about 78 s on that runner, and #545 and #1835's
+ * near field after the world, about 50 s. Each needs only the realistic world
+ * loaded and a view of its own, so they are a load of their own, on the view
+ * size and rung they were drawn on before. The realistic world is loaded
+ * first, through the renderer the product ships, exactly as `realisticProbe`
+ * does.
+ */
+async function realisticTownRun(): Promise<TownRun> {
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  const outcome = await threeGameRenderer.loadRealisticWorld();
+  phaseEnds('town: loadRealisticWorld');
+  const canvas = document.createElement('canvas');
+  const view = threeGameRenderer.create(canvas, top);
+  // `realisticProbe`'s 640 × 360, sized through the view for its reason.
+  view.resize(640, 360);
+  const gl = canvas.getContext('webgl2');
+  let town = NO_TOWN;
+  try {
+    if (gl !== null) town = townProbes(view, gl, canvas);
+  } finally {
+    view.destroy();
+  }
+  // #545, in the world the owner saw it in. @see nearFieldProbe
+  const nearField = nearFieldProbe(1_600, 200, top);
+  phaseEnds('near field');
+  // #1835: and the street's, at the widest frame the stylesheet allows.
+  const nearFieldWall = nearFieldStreetProbe(1_200, 200, top, 'mapped building');
+  const nearFieldPerson = nearFieldStreetProbe(1_200, 200, top, 'person');
+  phaseEnds('near field, the street');
+  return {
+    realistic: { ...NO_REALISTIC, ...town, measured: gl !== null, loaded: outcome.loaded },
+    nearField,
+    nearFieldWall,
+    nearFieldPerson,
+  };
+}
+
+/**
  * `frame` with `count` other real riders on the road ahead of the rider — #783:
  * the rider's own marker copied, as a room's `remote` kind, a few metres apart
  * along the road's heading, the shape `scene.ts` gives a room's drawn set.
@@ -13296,25 +13396,21 @@ async function run(): Promise<void> {
     }
     return;
   }
+  // #1947: the mapped town and the near field, a load of their own.
+  if (new URLSearchParams(location.search).has('town')) {
+    try {
+      const town = await realisticTownRun();
+      window.__oylGameHarness = { ...emptyHarness(errors), ...town };
+    } catch (error: unknown) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      window.__oylGameHarness = emptyHarness(errors);
+    }
+    return;
+  }
   if (new URLSearchParams(location.search).has('realistic')) {
     try {
       const realistic = await realisticProbe();
-      // #545, in the world the owner saw it in — after `realisticProbe`, which
-      // is what loaded that world. @see nearFieldProbe
-      const nearField = nearFieldProbe(1_600, 200, REALISTIC_LADDER[0] as QualitySettings);
-      phaseEnds('near field');
-      // #1835: and the street's, at the widest frame the stylesheet allows.
-      const rung = REALISTIC_LADDER[0] as QualitySettings;
-      const nearFieldWall = nearFieldStreetProbe(1_200, 200, rung, 'mapped building');
-      const nearFieldPerson = nearFieldStreetProbe(1_200, 200, rung, 'person');
-      phaseEnds('near field, the street');
-      window.__oylGameHarness = {
-        ...emptyHarness(errors),
-        realistic,
-        nearField,
-        nearFieldWall,
-        nearFieldPerson,
-      };
+      window.__oylGameHarness = { ...emptyHarness(errors), realistic };
     } catch (error: unknown) {
       errors.push(error instanceof Error ? error.message : String(error));
       window.__oylGameHarness = emptyHarness(errors);
