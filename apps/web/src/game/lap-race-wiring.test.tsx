@@ -57,13 +57,12 @@ import {
   askRaceLane,
   LAP_RACE_RIDER_ID,
   LAP_RACE_TICK_SECONDS,
-  LAP_RACE_MOST_BOTS,
   lapRaceBotConditions,
   startLapRaceRide,
   stepLapRaceRide,
-  type LapRaceChoice,
   type LapRaceRide,
 } from './lap-race/ride-race';
+import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './lap-race/choice';
 import type { GameRenderer, SceneFrame } from './port';
 import { lineOffsetAt, racingLine } from './racing-line';
 import {

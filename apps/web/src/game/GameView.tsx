@@ -210,10 +210,11 @@ import {
   lapRaceChoiceRaceable,
   lapRaceSaid,
   startLapRaceRide,
+  lapRaceAssisted,
   stepLapRaceRide,
-  type LapRaceChoice,
   type LapRaceRide,
 } from './lap-race/ride-race';
+import { DEFAULT_LAP_RACE_CHOICE, type LapRaceChoice } from './lap-race/choice';
 import { lapRaceStandings, type LapRaceHud } from './hud/lap-race-hud';
 import {
   deliveryEvents,
@@ -519,8 +520,8 @@ export interface GameViewProps {
    * that is not a loop, or running a Delivery round, runs none. A race rides
    * the stylised world whatever Settings chose (D-10.1, the owner's answer to
    * D-14 Q5), so the realistic village's frozen 50 is never asked to hold a
-   * race (D-10.3). Absent, an ordinary ride; a test sets it, and #1907's
-   * chooser will.
+   * race (D-10.3). Absent — the product — the chooser's *Ride a lap race*
+   * decides (#1907), offered on a loop only. A test sets it.
    *
    * ⚠️ **Nothing of a race reaches the trainer** (ADR 0060 D-2): the race
    * reads the simulation's odometer as the rider's effort distance and writes
@@ -730,6 +731,21 @@ export function GameView(props: GameViewProps): JSX.Element {
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
   const [withDelivery, setWithDelivery] = useState(false);
+  /**
+   * Whether the rider switched on a lap race in the chooser, and which race
+   * — #1907. Per ride, like the round beside it; one mode a ride, so turning
+   * either on turns the other off, as the two ghosts do.
+   */
+  const [withLapRace, setWithLapRace] = useState(false);
+  const [lapRaceChoice, setLapRaceChoice] = useState<LapRaceChoice>(DEFAULT_LAP_RACE_CHOICE);
+  const chooseDelivery = useCallback((value: boolean) => {
+    setWithDelivery(value);
+    if (value) setWithLapRace(false);
+  }, []);
+  const chooseLapRace = useCallback((value: boolean) => {
+    setWithLapRace(value);
+    if (value) setWithDelivery(false);
+  }, []);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
   /**
    * Where the rider said their hands are — #365.
@@ -1470,6 +1486,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       sitting: RidingPosition,
       riderGhost = false,
       delivery = false,
+      lapRace: LapRaceChoice | undefined = undefined,
     ): Promise<void> => {
       const profile = route.profile;
       // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
@@ -1557,13 +1574,14 @@ export function GameView(props: GameViewProps): JSX.Element {
         entered !== undefined && route.id === roomRouteId(entered.roomId)
           ? entered.roomId
           : props.roomId;
+      const raceAsked = props.lapRace ?? lapRace;
       const raceChoice =
-        props.lapRace !== undefined &&
+        raceAsked !== undefined &&
         profile.loop &&
         !deliveryWanted &&
         roomId === undefined &&
-        lapRaceChoiceRaceable(props.lapRace)
-          ? props.lapRace
+        lapRaceChoiceRaceable(raceAsked)
+          ? raceAsked
           : undefined;
       const realistic = raceChoice === undefined && readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
@@ -1877,6 +1895,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       sitting: RidingPosition,
       riderGhost?: boolean,
       delivery?: boolean,
+      lapRace?: LapRaceChoice,
     ): Promise<void> => {
       // #509: one press is one ride. @see startingRef
       if (startingRef.current) {
@@ -1884,7 +1903,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       startingRef.current = true;
       try {
-        await begin(route, ghost, pacer, air, sitting, riderGhost, delivery);
+        await begin(route, ghost, pacer, air, sitting, riderGhost, delivery, lapRace);
       } finally {
         startingRef.current = false;
       }
@@ -2779,8 +2798,17 @@ export function GameView(props: GameViewProps): JSX.Element {
           // here for `worldChosen`'s reason: a round ridden since is seen at once.
           delivery={{
             chosen: withDelivery,
-            onChoose: setWithDelivery,
+            onChoose: chooseDelivery,
             week: readDeliveryProgress(deviceStorage()),
+          }}
+          // #1907: a lap race, offered on a loop; the assisted setting read
+          // here, as the week is, so one changed in Settings is seen at once.
+          lapRace={{
+            chosen: withLapRace,
+            onChoose: chooseLapRace,
+            choice: lapRaceChoice,
+            onChoice: setLapRaceChoice,
+            assisted: lapRaceAssisted(deviceStorage()),
           }}
           onStart={start}
           // #1221: whether this ride will be saved, said under Ride. The
