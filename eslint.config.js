@@ -663,6 +663,39 @@ export default tseslint.config(
     },
   },
 
+  // --- The lap race reads no clock and rolls no dice -------------------------
+  // #1897, ADR 0060. The device and the room run the same race arithmetic and
+  // must agree to the byte, so time arrives as a parameter and every draw comes
+  // from the race's own seed. As replan.ts' block above, this replaces the
+  // domain block's `no-restricted-globals` for these files, so it repeats it.
+  {
+    files: ['packages/domain/src/lap-race/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'This package depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
+        })),
+        {
+          name: 'Date',
+          message:
+            'The lap race is pure (#1897): time arrives as a parameter, so the device and the room agree.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'The lap race is deterministic (#1897): every draw comes from the race’s own seed, so the device and the room agree.',
+        },
+      ],
+    },
+  },
+
   // --- packages/sensors/src depends on no platform API either ----------------
   // #39 defines the shape every BLE transport implements, and its second
   // acceptance criterion is that Web Bluetooth *and* a native stack satisfy it

@@ -791,3 +791,12 @@ export * from './workout';
 // app shows and the instance's notice page reads back.
 
 export { formatModerationItem, parseModerationItem, type ModerationItem } from './moderation-item';
+
+// --- The lap race (#1897, ADR 0060) ------------------------------------------
+//
+// Effort distance and a bounded race offset: the racer is drawn and ranked at
+// their sum, the offset is clamped to ±10 m, and nothing moves one into the
+// other. Here so the device and the room run the same arithmetic. No game
+// event reaches the trainer (ADR 0060 D-2): nothing here imports a trainer.
+
+export * from './lap-race';
