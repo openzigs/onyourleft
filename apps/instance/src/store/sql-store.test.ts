@@ -4,7 +4,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from './node-sqlite.ts';
-import { OwnershipConflictError } from './sql-store.ts';
+import { openSqlStore } from './open-sql-store.ts';
+import { OwnershipConflictError, type SqlStore, type SyncItemWrite } from './sql-store.ts';
 import {
   activityRecordFixture,
   athleteFixture,
@@ -231,5 +232,90 @@ describe('SqlStore (#769)', () => {
       await expect(store.putActivityRecord(activityRecordFixture('nobody'))).rejects.toThrow();
       expect(await store.getAthlete(ATHLETE_A)).toBeDefined();
     });
+  });
+});
+
+describe('which sync writes scrub, counted on the connection (#1944)', () => {
+  /**
+   * Every statement the store runs, through `openSqlStore`'s `onQuery`: the
+   * scrub is `secure_delete` on, the write, then a TRUNCATE checkpoint, so a
+   * write that pays for one shows both, and one that does not shows neither.
+   */
+  const statements: string[] = [];
+  const counted = (path: string): Promise<SqlStore> =>
+    openSqlStore(path, { onQuery: (each) => statements.push(each) });
+
+  function scrubs(): { readonly secureDelete: number; readonly truncations: number } {
+    return {
+      secureDelete: statements.filter((each) => /secure_delete\s*=\s*on/i.test(each)).length,
+      truncations: statements.filter((each) => /wal_checkpoint\(\s*truncate\s*\)/i.test(each))
+        .length,
+    };
+  }
+
+  const note = (body: string, now: number): SyncItemWrite => ({
+    athleteId: ATHLETE_A,
+    kind: 'note',
+    key: 'n-1944-count',
+    body: new TextEncoder().encode(body),
+    digest: `digest-of-${body}`,
+    now,
+  });
+
+  /** `put`, with the statements it ran and no others counted. */
+  async function put(store: SqlStore, item: SyncItemWrite) {
+    statements.length = 0;
+    const answer = await store.putSyncItem(item);
+    return { answer, ...scrubs() };
+  }
+
+  async function countedWorld(): Promise<StoreHarness> {
+    harness = await createStoreHarness(counted);
+    await harness.write(seedWorld);
+    return harness;
+  }
+
+  /** The body a fresh connection reads back, or `null` for a tombstone. */
+  async function bodyHeld(opened: StoreHarness): Promise<string | null | undefined> {
+    const held = await opened.read((store) => store.getSyncItem(ATHLETE_A, 'note', 'n-1944-count'));
+    if (held === undefined) return undefined;
+    return held.body === null ? null : new TextDecoder().decode(held.body);
+  }
+
+  it('a first write stores the item and pays no checkpoint', async () => {
+    const opened = await countedWorld();
+    const first = await opened.write((store) => put(store, note('first', 1_790_000_100)));
+    expect(first).toStrictEqual({ answer: 'stored', secureDelete: 0, truncations: 0 });
+    expect(await bodyHeld(opened)).toBe('first');
+  });
+
+  it('an unchanged write answers unchanged and pays no checkpoint', async () => {
+    const opened = await countedWorld();
+    await opened.write((store) => store.putSyncItem(note('same', 1_790_000_100)));
+    const again = await opened.write((store) => put(store, note('same', 1_790_000_200)));
+    expect(again).toStrictEqual({ answer: 'unchanged', secureDelete: 0, truncations: 0 });
+    expect(await bodyHeld(opened)).toBe('same');
+  });
+
+  it('a write over a tombstone stores the item and pays no checkpoint', async () => {
+    const opened = await countedWorld();
+    await opened.write(async (store) => {
+      await store.putSyncItem(note('deleted', 1_790_000_100));
+      expect(await store.deleteSyncItem(ATHLETE_A, 'note', 'n-1944-count', 1_790_000_150)).toBe(
+        true,
+      );
+    });
+    expect(await bodyHeld(opened), 'the control: it is a tombstone').toBeNull();
+    const over = await opened.write((store) => put(store, note('revived', 1_790_000_200)));
+    expect(over).toStrictEqual({ answer: 'stored', secureDelete: 0, truncations: 0 });
+    expect(await bodyHeld(opened)).toBe('revived');
+  });
+
+  it('a write that replaces a live body with different bytes scrubs, once', async () => {
+    const opened = await countedWorld();
+    await opened.write((store) => store.putSyncItem(note('before', 1_790_000_100)));
+    const replaced = await opened.write((store) => put(store, note('after', 1_790_000_200)));
+    expect(replaced).toStrictEqual({ answer: 'stored', secureDelete: 1, truncations: 1 });
+    expect(await bodyHeld(opened)).toBe('after');
   });
 });

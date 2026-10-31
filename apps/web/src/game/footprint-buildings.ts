@@ -158,7 +158,7 @@
  *
  * ## The main street (#1590, the owner's ruling of 2026-10-22)
  *
- * A commercial plan — land the map calls retail, commercial or anything
+ * A commercial plan — land the map calls commercial or anything
  * built up but houses and industry ({@link footprintUse}) — is drawn as a
  * main-street shop, mostly in the shader, so it costs no download:
  *
@@ -1025,13 +1025,14 @@ export type FootprintUse = 'residential' | 'commercial' | 'industrial' | 'farmla
 const INDUSTRIAL_KINDS = new Set(['industrial', 'railway', 'military']);
 
 /** The kinds that are residential; every other built-up kind is commercial. */
-const RESIDENTIAL_KINDS = new Set(['residential', 'neighbourhood']);
+const RESIDENTIAL_KINDS = new Set(['residential']);
 
 /**
  * What the land under a footprint is used for. Farmland by class; built-up by
- * its `kind` — residential and neighbourhood land residential, industrial,
- * railway and military land industrial, and every other built-up kind (retail,
- * a school, a hospital) commercial. ⚠️ A footprint on land the map classes as
+ * its `kind` — residential land residential, industrial, railway and military
+ * land industrial, and every other built-up kind (commercial, a school, a
+ * hospital) commercial. #1946: the archive emits no `neighbourhood` or `retail`
+ * (#1630, spike 0031), so neither is named. ⚠️ A footprint on land the map classes as
  * neither — `other`, or `unknown` where no tile was read — is residential:
  * most buildings are houses, and a mapped house on unmapped land is still one.
  */
