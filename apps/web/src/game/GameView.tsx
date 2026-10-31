@@ -207,6 +207,7 @@ import {
   lapRaceHeard,
   lapRaceHud,
   lapRaceBotConditions,
+  lapRaceChoiceRaceable,
   lapRaceSaid,
   startLapRaceRide,
   lapRaceAssisted,
@@ -1558,11 +1559,30 @@ export function GameView(props: GameViewProps): JSX.Element {
       // #1906: a lap race is asked for on a loop with no Delivery round, and
       // rides the STYLISED world (ADR 0060 D-10.1, D-14 Q5): the realistic
       // village's frame is frozen at 50 (D-10.3) and has no race ceiling.
+      // A ride in a room runs no race (D-7.3, D-8), so it keeps the rider's
+      // world; and nor does a choice that cannot be raced, which is refused
+      // HERE, before the trainer is asked or a session made, as an ordinary
+      // ride rather than a throw from a ride already begun.
       const deliveryWanted =
         props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
+      // #784: the room entered on the picker's panel — but only for a ride
+      // started from the panel, on the room's own road: a rider in a room who
+      // presses *Ride* on one of their own routes rides it alone. Else the
+      // shell's room, which only a test and the browser gate name.
+      const entered = enteredRef.current;
+      const roomId =
+        entered !== undefined && route.id === roomRouteId(entered.roomId)
+          ? entered.roomId
+          : props.roomId;
       const raceAsked = props.lapRace ?? lapRace;
       const raceChoice =
-        raceAsked !== undefined && profile.loop && !deliveryWanted ? raceAsked : undefined;
+        raceAsked !== undefined &&
+        profile.loop &&
+        !deliveryWanted &&
+        roomId === undefined &&
+        lapRaceChoiceRaceable(raceAsked)
+          ? raceAsked
+          : undefined;
       const realistic = raceChoice === undefined && readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
@@ -1700,15 +1720,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
       setRaceOver(undefined);
       setStarting(undefined);
-      // #784: the room entered on the picker's panel — but only for a ride
-      // started from the panel, on the room's own road: a rider in a room who
-      // presses *Ride* on one of their own routes rides it alone. Else the
-      // shell's room, which only a test and the browser gate name.
-      const entered = enteredRef.current;
-      const roomId =
-        entered !== undefined && route.id === roomRouteId(entered.roomId)
-          ? entered.roomId
-          : props.roomId;
+      // #784: the room worked out above, before the race was chosen.
       roomIdRef.current = roomId;
       // The panel's room says whether this rider made it — made here, or as
       // the instance answered their join by its code (#948,
@@ -1836,7 +1848,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const raced = rideConditionsFor(riderMassFor(props.riderMass).mass, sitting);
       lapRaceRef.current =
-        raceChoice === undefined || roomId !== undefined
+        raceChoice === undefined
           ? undefined
           : startLapRaceRide({
               choice: raceChoice,

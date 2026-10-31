@@ -62,7 +62,7 @@ import {
   stepLapRaceRide,
   type LapRaceRide,
 } from './lap-race/ride-race';
-import type { LapRaceChoice } from './lap-race/choice';
+import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './lap-race/choice';
 import type { GameRenderer, SceneFrame } from './port';
 import { lineOffsetAt, racingLine } from './racing-line';
 import {
@@ -755,6 +755,69 @@ describe('a solo lap race inside a game ride — #1906', () => {
     await rideTheTrace({ race: undefined, frames: 4, realistic });
     expect(realistic.asked).toBe(1);
   });
+
+  it('keeps the realistic world on a ride in a room, which runs no race (D-7.3, D-10)', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    const realistic = { asked: 0 };
+    const drawn: SceneFrame[] = [];
+    await rideTheTrace({
+      race: RACE,
+      frames: 4,
+      drawn,
+      realistic,
+      room: {
+        room: roomPortOver(() => room.link(), { timers: clock, now: () => nowMs }),
+        roomId: 'room-1',
+      },
+    });
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
+    expect(realistic.asked).toBe(1);
+  });
+
+  it.each([
+    ['no bots', { ...RACE, bots: 0 }],
+    ['too many bots', { ...RACE, bots: LAP_RACE_MOST_BOTS + 1 }],
+    ['part of a bot', { ...RACE, bots: 1.5 }],
+    ['no laps', { ...RACE, laps: 0 }],
+    ['part of a lap', { ...RACE, laps: 1.5 }],
+  ])(
+    'rides an ordinary ride for a choice that cannot be raced (%s), and throws nothing',
+    async (_name, choice) => {
+      const rejected: unknown[] = [];
+      const onRejection = (reason: unknown): void => {
+        rejected.push(reason);
+      };
+      process.on('unhandledRejection', onRejection);
+      try {
+        writeRealisticWorldChoice(localStorage, true);
+        const realistic = { asked: 0 };
+        const drawn: SceneFrame[] = [];
+        const writes: Write[] = [];
+        await rideTheTrace({
+          race: choice,
+          frames: 6,
+          drawn,
+          realistic,
+          trainer: trainerPort(writes),
+        });
+        // The ride runs, as an ordinary one: drawn, on the rider's world, and
+        // written to the trainer, with no race on the screen or in a frame.
+        expect(drawn.length).toBeGreaterThan(0);
+        expect(drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
+        expect(raceFields()).toEqual([]);
+        expect(realistic.asked).toBe(1);
+        expect(writes.length).toBeGreaterThan(0);
+        expect(buttonStarting('End ride')).toBeDefined();
+        for (let index = 0; index < 5; index += 1) await settle();
+        expect(rejected).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onRejection);
+      }
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
