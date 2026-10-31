@@ -846,8 +846,8 @@ async function harness(
  * town: #1549's town 10.7 s to 23.7 s, and #1581, #1659, #1662, #1658, #1679,
  * #1661, #1663, #1586, #1550 and #1665 after it, 78.1 s in all, then #1835's
  * street. Those and the near field are `?realistic&town` now
- * (§`TOWN_LOAD_BUDGET_MS`, `game-harness.ts` §`realisticTownRun`), which
- * leaves this load about 172 s there, 63 % of this budget.
+ * (§`TOWN_LOAD_BUDGET_MS`, `game-harness.ts` §`realisticTownRun`), and this
+ * load took 169 s on the 7763 after it (41158480746), 61 % of this budget.
  */
 const REALISTIC_LOAD_BUDGET_MS = 275_000;
 /**
@@ -893,10 +893,16 @@ const TOWN_QUERY = '?realistic&town';
  * phases were about 128 s inside the `?realistic` load (run 41132248051:
  * #1549 to #1665's town 78.1 s, #545's near field 16.9 s, and #1835's street,
  * which that load never reached, 25.7 s on an EPYC 9V74 in 41132248051's
- * fourth attempt and so about 33 s on the 7763). 200 s is about 1.5 times
- * that with the world's own load, the margin every budget in this file keeps.
+ * fourth attempt and so about 33 s on the 7763).
+ *
+ * ⚠️ **Alone it took 151 s there, not 128** (run 41158480746, #1947's first
+ * nightly): every later phase within a second of what it took inside
+ * `?realistic`, but #1549's, the first frame this view draws, 37.4 s where it
+ * was 23.7 s, because a new page compiles and uploads what `realisticProbe`'s
+ * earlier phases had. 225 s is 1.49 times 151, the margin every budget in
+ * this file keeps.
  */
-const TOWN_LOAD_BUDGET_MS = 200_000;
+const TOWN_LOAD_BUDGET_MS = 225_000;
 
 /**
  * #679: the least lettering contrast a banner strip must read (a variance of
@@ -1088,13 +1094,12 @@ const WHEEL_TRACK_CEILING = 0.08;
  * (39570460751), about 27 s more with the load at 182 s.
  *
  * ⚠️ **Since the nightly's shards (#1698, #1701) the sum is shard 1's, and
- * since #1947 it is 275 + 200 + 160 = 635 s**: `?realistic`, `?realistic&town`
+ * since #1947 it is 275 + 225 + 160 = 660 s**: `?realistic`, `?realistic&town`
  * (§`TOWN_LOAD_BUDGET_MS`) and `?realistic&trees`, the only loads shard 1's
  * describes pay for (the plain page is required-only, and
  * `realistic.browser.spec.ts`' two waits are shard 2's). Shard 1's other
- * cases took 86 s of a green 414 s on an AMD EPYC 9V74 (41132248051, fourth
- * attempt), about 110 s on the 7763, so a run where all three hung is about
- * 635 + 30 + 110 = 775 s, 65 s inside 840.
+ * cases took 97 s of a green 546 s on the 7763 (41158480746), so a run where
+ * all three hung is about 660 + 30 + 97 = 787 s, 53 s inside 840.
  */
 function paysForTheRealisticLoad(): void {
   paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);

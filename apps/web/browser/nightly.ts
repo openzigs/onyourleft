@@ -73,7 +73,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     spec: 'game.browser.spec.ts',
     describe: 'scenery the camera passes is not cut by the near plane — #545',
     seconds:
-      'since #1947 the `?realistic&town` load, about 135 s on the AMD EPYC 7763, shared with the mapped town’s cases below',
+      'since #1947 the `?realistic&town` load, 151 s on the AMD EPYC 7763, shared with the mapped town’s cases below',
     why:
       'what the realistic world draws near the camera. The stylised world has no near-field ' +
       'case here, and `near-field.test.ts` (nightly too) is the arithmetic.',
