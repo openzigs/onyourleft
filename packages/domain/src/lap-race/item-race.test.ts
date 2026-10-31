@@ -225,3 +225,111 @@ describe('a racer id that is an Object.prototype key', () => {
     expect(laned.racers.find((entry) => entry.racer.id === 'constructor')?.lane).toBe(2);
   });
 });
+
+describe('a shielded racer: the assisted setting’s “no knock-back on me” (#1905)', () => {
+  /** The race with `id` holding `kind`. */
+  function holding(
+    race: ItemRaceState,
+    id: string,
+    kind: 'crosswind-gust' | 'puddle' | 'rain-cape',
+  ): ItemRaceState {
+    return {
+      ...race,
+      racers: race.racers.map((entry) =>
+        entry.racer.id === id ? { ...entry, held: kind } : entry,
+      ),
+    };
+  }
+
+  function riderOf(race: ItemRaceState) {
+    return race.racers.find((entry) => entry.racer.id === 'rider');
+  }
+
+  /** Every bot behind the rider in the rider's lane, each with a gust, every tick, for a minute. */
+  function targeted(shieldedIds: readonly string[] | undefined): readonly number[] {
+    let race = createItemRace({
+      course: raceCourse(400, 3),
+      seed: 1_905,
+      itemsOn: true,
+      racerIds: ['rider', 'b1', 'b2', 'b3'],
+      startMs: 0,
+      ...(shieldedIds === undefined ? {} : { shieldedIds }),
+    });
+    const offsets: number[] = [];
+    for (let second = 1; second <= 60; second += 1) {
+      for (const id of ['b1', 'b2', 'b3']) race = holding(race, id, 'crosswind-gust');
+      const rider = second * 10;
+      race = stepRace(race, {
+        atMs: second * 1_000,
+        effortDistances: { rider, b1: rider - 5, b2: rider - 10, b3: rider - 15 },
+        uses: ['b1', 'b2', 'b3'],
+      });
+      offsets.push(riderOf(race)?.racer.raceOffset ?? 0);
+    }
+    return offsets;
+  }
+
+  it('is never knocked back however many hits it takes, and the same race unshielded is', () => {
+    expect(Math.min(...targeted(['rider']))).toBeGreaterThanOrEqual(0);
+    expect(Math.min(...targeted(undefined))).toBeLessThan(0);
+  });
+
+  it('keeps its cape, counts a puddle as ridden through once, and its own items still work', () => {
+    let race = createItemRace({
+      course: raceCourse(1_000, 3),
+      seed: 7,
+      itemsOn: true,
+      racerIds: ['rider', 'b1'],
+      startMs: 0,
+      shieldedIds: ['rider'],
+    });
+    race = stepRace(holding(race, 'rider', 'rain-cape'), {
+      atMs: 1_000,
+      effortDistances: { rider: 20, b1: 10 },
+      uses: ['rider'],
+    });
+    const cape = riderOf(race)?.capeUntilMs;
+    expect(cape).toBe(1_000 + 15_000);
+    race = stepRace(holding(race, 'b1', 'crosswind-gust'), {
+      atMs: 2_000,
+      effortDistances: { rider: 30, b1: 20 },
+      uses: ['b1'],
+    });
+    expect(riderOf(race)?.capeUntilMs).toBe(cape);
+    expect(riderOf(race)?.effects).toEqual([]);
+    // b1, ahead now, lays a puddle at the next pick-up point, 250 m, and the rider rides through it.
+    race = stepRace(holding(race, 'b1', 'puddle'), {
+      atMs: 3_000,
+      effortDistances: { rider: 200, b1: 240 },
+      uses: ['b1'],
+    });
+    race = stepRace(race, { atMs: 4_000, effortDistances: { rider: 260, b1: 280 } });
+    expect(race.hazards[0]?.hitIds).toEqual(['rider']);
+    expect(riderOf(race)?.racer.raceOffset).toBe(0);
+  });
+
+  it('is named in the state, sorted and once, and must be in the field', () => {
+    const course = raceCourse(400, 1);
+    const race = createItemRace({
+      course,
+      seed: 1,
+      itemsOn: true,
+      racerIds: ['b', 'a'],
+      startMs: 0,
+      shieldedIds: ['b', 'a', 'b'],
+    });
+    expect(race.shielded).toEqual(['a', 'b']);
+    const plain = createItemRace({ course, seed: 1, itemsOn: true, racerIds: ['a'], startMs: 0 });
+    expect(plain.shielded).toEqual([]);
+    expect(() =>
+      createItemRace({
+        course,
+        seed: 1,
+        itemsOn: true,
+        racerIds: ['a'],
+        startMs: 0,
+        shieldedIds: ['z'],
+      }),
+    ).toThrow(/shieldedIds must name racers in the field/);
+  });
+});

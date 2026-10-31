@@ -717,6 +717,35 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reads every tick's effort distance and speed back
                         equal. ⚠️ `race-input.ts` is `@unwired` until #1906
                         runs the race in `GameView`
+    src/game/lap-race/assist-preference.ts, src/game/lap-race/assist.ts
+                        the lap race's assisted setting (#1905, Delivery's
+                        #1813 pattern): items off, auto-use, no knock-back on
+                        me, gentler bots. Kept on the device, read only by
+                        Settings and `game/lap-race/`. "No knock-back" is the
+                        model's own: `createItemRace`'s `shieldedIds`, and a
+                        hit on a shielded racer does nothing (`items.ts`
+                        §"A shielded racer"), solo races only. `assist.ts`
+                        is unwired until #1906 starts a race in a ride
+    src/game/lap-race/in-view.ts
+                        what a lap-race frame draws (#1902, ADR 0060 D-10.4):
+                        every pick-up point of every lap on the frame's road,
+                        each puddle in its lane until it dries, and each
+                        racer's hit effect (`hitLook`) while a slow-down runs
+                        on them. #1899's items resolve on the tick they are
+                        used, so NOTHING is ever in flight to draw. It reaches
+                        the view on `port.ts` §`SceneFrame.lapRace`, the hit on
+                        `RiderMarker.hit` (so it is drawn where `scene.ts` drew
+                        the racer), and the bots as `bot` markers through
+                        `SceneInput.raceBots`, in their lane and moved aside
+                        only to make room for the rider. `three-renderer.ts`
+                        §`LapRaceBelt` draws it in THREE instanced calls
+                        whatever the count, and the bots cost none: they are
+                        instances of the riders' meshes (#368). ⚠️ **WCAG
+                        2.3.1**: the hit's brightness swings on the RACE's
+                        clock at 0.4 Hz, so a second hit never restarts it,
+                        and under reduced motion it is steady; `in-view.test.ts`
+                        counts the luminance changes over the timeline in both
+                        forms. `@unwired` until #1906 runs a race in a ride
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round

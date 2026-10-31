@@ -1945,11 +1945,12 @@ html {
  * under WCAG 2.2 SC 2.5.8's 24×24 (Level AA — the MINIMUM criterion; 44×44 is
  * SC 2.5.5, AAA). Declared, and `shell.browser.spec.ts` measures it with a
  * control that strips it. #1813's Delivery assist switches take the same
- * size; their section is not `.oyl-announce`, whose tests find the
- * announcements' own controls by it.
+ * size, and since #1905 the lap race's; their sections are not
+ * `.oyl-announce`, whose tests find the announcements' own controls by it.
  */
 .oyl-announce input[type='checkbox'],
-.oyl-delivery-assist input[type='checkbox'] {
+.oyl-delivery-assist input[type='checkbox'],
+.oyl-lap-race-assist input[type='checkbox'] {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;

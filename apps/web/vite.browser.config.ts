@@ -239,6 +239,10 @@ export default defineConfig({
         // marker gone from the frame after its delivery, in a real context.
         // `delivery-harness.ts` says what it draws.
         delivery: 'browser/delivery.html',
+        // #1902: the lap race's pick-up points, puddles and hit effects in
+        // three calls, eight racers drawn in the riders' own, in a real
+        // context. `lap-race-harness.ts` says what it draws.
+        'lap-race': 'browser/lap-race.html',
         // #1904: a lap race's fields, its warning and its standings on the
         // real HUD and stylesheet, beside the leaning rider's box.
         // `lap-race-hud-harness.tsx` says what it does not prove.
