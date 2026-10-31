@@ -239,6 +239,10 @@ export default defineConfig({
         // marker gone from the frame after its delivery, in a real context.
         // `delivery-harness.ts` says what it draws.
         delivery: 'browser/delivery.html',
+        // #1904: a lap race's fields, its warning and its standings on the
+        // real HUD and stylesheet, beside the leaning rider's box.
+        // `lap-race-hud-harness.tsx` says what it does not prove.
+        'lap-race-hud': 'browser/lap-race-hud.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

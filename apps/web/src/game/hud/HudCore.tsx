@@ -48,6 +48,7 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
+import { isLapRaceReading } from './lap-race-hud';
 import { GamepadIntents } from './GamepadIntents';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
@@ -380,6 +381,10 @@ function fieldClass(reading: HudReading): string {
     ...(isRoomReading(reading) ? ['oyl-hud__field--room'] : []),
     // #1812: and a Delivery round's, the same way (`theme.css` §"A ROOM RIDE ON A PHONE").
     ...(isDeliveryReading(reading) ? ['oyl-hud__field--delivery'] : []),
+    // #1904: and a lap race's, the same way; and a field warning of a hit
+    // coming is outlined (`theme.css` §"A LAP RACE ON THE HUD").
+    ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
+    ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
   ].join(' ');
 }
