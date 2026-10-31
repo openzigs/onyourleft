@@ -37,7 +37,7 @@ import { TOUCH_LOCK_EXEMPT } from '../../design/touch-lock';
 import { tap } from '../../design/touch-lock-testing';
 import { TOUCH_LOCK_NAME } from '../../design/TouchLockButton';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../../testing/mount';
-import type { PadSnapshot } from '../gamepad-port';
+import { FORWARDED_BUTTON_GLOBAL, type PadSnapshot } from '../gamepad-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import {
   askLane,
@@ -73,6 +73,7 @@ afterEach(() => {
   mounted = undefined;
   vi.useRealTimers();
   Reflect.deleteProperty(window.navigator, 'getGamepads');
+  Reflect.deleteProperty(globalThis, 'Capacitor');
 });
 
 function route(): ReturnType<typeof routeProfile> {
@@ -89,7 +90,7 @@ function route(): ReturnType<typeof routeProfile> {
   return routeProfile(points);
 }
 
-function RideWithRace(): JSX.Element {
+function RideWithRace(props: { readonly withSteering?: boolean }): JSX.Element {
   const profile = useMemo(route, []);
   const steering = useMemo<SteerInputPort>(
     () => ({
@@ -117,14 +118,14 @@ function RideWithRace(): JSX.Element {
       paused={false}
       onPause={() => undefined}
       onEnd={() => undefined}
-      steering={steering}
+      steering={props.withSteering === false ? undefined : steering}
       items={items}
     />
   );
 }
 
-async function ride(): Promise<void> {
-  mounted = await mount(<RideWithRace />);
+async function ride(withSteering = true): Promise<void> {
+  mounted = await mount(<RideWithRace withSteering={withSteering} />);
   await settle();
 }
 
@@ -237,6 +238,49 @@ describe('the touch lock kept whole in a lap race — ADR 0060 D-13, #1432', () 
     tap(button(TOUCH_LOCK_NAME));
 
     // A standard pad's A, the button that throws toward the next house on a round.
+    padPress([0]);
+
+    expect(nextTick().held).toBeNull();
+  });
+
+  it.each([
+    ['A', 0],
+    ['B', 1],
+    ['X', 2],
+  ])('uses the item on a standard pad’s %s, every throw button', async (_name, index) => {
+    await ride();
+
+    padPress([index]);
+
+    expect(nextTick().held).toBeNull();
+  });
+
+  it.each([2, 3, 4])('uses the item on the shell’s forwarded button %i', async (number) => {
+    Object.defineProperty(globalThis, 'Capacitor', {
+      configurable: true,
+      value: { isNativePlatform: () => true },
+    });
+    await ride();
+    listed = [{ connected: true, mapping: '', axes: [0, 0, 0, 0], buttons: [] }];
+    act(() => {
+      window.dispatchEvent(new Event('gamepadconnected'));
+      for (let frame = 0; frame < 3; frame += 1) vi.advanceTimersToNextFrame();
+      const handler = Reflect.get(window, FORWARDED_BUTTON_GLOBAL) as (
+        b: number,
+        p: boolean,
+      ) => void;
+      handler(number, true);
+      for (let frame = 0; frame < 3; frame += 1) vi.advanceTimersToNextFrame();
+      handler(number, false);
+      for (let frame = 0; frame < 3; frame += 1) vi.advanceTimersToNextFrame();
+    });
+
+    expect(nextTick().held).toBeNull();
+  });
+
+  it('uses the item on a pad when the ride passes items and no steering', async () => {
+    await ride(false);
+
     padPress([0]);
 
     expect(nextTick().held).toBeNull();
