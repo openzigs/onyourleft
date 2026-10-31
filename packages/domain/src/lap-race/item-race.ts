@@ -53,6 +53,11 @@ export interface RaceTickInput {
   readonly uses?: readonly string[];
 }
 
+/** A record's own value for `id`, never one inherited from `Object.prototype`. */
+function own(record: Readonly<Record<string, number>>, id: string): number | undefined {
+  return Object.hasOwn(record, id) ? record[id] : undefined;
+}
+
 /** A race on the line. @throws {LapRaceError} for an empty field, a repeated id, or a seed or instant that cannot start one. */
 export function createItemRace(setup: ItemRaceSetup): ItemRaceState {
   const ids = [...setup.racerIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -97,8 +102,8 @@ export function stepRace(state: ItemRaceState, input: RaceTickInput): ItemRaceSt
   const moved: ItemRaceState = {
     ...state,
     racers: state.racers.map((entry) => {
-      const effort = input.effortDistances[entry.racer.id];
-      const lane = input.lanes?.[entry.racer.id];
+      const effort = own(input.effortDistances, entry.racer.id);
+      const lane = input.lanes === undefined ? undefined : own(input.lanes, entry.racer.id);
       return {
         ...entry,
         racer: effort === undefined ? entry.racer : withEffortDistance(entry.racer, effort),

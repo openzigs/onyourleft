@@ -17,6 +17,14 @@
  * Every offset change goes through `race.ts` §`applyOffset`, so it is clamped
  * to `[−B, +B]` after every change (D-3.2).
  *
+ * **The tick instants are part of the determinism contract.** The clamp runs
+ * once a tick, on the sum of that tick's effects, and a pick-up or a puddle is
+ * judged by where a racer is at a tick's end. So the same inputs at a different
+ * tick spacing can give a different offset near the bound (a racer at 9 m under
+ * a tailwind for 0 to 4 s and a gust for 2 to 6 s ends at 5 m on six 1 s ticks
+ * and at 7 m on one 6 s tick). The device and the room must step on the same
+ * instants (#1909).
+ *
  * An effect is a **rate in metres per second over a duration**, integrated
  * tick by tick: a racer is never teleported, and no rate exceeds
  * {@link MAXIMUM_EFFECT_RATE_METRES_PER_SECOND}.
@@ -45,7 +53,7 @@
  * |---|---|---|
  * | `tailwind` | the holder gains +1.5 m/s of offset for 4 s | 6 |
  * | `slipstream` | a tow toward the racer ahead: +2 m/s for 4 s, only when a racer is within {@link SLIPSTREAM_REACH_METRES} ahead; otherwise used up for nothing | 8 |
- * | `puddle` | dropped at the holder's drawn distance in the holder's lane; the first other racer to ride through it in that lane loses 1.5 m/s for 4 s. It dries after {@link PUDDLE_LIFETIME_MS} | 6 |
+ * | `puddle` | dropped at the holder's drawn distance in the holder's lane; the first other racer, in id order, to ride through it in a tick in that lane loses 1.5 m/s for 4 s. It dries after {@link PUDDLE_LIFETIME_MS} | 6 |
  * | `crosswind-gust` | sent up the road in the holder's lane at the nearest racer ahead: −2 m/s for 4 s if that racer is in the lane, a miss if not | 8 |
  * | `rain-cape` | absorbs the next hit within {@link RAIN_CAPE_DURATION_MS}; moves nothing | 0 |
  *
@@ -328,6 +336,9 @@ export function resolveItems(
       ...entry,
       racer: metres === 0 ? entry.racer : applyOffset(entry.racer, metres),
       effects: entry.effects.filter((effect) => effect.untilMs > atMs),
+      // A cape nobody hit has gone by now: a reader sees no cape, not a stale instant.
+      capeUntilMs:
+        entry.capeUntilMs !== null && entry.capeUntilMs <= atMs ? null : entry.capeUntilMs,
     };
   });
 
@@ -336,6 +347,7 @@ export function resolveItems(
   for (const hazard of state.hazards) {
     const victim = racers.findIndex(
       (entry) =>
+        hazard.untilMs > atMs &&
         entry.racer.id !== hazard.ownerId &&
         entry.racer.finishedAtMs === null &&
         entry.lane === hazard.lane &&
