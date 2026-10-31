@@ -1478,7 +1478,7 @@ reloads a harness that takes ten seconds" is reading the old file.** They did re
 the whole critical path: 43 cases at 9.1 s each, run in one worker, came to 6.0 to 7.3 minutes of a
 browser gate that took 271 to 449 s, in a job that ran 8m40s to 13m44s on `main`. The harness does
 all of its work in one `run()` and publishes one object, so a worker-scoped fixture now loads it
-once per query (`''`, `?shadow-map`, `?realistic` and `?realistic&trees`) and every case reads that result, with every assertion
+once per query (`''`, `?shadow-map`, `?realistic`, `?realistic&trees` and, since #1947, `?realistic&town`) and every case reads that result, with every assertion
 unchanged. On #456's pull request that made the game spec 32 s, the browser gate 88 s and the job
 **7m44s**. The browser gate's slowest spec is now `ride.browser.spec.ts` at about 45 s of case time,
 and the job's largest step is Vitest with coverage at about 150 s. ⚠️ **What this does NOT change**:
@@ -1502,6 +1502,14 @@ past its 150 s, which turned `main` red. Their own load also asserts the realist
 (`trees.drawnWorld`), which the shared load had asserted for them. Every phase of a harness run is
 printed as it ends (`game-harness.ts` §`phaseEnds`) and never asserted; read those lines before
 raising a budget.
+⚠️ **Since [#1947](https://github.com/openzigs/onyourleft/issues/1947) the mapped town's cases
+(#1549 to #1665) and the near field (#545, #1835) read a load of their own, `game.html?realistic&town`
+(`game.browser.spec.ts` §`paysForTheTownLoad`, `TOWN_LOAD_BUDGET_MS`), and a reviewer who remembers
+them reading `?realistic` is reading the old file.** They had grown the `?realistic` `beforeAll` to its
+275 s budget on the AMD EPYC 7763; on their own the two loads read about 151–156 s and 169–170 s there.
+`?realistic` publishes the town's fields as their `NO_*` defaults, so a case pointed at the wrong load
+goes red. As #644's did, the new load asserts the realistic world loaded and drew (`loaded`,
+`drawnWorld`, in the describe's `measuredBy`), which the shared load had asserted for them.
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) every load has a budget of
 its own, every describe pays for the load it reads, the game spec runs LAST, and the whole gate
 has a `globalTimeout`** — a reviewer who remembers the plain page and `?shadow-map` loaded inside a
