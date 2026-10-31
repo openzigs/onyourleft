@@ -19,6 +19,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import '../design/theme.css';
+// #1945: the demo's own layout for a small frame, after the theme it adjusts.
+import './demo.css';
 import type { GameView } from '../game/port';
 import {
   decorationBeltOf,

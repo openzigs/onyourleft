@@ -57,7 +57,7 @@ import {
   type FootprintFixtureName,
 } from './footprint-fixtures-testing';
 import { FOUNDATION_METRES } from './buildings';
-import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
+import { kindAt, landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf } from './rectilinear-roofs';
@@ -67,6 +67,11 @@ import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadPosition, type CorridorOrigin } from './terrain';
+import {
+  landUseCorridor,
+  REMOVED_LAND_USE_KINDS,
+  TOWN_LAND_USE_CLASSES,
+} from './testing/land-use-fixtures';
 import type { WorldCorridor } from './world-data/corridor';
 
 const fixture = footprintFixture();
@@ -653,7 +658,7 @@ describe('the surfaces — #1540’s table, with #1548’s swap', () => {
     expect(roofSurfaceOf('flat', 0.1)).toBe('flat-roof');
     expect(roofSurfaceOf('gable', 0.1)).toBe('roof-tiles');
     expect(roofSurfaceOf('gable', 0.9)).toBe('slate');
-    expect(footprintUse('built-up', 'retail')).toBe('commercial');
+    expect(footprintUse('built-up', 'commercial')).toBe('commercial');
     expect(footprintUse('built-up', 'railway')).toBe('industrial');
     expect(footprintUse('farmland', undefined)).toBe('farmland');
     expect(footprintUse('other', undefined)).toBe('residential');
@@ -673,6 +678,47 @@ describe('the surfaces — #1540’s table, with #1548’s swap', () => {
       expect(FOOTPRINT_SURFACES).toContain(plan.surfaces.wall);
       expect(FOOTPRINT_SURFACES).toContain(plan.surfaces.roof);
     }
+  });
+});
+
+describe('every land-use kind our archive emits keeps its footprint use — #1946', () => {
+  /**
+   * The use each kind read as before #1946 removed `neighbourhood` from the
+   * residential kinds: a frozen record, not derived from the planner. Only
+   * built-up land is read by its kind; farmland is farmland; every other class,
+   * and every kind #1630 removed (now `other`), is residential.
+   */
+  const USE_BEFORE_1946 = {
+    residential: ['residential'],
+    industrial: ['industrial', 'railway'],
+    commercial: ['commercial', 'school', 'college', 'university', 'hospital', 'pedestrian'],
+    farmland: ['farmland', 'meadow'],
+  } as const;
+  const kinds = [...Object.keys(TOWN_LAND_USE_CLASSES), ...REMOVED_LAND_USE_KINDS];
+  const expectedUse = (kind: string): string =>
+    Object.entries(USE_BEFORE_1946).find(([, of]) =>
+      (of as readonly string[]).includes(kind),
+    )?.[0] ?? 'residential';
+  const fixture = landUseCorridor(kinds);
+  const mask = landClassMask(fixture.corridor);
+
+  it('reads each kind through the planner’s own path — classAt, kindAt, footprintUse — as it did', () => {
+    for (const kind of kinds) {
+      const [x, z] = fixture.centreOf(kind);
+      expect(footprintUse(mask.classAt(x, z), kindAt(fixture.corridor, x, z)), kind).toBe(
+        expectedUse(kind),
+      );
+    }
+  });
+
+  it('control: the record names only kinds the archive emits, and the uses differ between them', () => {
+    for (const named of Object.values(USE_BEFORE_1946).flat()) expect(kinds).toContain(named);
+    const [rx, rz] = fixture.centreOf('residential');
+    const [cx, cz] = fixture.centreOf('commercial');
+    expect(footprintUse(mask.classAt(rx, rz), kindAt(fixture.corridor, rx, rz))).toBe(
+      'residential',
+    );
+    expect(footprintUse(mask.classAt(cx, cz), kindAt(fixture.corridor, cx, cz))).toBe('commercial');
   });
 });
 
