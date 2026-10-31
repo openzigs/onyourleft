@@ -3,6 +3,10 @@
 /**
  * `pnpm --filter @onyourleft/web basemap:compare -- <ours.pmtiles> <theirs.pmtiles> [--strict] [--build-year YYYY]`
  *
+ * `run-compare.mjs` runs {@link main}: this file reaches
+ * `@onyourleft/map-features`, whose TypeScript `node`'s strip-only mode refuses
+ * (parameter properties), so it is loaded through Vite's module runner.
+ *
  * Walks every tile inside the two archives' bounds, at every zoom either holds,
  * and prints `compare.ts`'s summary as JSON. `--strict` is for `build.sh
  * --compare`'s pair (the same extract through upstream's profile): it exits 1
@@ -72,7 +76,7 @@ function printable(summary: Summary): unknown {
   };
 }
 
-async function main(argv: readonly string[]): Promise<number> {
+export async function main(argv: readonly string[]): Promise<number> {
   const paths = argv.filter((arg, i) => !arg.startsWith('--') && argv[i - 1] !== '--build-year');
   const strict = argv.includes('--strict');
   const yearAt = argv.indexOf('--build-year');
@@ -120,9 +124,4 @@ async function main(argv: readonly string[]): Promise<number> {
   } finally {
     await Promise.all(sources.map((source) => source.close()));
   }
-}
-
-// Run only when this file is the program, never when a test imports it.
-if (process.argv[1]?.endsWith('compare-archives.ts') === true) {
-  process.exitCode = await main(process.argv.slice(2));
 }

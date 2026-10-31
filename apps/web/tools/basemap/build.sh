@@ -179,7 +179,10 @@ RECORD="${OUTPUT%.pmtiles}.build.txt"
   echo "java $(java -version 2>&1 | head -1)"
   echo "patch $(sha256 "${HERE}/profile/protomaps-basemaps.patch")"
   echo "jar $(sha256 "${WORK}/jars/onyourleft.jar")"
+  # Every shared source, but only this region's extract: data/sources also
+  # holds any other region built from the same --work.
   for source in "${WORK}"/data/sources/*; do
+    case "${source}" in *.osm.pbf) [ "${source}" = "${PBF}" ] || continue ;; esac
     [ -f "${source}" ] && echo "input $(basename "${source}") $(bytes "${source}") $(sha256 "${source}")"
   done
   echo "output $(basename "${OUTPUT}") $(bytes "${OUTPUT}") $(sha256 "${OUTPUT}")"

@@ -19,7 +19,7 @@ features whose tags are equal) is upstream's.
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `build.sh`                                    | The build. It pins every tool, downloads into `~/.cache/onyourleft/basemap` (never into the repository), runs both test suites through `mvn package`, and writes a build record of every input's SHA-256. |
 | `profile/`                                    | `BuildingTags.java` (the fields), `BuildingPalette.java` (the colour palette), their JUnit suite, and the patch. Compiled inside upstream's Maven project by `build.sh`.                                  |
-| `compare-archives.ts`, `compare.ts`, `mvt.ts` | `pnpm --filter @onyourleft/web basemap:compare -- ours.pmtiles theirs.pmtiles [--strict]` walks two archives tile by tile and reads every z15 tile through the client's own `decodeTile`.                 |
+| `run-compare.mjs`, `compare-archives.ts`, `compare.ts`, `mvt.ts` | `pnpm --filter @onyourleft/web basemap:compare -- ours.pmtiles theirs.pmtiles [--strict]` walks two archives tile by tile and reads every z15 tile through the client's own `decodeTile`.                 |
 | `building-fields.ts`                          | The fields' rules, for the comparison. `building-fields.test.ts` holds them to the Java source, list for list.                                                                                            |
 
 ## Building
