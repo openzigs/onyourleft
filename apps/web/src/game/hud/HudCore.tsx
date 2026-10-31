@@ -50,6 +50,7 @@ import {
 import type { HudPanelProps } from './HudPanel';
 import { isLapRaceReading } from './lap-race-hud';
 import { GamepadIntents } from './GamepadIntents';
+import { ItemControl } from './ItemControl';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -267,11 +268,21 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         {props.throwing === undefined ? null : (
           <ThrowControl port={props.throwing} touchLocked={touchLocked} />
         )}
-        {/* #1820: a Delivery round's lane keys. Nothing drawn, so nothing the lock refuses. */}
+        {/*
+          #1901: a lap race's item use, where the throws stand on a round.
+          Inside this region, so the lock refuses a tap on it as on Pause: it
+          is not exempt (ADR 0060 D-13), and a key or a pad still uses the item.
+        */}
+        {props.items === undefined ? null : (
+          <ItemControl port={props.items} touchLocked={touchLocked} />
+        )}
+        {/* #1820: a Delivery round's or a lap race's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}
-        {/* #1821: a gamepad's throws and lane changes, to the same two ports. Nothing drawn. */}
-        {props.throwing === undefined && props.steering === undefined ? null : (
-          <GamepadIntents throwing={props.throwing} steering={props.steering} />
+        {/* #1821: a gamepad's throws, items and lane changes, to the same ports. Nothing drawn. */}
+        {props.throwing === undefined &&
+        props.steering === undefined &&
+        props.items === undefined ? null : (
+          <GamepadIntents throwing={props.throwing} steering={props.steering} items={props.items} />
         )}
         {props.moreActions}
       </div>
