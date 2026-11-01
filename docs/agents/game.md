@@ -719,8 +719,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         chose: in the realistic one its frame is held to
                         `realistic-budget.ts` §`LAP_RACE_VILLAGE_DRAW_CALLS`
                         (proposed 58), never the village's frozen 50, and its
-                        bots are split as a room's riders are (#783). Started at the press (assist read
-                        from the device, ONE seed nothing keeps), stepped one
+                        bots are split as a room's riders are (#783), and
+                        it rides without the pacer a rider chose. Started at
+                        the press (assist read from the device, ONE seed
+                        nothing keeps), stepped one
                         tick a simulation step that ran (bots through
                         `@onyourleft/physics` §`stepBotRace`), the rider
                         DRAWN at effort distance plus race offset (D-3.3)

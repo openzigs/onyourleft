@@ -96,6 +96,7 @@ interface DrawnInput {
   readonly odometer: number;
   readonly steeredLateral: number | undefined;
   readonly bots: number | undefined;
+  readonly pacer: number | undefined;
 }
 const inputs = vi.hoisted((): DrawnInput[] => []);
 vi.mock('./scene', async (importOriginal) => {
@@ -109,6 +110,7 @@ vi.mock('./scene', async (importOriginal) => {
         odometer: input.state.ride.distance,
         steeredLateral: input.steeredLateral,
         bots: input.raceBots?.length,
+        pacer: input.botDistance,
       });
       return actual.sceneFrame(...args);
     },
@@ -408,6 +410,8 @@ async function rideTheTrace(options: {
   readonly seen?: Map<number, DrawnInput> | undefined;
   readonly room?: Pick<Parameters<typeof GameView>[0], 'room' | 'roomId'> | undefined;
   readonly delivery?: boolean | undefined;
+  /** Tick *Pace me* and type this intensity on the chooser before the press (#1971). */
+  readonly pacerIntensity?: string | undefined;
   /** The presses to make, {@link PRESSES} unless given. */
   readonly presses?: ReadonlyMap<number, SteerIntent | 'item'> | undefined;
 }): Promise<void> {
@@ -424,6 +428,22 @@ async function rideTheTrace(options: {
     />,
   );
   await settle();
+  if (options.pacerIntensity !== undefined) {
+    const box = queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').find(
+      (input) => (input.closest('label')?.textContent ?? '').includes('pacer'),
+    );
+    expect(box).toBeDefined();
+    await clickThrough(box);
+    const field =
+      mounted.container.querySelector<HTMLInputElement>('#oyl-game-pacer-intensity') ?? undefined;
+    expect(field).toBeDefined();
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    await act(async () => {
+      descriptor?.set?.call(field, options.pacerIntensity);
+      field?.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+  }
   await clickThrough(buttonStarting('Ride '));
   for (let index = 0; index < (options.frames ?? FRAMES); index += 1) {
     const built = inputs.length;
@@ -760,6 +780,24 @@ describe('a solo lap race inside a game ride — #1906', () => {
     await rideTheTrace({ race: RACE, frames: 4, realistic: stylised });
     expect(raceFields().length).toBe(2);
     expect(stylised.asked).toBe(0);
+  });
+
+  it('drops the pacer from a race, so the frame is the one the ceiling was measured on (#1971)', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    const seen = new Map<number, DrawnInput>();
+    const drawn: SceneFrame[] = [];
+    await rideTheTrace({ race: RACE, frames: 4, drawn, seen, pacerIntensity: '2' });
+    expect(drawn.some((frame) => frame.lapRace !== undefined)).toBe(true);
+    expect([...seen.values()].every((input) => input.pacer === undefined)).toBe(true);
+    mounted?.unmount();
+    mounted = undefined;
+    // The control: the same chooser, the same pacer, no race, and the pacer rides.
+    pending = [];
+    nowMs = START_MS;
+    inputs.length = 0;
+    const ordinary = new Map<number, DrawnInput>();
+    await rideTheTrace({ race: undefined, frames: 4, seen: ordinary, pacerIntensity: '2' });
+    expect([...ordinary.values()].some((input) => input.pacer !== undefined)).toBe(true);
   });
 
   it('keeps the realistic world on a ride in a room, which runs no race (D-7.3, D-10)', async () => {

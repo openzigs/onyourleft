@@ -521,8 +521,9 @@ export interface GameViewProps {
    * a race rides the world Settings chose, as Delivery does (ADR 0060 D-10,
    * ADR 0059 D-3): stylised first (D-14 Q5), and now the realistic world
    * too, held there to `realistic-budget.ts` §`LAP_RACE_VILLAGE_DRAW_CALLS`
-   * and never to the village's frozen 50 (D-10.3). Absent — the product — the chooser's *Ride a lap race*
-   * decides (#1907), offered on a loop only. A test sets it.
+   * and never to the village's frozen 50 (D-10.3). A race rides without the
+   * pacer a rider chose. Absent — the product — the chooser's *Ride a lap
+   * race* decides (#1907), offered on a loop only. A test sets it.
    *
    * ⚠️ **Nothing of a race reaches the trainer** (ADR 0060 D-2): the race
    * reads the simulation's odometer as the rider's effort distance and writes
@@ -1633,7 +1634,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         // about 2.3 mph optimistic at 150 W on the flat. `rider.ts` holds the
         // three positions and the arithmetic.
         conditions: rideConditionsFor(riderMassFor(props.riderMass).mass, sitting),
-        ...(pacer === undefined ? {} : { pacer }),
+        // #1971: a race rides without the pacer. The race's own bots are the
+        // field, and `LAP_RACE_VILLAGE_DRAW_CALLS` was measured on a frame
+        // without one: a pacer kept beside them would be a non-racer `bot`
+        // marker the realistic world draws as a body of its own (`scene.ts`,
+        // `three-renderer.ts` §`realisticRemoteSplit`), one call over the ceiling.
+        ...(pacer === undefined || raceChoice !== undefined ? {} : { pacer }),
         // ⚠️ #326: the line that makes `packages/physics`'s entire wind model
         // reachable from a ride. `RideConditions.headwindMetresPerSecond` was
         // plumbed through three packages, spread into the bot's course, and

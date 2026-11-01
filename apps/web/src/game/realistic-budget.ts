@@ -558,7 +558,10 @@ export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
  * gives way to the two bots nearest the rider, which wear the realistic body
  * as a room's two nearest riders do (`three-renderer.ts`
  * §`realisticRemoteSplit`, #783); and the stylised riders' four instanced
- * meshes, which draw the other five bots. Nothing is rounded up past it, for
+ * meshes, which draw the other five bots. ⚠️ **The pacer gives way in the
+ * product too**: a race starts without the pacer a rider chose
+ * (`GameView.tsx`, held by `lap-race-wiring.test.tsx`), because a pacer kept
+ * would be a fourth realistic body and one call over this figure. Nothing is rounded up past it, for
  * {@link DELIVERY_VILLAGE_DRAW_CALLS}' reason: none of the eight moves with
  * the pieces' number or place. Counted at the WebGL entry points by
  * `realistic-lap-race.browser.spec.ts` §"#1971".
