@@ -18,9 +18,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   altitudeMetres,
+  createItemRace,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  raceCourse,
   routeProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -37,7 +39,8 @@ import { atStartLine } from '../simulation';
 import type { SteerInputPort } from '../steer-port';
 import { CONTROL_MINIMUM_PIXELS } from './HudCore';
 import { HudPanel } from './HudPanel';
-import { ITEM_BUTTON_LABEL, ITEM_BY_KEY_SENTENCE } from './ItemControl';
+import { ITEM_BUTTON_LABEL, ITEM_BY_KEY_SENTENCE, ITEM_NONE_HELD_SENTENCE } from './ItemControl';
+import type { LapRaceHud } from './lap-race-hud';
 
 // A path rather than `new URL(…, import.meta.url)`: under jsdom that URL is
 // not a `file:` one.
@@ -78,7 +81,25 @@ function route(): ReturnType<typeof routeProfile> {
 const ITEMS: ItemInputPort = { useItem: () => undefined };
 const STEERING: SteerInputPort = { steer: () => undefined };
 
-function hud(): React.ReactElement {
+/** A lap race of one for the HUD, the rider holding nothing. */
+function emptyHanded(): LapRaceHud {
+  const race = createItemRace({
+    course: raceCourse(1_000, 3),
+    seed: 1,
+    itemsOn: true,
+    racerIds: ['rider'],
+    startMs: 0,
+  });
+  return {
+    race,
+    riderId: 'rider',
+    entrants: {},
+    riderWattsPerKilogram: 3,
+    speedMetresPerSecond: 10,
+  };
+}
+
+function hud(lapRace?: LapRaceHud): React.ReactElement {
   const profile = route();
   return (
     <main>
@@ -94,6 +115,7 @@ function hud(): React.ReactElement {
         announcement=""
         steering={STEERING}
         items={ITEMS}
+        {...(lapRace === undefined ? {} : { lapRace })}
       />
     </main>
   );
@@ -135,6 +157,34 @@ describe('the item control on the HUD — #1901', () => {
     expect(document.body.textContent).toContain(ITEM_BY_KEY_SENTENCE);
     expect(item()?.getAttribute('aria-describedby')).not.toBeNull();
     expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('audits clean while nothing is held, still in the tab order, its reason a sentence off the screen (#1968)', async () => {
+    mounted = await mount(hud(emptyHanded()));
+
+    const button = item() as HTMLButtonElement;
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(tabbableElements(document)).toContain(button);
+    const note = document.getElementById(button.getAttribute('aria-describedby') ?? '');
+    expect(note?.textContent).toBe(ITEM_NONE_HELD_SENTENCE);
+    // Off the screen by clip, never `display: none`, so a screen reader still reads it.
+    expect(note?.classList.contains('oyl-visually-hidden')).toBe(true);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('draws the unavailable button in the HUD’s muted ink, AA on its surface in every theme (#1968)', () => {
+    const unavailable = ".oyl-hud__item .oyl-hud__control[aria-disabled='true']";
+    expect(declared(unavailable, 'color')).toEqual(['var(--oyl-color-hud-ink-muted)']);
+    expect(declared(unavailable, 'cursor')).toEqual(['not-allowed']);
+    // The button keeps the control's own surface, so the pair is the one held below.
+    expect(declared(unavailable, 'background')).toEqual([]);
+    expect(declared('.oyl-hud__control', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
+    for (const theme of THEMES) {
+      const palette = paletteColours(theme);
+      expect(contrastRatio(palette.hudInkMuted, palette.hudSurface)).toBeGreaterThanOrEqual(
+        AA_TEXT,
+      );
+    }
   });
 
   it('is in the tab order after Pause and End ride, and stays there with the lock on', async () => {
