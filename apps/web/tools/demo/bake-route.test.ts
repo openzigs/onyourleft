@@ -363,7 +363,7 @@ describe('demo:bake’s arguments and its committed record — #1651, ADR 0056 D
     expect(parseBakeArguments(['--', '--route', 'climb'])).toStrictEqual({
       route: 'climb',
       gpx: undefined,
-      archive: 'https://tiles.openzigs.com/basemap-us-oyl-20261030.pmtiles',
+      archive: 'https://tiles.openzigs.com/basemap-us-20260914.pmtiles',
       record: false,
       strip: false,
     });

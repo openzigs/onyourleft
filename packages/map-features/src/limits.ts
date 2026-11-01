@@ -28,13 +28,6 @@
  * column: a tile with one enormous coastline polygon need not be among the 200
  * largest. A real tile over a limit is refused and its stretch of the world is
  * procedural (ADR 0054 D-4), which is the safe direction to be wrong in.
- *
- * Since 2026-11-01 (#1557) the published archive is the project's own build,
- * `basemap-us-oyl-20261030.pmtiles`, and the table above was not re-measured
- * on it. Before the switch every distinct tile of that archive was read
- * through {@link decodeTile} with these limits (#1557, 2026-10-31): 19 of
- * 10,332,864 z15 tiles were refused, all in `landuse` or `water` and none in
- * `buildings`, and 16 of those 19 are refused in the 2026-09-14 archive too.
  */
 
 /** Every bound {@link decodeTile} enforces. */

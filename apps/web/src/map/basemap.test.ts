@@ -87,9 +87,7 @@ describe('readBasemapConfig — the URL is configuration', () => {
     // Pinned as a literal: a default that drifted to a different object, or to
     // somebody else's host (ADR 0010 D-1 forbids hotlinking), is a change a
     // reviewer must see in this file as well as in the constant.
-    expect(PUBLISHED_BASEMAP_URL).toBe(
-      'https://tiles.openzigs.com/basemap-us-oyl-20261030.pmtiles',
-    );
+    expect(PUBLISHED_BASEMAP_URL).toBe('https://tiles.openzigs.com/basemap-us-20260914.pmtiles');
   });
 
   it('lets the environment override the default', () => {

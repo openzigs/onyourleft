@@ -171,14 +171,10 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //   the same `clientRequestPath`, and `httpRequestsAdaptive` has no Range
     //   field. Measured 2026-09-26 (#559's review, grouping that dataset by
     //   `clientRequestPath` over 23 h): every app request was
-    //   `/basemap-us-20260914.pmtiles`, the archive then published. (Since
-    //   #1557's switch of 2026-11-01 the published archive is
-    //   `/basemap-us-oyl-20261030.pmtiles` on the same host: still one file
-    //   read by byte ranges, so the argument is unchanged.) The Range header
-    //   is handled while the request is served and is not kept — Play's
-    //   ephemeral case — so what is retained about location is the IP
-    //   address and the country/ASN derived from it, which is
-    //   IP-geolocation grade: approximate. The app requests
+    //   `/basemap-us-20260914.pmtiles`. The Range header is handled while the
+    //   request is served and is not kept — Play's ephemeral case — so what is
+    //   retained about location is the IP address and the country/ASN derived
+    //   from it, which is IP-geolocation grade: approximate. The app requests
     //   no GPS fix and never transmits a ride's positions — see the Precise
     //   location row. ⚠️ If a tile setup ever puts the tile in the URL (a
     //   z/x/y server, a query string), the kept record names it and the
