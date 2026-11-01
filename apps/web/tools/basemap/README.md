@@ -42,6 +42,14 @@ is built on the owner's Mac. It is uploaded under a separate name beside the
 live Protomaps file, and only on the owner's word. The ride map switches to it
 only after the owner's check on the tablet.
 
+**Published since 2026-11-01.** The US build of 2026-10-31 is
+`https://tiles.openzigs.com/basemap-us-oyl-20261030.pmtiles`, and since the
+owner's word of 2026-11-01 on #1557 it is the default every build reads
+(`src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`). The Protomaps file it
+replaced, `basemap-us-20260914.pmtiles`, stays published beside it, because
+every build made before the switch names it. A rebuild is published the same
+way: a new dated name, the constant moved to it, the old file left in place.
+
 `--build-year` is the latest `start_year` written. Give the value from the
 build record to rebuild the same extract byte for byte.
 

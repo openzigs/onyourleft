@@ -157,13 +157,23 @@ export const BASEMAP_URL_VARIABLE = 'VITE_BASEMAP_PMTILES_URL';
 /**
  * The archive a build uses when nothing else is configured (#534).
  *
- * #53's published US extract: the Protomaps basemap build of 2026-09-14, copied
- * to storage this project controls (ADR 0010 D-1 — copied, never hotlinked).
- * Read off the archive's own header on 2026-09-25: PMTiles v3, zoom 0–15,
- * bounds −125° to −66° longitude and 24° to 50° latitude — the contiguous
- * United States — and 19 155 814 749 bytes. It answers range requests with
+ * **Since 2026-11-01 (#1557), the project's own US build**: Planetiler with the
+ * pinned `protomaps/basemaps` profile, from the Geofabrik OpenStreetMap extract
+ * of 2026-10-30, built by `apps/web/tools/basemap/build.sh` (its README states
+ * the pins, licences, time, size and refresh). Protomaps v4 schema in every
+ * layer the map and the world read, plus the z15 building fields only #1789's
+ * decoder will read. 18 258 708 801 bytes, and it answers range requests with
  * `access-control-allow-origin: *`, which is what lets the APK's origin and a
- * self-hosted web build read it.
+ * self-hosted web build read it. The owner compared it with the previous
+ * default on the tablet before the switch.
+ *
+ * Until then it was #53's published US extract: the Protomaps basemap build of
+ * 2026-09-14, copied to storage this project controls (ADR 0010 D-1 — copied,
+ * never hotlinked), `basemap-us-20260914.pmtiles`. Read off that archive's
+ * header on 2026-09-25: PMTiles v3, zoom 0–15, bounds −125° to −66° longitude
+ * and 24° to 50° latitude — the contiguous United States — and 19 155 814 749
+ * bytes. ⚠️ It stays published, because every build made before the switch
+ * names it (the warning below).
  *
  * ⚠️ **Why a default at all, when the URL is configuration (#63 criterion 7).**
  * Without one, "no manual environment setup" (#534) cannot be met: `release.yml`
@@ -196,7 +206,7 @@ export const BASEMAP_URL_VARIABLE = 'VITE_BASEMAP_PMTILES_URL';
  * no retry, no spinner. `map.browser.spec.ts` §"a ride outside the archive's
  * coverage" is the measurement.
  */
-export const PUBLISHED_BASEMAP_URL = 'https://tiles.openzigs.com/basemap-us-20260914.pmtiles';
+export const PUBLISHED_BASEMAP_URL = 'https://tiles.openzigs.com/basemap-us-oyl-20261030.pmtiles';
 
 /** What `readBasemapConfig` reads. A parameter, so a test needs no bundler. */
 export interface BasemapEnvironment {
