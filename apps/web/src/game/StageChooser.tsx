@@ -472,6 +472,15 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       </StatusMessage>
     ),
   ].filter((each) => each !== undefined);
+  const lapRace =
+    props.lapRace === undefined ? undefined : (
+      <LapRaceControl
+        offer={props.lapRace}
+        route={chosen}
+        worldChosen={props.worldChosen}
+        idPrefix={ids}
+      />
+    );
   return (
     <div className="oyl-game__picker oyl-chooser">
       {/*
@@ -572,6 +581,15 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       <div className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card">
         <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
         <LoadoutHelp />
+        {/*
+          #1970: on a loop the race comes FIRST in the loadout, so on a
+          1280×800 tablet its switch is on the screen under Ride without a
+          scroll (`pre-ride.browser.spec.ts` §"#1970"); last, it was under the
+          pacer, the position and the wind, and below the fold. On any other
+          route its one line saying why there is no race stays last, under
+          every control a rider can use.
+        */}
+        {lapRace === undefined || !chosen.profile.loop ? null : lapRace}
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
         {props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
           <RiderGhostControl
@@ -600,14 +618,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           field={props.air.field}
         />
         {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
-        {props.lapRace === undefined ? null : (
-          <LapRaceControl
-            offer={props.lapRace}
-            route={chosen}
-            worldChosen={props.worldChosen}
-            idPrefix={ids}
-          />
-        )}
+        {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
     </div>
   );
