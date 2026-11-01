@@ -86,9 +86,10 @@ synthetic road and draws no OpenStreetMap data.
 - **What is in it.** Per preset route, one file in the demo's build output (`apps/web/demo/dist`,
   gitignored, never committed; a SHA-256 per route may be): the decoded corridor records the
   renderer reads (footprints, land use, water, footways, streets and place points, with the fields
-  ADR 0054 D-3.3 lists and no OSM identifier, name or address; ADR 0056's 2026-11-01 amendment), the route's line and elevation from a GPX the owner
-  supplies, stripped to latitude, longitude and elevation (ADR 0056 D-2, D-7), and the licence,
-  source and notice. No owner, route id or device time.
+  ADR 0054 D-3.3 lists and no OSM identifier, name or address; ADR 0056's 2026-11-01 amendment),
+  the route's line and elevation from a GPX the owner supplies, stripped to latitude, longitude and
+  elevation (ADR 0056 D-2, D-7), and the licence, source and notice. No owner, route id or device
+  time.
 - **Its licence.** It is a Derivative Database that is Publicly Used, so it is offered **under ODbL
   1.0** (§4.4 a.i). Shipping it in a build Publicly Conveys it, so the file carries the licence's
   URI and a notice file sits beside it (§4.2 b and d). The notice is ODbL §4.3 a's example:
