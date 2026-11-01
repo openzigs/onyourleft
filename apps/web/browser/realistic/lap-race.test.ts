@@ -2,8 +2,8 @@
 
 /**
  * The owner's page's `?race=worst` lap race — #1972: the worst case of
- * #1902/#1961 is handed to the frame, a lap race is refused outside the
- * stylised world, and nothing of it reaches a frame that did not ask.
+ * #1902/#1961 is handed to the frame, in either world since #1971, and
+ * nothing of it reaches a frame that did not ask.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -43,15 +43,25 @@ describe('the realistic page’s lap race — #1972', () => {
     expect(parseConfig('?world=stylised').race).toBeUndefined();
   });
 
-  it('refuses a race anywhere but the stylised world, and beside a frame it is not', () => {
-    for (const query of ['?race=worst', '?world=realistic&race=worst']) {
-      expect(() => parseConfig(query)).toThrow(/only the stylised world/);
+  it('reads a race in the realistic world too, on the village’s frame (#1971)', () => {
+    for (const query of ['?race=worst', '?world=realistic&race=worst&route=village']) {
+      const config = parseConfig(query);
+      expect(config.race).toBe('worst');
+      expect(parseConfig(configQuery(config))).toEqual(config);
     }
-    for (const other of ['delivery=3', 'town=mixed', 'route=village']) {
-      expect(() => parseConfig(`?world=stylised&race=worst&${other}`)).toThrow(
-        /two frames; name one of them/,
-      );
+  });
+
+  it('refuses a race beside a frame it is not: a round or a town anywhere, a route in the stylised world', () => {
+    for (const world of ['stylised', 'realistic']) {
+      for (const other of ['delivery=3', 'town=mixed']) {
+        expect(() => parseConfig(`?world=${world}&race=worst&${other}`)).toThrow(
+          /two frames; name one of them/,
+        );
+      }
     }
+    expect(() => parseConfig('?world=stylised&race=worst&route=village')).toThrow(
+      /two frames; name one of them/,
+    );
   });
 
   it('refuses a race it does not know, as it refuses an unknown lever', () => {
