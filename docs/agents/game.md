@@ -738,7 +738,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         held item" handed to `stepRace`'s next tick. The
                         lanes and keys are Delivery's (`lanes.ts`); the item
                         key is W, the HUD's `hud/ItemControl.tsx` is one
-                        button inside the touch lock (never exempt), and a
+                        button inside the touch lock (never exempt),
+                        `aria-disabled` while nothing is held (#1968; the key
+                        and a pad are left to the race), and a
                         pad's throw buttons use the item. `race-input.test.ts`
                         rides one power trace with and without presses and
                         reads every tick's effort distance and speed back
