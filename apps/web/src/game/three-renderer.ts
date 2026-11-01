@@ -10781,7 +10781,7 @@ export interface DrawnLapRacePiece {
 /**
  * The lap race's paints — #1902, this project's own (ADR 0060 D-1): a
  * glowing teal band across the road between two white posts, each with a teal
- * pennant, for a pick-up point; a grey-blue puddle the colour of the sky it
+ * flag (a pennant until #1969), for a pick-up point; a grey-blue puddle the colour of the sky it
  * holds, with a paler sheen; and a pale-blue glowing ring of spray about the
  * wheels for a hit. No item box, no symbol, no sprite and no colour scheme is
  * taken from any game.
@@ -10795,14 +10795,45 @@ const LAP_RACE_PAINT = {
 } as const;
 
 /**
+ * How a pick-up point's flags stand — #1969. The flags FACE the rider, broad
+ * side across the road, so they read from {@link PICK_UP_SEEN_FROM_METRES}
+ * away; until #1969 they were pennants edge-on to the rider, 3 cm wide as
+ * seen from behind, and from a distance the band across the road was all
+ * there was: a thin teal line. Each flag flies OUTWARD from its post, over
+ * the verge, so no flag is ever over the carriageway a rider and the chase
+ * camera ride through.
+ */
+const PICK_UP_POST_METRES = { height: 3, offRoad: 0.3, thick: 0.1 } as const;
+const PICK_UP_FLAG_METRES = { width: 1.5, height: 1.2, thick: 0.04 } as const;
+
+/**
+ * The distance a pick-up point is to be recognisable from — #1969: the
+ * HUD's puddle warning (`hud/lap-race-hud.ts` §`PUDDLE_WARNING_METRES`,
+ * 50 m, about five seconds at a race pace), because a puddle lies AT a
+ * pick-up point and that is the distance the project gives a rider to read
+ * the road and change lane. Restated rather than imported: this file
+ * imports no HUD module. `browser/lap-race.browser.spec.ts` §"#1969"
+ * measures what one pick-up point puts on a 1280×800 frame from here.
+ *
+ * @test-facing the distance `browser/lap-race-harness.ts` §`pickUpSeen` is
+ * measured from, and held equal to the HUD's by `lap-race-belt.test.ts`;
+ * the product's shape is {@link PICK_UP_FLAG_METRES}, which nothing reads
+ * at a distance
+ */
+export const PICK_UP_SEEN_FROM_METRES = 50;
+
+/**
  * A pick-up point, its middle on the road's centre at the origin: a band
  * 0.5 m along across the whole 7 m carriageway, lifted clear of the road by
- * `terrain.ts` §`CENTRE_LINE_LIFT_METRES`'s depth allowance, and a
- * post with a pennant just off each edge, all teal but the posts. The band
- * and pennants glow, so a pick-up reads in any light.
+ * `terrain.ts` §`CENTRE_LINE_LIFT_METRES`'s depth allowance, and a tall
+ * white post just off each edge flying a teal flag that faces the rider
+ * (#1969, {@link PICK_UP_FLAG_METRES}). The band and the flags glow, so a
+ * pick-up reads in any light. Still one shape, so still one instanced call.
  */
 function pickUpShape(): BufferGeometry {
   const half = ROAD_WIDTH_METRES / 2;
+  const post = PICK_UP_POST_METRES;
+  const flag = PICK_UP_FLAG_METRES;
   const parts: DeliveryPart[] = [
     {
       made: deliveryBox(ROAD_WIDTH_METRES, 0.02, 0.5, 0, CENTRE_LINE_LIFT_METRES + 0.01, 0),
@@ -10811,11 +10842,21 @@ function pickUpShape(): BufferGeometry {
     },
   ];
   for (const side of [-1, 1]) {
-    const x = side * (half + 0.2);
+    const x = side * (half + post.offRoad);
     parts.push(
-      { made: deliveryBox(0.06, 1.6, 0.06, x, 0.8, 0), colour: LAP_RACE_PAINT.pickUpPost },
       {
-        made: deliveryBox(0.03, 0.3, 0.45, x, 1.42, -0.25),
+        made: deliveryBox(post.thick, post.height, post.thick, x, post.height / 2, 0),
+        colour: LAP_RACE_PAINT.pickUpPost,
+      },
+      {
+        made: deliveryBox(
+          flag.width,
+          flag.height,
+          flag.thick,
+          x + side * (post.thick / 2 + flag.width / 2),
+          post.height - flag.height / 2,
+          0,
+        ),
         colour: LAP_RACE_PAINT.pickUpBand,
         glows: true,
       },
