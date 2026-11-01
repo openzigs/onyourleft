@@ -722,7 +722,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         never holds one. Started at the press (assist read
                         from the device, ONE seed nothing keeps), stepped one
                         tick a simulation step that ran (bots through
-                        `@onyourleft/physics` §`stepBotRace`), the rider
+                        `@onyourleft/physics` §`stepBotRace`: a field of
+                        mixed personalities from the seed, at the `canny`
+                        skill, #1959), the rider
                         DRAWN at effort distance plus race offset (D-3.3)
                         and the bots in their lanes, the HUD's place, item
                         and standings, its sentences owed. Nothing kept at

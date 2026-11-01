@@ -300,15 +300,18 @@ has just joined.
 ## 4b. Bots in a solo lap race (#1900)
 
 `lap-race-bot.ts` races the #92 bot. `stepBotRace` takes each bot's decision from
-`@onyourleft/domain` §`botDecision` (when to use its held item, which lane), rides its W/kg tier's
+`@onyourleft/domain` §`strategicBotDecision` (#1959: when to use its held item, which lane, by the
+bot's personality and skill, with the memory it handed back last tick), rides its W/kg tier's
 pace through `advanceBot`, and hands the bots' effort distances and decisions to §`stepRace` with
 the rider's inputs. A bot's inputs are a tier, the pacing rule, the course and a seed. Its public
 signatures take no activity, stream or ghost type, which a type-level test holds. Its power never reads
 the race's standings: there is no rubber-banding (ADR 0060 D-9). `lap-race-bot.test.ts` replaces
 `advance` with a sentinel, as `pacer.test.ts` does, and requires the bot's race position to move.
-The seed is the race's own, and `botDecision` refuses one that is not a safe whole number. Each
-bot's speed times the tick's length is passed as how far it will ride, so its puddle look-ahead
-grows with its speed (`packages/domain/src/lap-race/bots.ts`).
+The seed is the race's own, and the decision refuses one that is not a safe whole number. Each
+bot's speed times the tick's length is passed as how far it will ride, so its puddle look-ahead and
+its last call grow with its speed (`packages/domain/src/lap-race/strategy.ts`). A bot's strategy is
+chosen apart from its tier and is never read on the way to its power: a crafty and a naive bot of
+one tier ride one power trace, and the crafty one finishes ahead more often than not.
 
 ---
 

@@ -60,10 +60,13 @@
 
 import {
   BOT_MASS_KILOGRAMS,
+  botFieldPersonalities,
   createItemRace,
   racePosition,
   raceCourse,
   seconds,
+  type BotPersonality,
+  type BotSkill,
   type ItemRaceState,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -103,6 +106,13 @@ import {
 
 /** The race's length of one tick: the simulation's step, `simulation.ts` §`SIMULATION_STEP_SECONDS`. */
 export const LAP_RACE_TICK_SECONDS = 0.05;
+
+/**
+ * How well a solo race's bots choose (#1959): the middle of
+ * `@onyourleft/domain` §`BOT_SKILLS`, until the chooser offers it beside the
+ * tier, in words the owner approves.
+ */
+const LAP_RACE_BOT_SKILL: BotSkill = 'canny';
 
 /** The rider's id in the race. Never shown: the HUD names the rider's own line itself. */
 export const LAP_RACE_RIDER_ID = 'rider';
@@ -220,6 +230,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   const seed = drawRaceSeed();
   const tier = assistedBotTier(assist, choice.tier);
   const ids = Array.from({ length: choice.bots }, (_, index) => `bot-${String(index + 1)}`);
+  const personalities = botFieldPersonalities(seed, ids.length);
   const race = createItemRace(
     assistedRaceSetup(
       assist,
@@ -235,7 +246,13 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   );
   return {
     race,
-    bots: ids.map((id) => lapRaceBot(id, tier)),
+    // A mixed field: the three personalities in turn, from the race's seed.
+    bots: ids.map((id, index) =>
+      lapRaceBot(id, tier, {
+        personality: personalities[index] as BotPersonality,
+        skill: LAP_RACE_BOT_SKILL,
+      }),
+    ),
     seed,
     assist,
     input: startRiderInput(input.lineOffset),
