@@ -115,6 +115,8 @@ async function openChooser(
   viewport: ChooserViewport,
   query: 'chooser' | 'list',
   notices: ChooserNotices = 'promise',
+  /** More of the query, from `&` — #1970's `&lap=riding`, a loop chosen first. */
+  more = '',
 ): Promise<void> {
   if (viewport.insets) {
     await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
@@ -122,7 +124,7 @@ async function openChooser(
   await openRide(
     page,
     { ...viewport, unstagedFails: false },
-    `?picker=${query}${notices === 'promise' ? '' : `&notices=${notices}`}`,
+    `?picker=${query}${notices === 'promise' ? '' : `&notices=${notices}`}${more}`,
   );
 }
 
@@ -969,4 +971,79 @@ test.describe('#1221 — the chooser says, under Ride, that nothing is recording
       expect(read.onTop, 'something covers the line’s words').toBe(true);
     });
   }
+});
+
+/*
+ * #1970 — THE LAP RACE'S SWITCH, ON THE SCREEN, ON A LOOP.
+ *
+ * `ride.html?picker=chooser&lap=riding`: the chooser's first route, the one
+ * chosen when it opens, is a loop (`ride-harness.tsx` §`LAP`), so the chooser
+ * offers the race. On the owner's tablet in the shell — 1280×800 with the
+ * #439 insets — and with the page at `scrollY === 0`, the race's switch is
+ * whole on the screen above the fold, the topmost thing at its own centre,
+ * with #503's promise alone and with the tallest stack of notices above
+ * *Ride*. Every margin is printed.
+ *
+ * ⚠️ **The control** moves the race's control back to the END of the loadout,
+ * where it was until #1970 (under the pacer, the position and the wind): its
+ * switch must then be below the fold, or this measures nothing.
+ */
+async function readRaceSwitch(
+  page: Page,
+  movedLast: boolean,
+): Promise<{
+  readonly top: number;
+  readonly bottom: number;
+  readonly fold: number;
+  readonly onTop: boolean;
+}> {
+  return page.evaluate((last) => {
+    const race = document.querySelector('.oyl-chooser__loadout > .oyl-game__lap-race');
+    if (race === null) throw new Error('the chooser offers no lap race on the loop');
+    if (last) race.parentElement?.append(race);
+    window.scrollTo(0, 0);
+    const box = race.querySelector('input[role="switch"]')?.getBoundingClientRect();
+    if (box === undefined) throw new Error('the lap race has no switch');
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;bottom:0;height:env(safe-area-inset-bottom,0px)';
+    document.body.append(probe);
+    const inset = probe.getBoundingClientRect().height;
+    probe.remove();
+    return {
+      top: box.top,
+      bottom: box.bottom,
+      fold: window.innerHeight - inset,
+      onTop: hit !== null && race.contains(hit),
+    };
+  }, movedLast);
+}
+
+test.describe('#1970 — the lap race’s switch is on the screen on a loop, on the tablet', () => {
+  for (const notices of ['promise', 'all'] as const) {
+    test(`notices ${notices}: the switch is whole above the fold at scrollY 0 — ${TABLET_IN_THE_SHELL_CHOOSER.name}`, async ({
+      page,
+    }) => {
+      await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'chooser', notices, '&lap=riding');
+      const seen = await readRaceSwitch(page, false);
+      console.log(
+        `#1970 notices ${notices}: the race switch at ${seen.top.toFixed(1)}–${seen.bottom.toFixed(1)} px, ${(seen.fold - seen.bottom).toFixed(1)} px above the fold`,
+      );
+      expect(seen.top).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
+      expect(seen.bottom).toBeLessThanOrEqual(seen.fold + SUBPIXEL_TOLERANCE);
+      expect(seen.onTop, 'something covers the race switch at its own centre').toBe(true);
+    });
+  }
+
+  test('the control — the race last in the loadout puts its switch below the fold', async ({
+    page,
+  }) => {
+    await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'chooser', 'promise', '&lap=riding');
+    const seen = await readRaceSwitch(page, true);
+    console.log(
+      `#1970 — the control: the race switch at ${seen.top.toFixed(1)} px, the fold at ${seen.fold.toFixed(1)} px`,
+    );
+    expect(seen.top).toBeGreaterThan(seen.fold);
+  });
 });

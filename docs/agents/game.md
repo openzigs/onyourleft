@@ -709,8 +709,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a solo lap race inside a game ride (#1906, ADR 0060):
                         `GameView` holds one per ride, asked for by the
                         chooser (#1907: `StageChooser.tsx` §`LapRaceControl`
-                        offers *Ride a lap race* on a loop only, saying why
-                        in words on any other, with its laps, field, tier and
+                        offers *Ride a lap race* on a loop only, first in
+                        *Your ride* so a tablet shows it unscrolled (#1970),
+                        saying why in words, last, on any other, with its
+                        laps, field, tier and
                         items from `lap-race/choice.ts`, and turns a Delivery
                         round off as it is turned on) or a test's `lapRace`
                         prop, on a LOOP route,
