@@ -42,6 +42,29 @@ is built on the owner's Mac. It is uploaded under a separate name beside the
 live Protomaps file, and only on the owner's word. The ride map switches to it
 only after the owner's check on the tablet.
 
+**Uploaded, but not the default.** The first US build, made on 2026-10-31 from
+the 2026-10-30 extract, is uploaded as
+`https://tiles.openzigs.com/basemap-us-oyl-20261030.pmtiles`. Inside the US its
+roads match the Protomaps file's, with newer OpenStreetMap data, and it adds
+Alaska and Hawaii. The ride map does not read it (`src/map/basemap.ts`
+§`PUBLISHED_BASEMAP_URL` still names `basemap-us-20260914.pmtiles`) because
+that build was not clipped to the extract: its header bounds are -180..180 by
+15.9..73.0 and it addresses 368 848 915 tiles against the old file's
+21 635 078, since Planetiler filled the whole box with land and ocean
+polygons. A z15 tile in London, Toronto or Mexico City exists in it and holds
+only `earth`, where the old file has none, so the world would draw no villages
+or streets for a ride there and the map would paint bare land (#1557's review,
+which also measured a southern-Ontario tile with 1777 buildings and 137 roads
+in the old file and none in the new). `build.sh` now fetches the region's
+Geofabrik `.poly` and gives it to Planetiler as `--polygon`, which limits the
+output to tiles intersecting the outline. The switch waits for a rebuild with
+that flag, a `basemap:compare` whose `coverage` block (header bounds and
+addressed-tile count of both archives) shows a count near the old file's, and
+the owner's word. Not run: that rebuild, which needs the US extract and hours.
+The `-20261030` in the name is the extract's date; the build ran on 2026-10-31.
+A published archive is moved to the same way as before: a new dated name, the
+constant moved to it, the old file left in place.
+
 `--build-year` is the latest `start_year` written. Give the value from the
 build record to rebuild the same extract byte for byte.
 

@@ -189,6 +189,13 @@ export const BASEMAP_URL_VARIABLE = 'VITE_BASEMAP_PMTILES_URL';
  * still in use can name it. `docs/architecture.md`'s Basemap row says the same
  * where #53's archive is described.
  *
+ * ⚠️ **#1557's own build, `basemap-us-oyl-20261030.pmtiles`, is uploaded but is
+ * NOT this default**: it was not clipped to the US, so its header says
+ * −180°..180° by 15.9°..73.0° and a z15 tile in London holds only `earth`.
+ * That would turn a non-US ride from a procedural world into an empty one and
+ * paint bare land beside the line. `apps/web/tools/basemap/README.md` says what
+ * the switch waits for.
+ *
  * ⚠️ **Outside that box the map is a line on a plain background.** The archive
  * declares its bounds in its header, `pmtiles`' protocol hands them to
  * MapLibre as the source's `bounds`, and MapLibre asks for no tile outside
