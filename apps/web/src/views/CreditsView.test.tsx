@@ -700,6 +700,22 @@ describe('the map data — #1552, ADR 0054 D-3.6', () => {
     expect(licence?.getAttribute('rel') ?? '').toContain('noreferrer');
   });
 
+  it('credits ESA WorldCover in the words ADR 0032 records, linking CC BY 4.0 — #1975', async () => {
+    await render();
+    const credit = mapData()?.querySelector('[data-credit="worldcover"]');
+    const words = (credit?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(words).toContain(
+      '© ESA WorldCover project 2020 / Contains modified Copernicus Sentinel data (2020) ' +
+        'processed by ESA WorldCover consortium',
+    );
+    const licence = credit?.querySelector<HTMLAnchorElement>(
+      'a[href="https://creativecommons.org/licenses/by/4.0/"]',
+    );
+    expect(licence?.textContent).toBe('Creative Commons Attribution 4.0 licence');
+    expect(licence?.getAttribute('target')).toBe('_blank');
+    expect(licence?.getAttribute('rel') ?? '').toContain('noreferrer');
+  });
+
   it('links the same ODbL URL, and credits in the same words, as an exported course', () => {
     expect(ODBL_LICENCE_URL).toBe(FIT_ODBL_LICENCE_URL);
     expect(OSM_ATTRIBUTION).toBe(FIT_OSM_ATTRIBUTION);

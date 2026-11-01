@@ -16,7 +16,12 @@ import { loadNoticesDocument } from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { StatusMessage } from '../design/StatusMessage';
-import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
+import {
+  ODBL_LICENCE_URL,
+  ODBL_NOTICE,
+  OSM_ATTRIBUTION,
+  WORLDCOVER_ATTRIBUTION,
+} from '../map/basemap';
 
 /**
  * Who made the art this app ships, generated from `ASSETS.toml` — #358.
@@ -129,6 +134,9 @@ export interface CreditsViewProps {
 const NOTICE =
   'Each work below remains the copyright of its creator and is used under the licence named ' +
   'beside it. The material is provided as-is, without warranties of any kind.';
+
+/** ESA WorldCover's licence (#1975), from the same table every CC BY credit here links through. */
+const CC_BY_LICENCE_URL = licenceLink('CC-BY-4.0');
 
 /** One work, its licence, what was changed, and the files taken from it. */
 function Work({ work }: { readonly work: CreditedWork }): JSX.Element {
@@ -452,6 +460,20 @@ export function CreditsView({
           .
         </p>
         <p>{ODBL_NOTICE}</p>
+        {/*
+          #1975: the map archive also carries a land-cover layer derived from
+          ESA WorldCover, which nothing here draws. CC BY 4.0 asks for the
+          credit when the material is shared, and the owner ruled on
+          2026-10-31 (#1557) that the app gives it.
+        */}
+        <p data-credit="worldcover">
+          {WORLDCOVER_ATTRIBUTION}. The map files also hold a land-cover layer derived from ESA
+          WorldCover, which is published under the{' '}
+          <a href={CC_BY_LICENCE_URL} target="_blank" rel="noreferrer">
+            Creative Commons Attribution 4.0 licence
+          </a>
+          . This app does not draw that layer.
+        </p>
       </div>
 
       <div data-terms="software">

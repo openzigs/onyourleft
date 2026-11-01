@@ -6647,6 +6647,16 @@ select.oyl-input {
   margin-block-start: var(--oyl-space-sm);
 }
 
+/* #1968: *Use item* while nothing is held carries `aria-disabled` rather than
+   the `disabled` attribute, for the picker's reason (§"A ride control the
+   pacer intensity has blocked"): it stays in the tab order and says why. Its
+   look is the HUD's muted ink on the control's own surface (AA in every
+   theme, `ItemControl.a11y.test.tsx`), and the pointer's half of the signal. */
+.oyl-hud__item .oyl-hud__control[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: var(--oyl-color-hud-ink-muted);
+}
+
 /*
  * THE MAP DATA'S CREDIT — #1552, ADR 0054 D-3.6 and D-8 Q3.
  *

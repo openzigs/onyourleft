@@ -177,6 +177,11 @@ export function riderEntry(race: ItemRaceState, riderId: string): LapRacer {
   return entry;
 }
 
+/** Whether the rider holds an item now — the HUD's *Use item* is unavailable without one (#1968). */
+export function riderHolds(hud: LapRaceHud): boolean {
+  return riderEntry(hud.race, hud.riderId).held !== null;
+}
+
 /**
  * A hit coming at the rider, from the race as it stands: a racer behind in
  * the rider's lane, within the gust's reach (`items.ts` §`GUST_REACH_METRES`),

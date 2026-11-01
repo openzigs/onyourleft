@@ -26,6 +26,7 @@ import { FONT_STACK, GLYPH_RANGE_STARTS, rangeName } from '../../tools/glyphs/fo
 import { THEMES } from '../design/tokens';
 
 import {
+  BASEMAP_ATTRIBUTION,
   BASEMAP_SOURCE_ID,
   GLYPHS_URL,
   LABEL_FONT,
@@ -36,6 +37,7 @@ import {
   OSM_ATTRIBUTION,
   PUBLISHED_BASEMAP_URL,
   readBasemapConfig,
+  WORLDCOVER_ATTRIBUTION,
   styleOrigins,
   type BasemapStyle,
   type MapColours,
@@ -44,11 +46,30 @@ import {
 const ARCHIVE = 'https://tiles.example.org/basemap.pmtiles';
 const OTHER = 'https://tiles.example.net/planet.pmtiles';
 
+describe('the credit beside the map — ODbL §4.3, and ESA WorldCover’s CC BY 4.0 (#1975)', () => {
+  it('credits OpenStreetMap first, then ESA WorldCover in the words ADR 0032 records', () => {
+    // Literals, not the constants: the words are a licence's and the owner's,
+    // and a change to them is one a reviewer must see in this file too.
+    expect(BASEMAP_ATTRIBUTION).toBe(
+      '© OpenStreetMap contributors · © ESA WorldCover project 2020 / Contains modified ' +
+        'Copernicus Sentinel data (2020) processed by ESA WorldCover consortium',
+    );
+    expect(BASEMAP_ATTRIBUTION.startsWith(OSM_ATTRIBUTION)).toBe(true);
+    expect(BASEMAP_ATTRIBUTION.endsWith(WORLDCOVER_ATTRIBUTION)).toBe(true);
+  });
+
+  it('is what the published archive is credited with when nothing is configured', () => {
+    const config = readBasemapConfig({});
+    expect(config?.attribution).toContain('© OpenStreetMap contributors');
+    expect(config?.attribution).toContain('© ESA WorldCover project 2020');
+  });
+});
+
 describe('readBasemapConfig — the URL is configuration', () => {
   it('reads a configured archive', () => {
     const config = readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: ARCHIVE });
     expect(config?.archiveUrl).toBe(ARCHIVE);
-    expect(config?.attribution).toBe(OSM_ATTRIBUTION);
+    expect(config?.attribution).toBe(BASEMAP_ATTRIBUTION);
   });
 
   it('is the archive #53 published when nothing is configured — #534', () => {
@@ -58,7 +79,7 @@ describe('readBasemapConfig — the URL is configuration', () => {
     for (const unset of [{}, { VITE_BASEMAP_PMTILES_URL: '' }, { VITE_BASEMAP_PMTILES_URL: ' ' }]) {
       const config = readBasemapConfig(unset);
       expect(config?.archiveUrl).toBe(PUBLISHED_BASEMAP_URL);
-      expect(config?.attribution).toBe(OSM_ATTRIBUTION);
+      expect(config?.attribution).toBe(BASEMAP_ATTRIBUTION);
     }
   });
 

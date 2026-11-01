@@ -19,6 +19,7 @@ import {
   basemapStyle,
   MAP_COLOURS,
   OSM_ATTRIBUTION,
+  readBasemapConfig,
   styleOrigins,
   type BasemapConfig,
   type BasemapStyle,
@@ -103,6 +104,21 @@ describe('criterion 4 — the OpenStreetMap attribution is a licence obligation'
     await settle();
     const credit = document.querySelector('.oyl-map__attribution');
     expect(credit?.textContent).toBe('© OpenStreetMap contributors');
+  });
+
+  it('credits ESA WorldCover beside OpenStreetMap for the archive a build is given — #1975', async () => {
+    // Through the read the ride screen makes (`main.tsx` hands the panel
+    // `browserBasemapConfig()`), not through a fixture written to pass.
+    const configured = readBasemapConfig({});
+    if (configured === undefined) throw new Error('the published archive is configured');
+    mounted = await mount(<MapPanel port={stubMapPort()} basemap={configured} track={aTrack()} />);
+    await settle();
+    const lines = queryAll(document, '.oyl-map__attribution');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toBe(
+      '© OpenStreetMap contributors · © ESA WorldCover project 2020 / Contains modified ' +
+        'Copernicus Sentinel data (2020) processed by ESA WorldCover consortium',
+    );
   });
 
   it('is visible without interaction — not inside a details, a dialog or a button', async () => {
