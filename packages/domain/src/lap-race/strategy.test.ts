@@ -14,19 +14,21 @@ import { createItemRace, stepRace } from './item-race';
 import {
   GUST_REACH_METRES,
   pickUpsPassed,
+  RAIN_CAPE_DURATION_MS,
   STARTING_LANE,
   type ItemKind,
   type ItemRaceState,
   type LapRacer,
   type OffsetEffect,
 } from './items';
-import { RACE_OFFSET_BOUND_METRES, raceCourse, type RaceCourse } from './race';
+import { RACE_OFFSET_BOUND_METRES, raceCourse, racePosition, type RaceCourse } from './race';
 import {
   BOT_FINISH_WINDOW_METRES,
   BOT_LANE_DWELL_MS,
   BOT_MEMORY_AT_START,
   BOT_PERSONALITIES,
   BOT_PUDDLE_REACH_METRES,
+  BOT_RELINE_MS,
   botFieldPersonalities,
   strategicBotDecision,
   type BotMemory,
@@ -107,7 +109,7 @@ function decide(
 const JUST_MOVED = (race: ItemRaceState): BotMemory => ({
   laneSinceMs: race.atMs - 500,
   itemSince: null,
-  linedUpIds: [],
+  linedUp: [],
 });
 
 describe('item timing: what a use is worth, against what the item is held for', () => {
@@ -223,11 +225,73 @@ describe('item timing: what a use is worth, against what the item is held for', 
     // x newly within gust reach behind in its lane: a hit is coming.
     expect(decide(race, 'defensive').use).toBe(true);
     // x was there last tick too, and may hold nothing: a defensive bot keeps its cape.
-    const sat: BotMemory = { laneSinceMs: null, itemSince: 1, linedUpIds: ['x'] };
+    const satFor = (ms: number): BotMemory => ({
+      laneSinceMs: null,
+      itemSince: 1,
+      linedUp: [{ id: 'x', sinceMs: race.atMs - ms }],
+    });
+    const sat = satFor(1_000);
     expect(decide(race, 'defensive', { memory: sat }).use).toBe(false);
+    expect(decide(race, 'defensive', { memory: satFor(BOT_RELINE_MS - 1) }).use).toBe(false);
+    // Sat there for BOT_RELINE_MS, x counts as lining up again (#1986).
+    expect(decide(race, 'defensive', { memory: satFor(BOT_RELINE_MS) }).use).toBe(true);
+    // Another rival's long sit is not x's: x has sat a second.
+    const others: BotMemory = {
+      ...sat,
+      linedUp: [
+        { id: 'y', sinceMs: 0 },
+        { id: 'x', sinceMs: race.atMs - 1_000 },
+      ],
+    };
+    expect(decide(race, 'defensive', { memory: others }).use).toBe(false);
     // An aggressive bot puts it on for either.
     expect(decide(race, 'aggressive', { memory: sat }).use).toBe(true);
   });
+
+  it.each([1_000, 250, 50])(
+    'answers a rival who sat behind it from the start, BOT_RELINE_MS after they lined up, on %s ms ticks (#1986)',
+    (tickMs) => {
+      // Wearing one cape, until 3 s, and holding another: a cape drawn while the
+      // first was on. x sits 10 m behind in its lane from the first tick, and
+      // is still sat there when the first cape has run out.
+      let race = field(
+        [
+          { id: 'bot', at: 300, held: 'rain-cape', capeUntilMs: 3_000 },
+          { id: 'x', at: 290 },
+        ],
+        0,
+      );
+      let memory = BOT_MEMORY_AT_START;
+      let putOnAtMs: number | null = null;
+      for (let atMs = 0; atMs <= 10_000 && putOnAtMs === null; atMs += tickMs) {
+        const decision = strategicBotDecision(
+          race,
+          'bot',
+          SEED,
+          (8 * tickMs) / 1_000,
+          strategy('defensive'),
+          memory,
+        );
+        memory = decision.memory;
+        // It keeps the lane, and so x stays lined up behind it, remembered from the first tick.
+        expect(decision.lane).toBe(1);
+        expect(memory.linedUp).toEqual([{ id: 'x', sinceMs: 0 }]);
+        if (decision.use) putOnAtMs = atMs;
+        const next = atMs + tickMs;
+        race = stepRace(race, {
+          atMs: next,
+          effortDistances: { bot: 300 + (8 * next) / 1_000, x: 290 + (8 * next) / 1_000 },
+          lanes: { bot: decision.lane, x: 1 },
+          uses: decision.use ? ['bot'] : [],
+        });
+      }
+      // Not while the first cape is on, nor in the seconds after, as before; then, at
+      // BOT_RELINE_MS of race time behind it, whatever the tick.
+      expect(putOnAtMs).toBe(BOT_RELINE_MS);
+      const bot = race.racers.find((entry) => entry.racer.id === 'bot') as LapRacer;
+      expect(bot.capeUntilMs).toBe(BOT_RELINE_MS + tickMs + RAIN_CAPE_DURATION_MS);
+    },
+  );
 
   it('holding a cape, does not move into the line of a rival behind, where the cape would go at once', () => {
     const ahead = (rival: Spec[]): ItemRaceState => ({
@@ -357,7 +421,7 @@ describe('lanes: a score per lane, and a dwell', () => {
       use: true,
       lane: 1,
       // Used, so its judgement of that item is forgotten; the racer lined up behind is remembered.
-      memory: { laneSinceMs: null, itemSince: null, linedUpIds: ['x'] },
+      memory: { laneSinceMs: null, itemSince: null, linedUp: [{ id: 'x', sinceMs: 5_000 }] },
     });
   });
 
@@ -625,7 +689,8 @@ describe('holding: a defensive leader’s cape absorbs the hit the #1900 bot was
       Array.from({ length: 100 }, (_, at) => strategicRun(at + 1, skill)).filter(
         (run) => run.absorbed && !run.wasted && !run.hit,
       ).length;
-    // Measured: 87 of 100 at canny, 8 at naive (10 at canny before #1982's fix round).
+    // Measured: 87 of 100 at canny, 8 at naive (10 at canny before #1982's fix round), and
+    // the same with #1986's re-lining, whose rival moves into the lane two ticks before the gust.
     expect(held('canny')).toBeGreaterThanOrEqual(80);
     // Skill still degrades it.
     expect(held('naive')).toBeLessThanOrEqual(40);
@@ -708,9 +773,12 @@ describe('over a thousand seeded races', { timeout: 60_000 }, () => {
     const aggressive = profile('aggressive');
     const defensive = profile('defensive');
     const opportunist = profile('opportunist');
-    // Measured at #1982's fix round, with canny misjudging by 1.5 m (it was 6 m, and the
-    // wider gaps it measured then were mostly that noise): mean holds 2.83 / 3.35 / 3.46 s,
-    // capes 2.86 / 4.68 / 3.00 s. Over a thousand races those means move by well under 0.1 s.
+    // The races are seeded, so these means are the same on every run: a margin below is
+    // slack against a retune of the weights, not against run-to-run variation, of which
+    // there is none. Measured with #1986's re-lining (aggressive / defensive / opportunist):
+    // mean holds 2.80 / 3.29 / 3.44 s, capes 2.74 / 4.26 / 2.88 s, racers a gust 1.01 /
+    // 1.12 / 1.21; so about 85 ms left on aggressive against defensive held, 135 ms on
+    // defensive against opportunist capes. Before it: 2.83 / 3.35 / 3.46 s and 2.86 / 4.68 / 3.00 s.
     // Aggressive fires early: the shortest holds.
     expect(aggressive.held).toBeLessThan(defensive.held - 400);
     expect(aggressive.held).toBeLessThan(opportunist.held - 400);
@@ -735,33 +803,78 @@ describe('what a decision reads, and what it does not', () => {
       'reactive',
     ]);
     let compared = 0;
-    for (const state of run.states.slice(0, 120)) {
+    // Comparisons where the cape rule reads a sat rival: the bot holds a cape, none on,
+    // with a rival in gust reach behind it in its lane.
+    let capeRuleRead = 0;
+    for (const raced of run.states.slice(0, 120)) {
       for (const id of ['b0', 'b1', 'b2']) {
-        const blind: ItemRaceState = {
-          ...state,
-          racers: state.racers.map((entry) =>
-            entry.racer.id === id ? entry : { ...entry, held: 'crosswind-gust', capeUntilMs: 1e9 },
-          ),
-        };
-        const at = Number(id.slice(1));
-        const pick = (race: ItemRaceState): unknown =>
-          strategicBotDecision(
-            race,
-            id,
-            7,
-            8,
-            [
-              strategy('aggressive', 'canny'),
-              strategy('defensive', 'crafty'),
-              strategy('opportunist', 'naive'),
-            ][at] as BotStrategy,
-            BOT_MEMORY_AT_START,
-          );
-        expect(pick(blind)).toEqual(pick(state));
-        compared += 1;
+        // As raced, and holding a cape as it is drawn, so the cape rule is asked.
+        const owns: readonly ItemRaceState[] = [
+          raced,
+          {
+            ...raced,
+            racers: raced.racers.map((entry) =>
+              entry.racer.id === id ? { ...entry, held: 'rain-cape', capeUntilMs: null } : entry,
+            ),
+          },
+        ];
+        for (const state of owns) {
+          const blind: ItemRaceState = {
+            ...state,
+            racers: state.racers.map((entry) =>
+              entry.racer.id === id
+                ? entry
+                : { ...entry, held: 'crosswind-gust', capeUntilMs: 1e9 },
+            ),
+          };
+          const at = Number(id.slice(1));
+          // An empty memory, and one with every rival lined up behind it: half of them
+          // a second ago, half for BOT_RELINE_MS, so both of the cape rule's readings
+          // of a sat rival are held blind too (#1986).
+          const populated: BotMemory = {
+            laneSinceMs: null,
+            itemSince: null,
+            linedUp: state.racers
+              .filter((entry) => entry.racer.id !== id)
+              .map((entry, place) => ({
+                id: entry.racer.id,
+                sinceMs: state.atMs - (place % 2 === 0 ? 1_000 : BOT_RELINE_MS),
+              })),
+          };
+          const me = state.racers.find((entry) => entry.racer.id === id) as LapRacer;
+          if (
+            me.held === 'rain-cape' &&
+            me.capeUntilMs === null &&
+            state.racers.some((entry) => {
+              const gap = racePosition(me.racer) - racePosition(entry.racer);
+              return entry.lane === me.lane && gap > 0 && gap <= GUST_REACH_METRES;
+            })
+          ) {
+            capeRuleRead += 1;
+          }
+          for (const memory of [BOT_MEMORY_AT_START, populated]) {
+            const pick = (race: ItemRaceState): unknown =>
+              strategicBotDecision(
+                race,
+                id,
+                7,
+                8,
+                [
+                  strategy('aggressive', 'canny'),
+                  strategy('defensive', 'crafty'),
+                  strategy('opportunist', 'naive'),
+                ][at] as BotStrategy,
+                memory,
+              );
+            expect(pick(blind)).toEqual(pick(state));
+            compared += 1;
+          }
+        }
       }
     }
-    expect(compared).toBeGreaterThan(300);
+    // Measured: 90 of 720 states.
+    expect(capeRuleRead).toBeGreaterThan(50);
+    expect(compared).toBeGreaterThan(1_200);
   });
 
   it('is a pure function of its inputs, draws nothing from the race, and the seed matters', () => {
@@ -806,13 +919,13 @@ describe('what a decision reads, and what it does not', () => {
       laneSinceMs: race.atMs,
       itemSince: pickUpsPassed(COURSE, 100),
       // It moved out of x's line, so nobody is lined up behind it in the lane it rides.
-      linedUpIds: [],
+      linedUp: [],
     });
     const used = decide(field([{ id: 'bot', at: 100, held: 'tailwind' }]), 'defensive');
     expect(used).toEqual({
       use: true,
       lane: 1,
-      memory: { laneSinceMs: null, itemSince: null, linedUpIds: [] },
+      memory: { laneSinceMs: null, itemSince: null, linedUp: [] },
     });
   });
 
@@ -838,7 +951,7 @@ describe('what a decision reads, and what it does not', () => {
         racer: { ...entry.racer, finishedAtMs: 1, lineMetres: 3_000 },
       })),
     };
-    const memory: BotMemory = { laneSinceMs: 3, itemSince: 0, linedUpIds: [] };
+    const memory: BotMemory = { laneSinceMs: 3, itemSince: 0, linedUp: [] };
     expect(decide(finished, 'aggressive', { memory })).toEqual({ use: false, lane: 2, memory });
     expect(decide(race, 'aggressive', { id: 'nobody', memory })).toEqual({
       use: false,
