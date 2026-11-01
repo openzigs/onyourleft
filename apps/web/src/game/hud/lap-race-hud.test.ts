@@ -16,6 +16,7 @@ import {
   geographicPosition,
   raceCourse,
   routeProfile,
+  stepRace,
   type RoutePoint,
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
@@ -282,6 +283,54 @@ describe('the lap race’s standings, as a room’s (#1904, ADR 0051)', () => {
       ['A rider', NO_READING],
       ['A rider', NO_READING],
     ]);
+  });
+
+  describe('always shows the leader (#1967, the owner’s ruling of 2026-10-31)', () => {
+    const FIELD = ['bot-1', 'bot-2', 'bot-3', 'bot-4', 'bot-5', 'bot-6', 'bot-7'] as const;
+
+    /** Eight racers, the rider in `place`, each bot 10 m apart. */
+    function eightWithRiderIn(place: number): ReturnType<typeof lapRaceStandings> {
+      const race = createItemRace({
+        course: raceCourse(1_000, 3),
+        seed: 1,
+        itemsOn: false,
+        racerIds: [RIDER, ...FIELD],
+        startMs: 0,
+      });
+      const ahead = FIELD.map((id, index) => [id, 200 - index * 10] as const);
+      const all: Record<string, number> = Object.fromEntries(ahead);
+      // Between the bot in `place - 1` and the one in `place`.
+      all[RIDER] = 200 - (place - 1) * 10 + 5;
+      const moved = stepRace(race, { atMs: 1_000, effortDistances: all });
+      return lapRaceStandings({ ...hudOf(moved, 10), entrants: {} });
+    }
+
+    it('with eight racers and the rider last: place 1 first, then the riders around the rider', () => {
+      const view = eightWithRiderIn(8);
+      expect(view.place).toBe(8);
+      expect(view.of).toBe(8);
+      expect(view.lines.map((line) => line.place)).toEqual([1, 3, 4, 5, 6, 7, 8]);
+      expect(view.lines.find((line) => line.you)?.place).toBe(8);
+    });
+
+    it('keeps three ahead of the rider and two behind, after the leader', () => {
+      expect(eightWithRiderIn(5).lines.map((line) => line.place)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      expect(eightWithRiderIn(6).lines.map((line) => line.place)).toEqual([1, 3, 4, 5, 6, 7, 8]);
+    });
+
+    it('with the rider leading, the window is the front, as before', () => {
+      const view = eightWithRiderIn(1);
+      expect(view.lines.map((line) => line.place)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    });
+
+    it('never shows the leader twice when the window already starts at the front', () => {
+      for (let place = 1; place <= 8; place += 1) {
+        const places = eightWithRiderIn(place).lines.map((line) => line.place);
+        expect(places[0], `rider in ${String(place)}`).toBe(1);
+        expect(new Set(places).size, `rider in ${String(place)}`).toBe(places.length);
+        expect(places, `rider in ${String(place)}`).toContain(place);
+      }
+    });
   });
 
   it('shows a dash, never NaN, for a W/kg that is not a number', () => {
