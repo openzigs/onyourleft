@@ -22,6 +22,8 @@
  * 3. **`showcase()`** — a real view's frame with a pick-up point, two puddles
  *    and two racers hit, on a canvas the spec photographs for the owner
  *    (ADR 0060 D-1: new art is proposed in its pull request).
+ * 4. **`pickUpSeen(aheadMetres)`** — #1969: what one pick-up point puts on a
+ *    1280×800 frame from that far back, read as the pixels it changes.
  */
 
 import { createItemRace, metres, raceCourse, type Hazard } from '@onyourleft/domain';
@@ -34,6 +36,7 @@ import { sceneFrame, type RaceBotInput } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
 import { corridorOrigin } from '../src/game/terrain';
 import {
+  PICK_UP_SEEN_FROM_METRES,
   lapRaceCallsProbe,
   lapRaceDrawnOf,
   threeGameRenderer,
@@ -63,6 +66,9 @@ declare global {
       viewCalls(hazards: number): LapRaceViewCalls;
       probeCalls(world: 'stylised' | 'realistic', hazards: number): LapRaceCalls;
       showcase(): void;
+      pickUpSeen(aheadMetres: number, shown?: boolean): PickUpSeen;
+      /** `three-renderer.ts` §`PICK_UP_SEEN_FROM_METRES`, for the spec, which imports no three. */
+      readonly pickUpSeenFrom: number;
     };
   }
 }
@@ -215,4 +221,92 @@ function showcase(): void {
   });
 }
 
-window.__oylLapRace = { ready: true, viewCalls, probeCalls, showcase };
+/** What {@link pickUpSeen} measured: the pixels one pick-up point changed on the frame. */
+export interface PickUpSeen {
+  /** Pixels that differ between the frame with the pick-up point and without it. */
+  readonly changed: number;
+  /** How many rows and columns those pixels span. */
+  readonly rows: number;
+  readonly columns: number;
+}
+
+/**
+ * #1969: ONE pick-up point `aheadMetres` up a straight, level road from the
+ * rider, on a real view (`threeGameRenderer.create`, the stylised world) at
+ * the owner's tablet's 1280×800, drawn and read back, then the same frame
+ * with no race drawn and read back: what differs is what the pick-up point
+ * puts on the screen. Its other pick-up points are left off, so nothing else
+ * in the frame differs. `shown` draws it on a canvas the spec photographs.
+ */
+function pickUpSeen(aheadMetres: number, shown = false): PickUpSeen {
+  const width = 1280;
+  const height = 800;
+  const drawn = canvas(width, height);
+  if (shown) drawn.id = 'lap-race-pick-up';
+  const view = threeGameRenderer.create(drawn, qualitySettings(0));
+  view.resize(width, height);
+  const frame = frameAt([], undefined);
+  const race = createItemRace({
+    course: raceCourse(400, 3),
+    seed: 1,
+    itemsOn: true,
+    racerIds: ['rider'],
+    startMs: 0,
+  });
+  // The first pick-up point is a quarter of a 400 m lap in, 100 m into the race.
+  const inView = lapRaceInView({
+    corridor: frame.corridor,
+    race,
+    startAlong: RIDER + aheadMetres - 100,
+  });
+  const one = inView.pickUps.slice(0, 1);
+  if (one.length !== 1) throw new Error(`no pick-up point ${String(aheadMetres)} m ahead`);
+  const gl = drawn.getContext('webgl2');
+  if (gl === null) throw new Error('no WebGL2 context on the pick-up canvas');
+  const read = (): Uint8Array => {
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    return pixels;
+  };
+  view.render(frame);
+  const without = read();
+  const raced: SceneFrame = { ...frame, lapRace: { pickUps: one, hazards: [] } };
+  view.render(raced);
+  const withIt = read();
+  let changed = 0;
+  let top = height;
+  let bottom = -1;
+  let left = width;
+  let right = -1;
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const at = (row * width + column) * 4;
+      if (
+        withIt[at] !== without[at] ||
+        withIt[at + 1] !== without[at + 1] ||
+        withIt[at + 2] !== without[at + 2]
+      ) {
+        changed += 1;
+        top = Math.min(top, row);
+        bottom = Math.max(bottom, row);
+        left = Math.min(left, column);
+        right = Math.max(right, column);
+      }
+    }
+  }
+  if (!shown) view.destroy();
+  return {
+    changed,
+    rows: bottom < 0 ? 0 : bottom - top + 1,
+    columns: right < 0 ? 0 : right - left + 1,
+  };
+}
+
+window.__oylLapRace = {
+  ready: true,
+  viewCalls,
+  probeCalls,
+  showcase,
+  pickUpSeen,
+  pickUpSeenFrom: PICK_UP_SEEN_FROM_METRES,
+};

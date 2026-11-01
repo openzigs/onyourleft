@@ -420,3 +420,15 @@ renamed, an issue renumbered) and may not change a decision. In particular:
 - **Spike 0030 is overtaken**: the office record for US 7,278,913 shows it alive, or a claim on
   rank-weighted items or on items in exercise races turns up. D-9 and #1899 would then need a new
   reading before the mode ships.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-01** — **D-9.2's reason clause, *"it keeps a bot's power a function of its tier and the
+  road only"*, is superseded for lap-race bots by
+  [ADR 0061](0061-lap-race-bots-a-course-only-energy-plan-never-another-racer.md).** Read ADR 0061
+  D-1 for the rule that replaces it. This entry only points there; D-9.1, D-9.3 and the D-14 Q4
+  answer are unchanged, and nothing else in this ADR changes. Recorded on the owner's
+  [ruling of 2026-11-01](https://github.com/openzigs/onyourleft/pull/1984#issuecomment-6557317199)
+  (Q5).

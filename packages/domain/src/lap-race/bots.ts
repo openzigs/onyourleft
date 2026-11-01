@@ -184,9 +184,29 @@ function besides(lane: number, unit: number): number {
 }
 
 /**
+ * The checks every bot decision makes on its seed and its travel: the reactive
+ * one here and `strategy.ts` §`strategicBotDecision` alike.
+ *
+ * @throws {LapRaceError} for a seed that is not a safe whole number, or a
+ *   travel that is not a finite number of metres of at least zero.
+ */
+export function checkBotInputs(seed: number, travelMetres: number): void {
+  raceRandom(seed);
+  if (!Number.isFinite(travelMetres) || travelMetres < 0) {
+    throw new LapRaceError(
+      'travel-out-of-range',
+      'travelMetres must be a finite number of metres of at least zero',
+    );
+  }
+}
+
+/**
  * When to use the held item, and which lane to ride, from the race as it
- * stands. A bot that is finished, or not in the race, keeps its lane and uses
- * nothing.
+ * stands: the #1900 bot's reactive rules, with their fixed chances. Since #1959
+ * the solo race's bots decide through `strategy.ts` §`strategicBotDecision`
+ * instead, and this is the yardstick that module's tests measure it against
+ * (#1959's "than the #1900 bot"). A bot that is finished, or not in the race,
+ * keeps its lane and uses nothing.
  *
  * @param seed - the race's own seed, the one `createItemRace` took.
  * @param travelMetres - how far the bot will ride this tick: what the puddle
@@ -200,13 +220,7 @@ export function botDecision(
   seed: number,
   travelMetres = 0,
 ): BotDecision {
-  raceRandom(seed);
-  if (!Number.isFinite(travelMetres) || travelMetres < 0) {
-    throw new LapRaceError(
-      'travel-out-of-range',
-      'travelMetres must be a finite number of metres of at least zero',
-    );
-  }
+  checkBotInputs(seed, travelMetres);
   const index = race.racers.findIndex((entry) => entry.racer.id === botId);
   const me = race.racers[index];
   if (me === undefined || me.racer.finishedAtMs !== null) {

@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
-import { kilograms } from '@onyourleft/domain';
+import { botFieldPersonalities, kilograms } from '@onyourleft/domain';
 
 import { LAP_RACE_ASSIST_STORAGE_KEY } from './assist-preference';
 import {
@@ -74,6 +74,25 @@ describe('a lap race in a ride — #1906', () => {
     ]);
     expect(ride.race.racers.every((entry) => entry.racer.effortDistance === 0)).toBe(true);
     expect(ride.names['bot-3']).toBe('Brisk bot 3');
+  });
+
+  it('deals its bots a mixed field from the race’s seed (#1959), at one skill, on the chosen tier', () => {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 7;
+        return array;
+      },
+    );
+    const ride = started();
+    const personalities = ride.bots.map((bot) => bot.strategy.personality);
+    expect(personalities).toEqual(botFieldPersonalities(7, LAP_RACE_MOST_BOTS));
+    expect(new Set(personalities).size).toBe(3);
+    expect(ride.bots.map((bot) => bot.strategy.skill)).toEqual(
+      Array.from({ length: LAP_RACE_MOST_BOTS }, () => 'canny'),
+    );
+    expect(ride.bots.map((bot) => bot.tier)).toEqual(
+      Array.from({ length: LAP_RACE_MOST_BOTS }, () => 'brisk'),
+    );
   });
 
   it('starts no race on a route that is not a loop', () => {

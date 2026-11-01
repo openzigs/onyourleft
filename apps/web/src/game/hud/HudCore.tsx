@@ -48,7 +48,7 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
-import { isLapRaceReading } from './lap-race-hud';
+import { isLapRaceReading, riderHolds } from './lap-race-hud';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
 import { SteerKeys } from './SteerKeys';
@@ -274,7 +274,13 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           is not exempt (ADR 0060 D-13), and a key or a pad still uses the item.
         */}
         {props.items === undefined ? null : (
-          <ItemControl port={props.items} touchLocked={touchLocked} />
+          <ItemControl
+            port={props.items}
+            touchLocked={touchLocked}
+            // #1968: unavailable while the race says nothing is held. A HUD
+            // handed an item port and no race cannot know, and refuses nothing.
+            held={props.lapRace === undefined || riderHolds(props.lapRace)}
+          />
         )}
         {/* #1820: a Delivery round's or a lap race's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}

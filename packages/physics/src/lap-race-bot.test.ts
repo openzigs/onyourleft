@@ -11,6 +11,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type {
+  BotStrategy,
   BotTier,
   GhostSamples,
   GhostTrack,
@@ -21,6 +22,7 @@ import type {
 } from '@onyourleft/domain';
 import {
   altitudeMetres,
+  BOT_PERSONALITIES,
   createItemRace,
   degreesCelsius,
   degreesLatitude,
@@ -71,6 +73,16 @@ function loop(climb: number): RouteProfile {
 const FLAT = loop(0);
 const HILLY = loop(20);
 
+/** The solo race's skill, and a personality: what a bot decides by when a test does not care. */
+const STRATEGY: BotStrategy = { personality: 'opportunist', skill: 'canny' };
+
+/** A racer in a test field: its tier, and its strategy when the test sets one. */
+interface Entrant {
+  readonly id: string;
+  readonly tier: BotTier;
+  readonly strategy?: BotStrategy;
+}
+
 function conditions(profile: RouteProfile): LapRaceBotConditions {
   return { profile, airDensityKilogramsPerCubicMetre: AIR };
 }
@@ -83,7 +95,7 @@ interface Run {
 /** A solo race of bots, one tick a second, until every bot has finished or `limit` ticks. */
 function race(
   profile: RouteProfile,
-  field: readonly { readonly id: string; readonly tier: BotTier }[],
+  field: readonly Entrant[],
   seed: number,
   itemsOn: boolean,
   limit = 2_000,
@@ -95,7 +107,9 @@ function race(
     racerIds: field.map((bot) => bot.id),
     startMs: 0,
   });
-  let bots: readonly LapRaceBot[] = field.map((bot) => lapRaceBot(bot.id, bot.tier));
+  let bots: readonly LapRaceBot[] = field.map((bot) =>
+    lapRaceBot(bot.id, bot.tier, bot.strategy ?? STRATEGY),
+  );
   const races = [state];
   const all = [bots];
   for (let tick = 0; tick < limit; tick += 1) {
@@ -126,7 +140,7 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
       racerIds: ['bot'],
       startMs: 0,
     });
-    const { race: next, bots } = stepBotRace(start, [lapRaceBot('bot', 'hard')], {
+    const { race: next, bots } = stepBotRace(start, [lapRaceBot('bot', 'hard', STRATEGY)], {
       elapsed: seconds(1),
       conditions: conditions(FLAT),
       seed: 1,
@@ -144,7 +158,7 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
       racerIds: ['bot'],
       startMs: 0,
     });
-    const { bots } = stepBotRace(start, [lapRaceBot('bot', 'hard')], {
+    const { bots } = stepBotRace(start, [lapRaceBot('bot', 'hard', STRATEGY)], {
       elapsed: seconds(1),
       conditions: conditions(FLAT),
       seed: 1,
@@ -157,49 +171,55 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
   });
 });
 
-describe('the puddle look-ahead it hands the bot decision', () => {
-  it('is the bot’s speed times the tick, so a fast bot steers round a puddle beyond the fixed 15 m', () => {
+describe('the travel it hands the bot decision', () => {
+  it('is the bot’s speed times the tick, which its last call grows with', () => {
+    const total = FLAT.totalDistance * 3;
     const start = createItemRace({
       course: raceCourse(FLAT.totalDistance, 3),
       seed: 1,
       itemsOn: true,
-      racerIds: ['bot', 'x'],
+      racerIds: ['bot'],
       startMs: 0,
     });
-    // The bot at 100 m doing 20 m/s, a puddle of x's 25 m ahead in the bot's lane.
-    const ahead: ItemRaceState = {
+    // The bot 60 m from the line, past the last pick-up point, with a tow and no one to pull it.
+    const near: ItemRaceState = {
       ...start,
       racers: start.racers.map((entry) => ({
         ...entry,
-        racer: { ...entry.racer, effortDistance: entry.racer.id === 'bot' ? 100 : 400 },
+        racer: { ...entry.racer, effortDistance: total - 60 },
+        held: 'tow' as const,
+        pickUpsPassed: 9,
       })),
-      hazards: [{ position: 125, lane: 1, ownerId: 'x', untilMs: 1e9, hitIds: [] }],
     };
     const fast: LapRaceBot = {
-      ...lapRaceBot('bot', 'fierce'),
-      ride: { speed: metresPerSecond(20), distance: metres(100) },
+      ...lapRaceBot('bot', 'fierce', STRATEGY),
+      ride: { speed: metresPerSecond(20), distance: metres(total - 60) },
     };
-    const lane = (elapsed: number): number | undefined =>
-      stepBotRace(ahead, [fast], {
+    const held = (elapsed: number): string | null | undefined =>
+      stepBotRace(near, [fast], {
         elapsed: seconds(elapsed),
         conditions: conditions(FLAT),
         seed: 1,
-      }).race.racers.find((entry) => entry.racer.id === 'bot')?.lane;
-    // A 1 s tick carries it 20 m, short of the puddle's 25 m, but past the fixed 15 m.
-    expect(lane(1)).toBe(1);
-    // A 1.5 s tick would carry it 30 m, through the puddle: it moves lane first.
-    expect(lane(1.5)).not.toBe(1);
+      }).race.racers[0]?.held;
+    // 1 s ticks carry it 20 m: 5 m and two ticks short of the line is 45 m, so it holds on.
+    expect(held(1)).toBe('tow');
+    // 1.5 s ticks carry it 30 m: two of them reach the line, so it spends the tow now.
+    expect(held(1.5)).toBeNull();
   });
 });
 
 describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 0007 D4)', () => {
   it('takes no activity, stream or ghost type anywhere in its public signatures', () => {
-    expectTypeOf(lapRaceBot).parameters.toEqualTypeOf<[id: string, tier: BotTier]>();
+    expectTypeOf(lapRaceBot).parameters.toEqualTypeOf<
+      [id: string, tier: BotTier, strategy: BotStrategy]
+    >();
     expectTypeOf(stepBotRace).parameters.toEqualTypeOf<
       [race: ItemRaceState, bots: readonly LapRaceBot[], step: BotRaceStep]
     >();
     expectTypeOf<keyof BotRaceStep>().toEqualTypeOf<'elapsed' | 'conditions' | 'seed' | 'rider'>();
-    expectTypeOf<keyof LapRaceBot>().toEqualTypeOf<'id' | 'tier' | 'ride' | 'power'>();
+    expectTypeOf<keyof LapRaceBot>().toEqualTypeOf<
+      'id' | 'tier' | 'strategy' | 'memory' | 'ride' | 'power'
+    >();
     expectTypeOf<keyof LapRaceBotConditions>().toEqualTypeOf<
       | 'profile'
       | 'airDensityKilogramsPerCubicMetre'
@@ -247,14 +267,17 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     // Every name, held to a list: a ghost or recording export is none of these.
     expect(fromDomain).toEqual(
       [
+        'BOT_MEMORY_AT_START',
+        'BotMemory',
+        'BotStrategy',
         'BotTier',
         'ItemRaceState',
         'RaceTickInput',
         'Seconds',
         'Watts',
-        'botDecision',
         'botTierPlan',
         'stepRace',
+        'strategicBotDecision',
       ].sort(),
     );
   });
@@ -326,11 +349,11 @@ describe('no rubber-banding (ADR 0060 D-9)', () => {
 
 describe('the same race gives the same decisions', () => {
   it('compares two runs byte for byte, and another seed decides differently', () => {
-    const field = [
-      { id: 'a', tier: 'brisk' as const },
-      { id: 'b', tier: 'hard' as const },
-      { id: 'c', tier: 'hard' as const },
-      { id: 'd', tier: 'fierce' as const },
+    const field: Entrant[] = [
+      { id: 'a', tier: 'brisk', strategy: { personality: 'aggressive', skill: 'naive' } },
+      { id: 'b', tier: 'hard', strategy: { personality: 'defensive', skill: 'canny' } },
+      { id: 'c', tier: 'hard', strategy: { personality: 'opportunist', skill: 'crafty' } },
+      { id: 'd', tier: 'fierce' },
     ];
     const one = race(HILLY, field, 11, true);
     const two = race(HILLY, field, 11, true);
@@ -356,10 +379,98 @@ describe('the same race gives the same decisions', () => {
       seed: 1,
       rider: { effortDistances: { rider: 9 }, lanes: { rider: 0 } },
     };
-    const { race: next } = stepBotRace(start, [lapRaceBot('bot', 'steady')], step);
+    const { race: next } = stepBotRace(start, [lapRaceBot('bot', 'steady', STRATEGY)], step);
     const rider = next.racers.find((entry) => entry.racer.id === 'rider');
     expect(rider?.racer.effortDistance).toBe(9);
     expect(rider?.lane).toBe(0);
     expect(next.atMs).toBe(1_000);
   });
+
+  it('hands each bot its memory back, so a lane it moved into is kept for the dwell (#1959)', () => {
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 1,
+      itemsOn: false,
+      racerIds: ['bot', 'rider'],
+      startMs: 0,
+    });
+    // The bot at 100 m, the rider 8 m behind it in its lane, as a gust would come up.
+    let race: ItemRaceState = {
+      ...start,
+      racers: start.racers.map((entry) => ({
+        ...entry,
+        racer: { ...entry.racer, effortDistance: entry.racer.id === 'bot' ? 100 : 92 },
+      })),
+    };
+    let bots: readonly LapRaceBot[] = [
+      {
+        ...lapRaceBot('bot', 'steady', { personality: 'defensive', skill: 'crafty' }),
+        ride: { speed: metresPerSecond(8), distance: metres(100) },
+      },
+    ];
+    const lanes: number[] = [];
+    for (let second = 0; second < 3; second += 1) {
+      const bot = race.racers.find(
+        (entry) => entry.racer.id === 'bot',
+      ) as ItemRaceState['racers'][number];
+      // The rider follows the bot into whatever lane it rode last.
+      const next = stepBotRace(race, bots, {
+        elapsed: seconds(1),
+        conditions: conditions(FLAT),
+        seed: 1,
+        rider: { effortDistances: { rider: 92 + 8 * (second + 1) }, lanes: { rider: bot.lane } },
+      });
+      race = next.race;
+      bots = next.bots;
+      lanes.push(race.racers.find((entry) => entry.racer.id === 'bot')?.lane ?? -1);
+    }
+    expect(bots[0]?.memory.laneSinceMs).toBe(2_000);
+    // Out at once; held for the dwell with the rider behind it again; out again after it.
+    expect(lanes[0]).not.toBe(1);
+    expect(lanes[1]).toBe(lanes[0]);
+    expect(lanes[2]).not.toBe(lanes[1]);
+  });
+});
+
+describe('skill is its own axis, and never power (#1959, ADR 0060 D-9)', () => {
+  it(
+    'a crafty bot beats a naive one of the same tier more often than not, on the same power trace',
+    { timeout: 60_000 },
+    () => {
+      let ahead = 0;
+      let behind = 0;
+      for (let seed = 1; seed <= 150; seed += 1) {
+        // Which id is crafty alternates, so a tie broken by id favours neither.
+        const crafty = seed % 2 === 0 ? 'a' : 'b';
+        const naive = crafty === 'a' ? 'b' : 'a';
+        const personality = BOT_PERSONALITIES[seed % 3] as BotStrategy['personality'];
+        const run = race(
+          HILLY,
+          [
+            { id: crafty, tier: 'hard', strategy: { personality, skill: 'crafty' } },
+            { id: naive, tier: 'hard', strategy: { personality, skill: 'naive' } },
+            {
+              id: 'c',
+              tier: 'hard',
+              strategy: {
+                personality: BOT_PERSONALITIES[(seed + 1) % 3] as BotStrategy['personality'],
+                skill: 'canny',
+              },
+            },
+          ],
+          seed,
+          true,
+        );
+        const last = run.races[run.races.length - 1] as ItemRaceState;
+        const order = standings(last.racers.map((entry) => entry.racer));
+        if (order.indexOf(crafty) < order.indexOf(naive)) ahead += 1;
+        else behind += 1;
+        // Strength is the tier alone: the two skills ride one power trace, tick for tick.
+        const trace = (id: string): number[] =>
+          run.bots.map((bots) => bots.find((bot) => bot.id === id)?.power ?? -1);
+        expect(trace(crafty), `seed ${String(seed)}`).toEqual(trace(naive));
+      }
+      expect(ahead).toBeGreaterThan(behind);
+    },
+  );
 });
