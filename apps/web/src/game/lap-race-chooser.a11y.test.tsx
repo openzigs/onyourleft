@@ -209,6 +209,28 @@ describe('#1907 — the lap race in the chooser', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('puts the race first in Your ride on a loop, and the reason there is none last on any other route (#1970)', async () => {
+    await game();
+    const loadout = document.querySelector('.oyl-chooser__loadout');
+    /** The loadout's own parts, past its title and its ⓘ, by class. */
+    const parts = (): string[] =>
+      [...(loadout?.children ?? [])]
+        .map((each) => each.classList[0] ?? '')
+        .filter((name) => name !== 'oyl-chooser__loadout-title' && name !== 'oyl-chooser__help');
+    // Not a loop: the reason is the loadout's last line, under every control.
+    expect(parts().at(-1)).toBe('oyl-game__lap-race');
+    expect(parts().indexOf('oyl-game__lap-race')).toBeGreaterThan(
+      parts().indexOf('oyl-game__wind'),
+    );
+    await activateWithKeyboard(card(LOOP) as HTMLElement);
+    // A loop: the race comes first, so a tablet shows its switch without a scroll.
+    expect(parts()[0]).toBe('oyl-game__lap-race');
+    // And first in the keyboard's order among the loadout's controls.
+    const controls = queryAll<HTMLElement>(loadout ?? document.body, 'input, select, button');
+    expect(controls[0]).toBe(raceSwitch());
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('starts an ordinary ride on the point-to-point route, in the world Settings chose, though the switch was left on', async () => {
     writeRealisticWorldChoice(localStorage, true);
     await game();

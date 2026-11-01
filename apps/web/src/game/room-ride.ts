@@ -179,7 +179,7 @@ export interface StandingsLine {
 
 /** A race's standings on the HUD. */
 export interface RaceStandingsView {
-  /** At most {@link STANDINGS_LINES}, around the rider's own. */
+  /** At most {@link STANDINGS_LINES}, around the rider's own (a lap race's keeps the leader too). */
   readonly lines: readonly StandingsLine[];
   /** The rider's own place, and how many are in the race — "4th of 12". */
   readonly place: number | undefined;
@@ -255,17 +255,30 @@ export function raceStandings(room: RoomConnection): RaceStandingsView | undefin
  * Every line of a race's standings, leader first, windowed to
  * {@link STANDINGS_LINES} around the rider's own — the room's (#1347) and,
  * since #1904, a solo lap race's, so the two panels read the same (ADR 0051).
+ *
+ * With `keepLeader` (a solo lap race's, #1967, the owner's ruling of
+ * 2026-10-31: "Always show the leader"), a window that would not start at the
+ * front gives its first line to the leader instead, and the rest stay around
+ * the rider's own: three ahead and two behind, or as many as there are. The
+ * list is never longer than {@link STANDINGS_LINES}, and a room's race is
+ * windowed as ADR 0051 D-7 has it.
  */
-export function windowedStandings(all: readonly StandingsLine[]): RaceStandingsView {
+export function windowedStandings(
+  all: readonly StandingsLine[],
+  options: { readonly keepLeader?: boolean } = {},
+): RaceStandingsView {
   const own = all.findIndex((line) => line.you);
   const centre = own === -1 ? 0 : own;
   const half = Math.floor(STANDINGS_LINES / 2);
   const first = Math.max(0, Math.min(centre - half, all.length - STANDINGS_LINES));
-  return {
-    lines: all.slice(first, first + STANDINGS_LINES),
-    place: own === -1 ? undefined : own + 1,
-    of: all.length,
-  };
+  const place = own === -1 ? undefined : own + 1;
+  if (options.keepLeader === true && first > 0) {
+    const rest = STANDINGS_LINES - 1;
+    // `first > 0` puts both terms past the leader, so it is never shown twice.
+    const from = Math.min(centre - half, all.length - rest);
+    return { lines: [...all.slice(0, 1), ...all.slice(from, from + rest)], place, of: all.length };
+  }
+  return { lines: all.slice(first, first + STANDINGS_LINES), place, of: all.length };
 }
 
 /** A room ride's memory between frames. */
