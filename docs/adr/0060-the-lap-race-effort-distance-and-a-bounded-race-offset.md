@@ -434,13 +434,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   changes is D-9.2's last clause, *"a function of its tier and the road only"*, which on its words
   forbids any plan. **The rule from this entry: a bot's power is a function of its tier, the road,
   the distance it has left and its own energy budget, and never of any other racer.** That widens a
-  rule, so it is more than the fact *Reversing any of these* and ADR 0013 D-3 allow an amendment to
-  record. It is recorded here because the owner asked for an amendment (#1960), as ADR 0059's entry
-  of 2026-10-28 recorded an owner's ruling on D-2.2, and because the decision D-9 makes, no
-  rubber-banding by rank, is not reversed; the owner's ruling is what settles the mechanism.
+  rule, and ADR 0013 D-3's last row sends a decision whose reasoning has been overtaken to a
+  superseding ADR. This entry is therefore a proposal on that point: **the owner's ruling must say
+  in its own words that it accepts an amendment despite D-3, or the entry is withdrawn and the same
+  rule is written as ADR 0061.** The author recommends ADR 0061 if the owner does not say so. ADR
+  0059's entry of 2026-10-28 recorded a ruling the owner had already given; this one records none
+  yet.
   (1) **What the plan may read**: the bot's tier; the course, meaning the grade along the loop, the
   lap count and the race length; the bot's own `effortDistance`, so that the distance left is the
-  race length less it; and the budget the bot itself has spent, in the critical-power and W′ style of
+  race length less it (the finish is counted at the drawn distance, D-3.3, so the closing sprint
+  can start up to B, 10 m, early or late relative to the visible line, and the code that follows
+  must not assert that the bot sprints at the line); and the budget the bot itself has spent, in the critical-power and W′ style of
   `packages/domain/src/analysis/critical-power.ts`: a reserve of work above the tier's power that a
   climb or the closing distance draws down and an easier stretch refills. The plan is fixed from the
   course before the start, and each step is pure and seeded by the race's own seed.
@@ -449,20 +453,28 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   distance** (`effortDistance + raceOffset`). The last is the one that is easy to miss. `raceOffset`
   is moved by other racers' items (D-5.1), and laps are counted at the drawn distance (D-3.3), so a
   plan that measured the distance left from the drawn distance, or counted laps from the race's lap
-  counter, would make a bot's power depend on what another racer did. A bot's item and lane choices
+  counter, would make a bot's power depend on what another racer did. This also depends on solo races having no
+  drafting: `advanceBot` passes no draft multiplier and D-8 keeps bots out of rooms, where drafting
+  lives (D-5.3, Q8). If D-8 is revisited, the bot's `effortDistance` would carry another racer's
+  shelter, and a new entry must first say how the plan stays independent of it. A bot's item and lane choices
   (`packages/domain/src/lap-race/bots.ts` §`botDecision`, #1900) read the race as they do today and
   are not its power; the sibling tactics issue #1959 keeps to that.
   (3) **What does not move**: D-7.1, so power still comes from the tier's W/kg through a pacing rule
   into `packages/physics` §`advanceBot` and §`advance`, with no new physics, and a bot is never built
   from a recorded ride (#1955's scans); D-2, so no game event reaches the trainer (#1952's walk);
-  D-4.3 and D-5.2, so the plan changes no rider's grade, mass, `C_D·A`, rolling resistance, drafting
-  multiplier or power, only the bot's own power within (4); and D-8, so there are still no bots in
+  D-4.3 and D-5.2, so no rule changes a rider's grade, mass, `C_D·A`, rolling resistance or drafting
+  multiplier, and no rule of catch-up changes a rider's power. D-4.3 is read as that rule of
+  catch-up; it does not forbid a bot's own pacing, which #92's grade pacing already varies, and a
+  bot is a racer like any other (D-7.2) in that its power comes from its own rule, bounded by (4); and D-8, so there are still no bots in
   rooms.
   (4) **The bounds, held as tests by the code that follows this entry**: a bot's mean power over a
   race stays within a stated tolerance of its tier's W/kg × `BOT_MASS_KILOGRAMS` (75 kg), the
   tolerance a named constant that the code's pull request proposes and the owner approves there; its
-  peak stays inside #92's envelope, `MINIMUM_INTENSITY_WATTS_PER_KILOGRAM` (0.5) to
-  `MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM` (7); with items off, `fierce`, `hard`, `brisk` and `steady`
+  peak stays inside two limits: the intensity bounds `MINIMUM_INTENSITY_WATTS_PER_KILOGRAM` (0.5)
+  to `MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM` (7), and a surge ceiling over the tier's power, a named
+  constant that the code's pull request proposes and the owner approves there. #92's own band,
+  +10% and -20% (`PACING_FACTOR_CEILING` and `PACING_FACTOR_FLOOR`), is not carried over: a W′ plan
+  must be able to exceed +10% on a climb and in the closing sprint, which that band forbids; with items off, `fierce`, `hard`, `brisk` and `steady`
   finish in that order over 100 seeds; and #1900's test that the same bot on the same course reads
   back an identical power trace whether it leads or trails is kept, with a mutation that reads rank
   proven to turn it red.
