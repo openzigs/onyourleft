@@ -20,9 +20,11 @@ import { northRoute } from './route-fixtures-testing';
 import { sceneFrame, type RaceBotInput } from './scene';
 import { atStartLine } from './simulation';
 import { CENTRE_LINE_LIFT_METRES, ROAD_WIDTH_METRES, corridorOrigin } from './terrain';
+import { PUDDLE_WARNING_METRES } from './hud/lap-race-hud';
 import {
   LAP_RACE_PIECE_CAPACITY,
   LapRaceBelt,
+  PICK_UP_SEEN_FROM_METRES,
   RiderBelt,
   type LapRacePieceKind,
 } from './three-renderer';
@@ -261,6 +263,44 @@ describe('the lap race’s belt — #1902', () => {
           expect(channel * PEAK_IRRADIANCE, what).toBeLessThanOrEqual(1);
         }
       }
+    }
+    belt.dispose();
+  });
+
+  it('flies each pick-up point’s glowing flags facing the rider, high and off the carriageway (#1969)', () => {
+    // The distance the browser gate reads a pick-up point from is the HUD's puddle warning.
+    expect(PICK_UP_SEEN_FROM_METRES).toBe(PUDDLE_WARNING_METRES);
+    const belt = new LapRaceBelt('stylised');
+    const geometry = belt.meshOf('pickUps').geometry;
+    const glow = geometry.getAttribute('oylGlow');
+    const position = geometry.getAttribute('position');
+    const half = ROAD_WIDTH_METRES / 2;
+    /** The glowing parts above head height: the flags, by side. */
+    const flags = new Map<number, { xs: number[]; ys: number[]; zs: number[] }>();
+    for (let at = 0; at < position.count; at += 1) {
+      const [x, y, z] = [position.getX(at), position.getY(at), position.getZ(at)];
+      // Nothing over the carriageway above the band: a rider and the camera ride through it.
+      if (Math.abs(x) < half) expect(y, 'a part over the road').toBeLessThan(0.1);
+      if (glow.getX(at) !== 1 || y < 1) continue;
+      const side = Math.sign(x);
+      const flag = flags.get(side) ?? { xs: [], ys: [], zs: [] };
+      flag.xs.push(x);
+      flag.ys.push(y);
+      flag.zs.push(z);
+      flags.set(side, flag);
+    }
+    expect([...flags.keys()].sort()).toEqual([-1, 1]);
+    const span = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+    for (const [side, flag] of flags) {
+      // Broad ACROSS the road, thin along it: its face is to the rider, never its edge.
+      expect(span(flag.xs), `flag ${String(side)} across`).toBeGreaterThanOrEqual(1);
+      expect(span(flag.ys), `flag ${String(side)} tall`).toBeGreaterThanOrEqual(1);
+      expect(span(flag.zs), `flag ${String(side)} along`).toBeLessThan(0.1);
+      // Over the verge, outside the road's edge.
+      expect(
+        Math.min(...flag.xs.map(Math.abs)),
+        `flag ${String(side)} off the road`,
+      ).toBeGreaterThan(half);
     }
     belt.dispose();
   });

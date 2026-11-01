@@ -35,7 +35,9 @@ A frame drawn from map data is treated as a **Produced Work** (ADR 0032 D-5, ADR
 
 - **The ride map** shows `© OpenStreetMap contributors` beside the map whenever a map is drawn
   (ADR 0012 D-5). The string is `apps/web/src/map/basemap.ts` §`OSM_ATTRIBUTION`, and every surface
-  uses that constant, never a copy.
+  uses that constant, never a copy. Since #1975 the same line goes on to credit ESA WorldCover
+  (CC BY 4.0, `§WORLDCOVER_ATTRIBUTION`), whose derived `landcover` layer the archive carries and
+  the app does not draw; OpenStreetMap stays first.
 - **The ride screen** shows the same line, small, in the HUD's actions panel, **for the whole ride**
   whenever the ride's world was given map data when it started (`GameView.tsx`, #1552). It is keyed
   on the corridor the ride started with, never on "the realistic world is chosen" and never on what
@@ -46,7 +48,7 @@ A frame drawn from map data is treated as a **Produced Work** (ADR 0032 D-5, ADR
 - **The credits screen** (`apps/web/src/views/CreditsView.tsx`) has a *Map data* entry naming
   OpenStreetMap contributors, linking the ODbL 1.0, and carrying ODbL §4.3 a's own example sentence:
   *"Contains information from OpenStreetMap, which is made available here under the Open Database
-  License (ODbL)."*
+  License (ODbL)."* Below it, the ESA WorldCover credit and a link to CC BY 4.0 (#1975).
 - **An exported course** (`packages/fit/src/route/`) carries the attribution and the licence URL in
   the formats that have somewhere to put them.
 
