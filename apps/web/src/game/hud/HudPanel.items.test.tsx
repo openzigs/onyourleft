@@ -49,7 +49,8 @@ import {
 import { atStartLine } from '../simulation';
 import type { SteerInputPort } from '../steer-port';
 import { HudPanel } from './HudPanel';
-import { ITEM_BUTTON_LABEL, ITEM_BY_KEY_SENTENCE } from './ItemControl';
+import { ITEM_BUTTON_LABEL, ITEM_BY_KEY_SENTENCE, ITEM_NONE_HELD_SENTENCE } from './ItemControl';
+import type { LapRaceHud } from './lap-race-hud';
 
 const RIDER = 'rider';
 
@@ -90,7 +91,29 @@ function route(): ReturnType<typeof routeProfile> {
   return routeProfile(points);
 }
 
-function RideWithRace(props: { readonly withSteering?: boolean }): JSX.Element {
+/** A lap race of one for the HUD, the rider holding `held`, built through the model. */
+function raceHolding(held: ItemKind | null): LapRaceHud {
+  const started = createItemRace({
+    course: raceCourse(1_000, 3),
+    seed: 1,
+    itemsOn: true,
+    racerIds: [RIDER],
+    startMs: 0,
+  });
+  return {
+    race: { ...started, racers: started.racers.map((each) => ({ ...each, held })) },
+    riderId: RIDER,
+    entrants: {},
+    riderWattsPerKilogram: 3,
+    speedMetresPerSecond: 10,
+  };
+}
+
+function RideWithRace(props: {
+  readonly withSteering?: boolean;
+  /** The race the HUD is shown, the rider holding this; no race at all when absent. */
+  readonly holds?: ItemKind | null;
+}): JSX.Element {
   const profile = useMemo(route, []);
   const steering = useMemo<SteerInputPort>(
     () => ({
@@ -120,12 +143,15 @@ function RideWithRace(props: { readonly withSteering?: boolean }): JSX.Element {
       onEnd={() => undefined}
       steering={props.withSteering === false ? undefined : steering}
       items={items}
+      {...(props.holds === undefined ? {} : { lapRace: raceHolding(props.holds) })}
     />
   );
 }
 
-async function ride(withSteering = true): Promise<void> {
-  mounted = await mount(<RideWithRace withSteering={withSteering} />);
+async function ride(withSteering = true, holds?: ItemKind | null): Promise<void> {
+  mounted = await mount(
+    <RideWithRace withSteering={withSteering} {...(holds === undefined ? {} : { holds })} />,
+  );
   await settle();
 }
 
@@ -306,6 +332,64 @@ describe('the touch lock kept whole in a lap race — ADR 0060 D-13, #1432', () 
     expect(exempt.map((each) => each.textContent)).toEqual(['End ride']);
     // Inside the region the lock covers.
     expect(item.closest('section.oyl-hud')).not.toBeNull();
+  });
+});
+
+describe('Use item while nothing is held — #1968', () => {
+  /** The sentences the item button is described by, in order. */
+  function describedBy(): (string | null | undefined)[] {
+    return (button(ITEM_BUTTON_LABEL).getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .filter((id) => id !== '')
+      .map((id) => document.getElementById(id)?.textContent);
+  }
+
+  it('is unavailable while the rider holds nothing, says why, and a tap or Enter asks nothing', async () => {
+    await ride(true, null);
+
+    expect(button(ITEM_BUTTON_LABEL).getAttribute('aria-disabled')).toBe('true');
+    // `aria-disabled`, never `disabled`: it stays in the tab order and says why.
+    expect(button(ITEM_BUTTON_LABEL).disabled).toBe(false);
+    expect(describedBy()).toEqual([ITEM_NONE_HELD_SENTENCE]);
+    const note = document.getElementById(
+      button(ITEM_BUTTON_LABEL).getAttribute('aria-describedby') ?? '',
+    );
+    // Plain text, never a second live region beside the announcer's (#445).
+    expect(note?.closest('[aria-live]')).toBeNull();
+
+    tap(button(ITEM_BUTTON_LABEL));
+    expect(nextTick().held).toBe('tailwind');
+    await activateWithKeyboard(button(ITEM_BUTTON_LABEL));
+    expect(nextTick().held).toBe('tailwind');
+  });
+
+  it('is available while the rider holds an item, and a tap uses it — the control for the case above', async () => {
+    await ride(true, 'tailwind');
+
+    expect(button(ITEM_BUTTON_LABEL).hasAttribute('aria-disabled')).toBe(false);
+    expect(button(ITEM_BUTTON_LABEL).hasAttribute('aria-describedby')).toBe(false);
+    expect(mounted?.container.textContent).not.toContain(ITEM_NONE_HELD_SENTENCE);
+
+    tap(button(ITEM_BUTTON_LABEL));
+    expect(nextTick().held).toBeNull();
+  });
+
+  it('with nothing held and the lock on, is described by both sentences', async () => {
+    await ride(true, null);
+    tap(button(TOUCH_LOCK_NAME));
+
+    expect(describedBy()).toEqual([ITEM_NONE_HELD_SENTENCE, ITEM_BY_KEY_SENTENCE]);
+  });
+
+  it('leaves the item key and a pad to the race while nothing is held, as before', async () => {
+    // The HUD does not gate them: the race refuses a use with nothing held
+    // (`@onyourleft/domain` §`stepRace`), and a key pressed as an item is
+    // picked up reaches a race the HUD has not caught up with yet.
+    await ride(true, null);
+    press('w');
+    expect(nextTick().held).toBeNull();
+    padPress([0]);
+    expect(nextTick().held).toBeNull();
   });
 });
 

@@ -740,7 +740,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         held item" handed to `stepRace`'s next tick. The
                         lanes and keys are Delivery's (`lanes.ts`); the item
                         key is W, the HUD's `hud/ItemControl.tsx` is one
-                        button inside the touch lock (never exempt), and a
+                        button inside the touch lock (never exempt),
+                        `aria-disabled` while nothing is held (#1968; the key
+                        and a pad are left to the race), and a
                         pad's throw buttons use the item. `race-input.test.ts`
                         rides one power trace with and without presses and
                         reads every tick's effort distance and speed back
@@ -997,7 +999,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (with a hit coming under it, outlined dashed: a shape,
                         never a tint), last and absent on any other ride; the
                         standings in a room's panel (`RaceStandings.tsx`, W/kg,
-                        never watts, never a live region). Its five sentences
+                        never watts, never a live region), with the leader
+                        always its first line (#1967). Its five sentences
                         are rank 5h, OWED as Delivery's are, the place at most
                         once every 10 s. `GameView` feeds `HudInput.lapRace`
                         on a ride running a race (#1906);
