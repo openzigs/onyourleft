@@ -741,19 +741,25 @@ describe('a solo lap race inside a game ride — #1906', () => {
     expect(raceFields()).toEqual([]);
   });
 
-  it('rides the stylised world for a race when Settings chose the realistic one (D-10)', async () => {
+  it('rides a race in the realistic world when Settings chose it, and in the stylised when not (#1971)', async () => {
     writeRealisticWorldChoice(localStorage, true);
     const realistic = { asked: 0 };
-    await rideTheTrace({ race: RACE, frames: 4, realistic });
+    const drawn: SceneFrame[] = [];
+    await rideTheTrace({ race: RACE, frames: 4, drawn, realistic });
     expect(raceFields().length).toBe(2);
-    expect(realistic.asked).toBe(0);
+    expect(realistic.asked).toBe(1);
+    // Still a race: its pieces are on the frames the realistic world is handed.
+    expect(drawn.some((frame) => frame.lapRace !== undefined)).toBe(true);
     mounted?.unmount();
     mounted = undefined;
-    // The control: an ordinary ride with the same choice asks for the realistic world.
+    // The control: the same race with the stylised world chosen asks for nothing.
+    writeRealisticWorldChoice(localStorage, false);
     pending = [];
     nowMs = START_MS;
-    await rideTheTrace({ race: undefined, frames: 4, realistic });
-    expect(realistic.asked).toBe(1);
+    const stylised = { asked: 0 };
+    await rideTheTrace({ race: RACE, frames: 4, realistic: stylised });
+    expect(raceFields().length).toBe(2);
+    expect(stylised.asked).toBe(0);
   });
 
   it('keeps the realistic world on a ride in a room, which runs no race (D-7.3, D-10)', async () => {

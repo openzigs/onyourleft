@@ -23,7 +23,7 @@
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
  * recorded here and in docs/agents/ci.md §4c.
- * Eight of the fourteen describes below draw the REALISTIC world, which is a rung
+ * Nine of the fifteen describes below draw the REALISTIC world, which is a rung
  * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
  * measure the owner's instruments for it. The other six are the DEFAULT
  * world, every rider's, and each is an owner's exception. One is #1076's: the
@@ -186,6 +186,19 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'chooses, read off a page that ships in no build. Still required: that an ordinary ' +
       'frame is never held to it (`realistic-budget-village.test.ts`), and the belt’s three ' +
       'calls whatever the count in both worlds’ materials (`delivery.browser.spec.ts`).',
+  },
+  {
+    spec: 'realistic-lap-race.browser.spec.ts',
+    describe: 'the realistic page’s village frame, racing — #1971',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the lap race’s own village ceiling (#1971, ADR 0060 D-10.2): the decorated village ' +
+      'hold with a race’s worst case drawn inside `LAP_RACE_VILLAGE_DRAW_CALLS`, and the same ' +
+      'frame with no race at the frozen 50. Cost, in a world a rider chooses, read off a page ' +
+      'that ships in no build. Still required: that a frame carrying no race is never held to ' +
+      'it (`realistic-budget-lap-race.test.ts`), that the realistic world draws a race’s bots ' +
+      'by #783’s split (`three-renderer.test.ts`), and the belt’s three calls whatever the ' +
+      'count in both worlds’ materials (`lap-race.browser.spec.ts`).',
   },
   {
     spec: 'realistic-town.browser.spec.ts',

@@ -534,16 +534,61 @@ export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
 export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
 
 /**
+ * The most draw calls the realistic village frame may make **while a lap
+ * race runs** — #1971, ADR 0060 D-10.2: **PROPOSED, AWAITING THE OWNER'S
+ * APPROVAL** (desktop measurement; the tablet reading is the orchestrating
+ * session's, as Delivery's 53 was #1815's).
+ *
+ * ⚠️ **A third village ceiling, not a reuse.** {@link REALISTIC_VILLAGE_DRAW_CALLS}
+ * stays frozen at 50 (D-10.3) and {@link DELIVERY_VILLAGE_DRAW_CALLS} at 53;
+ * this neither reuses nor changes either, and it is never the stylised
+ * world's {@link LAP_RACE_SCENE_DRAW_CALLS}. It applies only while a
+ * realistic frame carries a lap race (`port.ts` §`SceneFrame.lapRace`);
+ * {@link villageDrawCallCeiling} is the one place that choice is made.
+ *
+ * ## Where the number comes from
+ *
+ * #1689's frame — the village road's hold on Halloween, the top rung held —
+ * carrying #1972's worst case: the rider and seven bots, five of the eight
+ * hit, every pick-up point of a three-lap race of 40 m laps and ten puddles
+ * (`browser/realistic/lap-race.ts`): **58** calls and 187 212 triangles, on
+ * a Mac in the pinned Chromium, 2026-11-01, against 50 and 164 474 on the
+ * same frame with no race. The eight it adds are the belt's three instanced
+ * calls (#1902); one realistic body, because the ordinary frame's pacer
+ * gives way to the two bots nearest the rider, which wear the realistic body
+ * as a room's two nearest riders do (`three-renderer.ts`
+ * §`realisticRemoteSplit`, #783); and the stylised riders' four instanced
+ * meshes, which draw the other five bots. Nothing is rounded up past it, for
+ * {@link DELIVERY_VILLAGE_DRAW_CALLS}' reason: none of the eight moves with
+ * the pieces' number or place. Counted at the WebGL entry points by
+ * `realistic-lap-race.browser.spec.ts` §"#1971".
+ *
+ * ⚠️ **The call count is the desktop half.** It does not depend on the GPU,
+ * so the pinned Chromium counts what the tablet would; what the calls COST
+ * there is the tablet step, which the owner reads against this number.
+ *
+ * @test-facing held by `realistic-lap-race.browser.spec.ts` §"#1971", which
+ * counts the race's village frame at the WebGL entry points, and by
+ * `realistic-budget-lap-race.test.ts`; nothing in the product applies a
+ * draw-call ceiling at run time
+ */
+export const LAP_RACE_VILLAGE_DRAW_CALLS = 58;
+
+/**
  * Which village ceiling a frame is held to — #1815, DL6b: the Delivery
- * ceiling while the frame carries a round, and the frozen one on every
- * other frame. A round with nothing in view is still a round running.
+ * ceiling while the frame carries a round, since #1971 the lap race's while
+ * it carries a race, and the frozen one on every other frame. A round or a
+ * race with nothing in view is still running. A frame never carries both: a
+ * ride runs one mode (`GameView`).
  *
  * @test-facing the owner's page publishes it for the frame it drew
- * (`realistic-harness.ts`), and `realistic-delivery.browser.spec.ts` holds
- * that frame to it; `realistic-budget-village.test.ts` holds an ordinary
- * frame one call over 50 to be over it
+ * (`realistic-harness.ts`), and `realistic-delivery.browser.spec.ts` and
+ * `realistic-lap-race.browser.spec.ts` §"#1971" hold that frame to it;
+ * `realistic-budget-village.test.ts` holds an ordinary frame one call over
+ * 50 to be over it
  */
-export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery'>): number {
+export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery' | 'lapRace'>): number {
+  if (frame.lapRace !== undefined) return LAP_RACE_VILLAGE_DRAW_CALLS;
   return frame.delivery === undefined ? REALISTIC_VILLAGE_DRAW_CALLS : DELIVERY_VILLAGE_DRAW_CALLS;
 }
 

@@ -715,9 +715,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         round off as it is turned on) or a test's `lapRace`
                         prop, on a LOOP route,
                         solo (no room, D-7.3) and never beside a Delivery
-                        round. A race rides the STYLISED world whatever
-                        Settings chose (D-10.1), so the village's frozen 50
-                        never holds one. Started at the press (assist read
+                        round. Since #1971 a race rides the world Settings
+                        chose: in the realistic one its frame is held to
+                        `realistic-budget.ts` §`LAP_RACE_VILLAGE_DRAW_CALLS`
+                        (proposed 58), never the village's frozen 50, and its
+                        bots are split as a room's riders are (#783). Started at the press (assist read
                         from the device, ONE seed nothing keeps), stepped one
                         tick a simulation step that ran (bots through
                         `@onyourleft/physics` §`stepBotRace`), the rider

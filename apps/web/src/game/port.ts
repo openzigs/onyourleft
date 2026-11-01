@@ -244,6 +244,15 @@ export interface RiderMarker {
    * call. Absent on every ordinary ride and on a racer nothing has hit.
    */
   readonly hit?: RaceHitLook | undefined;
+  /**
+   * A lap race's bot — #1971: a `bot` marker that `scene.ts` §`raceBots`
+   * placed, rather than the one pacer (#92), which is a `bot` too. Read by
+   * `three-renderer.ts` §`realisticRemoteSplit` alone, which draws a race's
+   * bots in the realistic world as #783 draws a room's riders: the nearest
+   * two in the realistic body, the next ones stylised. Absent on every other
+   * marker.
+   */
+  readonly racer?: true | undefined;
 }
 
 /**

@@ -333,8 +333,9 @@ declare global {
       /**
        * #1815: the village ceiling that same frame is held to,
        * `realistic-budget.ts` §`villageDrawCallCeiling` of the frame the page
-       * drew — the Delivery one while it carries a round, the frozen 50
-       * otherwise. Absent with the result.
+       * drew — the Delivery one while it carries a round, since #1971 the
+       * lap race's while it carries a race in the realistic world, the
+       * frozen 50 otherwise. Absent with the result, and on a stylised race.
        */
       readonly villageCeiling?: number;
       /**
@@ -349,8 +350,9 @@ declare global {
        * #1972: the scene ceiling that same frame is held to,
        * `realistic-budget.ts` §`stylisedSceneDrawCallCeiling` of the frame the
        * page drew — the lap race's 14 while it carries a race. Absent unless
-       * `?race=` asked for one, because the stylised world's own 11 is the
-       * scenery-free frame's and this page's ordinary frames carry scenery.
+       * `?race=` asked for one in the stylised world, because the stylised
+       * world's own 11 is the scenery-free frame's and this page's ordinary
+       * frames carry scenery; a realistic race's is `villageCeiling` (#1971).
        */
       readonly raceCeiling?: number;
     };
@@ -663,8 +665,10 @@ async function run(): Promise<void> {
       origin,
       distance,
       elapsed: config.at === undefined ? elapsed : 0,
-      // #1972: a race is held to the SCENERY-FREE frame's ceiling, so it carries none.
-      rung: config.race === undefined ? worldRung(state) : SCENERY_FREE,
+      // #1972: a stylised race is held to the SCENERY-FREE frame's ceiling, so
+      // it carries none; #1971: a realistic one is held on the village's frame.
+      rung:
+        config.race === undefined || config.world === 'realistic' ? worldRung(state) : SCENERY_FREE,
       // #1534's pair: the villages' ground left wooded.
       settlementsWooded: config.leversOff.includes('settlement-clearing'),
       // #1541's pair: the people off.
@@ -740,13 +744,16 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(delivery === undefined ? {} : { delivery }),
-        // A race is the stylised world's frame; the village's ceiling is no part of it.
-        ...(drawn === undefined || config.race !== undefined
+        // A stylised race is the scenery-free frame's; the village's ceiling is
+        // no part of it. #1971: a realistic race's frame is the village's.
+        ...(drawn === undefined || (config.race !== undefined && config.world !== 'realistic')
           ? {}
           : { villageCeiling: villageDrawCallCeiling(drawn) }),
         ...(race === undefined || drawn === undefined
           ? {}
-          : { race, raceCeiling: stylisedSceneDrawCallCeiling(drawn) }),
+          : config.world === 'realistic'
+            ? { race }
+            : { race, raceCeiling: stylisedSceneDrawCallCeiling(drawn) }),
       });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);

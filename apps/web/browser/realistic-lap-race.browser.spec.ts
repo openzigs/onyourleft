@@ -18,17 +18,32 @@
  * of the realistic set, and the load is one of about four seconds. What a
  * frame of it COSTS on the tablet's GPU is the owner's reading, taken from
  * this page, once it is staged into the debug APK (`realistic:stage`).
+ *
+ * ## #1971 — the same race in the realistic world, nightly
+ *
+ * The last describe draws the worst case on `realistic-delivery.browser.spec.ts`'
+ * frame — the village road's hold on Halloween, the top rung held — in the
+ * REALISTIC world, and holds it to `realistic-budget.ts`
+ * §`LAP_RACE_VILLAGE_DRAW_CALLS`, the ceiling the page reports for the frame
+ * it drew. Its controls: the belt drew every piece it was handed, the village
+ * is in frame, and the same frame with no race is the frozen 50. Nightly, as
+ * Delivery's village ceiling is (`nightly.ts`): two loads of the realistic
+ * set, in a world a rider chooses.
  */
 
 import { expect, test } from '@playwright/test';
 
+import { VILLAGE_HOLD_METRES } from '../src/demo/synthetic-road';
 import {
   DELIVERY_VILLAGE_DRAW_CALLS,
   LAP_RACE_SCENE_DRAW_CALLS,
+  LAP_RACE_VILLAGE_DRAW_CALLS,
+  REALISTIC_FRAME_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
   STYLISED_SCENE_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 
+import { NIGHTLY } from './nightly';
 import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
 
 /** The held frame, as `realistic-delivery.browser.spec.ts` holds its own, in the stylised world. */
@@ -100,5 +115,41 @@ test.describe('the realistic page’s lap race — #1972', () => {
     expect(ordinary.page.villageCeiling).toBe(REALISTIC_VILLAGE_DRAW_CALLS);
     expect(lines).toHaveLength(1);
     expect(JSON.parse((lines[0] ?? '').slice('OYL-REALISTIC '.length))).not.toHaveProperty('race');
+  });
+});
+
+/** `realistic-delivery.browser.spec.ts`' frame, #1689's decorated village hold, with no round. */
+const VILLAGE = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31`;
+
+test.describe('the realistic page’s village frame, racing — #1971', { tag: NIGHTLY }, () => {
+  test('draws the decorated village hold with a lap race’s worst case inside LAP_RACE_VILLAGE_DRAW_CALLS', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS * 2);
+    const raced = await ride(page, `${VILLAGE}&race=worst`);
+    console.log(
+      `#1971 route=village at=${String(VILLAGE_HOLD_METRES)}, decorated, racing ` +
+        `${JSON.stringify(raced.page.race)}: ${String(raced.result.lastFrame.calls)} ` +
+        `draw calls a frame (the page's mean ${String(raced.result.drawCalls)}), ` +
+        `${String(raced.result.lastFrame.triangles)} triangles, frame ms ` +
+        `${JSON.stringify(raced.result.frameMs)}, held to ${String(raced.page.villageCeiling)}`,
+    );
+    // Not vacuous: the village is in frame, and the belt drew every piece it was handed.
+    const census = raced.page.census;
+    if (census === undefined) throw new Error('the page published no census');
+    expect(census.structures.church.inView).toBeGreaterThanOrEqual(1);
+    expect(raced.page.race).toEqual({ racers: 8, pickUps: 9, hazards: 10, hits: 5 });
+    // The ceiling the page chose is the race's village one: not 50, not Delivery's, not 14.
+    expect(raced.page.villageCeiling).toBe(LAP_RACE_VILLAGE_DRAW_CALLS);
+    expect(raced.page.raceCeiling).toBeUndefined();
+    expect(raced.result.lastFrame.calls).toBeLessThanOrEqual(LAP_RACE_VILLAGE_DRAW_CALLS);
+    expect(raced.result.lastFrame.triangles).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    expect(raced.result.drawCalls).toBe(raced.result.lastFrame.calls);
+    // The control: the same frame with no race is the frozen 50, which the race is over.
+    const ordinary = await ride(page, VILLAGE);
+    expect(ordinary.page.race).toBeUndefined();
+    expect(ordinary.page.villageCeiling).toBe(REALISTIC_VILLAGE_DRAW_CALLS);
+    expect(ordinary.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_VILLAGE_DRAW_CALLS);
+    expect(raced.result.lastFrame.calls).toBeGreaterThan(ordinary.result.lastFrame.calls);
   });
 });
