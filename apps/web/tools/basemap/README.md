@@ -81,8 +81,14 @@ in that file, and the last column says where their licence was read instead.
 | `pgf-encoding` (`pgf-encoding.zip`)                                                     | `wipfli.github.io/pgf-encoding`          | the encodings CC0 1.0; the zip's code MIT and its fonts SIL OFL, neither of which is in a tile | none for the encodings                                                                                        | not in `LICENSE_DATA.md`; read on 2026-10-31 in the downloaded zip's own `README.md` ("License"), `LICENSE` and `encoding/CC0-LICENSE`          |
 
 Every licence above is open data: ODbL, CC BY 4.0 and CC0 meet the Open
-Definition, and Natural Earth is public domain. One question is **not
-settled**, and it needs the owner's answer before the US archive is uploaded:
+Definition, and Natural Earth is public domain. One question needed the
+owner's answer before the US archive was uploaded, and the owner gave it on
+2026-10-31 on #1557: **publish the WorldCover credit**. Since #1975 the app
+gives it, beside the ride map and on the credits screen (`src/map/basemap.ts`
+§`WORLDCOVER_ATTRIBUTION`, with the year 2020 that Overture's attribution
+guidelines give for this layer), and a notice beside the archives on
+`tiles.openzigs.com` gives each archive's data credits once the owner approves
+its words. The question as it was put:
 
 - ⚠️ **The WorldCover credit.** `LICENSE_DATA.md` ties it to _displaying_ the
   `landcover` layer, and the client displays none: the ride map reads `earth`,
