@@ -34,6 +34,8 @@ import {
 } from './items';
 import randomSource from './random.ts?raw';
 import raceSource from './race.ts?raw';
+import strategyTestingSource from './strategy-testing.ts?raw';
+import strategySource from './strategy.ts?raw';
 import { raceCourse } from './race';
 
 const COURSE = raceCourse(1_000, 3);
@@ -215,6 +217,8 @@ describe('never from a recorded ride (ADR 0007 D4, ADR 0060 D-7.1)', () => {
       'items.ts': itemsSource,
       'random.ts': randomSource,
       'race.ts': raceSource,
+      'strategy.ts': strategySource,
+      'strategy-testing.ts': strategyTestingSource,
     };
     let read = 0;
     for (const [file, source] of Object.entries(sources)) {
