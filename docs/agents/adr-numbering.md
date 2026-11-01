@@ -12,12 +12,20 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0061 is [ADR 0061](../adr/0061-lap-race-bots-a-course-only-energy-plan-never-another-racer.md)**,
+  taken by [#1960](https://github.com/openzigs/onyourleft/issues/1960) on 2026-11-01 for the lap-race
+  bots' course-only energy plan, and **accepted on the owner's
+  [ruling of the same day](https://github.com/openzigs/onyourleft/pull/1984#issuecomment-6557317199)** on #1984, with every D-7 recommendation as written. The owner
+  had ruled on [#1977](https://github.com/openzigs/onyourleft/pull/1977) that day that the plan is a new
+  ADR rather than an amendment to ADR 0060. It took the next free number after 0060; **0057 and 0058
+  stay claimed** by #1748 and #1752. **The next free number is 0062.** A reviewer who remembers this
+  file offering 0061 is reading the old file.
   ⚠️ **0060 is [ADR 0060](../adr/0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)**,
   taken by [#1895](https://github.com/openzigs/onyourleft/issues/1895) on 2026-10-30 for the lap
   race (the epic [#1894](https://github.com/openzigs/onyourleft/issues/1894)), and **accepted on the
   owner's ruling of the same day**, with every D-14 recommendation as written. It took the next free number after 0059; **0057 and 0058 stay claimed** by
   [#1748](https://github.com/openzigs/onyourleft/issues/1748) and
-  [#1752](https://github.com/openzigs/onyourleft/issues/1752). **The next free number is 0061.** A
+  [#1752](https://github.com/openzigs/onyourleft/issues/1752). The next free number was then 0061. A
   reviewer who remembers this file offering 0060 is reading the old file.
   ⚠️ **0059 is [ADR 0059](../adr/0059-delivery-a-parcel-round-game-mode.md)**, taken by
   [#1804](https://github.com/openzigs/onyourleft/issues/1804) on 2026-10-28 for Delivery, the
