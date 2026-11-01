@@ -39,7 +39,9 @@
  * ## The standings, as a room's (ADR 0051, ADR 0060 D-12.2)
  *
  * The same panel a room's race uses (`RaceStandings.tsx`), windowed the same
- * way (`room-ride.ts` §`windowedStandings`), so a solo race reads like a
+ * way (`room-ride.ts` §`windowedStandings`) but for one line: the leader is
+ * always the first (#1967, the owner's ruling of 2026-10-31), so a rider at
+ * the back of eight still sees who is winning. A solo race reads like a
  * room's: a place, a name, a time gap **to the rider**, and **W/kg, never
  * watts**. Not a live region: ADR 0051 D-7. The time gap is this file's,
  * because there is no room to compute it: the drawn distance between the two
@@ -295,7 +297,8 @@ function powerToWeight(value: number | undefined): string {
 
 /**
  * The field's standings, as a room's panel shows them — every racer in
- * `standings` order, the rider's own line marked, windowed around it.
+ * `standings` order, the rider's own line marked, windowed around it with
+ * the leader always on the first line (#1967).
  * @see the module note §"The standings"
  */
 export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
@@ -333,5 +336,5 @@ export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
       you,
     };
   });
-  return windowedStandings(lines);
+  return windowedStandings(lines, { keepLeader: true });
 }

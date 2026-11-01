@@ -32,7 +32,9 @@ export function RaceStandings(props: { readonly standings: RaceStandingsView }):
       {/*
         `role="list"` because list-style none makes WebKit drop the semantics,
         and `start` because the list is windowed: its own numbering must agree
-        with the place drawn beside the first line.
+        with the place drawn beside the first line. Each line's `value` too,
+        since #1967: a lap race keeps the leader above a window further back,
+        so the places can jump after the first line.
       */}
       <ol className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
         {lines.map((line) => (
@@ -44,6 +46,7 @@ export function RaceStandings(props: { readonly standings: RaceStandingsView }):
                 : 'oyl-hud__standings-line'
             }
             aria-current={line.you ? 'true' : undefined}
+            value={line.place}
           >
             {/*
               The spaces between the parts are the words' own: a screen
