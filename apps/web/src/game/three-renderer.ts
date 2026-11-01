@@ -10814,6 +10814,11 @@ const PICK_UP_FLAG_METRES = { width: 1.5, height: 1.2, thick: 0.04 } as const;
  * the road and change lane. Restated rather than imported: this file
  * imports no HUD module. `browser/lap-race.browser.spec.ts` §"#1969"
  * measures what one pick-up point puts on a 1280×800 frame from here.
+ *
+ * @test-facing the distance `browser/lap-race-harness.ts` §`pickUpSeen` is
+ * measured from, and held equal to the HUD's by `lap-race-belt.test.ts`;
+ * the product's shape is {@link PICK_UP_FLAG_METRES}, which nothing reads
+ * at a distance
  */
 export const PICK_UP_SEEN_FROM_METRES = 50;
 
