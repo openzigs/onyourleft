@@ -86,6 +86,29 @@ import type { Theme } from '../design/tokens';
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 
 /**
+ * The credit ESA WorldCover's CC BY 4.0 licence asks for (#1975).
+ *
+ * The published archives carry a `landcover` layer derived from ESA
+ * WorldCover, which the client never draws (`tools/basemap/README.md`
+ * §"The downloaded data and its licences"). CC BY 4.0 asks for the credit
+ * when the material is shared, and the owner ruled on 2026-10-31 (#1557) that
+ * the app credits it. The wording is the attribution string ADR 0032 records,
+ * read first-hand from `esa-worldcover.org`, with the year filled in as 2020:
+ * the layer is Daylight's landcover, and Overture's attribution guidelines,
+ * which Protomaps' `LICENSE_DATA.md` points to, credit WorldCover 2020 for it.
+ */
+export const WORLDCOVER_ATTRIBUTION =
+  '© ESA WorldCover project 2020 / Contains modified Copernicus Sentinel data (2020) processed by ESA WorldCover consortium';
+
+/**
+ * Everything the ride map credits beside itself: OpenStreetMap first, as ODbL
+ * §4.3 asks, then ESA WorldCover (#1975). What {@link readBasemapConfig} hands
+ * the map panel for any archive, because every Protomaps basemap build carries
+ * the same `landcover` layer.
+ */
+export const BASEMAP_ATTRIBUTION = `${OSM_ATTRIBUTION} · ${WORLDCOVER_ATTRIBUTION}`;
+
+/**
  * The Open Database License 1.0, which OpenStreetMap's data is published
  * under — linked from the credits screen's map-data entry (#1552). The same
  * URL `@onyourleft/fit` writes into an exported course (`ODBL_LICENCE_URL`),
@@ -112,7 +135,7 @@ export interface BasemapConfig {
    * {@link basemapStyle} adds the prefix.
    */
   readonly archiveUrl: string;
-  /** Credited beside the map. Defaults to {@link OSM_ATTRIBUTION}. */
+  /** Credited beside the map. Defaults to {@link BASEMAP_ATTRIBUTION}. */
   readonly attribution: string;
 }
 
@@ -210,7 +233,7 @@ export function readBasemapConfig(environment: BasemapEnvironment): BasemapConfi
   if (parsed.protocol !== 'https:') {
     return undefined;
   }
-  return { archiveUrl: parsed.toString(), attribution: OSM_ATTRIBUTION };
+  return { archiveUrl: parsed.toString(), attribution: BASEMAP_ATTRIBUTION };
 }
 
 /** Read the real bundler environment. The one caller that does. */
