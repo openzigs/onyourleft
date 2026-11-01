@@ -12,12 +12,14 @@
  * --compare`'s pair (the same extract through upstream's profile): it exits 1
  * on any differing tile, malformed tile, refused field value or decoder
  * disagreement. Without it, the schema is the comparison and the counts are a
- * record. Meant for a region: a US archive has millions of z15 tiles.
+ * record. The JSON opens with `coverage`: each archive's header bounds and
+ * addressed-tile count, so an archive that covers far more than the one it
+ * replaces shows before anything is uploaded. Meant for a region: a US archive has millions of z15 tiles.
  */
 
 import { open, type FileHandle } from 'node:fs/promises';
 import { PMTiles, type RangeResponse, type Source } from 'pmtiles';
-import { compareTile, emptySummary, strictPasses, type Summary } from './compare';
+import { compareTile, describeCoverage, emptySummary, strictPasses, type Summary } from './compare';
 
 class FileHandleSource implements Source {
   private constructor(
@@ -115,7 +117,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         }
       }
     }
-    process.stdout.write(`${JSON.stringify(printable(summary), null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ coverage: describeCoverage(a, b), ...(printable(summary) as object) }, null, 2)}\n`,
+    );
     if (strict && !strictPasses(summary)) {
       process.stderr.write('compare-archives: the strict pair differs; see the summary\n');
       return 1;

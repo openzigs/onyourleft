@@ -107,6 +107,7 @@ list() {
     for name in "$@"; do printf '<a href="%s">%s</a>\n' "${name}" "${name}"; done
     echo '</body></html>'
   } >"${tmp}/web/${GEOFABRIK}/${region}.html"
+  printf 'outline of %s\n' "${region}" >"${tmp}/web/${GEOFABRIK}/${region}.poly"
 }
 
 # publish PARENT NAME CONTENT: Geofabrik serves this extract and its MD5.
@@ -148,6 +149,10 @@ check 'a dated extract: it is cached under the region and its dated name' test -
 check 'a dated extract: Planetiler reads that file' has "$(cat "${tmp}/calls")" "--osm_path=${dated}"
 check 'a dated extract: the record names the file, its URL and its MD5' \
   has "$(record us)" "extract us-261030.osm.pbf ${url} md5 $(md5of "${dated}") "
+poly="${tmp}/work/data/extracts/north-america/us/us.poly"
+check 'the outline: the region .poly is fetched' has "$(cat "${tmp}/calls")" "-o ${poly}.part https://${GEOFABRIK}/north-america/us.poly"
+check 'the outline: Planetiler is clipped to it' has "$(cat "${tmp}/calls")" "--polygon=${poly}"
+check 'the outline: the record names it' has "$(record us)" 'polygon https://download.geofabrik.de/north-america/us.poly '
 
 # --- Reusing it, and a newer one --------------------------------------------
 : >"${tmp}/calls"
