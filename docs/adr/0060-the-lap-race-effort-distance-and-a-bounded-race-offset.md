@@ -420,3 +420,53 @@ renamed, an issue renumbered) and may not change a decision. In particular:
 - **Spike 0030 is overtaken**: the office record for US 7,278,913 shows it alive, or a claim on
   rank-weighted items or on items in exercise races turns up. D-9 and #1899 would then need a new
   reading before the mode ships.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-31** — **Proposed, for the owner's ruling on the pull request that appends this entry**
+  ([#1960](https://github.com/openzigs/onyourleft/issues/1960), the owner's request of 2026-10-31
+  for smarter bots): **a bot's power may follow a course-only race plan.** D-9.1 is unchanged: a bot
+  never varies its power with its race position, and D-14 Q4's answer stands. What this entry
+  changes is D-9.2's last clause, *"a function of its tier and the road only"*, which on its words
+  forbids any plan. **The rule from this entry: a bot's power is a function of its tier, the road,
+  the distance it has left and its own energy budget, and never of any other racer.** That widens a
+  rule, so it is more than the fact *Reversing any of these* and ADR 0013 D-3 allow an amendment to
+  record. It is recorded here because the owner asked for an amendment (#1960), as ADR 0059's entry
+  of 2026-10-28 recorded an owner's ruling on D-2.2, and because the decision D-9 makes, no
+  rubber-banding by rank, is not reversed; the owner's ruling is what settles the mechanism.
+  (1) **What the plan may read**: the bot's tier; the course, meaning the grade along the loop, the
+  lap count and the race length; the bot's own `effortDistance`, so that the distance left is the
+  race length less it; and the budget the bot itself has spent, in the critical-power and W′ style of
+  `packages/domain/src/analysis/critical-power.ts`: a reserve of work above the tier's power that a
+  climb or the closing distance draws down and an easier stretch refills. The plan is fixed from the
+  course before the start, and each step is pure and seeded by the race's own seed.
+  (2) **What it may never read**: any other racer's place, power, `effortDistance`, drawn distance,
+  gap to the bot or finish; the bot's own place or rank; and **the bot's own `raceOffset` and drawn
+  distance** (`effortDistance + raceOffset`). The last is the one that is easy to miss. `raceOffset`
+  is moved by other racers' items (D-5.1), and laps are counted at the drawn distance (D-3.3), so a
+  plan that measured the distance left from the drawn distance, or counted laps from the race's lap
+  counter, would make a bot's power depend on what another racer did. A bot's item and lane choices
+  (`packages/domain/src/lap-race/bots.ts` §`botDecision`, #1900) read the race as they do today and
+  are not its power; the sibling tactics issue #1959 keeps to that.
+  (3) **What does not move**: D-7.1, so power still comes from the tier's W/kg through a pacing rule
+  into `packages/physics` §`advanceBot` and §`advance`, with no new physics, and a bot is never built
+  from a recorded ride (#1955's scans); D-2, so no game event reaches the trainer (#1952's walk);
+  D-4.3 and D-5.2, so the plan changes no rider's grade, mass, `C_D·A`, rolling resistance, drafting
+  multiplier or power, only the bot's own power within (4); and D-8, so there are still no bots in
+  rooms.
+  (4) **The bounds, held as tests by the code that follows this entry**: a bot's mean power over a
+  race stays within a stated tolerance of its tier's W/kg × `BOT_MASS_KILOGRAMS` (75 kg), the
+  tolerance a named constant that the code's pull request proposes and the owner approves there; its
+  peak stays inside #92's envelope, `MINIMUM_INTENSITY_WATTS_PER_KILOGRAM` (0.5) to
+  `MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM` (7); with items off, `fierce`, `hard`, `brisk` and `steady`
+  finish in that order over 100 seeds; and #1900's test that the same bot on the same course reads
+  back an identical power trace whether it leads or trails is kept, with a mutation that reads rank
+  proven to turn it red.
+  (5) **The patent reading**: spike 0030 §3.2 reads US 7,278,913 claim 1 as needing a target rank
+  set for each computer racer and a performance value changed according to it. The plan sets no rank
+  and reads none, so D-9.3's reading holds by construction. Spike 0030 was not re-run for this entry,
+  and no search was made for claims on energy-budget pacing of computer opponents. (#1960)
