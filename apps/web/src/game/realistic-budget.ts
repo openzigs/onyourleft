@@ -535,9 +535,11 @@ export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
 
 /**
  * The most draw calls the realistic village frame may make **while a lap
- * race runs** — #1971, ADR 0060 D-10.2: **PROPOSED, AWAITING THE OWNER'S
- * APPROVAL** (desktop measurement; the tablet reading is the orchestrating
- * session's, as Delivery's 53 was #1815's).
+ * race runs** — #1971, ADR 0060 D-10.2: **approved by the owner on
+ * 2026-11-01**. The tablet read it on 2026-11-01 (village frame held, 30 s
+ * soak, 5 min sampled): 58 calls, p99 16.72 ms, 0.21 % of frames over 20 ms,
+ * GPU mean 736 MHz, against the same frame with no race at 50 calls, p99
+ * 16.74 ms, 0.27 %, 736 MHz — the race costs nothing the tablet can measure.
  *
  * ⚠️ **A third village ceiling, not a reuse.** {@link REALISTIC_VILLAGE_DRAW_CALLS}
  * stays frozen at 50 (D-10.3) and {@link DELIVERY_VILLAGE_DRAW_CALLS} at 53;
