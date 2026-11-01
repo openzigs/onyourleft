@@ -50,9 +50,9 @@ project that needed only what that build carries.
 On 2026-10-27 the owner's ruling D4 on [#1656](https://github.com/openzigs/onyourleft/issues/1656)
 asked for building fields that Protomaps' build does not carry (levels, roof shape, colours,
 materials and the rest that ADR 0054's 2026-11-01 entry lists). No published build carries them, so
-the only way to have them is to build the archive. [#1557](https://github.com/openzigs/onyourleft/issues/1557)
-wrote that build (`apps/web/tools/basemap/`, merged in
-[#1974](https://github.com/openzigs/onyourleft/pull/1974)). On 2026-10-31 the owner ruled that it is
+the only way to have them is to build the archive.
+[#1557](https://github.com/openzigs/onyourleft/issues/1557) wrote that build
+(`apps/web/tools/basemap/`, merged in [#1974](https://github.com/openzigs/onyourleft/pull/1974)). On 2026-10-31 the owner ruled that it is
 run on the owner's Mac and uploaded under a separate name, and the first build was uploaded beside
 the Protomaps file that the client still reads. That build was not clipped to its extract and so
 addressed far more tiles than the old file; `build.sh` now clips to the region's outline, and the
@@ -76,10 +76,11 @@ that it is recorded here.
    published MD5, and **the output is clipped to that region's Geofabrik `.poly` outline**
    (Planetiler's `--polygon`), so the archive addresses only tiles that meet the region. An unclipped
    build is never made the default.
-3. **The build runs on the owner's Mac.** No build service, paid or free, is part of it.
+3. **The build runs on the owner's Mac.** No paid build service is part of it.
 4. **Every build writes a build record** with the SHA-256 of each input, the extract's name and
    date, the build year that bounds `start_year`, and the archive's size. A rebuild from the same
-   record and the same inputs is the same archive.
+   record and the same inputs is the same archive, given the same JDK, which the README records
+   but does not pin.
 
 ### D-2 — Publishing: a new dated name, beside the old file, and the old one kept
 
@@ -125,8 +126,10 @@ The change of the constant is its own pull request, and the old archive stays in
 
 Building on the owner's Mac adds no service. Storage and serving are the R2 bucket and CDN the
 project already uses for the Protomaps copy (ADR 0010 D-1, D-2), so **the cost is the existing
-hosting**, plus a second archive held beside the first, which ADR 0010 D-3 already prices as double
-storage during a refresh. This keeps ADR 0036 D-7: no issue takes a paid service as a prerequisite.
+hosting**, plus each archive D-2.2 keeps beside the current one. ADR 0010 D-3 priced double storage
+for about a week of a refresh; D-2.2 makes it a standing cost for as long as a release in use names
+the older archive (about $0.27 a month for a US archive at `docs/cost-model.md`'s rate). This
+keeps ADR 0036 D-7: no issue takes a paid service as a prerequisite.
 **Any rise in the R2 bill is put to the owner first** (the ruling of 2026-10-31 on #1557).
 
 ### D-6 — What does not change
@@ -150,3 +153,13 @@ field ADR 0054's 2026-11-01 entry declares is `null`.
   archive no build names is a decision for the owner, not a clean-up.
 - **This ADR builds nothing.** It records a decision whose tooling #1557 already merged; the switch
   of `PUBLISHED_BASEMAP_URL` is a separate pull request.
+
+## What would make this ADR wrong
+
+- **A published build starts carrying the building fields.** If Protomaps' own archive (or another
+  Protomaps v4 build) carries what ADR 0054's 2026-11-01 entry declares, copying it is again the
+  cheaper choice, and this ADR should be superseded back.
+- **The owner's Mac can no longer run the build** (the US build needs hours and a large heap). Then
+  the build moves somewhere else, and D-1.3 and D-5 must be decided again, with no paid service.
+- **The R2 bill rises past what the owner accepts** because D-2.2 keeps too many archives. Then
+  D-2.2's reading of "in use" has to change, which is a decision for the owner.
