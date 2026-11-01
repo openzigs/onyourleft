@@ -53,7 +53,8 @@ materials and the rest that ADR 0054's 2026-11-01 entry lists). No published bui
 the only way to have them is to build the archive.
 [#1557](https://github.com/openzigs/onyourleft/issues/1557) wrote that build
 (`apps/web/tools/basemap/`, merged in [#1974](https://github.com/openzigs/onyourleft/pull/1974)).
-On 2026-10-31 the owner ruled that it is run on the owner's Mac and uploaded under a separate name, and the first build was uploaded beside
+On 2026-10-31 the owner ruled that it is run on the owner's Mac and uploaded under a separate name,
+and the first build was uploaded beside
 the Protomaps file that the client still reads. That build was not clipped to its extract and so
 addressed far more tiles than the old file; `build.sh` now clips to the region's outline, and the
 default archive moves only to a clipped rebuild.
