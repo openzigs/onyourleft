@@ -24,7 +24,7 @@
  * | `tow` | its 8 m, the same way, with a racer within `TOW_REACH_METRES` ahead; nothing without one |
  * | `puddle` | 6 m × `attack` for each rival in its lane **about to reach the next pick-up point** ({@link BOT_PUDDLE_REACH_METRES} short of it or nearer), where the puddle would lie |
  * | `crosswind-gust` | 8 m × `attack` for each rival in its lane within `GUST_REACH_METRES` ahead: what the gust hits |
- * | `rain-cape` | the hit it would absorb: 8 m with a rival within gust reach behind in its lane, 6 m with a puddle it will ride into this tick, 4 m (half a gust) with a rival within `BOT_THREAT_METRES` behind in another lane, and nothing while one is already on |
+ * | `rain-cape` | the hit it would absorb: 8 m with a rival **lining up** behind it, newly within gust reach behind in the lane it rides or the lane it moves to (a racer lined up behind can follow it across); 4 m for one that was lined up there last tick too, who may hold nothing; 6 m with a rival's puddle in that lane within its puddle look-ahead (`BOT_PUDDLE_LOOKAHEAD_METRES`, or this tick's travel when that is further), 4 m (half a gust) with a rival within `BOT_THREAT_METRES` behind in another lane, and nothing while one is already on |
  *
  * It uses the item when that beats what it **holds the item for**, its
  * personality's `hold` for the item, in metres. So a `crosswind-gust` an
@@ -62,8 +62,10 @@
  *   look-ahead"), plus `skill` × the pick-up spacing (a quarter lap), so a
  *   crafty bot picks the lane with fewer hazards over the next spacing.
  * - **Exposure**: −8 m × `caution` for a lane with a rival within gust reach
- *   behind in it, unless it holds or wears a cape: then it rides as it likes
- *   and puts the cape on when the hit comes.
+ *   behind in it. Holding or wearing a cape, it keeps the lane it rides
+ *   whoever is behind, and puts the cape on when the hit comes; it still does
+ *   not move **into** a rival's line, where its cape would go on at once and
+ *   be spent before the hit.
  * - **Aim**: holding a gust, +8 m × `attack` × `hunt` for each rival in reach
  *   ahead in the lane, so it steers to the bunch.
  * - **Sit**: holding a puddle, +6 m × `attack` for each rival in the lane about
@@ -76,7 +78,10 @@
  *   keeps it there; a tie between the others goes toward the middle.
  *
  * Having changed lane, it keeps the new one for {@link BOT_LANE_DWELL_MS}, so
- * it does not flap between lanes every tick, whatever a racer behind does. Its
+ * it does not flap between lanes every tick, whatever a racer behind does.
+ * The one thing that cuts the dwell short is a rival's puddle in its lane
+ * within its puddle look-ahead: it rides round that rather than into it, so a
+ * bot is never seen to change lane into a puddle and fail to change out. Its
  * memory of when it last moved is {@link BotMemory}, which the caller hands
  * back each tick: it is this race's, and nothing stored or recorded (D-7.1).
  *
@@ -90,7 +95,8 @@
  *
  * {@link BOT_SKILL_LEVEL}: how well its choices score, from `naive` (0) to
  * `crafty` (1). Below 1, the bot **misjudges** by up to
- * {@link BOT_MISJUDGE_METRES} × (1 − skill): each item it holds by an error
+ * {@link BOT_MISJUDGE_METRES} × {@link BOT_SKILL_MISJUDGEMENT} (all of it
+ * when naive, an eighth when canny, none when crafty): each item it holds by an error
  * drawn once for that item, so a naive bot wastes some items and sits on
  * others, and each lane by an error drawn once per {@link BOT_LANE_DWELL_MS}
  * of race time, so it wanders into trouble. It sees hazards only as far
@@ -212,6 +218,12 @@ export interface BotStrategy {
 
 /** What a bot remembers between ticks of one race, and nothing else. */
 export interface BotMemory {
+  /**
+   * The ids of the rivals within gust reach behind it in its lane last tick:
+   * one not among them is lining up behind it, which is what a hit coming
+   * looks like to a rider, who cannot see what a rival holds.
+   */
+  readonly linedUpIds: readonly string[];
   /** The instant of the tick it last chose a new lane at, or `null` before its first change. */
   readonly laneSinceMs: number | null;
   /**
@@ -222,7 +234,11 @@ export interface BotMemory {
 }
 
 /** A bot's memory on the start line. */
-export const BOT_MEMORY_AT_START: BotMemory = Object.freeze({ laneSinceMs: null, itemSince: null });
+export const BOT_MEMORY_AT_START: BotMemory = Object.freeze({
+  laneSinceMs: null,
+  itemSince: null,
+  linedUpIds: Object.freeze([]),
+});
 
 /** A strategic decision: the inputs, and the memory to hand back next tick. */
 export interface StrategicBotDecision extends BotDecision {
@@ -248,8 +264,21 @@ export const BOT_LAST_CALL_METRES = 5;
  */
 export const BOT_FINISH_WINDOW_METRES = 40;
 
-/** The most a `naive` bot misjudges an item or a lane by, in metres: scaled by 1 − skill. */
+/** The most a `naive` bot misjudges an item or a lane by, in metres: scaled by {@link BOT_SKILL_MISJUDGEMENT}. */
 export const BOT_MISJUDGE_METRES = 12;
+
+/**
+ * How much of {@link BOT_MISJUDGE_METRES} each skill misjudges by: a proposal
+ * for the owner. `canny`'s eighth (1.5 m) is below the 1 m to 3 m gaps
+ * between what an item is worth and what a personality holds it for most of
+ * the time, so a canny `defensive` leader keeps its cape until the hit in most
+ * races and still misjudges some; at half (6 m) it did in 10 of 100.
+ */
+export const BOT_SKILL_MISJUDGEMENT: Readonly<Record<BotSkill, number>> = {
+  naive: 1,
+  canny: 0.125,
+  crafty: 0,
+};
 
 /** Salts, so the field's deal and an item's judgement are not the race generator's own draws. */
 const FIELD_SALT = 0x5bd1_e995;
@@ -289,7 +318,7 @@ function misjudgement(view: View, what: number, which: number): number {
 
 /** How far the bot misjudges the item it has held since `itemSince`, in metres: 0 when crafty. */
 function itemJudgement(view: View, itemSince: number): number {
-  return misjudgement(view, 0, itemSince) * (1 - view.level) * BOT_MISJUDGE_METRES;
+  return misjudgement(view, 0, itemSince) * view.misjudgeMetres;
 }
 
 /**
@@ -299,7 +328,7 @@ function itemJudgement(view: View, itemSince: number): number {
  */
 function laneJudgement(view: View, lane: number): number {
   const span = Math.floor(view.race.atMs / BOT_LANE_DWELL_MS);
-  return misjudgement(view, 1 + lane, span) * (1 - view.level) * BOT_MISJUDGE_METRES;
+  return misjudgement(view, 1 + lane, span) * view.misjudgeMetres;
 }
 
 /** The race as one bot reads it this tick. */
@@ -312,6 +341,8 @@ interface View {
   readonly index: number;
   /** Its skill's level, 0 to 1. */
   readonly level: number;
+  /** The most it misjudges an item or a lane by, in metres. */
+  readonly misjudgeMetres: number;
   readonly me: LapRacer;
   readonly at: number;
   /** Every other racer still riding. */
@@ -321,6 +352,8 @@ interface View {
   readonly urgentMetres: number;
   /** How far ahead it counts puddles when it picks a lane. */
   readonly spanMetres: number;
+  /** Who was lined up behind it last tick: its memory's. */
+  readonly linedUpIds: readonly string[];
 }
 
 /** How far `other` is ahead of the bot by drawn distance: below 0 behind. */
@@ -339,12 +372,17 @@ function aheadIn(view: View, lane: number, reach: number, orLevel = false): numb
   }).length;
 }
 
-/** Whether a rival in `lane` is behind the bot within `reach`. */
-function behindIn(view: View, lane: number, reach: number): boolean {
-  return view.rivals.some((other) => {
+/** The rivals in `lane` behind the bot within `reach`. */
+function behindOf(view: View, lane: number, reach: number): readonly LapRacer[] {
+  return view.rivals.filter((other) => {
     const gap = -gapTo(view, other);
     return other.lane === lane && gap > 0 && gap <= reach;
   });
+}
+
+/** Whether a rival in `lane` is behind the bot within `reach`. */
+function behindIn(view: View, lane: number, reach: number): boolean {
+  return behindOf(view, lane, reach).length > 0;
 }
 
 /** Other racers' puddles, still wet, in `lane` ahead of the bot within `reach`. */
@@ -382,7 +420,8 @@ function laneScore(view: View, lane: number): number {
   const { attack, caution, hunt } = view.weights;
   let score = (lane === view.me.lane ? BOT_LANE_STAY_METRES : 0) + laneJudgement(view, lane);
   score -= caution * itemStrength('puddle') * puddlesIn(view, lane, view.spanMetres);
-  if (!shielded(view) && behindIn(view, lane, GUST_REACH_METRES)) {
+  // A cape covers a hit in the lane it rides, not one it moves into the line of.
+  if ((!shielded(view) || lane !== view.me.lane) && behindIn(view, lane, GUST_REACH_METRES)) {
     score -= caution * itemStrength('crosswind-gust');
   }
   if (view.me.held === 'crosswind-gust') {
@@ -394,12 +433,15 @@ function laneScore(view: View, lane: number): number {
   return score;
 }
 
-/** The lane to ride this tick: its own while the dwell runs, else the best-scoring. */
+/**
+ * The lane to ride this tick: its own while the dwell runs, unless a rival's
+ * puddle lies in it within its puddle look-ahead; else the best-scoring.
+ */
 function chooseLane(view: View, memory: BotMemory): number {
   const own = view.me.lane;
-  if (memory.laneSinceMs !== null && view.race.atMs - memory.laneSinceMs < BOT_LANE_DWELL_MS) {
-    return own;
-  }
+  const dwelling =
+    memory.laneSinceMs !== null && view.race.atMs - memory.laneSinceMs < BOT_LANE_DWELL_MS;
+  if (dwelling && puddlesIn(view, own, view.urgentMetres) === 0) return own;
   const middle = (LANE_COUNT - 1) / 2;
   // Its own lane first, then toward the middle, then the lower: the first best wins a tie.
   const candidates = [own, own - 1, own + 1]
@@ -454,13 +496,20 @@ function worthNow(view: View, kind: ItemKind, lane: number): number {
       return attack * itemStrength(kind) * aheadIn(view, lane, GUST_REACH_METRES);
     case 'rain-cape': {
       if (view.me.capeUntilMs !== null && view.me.capeUntilMs > view.race.atMs) return 0;
-      if (behindIn(view, lane, GUST_REACH_METRES)) return itemStrength('crosswind-gust');
+      // A rival lined up behind it can follow it into the lane it moves to.
+      const lined = [
+        ...behindOf(view, lane, GUST_REACH_METRES),
+        ...behindOf(view, view.me.lane, GUST_REACH_METRES),
+      ];
+      if (lined.some((other) => !view.linedUpIds.includes(other.racer.id))) {
+        return itemStrength('crosswind-gust');
+      }
       if (puddlesIn(view, lane, view.urgentMetres) > 0) return itemStrength('puddle');
       const near = view.rivals.some((other) => {
         const gap = -gapTo(view, other);
         return gap > 0 && gap <= BOT_THREAT_METRES;
       });
-      return near ? itemStrength('crosswind-gust') / 2 : 0;
+      return near || lined.length > 0 ? itemStrength('crosswind-gust') / 2 : 0;
     }
   }
 }
@@ -538,6 +587,7 @@ export function strategicBotDecision(
     botId,
     index,
     level,
+    misjudgeMetres: BOT_MISJUDGE_METRES * BOT_SKILL_MISJUDGEMENT[strategy.skill],
     me,
     at: racePosition(me.racer),
     rivals: race.racers.filter(
@@ -547,6 +597,7 @@ export function strategicBotDecision(
     urgentMetres,
     // A quarter lap: the spacing of `PICK_UP_FRACTIONS`' points.
     spanMetres: urgentMetres + (level * course.lapLengthMetres) / (PICK_UP_FRACTIONS.length + 1),
+    linedUpIds: memory.linedUpIds,
   };
 
   const lane = chooseLane(view, memory);
@@ -564,6 +615,7 @@ export function strategicBotDecision(
     memory: {
       laneSinceMs: lane === me.lane ? memory.laneSinceMs : race.atMs,
       itemSince: use ? null : itemSince,
+      linedUpIds: behindOf(view, lane, GUST_REACH_METRES).map((other) => other.racer.id),
     },
   };
 }

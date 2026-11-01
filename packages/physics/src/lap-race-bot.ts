@@ -78,8 +78,8 @@ export interface BotRaceStep {
   readonly conditions: LapRaceBotConditions;
   /**
    * The race's own seed, the one `createItemRace` took: the bots' decisions
-   * are drawn from it. `botDecision` refuses one that is not a safe whole
-   * number.
+   * are drawn from it. `strategicBotDecision` refuses one that is not a
+   * safe whole number.
    */
   readonly seed: number;
   /** The rider's inputs this tick, as their client sends them. */

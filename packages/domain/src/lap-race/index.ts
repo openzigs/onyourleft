@@ -86,6 +86,7 @@ export type {
   StrategicBotDecision,
 } from './strategy';
 export {
+  BOT_FINISH_WINDOW_METRES,
   BOT_LANE_DWELL_MS,
   BOT_LANE_STAY_METRES,
   BOT_LAST_CALL_METRES,
@@ -95,6 +96,7 @@ export {
   BOT_PERSONALITY_WEIGHTS,
   BOT_PUDDLE_REACH_METRES,
   BOT_SKILL_LEVEL,
+  BOT_SKILL_MISJUDGEMENT,
   BOT_SKILLS,
   botFieldPersonalities,
   strategicBotDecision,

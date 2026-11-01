@@ -107,6 +107,7 @@ function decide(
 const JUST_MOVED = (race: ItemRaceState): BotMemory => ({
   laneSinceMs: race.atMs - 500,
   itemSince: null,
+  linedUpIds: [],
 });
 
 describe('item timing: what a use is worth, against what the item is held for', () => {
@@ -194,16 +195,17 @@ describe('item timing: what a use is worth, against what the item is held for', 
     expect(decide(behind(10, 0), 'defensive').use).toBe(false);
     expect(decide(behind(10, 0), 'aggressive').use).toBe(true);
     expect(decide(behind(30, 0), 'aggressive').use).toBe(false);
-    // A puddle it will ride into, with the dwell keeping it in the lane.
+    // A puddle it will ride into whichever lane it takes: it puts the cape on.
+    const soaked = {
+      ...field([{ id: 'bot', at: 300, lane: 0, held: 'rain-cape' }]),
+      hazards: [puddle(310, 0), puddle(310, 1)],
+    };
+    expect(decide(soaked, 'defensive')).toMatchObject({ use: true, lane: 0 });
+    // One it can ride round, it rides round, and keeps the cape.
     const wet = {
       ...field([{ id: 'bot', at: 300, held: 'rain-cape' }]),
       hazards: [puddle(310, 1)],
     };
-    expect(decide(wet, 'defensive', { memory: JUST_MOVED(wet) })).toMatchObject({
-      use: true,
-      lane: 1,
-    });
-    // Free to move, it rides round it instead, and keeps the cape.
     expect(decide(wet, 'defensive')).toMatchObject({ use: false, lane: 0 });
     // One already on is not put on again.
     const worn = field([
@@ -211,6 +213,56 @@ describe('item timing: what a use is worth, against what the item is held for', 
       { id: 'x', at: 290 },
     ]);
     expect(decide(worn, 'defensive').use).toBe(false);
+  });
+
+  it('puts a defensive cape on for a rival lining up behind it, and not for one already sat there', () => {
+    const race = field([
+      { id: 'bot', at: 300, held: 'rain-cape' },
+      { id: 'x', at: 280 },
+    ]);
+    // x newly within gust reach behind in its lane: a hit is coming.
+    expect(decide(race, 'defensive').use).toBe(true);
+    // x was there last tick too, and may hold nothing: a defensive bot keeps its cape.
+    const sat: BotMemory = { laneSinceMs: null, itemSince: 1, linedUpIds: ['x'] };
+    expect(decide(race, 'defensive', { memory: sat }).use).toBe(false);
+    // An aggressive bot puts it on for either.
+    expect(decide(race, 'aggressive', { memory: sat }).use).toBe(true);
+  });
+
+  it('holding a cape, does not move into the line of a rival behind, where the cape would go at once', () => {
+    const ahead = (rival: Spec[]): ItemRaceState => ({
+      ...field([{ id: 'bot', at: 300, lane: 0, held: 'rain-cape' }, ...rival]),
+      hazards: [puddle(350, 0)],
+    });
+    // A puddle 50 m ahead in its lane, and a rival 10 m behind in the lane beside it.
+    expect(decide(ahead([{ id: 'x', at: 290, lane: 1 }]), 'defensive')).toMatchObject({
+      use: false,
+      lane: 0,
+    });
+    // With nobody behind, it rides round the puddle and keeps the cape.
+    expect(decide(ahead([]), 'defensive')).toMatchObject({ use: false, lane: 1 });
+  });
+
+  it('puts its cape on for a rival lined up behind it as it moves out of their lane, since they can follow', () => {
+    // A puddle 50 m ahead in its lane sends it across, out of the line of x behind it.
+    const race = {
+      ...field([
+        { id: 'bot', at: 300, held: 'rain-cape' },
+        { id: 'x', at: 290 },
+      ]),
+      hazards: [puddle(350, 1)],
+    };
+    expect(decide(race, 'defensive')).toMatchObject({ use: true, lane: 0 });
+  });
+
+  it('looks a tick of travel ahead for a puddle its cape must absorb, beyond the fixed look-ahead (#1900)', () => {
+    // Puddles 20 m ahead in both lanes it could take: beyond the fixed 15 m, within a 25 m tick.
+    const soaked = {
+      ...field([{ id: 'bot', at: 100, lane: 0, held: 'rain-cape' }]),
+      hazards: [puddle(120, 0), puddle(120, 1)],
+    };
+    expect(decide(soaked, 'defensive', { travel: 25 })).toMatchObject({ use: true, lane: 0 });
+    expect(decide(soaked, 'defensive', { travel: 0 })).toMatchObject({ use: false, lane: 0 });
   });
 
   it('near a pick-up point spends an item a fresh draw beats, and a leader keeps its cape there', () => {
@@ -231,6 +283,19 @@ describe('item timing: what a use is worth, against what the item is held for', 
     ]);
     expect(decide(leader, 'defensive').use).toBe(false);
   });
+
+  it('weighs the fresh draw by its own band: at the back, the back’s richer draw beats a gust it holds', () => {
+    const gust = (x: number, z: number): ItemRaceState =>
+      field([
+        { id: 'bot', at: 240, held: 'crosswind-gust' },
+        { id: 'x', at: x, lane: 0 },
+        { id: 'z', at: z, lane: 2 },
+      ]);
+    // 10 m short of the point, at the back of three: the back's mean (7.1 m) beats a defensive hold of 5 m.
+    expect(decide(gust(300, 310), 'defensive').use).toBe(true);
+    // At the front, the front's mean (4.5 m) does not.
+    expect(decide(gust(180, 170), 'defensive').use).toBe(false);
+  });
 });
 
 describe('the last lap and the last call', () => {
@@ -242,6 +307,14 @@ describe('the last lap and the last call', () => {
       ]);
     expect(decide(one(1_100), 'opportunist').use).toBe(false);
     expect(decide(one(2_100), 'opportunist').use).toBe(true);
+  });
+
+  it('on the last lap, spends an item worth nothing just short of a pick-up point to draw again', () => {
+    const alone = (at: number): ItemRaceState => field([{ id: 'bot', at, held: 'tow' }]);
+    // 10 m short of the point at 2,250 m: a fresh draw is worth the front's mean.
+    expect(decide(alone(2_240), 'defensive').use).toBe(true);
+    // Away from a point, an item worth nothing is kept.
+    expect(decide(alone(2_100), 'defensive').use).toBe(false);
   });
 
   it('spends whatever is held at the last call, worth something or not, and the call grows with the travel', () => {
@@ -283,8 +356,8 @@ describe('lanes: a score per lane, and a dwell', () => {
     expect(decide(chased('rain-cape'), 'defensive')).toEqual({
       use: true,
       lane: 1,
-      // Used, so its judgement of that item is forgotten.
-      memory: { laneSinceMs: null, itemSince: null },
+      // Used, so its judgement of that item is forgotten; the racer lined up behind is remembered.
+      memory: { laneSinceMs: null, itemSince: null, linedUpIds: ['x'] },
     });
   });
 
@@ -307,6 +380,36 @@ describe('lanes: a score per lane, and a dwell', () => {
     // Its own puddle is no hazard to it.
     const own = wet([{ ...puddle(200, 1), ownerId: 'bot' }]);
     expect(decide(own, 'defensive').lane).toBe(1);
+  });
+
+  it('a naive bot counts puddles a tick of travel ahead when it picks a lane, beyond the fixed look-ahead (#1900)', () => {
+    const road = (hazards: ItemRaceState['hazards']): ItemRaceState => ({
+      ...field([{ id: 'bot', at: 100 }]),
+      hazards,
+    });
+    const naive = (race: ItemRaceState, travel: number): number =>
+      decide(race, 'defensive', { skill: 'naive', travel }).lane;
+    // Three puddles 16 m to 20 m ahead in its lane: beyond the fixed 15 m.
+    const wet = road([puddle(116, 1), puddle(118, 1), puddle(120, 1)]);
+    // On a dry road, this seed's misjudgement keeps it in its lane...
+    expect(naive(road([]), 0)).toBe(1);
+    // ...and with no travel to speak of, it does not see those puddles.
+    expect(naive(wet, 0)).toBe(1);
+    // A 25 m tick reaches them, and it leaves the lane.
+    expect(naive(wet, 25)).not.toBe(1);
+  });
+
+  it('cuts the dwell short for a puddle in its lane within its look-ahead, and for nothing further', () => {
+    const wet = (at: number): ItemRaceState => ({
+      ...field([{ id: 'bot', at: 300 }]),
+      hazards: [puddle(at, 1)],
+    });
+    const near = wet(310);
+    expect(decide(near, 'defensive', { memory: JUST_MOVED(near) }).lane).toBe(0);
+    // 30 m ahead, beyond the look-ahead: the dwell holds, where a bot free to move would go.
+    const far = wet(330);
+    expect(decide(far, 'defensive', { memory: JUST_MOVED(far) }).lane).toBe(1);
+    expect(decide(far, 'defensive').lane).toBe(0);
   });
 
   it('holding a puddle, sits in the lane of the racer behind who is about to reach the point', () => {
@@ -486,14 +589,26 @@ describe('holding: a defensive leader’s cape absorbs the hit the #1900 bot was
     return { absorbed, wasted, hit };
   }
 
+  /** The scripted scenario with the defensive leader deciding at `skill`. */
+  function strategicRun(seed: number, skill: BotSkill): ReturnType<typeof scripted> {
+    let memory = BOT_MEMORY_AT_START;
+    return scripted(seed, (race) => {
+      const decision = strategicBotDecision(
+        race,
+        'bot',
+        seed,
+        8,
+        strategy('defensive', skill),
+        memory,
+      );
+      memory = decision.memory;
+      return decision;
+    });
+  }
+
   it('over twenty seeds', () => {
     for (let seed = 1; seed <= 20; seed += 1) {
-      let memory = BOT_MEMORY_AT_START;
-      const strategic = scripted(seed, (race) => {
-        const decision = strategicBotDecision(race, 'bot', seed, 8, strategy('defensive'), memory);
-        memory = decision.memory;
-        return decision;
-      });
+      const strategic = strategicRun(seed, 'crafty');
       expect(strategic, `seed ${String(seed)}`).toEqual({
         absorbed: true,
         wasted: false,
@@ -503,6 +618,17 @@ describe('holding: a defensive leader’s cape absorbs the hit the #1900 bot was
       expect(reactive.absorbed, `seed ${String(seed)}`).toBe(false);
       expect(reactive.wasted, `seed ${String(seed)}`).toBe(true);
     }
+  });
+
+  it('at canny, the solo race’s skill, in at least 80 of seeds 1 to 100', () => {
+    const held = (skill: BotSkill): number =>
+      Array.from({ length: 100 }, (_, at) => strategicRun(at + 1, skill)).filter(
+        (run) => run.absorbed && !run.wasted && !run.hit,
+      ).length;
+    // Measured: 87 of 100 at canny, 8 at naive (10 at canny before #1982's fix round).
+    expect(held('canny')).toBeGreaterThanOrEqual(80);
+    // Skill still degrades it.
+    expect(held('naive')).toBeLessThanOrEqual(40);
   });
 });
 
@@ -582,12 +708,15 @@ describe('over a thousand seeded races', { timeout: 60_000 }, () => {
     const aggressive = profile('aggressive');
     const defensive = profile('defensive');
     const opportunist = profile('opportunist');
+    // Measured at #1982's fix round, with canny misjudging by 1.5 m (it was 6 m, and the
+    // wider gaps it measured then were mostly that noise): mean holds 2.83 / 3.35 / 3.46 s,
+    // capes 2.86 / 4.68 / 3.00 s. Over a thousand races those means move by well under 0.1 s.
     // Aggressive fires early: the shortest holds.
-    expect(aggressive.held).toBeLessThan(defensive.held - 1_000);
-    expect(aggressive.held).toBeLessThan(opportunist.held - 1_000);
+    expect(aggressive.held).toBeLessThan(defensive.held - 400);
+    expect(aggressive.held).toBeLessThan(opportunist.held - 400);
     // Defensive keeps its cape: the longest-held capes.
-    expect(defensive.cape).toBeGreaterThan(aggressive.cape + 2_000);
-    expect(defensive.cape).toBeGreaterThan(opportunist.cape + 2_000);
+    expect(defensive.cape).toBeGreaterThan(aggressive.cape + 1_250);
+    expect(defensive.cape).toBeGreaterThan(opportunist.cape + 1_250);
     // Opportunist waits for bunches: the most racers a gust.
     expect(opportunist.gust).toBeGreaterThan(aggressive.gust + 0.1);
     // D-4's bound, at every tick of every race.
@@ -673,9 +802,31 @@ describe('what a decision reads, and what it does not', () => {
     ]);
     const moved = decide(race, 'defensive');
     expect(moved.lane).not.toBe(1);
-    expect(moved.memory).toEqual({ laneSinceMs: race.atMs, itemSince: pickUpsPassed(COURSE, 100) });
+    expect(moved.memory).toEqual({
+      laneSinceMs: race.atMs,
+      itemSince: pickUpsPassed(COURSE, 100),
+      // It moved out of x's line, so nobody is lined up behind it in the lane it rides.
+      linedUpIds: [],
+    });
     const used = decide(field([{ id: 'bot', at: 100, held: 'tailwind' }]), 'defensive');
-    expect(used).toEqual({ use: true, lane: 1, memory: { laneSinceMs: null, itemSince: null } });
+    expect(used).toEqual({
+      use: true,
+      lane: 1,
+      memory: { laneSinceMs: null, itemSince: null, linedUpIds: [] },
+    });
+  });
+
+  it('keeps its judgement of an item it holds through a pick-up point, drawn once for that item', () => {
+    // A cape at 240 m, before the point at 250 m, worth nothing to a lone defensive bot.
+    const first = decide(field([{ id: 'bot', at: 240, held: 'rain-cape' }]), 'defensive');
+    expect(first.use).toBe(false);
+    expect(first.memory.itemSince).toBe(0);
+    // Through the point, still holding it: the key it was judged by is the one it first saw it at.
+    const later = field([{ id: 'bot', at: 260, held: 'rain-cape' }]);
+    expect(later.racers[0]?.pickUpsPassed).toBe(1);
+    expect(decide(later, 'defensive', { memory: first.memory }).memory.itemSince).toBe(0);
+    // With no memory of it, it is a new item to the bot.
+    expect(decide(later, 'defensive').memory.itemSince).toBe(1);
   });
 
   it('does nothing once finished, and nothing for an id not in the race, and keeps its memory', () => {
@@ -687,7 +838,7 @@ describe('what a decision reads, and what it does not', () => {
         racer: { ...entry.racer, finishedAtMs: 1, lineMetres: 3_000 },
       })),
     };
-    const memory: BotMemory = { laneSinceMs: 3, itemSince: 0 };
+    const memory: BotMemory = { laneSinceMs: 3, itemSince: 0, linedUpIds: [] };
     expect(decide(finished, 'aggressive', { memory })).toEqual({ use: false, lane: 2, memory });
     expect(decide(race, 'aggressive', { id: 'nobody', memory })).toEqual({
       use: false,
