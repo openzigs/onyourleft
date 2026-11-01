@@ -997,7 +997,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (with a hit coming under it, outlined dashed: a shape,
                         never a tint), last and absent on any other ride; the
                         standings in a room's panel (`RaceStandings.tsx`, W/kg,
-                        never watts, never a live region). Its five sentences
+                        never watts, never a live region), with the leader
+                        always its first line (#1967). Its five sentences
                         are rank 5h, OWED as Delivery's are, the place at most
                         once every 10 s. `GameView` feeds `HudInput.lapRace`
                         on a ride running a race (#1906);
