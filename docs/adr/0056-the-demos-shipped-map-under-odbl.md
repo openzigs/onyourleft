@@ -357,3 +357,42 @@ own shape rather than by somebody remembering to.
 | ODbL 1.0: §1.0 definitions, §4.2, §4.3, §4.4 a, c and d, §4.6, quoted verbatim in Context | <https://opendatacommons.org/licenses/odbl/1-0/> (canonical page, fetched directly, HTTP 200) | 2026-10-24 |
 | The owner's rulings of 2026-10-24 | [#1643](https://github.com/openzigs/onyourleft/issues/1643), its body's revised ruling and its comment of 2026-10-24 | 2026-10-24 |
 | That the archive is distributed as *"an Open Database License Produced Work (OpenStreetMap attribution required)"* | <https://docs.protomaps.com/basemaps/downloads>, as quoted in ADR 0054 Context | 2026-10-21 |
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-01** — **D-2.1's list of what is shipped is no longer whole: the demo bundle publishes
+  the new building fields, and has carried place points since it was first baked**
+  ([#1788](https://github.com/openzigs/onyourleft/issues/1788), on the owner's ruling D4 of
+  2026-10-27 on [#1656](https://github.com/openzigs/onyourleft/issues/1656), and the owner's ruling
+  of 2026-11-01 on [#1991](https://github.com/openzigs/onyourleft/pull/1991)). D-2.1 lists the
+  bundle's records *"as ADR 0054 D-3.3 lists them after its amendment of 2026-10-22"*. The bundle's
+  `features` is `apps/web/src/game/world-data/corridor.ts` §`packedCorridorFeatures`
+  (`tools/demo/bake-route.ts`, `tools/demo/route-bundle.ts`), the one shape the rider's store and
+  the demo share, so every field added to the store's `features` is in the bundle too. Two things
+  follow. (1) Since [#1632](https://github.com/openzigs/onyourleft/issues/1632) and
+  [#1651](https://github.com/openzigs/onyourleft/issues/1651) landed together on 2026-10-25, the
+  packed shape (`PACKED_VERSION` 3) has carried place points with `kind`, `kind_detail` and
+  `population_rank` ([ADR 0055](0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) and
+  no name, which D-2.1's parenthesis does not name. No decision of this ADR chose to publish them.
+  **The owner's ruling of 2026-11-01 allows them** (*"Keep, record it"*): the bundle keeps place
+  points, their kind and rank only and never a name, under ODbL 1.0 like every other record in it.
+  D-2.2's reason against option (b) is half false since ADR 0055, because the `places` layer is now
+  read, for kind and rank; its conclusion stands, because names and `pois` are still never read. (2)
+  From [#1789](https://github.com/openzigs/onyourleft/issues/1789), the bundle carries the twelve
+  building fields [ADR 0054](0054-towns-from-real-map-data.md)'s entry of this date declares, each a
+  whitelisted value, a clamped whole number or a palette index, and `null` where the archive the
+  bake reads carries none. **The demo bundle publishes them** under ODbL 1.0, as it publishes every
+  other record in it (D-3), and D-4's §4.6 a offering covers them unchanged, because the offer is
+  the bundle file itself. D-2.1's list reads, from #1789: building footprints with `kind`, `height`
+  and `min_height`, and with the building type, levels, roof levels, roof shape, roof orientation,
+  roof direction, wall colour, roof colour, wall material, roof material, start year and landmark
+  flag; land-use and water polygons with `kind`; footway lines with `kind` and `kind_detail`; street
+  lines with `kind`, `kind_detail` and bridge or tunnel; and place points with `kind`, `kind_detail`
+  and `population_rank` — with no OSM id, no name, no address, no owner, no route id, no device time
+  and no tile coordinate list. What still stands, unchanged: D-5 (the bundle is never committed),
+  D-8 (attribution in the demo frame and in every exported video frame) and D-9 (CI bakes only the
+  synthetic fixture), and D-1 to D-11 otherwise.

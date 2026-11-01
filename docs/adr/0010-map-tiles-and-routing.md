@@ -753,3 +753,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   tree. The 1 006 kB in the entry above was right for #489's tree; the chunk carries this app's own
   map code as well as MapLibre's and has grown with it since, so that figure describes neither
   build today. The licence table's read date is 2026-09-30. ([#756](https://github.com/openzigs/onyourleft/pull/756))
+- **2026-11-01** — D-1's *Generation* row, *"**We do not generate.** Copy Protomaps' published
+  daily build"*, is superseded by
+  [ADR 0062](0062-we-build-our-own-basemap-archive-from-openstreetmap.md), on the owner's ruling of
+  that day on [#1991](https://github.com/openzigs/onyourleft/pull/1991): the project builds its own
+  archive from OpenStreetMap. This entry is a pointer and changes nothing else here.
+  ([#1788](https://github.com/openzigs/onyourleft/issues/1788))
