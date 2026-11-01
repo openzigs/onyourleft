@@ -83,6 +83,7 @@ export type {
   BotSkill,
   BotStrategy,
   BotWeights,
+  LinedUpRival,
   StrategicBotDecision,
 } from './strategy';
 export {
@@ -95,6 +96,7 @@ export {
   BOT_PERSONALITIES,
   BOT_PERSONALITY_WEIGHTS,
   BOT_PUDDLE_REACH_METRES,
+  BOT_RELINE_MS,
   BOT_SKILL_LEVEL,
   BOT_SKILL_MISJUDGEMENT,
   BOT_SKILLS,
