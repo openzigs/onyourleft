@@ -73,3 +73,29 @@ export {
   botDecision,
   botTierPlan,
 } from './bots';
+
+// The bots' strategy (#1959): item timing by what a use is worth, lane
+// tactics with a dwell, personalities and a skill level. Decisions only: no
+// power, so D-9 is untouched.
+export type {
+  BotMemory,
+  BotPersonality,
+  BotSkill,
+  BotStrategy,
+  BotWeights,
+  StrategicBotDecision,
+} from './strategy';
+export {
+  BOT_LANE_DWELL_MS,
+  BOT_LANE_STAY_METRES,
+  BOT_LAST_CALL_METRES,
+  BOT_MEMORY_AT_START,
+  BOT_MISJUDGE_METRES,
+  BOT_PERSONALITIES,
+  BOT_PERSONALITY_WEIGHTS,
+  BOT_PUDDLE_REACH_METRES,
+  BOT_SKILL_LEVEL,
+  BOT_SKILLS,
+  botFieldPersonalities,
+  strategicBotDecision,
+} from './strategy';

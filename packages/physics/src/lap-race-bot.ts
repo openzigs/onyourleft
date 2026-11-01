@@ -14,7 +14,9 @@
  *
  * ## What a bot is made of: a tier, the pacing rule, the course and a seed
  *
- * The whole of a bot is an id, a {@link BotTier} and its own ride state. The
+ * The whole of a bot is an id, a {@link BotTier}, a `BotStrategy` (#1959: a
+ * personality and a skill, which decide its lanes and items and nothing else),
+ * what its decisions remember from the last tick, and its own ride state. The
  * whole of a tick's inputs is the elapsed time, the course's conditions (the
  * same {@link BotCourse} the #92 bot takes, minus the plan the tier supplies),
  * the race's seed and the rider's inputs. **No activity, stream, ghost or
@@ -24,8 +26,9 @@
  * ## No rubber-banding (D-9)
  *
  * A bot's power is a function of its tier and the road under it. The race's
- * standings are never read on the way to {@link advanceBot}: two races where
- * the same bot leads and trails read back identical power traces.
+ * standings are never read on the way to {@link advanceBot}, and neither is
+ * its strategy: two races where the same bot leads and trails read back
+ * identical power traces, and so do two bots of one tier and different skill.
  *
  * ## No instance, no network (D-7.3)
  *
@@ -33,16 +36,34 @@
  * and nothing here reads a clock or names a platform API.
  */
 
-import type { ItemRaceState, RaceTickInput, Seconds, Watts } from '@onyourleft/domain';
-import { botDecision, botTierPlan, stepRace, type BotTier } from '@onyourleft/domain';
+import type {
+  BotMemory,
+  BotStrategy,
+  ItemRaceState,
+  RaceTickInput,
+  Seconds,
+  Watts,
+} from '@onyourleft/domain';
+import {
+  BOT_MEMORY_AT_START,
+  botTierPlan,
+  stepRace,
+  strategicBotDecision,
+  type BotTier,
+} from '@onyourleft/domain';
 
 import { advanceBot, BOT_AT_START_LINE, type BotCourse } from './pacer';
 import type { RideState } from './simulate';
 
-/** One bot in a race: an id, a tier, and where its own power has taken it. */
+/** One bot in a race: an id, a tier, a strategy, and where its own power has taken it. */
 export interface LapRaceBot {
   readonly id: string;
+  /** Its strength: the only thing that sets its power. */
   readonly tier: BotTier;
+  /** How it decides (#1959): chosen apart from the tier, and never read on the way to its power. */
+  readonly strategy: BotStrategy;
+  /** What its decisions remember from the last tick of this race: nothing stored, nothing recorded. */
+  readonly memory: BotMemory;
   readonly ride: RideState;
   /** What the pacing rule asked for on the last tick, in watts. 0 before the first. */
   readonly power: Watts | 0;
@@ -65,9 +86,9 @@ export interface BotRaceStep {
   readonly rider?: Omit<RaceTickInput, 'atMs'>;
 }
 
-/** A bot on the start line. */
-export function lapRaceBot(id: string, tier: BotTier): LapRaceBot {
-  return { id, tier, ride: BOT_AT_START_LINE, power: 0 };
+/** A bot on the start line, with its strength and its way of racing chosen apart. */
+export function lapRaceBot(id: string, tier: BotTier, strategy: BotStrategy): LapRaceBot {
+  return { id, tier, strategy, memory: BOT_MEMORY_AT_START, ride: BOT_AT_START_LINE, power: 0 };
 }
 
 /**
@@ -87,8 +108,16 @@ export function stepBotRace(
   const lanes: Record<string, number> = { ...step.rider?.lanes };
   const uses: string[] = [...(step.rider?.uses ?? [])];
   const moved = bots.map((bot): LapRaceBot => {
-    // How far the bot will ride this tick, near enough: what its puddle look-ahead grows to.
-    const decision = botDecision(race, bot.id, step.seed, bot.ride.speed * step.elapsed);
+    // How far the bot will ride this tick, near enough: what its puddle
+    // look-ahead and its last call grow with.
+    const decision = strategicBotDecision(
+      race,
+      bot.id,
+      step.seed,
+      bot.ride.speed * step.elapsed,
+      bot.strategy,
+      bot.memory,
+    );
     lanes[bot.id] = decision.lane;
     if (decision.use) uses.push(bot.id);
     const tick = advanceBot(bot.ride, step.elapsed, {
@@ -96,7 +125,7 @@ export function stepBotRace(
       plan: botTierPlan(bot.tier),
     });
     effortDistances[bot.id] = tick.state.distance;
-    return { ...bot, ride: tick.state, power: tick.power };
+    return { ...bot, memory: decision.memory, ride: tick.state, power: tick.power };
   });
   return {
     race: stepRace(race, {
