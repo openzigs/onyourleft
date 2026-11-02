@@ -35,6 +35,7 @@ import {
   type PrivacyZoneRecord,
   type RouteRecord,
 } from '@onyourleft/store';
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { FILE_FIELD, LOOP_FIELD, loopChosen, routeFromImportForm } from '../routes/import-form';
@@ -53,7 +54,13 @@ import {
   type Mounted,
 } from '../testing/mount';
 import { liveRegionsSaying, timesSaid } from '../testing/said-once';
-import { RoutesView } from './RoutesView';
+import type { PreferenceStorage } from '../game/hud/announce-preference';
+import { basemapStyle, OSM_ATTRIBUTION, type BasemapConfig } from '../map/basemap';
+import { MAP_OFFLINE_TEXT } from '../map/MapPanel';
+import type { MapPort } from '../map/port';
+import { coordinatesNowOn, stubMapPort, type RecordedMap, type StubMapPort } from '../map/testing';
+import { MAP_TILES_STORAGE_KEY } from '../map/tiles-preference';
+import { ROUTE_MAP_FAILED_TEXT, RoutesView } from './RoutesView';
 
 const ATHLETE = toAthleteId('athlete-a');
 const METRES_PER_DEGREE_LATITUDE = 111_194.93;
@@ -660,5 +667,196 @@ describe('each message is said once, in one live region', () => {
     expect(timesSaid(view.container, fault)).toBe(1);
     expect(liveRegionsSaying(view.container, fault)).toBe(0);
     expect(view.container.querySelector('[data-oyl-pane="list"]')?.textContent).toContain(fault);
+  });
+});
+
+describe('#2003 — a chosen route on the map', () => {
+  const BASEMAP: BasemapConfig = {
+    archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
+    attribution: OSM_ATTRIBUTION,
+  };
+
+  /** A loader that counts its calls, resolving to the stub port. */
+  function loaderFor(port: StubMapPort): { load: () => Promise<MapPort>; calls: () => number } {
+    let calls = 0;
+    return {
+      load: () => {
+        calls += 1;
+        return Promise.resolve(port);
+      },
+      calls: () => calls,
+    };
+  }
+
+  async function renderMapped(
+    stub: RouteStub,
+    selected: string | undefined,
+    map: (() => Promise<MapPort>) | undefined,
+    extra: { basemap?: BasemapConfig | undefined; preferences?: PreferenceStorage } = {
+      basemap: BASEMAP,
+    },
+  ): Promise<Mounted> {
+    mounted = await mount(
+      <RoutesView
+        port={stub}
+        now={() => 1_700_000_500}
+        selected={selected}
+        map={map}
+        basemap={extra.basemap}
+        {...(extra.preferences === undefined ? {} : { preferences: extra.preferences })}
+      />,
+    );
+    await settle();
+    await settle();
+    return mounted;
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'onLine');
+  });
+
+  it('draws the route’s own line, whole, on an explorable map fitted to it', async () => {
+    const saved = route();
+    const engine = stubMapPort();
+    await renderMapped(routeStub(ATHLETE, [saved]), 'route-1', loaderFor(engine).load);
+
+    const headings = queryAll(document, 'h3').map((heading) => heading.textContent);
+    expect(headings).toContain('Map');
+    expect(engine.created).toHaveLength(1);
+    const made = engine.created[0] as RecordedMap;
+    expect(made.options.explorable).toBe(true);
+    // Read back off what the map was handed: every position of the stored
+    // profile, longitude first, in order.
+    expect(coordinatesNowOn(made)).toEqual(
+      saved.profile.positions.map((position) => [position.longitude, position.latitude]),
+    );
+    expect(made.bounds.at(-1)?.south).toBe(saved.profile.positions[0]?.latitude);
+    expect(document.querySelector('.oyl-map')?.getAttribute('aria-label')).toBe(
+      'Map of this route.',
+    );
+    expect(queryAll(document, '.oyl-map__moves button')).toHaveLength(7);
+  });
+
+  it('moves that map from the page’s own buttons', async () => {
+    const engine = stubMapPort();
+    await renderMapped(routeStub(ATHLETE, [route()]), 'route-1', loaderFor(engine).load);
+    await activateWithKeyboard(buttonSaying(document, 'Zoom in') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(document, 'Move east') as HTMLElement);
+    expect(engine.created[0]?.moves).toEqual(['zoom in', 'pan east']);
+  });
+
+  it('fetches no map engine for the list, and one only once a route is chosen', async () => {
+    const engine = stubMapPort();
+    const loader = loaderFor(engine);
+    const view = await renderMapped(routeStub(ATHLETE, [route()]), undefined, loader.load);
+    expect(loader.calls()).toBe(0);
+    await view.rerender(
+      <RoutesView
+        port={routeStub(ATHLETE, [route()])}
+        selected="route-1"
+        map={loader.load}
+        basemap={BASEMAP}
+      />,
+    );
+    await settle();
+    await settle();
+    expect(loader.calls()).toBe(1);
+    expect(engine.created).toHaveLength(1);
+  });
+
+  it('keeps one engine and one map when another route is chosen, and moves the line', async () => {
+    const engine = stubMapPort();
+    const loader = loaderFor(engine);
+    const other = route({
+      id: stubRouteId('route-2'),
+      name: 'Ditchling Beacon',
+      profile: routeProfile(northPoints(1500, 9000)),
+    });
+    const stub = routeStub(ATHLETE, [route(), other]);
+    const view = await renderMapped(stub, 'route-1', loader.load);
+    await view.rerender(
+      <RoutesView port={stub} selected="route-2" map={loader.load} basemap={BASEMAP} />,
+    );
+    await settle();
+    await settle();
+    expect(loader.calls()).toBe(1);
+    expect(coordinatesNowOn(engine.created.at(-1) as RecordedMap)[0]).toEqual([
+      other.profile.positions[0]?.longitude,
+      other.profile.positions[0]?.latitude,
+    ]);
+  });
+
+  it('follows the rider’s map-tiles switch, as a ride’s page does', async () => {
+    const engine = stubMapPort();
+    const turnedOff: PreferenceStorage = {
+      getItem: (key) => (key === MAP_TILES_STORAGE_KEY ? 'off' : null),
+      setItem: () => undefined,
+    };
+    await renderMapped(routeStub(ATHLETE, [route()]), 'route-1', loaderFor(engine).load, {
+      basemap: BASEMAP,
+      preferences: turnedOff,
+    });
+    const made = engine.created[0] as RecordedMap;
+    expect(made.options.style).toEqual(basemapStyle(BASEMAP, { tiles: false }));
+    expect(made.tracks.at(-1)).toBeDefined();
+  });
+
+  it('says there is no map, in a route’s words, for a build with no basemap', async () => {
+    const engine = stubMapPort();
+    await renderMapped(routeStub(ATHLETE, [route()]), 'route-1', loaderFor(engine).load, {
+      basemap: undefined,
+    });
+    expect(engine.created).toHaveLength(0);
+    expect(document.body.textContent).toContain('the route is not drawn on a map');
+    // And the route's facts are still there in words.
+    expect(document.querySelector('.oyl-selected dl')?.textContent).toContain('Distance');
+  });
+
+  it('says it is loading while the engine loads, not that the browser has no WebGL', async () => {
+    const never = (): Promise<MapPort> => new Promise(() => undefined);
+    await renderMapped(routeStub(ATHLETE, [route()]), 'route-1', never);
+    expect(document.body.textContent).toContain('Loading the map…');
+    expect(document.body.textContent).not.toContain('WebGL');
+  });
+
+  it('says the map could not be loaded when the engine fails to arrive', async () => {
+    const failing = (): Promise<MapPort> => Promise.reject(new Error('chunk failed'));
+    await renderMapped(routeStub(ATHLETE, [route()]), 'route-1', failing);
+    expect(document.body.textContent).toContain(ROUTE_MAP_FAILED_TEXT);
+    expect(document.body.textContent).not.toContain('chunk failed');
+  });
+
+  it('offline, says the map is unavailable rather than drawing a plain box, then draws it', async () => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+    const engine = stubMapPort();
+    await renderMapped(routeStub(ATHLETE, [route()]), 'route-1', loaderFor(engine).load);
+    expect(engine.created).toHaveLength(0);
+    expect(queryAll(document, '.oyl-map')).toHaveLength(0);
+    expect(document.body.textContent).toContain(MAP_OFFLINE_TEXT);
+
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
+    await act(async () => {
+      globalThis.dispatchEvent(new Event('online'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(engine.created).toHaveLength(1);
+    expect(coordinatesNowOn(engine.created[0] as RecordedMap).length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain(MAP_OFFLINE_TEXT);
+  });
+
+  it('puts no coordinate of the route in any text or attribute on the page — ADR 0004 D', async () => {
+    const saved = route();
+    await renderMapped(routeStub(ATHLETE, [saved]), 'route-1', loaderFor(stubMapPort()).load);
+    const everything = [
+      document.body.textContent ?? '',
+      ...[...document.querySelectorAll('*')].flatMap((element) =>
+        [...element.attributes].map((attribute) => attribute.value),
+      ),
+    ].join('\n');
+    // The route runs north from 51.5074 N, 0.1278 W. No form of either number
+    // to three places or more is anywhere on the page.
+    expect(everything).not.toMatch(/51\.5\d\d/);
+    expect(everything).not.toMatch(/0\.127/);
   });
 });

@@ -32,14 +32,17 @@ import type { MapRenderer, MapView, MapViewOptions } from './port';
  * Create a map in `doc`'s palette, and repaint it in the other one whenever
  * the page changes. `optionsFor` builds a palette's style — `MapPanel.tsx`
  * passes `basemap.ts` §`basemapStyle` with that palette's line colour.
+ * `explorable` is fixed at creation (`port.ts` §`MapCreateOptions`): a change
+ * of palette repaints the map and cannot make it movable or still.
  */
 export function createThemedMap(
   renderer: MapRenderer,
   container: HTMLElement,
   doc: Document,
   optionsFor: (theme: Theme) => MapViewOptions,
+  explorable = false,
 ): MapView {
-  const view = renderer.create(container, optionsFor(documentTheme(doc)));
+  const view = renderer.create(container, { ...optionsFor(documentTheme(doc)), explorable });
   const stopWatching = watchDocumentTheme(doc, (theme) => {
     view.setStyle(optionsFor(theme));
   });
@@ -49,6 +52,15 @@ export function createThemedMap(
     },
     setStyle: (options) => {
       view.setStyle(options);
+    },
+    zoom: (direction) => {
+      view.zoom(direction);
+    },
+    pan: (direction) => {
+      view.pan(direction);
+    },
+    fitTrack: () => {
+      view.fitTrack();
     },
     destroy: () => {
       stopWatching();

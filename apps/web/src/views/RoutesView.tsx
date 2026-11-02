@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useId, useState, type FormEvent, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type FormEvent,
+  type JSX,
+  type ReactNode,
+} from 'react';
 
 import { LOOP_CLOSURE_METRES, unixSeconds, type Metres } from '@onyourleft/domain';
 import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/store';
@@ -9,12 +18,19 @@ import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { FileDrop } from '../design/FileDrop';
+import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
 import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { ProfileShape } from '../design/illustration/ProfileShape';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
+import type { BasemapConfig } from '../map/basemap';
+import { MapPanel } from '../map/MapPanel';
+import { useOnline } from '../map/online';
+import type { MapPort } from '../map/port';
+import { readMapTilesChoice } from '../map/tiles-preference';
+import { routeGeometry } from '../map/track';
 import { checkName, editRoute, LOOP_CHECKBOX_LABEL, type SaveRefusal } from '../routes/save';
 import { FILE_FIELD, LOOP_FIELD, routeFromImportForm } from '../routes/import-form';
 import { PUBLIC_ROUTE_WARNING, PUBLIC_ROUTE_ZONE_NOTE } from '../routes/share';
@@ -66,13 +82,20 @@ import { formatDistance, formatSmallDistance, measurementText } from '../units/f
  * not in the list the screen read is read on its own with `getRoute`, so a
  * shared link to it is not called "not found" because the list is bounded.
  *
- * ⚠️ **There is no map here, and the drawing canvas is its own screen.** #71's
- * canvas is `RouteBuilderView` at `/routes/new`, linked from the top of this
- * one — it is a screenful of controls in its own right and folding it in would
- * make this page two things. #63's map still needs a published tile archive
- * (#53) that does not exist yet, so a saved route here is a name, a distance, a
- * climb and a visibility. ⚠️ A reviewer who remembers this paragraph saying
- * "no drawing canvas" is reading the old file.
+ * ⚠️ **The drawing canvas is its own screen.** #71's canvas is
+ * `RouteBuilderView` at `/routes/new`, linked from the top of this one — it is
+ * a screenful of controls in its own right and folding it in would make this
+ * page two things. ⚠️ A reviewer who remembers this paragraph saying "no
+ * drawing canvas" is reading the old file.
+ *
+ * **A chosen route is drawn on the map — #2003.** Through the same `MapPanel`,
+ * basemap and map-tiles switch as a ride's page, made `explorable` so the rider
+ * can zoom and pan along it (`map/MapPanel.tsx` says how, and how a keyboard
+ * does the same). Its facts stay above it as words, so the map is never the
+ * only way to them, and offline the panel says the map is unavailable rather
+ * than drawing a plain box. ⚠️ A reviewer who remembers this paragraph saying
+ * "there is no map here" — because #53's archive did not exist — is reading the
+ * old file.
  */
 
 /** One text field of a submitted form. See `SegmentsView.tsx` for why this narrows. */
@@ -126,7 +149,30 @@ export interface RoutesViewProps {
   readonly save?: ((file: DownloadableFile) => void) | undefined;
   /** The selected route's id, from `#/routes/selected/<id>` — #670. */
   readonly selected?: string | undefined;
+  /**
+   * How to get a map engine (#2003), or `undefined` where there is none — the
+   * loader a ride's page takes (`ActivityDetailView.tsx`), so `maplibre-gl` is
+   * fetched only once a route is chosen, never for the list.
+   */
+  readonly map?: (() => Promise<MapPort>) | undefined;
+  /** Where the basemap is, or `undefined` for a build configured with none (#534). */
+  readonly basemap?: BasemapConfig | undefined;
+  /**
+   * Where the rider's map-tiles choice is kept (`map/tiles-preference.ts`) —
+   * this DEVICE's `localStorage` unless a test hands in a double.
+   */
+  readonly preferences?: PreferenceStorage | undefined;
 }
+
+/** The map engine, once a route is chosen (#2003). */
+type MapEngine =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly port: MapPort }
+  | { readonly kind: 'failed' };
+
+/** What the route's page says when the map engine itself could not be loaded (#2003). */
+export const ROUTE_MAP_FAILED_TEXT =
+  'The map could not be loaded on this device. The route’s facts and downloads are unaffected.';
 
 /** A selected route that was not in the list, read on its own. */
 type Fetched =
@@ -134,7 +180,15 @@ type Fetched =
   | { readonly id: string; readonly kind: 'missing' }
   | { readonly id: string; readonly kind: 'failed' };
 
-export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.Element {
+export function RoutesView({
+  port,
+  now,
+  save,
+  selected,
+  map,
+  basemap,
+  preferences,
+}: RoutesViewProps): JSX.Element {
   const [routes, setRoutes] = useState<readonly RouteRecord[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<SaveRefusal | undefined>(undefined);
@@ -142,6 +196,11 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
   const [pendingDelete, setPendingDelete] = useState<RouteRecord | undefined>(undefined);
   const [exported, setExported] = useState<string | undefined>(undefined);
   const [fetched, setFetched] = useState<Fetched | undefined>(undefined);
+  const [engine, setEngine] = useState<MapEngine>({ kind: 'loading' });
+  // Read once, when the screen opens: the switch is on the Settings screen, so
+  // it cannot change while this one is showing — `ActivityDetailView`'s rule.
+  const [tiles] = useState(() => readMapTilesChoice(preferences ?? deviceStorage()));
+  const online = useOnline();
   const listCaptionId = useId();
   const units = useUnits();
 
@@ -310,6 +369,37 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
     [port, reload, selected],
   );
 
+  const shown: Fetched | { readonly kind: 'found'; readonly route: RouteRecord } | undefined =
+    inList !== undefined
+      ? { kind: 'found', route: inList }
+      : fetched?.id === selected
+        ? fetched
+        : undefined;
+  const routeShown = shown?.kind === 'found';
+
+  /**
+   * The map engine, fetched the first time a route is on screen (#2003) — not
+   * for the list, which draws no map, and not again for the next route: the
+   * loader is the module's `import()`, and one port serves every map.
+   */
+  useEffect(() => {
+    if (!routeShown || map === undefined || engine.kind !== 'loading') {
+      return undefined;
+    }
+    let live = true;
+    map().then(
+      (loaded) => {
+        if (live) setEngine({ kind: 'ready', port: loaded });
+      },
+      () => {
+        if (live) setEngine({ kind: 'failed' });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [routeShown, map, engine.kind]);
+
   if (port === undefined) {
     return (
       <div>
@@ -321,13 +411,6 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       </div>
     );
   }
-
-  const shown: Fetched | { readonly kind: 'found'; readonly route: RouteRecord } | undefined =
-    inList !== undefined
-      ? { kind: 'found', route: inList }
-      : fetched?.id === selected
-        ? fetched
-        : undefined;
 
   /*
    * #668: the next step is an action, so it is drawn as a button rather than
@@ -428,6 +511,22 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
     ) : shown.kind === 'found' ? (
       <SelectedRoute
         route={shown.route}
+        mapPanel={
+          engine.kind === 'failed' ? (
+            <p className="oyl-muted">{ROUTE_MAP_FAILED_TEXT}</p>
+          ) : (
+            <RouteMap
+              route={shown.route}
+              // Nothing until the engine is here: `MapPanel` with no port says
+              // the browser has no WebGL, which is not true while it loads.
+              port={engine.kind === 'ready' ? engine.port : undefined}
+              loading={map !== undefined && engine.kind === 'loading'}
+              basemap={basemap}
+              tiles={tiles}
+              offline={!online}
+            />
+          )
+        }
         units={units}
         save={save}
         onExport={onExport}
@@ -593,8 +692,52 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
  */
 export const ROUTES_KEPT_VISIBLE: readonly string[] = [PUBLIC_ROUTE_WARNING];
 
+interface RouteMapProps {
+  readonly route: RouteRecord;
+  readonly port: MapPort | undefined;
+  readonly loading: boolean;
+  readonly basemap: BasemapConfig | undefined;
+  readonly tiles: boolean;
+  readonly offline: boolean;
+}
+
+/**
+ * The chosen route on the map (#2003).
+ *
+ * The line is the route's own profile, whole — the owner's view of their own
+ * route on their own device (`map/track.ts` §`routeGeometry`). Memoised on the
+ * profile, so a re-render of the page is not a new line, which `MapPanel`
+ * would hand the map again.
+ */
+function RouteMap({
+  route,
+  port,
+  loading,
+  basemap,
+  tiles,
+  offline,
+}: RouteMapProps): JSX.Element | null {
+  const track = useMemo(() => routeGeometry(route.profile.positions), [route.profile]);
+  if (loading) {
+    return <p className="oyl-muted">Loading the map…</p>;
+  }
+  return (
+    <MapPanel
+      port={port}
+      basemap={basemap}
+      tiles={tiles}
+      track={track}
+      subject="route"
+      explorable
+      offline={offline}
+    />
+  );
+}
+
 interface SelectedRouteProps {
   readonly route: RouteRecord;
+  /** The route's map, or what is said instead of one (#2003). */
+  readonly mapPanel: ReactNode;
   readonly units: UnitSystem;
   readonly save: ((file: DownloadableFile) => void) | undefined;
   readonly onExport: (route: RouteRecord, format: RouteFileFormat) => void;
@@ -608,6 +751,7 @@ interface SelectedRouteProps {
 /** The chosen route, at the head of the detail pane — #670. */
 function SelectedRoute({
   route,
+  mapPanel,
   units,
   save,
   onExport,
@@ -644,6 +788,8 @@ function SelectedRoute({
           <dd>{route.visibility}</dd>
         </div>
       </dl>
+      <h3>Map</h3>
+      {mapPanel}
       <h3>Send to a head unit</h3>
       <p>
         {save === undefined ? (
