@@ -766,11 +766,6 @@ function registerProtocol(): boolean {
 }
 
 /**
- * Whether to draw map tiles — `?tiles=off` is the rider's Settings switch
- * turned off (`map/tiles-preference.ts`, the owner's decision of 2026-09-25),
- * handed to the **real** `basemapStyle` the way `MapPanel.tsx` hands it.
- */
-/**
  * `?explorable` builds the map a saved route's page builds (#2003): drag and
  * pinch on, the canvas out of the tab order, and the buttons' moves on
  * `window.__oylMapMove`. Absent, the still map a ride's page draws — which is
@@ -780,6 +775,11 @@ function explorableMap(): boolean {
   return new URL(window.location.href).searchParams.has('explorable');
 }
 
+/**
+ * Whether to draw map tiles — `?tiles=off` is the rider's Settings switch
+ * turned off (`map/tiles-preference.ts`, the owner's decision of 2026-09-25),
+ * handed to the **real** `basemapStyle` the way `MapPanel.tsx` hands it.
+ */
 function tilesDrawn(): boolean {
   return new URL(window.location.href).searchParams.get('tiles') !== 'off';
 }

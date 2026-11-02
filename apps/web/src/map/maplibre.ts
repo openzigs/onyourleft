@@ -173,6 +173,11 @@ function fullStyle(options: MapViewOptions, track: TrackFeature | undefined): St
  *   buttons, a double click and a pinch remain.
  * - **Rotation and pitch are off.** The pan buttons are named north, south,
  *   east and west, which is only true of a map that keeps north up.
+ * - **One finger scrolls the page.** MapLibre's touch pan calls
+ *   `preventDefault` on a one-finger `touchmove`, so a thumb on a map that
+ *   fills a phone's screen would pan the map and never the page. The touch pan
+ *   is turned off (see `create`); a mouse drag still pans, a pinch still zooms,
+ *   and the panel's compass buttons move the view for a touch.
  * - **Box zoom and the keyboard handler are off.** The keyboard handler
  *   listens on the canvas, which is kept out of the tab order (see the module
  *   note), and its equivalents are the panel's buttons.
@@ -212,6 +217,9 @@ const renderer: MapRenderer = {
     if (options.explorable === true) {
       // A pinch zooms; it does not also turn the map. See `EXPLORABLE`.
       map.touchZoomRotate.disableRotation();
+      // `dragPan` switches the mouse and the touch pan together; only the
+      // touch half is unwanted. See `EXPLORABLE`.
+      map.dragPan._touchPan.disable();
     }
     /** The box the line was last fitted to, for `fitTrack`. */
     let fitted: TrackBounds | undefined;

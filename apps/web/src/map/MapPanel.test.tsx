@@ -428,6 +428,24 @@ describe('#2003 — a map the rider can move, and one that says it is offline', 
     expect(document.body.textContent).not.toContain('ride');
   });
 
+  it('still draws the line offline when the rider turned map tiles off', async () => {
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel
+        port={port}
+        basemap={BASEMAP}
+        track={aTrack()}
+        tiles={false}
+        subject="route"
+        explorable
+        offline
+      />,
+    );
+    await settle();
+    expect(port.created).toHaveLength(1);
+    expect(document.body.textContent).not.toContain(MAP_OFFLINE_TEXT);
+  });
+
   it('creates no map offline and says so, then draws it with its line once back online', async () => {
     const port = stubMapPort();
     // The SAME line both times, as a route's page memoises it: a new one would

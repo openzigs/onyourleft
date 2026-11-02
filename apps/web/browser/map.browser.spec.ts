@@ -1202,4 +1202,37 @@ test.describe('an explorable map — #2003', () => {
     await page.waitForTimeout(1000);
     expect(await lineAtCentre(page)).toBe(true);
   });
+
+  test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true });
+
+    test('a one-finger drag is left to the page, not taken as a pan', async ({ page }) => {
+      await page.goto(`/?tiles=off&explorable&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+      const load = await mapLoad(page);
+      expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+
+      const box = await page.locator('#map').boundingBox();
+      if (box === null) throw new Error('the map has no box to drag');
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 10; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: x - step * 20, y }],
+        });
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+      // Long enough for a pan to have drawn, had MapLibre taken the drag: it
+      // would have called `preventDefault` and the page could not have scrolled.
+      await page.waitForTimeout(1000);
+      expect(await lineAtCentre(page)).toBe(true);
+
+      // The compass buttons are what a touch moves the map with.
+      await page.evaluate(() => window.__oylMapMove?.('pan north'));
+      await expect.poll(() => lineAtCentre(page)).toBe(false);
+    });
+  });
 });

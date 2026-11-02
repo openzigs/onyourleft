@@ -55,6 +55,9 @@
  * which is what keeps it out of the tab order rather than sitting in it as an
  * unlabelled stop.
  *
+ * That is a ride's map. A saved route's page asks for a map that moves
+ * instead, and its section below (#2003) is what qualifies this one.
+ *
  * ## In the page's palette, following it (#672)
  *
  * The style is the page's palette's (`basemap.ts` §`MAP_COLOURS`), and a
@@ -87,7 +90,8 @@
  * `offline` (#2003): the streets come from the archive over the network and
  * ADR 0024 D-2 does not precache it, so a map drawn offline is the route's
  * line on a plain box. The page says the map is unavailable instead, and draws
- * it when the device is back online.
+ * it when the device is back online. A rider who turned map tiles off has no
+ * streets to fetch, so offline changes nothing for them.
  */
 
 import { useEffect, useRef, type JSX } from 'react';
@@ -218,7 +222,11 @@ export function MapPanel({
   const view = useRef<MapView | undefined>(undefined);
   const words = WORDS[subject];
 
-  const drawable = track !== undefined && port !== undefined && basemap !== undefined && !offline;
+  // Offline matters only to a map that fetches streets: with the tiles switch
+  // off the style has no source, needs no network, and draws as it does online.
+  const unreachable = offline && tiles;
+  const drawable =
+    track !== undefined && port !== undefined && basemap !== undefined && !unreachable;
   const parts = track?.coordinates.length ?? 0;
   const label = words.label(parts);
 
@@ -285,7 +293,7 @@ export function MapPanel({
     return <p className="oyl-muted">{words.noBasemap}</p>;
   }
 
-  if (offline) {
+  if (unreachable) {
     return <p className="oyl-muted">{MAP_OFFLINE_TEXT}</p>;
   }
 
