@@ -64,6 +64,7 @@ import {
   countrysideFixture,
   houseStreetFixture,
   commercialStreetFixture,
+  mappedRoofStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
@@ -478,7 +479,9 @@ async function run(): Promise<void> {
                   ? houseStreetFixture(latitude)
                   : config.town === 'commercial'
                     ? commercialStreetFixture(latitude)
-                    : undefined;
+                    : config.town === 'roofs'
+                      ? mappedRoofStreetFixture(latitude)
+                      : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
