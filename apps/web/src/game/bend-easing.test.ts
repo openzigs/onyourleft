@@ -26,6 +26,7 @@ import {
   EASED_LEAN_RADIANS,
   EASING_WINDOW_METRES,
   GIVE_BACK_SHARE,
+  MAX_LAG_METRES,
   PICK_UP_METRES_PER_SECOND_SQUARED,
   easedPlace,
   type EasedPlace,
@@ -218,6 +219,32 @@ describe('the speed lost in a bend is drawn position only, and given back — #1
       expect(hardest).toBeLessThan(-BRAKING_METRES_PER_SECOND_SQUARED / 2);
       // And it gave them back: well after the bend it is on the odometer again.
       expect(easedPlace(line, to + 300, speed)).toEqual({ distance: to + 300, speed });
+    },
+  );
+
+  it.each([8, 14, 18, 22, 25])(
+    'never moves the drawn place faster than the give-back allows, nor lets it lag past the bound, at %s m/s — across the window’s edge too',
+    (speed) => {
+      const route = levelHairpinRoute(10, 2_000);
+      const line = racingLine(route);
+      let previous = easedPlace(line, 1_700, speed);
+      let deepest = 0;
+      let worst = 0;
+      for (let at = 1_700.5; at <= 3_000; at += 0.5) {
+        const place = easedPlace(line, at, speed);
+        deepest = Math.max(deepest, at - place.distance);
+        worst = Math.max(worst, (place.distance - previous.distance) / 0.5);
+        previous = place;
+      }
+      // It did ease off, and the lag is bounded: pacers and the finish stay comparable.
+      expect(deepest).toBeGreaterThan(1);
+      expect(deepest).toBeLessThanOrEqual(MAX_LAG_METRES + 1e-9);
+      // The drawn place moves at most 15 % faster than the odometer, every half metre.
+      expect(worst).toBeLessThanOrEqual(1 + GIVE_BACK_SHARE + 0.02);
+      // And the lag is all given back before the bend leaves the window.
+      expect(easedPlace(line, 2_031 + EASING_WINDOW_METRES - 100, speed).distance).toBe(
+        2_031 + EASING_WINDOW_METRES - 100,
+      );
     },
   );
 

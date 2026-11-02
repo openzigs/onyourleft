@@ -930,6 +930,10 @@ function ridersOnTheRoad(
   for (const remote of input.remoteRiders ?? []) {
     if (first === undefined || last === undefined) break;
     // #1998: on the corridor by where they are DRAWN, which is where `markerAt` puts them.
+    // The drawn place is never ahead of the odometer, so a rider whose odometer
+    // is behind the corridor is behind it drawn too: skipped before the easing,
+    // which is the cost of a frame in a crowded room.
+    if (remote.distanceMetres < first.along) continue;
     const place = ease(remote.distanceMetres, remote.speedMetresPerSecond);
     if (place.distance < first.along || place.distance > last.along) continue;
     riders.push({

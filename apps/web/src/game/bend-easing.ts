@@ -30,7 +30,10 @@
  *   it closes in — the extra speed falls at {@link GIVE_BACK_EASING_METRES_PER_SECOND_SQUARED}
  *   as the lag runs out — so it arrives on the odometer smoothly, never
  *   overtakes it (the lag never goes below nought), and is exactly on it a
- *   little way after the bend.
+ *   little way after the bend. The lag is BOUNDED, at {@link MAX_LAG_METRES}:
+ *   at a descent's speed a hairpin would cost hundreds of metres, which could
+ *   not be given back inside {@link EASING_WINDOW_METRES} and would be
+ *   dropped in one step as the bend left it.
  *
  * ## What is NOT changed — and how the speed lost is accounted for
  *
@@ -43,9 +46,12 @@
  * rider is on their own odometer again once the road straightens — a ride's
  * recorded distance is the rider's own, and no distance is invented or lost.
  *
- * **Pacers and ghosts stay comparable** because every rider is eased by this
- * one function of where they are and how fast: a bot or a ghost at the
- * rider's distance and speed is drawn exactly where the rider is.
+ * **Pacers and ghosts stay comparable** in two ways: every rider is eased by
+ * this one function of where they are and how fast, so a bot or a ghost at the
+ * rider's distance and speed is drawn exactly where the rider is; and no
+ * rider is drawn more than {@link MAX_LAG_METRES} behind their odometer, so
+ * riders at different speeds are never drawn further out of order than that,
+ * and "To go" and the finish are never further out than that.
  *
  * ## Stateless, like the lean
  *
@@ -108,8 +114,25 @@ export const GIVE_BACK_SHARE = 0.15;
 export const GIVE_BACK_EASING_METRES_PER_SECOND_SQUARED = 0.5;
 
 /**
- * How far back the lag is ridden from: **1 000 m**. A hairpin's lag is given
- * back within about 150 m of it; this is long enough for a run of switchbacks.
+ * The most the drawn rider ever lags its odometer: **30 m**. Chosen, and why it
+ * is a bound rather than whatever the bend costs: at a descent's speed a
+ * hairpin costs hundreds of metres of lag (256 m at 25 m/s), which takes more
+ * than {@link EASING_WINDOW_METRES} to give back, so the lag recomputed from the
+ * window dropped in one step as the bend left it and the drawn rider jumped
+ * metres in a frame; and a rider that far behind its own odometer disagrees
+ * with the HUD's gap, "To go" and a pacer or ghost beside it. Giving back
+ * `L` metres takes about `L / `{@link GIVE_BACK_SHARE} of odometer (200 m for
+ * 30 m, at any speed), so the whole lag is given back well inside the window.
+ * ⚠️ Where the bend would cost more, the drawn place keeps pace with the
+ * odometer once the lag is at the bound while the drawn speed stays eased: the
+ * lean is held to 25° and the position is held close to the odometer.
+ */
+export const MAX_LAG_METRES = 30;
+
+/**
+ * How far back the lag is ridden from: **1 000 m**. With the lag bounded by
+ * {@link MAX_LAG_METRES} a bend's lag is given back within about 250 m of it
+ * at any speed up to a descent's; this is long enough for a run of switchbacks.
  */
 export const EASING_WINDOW_METRES = 1_000;
 
@@ -163,7 +186,8 @@ export interface EasedPlace {
  *    between samples, so a limit drawn straight between two samples is above
  *    the limit in between, and leant the rider at 27–29° in a test.
  * 3. **The lag**, ridden from there to the odometer at
- *    {@link EASING_STEP_METRES}: `1 − u/v` a metre, never below nought.
+ *    {@link EASING_STEP_METRES}: `1 − u/v` a metre, between nought and
+ *    {@link MAX_LAG_METRES}.
  */
 export function easedPlace(line: RacingLine, distance: number, speed: number): EasedPlace {
   if (!(speed > 0) || !Number.isFinite(distance)) {
@@ -185,7 +209,7 @@ export function easedPlace(line: RacingLine, distance: number, speed: number): E
   for (let at = from; at < distance;) {
     const step = Math.min(EASING_STEP_METRES, distance - at);
     const drawn = drawnSpeed(limit, from, at - lag, speed, lag);
-    lag = Math.max(0, lag + step * (1 - drawn / speed));
+    lag = Math.min(MAX_LAG_METRES, Math.max(0, lag + step * (1 - drawn / speed)));
     at += step;
   }
   return { distance: distance - lag, speed: drawnSpeed(limit, from, distance - lag, speed, lag) };
