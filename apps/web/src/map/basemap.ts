@@ -189,21 +189,25 @@ export const BASEMAP_URL_VARIABLE = 'VITE_BASEMAP_PMTILES_URL';
  * still in use can name it. `docs/architecture.md`'s Basemap row says the same
  * where #53's archive is described.
  *
- * ⚠️ **#1557's own build, `basemap-us-oyl-20261030.pmtiles`, is uploaded but is
- * NOT this default**: it was not clipped to the US, so its header says
- * −180°..180° by 15.9°..73.0° and a z15 tile in London holds only `earth`.
- * That would turn a non-US ride from a procedural world into an empty one and
- * paint bare land beside the line. `apps/web/tools/basemap/README.md` says what
- * the switch waits for.
+ * ⚠️ **Since the owner's word of 2026-11-02 this is our own build** (ADR 0062),
+ * `basemap-us-oyl-20261031.pmtiles`: the 2026-10-31 US extract, clipped to the
+ * extract's outline, so it adds Alaska and Hawaii and holds no tile outside the
+ * US. #1557's unclipped `-20261030` build and the Protomaps
+ * `basemap-us-20260914.pmtiles` stay published beside it, under the rule above.
+ * Its header bounds are −180°..180° by 15.9°..73.0° (the Aleutians cross the
+ * antimeridian), so MapLibre does ask for tiles outside the US. The archive has
+ * none, so it gets nothing back, and the world's read counts an absent tile as
+ * `outside-archive` (`game/world-data/corridor.ts`), the same as one outside the
+ * bounds, so a ride outside the US still draws its procedural world.
  *
- * ⚠️ **Outside that box the map is a line on a plain background.** The archive
- * declares its bounds in its header, `pmtiles`' protocol hands them to
- * MapLibre as the source's `bounds`, and MapLibre asks for no tile outside
- * them — so a ride in London costs one header read and then nothing: no error,
- * no retry, no spinner. `map.browser.spec.ts` §"a ride outside the archive's
- * coverage" is the measurement.
+ * ⚠️ **Outside the US the map is a line on a plain background.** The archive
+ * holds no tile there, so a ride in London draws the ride's line and no land:
+ * no error, no retry, no spinner. It now costs a directory read or two that
+ * come back empty, where the Protomaps file's box-shaped bounds cost nothing.
+ * `map.browser.spec.ts` §"a ride outside the archive's coverage" measures the
+ * bounds case against the fixture archive.
  */
-export const PUBLISHED_BASEMAP_URL = 'https://tiles.openzigs.com/basemap-us-20260914.pmtiles';
+export const PUBLISHED_BASEMAP_URL = 'https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles';
 
 /** What `readBasemapConfig` reads. A parameter, so a test needs no bundler. */
 export interface BasemapEnvironment {
