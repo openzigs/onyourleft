@@ -64,6 +64,8 @@
  * what the loopback half does and does not prove, which is unchanged.
  */
 
+import type { GeographicPosition } from '@onyourleft/domain';
+
 import { documentTheme } from '../src/design/theme-selection';
 import type { Theme } from '../src/design/tokens';
 import {
@@ -250,6 +252,19 @@ export interface MapProbe {
   readonly registrations: number;
 }
 
+/**
+ * What an editable map reported (#2006), as the route planner would hear it.
+ * Positions are `[longitude, latitude]`.
+ */
+export type MapEdit =
+  | { readonly kind: 'tap'; readonly at: readonly [number, number] }
+  | { readonly kind: 'move'; readonly id: string; readonly at: readonly [number, number] }
+  | {
+      readonly kind: 'line';
+      readonly from: readonly [number, number];
+      readonly to: readonly [number, number];
+    };
+
 /** One press of an explorable map's buttons (#2003), as `MapPanel.tsx` makes it. */
 export type MapMove =
   'zoom in' | 'zoom out' | 'pan north' | 'pan south' | 'pan east' | 'pan west' | 'fit';
@@ -258,6 +273,14 @@ declare global {
   interface Window {
     /** Present once the map exists: what a button below an explorable map does (#2003). */
     __oylMapMove?: (move: MapMove) => void;
+    /** Present on an `?editable` map (#2006): every gesture it reported, in order. */
+    __oylMapEdits?: MapEdit[];
+    /**
+     * Present on an `?editable` map (#2006): put one waypoint, `w1`, at the
+     * view's centre, numbered `label` (`1` unless given) — a second call
+     * renumbers the same marker, as an insert before it would.
+     */
+    __oylMapWaypointAtCentre?: (label?: string) => void;
     __oylMapProbe?: () => MapProbe;
     __oylHarness?: HarnessResult;
     __oylMapLoad?: MapLoadResult;
@@ -776,6 +799,15 @@ function explorableMap(): boolean {
 }
 
 /**
+ * `?editable` builds the route planner's map (#2006): explorable, and the
+ * gestures reported into `window.__oylMapEdits` through the planner's own
+ * seam, `MapView.listen`.
+ */
+function editableMap(): boolean {
+  return new URL(window.location.href).searchParams.has('editable');
+}
+
+/**
  * Whether to draw map tiles — `?tiles=off` is the rider's Settings switch
  * turned off (`map/tiles-preference.ts`, the owner's decision of 2026-09-25),
  * handed to the **real** `basemapStyle` the way `MapPanel.tsx` hands it.
@@ -872,16 +904,34 @@ function run(): void {
     }
     // Through the same function `MapPanel.tsx` uses, so the palette the map
     // is drawn in, and the watch that repaints it, are the product's (#672).
+    const editable = editableMap();
     const view = createThemedMap(
       mapLibrePort.renderer,
       container,
       document,
       optionsFor,
-      explorableMap(),
+      explorableMap() || editable,
+      editable,
     );
     created = true;
     const track = trackFor();
     view.setTrack(trackFeature(track), trackBounds(track));
+    if (editable) {
+      const edits: MapEdit[] = [];
+      const pair = (position: GeographicPosition): readonly [number, number] => [
+        position.longitude,
+        position.latitude,
+      ];
+      view.listen({
+        tap: (position) => edits.push({ kind: 'tap', at: pair(position) }),
+        moveWaypoint: (id, position) => edits.push({ kind: 'move', id, at: pair(position) }),
+        dragLine: (from, to) => edits.push({ kind: 'line', from: pair(from), to: pair(to) }),
+      });
+      window.__oylMapEdits = edits;
+      window.__oylMapWaypointAtCentre = (label = '1'): void => {
+        view.setWaypoints([{ id: 'w1', position: view.centre(), label }]);
+      };
+    }
     window.__oylMapMove = (move: MapMove): void => {
       const [verb, direction] = move.split(' ');
       if (verb === 'zoom') view.zoom(direction as 'in' | 'out');

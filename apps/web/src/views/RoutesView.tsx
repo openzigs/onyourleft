@@ -424,7 +424,7 @@ export function RoutesView({
       <a className="oyl-button oyl-button--secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
         Draw a route on this device
       </a>{' '}
-      — place waypoints and have the roads between them worked out.
+      — place waypoints on a map or from a list, and save the route here.
     </p>
   );
 

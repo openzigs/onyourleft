@@ -32,6 +32,7 @@ import {
   STYLE_OFFSET,
   type FootprintPlan,
   type FootprintPlanOptions,
+  type PlanRoofVariant,
   type FootprintRole,
 } from './footprint-buildings';
 import {
@@ -865,7 +866,7 @@ describe('the archetypes’ variants and the lever — #1785', () => {
       bungalow: 'half-hipped',
       ranch: 'side-hipped',
     };
-    const seen = new Set<RoofVariant>();
+    const seen = new Set<PlanRoofVariant>();
     for (const plan of plans) {
       if (plan.roofVariant === 'plain') continue;
       seen.add(plan.roofVariant);

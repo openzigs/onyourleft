@@ -5,7 +5,8 @@
  * differently yet**. The plan's use of each field is a sibling issue under
  * #1656; until one lands, a corridor plans exactly as it did before #1789,
  * whether its archive carries the fields (#1557's) or not (Protomaps' own, or
- * a self-hoster's).
+ * a self-hoster's). Since #1790 the roof and storey fields draw, and with its
+ * lever off (`mappedRoofShape: false`) nothing does.
  *
  * Each corridor here goes through the store's own pack and unpack
  * (`world-data/corridor.ts`), and each assertion reads `footprintPlans`'
@@ -18,7 +19,7 @@ import { BUILDING_FIELD_NAMES, type BuildingFeature } from '@onyourleft/map-feat
 import { BUILDING_FIELDS_DECODED } from '@onyourleft/map-features/testing';
 import { describe, expect, it } from 'vitest';
 
-import { footprintPlans } from './footprint-buildings';
+import { footprintPlans, type FootprintPlanOptions } from './footprint-buildings';
 import { denseTownFixture, footprintFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import {
@@ -57,13 +58,19 @@ function throughTheStore(corridor: WorldCorridor): WorldCorridor {
 }
 
 /** SHA-256 over every plan and the verdicts, typed arrays as their numbers. */
-function plansDigest(corridor: WorldCorridor): { readonly plans: number; readonly digest: string } {
+function plansDigest(
+  corridor: WorldCorridor,
+  options: FootprintPlanOptions = {},
+): { readonly plans: number; readonly digest: string } {
   const fixture = footprintFixture();
   const { plans, verdicts } = footprintPlans(
     corridor,
     landClassMask(corridor),
     fixture.profile,
     fixture.origin,
+    undefined,
+    undefined,
+    options,
   );
   const text = JSON.stringify({ plans, verdicts }, (_key, value: unknown) =>
     ArrayBuffer.isView(value) ? Array.from(value as Float32Array) : value,
@@ -92,11 +99,16 @@ describe('#1789: an archive without the building fields plans as before', () => 
     expect(plansDigest(corridor)).toStrictEqual({ plans: 12, digest: PLANS_BEFORE_1789 });
   });
 
-  it('nothing draws from the fields yet: every field set plans the same as none', () => {
+  it('nothing draws from the fields with #1790’s lever off: every field set plans the same as none', () => {
     const corridor = throughTheStore(withEveryField(footprintFixture().corridor));
     // Not vacuous: the fields survived the store's pack.
     expect(corridor.buildings[0]?.roofShape).toBe(BUILDING_FIELDS_DECODED.roofShape);
-    expect(plansDigest(corridor)).toStrictEqual({ plans: 12, digest: PLANS_BEFORE_1789 });
+    expect(plansDigest(corridor, { mappedRoofShape: false })).toStrictEqual({
+      plans: 12,
+      digest: PLANS_BEFORE_1789,
+    });
+    // Control: since #1790, with its lever on, the roof and storey fields draw.
+    expect(plansDigest(corridor).digest).not.toBe(PLANS_BEFORE_1789);
   });
 
   it('packs 2 000 footprints with no field set to the bytes version 3 packed, but for the version digit', () => {
