@@ -44,6 +44,8 @@
  * mean the map works.
  */
 
+import type { GeographicPosition } from '@onyourleft/domain';
+
 import type { BasemapStyle } from './basemap';
 import type { TrackBounds, TrackFeature } from './track';
 
@@ -57,7 +59,18 @@ export interface MapView {
    * map that had to be rebuilt to change its line would flash the basemap and
    * refetch every tile.
    */
-  setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void;
+  setTrack(
+    track: TrackFeature | undefined,
+    bounds: TrackBounds | undefined,
+    /**
+     * Whether to move the view to `bounds` now (#2006). On unless `false`.
+     * The route planner hands its line over on every edit and fits it only
+     * once: a map that jumped to the whole route at every tap would throw the
+     * rider off the street they were working on. `bounds` is still kept for
+     * {@link fitTrack} either way.
+     */
+    fitNow?: boolean,
+  ): void;
   /**
    * Repaint the same map in another basemap style — the other palette's,
    * when the page changes palette (#672).
@@ -81,6 +94,20 @@ export interface MapView {
   pan(direction: MapPanDirection): void;
   /** Fit the view to the line it holds again, after the rider has moved it (#2003). */
   fitTrack(): void;
+  /**
+   * Put the route planner's waypoints on the map as markers a pointer can drag
+   * (#2006), replacing the ones it holds; matched by id, so a marker that is
+   * being dragged is the same marker after the planner redraws. Only a map
+   * created {@link MapCreateOptions.editable} draws them.
+   */
+  setWaypoints(waypoints: readonly MapWaypoint[]): void;
+  /** Where the middle of the view is now (#2006): the route planner's first waypoint. */
+  centre(): GeographicPosition;
+  /**
+   * Hear the pointer on an editable map (#2006). One set of handlers per map;
+   * a second call replaces the first.
+   */
+  listen(handlers: MapPointerHandlers): void;
   /** Release the map and everything it holds. Idempotent. */
   destroy(): void;
 }
@@ -129,6 +156,40 @@ export interface MapCreateOptions extends MapViewOptions {
    * buttons.
    */
   readonly explorable?: boolean;
+  /**
+   * Whether the map is the route planner's (#2006): a tap is heard, the
+   * waypoints are markers that drag, and the line can be dragged to bend it.
+   * Only meaningful on an {@link explorable} map.
+   *
+   * ⚠️ **The pointer's way only, and never the only way.** The markers take no
+   * focus — the planner's list is the keyboard's way to place, move and insert
+   * a waypoint (`views/RouteBuilderView.tsx`) — so nothing here is a tab stop.
+   */
+  readonly editable?: boolean;
+}
+
+/** One waypoint as an editable map draws it (#2006). */
+export interface MapWaypoint {
+  /** The planner's id, which a drag hands back. */
+  readonly id: string;
+  readonly position: GeographicPosition;
+}
+
+/**
+ * What an editable map tells its owner (#2006). Each fires once per gesture,
+ * at its end: a waypoint dragged across the map is one move, not a hundred.
+ */
+export interface MapPointerHandlers {
+  /** A tap or click on the map, away from a waypoint. */
+  readonly tap: (position: GeographicPosition) => void;
+  /** A waypoint was dragged and let go here. */
+  readonly moveWaypoint: (id: string, position: GeographicPosition) => void;
+  /**
+   * The line was grabbed at `from` and let go at `to`. The map does not know
+   * which leg that was: the planner works it out from `from`
+   * (`routing/map-edit.ts` §`nearestLeg`).
+   */
+  readonly dragLine: (from: GeographicPosition, to: GeographicPosition) => void;
 }
 
 export interface MapRenderer {

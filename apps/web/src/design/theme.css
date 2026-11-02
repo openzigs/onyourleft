@@ -4766,6 +4766,12 @@ select.oyl-input {
  * a WebGL canvas in a container with no height renders zero pixels and looks
  * exactly like a map that failed to load.
  */
+/*
+ * Positioned and clipped since #2006: the route planner's markers are placed
+ * by MapLibre with a `transform` from the map's top left, which needs the map
+ * to be their containing block, and a marker dragged past the edge must not
+ * draw over the page. MapLibre's own stylesheet would do both and is not loaded.
+ */
 .oyl-map {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
@@ -4773,6 +4779,8 @@ select.oyl-input {
   display: block;
   height: 20rem;
   margin-top: var(--oyl-space-sm);
+  overflow: hidden;
+  position: relative;
   width: 100%;
 }
 
@@ -5561,6 +5569,30 @@ select.oyl-input {
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
   margin-block: var(--oyl-space-sm);
+}
+
+/*
+ * The route planner's waypoints on its map (#2006) — `map/maplibre.ts` makes
+ * each one this element, `aria-hidden` and out of the tab order, because the
+ * planner's list is the keyboard's way to them. A disc in the accent with the
+ * surface round it, so it reads on the basemap and on the plain background
+ * alike. `touch-action: none` so a finger dragging one moves the waypoint and
+ * not the page. The `--new` one is the pull on the line, before it is let go.
+ * Its position is set by `map/maplibre.ts` §`markerElement`.
+ */
+.oyl-map__waypoint {
+  background: var(--oyl-color-accent);
+  border: 3px solid var(--oyl-color-surface);
+  border-radius: 50%;
+  box-sizing: border-box;
+  cursor: grab;
+  height: 1.25rem;
+  touch-action: none;
+  width: 1.25rem;
+}
+
+.oyl-map__waypoint--new {
+  cursor: grabbing;
 }
 
 /*

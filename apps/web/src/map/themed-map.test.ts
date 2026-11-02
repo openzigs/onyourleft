@@ -80,6 +80,35 @@ describe('a map in the page’s palette — #672', () => {
     view.destroy();
   });
 
+  it('is created editable when asked, and passes the planner’s calls on — #2006', () => {
+    const port = stubMapPort();
+    const view = createThemedMap(
+      port.renderer,
+      document.createElement('div'),
+      document,
+      optionsFor,
+      true,
+      true,
+    );
+    const created = port.created[0];
+    expect(created?.options.editable).toBe(true);
+    const here = created?.centre;
+    expect(view.centre()).toBe(here);
+    const waypoints = here === undefined ? [] : [{ id: 'w1', position: here }];
+    view.setWaypoints(waypoints);
+    expect(created?.waypoints).toEqual([waypoints]);
+    const handlers = {
+      tap: () => undefined,
+      moveWaypoint: () => undefined,
+      dragLine: () => undefined,
+    };
+    view.listen(handlers);
+    expect(created?.handlers).toBe(handlers);
+    view.setTrack(undefined, { west: 0, south: 0, east: 1, north: 1 }, false);
+    expect(created?.fits).toEqual([false]);
+    view.destroy();
+  });
+
   it('is repainted in the other palette when the page changes, and not rebuilt', async () => {
     const port = stubMapPort();
     const view = createThemedMap(

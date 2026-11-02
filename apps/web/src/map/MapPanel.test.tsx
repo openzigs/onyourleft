@@ -24,7 +24,8 @@ import {
   type BasemapConfig,
   type BasemapStyle,
 } from './basemap';
-import { MAP_OFFLINE_TEXT, MapPanel } from './MapPanel';
+import { MAP_OFFLINE_TEXT, MapPanel, type MapEditing } from './MapPanel';
+import type { MapView, MapWaypoint } from './port';
 import { countingMutationObservers, stubMapPort, type StubMapPort } from './testing';
 import { trackGeometry, type TrackGeometry } from './track';
 import type { TrackSegment } from '../detail/privacy';
@@ -474,5 +475,143 @@ describe('#2003 — a map the rider can move, and one that says it is offline', 
     expect(port.created).toHaveLength(1);
     // The line is handed to the map created late, not only to one created on mount.
     expect(port.created[0]?.tracks.at(-1)?.geometry.coordinates).toHaveLength(1);
+  });
+});
+
+describe('the route planner’s map — #2006', () => {
+  const EMPTY_VIEW = { west: -125, south: 24, east: -66, north: 50 };
+  const HERE = geographicPosition(degreesLatitude(40), degreesLongitude(-105));
+
+  function editing(
+    heard: string[],
+    views: (MapView | undefined)[] = [],
+    waypoints: readonly MapWaypoint[] = [],
+  ): MapEditing {
+    return {
+      waypoints,
+      emptyView: EMPTY_VIEW,
+      pointer: {
+        tap: () => heard.push('tap'),
+        moveWaypoint: (id) => heard.push(`move ${id}`),
+        dragLine: () => heard.push('line'),
+      },
+      onView: (view) => views.push(view),
+    };
+  }
+
+  it('draws a map with no line, at the empty view, editable and movable', async () => {
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing([])} />,
+    );
+    await settle();
+    expect(port.created).toHaveLength(1);
+    expect(port.created[0]?.options).toMatchObject({ explorable: true, editable: true });
+    expect(port.created[0]?.tracks).toEqual([undefined]);
+    expect(port.created[0]?.bounds).toEqual([EMPTY_VIEW]);
+    expect(document.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Map for drawing a route.',
+    );
+    expect(document.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe(
+      'Move the map',
+    );
+  });
+
+  it('hands every gesture to the LATEST handlers, without making another map', async () => {
+    const port = stubMapPort();
+    const first: string[] = [];
+    const second: string[] = [];
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing(first)} />,
+    );
+    await settle();
+    await mounted.rerender(
+      <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing(second)} />,
+    );
+    await settle();
+    const handlers = port.created[0]?.handlers;
+    handlers?.tap(HERE);
+    handlers?.moveWaypoint('w3', HERE);
+    handlers?.dragLine(HERE, HERE);
+    expect([first, second]).toEqual([[], ['tap', 'move w3', 'line']]);
+    expect(port.created).toHaveLength(1);
+  });
+
+  it('puts the waypoints on the map, and again when they change', async () => {
+    const port = stubMapPort();
+    const one = [{ id: 'w1', position: HERE }];
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing([], [], one)} />,
+    );
+    await settle();
+    const two = [...one, { id: 'w2', position: HERE }];
+    await mounted.rerender(
+      <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing([], [], two)} />,
+    );
+    await settle();
+    expect(port.created[0]?.waypoints).toEqual([one, two]);
+  });
+
+  it('gives the planner the live map, and takes it back when the map goes', async () => {
+    const port = stubMapPort();
+    const views: (MapView | undefined)[] = [];
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing([], views)} />,
+    );
+    await settle();
+    expect(views).toHaveLength(1);
+    expect(views[0]?.centre()).toBe(port.created[0]?.centre);
+    mounted.unmount();
+    mounted = undefined;
+    expect(views).toHaveLength(2);
+    expect(views[1]).toBeUndefined();
+  });
+
+  it('fits once, and keeps the line’s box for Whole route', async () => {
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel
+        port={port}
+        basemap={BASEMAP}
+        subject="draft"
+        track={aTrack()}
+        editing={editing([])}
+      />,
+    );
+    await settle();
+    const longer: TrackGeometry = {
+      type: 'MultiLineString',
+      coordinates: [
+        ...aTrack().coordinates,
+        [
+          [-105, 40],
+          [-105.1, 40.1],
+        ],
+      ],
+    };
+    await mounted.rerender(
+      <MapPanel
+        port={port}
+        basemap={BASEMAP}
+        subject="draft"
+        track={longer}
+        editing={editing([])}
+      />,
+    );
+    await settle();
+    expect(port.created[0]?.fits).toEqual([true, false]);
+    expect(port.created[0]?.bounds.at(-1)).toBeDefined();
+    expect(port.created[0]?.bounds.at(-1)).not.toEqual(EMPTY_VIEW);
+    expect(document.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Map of the route being drawn, in 2 legs.',
+    );
+  });
+
+  it('a ride’s map still fits at every new line — the control', async () => {
+    const port = stubMapPort();
+    mounted = await mount(<MapPanel port={port} basemap={BASEMAP} track={aTrack()} />);
+    await settle();
+    expect(port.created[0]?.options.editable).toBeUndefined();
+    expect(port.created[0]?.fits).toEqual([true]);
   });
 });

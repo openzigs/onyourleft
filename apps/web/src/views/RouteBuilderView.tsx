@@ -1,17 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+} from 'react';
 
 import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
   metres,
+  unixSeconds,
   type GeographicPosition,
   type RidingPreferences,
   type RoutingProvider,
   type SurfaceTolerance,
 } from '@onyourleft/domain';
+import type { RouteId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
@@ -24,17 +35,26 @@ import {
   formatSmallDistance,
   measurementText,
 } from '../units/format';
+import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
+import type { BasemapConfig } from '../map/basemap';
+import { MapPanel } from '../map/MapPanel';
+import { useOnline } from '../map/online';
+import type { MapPointerHandlers, MapPort, MapView } from '../map/port';
+import { readMapTilesChoice } from '../map/tiles-preference';
 import {
   addWaypoint,
   clear,
   deleteWaypoint,
   draftDistance,
+  insertWaypoint,
   isEmpty,
   moveWaypoint,
   resolveDraft,
   reverse,
   setLegMode,
   type DraftEdit,
+  type LegMode,
+  type RouteDraft,
 } from '../routing/draft';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
@@ -48,6 +68,13 @@ import {
   undo,
   type DraftHistory,
 } from '../routing/history';
+import {
+  draftGeometry,
+  EMPTY_PLANNER_VIEW,
+  legMidpoint,
+  mapWaypoints,
+  nearestLeg,
+} from '../routing/map-edit';
 import { RIDING_DEFAULTS, strandingRisk, SURFACE_LABELS } from '../routing/preferences';
 import {
   elevationSentence,
@@ -57,6 +84,9 @@ import {
   unresolvedSentence,
 } from '../routing/present';
 import { ScrollTable } from '../design/ScrollTable';
+import { FLAT_DRAWN_ROUTE_TEXT, routeFromDraft, type SaveRefusal } from '../routes/save';
+import type { RoutePort } from '../routes/store-port';
+import { hrefForSelection, routeById } from '../shell/routes';
 
 /**
  * The route drawing canvas — [#71](https://github.com/openzigs/onyourleft/issues/71)
@@ -77,16 +107,32 @@ import { ScrollTable } from '../design/ScrollTable';
  * audits and what a screen-reader user actually operates, and building it first
  * means the keyboard path is the one that cannot rot.
  *
- * ⚠️ **There is no map on this screen yet, and that is #53 rather than an
- * omission here.** `map/port.ts` exists and `MapPanel` renders through it, but
- * ADR 0010 D-1's tile archive is not published, so a map would be a grey
- * rectangle. Everything this screen does works without one, which is the
- * property that made the list-first ordering worth choosing.
+ * ## The map — #2006
  *
- * ⚠️ **And there is no routing engine.** `routing/testing.ts` says why at
- * length: ADR 0010 D-4 chose Valhalla and nothing is running, so the provider
- * arrives as a prop and this screen explains itself when there is none. Every
- * decision about *what to ask* is made here and is tested; the asking is #53's.
+ * Under the list's buttons, the published basemap (ADR 0062) is the second
+ * way: a tap adds a waypoint there, a marker drags, and pulling the line
+ * between two waypoints puts a new one where it is let go
+ * (`routing/map-edit.ts` decides which leg). The first waypoint the list adds
+ * lands at the map's centre, where the rider has been looking, rather than at
+ * a fixed default. Each gesture has a list equivalent — *Add a waypoint*, the
+ * nudges, and *Add a waypoint halfway along* on a leg's row — so the map is
+ * never the only way (WCAG 2.2 SC 2.1.1 and 2.5.7). With no WebGL, no basemap
+ * or no network, the panel says so and the list carries on; with map tiles
+ * turned off the line is drawn on a plain background, offline too. ⚠️ A
+ * reviewer who remembers this paragraph saying there is no tile archive is
+ * reading the old file.
+ *
+ * ⚠️ **There is no routing engine.** `routing/testing.ts` says why at length:
+ * ADR 0010 D-4 chose Valhalla and nothing is running, so the provider arrives
+ * as a prop and this screen explains itself when there is none. With none, a
+ * new leg is freehand — a straight line whose distance is a lower bound — so
+ * a route can still be drawn and saved (#2006).
+ *
+ * ## Saving it — #2006
+ *
+ * *Save to your routes* writes the drawn line as an ordinary saved route
+ * (`routes/save.ts` §`routeFromDraft`), in the same list as an import, ridden
+ * and downloaded the same way. The draft stays on screen afterwards.
  *
  * ## What this screen is careful about
  *
@@ -120,9 +166,47 @@ export interface RouteBuilderViewProps {
    * test in the file is a test that depends on its neighbours.
    */
   readonly storage?: DraftStorage | undefined;
-  /** Where a first waypoint lands when there is nothing to place it relative to. */
+  /**
+   * Where a first waypoint lands when there is no map to read a centre from.
+   * With a map, it lands at the map's centre (#2006).
+   */
   readonly origin?: GeographicPosition | undefined;
+  /** How to get a map engine (#2006), or `undefined` where there is none — `RoutesView`'s loader. */
+  readonly map?: (() => Promise<MapPort>) | undefined;
+  /** Where the basemap is, or `undefined` for a build configured with none (#534). */
+  readonly basemap?: BasemapConfig | undefined;
+  /** Where the rider's map-tiles choice is kept — this device's unless a test hands in a double. */
+  readonly preferences?: PreferenceStorage | undefined;
+  /** Where a drawn route is saved (#2006): the saved routes' store, or `undefined` with none. */
+  readonly routes?: RoutePort | undefined;
+  /** The instant to stamp a save with. Injected so a test can assert what was written. */
+  readonly now?: (() => number) | undefined;
 }
+
+/** The map engine (#2006), loaded as `RoutesView` loads it. */
+type MapEngine =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly port: MapPort }
+  | { readonly kind: 'failed' };
+
+/** What the planner says when the map engine itself could not be loaded (#2006). */
+export const PLANNER_MAP_FAILED_TEXT =
+  'The map could not be loaded on this device. The waypoint list places and moves every waypoint.';
+
+/** The planner's one line about its map's gestures (#2006). */
+export const PLANNER_MAP_TEXT =
+  'Tap the map to add a waypoint, drag one to move it, or drag the line to add one there.';
+
+/** A profile, and the draft it was worked out for — see `routeFromDraft`'s `elevation`. */
+interface ElevationFor {
+  readonly draft: RouteDraft;
+  readonly planned: PlannedElevation;
+}
+
+/** The last save, said under the form. */
+type Saved =
+  | { readonly kind: 'saved'; readonly id: string; readonly name: string; readonly flat: boolean }
+  | { readonly kind: 'refused'; readonly refusal: SaveRefusal };
 
 /**
  * How far one nudge moves a waypoint: **0.0005°**, about 55 m north–south.
@@ -152,6 +236,11 @@ export function RouteBuilderView({
   provider,
   storage,
   origin,
+  map,
+  basemap,
+  preferences: tilePreferences,
+  routes,
+  now,
 }: RouteBuilderViewProps): JSX.Element {
   const keep = useRef<DraftStorage>(
     storage ?? browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
@@ -159,12 +248,23 @@ export function RouteBuilderView({
   const [history, setHistory] = useState<DraftHistory>(() => newHistory(keep.current.read()));
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [preferences, setPreferences] = useState<RidingPreferences>(RIDING_DEFAULTS);
-  const [elevation, setElevation] = useState<PlannedElevation | undefined>(undefined);
+  const [elevationFor, setElevation] = useState<ElevationFor | undefined>(undefined);
+  const elevation = elevationFor?.planned;
   const [elevationFault, setElevationFault] = useState<string | undefined>(undefined);
   const [clearArmed, setClearArmed] = useState(false);
+  const [engine, setEngine] = useState<MapEngine>({ kind: 'loading' });
+  const [saved, setSaved] = useState<Saved | undefined>(undefined);
+  // Read once, as `RoutesView` reads it: the switch is on the Settings screen.
+  const [tiles] = useState(() => readMapTilesChoice(tilePreferences ?? deviceStorage()));
+  const online = useOnline();
+  const nameId = useId();
+  /** The live map, for its centre (#2006). */
+  const mapView = useRef<MapView | undefined>(undefined);
   const units = useUnits();
 
   const draft = history.present;
+  /** With no routing service a new leg is a straight line (#2006). */
+  const newLegMode: LegMode = provider === undefined ? 'freehand' : 'snapped';
 
   /**
    * Route the stale legs, then keep the answer without making a history step.
@@ -226,7 +326,7 @@ export function RouteBuilderView({
     setElevationFault(undefined);
     void planElevation(draft, provider)
       .then((planned) => {
-        if (live) setElevation(planned);
+        if (live) setElevation(planned === undefined ? undefined : { draft, planned });
       })
       .catch((error: unknown) => {
         if (!live) return;
@@ -243,8 +343,26 @@ export function RouteBuilderView({
     };
   }, [draft, provider, routedLegs]);
 
+  // The map engine, fetched once (#2006): the loader is the module's `import()`.
+  useEffect(() => {
+    if (map === undefined || engine.kind !== 'loading') return undefined;
+    let live = true;
+    map().then(
+      (loaded) => {
+        if (live) setEngine({ kind: 'ready', port: loaded });
+      },
+      () => {
+        if (live) setEngine({ kind: 'failed' });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [map, engine.kind]);
+
   const place = (): void => {
-    const last = draft.waypoints.at(-1)?.position ?? origin ?? DEFAULT_ORIGIN;
+    const last =
+      draft.waypoints.at(-1)?.position ?? mapView.current?.centre() ?? origin ?? DEFAULT_ORIGIN;
     const next =
       draft.waypoints.length === 0
         ? last
@@ -252,7 +370,63 @@ export function RouteBuilderView({
             degreesLatitude(last.latitude + NUDGE_DEGREES * 4),
             degreesLongitude(last.longitude),
           );
-    apply(addWaypoint(draft, next));
+    apply(addWaypoint(draft, next, newLegMode));
+  };
+
+  /** What the map's gestures do to the draft (#2006). Read at the gesture, through a ref. */
+  const pointer: MapPointerHandlers = {
+    tap: (position) => {
+      apply(addWaypoint(draft, position, newLegMode));
+    },
+    moveWaypoint: (id, position) => {
+      apply(moveWaypoint(draft, id, position));
+    },
+    dragLine: (from, to) => {
+      const leg = nearestLeg(draft, from);
+      if (leg !== undefined) apply(insertWaypoint(draft, leg, to));
+    },
+  };
+  const geometry = useMemo(() => draftGeometry(draft), [draft]);
+  const markers = useMemo(() => mapWaypoints(draft), [draft]);
+  const onView = useCallback((view: MapView | undefined) => {
+    mapView.current = view;
+  }, []);
+
+  const onSave = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (routes === undefined) return;
+    const name = new FormData(event.currentTarget).get('name');
+    const instant = now === undefined ? Date.now() / 1000 : now();
+    const planned = elevationFor?.draft === draft ? elevationFor.planned : undefined;
+    const outcome = routeFromDraft(draft, {
+      id: `route-${String(Math.round(instant * 1000))}` as RouteId,
+      owner: routes.athleteId,
+      name: typeof name === 'string' ? name : '',
+      now: unixSeconds(Math.floor(instant)),
+      elevation: planned,
+    });
+    if (outcome.status === 'refused') {
+      setSaved({ kind: 'refused', refusal: outcome.refusal });
+      return;
+    }
+    try {
+      await routes.store.putRoute(outcome.record);
+    } catch {
+      setSaved({
+        kind: 'refused',
+        refusal: {
+          code: 'not-a-route',
+          message: 'The route could not be saved on this device. Nothing was lost from the plan.',
+        },
+      });
+      return;
+    }
+    setSaved({
+      kind: 'saved',
+      id: outcome.record.id,
+      name: outcome.record.name,
+      flat: outcome.record.elevation === undefined,
+    });
   };
 
   const nudge = (id: string, north: number, east: number): void => {
@@ -278,8 +452,9 @@ export function RouteBuilderView({
     <>
       {provider === undefined ? (
         <StatusMessage tone="warning" label="No routing service">
-          Waypoints can be placed and moved, but nothing can work out the roads between them until a
-          routing service is configured. Distance and climbing stay empty until then.
+          Nothing can work out the roads between waypoints until a routing service is configured, so
+          each leg is a straight line: the distance is at least the one shown, and climbing stays
+          empty.
         </StatusMessage>
       ) : null}
 
@@ -289,8 +464,8 @@ export function RouteBuilderView({
         level={2}
         help={
           <p>
-            Place waypoints in order; the roads between them are worked out for you. Every control
-            here works from the keyboard — a nudge moves a waypoint about{' '}
+            Place waypoints in order, on the map or from this list. Every control here works from
+            the keyboard — a nudge moves a waypoint about{' '}
             {measurementText(
               formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units),
             )}
@@ -380,6 +555,32 @@ export function RouteBuilderView({
         </StatusMessage>
       ) : null}
 
+      {map === undefined ? null : engine.kind === 'failed' ? (
+        <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
+      ) : engine.kind === 'loading' ? (
+        <p className="oyl-muted">Loading the map…</p>
+      ) : (
+        <>
+          {/* Only over a map there is to tap: with no basemap, or offline with
+              tiles on, the panel says why there is none instead. */}
+          {basemap !== undefined && (online || !tiles) ? <p>{PLANNER_MAP_TEXT}</p> : null}
+          <MapPanel
+            port={engine.port}
+            basemap={basemap}
+            tiles={tiles}
+            track={geometry}
+            subject="draft"
+            offline={!online}
+            editing={{
+              waypoints: markers,
+              pointer,
+              emptyView: EMPTY_PLANNER_VIEW,
+              onView,
+            }}
+          />
+        </>
+      )}
+
       {isEmpty(draft) ? (
         <p>No waypoints yet. Add one to start a route.</p>
       ) : (
@@ -453,7 +654,7 @@ export function RouteBuilderView({
               <th scope="col">Surface</th>
               <th scope="col">State</th>
               <th scope="col">
-                <VisuallyHidden>Change how this leg is drawn</VisuallyHidden>
+                <VisuallyHidden>Change or split this leg</VisuallyHidden>
               </th>
             </tr>
           </thead>
@@ -481,6 +682,16 @@ export function RouteBuilderView({
                     {leg.mode === 'snapped'
                       ? `Draw leg ${String(index + 1)} freehand`
                       : `Follow roads on leg ${String(index + 1)}`}
+                  </Button>
+                  {/* #2006: the list's way to do what pulling the line does. */}
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      const middle = legMidpoint(draft, index);
+                      if (middle !== undefined) apply(insertWaypoint(draft, index, middle));
+                    }}
+                  >
+                    {`Add a waypoint halfway along leg ${String(index + 1)}`}
                   </Button>
                 </td>
               </tr>
@@ -519,7 +730,8 @@ export function RouteBuilderView({
 
       <h2>Distance, climbing and surface</h2>
       <p>
-        {`${measurementText(formatDistance(draftDistance(draft), units))} over ${String(draft.legs.length)} ${draft.legs.length === 1 ? 'leg' : 'legs'}.`}
+        {/* #2006: a freehand leg's length is a lower bound, so a total with one is a minimum. */}
+        {`${surfaces.freehandLegs > 0 ? 'At least ' : ''}${measurementText(formatDistance(draftDistance(draft), units))} over ${String(draft.legs.length)} ${draft.legs.length === 1 ? 'leg' : 'legs'}.`}
       </p>
       <p>
         {`Paved ${measurementText(formatDistance(metres(surfaces.pavedMetres), units))}, unpaved ${measurementText(formatDistance(metres(surfaces.unpavedMetres), units))}, unknown ${measurementText(formatDistance(metres(surfaces.unknownMetres), units))}.`}
@@ -583,6 +795,38 @@ export function RouteBuilderView({
               ))}
             </tbody>
           </ScrollTable>
+        </>
+      )}
+
+      {/* #2006: the drawn route, into the same library as an imported one. */}
+      {routes === undefined ? null : (
+        <>
+          <h2>Save this route</h2>
+          {draft.waypoints.length < 2 ? (
+            <p>A route needs two waypoints before it can be saved.</p>
+          ) : (
+            <form aria-label="Save this route" onSubmit={(event) => void onSave(event)}>
+              <p>
+                <label htmlFor={nameId}>Name</label>{' '}
+                <input id={nameId} name="name" type="text" autoComplete="off" />
+              </p>
+              <Button type="submit" variant="secondary">
+                Save to your routes
+              </Button>
+            </form>
+          )}
+          {saved?.kind === 'refused' ? (
+            <StatusMessage tone="warning" live>
+              {saved.refusal.message}
+            </StatusMessage>
+          ) : null}
+          {saved?.kind === 'saved' ? (
+            <StatusMessage tone="success" live>
+              {`Saved “${saved.name}” to your routes. It is private.`}
+              {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}{' '}
+              <a href={hrefForSelection(routeById('routes'), saved.id)}>Open it in Routes</a>
+            </StatusMessage>
+          ) : null}
         </>
       )}
     </>
