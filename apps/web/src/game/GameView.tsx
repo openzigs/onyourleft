@@ -517,11 +517,13 @@ export interface GameViewProps {
    * Run a solo lap race against bots in the ride — #1906, ADR 0060 (epic
    * #1894): its laps, field, tier and items. Read at the press, and only for
    * a solo ride on a loop route (D-7.3, D-11.1): a ride in a room, on a route
-   * that is not a loop, or running a Delivery round, runs none. A race rides
-   * the stylised world whatever Settings chose (D-10.1, the owner's answer to
-   * D-14 Q5), so the realistic village's frozen 50 is never asked to hold a
-   * race (D-10.3). Absent — the product — the chooser's *Ride a lap race*
-   * decides (#1907), offered on a loop only. A test sets it.
+   * that is not a loop, or running a Delivery round, runs none. Since #1971
+   * a race rides the world Settings chose, as Delivery does (ADR 0060 D-10,
+   * ADR 0059 D-3): stylised first (D-14 Q5), and now the realistic world
+   * too, held there to `realistic-budget.ts` §`LAP_RACE_VILLAGE_DRAW_CALLS`
+   * and never to the village's frozen 50 (D-10.3). A race rides without the
+   * pacer a rider chose. Absent — the product — the chooser's *Ride a lap
+   * race* decides (#1907), offered on a loop only. A test sets it.
    *
    * ⚠️ **Nothing of a race reaches the trainer** (ADR 0060 D-2): the race
    * reads the simulation's odometer as the rider's effort distance and writes
@@ -1556,11 +1558,12 @@ export function GameView(props: GameViewProps): JSX.Element {
       // the contact blob: its rider is `RealisticRiderBelt`, which casts into
       // no map, and ADR 0026 D-6's budget and Part Z's soak were both taken
       // with the blob. Giving it the map is its own measurement.
-      // #1906: a lap race is asked for on a loop with no Delivery round, and
-      // rides the STYLISED world (ADR 0060 D-10.1, D-14 Q5): the realistic
-      // village's frame is frozen at 50 (D-10.3) and has no race ceiling.
-      // A ride in a room runs no race (D-7.3, D-8), so it keeps the rider's
-      // world; and nor does a choice that cannot be raced, which is refused
+      // #1906: a lap race is asked for on a loop with no Delivery round. Since
+      // #1971 it rides the world the rider chose, the realistic one included,
+      // where its frame has its own ceiling (`realistic-budget.ts`
+      // §`LAP_RACE_VILLAGE_DRAW_CALLS`, ADR 0060 D-10.2) and the village's 50
+      // stays frozen (D-10.3). A ride in a room runs no race (D-7.3, D-8);
+      // and nor does a choice that cannot be raced, which is refused
       // HERE, before the trainer is asked or a session made, as an ordinary
       // ride rather than a throw from a ride already begun.
       const deliveryWanted =
@@ -1583,7 +1586,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
-      const realistic = raceChoice === undefined && readRealisticWorldChoice(deviceStorage());
+      const realistic = readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
       // for it, like the mass below. A view left from a previous ride is
@@ -1631,7 +1634,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         // about 2.3 mph optimistic at 150 W on the flat. `rider.ts` holds the
         // three positions and the arithmetic.
         conditions: rideConditionsFor(riderMassFor(props.riderMass).mass, sitting),
-        ...(pacer === undefined ? {} : { pacer }),
+        // #1971: a race rides without the pacer. The race's own bots are the
+        // field, and `LAP_RACE_VILLAGE_DRAW_CALLS` was measured on a frame
+        // without one: a pacer kept beside them would be a non-racer `bot`
+        // marker the realistic world draws as a body of its own (`scene.ts`,
+        // `three-renderer.ts` §`realisticRemoteSplit`), one call over the ceiling.
+        ...(pacer === undefined || raceChoice !== undefined ? {} : { pacer }),
         // ⚠️ #326: the line that makes `packages/physics`'s entire wind model
         // reachable from a ride. `RideConditions.headwindMetresPerSecond` was
         // plumbed through three packages, spread into the bot's course, and

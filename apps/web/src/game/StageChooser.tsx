@@ -194,8 +194,8 @@ export interface DeliveryOffer {
 /**
  * A lap race, as the chooser offers it — #1907 (epic #1894, ADR 0060): on a
  * LOOP route only, because a race is laps of one (D-11.1); on any other the
- * chooser says why in words and asks for no race. Offered in either world: a
- * race rides the standard world whatever Settings chose (D-10.1), and says so.
+ * chooser says why in words and asks for no race. Offered in either world,
+ * and since #1971 ridden in the one Settings chose.
  */
 export interface LapRaceOffer {
   /** Whether the rider switched the race on. */
@@ -474,12 +474,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   ].filter((each) => each !== undefined);
   const lapRace =
     props.lapRace === undefined ? undefined : (
-      <LapRaceControl
-        offer={props.lapRace}
-        route={chosen}
-        worldChosen={props.worldChosen}
-        idPrefix={ids}
-      />
+      <LapRaceControl offer={props.lapRace} route={chosen} idPrefix={ids} />
     );
   return (
     <div className="oyl-game__picker oyl-chooser">
@@ -1042,7 +1037,6 @@ export const LAP_RACE_CHOICE_TEXT = {
   hint:
     'Race laps of this loop against bots, picking up items round the lap. ' +
     'Nothing in the race changes what your trainer is sent.',
-  standardWorld: 'A lap race is ridden in the standard world.',
   notALoop:
     'No lap race on this route: a lap race needs a loop, a route that ends where it starts.',
   laps: 'Laps',
@@ -1070,7 +1064,6 @@ export const LAP_RACE_CHOICE_TEXT = {
 function LapRaceControl(props: {
   readonly offer: LapRaceOffer;
   readonly route: RidableRoute;
-  readonly worldChosen: boolean;
   readonly idPrefix: string;
 }): JSX.Element {
   const { offer } = props;
@@ -1093,7 +1086,7 @@ function LapRaceControl(props: {
           type="checkbox"
           role="switch"
           checked={offer.chosen}
-          aria-describedby={props.worldChosen ? `${id('hint')} ${id('world')}` : id('hint')}
+          aria-describedby={id('hint')}
           onChange={(event) => {
             offer.onChoose(event.target.checked);
           }}
@@ -1103,11 +1096,6 @@ function LapRaceControl(props: {
       <p id={id('hint')} className="tw:m-0">
         {LAP_RACE_CHOICE_TEXT.hint}
       </p>
-      {props.worldChosen ? (
-        <p id={id('world')} className="tw:m-0">
-          {LAP_RACE_CHOICE_TEXT.standardWorld}
-        </p>
-      ) : null}
       {offer.chosen ? (
         <>
           <label htmlFor={id('laps')}>{LAP_RACE_CHOICE_TEXT.laps}</label>

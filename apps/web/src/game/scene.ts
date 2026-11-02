@@ -917,7 +917,10 @@ function ridersOnTheRoad(
     const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
     const turned = crankAngle === undefined ? marker : { ...marker, crankAngle };
     // #1902: a lap-race hit effect rides on the marker, so it is drawn where the rider is.
-    const cranked = rider.hit === undefined ? turned : { ...turned, hit: rider.hit };
+    const hit = rider.hit === undefined ? turned : { ...turned, hit: rider.hit };
+    // #1971: a lap race's bot says so, apart from the one pacer, for the
+    // realistic world's split. Only a race's bots are laned.
+    const cranked = rider.laned === undefined ? hit : { ...hit, racer: true as const };
     return {
       // #783: the name the room gave them, carried to the frame as words only.
       marker:

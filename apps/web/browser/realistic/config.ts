@@ -29,7 +29,7 @@
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  * | `delivery` | #1815: a Delivery round's worst case on every frame, for the two village ceilings (`realistic-budget.ts` §`DELIVERY_VILLAGE_DRAW_CALLS`): this many parcels, house markers and obstacles each, placed on the road ahead of the rider (`realistic/delivery.ts`) and drawn by the product's own belt. Pair it with `route=village` and the frozen frame's query; absent, the frame carries no round, as an ordinary ride's does. More than the belt's 32 is REFUSED, because it would draw 32 under the name of more | `1` to `32`; default none |
- * | `race` | #1972: a lap race's worst case on every frame, for #1903's tablet reading (`realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`): the rider and seven bots, five of the eight hit, every pick-up point of a three-lap race of 40 m laps and ten puddles, in the scenery-free STYLISED frame (`realistic/lap-race.ts`), drawn by the product's own belt. A lap race rides only the stylised world (ADR 0060 D-10.1, Q5), so it is REFUSED without `world=stylised`, and beside `delivery`, `town` and `route`, whose frames it is not | `worst`; default none |
+ * | `race` | #1972: a lap race's worst case on every frame, for #1903's tablet reading (`realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`): the rider and seven bots, five of the eight hit, every pick-up point of a three-lap race of 40 m laps and ten puddles (`realistic/lap-race.ts`), drawn by the product's own belt. With `world=stylised`, in the scenery-free STYLISED frame, and REFUSED beside `route`; since #1971 in the realistic world too, on the route's own frame with its scenery (`route=village` is #1689's hold), held to §`LAP_RACE_VILLAGE_DRAW_CALLS`. REFUSED beside `delivery` and `town` in both | `worst`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -431,9 +431,10 @@ export interface RealisticPageConfig {
    */
   readonly delivery: number | undefined;
   /**
-   * #1972: a lap race's worst case on every frame, in the stylised world's
-   * scenery-free frame. `undefined` is a frame with no race, as an ordinary
-   * ride's. @see realistic/lap-race.ts
+   * #1972: a lap race's worst case on every frame — in the stylised world's
+   * scenery-free frame, or since #1971 on the realistic world's own frame.
+   * `undefined` is a frame with no race, as an ordinary ride's.
+   * @see realistic/lap-race.ts
    */
   readonly race: 'worst' | undefined;
 }
@@ -794,20 +795,21 @@ function deliveryFrom(value: string): number {
 }
 
 /**
- * `?race=worst` — #1972. A lap race rides only the stylised world (ADR 0060
- * D-10.1, Q5), so a URL naming one without `world=stylised` is REFUSED: it
- * would otherwise draw the realistic world with no race in it under the
- * race's name. It is refused beside `delivery`, `town` and `route` for the
- * same reason, because `LAP_RACE_SCENE_DRAW_CALLS` is the scenery-free
- * stylised frame's ceiling and those draw a village's.
+ * `?race=worst` — #1972, and since #1971 in either world. With
+ * `world=stylised` the race is drawn on the scenery-free frame
+ * `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of, so it is REFUSED beside
+ * `route`, whose frame is a village's. In the realistic world it is drawn on
+ * the route's own frame with its scenery — `route=village` for #1689's hold,
+ * as Delivery's measurement is — and held to `LAP_RACE_VILLAGE_DRAW_CALLS`.
+ * In both it is refused beside `delivery` (a ride runs one mode) and `town`
+ * (a frame it is not).
  */
 function raceFrom(params: URLSearchParams): 'worst' {
   const value = params.get('race');
   if (value !== 'worst') throw new Error(`realistic: race is one of worst, not "${String(value)}"`);
-  if (params.get('world') !== 'stylised') {
-    throw new Error('realistic: a lap race rides only the stylised world; add world=stylised');
-  }
-  for (const other of ['delivery', 'town', 'route']) {
+  const others =
+    params.get('world') === 'stylised' ? ['delivery', 'town', 'route'] : ['delivery', 'town'];
+  for (const other of others) {
     if (params.has(other)) {
       throw new Error(`realistic: race and ${other} are two frames; name one of them, not both`);
     }

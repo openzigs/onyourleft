@@ -243,7 +243,7 @@ describe('#1907 — the lap race in the chooser', () => {
     expect(drawn.length).toBeGreaterThan(0);
     expect(drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
     expect(raceFields()).toEqual([]);
-    // Not a race, so not held to the standard world (ADR 0060 D-10.1 is a race's).
+    // An ordinary ride, in the world Settings chose.
     expect(realisticAsked).toBe(1);
   });
 
@@ -302,12 +302,13 @@ describe('#1907 — the lap race in the chooser', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
-  it('says the race rides the standard world when Settings chose the realistic one', async () => {
+  it('says nothing about the world when Settings chose the realistic one: a race rides it (#1971)', async () => {
     writeRealisticWorldChoice(localStorage, true);
     await game();
     await activateWithKeyboard(card(LOOP) as HTMLElement);
-    expect(described(raceSwitch() as HTMLInputElement)).toBe(
-      `${LAP_RACE_CHOICE_TEXT.hint} ${LAP_RACE_CHOICE_TEXT.standardWorld}`,
+    expect(described(raceSwitch() as HTMLInputElement)).toBe(LAP_RACE_CHOICE_TEXT.hint);
+    expect(document.querySelector('.oyl-game__lap-race')?.textContent).not.toMatch(
+      /standard world/i,
     );
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });

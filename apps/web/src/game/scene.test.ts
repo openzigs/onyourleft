@@ -1014,6 +1014,20 @@ describe('a lap race’s bots on the road — #1902', () => {
     expect(frame.markers.map((marker) => marker.kind)).toEqual(['rider', 'bot', 'bot']);
   });
 
+  it('marks a race’s bots as racers and the pacer as none, for the realistic world’s split (#1971)', () => {
+    const frame = sceneFrame(
+      input({
+        botDistance: 420,
+        raceBots: [{ distanceMetres: 430, speedMetresPerSecond: 9, lateralMetres: -1.75 }],
+      }),
+    );
+    expect(frame.markers.map((marker) => [marker.kind, marker.racer])).toEqual([
+      ['rider', undefined],
+      ['bot', undefined],
+      ['bot', true],
+    ]);
+  });
+
   it('draws a bot in its lane away from the rider, its cranks turned from its own odometer', () => {
     const lanes = [-1.75, 0, 1.75];
     const placed = (bots: SceneInput['raceBots']) => {

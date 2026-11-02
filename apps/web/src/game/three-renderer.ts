@@ -806,17 +806,25 @@ export const STYLISED_RIDER_SLOTS = 3 + MAXIMUM_DRAWN_SET;
  * of realistic riders stays blocked on the tablet's measurement.
  * `three-renderer.test.ts` §"#783" holds the split; the browser gate's
  * realistic load counts the triangles it leaves a frame.
+ *
+ * #1971: **a lap race's bots** ({@link RiderMarker.racer}) are split by the
+ * same rule, so a race in the realistic world draws at most the realistic
+ * bodies a room does, and none of its seven bots goes undrawn; the pacer, a
+ * `bot` too, keeps its own realistic place.
  */
 export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
   readonly realistic: readonly RiderMarker[];
   readonly stylised: readonly RiderMarker[];
 } {
   const own = markers.find((marker) => marker.kind === 'rider');
-  const local = markers.filter((marker) => marker.kind !== 'remote');
+  // #1971: a lap race's bots are split as a room's riders are. A race runs in
+  // no room (ADR 0060 D-7.3, D-8), so the two never share the split.
+  const other = (marker: RiderMarker): boolean => marker.kind === 'remote' || marker.racer === true;
+  const local = markers.filter((marker) => !other(marker));
   const far = (marker: RiderMarker): number =>
     own === undefined ? 0 : Math.hypot(marker.x - own.x, marker.y - own.y, marker.z - own.z);
   const remote = markers
-    .filter((marker) => marker.kind === 'remote')
+    .filter(other)
     .map((marker) => ({ marker, far: far(marker) }))
     .sort((a, b) => a.far - b.far)
     .map((each) => each.marker);
