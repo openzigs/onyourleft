@@ -13,6 +13,7 @@
  */
 
 import type {
+  MapCreateOptions,
   MapPort,
   MapRenderer,
   MapView,
@@ -26,12 +27,14 @@ import type { TrackBounds, TrackFeature } from './track';
 /** One map that was created, and everything that happened to it. */
 export interface RecordedMap {
   readonly container: HTMLElement;
-  readonly options: MapViewOptions;
+  readonly options: MapCreateOptions;
   /** Every `setTrack`, in order. A map is created empty, so this is the whole history. */
   readonly tracks: (TrackFeature | undefined)[];
   readonly bounds: (TrackBounds | undefined)[];
   /** Every `setStyle`, in order (#672): the palettes it was repainted in. */
   readonly styles: MapViewOptions[];
+  /** Every `zoom`, `pan` and `fitTrack`, in order (#2003), e.g. `'zoom in'`, `'pan north'`, `'fit'`. */
+  readonly moves: string[];
   destroyed: boolean;
 }
 
@@ -67,13 +70,14 @@ export function stubMapPort(): StubMapPort {
   const protocol: ProtocolRegistry = createProtocolRegistry(registrar, () => ({ stub: true }));
 
   const renderer: MapRenderer = {
-    create(container: HTMLElement, options: MapViewOptions): MapView {
+    create(container: HTMLElement, options: MapCreateOptions): MapView {
       const record: RecordedMap = {
         container,
         options,
         tracks: [],
         bounds: [],
         styles: [],
+        moves: [],
         destroyed: false,
       };
       created.push(record);
@@ -84,6 +88,15 @@ export function stubMapPort(): StubMapPort {
         },
         setStyle(next: MapViewOptions): void {
           record.styles.push(next);
+        },
+        zoom(direction): void {
+          record.moves.push(`zoom ${direction}`);
+        },
+        pan(direction): void {
+          record.moves.push(`pan ${direction}`);
+        },
+        fitTrack(): void {
+          record.moves.push('fit');
         },
         destroy(): void {
           record.destroyed = true;
