@@ -538,6 +538,70 @@ describe('which way a mapped roof runs — #1790', () => {
     ) as [Plane];
     expect(angleBetween([other.nx, other.nz], bearing(0))).toBeLessThanOrEqual(15);
   });
+
+  // A gable is symmetric and sin is 0 at 0 and 180, so only 90 and 270 tell east from west (#583).
+  it.each([90, 270])(
+    'slopes a skillion tagged %i down toward that bearing, not its mirror',
+    (degrees) => {
+      const plan = planOf(TEN_BY_SIX, { roofShape: 'skillion', roofDirectionDegrees: degrees });
+      const planes = planesOf(plan, minimumAreaRectangle(plan.footprint));
+      expect(planes).toHaveLength(1);
+      const [slope] = planes as [Plane];
+      expect(angleBetween([slope.nx, slope.nz], bearing(degrees))).toBeLessThanOrEqual(15);
+    },
+  );
+
+  it.each([
+    { roofOrientation: 'across' as const },
+    { roofDirectionDegrees: 90 },
+    { roofDirectionDegrees: 0 },
+  ])('never turns a mapped hip’s ridge: %o', (tags) => {
+    const rectangle = minimumAreaRectangle(planOf(TEN_BY_SIX, {}).footprint);
+    const long: readonly [number, number] = [rectangle.ux, rectangle.uz];
+    const plan = planOf(TEN_BY_SIX, { roofShape: 'hipped', ...tags });
+    expect(angleBetween(ridgeRun(plan), long) % 180).toBeLessThan(1);
+  });
+
+  /** Sites of one tagged footprint spread along the road, so every seeded share is sampled. */
+  const spreadSites = (tags: Partial<BuildingFields>): FootprintPlan[] =>
+    plansOf(
+      Array.from({ length: 24 }, (_, at) => ({
+        corners: TEN_BY_SIX,
+        along: 300 + at * 40,
+        lateral: 24,
+        height: 3.5,
+        tags,
+      })),
+    ) as FootprintPlan[];
+
+  it('gives a skillion no chimney, where a gable of the same footprints has some', () => {
+    const chimneys = (shape: 'gabled' | 'skillion'): number =>
+      spreadSites({ roofShape: shape }).filter((plan) => plan.triangles.chimney.length > 0).length;
+    expect(chimneys('gabled')).toBeGreaterThan(0);
+    expect(chimneys('skillion')).toBe(0);
+  });
+
+  it('hangs a skillion’s gutter under its low eave only', () => {
+    // A gutter stands out past the fascia, which is as far as the eaves reach: 0.4 m past the wall.
+    const outside = (plan: FootprintPlan): number[] => {
+      const rectangle = minimumAreaRectangle(plan.footprint);
+      return verticesOf(plan, 'trim')
+        .map((v) => -(v.x - rectangle.cx) * rectangle.uz + (v.z - rectangle.cz) * rectangle.ux)
+        .filter((across) => Math.abs(across) > rectangle.halfShort + 0.45);
+    };
+    const plans = spreadSites({ roofShape: 'skillion' });
+    const guttered = plans.filter((plan) => outside(plan).length > 0);
+    expect(guttered.length).toBeGreaterThan(0);
+    for (const plan of guttered) {
+      const sides = new Set(outside(plan).map(Math.sign));
+      expect(sides.size).toBe(1);
+    }
+    // Control: a gable's gutters hang on both.
+    const both = spreadSites({ roofShape: 'gabled' }).some(
+      (plan) => new Set(outside(plan).map(Math.sign)).size === 2,
+    );
+    expect(both).toBe(true);
+  });
 });
 
 describe('mapped storeys — #1790', () => {

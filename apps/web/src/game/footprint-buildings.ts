@@ -5293,7 +5293,7 @@ export interface FootprintPlanOptions {
   readonly roofVariants?: boolean;
   /**
    * #1785: the variant every pitched roof wears, whatever its archetype, while
-   * `roofVariants` is on — the way in for a mapped `roof:shape` (#1656) and for
+   * `roofVariants` is on — the way in for #1656's probes, which a mapped `roof:shape` (#1790, `MAPPED_ROOFS`) overrides, and for
    * the shapes' tests; absent, each archetype's own.
    */
   readonly roofVariant?: Exclude<RoofVariant, 'plain'>;
