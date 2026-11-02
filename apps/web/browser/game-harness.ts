@@ -78,6 +78,7 @@ import type { KitColour } from '@onyourleft/store';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
   NEAR_PLANE_METRES,
   cameraRig,
   verticalHalfTangent,
@@ -88,7 +89,7 @@ import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-vie
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
-import { sceneFrame as builtSceneFrame } from '../src/game/scene';
+import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
@@ -213,6 +214,7 @@ import {
   horizonFromSkyOf,
   drawOrderOf,
   firDepthPrepassOf,
+  nearTreeFadeOf,
   foliageOrderedOf,
   sceneMaterialsOf,
   type DrawnPiece,
@@ -336,6 +338,7 @@ import {
   REALISTIC_TREE_LEVELS,
 } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
+import type { NearTreeFade } from '../src/game/near-tree-fade';
 import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
 import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import {
@@ -371,6 +374,29 @@ import { observePair, PRESENCE_PAIR_GAP_MILLISECONDS } from '../src/camera/prese
  */
 function sceneFrame(input: Parameters<typeof builtSceneFrame>[0]): SceneFrame {
   return retainedFrame(builtSceneFrame(input));
+}
+
+/**
+ * `frame`'s camera aimed as the chase camera was before #1994: from behind the
+ * rider at `distance` (on the centreline), straight on along the road there.
+ *
+ * #1994's camera looks at the road up the ROUTE, so in a bend it is turned
+ * toward the bend and the rider is off the middle of the frame. A probe that
+ * holds the camera still to read something ELSE in a bend — the line's offset
+ * ({@link lineProbe}), which way a bend turns on the screen ({@link
+ * bendProbe}) — uses this one, so its reading is of what it measures and not
+ * of where #1994 points the camera.
+ */
+function straightOnCamera(frame: SceneFrame, distance: number): CameraPose {
+  const rider = chaseRider(frame.corridor, distance, 0);
+  return {
+    ...frame.camera,
+    x: rider.x,
+    z: rider.z,
+    headingX: rider.tangent.headingX,
+    headingZ: rider.tangent.headingZ,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
 }
 
 /** How a frame is built: {@link sceneFrame}'s copy, or {@link lentSceneFrame}. */
@@ -1389,14 +1415,18 @@ function lineProbe(
   const origin = corridorOrigin(profile);
   const onTheLine = sceneFrame({ profile, origin, state });
   const onTheCentre = sceneFrame({ profile, origin, state, centreline: true });
-  const still = onTheCentre.camera;
+  // #1994: aimed straight on, as it was. Through the product's camera, which
+  // now looks at the road round the bend, the CENTRELINE rider read 14.4 % of
+  // the width off the middle on #1994's pull request — the control below
+  // would be reading the camera, not the line. @see straightOnCamera
+  const still = straightOnCamera(onTheCentre, apex);
   const riderOnly = (frame: SceneFrame): SceneFrame => ({
     ...frame,
     camera: still,
     scatter: [],
     markers: frame.markers.filter((marker) => marker.kind === 'rider'),
   });
-  const nobody: SceneFrame = { ...onTheCentre, scatter: [], markers: [] };
+  const nobody: SceneFrame = { ...onTheCentre, camera: still, scatter: [], markers: [] };
   const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
   if (gl === null) {
     view.destroy();
@@ -1558,12 +1588,15 @@ function bendProbe(
       ...atStartLine(profile),
       ride: { speed: metresPerSecond(9), distance: metres(395) },
     };
-    const frame = sceneFrame({
+    const built = sceneFrame({
       profile,
       origin: corridorOrigin(profile),
       state,
       centreline: true,
     });
+    // #1994: aimed straight on, as it was, so the far road is where the bend
+    // takes it and not where the camera has turned to. @see straightOnCamera
+    const frame = { ...built, camera: straightOnCamera(built, 395) };
     const road: SceneFrame = { ...frame, scatter: [], markers: [] };
     const present = drawn(road);
     const absent = drawn({ ...road, corridor: { ...road.corridor, indices: new Uint32Array(0) } });
@@ -8895,7 +8928,38 @@ export interface TreeLevelMeasurement {
     readonly triangles: number;
     readonly calls: number;
   };
+  /** #545: a tree near the camera, faded and the controls. @see nearFadeProbe */
+  readonly nearFade: NearFadeMeasurement;
 }
+
+/**
+ * A tree brought toward the camera's eye, as the product draws it and as its
+ * two controls do — #545, the owner's ruling of 2026-11-02. @see nearFadeProbe
+ */
+export interface NearFadeMeasurement {
+  /** How far the tree's trunk stands from the eye in plan at each step, far to near, in metres. */
+  readonly distances: readonly number[];
+  /**
+   * How much colour the tree moves at each step, against the frame without
+   * it (`colourMoved`, summed over every pixel and channel): the product,
+   * faded. ⚠️ Colour, not a count of pixels: the tree's ground blob fades with
+   * it, and at 4.6 m from the eye its 7 % darkening still changes four
+   * thousand pixels by a level or two — measured, a count reads that as a pop
+   * the eye cannot see.
+   */
+  readonly colour: readonly number[];
+  /** The same, the tree dropped whole at the middle of the fade — the pop the fade replaces. */
+  readonly colourCut: readonly number[];
+  /** The same, the tree drawn whole however near — as before the ruling. */
+  readonly colourOff: readonly number[];
+}
+
+const NO_NEAR_FADE: NearFadeMeasurement = {
+  distances: [],
+  colour: [],
+  colourCut: [],
+  colourOff: [],
+};
 
 /**
  * One still tree across both its hand-overs, frame by frame — #617. The trees
@@ -10943,6 +11007,7 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
   scanned: { triangles: 0, calls: 0 },
+  nearFade: NO_NEAR_FADE,
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -12247,6 +12312,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
         headingZ: SHADOW_HEADING_SHARE * rider.headingZ,
         eyeRoadY: rider.y + SHADOW_ALTITUDE_METRES - CAMERA_ABOVE_METRES,
         targetRoadY: rider.y,
+        targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
       },
     };
     // `inTheFrame`'s projection, with the right-hand vector normalised: it
@@ -12751,6 +12817,82 @@ function woodedFrameOf(
   };
 }
 
+/** How far to the side of the eye's axis {@link nearFadeProbe}'s tree stands, in metres. */
+const NEAR_FADE_ACROSS_METRES = 3;
+
+/**
+ * The frame {@link nearFadeProbe} draws: a quarter of the load's pixels, at
+ * its 16 : 9, for the load's budget — #644's reason. What it reads is a share
+ * of one tree's pixels, which the frame's size does not change.
+ */
+const NEAR_FADE_SIZE = { width: 320, height: 180 } as const;
+
+/**
+ * A tree near the camera, read off the drawing buffer — #545, the owner's
+ * ruling of 2026-11-02 (`near-tree-fade.ts`).
+ *
+ * One broadleaf, standing {@link NEAR_FADE_ACROSS_METRES} to the side of the
+ * camera's axis on the bare level road, is placed a tenth of a metre nearer
+ * the eye each step, from 6.6 m to 4 m — through the whole fade, which runs
+ * from 6 m to 4.5 m. Each step is the frame without it and then the frame with
+ * it: a tree that follows a frame with no tree is drawn at its level at once
+ * (`tree-levels.ts` §`TreeHandOver`), so what is read is the fade alone and
+ * never a hand-over. What is read is the colour it moves against the empty
+ * frame ({@link NearFadeMeasurement.colour} says why not a count of pixels).
+ *
+ * **Two controls**, on the same view: the tree dropped whole at the middle of
+ * the fade, in one step — the pop the fade replaces, whose largest one-step
+ * change is the scale the product's is held under; and the tree drawn whole —
+ * as before the ruling, which shows the tree is in the picture at the steps
+ * where the product draws none of it.
+ */
+function nearFadeProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  level: SceneFrame,
+): NearFadeMeasurement {
+  const pose = level.camera;
+  const { eye } = cameraRig(pose);
+  const ground = onTheRoad(level, 0, 0).y;
+  const across = NEAR_FADE_ACROSS_METRES;
+  const distances = Array.from({ length: 27 }, (_, step) => 6.6 - step * 0.1);
+  const treeAt = (distance: number): ScatterItem => {
+    const ahead = Math.sqrt(distance ** 2 - across ** 2);
+    return {
+      kind: 'tree-broadleaf',
+      x: eye.x + ahead * pose.headingX - across * pose.headingZ,
+      y: ground,
+      z: eye.z + ahead * pose.headingZ + across * pose.headingX,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    };
+  };
+  const { width, height } = NEAR_FADE_SIZE;
+  const bare: SceneFrame = { ...level, scatter: [] };
+  view.render(bare);
+  view.render(bare);
+  const nothing = readRegion(gl, 0, 0, width, height);
+  const walk = (fade: NearTreeFade): number[] => {
+    nearTreeFadeOf(view, fade);
+    return distances.map((distance) => {
+      view.render(bare);
+      view.render({ ...level, scatter: [treeAt(distance)] });
+      return colourMoved(nothing, readRegion(gl, 0, 0, width, height));
+    });
+  };
+  try {
+    return {
+      distances,
+      colour: walk('fade'),
+      colourCut: walk('cut'),
+      colourOff: walk('off'),
+    };
+  } finally {
+    nearTreeFadeOf(view, 'fade');
+  }
+}
+
 /**
  * The trees' levels of detail in a real engine — #617.
  *
@@ -12799,6 +12941,7 @@ function treeLevelProbe(
   | 'nearestVisibleTriangles'
   | 'nearestVisibleTrianglesControl'
   | 'foliage'
+  | 'nearFade'
 > & { readonly woodedPicture: Uint8Array } {
   const build = (levels: TreeLevels): { view: GameView; gl: WebGL2RenderingContext } => {
     setTreeLevels(levels);
@@ -12960,6 +13103,13 @@ function treeLevelProbe(
     rankOnly: 'in-view',
   });
   phaseEnds('trees: nearest visible');
+  // #545, on the product's view at a quarter of the pixels.
+  const nearFade = withLevels(
+    REALISTIC_TREE_LEVELS,
+    (view, gl) => nearFadeProbe(view, gl, level),
+    NEAR_FADE_SIZE,
+  );
+  phaseEnds('trees: near-camera fade — #545');
   // #630, last, on the product's view: nothing after it reads that view.
   const foliageMeasured = withLevels(REALISTIC_TREE_LEVELS, foliage);
   phaseEnds('trees: foliage — #630');
@@ -12982,6 +13132,7 @@ function treeLevelProbe(
     nearestVisibleTriangles,
     nearestVisibleTrianglesControl,
     foliage: foliageMeasured,
+    nearFade,
   };
 }
 

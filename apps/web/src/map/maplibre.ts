@@ -34,6 +34,29 @@
  * focusable element inside an `aria-hidden` one is an audit failure and a tab
  * stop that announces nothing, so it is put back to `-1` below.
  *
+ * ## An editable map is the route planner's — #2006
+ *
+ * Created {@link MapCreateOptions.editable}, the map hears a tap, draws the
+ * planner's waypoints as markers that drag, and lets the line be grabbed and
+ * pulled to bend it — each reported once, at its end, through
+ * `MapPointerHandlers`. Double-click zoom is off on it, because two quick taps
+ * are two waypoints there; the zoom buttons remain.
+ *
+ * ⚠️ **The markers are custom elements, and that is the keyboard decision.**
+ * In the version the lockfile pins (6.12.0) a draggable **default** marker is
+ * keyboard-operable: MapLibre gives it `tabindex="0"` and `role="button"`,
+ * and an arrow key moves it one screen pixel (ten with Shift), firing the same
+ * drag events. Three things make that the wrong keyboard path here: a pixel is
+ * no stated distance (the planner's nudge is about 55 m, `RouteBuilderView`
+ * §`NUDGE_DEGREES`), the markers sit inside the map's `role="img"`, where a
+ * focusable button is an audit failure, and the planner's list already places,
+ * moves and inserts every waypoint from the keyboard. So each marker is our
+ * own `aria-hidden` element, which MapLibre leaves out of the tab order and
+ * gives no role, and the list stays the one keyboard path. Each shows its
+ * number in that list (`MapWaypoint.label`), so a marker and its row are
+ * named alike; the number is decoration for the eye, and the list is where a
+ * screen reader hears it.
+ *
  * ## The attribution control is off, and the attribution is not
  *
  * `attributionControl: false` because `MapPanel.tsx` renders the credit as
@@ -49,12 +72,22 @@
 import {
   addProtocol,
   Map as MapLibreMap,
+  Marker,
   removeProtocol,
   setWorkerUrl,
   type AddProtocolAction,
   type GeoJSONSource,
+  type LngLat,
+  type MapMouseEvent,
+  type MapTouchEvent,
   type StyleSpecification,
 } from 'maplibre-gl';
+import {
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  type GeographicPosition,
+} from '@onyourleft/domain';
 // The worker, bundled by Vite and addressed by URL. @see the setWorkerUrl note
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
@@ -63,10 +96,12 @@ import { TRACK_LAYER_ID, TRACK_SOURCE_ID } from './basemap';
 import type {
   MapCreateOptions,
   MapPanDirection,
+  MapPointerHandlers,
   MapPort,
   MapRenderer,
   MapView,
   MapViewOptions,
+  MapWaypoint,
   MapZoomDirection,
 } from './port';
 import { createProtocolRegistry } from './protocol';
@@ -142,7 +177,11 @@ function fit(map: MapLibreMap, bounds: TrackBounds | undefined): void {
  * against one still loading it rebuilds from this, and either way the line
  * is in it rather than waiting on a `setData` somebody has to remember.
  */
-function fullStyle(options: MapViewOptions, track: TrackFeature | undefined): StyleSpecification {
+function fullStyle(
+  options: MapViewOptions,
+  track: TrackFeature | undefined,
+  editable = false,
+): StyleSpecification {
   return {
     ...options.style,
     sources: {
@@ -151,6 +190,19 @@ function fullStyle(options: MapViewOptions, track: TrackFeature | undefined): St
     },
     layers: [
       ...options.style.layers,
+      // #2006: an invisible line as wide as a fingertip under the drawn one, so
+      // the planner's line can be grabbed. Only on an editable map.
+      ...(editable
+        ? [
+            {
+              id: TRACK_HIT_LAYER_ID,
+              type: 'line',
+              source: TRACK_SOURCE_ID,
+              layout: { 'line-cap': 'round', 'line-join': 'round' },
+              paint: { 'line-color': options.trackColour, 'line-width': 24, 'line-opacity': 0 },
+            },
+          ]
+        : []),
       {
         id: TRACK_LAYER_ID,
         type: 'line',
@@ -197,18 +249,146 @@ const EXPLORABLE = {
 /** How far one press of a pan button moves the view: a third of the map. */
 const PAN_FRACTION = 1 / 3;
 
+/** The planner's grab line (#2006): see {@link fullStyle}. */
+const TRACK_HIT_LAYER_ID = 'oyl-track-hit';
+
+/** The class every planner marker carries (#2006), and what a tap on one is told apart by. */
+const WAYPOINT_CLASS = 'oyl-map__waypoint';
+
+function positionOf(lngLat: LngLat): GeographicPosition {
+  return geographicPosition(degreesLatitude(lngLat.lat), degreesLongitude(lngLat.lng));
+}
+
+/** Whether a pointer event began on a planner marker rather than on the map under it. */
+function onMarker(event: MapMouseEvent | MapTouchEvent): boolean {
+  const target = event.originalEvent.target;
+  return target instanceof Element && target.closest(`.${WAYPOINT_CLASS}`) !== null;
+}
+
+/** A marker's element: ours, so it is out of the tab order — see the module note. */
+function markerElement(extra?: string): HTMLElement {
+  const element = document.createElement('div');
+  element.className = extra === undefined ? WAYPOINT_CLASS : `${WAYPOINT_CLASS} ${extra}`;
+  element.setAttribute('aria-hidden', 'true');
+  // MapLibre places a marker with a `transform` from the map's top left, and
+  // its own stylesheet — not loaded in this client — is what would put it
+  // there. Found by the browser gate: unplaced, a marker on the line was not
+  // under the pointer, and dragging it pulled the line instead.
+  element.style.position = 'absolute';
+  element.style.left = '0';
+  element.style.top = '0';
+  return element;
+}
+
+/**
+ * The planner's pointer, on an editable map (#2006): the tap, the markers and
+ * the line. Returns what the view needs to keep its markers in step.
+ */
+function editing(map: MapLibreMap): {
+  readonly listen: (handlers: MapPointerHandlers) => void;
+  readonly setWaypoints: (waypoints: readonly MapWaypoint[]) => void;
+} {
+  let handlers: MapPointerHandlers | undefined;
+  const markers = new Map<string, Marker>();
+  // The markers' containing block — see `markerElement`. `theme.css` makes
+  // `.oyl-map` positioned; this covers a container it does not style.
+  const container = map.getContainer();
+  if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+
+  map.on('click', (event) => {
+    if (onMarker(event)) return;
+    handlers?.tap(positionOf(event.lngLat));
+  });
+
+  /**
+   * Grab the line and pull it. A marker that follows the pointer shows where
+   * the new waypoint will go; letting go hands the grab and the drop to the
+   * planner. A press that does not move is a tap, and `click` above hears it.
+   */
+  const grab = (event: MapMouseEvent | MapTouchEvent): void => {
+    if (onMarker(event)) return;
+    if ('points' in event && event.points.length !== 1) return;
+    // Stops the map panning under the pull (MapLibre's documented use of it).
+    event.preventDefault();
+    const from = event.lngLat;
+    const start = event.point;
+    let moved = false;
+    const ghost = new Marker({ element: markerElement(`${WAYPOINT_CLASS}--new`) });
+    const follow = (next: MapMouseEvent | MapTouchEvent): void => {
+      // A finger on the line pulls the line, not the page: from the first move,
+      // or the browser has begun scrolling before the pull is recognised.
+      if (next.type === 'touchmove') next.originalEvent.preventDefault();
+      if (!moved && next.point.dist(start) < 3) return;
+      if (!moved) ghost.setLngLat(next.lngLat).addTo(map);
+      moved = true;
+      ghost.setLngLat(next.lngLat);
+    };
+    const drop = (): void => {
+      map.off('mousemove', follow);
+      map.off('touchmove', follow);
+      map.off('mouseup', drop);
+      map.off('touchend', drop);
+      if (!moved) return;
+      const to = ghost.getLngLat();
+      ghost.remove();
+      handlers?.dragLine(positionOf(from), positionOf(to));
+    };
+    map.on('mousemove', follow);
+    map.on('touchmove', follow);
+    map.on('mouseup', drop);
+    map.on('touchend', drop);
+  };
+  map.on('mousedown', TRACK_HIT_LAYER_ID, grab);
+  map.on('touchstart', TRACK_HIT_LAYER_ID, grab);
+
+  return {
+    listen: (next) => {
+      handlers = next;
+    },
+    setWaypoints: (waypoints) => {
+      const wanted = new Set(waypoints.map((waypoint) => waypoint.id));
+      for (const [id, marker] of markers) {
+        if (!wanted.has(id)) {
+          marker.remove();
+          markers.delete(id);
+        }
+      }
+      for (const waypoint of waypoints) {
+        const at: [number, number] = [waypoint.position.longitude, waypoint.position.latitude];
+        const held = markers.get(waypoint.id);
+        if (held !== undefined) {
+          held.setLngLat(at);
+          // An insert or a delete before it renumbers it (#2006's owner review).
+          held.getElement().textContent = waypoint.label;
+          continue;
+        }
+        const element = markerElement();
+        element.textContent = waypoint.label;
+        const marker = new Marker({ element, draggable: true }).setLngLat(at).addTo(map);
+        marker.on('dragend', () => {
+          handlers?.moveWaypoint(waypoint.id, positionOf(marker.getLngLat()));
+        });
+        markers.set(waypoint.id, marker);
+      }
+    },
+  };
+}
+
 const renderer: MapRenderer = {
   create(container: HTMLElement, options: MapCreateOptions): MapView {
     /** The line the map shows, so a new style is handed it too. */
     let current: TrackFeature | undefined;
+    const editable = options.explorable === true && options.editable === true;
     const map = new MapLibreMap({
       container,
       // The style is built by `basemap.ts` from configuration and is never
       // fetched from a URL. `basemap.test.ts` asserts every origin it names is
       // the configured one; a `style: 'https://…/style.json'` here would put
       // that back outside the assertion's reach.
-      style: fullStyle(options, current),
+      style: fullStyle(options, current, editable),
       ...(options.explorable === true ? EXPLORABLE : { interactive: false }),
+      // Two quick taps on the planner are two waypoints, not a zoom (#2006).
+      ...(editable ? { doubleClickZoom: false } : {}),
       attributionControl: false,
     });
     map.getCanvas().setAttribute('aria-hidden', 'true');
@@ -223,6 +403,8 @@ const renderer: MapRenderer = {
     }
     /** The box the line was last fitted to, for `fitTrack`. */
     let fitted: TrackBounds | undefined;
+    /** The planner's pointer, on an editable map only (#2006). */
+    const edit = editable ? editing(map) : undefined;
 
     /**
      * The line, handed over before the style had loaded, waiting for it.
@@ -269,11 +451,15 @@ const renderer: MapRenderer = {
     });
 
     return {
-      setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void {
+      setTrack(
+        track: TrackFeature | undefined,
+        bounds: TrackBounds | undefined,
+        fitNow?: boolean,
+      ): void {
         current = track;
         waiting = draw(track) ? undefined : { track };
         fitted = bounds;
-        fit(map, bounds);
+        if (fitNow !== false) fit(map, bounds);
       },
       zoom(direction: MapZoomDirection): void {
         // Animated unless the device asks for reduced motion, which MapLibre's
@@ -299,13 +485,22 @@ const renderer: MapRenderer = {
       fitTrack(): void {
         fit(map, fitted);
       },
+      setWaypoints(waypoints: readonly MapWaypoint[]): void {
+        edit?.setWaypoints(waypoints);
+      },
+      centre(): GeographicPosition {
+        return positionOf(map.getCenter());
+      },
+      listen(handlers: MapPointerHandlers): void {
+        edit?.listen(handlers);
+      },
       setStyle(next: MapViewOptions): void {
         // `setStyle` diffs against the loaded style, so a change of palette
         // is a set of paint-property writes and the archive source, the same
         // URL, is kept rather than rebuilt. Before the first
         // style has loaded MapLibre cannot diff, warns once, and rebuilds
         // from this object instead — which still carries the line.
-        map.setStyle(fullStyle(next, current));
+        map.setStyle(fullStyle(next, current, editable));
       },
       destroy(): void {
         map.remove();

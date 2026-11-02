@@ -32,10 +32,18 @@
  */
 
 import { ActivityXmlError, decodeGpxRoute, type DecodedRoute } from '@onyourleft/fit';
-import { RouteError } from '@onyourleft/domain';
+import { altitudeMetres, routeProfile, RouteError, type RouteProfile } from '@onyourleft/domain';
 import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
-import type { PrivacyZoneRecord, RouteId, RouteRecord, Visibility } from '@onyourleft/store';
+import type {
+  PrivacyZoneRecord,
+  RouteElevationRecord,
+  RouteId,
+  RouteRecord,
+  Visibility,
+} from '@onyourleft/store';
 
+import { unresolvedLegs, type RouteDraft } from '../routing/draft';
+import { plannedShape, type PlannedElevation } from '../routing/elevation';
 import { routeShare, ROUTE_SHARE_FAULT_TEXT } from './share';
 
 /** The longest name a route may carry. Long enough for a real one, short enough for a list row. */
@@ -50,7 +58,9 @@ export interface SaveRefusal {
     | 'not-a-route'
     | 'not-a-loop'
     | 'edited-elsewhere'
-    | 'cannot-be-shared';
+    | 'cannot-be-shared'
+    | 'legs-without-a-line'
+    | 'could-not-store';
   readonly message: string;
 }
 
@@ -182,6 +192,106 @@ export function routeFromGpx(text: string, options: ImportOptions): SaveOutcome 
       createdBy: options.owner,
       name: importedRouteName(decoded.name, options.fileName),
       profile: decoded.profile,
+      visibility: 'private',
+      createdAt: options.now,
+      updatedAt: options.now,
+    },
+  };
+}
+
+export interface DraftSaveOptions {
+  readonly id: RouteId;
+  readonly owner: RouteRecord['createdBy'];
+  /** What the rider typed. Checked by {@link checkName}. */
+  readonly name: string;
+  /** Passed in rather than read: this module may not consult a clock. */
+  readonly now: UnixSeconds;
+  /**
+   * The planner's profile, when a routing service gave it heights — and only
+   * when it was worked out for THIS draft. The caller holds that pairing:
+   * a profile from before the last edit describes a different line.
+   */
+  readonly elevation?: PlannedElevation | undefined;
+}
+
+/**
+ * What a rider is told about the heights of a route saved from the planner
+ * with no elevation service — the case with no instance (#2006).
+ */
+export const FLAT_DRAWN_ROUTE_TEXT =
+  'No heights are known for a route drawn here yet, so it is saved flat: its climb reads 0 m.';
+
+/**
+ * Turn the route a rider drew into a saved route — #2006.
+ *
+ * The same `RouteRecord` an import writes, so a drawn route sits in the same
+ * list, rides the same way and leaves through the same downloads (#74). And
+ * private, for {@link routeFromGpx}'s reason: there is no option here to make
+ * it anything else.
+ *
+ * ⚠️ **Its line is the drawn line, end to end, and every leg must have one.**
+ * A leg still being routed, or one whose routing failed, has no line, and
+ * joining its neighbours with a straight stroke would save a stretch the rider
+ * never drew as ridden road. So that is a refusal naming the legs — the
+ * planner's own {@link plannedShape} stops at the same hole.
+ *
+ * ⚠️ **With no elevation service the profile is flat, and says so.** A
+ * `RouteProfile` needs heights and a drawn line has none until something is
+ * asked; zero everywhere is the honest floor, `elevation` is left absent so
+ * the record does not claim a dataset (`RouteRecord.elevation`'s rule), and
+ * the rider is told ({@link FLAT_DRAWN_ROUTE_TEXT}).
+ */
+export function routeFromDraft(draft: RouteDraft, options: DraftSaveOptions): SaveOutcome {
+  const nameFault = checkName(options.name);
+  if (nameFault !== undefined) return { status: 'refused', refusal: nameFault };
+
+  if (draft.waypoints.length < 2) {
+    return refuse('not-a-route', 'A route needs two waypoints before it can be saved.');
+  }
+  const missing = unresolvedLegs(draft);
+  if (missing.length > 0) {
+    const names = missing.map((leg) => String(leg + 1));
+    const which =
+      names.length === 1
+        ? `Leg ${names[0]!} has`
+        : `Legs ${names.slice(0, -1).join(', ')} and ${names.at(-1)!} have`;
+    return refuse(
+      'legs-without-a-line',
+      `${which} no line yet, so the route was not saved. Draw ${names.length === 1 ? 'it' : 'them'} freehand, or wait for ${names.length === 1 ? 'it' : 'them'} to be routed.`,
+    );
+  }
+
+  let profile: RouteProfile;
+  let elevation: RouteElevationRecord | undefined;
+  try {
+    if (options.elevation === undefined) {
+      profile = routeProfile(
+        plannedShape(draft).map((position) => ({ position, elevation: altitudeMetres(0) })),
+      );
+    } else {
+      profile = options.elevation.profile;
+      elevation = {
+        dataset: options.elevation.dataset.name,
+        resolution: options.elevation.dataset.resolution,
+        interval: options.elevation.interval,
+        missing: options.elevation.coverage.missing,
+      };
+    }
+  } catch (error: unknown) {
+    // `no-distance`: every waypoint in one place. The domain's message names
+    // the problem and no coordinate (ADR 0004 decision D).
+    if (error instanceof RouteError) return refuse('not-a-route', `${error.message}.`);
+    throw error;
+  }
+
+  return {
+    status: 'saved',
+    record: {
+      id: options.id,
+      createdBy: options.owner,
+      name: options.name.trim(),
+      profile,
+      ...(elevation === undefined ? {} : { elevation }),
       visibility: 'private',
       createdAt: options.now,
       updatedAt: options.now,

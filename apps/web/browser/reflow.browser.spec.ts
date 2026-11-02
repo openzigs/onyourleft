@@ -443,6 +443,45 @@ test.describe("Home's facts hold a ten-hour duration on one line", () => {
   }
 });
 
+/**
+ * #2006's owner review, measured: at a tablet's 1280 × 800 the route planner's
+ * legs table keeps each leg's "3 to 4" and "0.7 km" on one line, and its
+ * *Name* field is wider than `.oyl-input`'s 8rem number box. The populated
+ * fixture draft has four waypoints, so three legs, each routed freehand.
+ */
+test.describe('the route planner at tablet width — #2006', () => {
+  const planner = ALL_ROUTES.find((each) => each.id === 'route-builder');
+  if (planner === undefined) {
+    throw new Error('the route table has no route-builder route');
+  }
+  // A tablet both ways up: landscape is where the owner saw it, and portrait
+  // is the narrower column, where it wraps first.
+  for (const [width, height] of [
+    [1280, 800],
+    [800, 1280],
+  ] as const) {
+    test(`keeps a leg’s name and distance on one line, and widens the name field, at ${String(width)}×${String(height)}`, async ({
+      page,
+    }) => {
+      await open(page, width, height, 'data=populated');
+      const seen = await visit(page, hrefFor(planner));
+      const legs = seen.planner;
+      expect(legs, 'the planner drew no legs').not.toBeNull();
+      console.log(
+        `planner at ${String(width)}×${String(height)}: ${(legs?.legCells ?? []).join(' | ')}; ` +
+          `${String(legs?.mostLegCellLines)} line(s); name ${String(legs?.nameWidth)} px`,
+      );
+      // Three legs, each with its heading and its distance.
+      expect(legs?.legCells).toHaveLength(6);
+      expect(legs?.legCells).toContain('3 to 4');
+      expect(legs?.mostLegCellLines, 'a leg’s name or distance wrapped').toBe(1);
+      // 16rem: twice the 8rem `.oyl-input` it had none of before.
+      expect(legs?.nameWidth ?? 0, 'the name field').toBeGreaterThanOrEqual(256);
+      expect(reflowFaults(planner, seen, true)).toEqual([]);
+    });
+  }
+});
+
 test.describe('the controls', () => {
   const route = ALL_ROUTES[0];
   if (route === undefined) {

@@ -150,6 +150,25 @@
  * `roofVariants`, the realistic page's `-roof-variants`). Every builder here
  * was written fresh for this project; none is ported.
  *
+ * ## Mapped roofs and storeys (#1790, the owner's rulings D2 and D4 of 2026-10-27)
+ *
+ * Where #1789 carries a footprint's `roof:shape`, the plan draws it
+ * ({@link MAPPED_ROOFS}) in place of the archetype's or the seeded roof: flat,
+ * a gable, a hip (a `pyramidal` and a `mansard` one too), one of #1785's
+ * variants, or a `skillion`, one slope at the porch's shed pitch
+ * ({@link SKILLION_PITCH_DEGREES}). A pitched tag is drawn on a rectangle and
+ * on #1660's L, T, U and Z, and on no other shape, which keeps today's roof;
+ * a terraced footprint keeps its flat roof and cornice. On a rectangle,
+ * `roof:orientation=across` and `roof:direction` turn a gable's ridge
+ * ({@link roofTurnedOf}), and a skillion slopes down toward its
+ * `roof:direction`. `building:levels` is a footprint's storey count, its eaves
+ * still at the mapped height ({@link storeyMetresOf}), and `roof:levels` of 1
+ * or more admits dormers below their least pitch. A tagged roof over a cap
+ * falls back to the plain roof, then to the flat one, as a variant does.
+ * Every footprint with none of these tags is planned as before, byte for
+ * byte, and so is every one with `?levers=-mapped-roof-shape`
+ * ({@link FootprintPlanOptions}' `mappedRoofShape`).
+ *
  * The near level stays inside {@link FOOTPRINT_MAX_TRIANGLES} and the far
  * level, walls and roof, inside {@link FOOTPRINT_MAX_FAR_TRIANGLES}: a house's
  * detail is about 40 triangles, and since #1588 about 60 more — gutters, a
@@ -231,6 +250,15 @@
  * residential land is one. Untyped, every plan is as before
  * ({@link FootprintPlanOptions.buildingTypes}, the page's `-building-type`).
  *
+ * Where a typed footprint also carries #1790's tags, the tag wins over what
+ * the type would choose by default: a mapped `roof:shape` over a barn's
+ * gambrel, a civic block's hip or a garage's gable, and a mapped
+ * `building:levels` over a garage's or a shed's one storey — and a
+ * `residential` footprint is resolved to apartments or a house from those
+ * levels. Everything else the type sets stays: a barn's planks and steep
+ * pitch, an outbuilding's blind walls and garage door, a civic block's plain
+ * door. Each lever switches its own half alone.
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -246,11 +274,13 @@
 
 import type { RouteProfile } from '@onyourleft/domain';
 import {
+  BUILDING_FIELD_RULES,
   NO_BUILDING_FIELDS,
   simplifyRing,
   triangulate,
   type BuildingFeature,
   type Ring,
+  type RoofShape,
 } from '@onyourleft/map-features';
 
 import {
@@ -592,6 +622,49 @@ export interface FootprintCladding {
 export type FootprintRoof = 'gable' | 'hip' | 'flat';
 
 /**
+ * The shape a plan's pitched roof is built in: `plain`, one of #1785's
+ * variants, or since #1790 a mapped `skillion` — one slope, which no
+ * archetype chooses ({@link MAPPED_ROOFS}).
+ */
+export type PlanRoofVariant = RoofVariant | 'skillion';
+
+/**
+ * How each mapped `roof:shape` is drawn — #1790, the table posted on #1557 on
+ * 2026-10-24 with #1785's variants: its {@link FootprintRoof} and the shape
+ * its pitched roof is built in. `pyramidal` is the hip, which over a square is
+ * a pyramid, and `mansard` the hip too. Every variant and the skillion has a
+ * gable end, so is a `gable`.
+ */
+export const MAPPED_ROOFS: Readonly<
+  Record<RoofShape, { readonly roof: FootprintRoof; readonly variant: PlanRoofVariant }>
+> = {
+  flat: { roof: 'flat', variant: 'plain' },
+  gabled: { roof: 'gable', variant: 'plain' },
+  hipped: { roof: 'hip', variant: 'plain' },
+  pyramidal: { roof: 'hip', variant: 'plain' },
+  skillion: { roof: 'gable', variant: 'skillion' },
+  'half-hipped': { roof: 'gable', variant: 'half-hipped' },
+  gambrel: { roof: 'gable', variant: 'gambrel' },
+  saltbox: { roof: 'gable', variant: 'saltbox' },
+  side_hipped: { roof: 'gable', variant: 'side-hipped' },
+  mansard: { roof: 'hip', variant: 'plain' },
+};
+
+/**
+ * A mapped skillion's pitch, degrees: **14** — #1790, the lean-to of
+ * `porch.ts`, scaled to the footprint: its shed roof's pitch.
+ */
+export const SKILLION_PITCH_DEGREES: number = FRONT_PORCH.pitchDegrees.shed;
+
+/**
+ * The pitched roofs whose ridge a mapped `roof:orientation` or
+ * `roof:direction` may turn — #1790: those whose ridge runs from gable end to
+ * gable end. A hip's, a half-hip's and a side-hipped roof's ends are hips,
+ * which a ridge across the long side would not keep at the slopes' pitch.
+ */
+const TURNABLE: ReadonlySet<PlanRoofVariant> = new Set(['plain', 'skillion', 'gambrel', 'saltbox']);
+
+/**
  * What a plan is painted — #1581: an entry of each of `building-paint.ts`'
  * lists, its wall surface's, its roof surface's, the trim's and the door's.
  * Seeded from the footprint, and never the same as a neighbour's
@@ -625,9 +698,9 @@ export interface FootprintPlan {
    * #1785: the shape its pitched roof is built in — `plain`, the gable or hip
    * `roof` names, or a variant ({@link variantRoof}), whose `roof` is `gable`
    * since each has a gable end. `plain` on a flat roof, and with
-   * `levers=-roof-variants`.
+   * `levers=-roof-variants`. Since #1790 a mapped `skillion` too.
    */
-  readonly roofVariant: RoofVariant;
+  readonly roofVariant: PlanRoofVariant;
   /**
    * A pitched roof's pitch, degrees, seeded ({@link ROOF_PITCHES_DEGREES}); 0 on a flat one.
    * A saltbox's back slope is at it; a gambrel's two pitches are {@link GAMBREL}'s own.
@@ -1429,6 +1502,42 @@ export function storeysFor(heightMetres: number | null): number {
   return Math.max(1, Math.round(heightMetres / STOREY_METRES));
 }
 
+/**
+ * How far a wall may rise above `building:levels` storeys of
+ * {@link STOREY_METRES} and keep them that tall: **2 m** — #1790, the `+ 2` of
+ * #1629's `3L + 2`. Every window's head is more than two thirds of a storey
+ * up it (`facade.ts` §`windowStoreysOf`), so no row is laid in that room.
+ */
+export const LEVELS_ROOM_METRES = 2;
+
+/**
+ * How tall a storey of windows is on a wall `wallHeight` metres from the floor
+ * to the eaves that is tagged `building:levels` = `levels` — #1790: the
+ * eaves stay at the mapped height (ADR 0054's amendment of 2026-10-24), and
+ * the levels place the windows in the wall. {@link STOREY_METRES} where
+ * `levels` of those fill it to within {@link LEVELS_ROOM_METRES} — #1629's
+ * `3L + 2`, drawn as today; otherwise the wall split into `levels` evenly, so
+ * the facade lays exactly `levels` rows of windows.
+ */
+export function storeyMetresOf(wallHeight: number, levels: number): number {
+  const room = wallHeight - levels * STOREY_METRES;
+  return room >= 0 && room <= LEVELS_ROOM_METRES ? STOREY_METRES : wallHeight / levels;
+}
+
+/**
+ * A mapped `building:levels` as a storey count — #1790: a whole number in the
+ * decoder's own bounds, or none. The decoder clamps it, but a corridor read
+ * back from the device's store is held only to a finite number
+ * (`world-data/corridor.ts` §`buildingFieldsOfPacked`), and a negative or
+ * fractional count would write a facade `top` that is another face's code.
+ */
+function levelsOf(levels: number | null): number | null {
+  const { min, max } = BUILDING_FIELD_RULES.levels;
+  return levels !== null && Number.isInteger(levels) && levels >= min && levels <= max
+    ? levels
+    : null;
+}
+
 /** The least and most storeys an untagged footprint is chosen between, inclusive. */
 export type StoreysRange = readonly [least: number, most: number];
 
@@ -1754,6 +1863,11 @@ export function baysOf(length: number): number {
 interface Windows {
   /** The eaves, in storeys above the floor. @see FACADE_FLOATS */
   readonly top: number;
+  /**
+   * #1790: how tall a storey of these windows is, metres — the facade's `v`
+   * counts them; {@link STOREY_METRES} where absent ({@link storeyMetresOf}).
+   */
+  readonly storey?: number;
   /** The outer ring's edge the front door is on, or −1. */
   readonly doorEdge: number;
   /** #1588: the walls' `clad` and `flags` ({@link STYLE_FLOATS}). */
@@ -2001,12 +2115,16 @@ function wallPiece(
     [u0, v1],
   ];
   const bays = windows === undefined || windows.blind === true ? 0 : baysOf(length);
+  // #1790: the facade's storeys are the mapped levels' where the plan has them.
+  const storey = windows?.storey ?? STOREY_METRES;
+  const f0 = (bottom - from) / storey;
+  const f1 = (top - from) / storey;
   let face: Face = PLAIN;
   let facade: Four<Pair> = [
-    [0, v0],
-    [bays, v0],
-    [bays, v1],
-    [0, v1],
+    [0, f0],
+    [bays, f0],
+    [bays, f1],
+    [0, f1],
   ];
   if (windows !== undefined) {
     const axis = windows.gableAxis;
@@ -2379,7 +2497,10 @@ function pitchedRoof(
 
 /** Where a roof variant faces — #1785. */
 interface VariantPlacing {
-  /** A saltbox's front: its short, steep slope is toward `+v` (`1`) or `−v` (`−1`). */
+  /**
+   * A saltbox's front: its short, steep slope is toward `+v` (`1`) or `−v`
+   * (`−1`); since #1790 a skillion's low eave.
+   */
   readonly front: number;
   /** A side-hipped roof's hipped end: `1` along `+u`, `−1` along `−u`. */
   readonly end: number;
@@ -2392,7 +2513,7 @@ interface VariantPlacing {
  * both eaves level (owner, 2026-10-30), so its drop is the back's. What a
  * porch's roof must pass under ({@link porchWallTopOf}).
  */
-export function eavePitchOf(variant: RoofVariant, pitchDegrees: number): number {
+export function eavePitchOf(variant: PlanRoofVariant, pitchDegrees: number): number {
   return variant === 'gambrel' ? GAMBREL.lowerDegrees : pitchDegrees;
 }
 
@@ -2419,6 +2540,10 @@ type Local = readonly [a: number, c: number, y: number];
  *   with the back's.
  * - `side-hipped`: the gable's slopes, a hip at `placing.end` and a gable at
  *   the other.
+ * - `skillion` (#1790): one slope at `pitchDegrees`, its eave toward
+ *   `placing.front` at the walls' top and rising across the whole width; each
+ *   end's wall a right triangle up to the high edge, and the high side's wall
+ *   carried up to it. A gutter and a downpipe under the low eave alone.
  *
  * Returns its ridge, for the chimney and the dormers.
  */
@@ -2426,7 +2551,7 @@ function variantRoof(
   writing: Writing,
   rectangle: Rectangle,
   heights: readonly [eaves: number, floor: number],
-  variant: Exclude<RoofVariant, 'plain'>,
+  variant: Exclude<PlanRoofVariant, 'plain'>,
   pitchDegrees: number,
   placing: VariantPlacing,
   dress: RoofDress,
@@ -2770,13 +2895,70 @@ function variantRoof(
       ridge = { top, half: Math.abs(ridgeEnd) };
       break;
     }
+    case 'skillion': {
+      // #1790: `low` is the eave's side; the slope rises across the whole width to the other.
+      const low = placing.front;
+      const a = gableReach;
+      const eaveY = eaves - overhang * tan;
+      const wallTop = eaves + 2 * halfShort * tan;
+      const highY = wallTop + overhang * tan;
+      slope(
+        [
+          [-a, out * low, eaveY],
+          [a, out * low, eaveY],
+          [a, -out * low, highY],
+          [-a, -out * low, highY],
+        ],
+        sideNormal(low, pitch),
+        pitch,
+        eaveY,
+        true,
+      );
+      for (const side of [low, -low]) {
+        const y = side === low ? eaveY : highY;
+        fascia(corner([-a, out * side, y]), corner([a, out * side, y]), [vx * side, 0, vz * side]);
+      }
+      for (const end of [1, -1]) {
+        gable(end, [
+          [halfShort * low, eaves],
+          [-halfShort * low, eaves],
+          [-halfShort * low, wallTop],
+        ]);
+        verge(a * end, end, [
+          [out * low, eaveY],
+          [-out * low, highY],
+        ]);
+      }
+      // The high side's wall, from the walls' top up to the slope's underside.
+      const at = (along: number, y: number): Vec => corner([along, -halfShort * low, y]);
+      const across = (y: number): number => (y - floor) / STOREY_METRES;
+      const run = halfLong / BAY_METRES;
+      const highUv: Four<Pair> = [
+        [-run, across(eaves)],
+        [run, across(eaves)],
+        [run, across(wallTop)],
+        [-run, across(wallTop)],
+      ];
+      quad(
+        writing.wall,
+        [at(-halfLong, eaves), at(halfLong, eaves), at(halfLong, wallTop), at(-halfLong, wallTop)],
+        [-vx * low, 0, -vz * low],
+        highUv,
+        plainIn(dress.gable),
+        highUv,
+      );
+      eaveYs = [eaveY, eaveY];
+      ridge = { top: highY, half: a, offset: -out * low };
+      break;
+    }
   }
   if (dress.gutters !== undefined) {
-    // As #1588 hangs them: a gutter under each long eave, a little under the roof's edge.
+    // As #1588 hangs them: a gutter under each long eave, a little under the roof's edge;
+    // since #1790 under a skillion's one eave.
     const bottomOf = (side: number): number =>
       (side === 1 ? eaveYs[0] : eaveYs[1]) - GUTTER.below - GUTTER.depth;
     const reachOf = (side: number): number => (side === 1 ? outs[0] : outs[1]);
-    for (const side of [1, -1]) {
+    for (const side of variant === 'skillion' ? [placing.front] : [1, -1]) {
       const bottom = bottomOf(side);
       const reach = reachOf(side);
       boxFaces(
@@ -2787,7 +2969,8 @@ function variantRoof(
         ['c+', 'y-', 'a+', 'a-'],
       );
     }
-    const { side, end, ground } = dress.gutters;
+    const { end, ground } = dress.gutters;
+    const side = variant === 'skillion' ? placing.front : dress.gutters.side;
     const bottom = bottomOf(side);
     const a = end * (halfLong - DOWNPIPE.fromCorner);
     const half = DOWNPIPE.size / 2;
@@ -4273,6 +4456,8 @@ export function footprintPlans(
   options: FootprintPlanOptions = {},
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
   const seed = scatterSeed(profile);
+  // #1790: each footprint's mapped roof and storeys, unless `-mapped-roof-shape` is off.
+  const mapped = options.mappedRoofShape ?? true;
   const counts: Record<FootprintVerdict, number> = {
     kept: 0,
     'on-excluded-land': 0,
@@ -4305,6 +4490,7 @@ export function footprintPlans(
       seed,
       maxVertices,
       tagged,
+      mapped,
       false,
       // #1791: its mapped building type, unless the lever is off.
       options.buildingTypes ?? true,
@@ -4334,6 +4520,7 @@ export function footprintPlans(
           split: options.splitRoofs ?? true,
           flat: false,
           variants: options.roofVariants === false ? 'off' : (options.roofVariant ?? 'archetype'),
+          mapped,
         },
         {
           on: options.houseArchetypes ?? true,
@@ -4511,6 +4698,8 @@ function terracePlans(
         seed,
         maxVertices,
         others.tagged,
+        // Its fields are all `null`: a terrace block reads no tag.
+        false,
         others.terrace === true,
       );
       if (typeof measured === 'string') continue;
@@ -4985,6 +5174,8 @@ interface Measured {
   readonly family: Exclude<BuildingFamily, 'residential'> | undefined;
   readonly storeys: number;
   readonly wallHeight: number;
+  /** #1790: how tall a storey of its windows is ({@link storeyMetresOf}). */
+  readonly storey: number;
   readonly base: number;
   readonly floor: number;
   readonly eaves: number;
@@ -5001,6 +5192,8 @@ function measureFootprint(
   seed: number,
   maxVertices: number,
   tagged: TaggedNeighbours | undefined,
+  // #1790: whether its mapped `building:levels` is read (`-mapped-roof-shape` off).
+  mapped: boolean,
   // #1637: a city centre's terraced block, commercial whatever the land under it.
   terrace = false,
   // #1791: whether its mapped building type is read.
@@ -5099,22 +5292,29 @@ function measureFootprint(
       ? FAMILY_USE[typedFamily]
       : footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
   const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  // #1790: a mapped `building:levels` is the storey count. Not a part's, which counts from the
+  // ground, not from its `min_height`, and whose `building:min_level` the tile does not carry.
+  const levels = mapped && !part ? levelsOf(building.levels) : null;
   // #1634: a mapped height is P-10's and #1629's; an untagged one is chosen — since #1791
-  // one storey for a mapped garage or shed.
+  // one storey for a mapped garage or shed. A mapped `building:levels` (#1790) or height wins
+  // over the type's one storey: the tag is the building's own, the type's storey a default.
   const storeys =
-    span !== null
-      ? storeysFor(span)
-      : typedFamily === 'garage' || typedFamily === 'shed'
-        ? 1
-        : untaggedStoreys(
-            urbanClass,
-            use,
-            area,
-            urbanClass === 'unknown' ? undefined : tagged?.medianNear(centroid.x, centroid.z),
-            share(STREAM_STOREYS),
-          );
+    levels !== null
+      ? levels
+      : span !== null
+        ? storeysFor(span)
+        : typedFamily === 'garage' || typedFamily === 'shed'
+          ? 1
+          : untaggedStoreys(
+              urbanClass,
+              use,
+              area,
+              urbanClass === 'unknown' ? undefined : tagged?.medianNear(centroid.x, centroid.z),
+              share(STREAM_STOREYS),
+            );
   const family = typedFamily === undefined ? undefined : resolvedFamily(typedFamily, storeys, area);
   const wallHeight = span !== null && span > 0 ? span : storeys * STOREY_METRES;
+  const storey = levels === null ? STOREY_METRES : storeyMetresOf(wallHeight, levels);
   const base = part ? lowest + minHeight : lowest - FOUNDATION_METRES;
   const floor = part ? base : highest + PLINTH_TOP_METRES;
   return {
@@ -5131,6 +5331,7 @@ function measureFootprint(
     family,
     storeys,
     wallHeight,
+    storey,
     base,
     floor,
     eaves: floor + wallHeight,
@@ -5151,6 +5352,13 @@ interface RoofSplitting {
    * none: the lever, and a variant's retry over a cap.
    */
   readonly variants?: 'off' | 'archetype' | Exclude<RoofVariant, 'plain'>;
+  /** #1790: whether the footprint's mapped `roof:*` tags set its roof; absent, they do not. */
+  readonly mapped?: boolean;
+  /**
+   * #1790: the plain gable or hip, whatever the tag or the archetype asks — a
+   * variant's, and a mapped one's, retry over a cap.
+   */
+  readonly plain?: boolean;
 }
 
 /** The planner's switches — the realistic page's levers; the product takes the defaults. */
@@ -5176,7 +5384,7 @@ export interface FootprintPlanOptions {
   readonly roofVariants?: boolean;
   /**
    * #1785: the variant every pitched roof wears, whatever its archetype, while
-   * `roofVariants` is on — the way in for a mapped `roof:shape` (#1656) and for
+   * `roofVariants` is on — the way in for #1656's probes, which a mapped `roof:shape` (#1790, `MAPPED_ROOFS`) overrides, and for
    * the shapes' tests; absent, each archetype's own.
    */
   readonly roofVariant?: Exclude<RoofVariant, 'plain'>;
@@ -5209,6 +5417,44 @@ export interface FootprintPlanOptions {
    * as before (`?levers=-building-type`).
    */
   readonly buildingTypes?: boolean;
+  /**
+   * #1790: each footprint's mapped `roof:shape`, `roof:orientation`,
+   * `roof:direction`, `building:levels` and `roof:levels`, where #1789 carries
+   * them, setting its roof and its storeys; `true` by default. Off, every tag
+   * is ignored and every plan is as before (`?levers=-mapped-roof-shape`).
+   */
+  readonly mappedRoofShape?: boolean;
+}
+
+/**
+ * The rectangle a mapped roof's ridge runs along — #1790: `rectangle` as it
+ * is, or turned a right angle so that its long axis is across the footprint.
+ * `roof:direction`, the way the main slope faces, wins: the ridge runs across
+ * it, along whichever of the rectangle's axes is nearer square to it, and on a
+ * tie along the long side. Without it `roof:orientation=across` turns it, and
+ * `along` or nothing keeps it.
+ */
+export function roofTurnedOf(
+  rectangle: Rectangle,
+  building: Pick<BuildingFeature, 'roofOrientation' | 'roofDirectionDegrees'>,
+): Rectangle {
+  const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
+  const facing = downSlopeOf(building.roofDirectionDegrees);
+  const turned =
+    facing === undefined
+      ? building.roofOrientation === 'across'
+      : Math.abs(facing[0] * ux + facing[1] * uz) > Math.abs(-facing[0] * uz + facing[1] * ux);
+  return turned ? { cx, cz, ux: -uz, uz: ux, halfLong: halfShort, halfShort: halfLong } : rectangle;
+}
+
+/**
+ * The way a mapped `roof:direction` faces, as a unit `(x, z)` in local metres
+ * — `x` west and `z` north, as `map-features` lays them — or none.
+ */
+function downSlopeOf(degrees: number | null): readonly [x: number, z: number] | undefined {
+  if (degrees === null) return undefined;
+  const radians = (degrees * Math.PI) / 180;
+  return [-Math.sin(radians), Math.cos(radians)];
 }
 
 /**
@@ -5308,25 +5554,35 @@ function planFootprint(
           terraced,
         })
       : 'unknown';
+  // #1790: the mapped `roof:shape`, where the lever is on and the footprint is not terraced. A
+  // pitched one only on a shape a pitched roof is built on — a rectangle, or #1660's L, T, U
+  // or Z; on any other the tag is not read, and the roof is as before.
+  const tag =
+    roofing.mapped === true && !terraced && building.roofShape !== null
+      ? MAPPED_ROOFS[building.roofShape]
+      : undefined;
+  const mappedRoof =
+    tag !== undefined &&
+    (tag.roof === 'flat' ||
+      split !== undefined ||
+      rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY)
+      ? tag
+      : undefined;
   const pitched =
     !roofing.flat &&
-    (pitchedFootprint({
-      area,
-      rectangularity,
-      wallHeight,
-      use,
-      terraced,
-      rectilinear: split !== undefined,
-    }) ||
-      // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
-      (buildingArchetype === 'garden-apartment' && wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES));
-  // The rectangles a pitched roof is built over, the largest first. A split of one is a
-  // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
-  // two or three is the notch fix.
-  const roofRectangles: readonly Rectangle[] =
-    split === undefined || split.length === 1 ? [rectangle] : split;
-  // Gutters, the downpipe, the dormers and the chimney: on the largest only.
-  const main = roofRectangles[0] as Rectangle;
+    (mappedRoof !== undefined
+      ? mappedRoof.roof !== 'flat'
+      : pitchedFootprint({
+          area,
+          rectangularity,
+          wallHeight,
+          use,
+          terraced,
+          rectilinear: split !== undefined,
+        }) ||
+        // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
+        (buildingArchetype === 'garden-apartment' &&
+          wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES));
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = terraced ? { party: { walls: party, eaves } } : {};
@@ -5376,29 +5632,66 @@ function planFootprint(
   // #1785: a pitched roof in its archetype's variant, on the footprint's own share, or in
   // the one asked for; every variant has a gable end, so is a `gable`.
   const wanted = roofing.variants ?? 'off';
-  const variant: RoofVariant =
-    !pitched || wanted === 'off'
+  // #1790: a mapped roof's own shape, whatever the archetype's; over a cap, its plain roof.
+  const variant: PlanRoofVariant =
+    !pitched || roofing.plain === true
       ? 'plain'
-      : wanted !== 'archetype'
-        ? wanted
-        : features.roofVariant !== 'none' && share(STREAM_ROOF_VARIANT) < features.roofVariant[1]
-          ? features.roofVariant[0]
-          : 'plain';
+      : mappedRoof !== undefined
+        ? mappedRoof.variant
+        : wanted === 'off'
+          ? 'plain'
+          : wanted !== 'archetype'
+            ? wanted
+            : features.roofVariant !== 'none' &&
+                share(STREAM_ROOF_VARIANT) < features.roofVariant[1]
+              ? features.roofVariant[0]
+              : 'plain';
   // #1581: a pitched roof is a gable or, seeded, a hip; a barn is always a gable. #1791: a
-  // civic block's is its low hip.
+  // civic block's is its low hip. Since #1790 a mapped roof is the one it names, over the
+  // mapped type's own (#1791): the `roof:shape` is the building's, the type's roof a default.
   const roof: FootprintRoof = !pitched
     ? 'flat'
-    : variant === 'plain' &&
-        (use === 'residential' || civic) &&
-        share(STREAM_HIP) < shareOf(features.hip, HIP_SHARE)
-      ? 'hip'
-      : 'gable';
+    : mappedRoof !== undefined
+      ? mappedRoof.roof
+      : variant === 'plain' &&
+          (use === 'residential' || civic) &&
+          share(STREAM_HIP) < shareOf(features.hip, HIP_SHARE)
+        ? 'hip'
+        : 'gable';
   const pitchDegrees =
-    roof === 'flat' ? 0 : (pitches[Math.floor(share(STREAM_PITCH) * pitches.length)] as number);
+    roof === 'flat'
+      ? 0
+      : variant === 'skillion'
+        ? SKILLION_PITCH_DEGREES
+        : (pitches[Math.floor(share(STREAM_PITCH) * pitches.length)] as number);
+  // The rectangles a pitched roof is built over, the largest first. A split of one is a
+  // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
+  // two or three is the notch fix. #1790: a mapped gable's on a rectangle, its ridge turned
+  // as its tags say.
+  const roofRectangles: readonly Rectangle[] =
+    split === undefined || split.length === 1
+      ? [
+          mappedRoof !== undefined && roof === 'gable' && TURNABLE.has(variant)
+            ? roofTurnedOf(rectangle, building)
+            : rectangle,
+        ]
+      : split;
+  // Gutters, the downpipe, the dormers and the chimney: on the largest only.
+  const main = roofRectangles[0] as Rectangle;
+  // #1790: a mapped skillion's low eave on a rectangle, toward its `roof:direction`; else the front.
+  const facingDown =
+    mappedRoof !== undefined ? downSlopeOf(building.roofDirectionDegrees) : undefined;
+  // #1790: a mapped attic storey admits dormers below their least pitch.
+  const attic = roofing.mapped === true && (building.roofLevels ?? 0) >= 1;
   // #1784: the archetype's eaves across a slope, while the lever is on; else #1581's.
   const overhang =
     choice.porches === true && features.eaves !== 'seeded' ? features.eaves : EAVES_OVERHANG_METRES;
-  const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < chimneyShare;
+  // #1790: none on a skillion, whose ridge is its high eave.
+  const withChimney =
+    roof !== 'flat' &&
+    variant !== 'skillion' &&
+    residential &&
+    share(STREAM_CHIMNEY) < chimneyShare;
   // Which end of the ridge the chimney stands toward; a side-hipped roof hips the other (#1785).
   const chimneyEnd = share(STREAM_CHIMNEY) < chimneyShare / 2 ? 1 : -1;
   // A canopy only where it stands clear of the road's clearance, as the walls do.
@@ -5628,7 +5921,9 @@ function planFootprint(
         : middle + (garage.bay === 0 ? 1 : -1)
       : -1;
   const windows: Windows = {
-    top: (eaves - floor) / STOREY_METRES,
+    // #1790: in storeys of the mapped levels', where it has them.
+    top: (eaves - floor) / measured.storey,
+    ...(measured.storey === STOREY_METRES ? {} : { storey: measured.storey }),
     doorEdge: front?.edge ?? -1,
     clad: wallClad,
     flags,
@@ -5661,12 +5956,14 @@ function planFootprint(
   const withDormers =
     roof !== 'flat' &&
     residential &&
-    pitchDegrees >= DORMER_KIND_MIN_PITCH_DEGREES[dormerKind] &&
+    // #1790: or lower, under a mapped attic storey; the dormer is still built only where it fits.
+    (attic || pitchDegrees >= DORMER_KIND_MIN_PITCH_DEGREES[dormerKind]) &&
     (call !== 'none' || share(STREAM_DORMER) < shareOf(features.dormer, DORMER_SHARE)) &&
     // #1785: a half-hipped or side-hipped roof's slopes are the gable's, and carry them; a
-    // gambrel's and a saltbox's are not, and do not.
+    // gambrel's and a saltbox's are not, and do not; nor, since #1790, a skillion's.
     variant !== 'gambrel' &&
-    variant !== 'saltbox';
+    variant !== 'saltbox' &&
+    variant !== 'skillion';
 
   const holes = building.rings
     .slice(1)
@@ -5736,7 +6033,16 @@ function planFootprint(
               [eaves, floor],
               variant,
               pitchDegrees,
-              { front: facingOf(each), end: -chimneyEnd },
+              {
+                // #1790: a mapped skillion's low eave on the side its `roof:direction` faces.
+                front:
+                  variant === 'skillion' && facingDown !== undefined
+                    ? facingDown[0] * -each.uz + facingDown[1] * each.ux >= 0
+                      ? 1
+                      : -1
+                    : facingOf(each),
+                end: -chimneyEnd,
+              },
               dress,
             );
       const ridge = roofOver(main, {
@@ -5891,7 +6197,8 @@ function planFootprint(
       maxVertices,
       others,
       party,
-      { ...roofing, variants: 'off' },
+      // #1790: and a mapped one too, to its plain gable or hip.
+      { ...roofing, variants: 'off', plain: true },
       choice,
     );
   }

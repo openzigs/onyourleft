@@ -11,11 +11,13 @@ import {
   DEFAULT_CONFIG,
   facadeTrimsWithLevers,
   firPrepassWithLevers,
+  nearTreeFadeWithLevers,
   archetypePorchesWithLevers,
   buildingTypesWithLevers,
   commercialArchetypesWithLevers,
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
+  mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   LAYERS,
   LEVERS,
@@ -449,6 +451,30 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(harness).toMatch(/config\.town === 'typed'\s*\?\s*typedStreetFixture\(latitude\)/);
   });
 
+  it('reads the mapped roof and storey tags, as the product does, unless #1790’s lever takes them out', () => {
+    expect(LEVERS).toContain('mapped-roof-shape');
+    expect(mappedRoofShapeWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(mappedRoofShapeWithLevers(LEVERS.filter((lever) => lever !== 'mapped-roof-shape'))).toBe(
+      true,
+    );
+    expect(mappedRoofShapeWithLevers(parseConfig('?levers=-mapped-roof-shape').leversOff)).toBe(
+      false,
+    );
+    expect(configQuery(parseConfig('?town=roofs&levers=-mapped-roof-shape'))).toBe(
+      `?levers=${encodeURIComponent('-mapped-roof-shape')}&town=roofs`,
+    );
+  });
+
+  it('rides the tagged street through #1790’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=roofs').town).toBe('roofs');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'roofs'\s*\?\s*mappedRoofStreetFixture\(latitude\)/);
+  });
+
   it('pitches the split houses, as the product does, unless #1660’s lever takes it out', () => {
     expect(LEVERS).toContain('split-roofs');
     expect(splitRoofsWithLevers([])).toBe(true);
@@ -511,6 +537,21 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(() => parseConfig('?levers=-unprepared')).toThrow(/levers is a comma-separated list/);
     expect(configQuery(parseConfig('?levers=-fir-prepass'))).toBe(
       `?levers=${encodeURIComponent('-fir-prepass')}`,
+    );
+  });
+
+  it('fades the trees near the camera, as the product does, unless its #545 lever is off', () => {
+    expect(LEVERS).toContain('near-tree-fade');
+    // No lever is the product, and no OTHER lever touches the fade.
+    expect(nearTreeFadeWithLevers([])).toBe('fade');
+    expect(
+      nearTreeFadeWithLevers(parseConfig('?levers=-fir-prepass,-generated-trees').leversOff),
+    ).toBe('fade');
+    expect(nearTreeFadeWithLevers(parseConfig('?levers=-near-tree-fade').leversOff)).toBe('off');
+    // The gate's pop control is never a URL's to ask for.
+    expect(() => parseConfig('?levers=-cut')).toThrow(/levers is a comma-separated list/);
+    expect(configQuery(parseConfig('?levers=-near-tree-fade'))).toBe(
+      `?levers=${encodeURIComponent('-near-tree-fade')}`,
     );
   });
 

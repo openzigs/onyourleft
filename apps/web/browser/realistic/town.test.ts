@@ -12,7 +12,8 @@
  * the bungalows' wide eaves without it, and #1581's with it; and since #1783
  * `-commercial-archetypes`: the commercial street's archetypes without it,
  * and none with it — and since #1922, the pair's frames planted alike but on
- * the driveways a garden apartment gives up.
+ * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
+ * the tagged street's roofs as tagged without it, and every tag ignored with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +22,7 @@ import {
   FOOTPRINT_ROLES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
+  MAPPED_ROOFS,
   mappedTown,
   minimumAreaRectangle,
   type FootprintPlan,
@@ -28,6 +30,7 @@ import {
 import {
   commercialStreetFixture,
   houseStreetFixture,
+  mappedRoofStreetFixture,
   mixedTownFixture,
   planFingerprint,
   typedStreetFixture,
@@ -123,6 +126,43 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
       undefined,
       urban,
       { roofVariants: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    plans.forEach((plan, index) => {
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
+describe('the realistic page’s `mapped-roof-shape` lever — #1790', () => {
+  const street = mappedRoofStreetFixture();
+
+  it('draws every tagged roof as tagged on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=roofs').leversOff);
+    expect(plans).toHaveLength(street.corridor.buildings.length);
+    plans.forEach((plan, index) => {
+      const shape = street.corridor.buildings[index]?.roofShape ?? null;
+      if (shape !== null) expect(plan.roof).toBe(MAPPED_ROOFS[shape].roof);
+    });
+    expect(plans.some((plan) => plan.roofVariant === 'skillion')).toBe(true);
+  });
+
+  it('plans every house as the planner with them off does, with `levers=-mapped-roof-shape`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=roofs&levers=-mapped-roof-shape').leversOff,
+    );
+    expect(plans.some((plan) => plan.roofVariant === 'skillion')).toBe(false);
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { mappedRoofShape: false },
     ).plans;
     expect(plans.length).toBe(off.length);
     plans.forEach((plan, index) => {

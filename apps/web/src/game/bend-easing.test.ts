@@ -32,6 +32,7 @@ import {
   type EasedPlace,
 } from './bend-easing';
 import { combinedLean } from './bicycle';
+import { CAMERA_BEHIND_METRES } from './camera';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
 import { lineOffsetAt, racingLine, type RacingLine } from './racing-line';
@@ -42,7 +43,7 @@ import {
   levelHairpinRoute,
   northRoute,
 } from './route-fixtures-testing';
-import { cameraPose, drawnRiderDistance, placedRiders, sceneFrame } from './scene';
+import { cameraPose, chaseRider, drawnRiderDistance, placedRiders, sceneFrame } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
 
@@ -283,9 +284,25 @@ describe('the speed lost in a bend is drawn position only, and given back — #1
     expect(Math.abs(combinedLean(rider.lean, rider.bodyLean))).toBeLessThanOrEqual(
       EASED_LEAN_RADIANS + 1e-9,
     );
-    // …and the camera stands on them.
-    expect(frame.camera.x).toBeCloseTo(rider.x, 9);
-    expect(frame.camera.z).toBeCloseTo(rider.z, 9);
+    // …and the camera stands on them: its eye is the chase distance straight
+    // back from the drawn rider along the road there. ⚠️ Not the pose's own
+    // `x`/`z` since #1994: in a bend that is the point the eye looks through,
+    // 4.5 m toward the road ahead, which is the rider only on a straight.
+    const chase = chaseRider(
+      frame.corridor,
+      place.distance,
+      offsetFrom(frame, rider, place.distance).across,
+    );
+    expect(chase.x).toBeCloseTo(rider.x, 6);
+    expect(chase.z).toBeCloseTo(rider.z, 6);
+    expect(frame.camera.x - frame.camera.headingX * CAMERA_BEHIND_METRES).toBeCloseTo(
+      rider.x - chase.tangent.headingX * CAMERA_BEHIND_METRES,
+      6,
+    );
+    expect(frame.camera.z - frame.camera.headingZ * CAMERA_BEHIND_METRES).toBeCloseTo(
+      rider.z - chase.tangent.headingZ * CAMERA_BEHIND_METRES,
+      6,
+    );
   });
 
   it('tells a caller with a camera of its own where the frame drew the rider — the demo’s tour', () => {

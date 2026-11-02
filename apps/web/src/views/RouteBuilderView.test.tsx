@@ -6,6 +6,7 @@ import {
   degreesLongitude,
   geographicPosition,
   RoutingError,
+  type GeographicPosition,
 } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -97,6 +98,10 @@ async function press(label: string): Promise<void> {
   await settle();
 }
 
+function at(latitude: number, longitude: number): GeographicPosition {
+  return geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
+}
+
 async function place(times: number): Promise<void> {
   for (let index = 0; index < times; index += 1) await press('Add a waypoint');
 }
@@ -131,6 +136,7 @@ describe('every control works from the keyboard', () => {
     await open({ provider });
     await place(2);
     provider.routeCalls.length = 0;
+    await press('Waypoint 1');
     for (const direction of ['north', 'south', 'east', 'west']) {
       await press(`Move waypoint 1 ${direction}`);
     }
@@ -143,9 +149,41 @@ describe('every control works from the keyboard', () => {
     await open({ provider });
     await place(2);
     provider.routeCalls.length = 0;
+    await press('Waypoint 1');
     await press('Move waypoint 1 north');
     const moved = provider.routeCalls[0]?.waypoints[0]?.position.latitude ?? 0;
     expect(moved).toBeCloseTo(51.5 + NUDGE_DEGREES, 6);
+  });
+
+  it('shows the moves of the selected waypoint only, so a row is two buttons', async () => {
+    // #2006's owner review: six buttons a waypoint was a wall of them. The
+    // four moves sit behind "Waypoint N", and Tab reaches them next.
+    await open({ provider: scriptedProvider() });
+    await place(3);
+    const moves = (): string[] =>
+      buttons()
+        .map((button) => button.textContent?.trim() ?? '')
+        .filter((name) => name.startsWith('Move waypoint'));
+    expect(moves()).toEqual([]);
+    await press('Waypoint 2');
+    expect(moves()).toEqual([
+      'Move waypoint 2 north',
+      'Move waypoint 2 south',
+      'Move waypoint 2 east',
+      'Move waypoint 2 west',
+    ]);
+    // In the tab order straight after the waypoint that shows them.
+    const order = buttons().map((button) => button.textContent?.trim() ?? '');
+    expect(order.indexOf('Move waypoint 2 north')).toBe(order.indexOf('Waypoint 2') + 1);
+    await press('Waypoint 3');
+    expect(moves()).toEqual([
+      'Move waypoint 3 north',
+      'Move waypoint 3 south',
+      'Move waypoint 3 east',
+      'Move waypoint 3 west',
+    ]);
+    await press('Waypoint 3');
+    expect(moves()).toEqual([]);
   });
 
   it('deletes one', async () => {
@@ -370,6 +408,7 @@ describe('what the screen says when a leg has no route', () => {
     const view = await open({ provider });
     await place(3);
     provider.failNextRoute(new RoutingError('no-route', 'No path between these two points.', 1));
+    await press('Waypoint 3');
     await press('Move waypoint 3 north');
     expect(view.container.textContent).toContain('No path between these two points.');
     expect(view.container.textContent).toContain('legs have no route');
@@ -380,6 +419,7 @@ describe('what the screen says when a leg has no route', () => {
     const view = await open({ provider });
     await place(2);
     provider.failNextRoute(new RoutingError('unavailable', 'The service did not answer in time.'));
+    await press('Waypoint 2');
     await press('Move waypoint 2 north');
     expect(view.container.textContent).toContain('worth trying again');
   });
@@ -405,6 +445,40 @@ describe('legs, surfaces and the settings that decide them', () => {
     provider.routeCalls.length = 0;
     await press('Follow roads on leg 1');
     expect(provider.routeCalls).toHaveLength(1);
+  });
+
+  it('offers no road-following with no routing service, since nothing could do it', async () => {
+    // #2006's owner review: "Follow roads on leg N" promised snapping that
+    // cannot happen. Absent, not disabled — `Button.tsx`'s rule.
+    await open({});
+    await place(3);
+    expect(buttons().filter((button) => button.textContent?.includes('Follow roads'))).toEqual([]);
+    // The leg's other control stays.
+    expect(present('Add a waypoint halfway along leg 2')).toBe(true);
+  });
+
+  it('still lets a road-following leg restored with no routing service be drawn freehand', async () => {
+    // Drawn where there was a service, reopened where there is none: the leg
+    // can never be routed here, and turning it freehand is how it gets a line.
+    const restored = [at(51.5, -0.12), at(51.51, -0.12)].reduce(
+      (draft, point) => addWaypoint(draft, point, 'snapped').draft,
+      emptyDraft(),
+    );
+    let held: RouteDraft | undefined = restored;
+    const view = await open({
+      storage: {
+        read: () => held,
+        write: (draft) => {
+          held = draft;
+        },
+        forget: () => {
+          held = undefined;
+        },
+      },
+    });
+    await press('Draw leg 1 freehand');
+    expect(held?.legs[0]?.mode).toBe('freehand');
+    expect(view.container.textContent).not.toContain('Follow roads on leg 1');
   });
 
   it('never calls an unknown surface paved', async () => {

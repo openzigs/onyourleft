@@ -30,6 +30,7 @@ import { footprintPlans } from './footprint-buildings';
 import { mixedTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose } from './port';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
 import { REALISTIC_STRUCTURE_MESHES } from './realistic-budget';
@@ -52,6 +53,7 @@ const POSE: CameraPose = {
   headingZ: 1,
   eyeRoadY: 0,
   targetRoadY: 0,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
 };
 
 const belts: { dispose(): void }[] = [];

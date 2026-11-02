@@ -52,6 +52,7 @@ import {
   LINE_LIMIT_METRES,
   leanAt,
   lineOffsetAt,
+  lineSlopeAt,
   racingLine,
   type RacingLine,
 } from './racing-line';
@@ -621,33 +622,99 @@ function mappedInView(
 }
 
 /**
- * Where the chase camera looks from.
+ * The nearest the camera's target is ever put, in metres: **10** — #1994.
+ * @see cameraPose
+ *
+ * Both the nearest point up the ROUTE a tight bend draws the target in to,
+ * and, past the end of a point-to-point route — where the corridor clamps on
+ * its final point and there is no road to look at — the nearest it is put to
+ * the point the camera stands behind, along the same line. Nearer, the camera
+ * would tip down at its own rider's front wheel; at 10 m it is pitched 7.9°
+ * down, against 3.9° on the flat.
+ */
+const CAMERA_TARGET_NEAREST_METRES = 10;
+
+/**
+ * The farthest off the middle of the frame, seen from the eye, a bend may put
+ * the rider: **20°** — #1994. @see cameraPose
+ *
+ * Inside the 24.7° half-width an upright phone sees (`camera.ts`
+ * §`verticalHalfTangent`), so the rider stays in every frame a device draws;
+ * a leaning rider leans INTO the bend, toward the middle.
+ */
+const RIDER_OFF_AXIS_RADIANS = (20 * Math.PI) / 180;
+
+/**
+ * Where the chase camera looks from, and what it looks at.
  *
  * `lateralMetres` is how far across the road the rider is drawn, positive on
  * the road's own normal side (#499); the camera is moved across with them.
  *
- * The heading is taken from the corridor's own centreline rather than from a
- * stored bearing, so the camera and the road cannot disagree: if the corridor
- * turns, the camera turns with it by construction. A separately-computed bearing
- * is the kind of second source of truth that drifts by a frame and reads as the
- * camera lagging the corner.
+ * Everything is read off the corridor's own centreline rather than a stored
+ * bearing, so the camera and the road cannot disagree. A separately-computed
+ * bearing is the kind of second source of truth that drifts by a frame and
+ * reads as the camera lagging the corner.
+ *
+ * ⚠️ **The camera LOOKS AT THE ROAD ahead — #1994.** Until then the target was
+ * {@link CAMERA_TARGET_AHEAD_METRES} straight on along the tangent of the
+ * corridor piece under the rider, which in a tight bend is a field or a
+ * junction. Now:
+ *
+ * - the **eye** is where it always was, {@link CAMERA_BEHIND_METRES} straight
+ *   back from the rider along the road's tangent there;
+ * - the **target** is ON the road, on the rider's line (moved across by the
+ *   same `lateralMetres` along that point's own normal), the farthest up the
+ *   ROUTE — up to {@link CAMERA_TARGET_AHEAD_METRES}, and no nearer than
+ *   {@link CAMERA_TARGET_NEAREST_METRES} — that keeps the rider within
+ *   {@link RIDER_OFF_AXIS_RADIANS} of the middle of the frame. On a straight,
+ *   and through any bend gentler than about 30 m of radius, that is the full
+ *   25 m; through a 20 m one it is about 18 m, through a 10 m hairpin 10 m;
+ * - the **heading** is from the eye to the target, and the pose's `x`/`z` are
+ *   the point on that line {@link CAMERA_BEHIND_METRES} past the eye — so
+ *   `camera.ts` §`cameraRig`, and every cull in `three-renderer.ts` that puts
+ *   the eye behind `x`/`z` along the heading, see the camera that is drawn. On
+ *   a straight that point is the rider and nothing changes.
+ *
+ * ⚠️ **Why the eye does not swing round with the view.** An eye swung round
+ * behind the rider on the line to the target keeps the rider in the middle of
+ * the frame, and stands up to 5 m from the centreline in a 20 m hairpin, over
+ * the pavement: `near-field-street.test.ts` (#545) measured its near plane
+ * cutting mapped walls and people at every aspect up to a 21 : 9 phone. Kept
+ * where it was, the eye is where #545 holds it, and the rider is drawn a little
+ * toward the OUTSIDE of a bend instead; and kept where it was with the target
+ * 25 m on regardless, a 10 m hairpin put the rider out of the frame altogether,
+ * which is what the shortened look-ahead is for.
+ *
+ * Where even {@link CAMERA_TARGET_NEAREST_METRES} up the road is further off
+ * the axis than that — a hairpin tighter than about 10 m, a turnaround where
+ * the road comes back past the rider — the target is that nearest point, and
+ * the damping turns the camera round with the road.
+ *
+ * Undamped: this is a function of one frame, and `GameView` damps the heading
+ * across frames (`camera.ts` §`dampedHeading`, §`turnedPose`).
  */
 export function cameraPose(
   corridor: RoadCorridor,
   atDistance: number,
   lateralMetres: number,
 ): CameraPose {
-  const here = placeOnCorridor(corridor, atDistance);
-  const heading = headingAt(corridor, here.index);
+  const rider = chaseRider(corridor, atDistance, lateralMetres);
+  const { tangent } = rider;
+  const eyeX = rider.x - tangent.headingX * CAMERA_BEHIND_METRES;
+  const eyeZ = rider.z - tangent.headingZ * CAMERA_BEHIND_METRES;
+  const target = roadTarget(corridor, atDistance, lateralMetres, tangent, eyeX, eyeZ);
+  const dx = target.x - eyeX;
+  const dz = target.z - eyeZ;
+  const range = Math.hypot(dx, dz);
+  const look = range > 1e-6 ? { headingX: dx / range, headingZ: dz / range } : tangent;
   return {
-    // #499: moved across the road by as much as the rider is, along the road's
-    // own normal, and NOT turned: the camera still looks down the road, and it
-    // does not roll with the lean (out of scope, and a rolling horizon on a
-    // phone is the fastest way to make somebody feel ill).
-    x: here.x - heading.headingZ * lateralMetres,
-    y: here.y,
-    z: here.z + heading.headingX * lateralMetres,
-    ...heading,
+    x: eyeX + look.headingX * CAMERA_BEHIND_METRES,
+    y: rider.y,
+    z: eyeZ + look.headingZ * CAMERA_BEHIND_METRES,
+    ...look,
+    targetAheadMetres: target.pastTheEnd
+      ? Math.max(range - CAMERA_BEHIND_METRES, CAMERA_TARGET_NEAREST_METRES)
+      : Math.max(range - CAMERA_BEHIND_METRES, 1),
     // #424 — the two heights the camera pitches by, read off the SAME corridor
     // the road is drawn from, so the gaze and the tarmac cannot disagree.
     // `camera.ts` §`cameraRig` says why these are the road's real heights and
@@ -659,8 +726,116 @@ export function cameraPose(
     // except the first 4.5 m and the last 25 m of a point-to-point route —
     // where they settle on the first or last point and the gaze goes level.
     eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
-    targetRoadY: placeOnCorridor(corridor, atDistance + CAMERA_TARGET_AHEAD_METRES).y,
+    targetRoadY: target.y,
   };
+}
+
+/**
+ * Where the chase camera's rider is, and which way the road runs there — #1994.
+ *
+ * The corridor at `atDistance`, moved across by `lateralMetres` along the
+ * road's own normal (#499), NOT rolled with the lean (out of scope, and a
+ * rolling horizon on a phone is the fastest way to make somebody feel ill).
+ * {@link cameraPose} stands its eye behind it along `tangent`; the demo's
+ * tour (`demo/camera-tour.ts`) points its other shots at it, because since
+ * #1994 the pose's own `x`/`z` are the rider only on a straight.
+ */
+export function chaseRider(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+): {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly tangent: { readonly headingX: number; readonly headingZ: number };
+} {
+  const here = placeOnCorridor(corridor, atDistance);
+  const tangent = headingAt(corridor, here.index);
+  return {
+    x: here.x - tangent.headingZ * lateralMetres,
+    y: here.y,
+    z: here.z + tangent.headingX * lateralMetres,
+    tangent,
+  };
+}
+
+interface RoadTarget {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Whether this is the end of a point-to-point route, clamped onto, rather than road. */
+  readonly pastTheEnd: boolean;
+}
+
+/**
+ * The point on the road the camera looks at — #1994. @see cameraPose
+ *
+ * The farthest point from {@link CAMERA_TARGET_NEAREST_METRES} to
+ * {@link CAMERA_TARGET_AHEAD_METRES} up the route that keeps the rider within
+ * {@link RIDER_OFF_AXIS_RADIANS} of the axis: down from the full look-ahead a
+ * metre at a time to the first that does, then halved six times between it
+ * and the metre beyond, so the target slides along the road by centimetres
+ * from one frame to the next rather than stepping a metre. Where none does,
+ * the nearest.
+ */
+function roadTarget(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+  tangent: { readonly headingX: number; readonly headingZ: number },
+  eyeX: number,
+  eyeZ: number,
+): RoadTarget {
+  const at = (reach: number): RoadTarget => {
+    const placed = placeOnCorridor(corridor, atDistance + reach);
+    // Past a point-to-point route's end the corridor's points all clamp onto
+    // its last one, so the piece the target is on has no length and no
+    // direction: the rider's own stands in for it.
+    const from = corridor.centre[placed.index] as CorridorPoint;
+    const to = corridor.centre[placed.index + 1];
+    const pastTheEnd = to === undefined || Math.hypot(to.x - from.x, to.z - from.z) < 1e-6;
+    const across = pastTheEnd ? tangent : headingAt(corridor, placed.index);
+    return {
+      x: placed.x - across.headingZ * lateralMetres,
+      y: placed.y,
+      z: placed.z + across.headingX * lateralMetres,
+      pastTheEnd,
+    };
+  };
+  // The eye looks at the rider along the tangent, so the rider is within the
+  // bound of an axis through `point` when the angle between them is.
+  const keepsRider = (point: { readonly x: number; readonly z: number }): boolean => {
+    const dx = point.x - eyeX;
+    const dz = point.z - eyeZ;
+    const along = dx * tangent.headingX + dz * tangent.headingZ;
+    const across = dx * tangent.headingZ - dz * tangent.headingX;
+    return Math.abs(Math.atan2(across, along)) <= RIDER_OFF_AXIS_RADIANS;
+  };
+  let reach = CAMERA_TARGET_AHEAD_METRES;
+  let point = at(reach);
+  if (keepsRider(point)) return point;
+  while (reach > CAMERA_TARGET_NEAREST_METRES) {
+    const beyond = reach;
+    reach = Math.max(CAMERA_TARGET_NEAREST_METRES, reach - 1);
+    point = at(reach);
+    if (keepsRider(point)) {
+      let near = reach;
+      let far = beyond;
+      for (let halving = 0; halving < 6; halving += 1) {
+        const middle = (near + far) / 2;
+        const tried = at(middle);
+        if (keepsRider(tried)) {
+          near = middle;
+          point = tried;
+        } else {
+          far = middle;
+        }
+      }
+      return point;
+    }
+  }
+  return point;
 }
 
 /**
@@ -695,6 +870,31 @@ function headingAt(
     headingX: length > 0 ? dx / length : 0,
     headingZ: length > 0 ? dz / length : 1,
   };
+}
+
+/**
+ * The most a drawn rider is turned off the road's heading toward the way its
+ * place on the line moves: **12°** — #1995.
+ *
+ * A judgement, not a measurement, and the reason is the camera. A rider moving
+ * across the road by the width of a lane over a few bicycle lengths, the most
+ * the line does outside a hairpin, points about 10° off it; in a hairpin the
+ * drawn line can cross the road far faster, and facing all of that stood the
+ * bicycle side-on to the road (#1995's review on the owner's course). 12° keeps
+ * every ordinary change of line drawn as it is and reads, from the chase
+ * camera, as a bicycle pointing along the road.
+ */
+export const FACING_TURN_LIMIT_RADIANS = (12 * Math.PI) / 180;
+
+/**
+ * How far a rider is drawn turned off the road, given the angle its drawn
+ * place moves at off the road — #1995: that angle where it is small, and never
+ * more than {@link FACING_TURN_LIMIT_RADIANS}, by a smooth saturation
+ * (`limit · tanh(angle / limit)`), so the turn has no kink where it starts to
+ * be held back.
+ */
+export function facingTurn(motion: number): number {
+  return FACING_TURN_LIMIT_RADIANS * Math.tanh(motion / FACING_TURN_LIMIT_RADIANS);
 }
 
 /**
@@ -969,11 +1169,12 @@ function ridersOnTheRoad(
   // wall clock. @see RiderMarker.rideSeconds
   const rideClock: number = ghostClock(input.state);
   return riders.map((rider) => {
-    const lateral = line === undefined ? 0 : lateralOf(rider, riders, line);
+    const across = line === undefined ? STRAIGHT_DOWN_THE_MIDDLE : lateralOf(rider, riders, line);
+    const lateral = across.metres;
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
     const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
-    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, roll, {
+    const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
       rideSeconds: rideClock,
@@ -1041,24 +1242,54 @@ function levelness(one: Rider, other: Rider): number {
  * that place is at most `1.75 + 1.2 = 2.95 m` out, inside
  * {@link DRAWN_LIMIT_METRES}.
  */
-function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
-  if (rider.steered !== undefined) return rider.steered;
-  if (rider.laned !== undefined) return lanedLateral(rider, rider.laned, riders, line);
+function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Across {
+  if (rider.steered !== undefined) return { metres: rider.steered, rate: 0 };
+  if (rider.laned !== undefined) {
+    return { metres: lanedLateral(rider, rider.laned, riders, line), rate: 0 };
+  }
   let level = 0;
   for (const other of riders) {
     if (other === rider) continue;
     level = Math.max(level, levelness(rider, other));
   }
   const side = rider.lane ?? LEVEL_LANES[rider.kind];
-  const drawn =
-    lineOffsetAt(line, rider.distance) * (1 - LINE_GIVEN_UP * level) +
-    side * SIDE_BY_SIDE_METRES * level;
+  const kept = 1 - LINE_GIVEN_UP * level;
+  const drawn = lineOffsetAt(line, rider.distance) * kept + side * SIDE_BY_SIDE_METRES * level;
+  // #1995: the share of the line this rider keeps moves at that share of the
+  // line's own rate.
+  const drawnRate = lineSlopeAt(line, rider.distance) * kept;
   const steered = riders.find((other) => other.steered !== undefined);
-  if (steered?.steered === undefined) return drawn;
+  if (steered?.steered === undefined) return { metres: drawn, rate: drawnRate };
   const clear = steered.steered + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(drawn, clear) : Math.max(drawn, clear);
-  return drawn + (aside - drawn) * Math.max(levelness(rider, steered), heldBehind(rider, steered));
+  const held = Math.max(levelness(rider, steered), heldBehind(rider, steered));
+  // A place held clear of the steered rider is theirs, and does not move as
+  // this one rides on.
+  const asideRate = aside === drawn ? drawnRate : 0;
+  return {
+    metres: drawn + (aside - drawn) * held,
+    rate: drawnRate + (asideRate - drawnRate) * held,
+  };
 }
+
+/**
+ * Where a rider is drawn across the road, and how fast that place moves —
+ * #1995. @see lateralOf
+ */
+interface Across {
+  /** Metres from the centreline, positive on the road's normal side. */
+  readonly metres: number;
+  /**
+   * Metres sideways per metre ridden, the same sign: the line's own rate
+   * ({@link lineSlopeAt}) for a rider on it, scaled by the share of it they
+   * keep. Nought for a rider whose place is not the line's — a Delivery
+   * round's steered rider and a lap race's laned bot.
+   */
+  readonly rate: number;
+}
+
+/** Every rider's place with the line switched off: on the centreline, not moving across it. */
+const STRAIGHT_DOWN_THE_MIDDLE: Across = { metres: 0, rate: 0 };
 
 /**
  * Where a lap-race bot is drawn across the road — #1902: in its lane
@@ -1084,7 +1315,7 @@ function lanedLateral(
   line: RacingLine,
 ): number {
   const own = riders[0] as Rider;
-  const ownLateral = lateralOf(own, riders, line);
+  const ownLateral = lateralOf(own, riders, line).metres;
   const side = laned > 0 ? 1 : -1;
   const clear = ownLateral + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(laned, clear) : Math.max(laned, clear);
@@ -1143,6 +1374,39 @@ function pedalling(atDistance: number): number {
 const GHOST_SPEED_HALF_WINDOW_SECONDS = 0.5;
 
 /**
+ * The angle, off the road's heading `road`, from where a rider's rear wheel is
+ * drawn to where its front wheel is — #1995. Each wheel is half of
+ * {@link BICYCLE_LENGTH_METRES} along the road from `atDistance`, at the
+ * rider's place across the road moved on by `across.rate` over that half, and
+ * on the road's own normal there, as {@link markerAt} places a rider. Nought
+ * where the two coincide, at a clamped end of the corridor.
+ */
+function wheelToWheel(
+  corridor: RoadCorridor,
+  atDistance: number,
+  across: Across,
+  road: { readonly headingX: number; readonly headingZ: number },
+): number {
+  const half = BICYCLE_LENGTH_METRES / 2;
+  const wheel = (offset: number): { x: number; z: number } => {
+    const at = placeOnCorridor(corridor, atDistance + offset);
+    const heading = headingAt(corridor, at.index);
+    const lateral = across.metres + across.rate * offset;
+    return { x: at.x - heading.headingZ * lateral, z: at.z + heading.headingX * lateral };
+  };
+  const rear = wheel(-half);
+  const front = wheel(half);
+  const dx = front.x - rear.x;
+  const dz = front.z - rear.z;
+  if (Math.hypot(dx, dz) < 1e-9) return 0;
+  // The signed angle from the road's heading to the wheels', positive toward
+  // the road's normal `(−headingZ, headingX)`.
+  const along = dx * road.headingX + dz * road.headingZ;
+  const normal = -dx * road.headingZ + dz * road.headingX;
+  return Math.atan2(normal, along);
+}
+
+/**
  * A marker on the road at a distance.
  *
  * ⚠️ Clamped to the corridor rather than extrapolated. A bot or ghost far enough
@@ -1155,24 +1419,42 @@ function markerAt(
   corridor: RoadCorridor,
   atDistance: number,
   kind: RiderMarker['kind'],
-  lateral: number,
+  across: Across,
   roll: RiderRoll,
   motion: Pick<RiderMarker, 'pedalling' | 'rideSeconds'>,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
-  // ⚠️ The heading is the road's at **this** marker's own distance, not the
+  // ⚠️ The road's heading at **this** marker's own distance, not the
   // camera's — #349. @see RiderMarker.headingX
-  const heading = headingAt(corridor, at.index);
+  const road = headingAt(corridor, at.index);
+  const lateral = across.metres;
+  // ⚠️ #1995: the marker FACES the way its bicycle points, from where its
+  // rear wheel is drawn to where its front wheel is, half a bicycle behind and
+  // ahead on the road, each across the road by the line's chord rate
+  // (`racing-line.ts` §`lineSlopeAt`) — not the road's heading, which slid a
+  // rider crossing the road sideways. Both wheels are placed as this marker
+  // is, so the facing moves continuously with the drawn position: no step
+  // where the line reaches the road's edge, and none at a corridor point.
+  // ⚠️ But turned at most FACING_TURN_LIMIT_RADIANS off the road, by a smooth
+  // saturation: where a hairpin's line swings across the road within a few
+  // metres that direction is 40°+ off the road, and was drawn side-on to it
+  // (#1995's review on the owner's course). A pure function of distance, so
+  // frame-rate independent, and every rider's marker is placed here, bots
+  // included.
+  const turn = facingTurn(wheelToWheel(corridor, atDistance, across, road));
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
   // #499: across the road along its own normal, `(−headingZ, headingX)` —
   // the rider's right, on the screen and since #583 on the map (it was called
   // the left until then) — and at the road's
   // height, which is flat across its width (`ribbonNormals` says why).
   return {
     kind,
-    x: at.x - heading.headingZ * lateral,
+    x: at.x - road.headingZ * lateral,
     y: at.y,
-    z: at.z + heading.headingX * lateral,
-    ...heading,
+    z: at.z + road.headingX * lateral,
+    headingX: road.headingX * cos - road.headingZ * sin,
+    headingZ: road.headingZ * cos + road.headingX * sin,
     lean: roll.bicycle,
     bodyLean: roll.body,
     pedalling: motion.pedalling,

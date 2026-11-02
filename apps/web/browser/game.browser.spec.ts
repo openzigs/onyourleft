@@ -51,6 +51,7 @@ import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
 import { GROUND_BLOB_DARKNESS, GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
+import { NEAR_TREE_FADE_METRES } from '../src/game/near-tree-fade';
 import { REALISTIC_VALLEY_HAZE } from '../src/game/realistic-light';
 import {
   PRESENCE_CHECK_MILLISECONDS,
@@ -5711,7 +5712,59 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
       measured.nearestVisibleTrianglesControl,
     );
   });
+
+  test('fades a tree out as it nears the camera, with no step a pop — #545', async ({
+    harnessRun,
+  }) => {
+    const { nearFade } = await trees(harnessRun);
+    const { distances, colour, colourCut, colourOff } = nearFade;
+    const largestStep = (amounts: readonly number[]): number =>
+      Math.max(...amounts.slice(1).map((amount, step) => Math.abs(amount - (amounts[step] ?? 0))));
+    const gone = distances
+      .map((distance, step) => ({ distance, step }))
+      .filter(({ distance }) => distance < NEAR_TREE_FADE_METRES.gone - 1e-6);
+    const fading = colour.filter(
+      (amount, step) => step > 0 && amount < (colour[step - 1] ?? 0) && amount > 0,
+    ).length;
+    console.log(
+      `#545: a tree from ${String(distances[0]?.toFixed(1))} m to ` +
+        `${String(distances.at(-1)?.toFixed(1))} m from the eye moves ${JSON.stringify(colour)} faded, ` +
+        `${JSON.stringify(colourCut)} dropped whole at the middle, ${JSON.stringify(colourOff)} drawn whole; ` +
+        `largest one-step change ${String(largestStep(colour))} faded, ${String(largestStep(colourCut))} dropped`,
+    );
+    // Non-vacuity: every step was drawn, and the tree is in the picture —
+    // whole at the far end, and still there at the near end drawn whole.
+    expect(distances).toHaveLength(27);
+    expect(colour[0]).toBeGreaterThan(NEAR_FADE_TREE_COLOUR);
+    expect(colour[0]).toBe(colourOff[0]);
+    expect(Math.min(...colourOff)).toBeGreaterThan(NEAR_FADE_TREE_COLOUR);
+    // Past the fade's near edge the product draws none of it, where the
+    // control draws all of it.
+    expect(gone.length).toBeGreaterThan(0);
+    for (const { step } of gone) expect(colour[step], `step ${String(step)}`).toBe(0);
+    // The control pops — the whole tree in one step — and the product's
+    // largest step is a small share of that, the fade spread over many steps.
+    expect(largestStep(colourCut)).toBeGreaterThan(NEAR_FADE_TREE_COLOUR);
+    expect(largestStep(colour)).toBeLessThanOrEqual(
+      NEAR_FADE_LARGEST_STEP_SHARE * largestStep(colourCut),
+    );
+    expect(fading).toBeGreaterThanOrEqual(10);
+  });
 });
+
+/**
+ * The least colour #545's tree moves at the frame's far end, of 320 × 180,
+ * for the probe to have measured a tree at all.
+ */
+const NEAR_FADE_TREE_COLOUR = 50_000;
+
+/**
+ * The most #545's faded tree may change in one tenth of a metre, as a share
+ * of what the control dropping it whole changes in one: a quarter. The fade
+ * is 1.5 m over fifteen steps, so each step takes about a fifteenth of the
+ * tree away; the tree also grows as it nears, which the share allows for.
+ */
+const NEAR_FADE_LARGEST_STEP_SHARE = 0.25;
 
 /**
  * How many of the wooded frame's pixels may differ between the product's trees

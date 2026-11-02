@@ -15,6 +15,7 @@ import {
   BUILDING_TYPES,
   NO_BUILDING_FIELDS,
   type BuildingFeature,
+  type BuildingFields,
   type BuildingType,
 } from '@onyourleft/map-features';
 
@@ -509,5 +510,122 @@ describe('#1791: untyped changes nothing, and the lever puts the type out', () =
     expect(planFingerprint(off)).toBe(planFingerprint(untyped));
     // Not vacuous: with the types, the street plans otherwise.
     expect(planFingerprint(plannedStreet())).not.toBe(planFingerprint(untyped));
+  });
+});
+
+/**
+ * The typed street with #1790's tags (and a mapped height) added to the rows
+ * named — each footprint of a row carries them, both sides.
+ */
+function taggedStreet(
+  tags: Readonly<Record<string, Partial<BuildingFields> & { readonly heightMetres?: number }>>,
+): WorldCorridor {
+  const { corridor, rows } = typedStreetFixture();
+  return {
+    ...corridor,
+    buildings: corridor.buildings.map((building, index): BuildingFeature => ({
+      ...building,
+      ...tags[rows[index] ?? ''],
+    })),
+  };
+}
+
+/**
+ * Where #1790 and #1791 meet: a mapped `roof:shape` and `building:levels` are
+ * the building's own, and win over what its type would choose by default — the
+ * type's roof, a barn's gambrel, a civic block's hip, a garage's or a shed's
+ * one storey. Everything else the type sets is kept: a barn's planks and its
+ * steep pitch, a garage's blind walls and its garage door.
+ */
+describe('#1790 with #1791: a mapped roof:shape or building:levels wins over the type’s default', () => {
+  it('draws a typed barn’s mapped gable or hip, not the type’s gambrel, and keeps its planks and pitch', () => {
+    for (const [shape, roof] of [
+      ['gabled', 'gable'],
+      ['hipped', 'hip'],
+    ] as const) {
+      const plans = plannedStreet({}, taggedStreet({ barn: { roofShape: shape } }));
+      for (const barn of rowOf(plans, 'barn')) {
+        expect(barn.roofVariant, shape).toBe('plain');
+        expect(barn.roof, shape).toBe(roof);
+        expect(barn.surfaces.wall).toBe('planks');
+        expect([40, 45]).toContain(barn.pitchDegrees);
+      }
+    }
+    // A mapped flat roof too, over the planks.
+    for (const barn of rowOf(
+      plannedStreet({}, taggedStreet({ barn: { roofShape: 'flat' } })),
+      'barn',
+    )) {
+      expect(barn.roof).toBe('flat');
+      expect(barn.surfaces.wall).toBe('planks');
+    }
+  });
+
+  it('keeps the barn’s gambrel when #1790’s lever is off, and drops its planks when #1791’s is', () => {
+    const tagged = taggedStreet({ barn: { roofShape: 'gabled' } });
+    for (const barn of rowOf(plannedStreet({ mappedRoofShape: false }, tagged), 'barn')) {
+      expect(barn.roofVariant).toBe('gambrel');
+    }
+    for (const barn of rowOf(plannedStreet({ buildingTypes: false }, tagged), 'barn')) {
+      expect(barn.roofVariant).toBe('plain');
+      expect(barn.roof).toBe('gable');
+      expect(barn.surfaces.wall).not.toBe('planks');
+    }
+  });
+
+  it('draws a church’s mapped gable, not a civic block’s low hip', () => {
+    const plans = plannedStreet({}, taggedStreet({ church: { roofShape: 'gabled' } }));
+    for (const church of rowOf(plans, 'church')) {
+      expect(church.roof).toBe('gable');
+      // Still a civic block: its plain door, no wreath, no house feature.
+      expect(doorFaces(church)).toBe(0);
+      expect(church.archetype).toBe('unknown');
+    }
+  });
+
+  it('draws a garage’s mapped hip, not the outbuilding’s gable', () => {
+    const plans = plannedStreet({}, taggedStreet({ garage: { roofShape: 'hipped' } }));
+    for (const garage of rowOf(plans, 'garage')) expect(garage.roof).toBe('hip');
+  });
+
+  it('gives a typed garage and shed their mapped levels, not the type’s one storey, and keeps them blind', () => {
+    const plans = plannedStreet({}, taggedStreet({ garage: { levels: 2 }, shed: { levels: 2 } }));
+    for (const row of ['garage', 'shed']) {
+      for (const plan of rowOf(plans, row)) {
+        expect(plan.storeys, row).toBe(2);
+        expect(windowFaces(plan), row).toBe(0);
+      }
+    }
+    for (const garage of rowOf(plans, 'garage')) {
+      expect(verticesOf(garage, 'door').some((vertex) => vertex.top === FACADE_GARAGE)).toBe(true);
+    }
+    // With #1790's lever off, the type's one storey again.
+    for (const row of ['garage', 'shed']) {
+      const off = plannedStreet(
+        { mappedRoofShape: false },
+        taggedStreet({ garage: { levels: 2 }, shed: { levels: 2 } }),
+      );
+      for (const plan of rowOf(off, row)) expect(plan.storeys, row).toBe(1);
+    }
+  });
+
+  it('resolves a `residential` footprint from its mapped levels, not its height: two levels are apartments', () => {
+    // 3.5 m is one storey by its height, which no apartment block is; two mapped levels make it one.
+    const low = { heightMetres: 3.5 };
+    for (const block of rowOf(
+      plannedStreet({}, taggedStreet({ 'residential-block': { ...low, levels: 2 } })),
+      'residential-block',
+    )) {
+      expect(block.storeys).toBe(2);
+      expect(block.buildingArchetype).toBe('garden-apartment');
+    }
+    // Control: the same height with no levels is a house.
+    for (const block of rowOf(
+      plannedStreet({}, taggedStreet({ 'residential-block': low })),
+      'residential-block',
+    )) {
+      expect(block.storeys).toBe(1);
+      expect(block.buildingArchetype).toBe('unknown');
+    }
   });
 });

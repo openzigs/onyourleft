@@ -57,6 +57,7 @@
  * | {@link SETTLEMENT_TREE_LINE_FRACTION}, {@link SETTLEMENT_GRADE_PERCENT} | **This repository's own.** People build on the valley floor and not on the pitch |
  * | {@link SCATTER_VERGE_METRES}, {@link SCATTER_BAND_METRES} | **This repository's own**, and the verge is a requirement rather than a taste — see the criterion it discharges on {@link SCATTER_VERGE_METRES} |
  * | {@link BEND_INNER_SHARE} | **Derived, not chosen.** Its two bounds come from the geometry of placing by a local normal and from {@link MINIMUM_SCATTER_SEPARATION_METRES}; the measurement that shows why it is needed is on the constant |
+ * | {@link SIGHTLINE_BEND_RADIUS_METRES}, {@link SIGHTLINE_CLEARING_METRES} | **The owner's ruling of 2026-11-02 on #545**, not a measurement: the inside of a tight bend is cleared like a real road's sightline |
  * | {@link AMBIGUOUS_TURN_RADIUS_METRES}, {@link AMBIGUOUS_CHORD_SHARE} | **Derived, not chosen.** The radius at which a {@link CURVATURE_WINDOW_METRES} chord subtends more than π is `30 / π`; the first is a margin below it and the second is `\|sin θ\| / θ` at that radius, computed rather than written down |
  * | {@link SCATTER_CELL_METRES}, {@link CELL_FILL}, {@link CLUSTER_SPAN_METRES}, {@link OPEN_GROUND_SHARE}, {@link PLANTED_GROUND_SHARE} | **This repository's own**, and judged by eye on the device rather than measured — #348, whose whole content is that the numbers said the scenery was fine and it looked like a village. ⚠️ Since **#351** they also carry a *proxy* measurement, because #348 overshot far enough to empty the world and nothing here could see it: how many items stand in the nearest 60 m of road, and how often that is none. A proxy is not the device, and #351's own criterion is still by eye |
  * | The weights and densities | **This repository's own**, chosen so that each of the three named places — valley floor, above the trees, a steep pitch — reads as a different place, which is what `scatter.test.ts` asserts |
@@ -102,6 +103,7 @@ import { inWater, waterways } from './waterways';
 import {
   ROAD_WIDTH_METRES,
   drawnRoadFrame,
+  drawnRoadPosition,
   localGroundPosition,
   type CorridorOrigin,
 } from './terrain';
@@ -544,6 +546,48 @@ export const BAND_FILL = 0.55;
  * geometry that guards the carriageway down to one number.
  */
 export const BEND_INNER_SHARE = 0.6;
+
+/**
+ * The radius under which the inside of a bend is a cleared sightline: **30 m**.
+ *
+ * The owner's ruling of 2026-11-02 on #545 (option B): no scatter within
+ * {@link SIGHTLINE_CLEARING_METRES} of the road's edge on the inside of a bend
+ * whose radius is under this, like the cleared sightline of a real road. It
+ * became necessary because #2011 turns the chase camera to look round a bend,
+ * and on the owner's course that brought a tree 3.6 m beyond the edge of a
+ * 17 m bend into the near-left view, 6.1–9.6 m from the eye — beyond the reach
+ * of the near-camera fade (`near-tree-fade.ts`), which stays as the safety net.
+ *
+ * ⚠️ **The DRAWN road's radius at the item, not {@link curvatureAt}'s.** That
+ * one is read over {@link CURVATURE_WINDOW_METRES} either side of a cell, so a
+ * bend shorter than the window reads as gentler than it is: measured over 90°
+ * and 180° bends of 14–29 m on 12 seeds, a rule read off it left a third or
+ * more of the clearing planted on every 25 m and 29 m bend, and all of it on a
+ * 90° bend of 29 m. {@link inTheSightline} reads the drawn road over
+ * {@link SIGHTLINE_WINDOW_METRES} about the item's own route distance instead.
+ * A straight road and the outside of every bend are untouched, item for item:
+ * `scatter.test.ts` holds both to digests taken before this rule existed.
+ */
+export const SIGHTLINE_BEND_RADIUS_METRES = 30;
+
+/**
+ * How far from the road's edge the inside of a tight bend is cleared: **8 m**,
+ * the owner's ruling of 2026-11-02 on #545. @see SIGHTLINE_BEND_RADIUS_METRES
+ *
+ * Measured from the carriageway's edge to the item's own lateral offset from
+ * the drawn road, so with {@link SCATTER_VERGE_METRES} it clears the whole of
+ * the nearest band and four fifths of the second.
+ */
+export const SIGHTLINE_CLEARING_METRES = 8;
+
+/**
+ * How far apart the drawn road is read for {@link SIGHTLINE_BEND_RADIUS_METRES}:
+ * **10 m**, the drawn road's own smoothing (`terrain.ts`
+ * §`BEND_SMOOTHING_METRES`). On a circle of radius `R` two consecutive 10 m
+ * chords turn through exactly `10 / R`, however the averaging has shrunk the
+ * drawn circle, so the radius read inside a bend is the route's own.
+ */
+export const SIGHTLINE_WINDOW_METRES = 10;
 
 /**
  * How long a stretch of road shares one clustering, in metres: **150**.
@@ -1078,6 +1122,27 @@ function fillCell(
         continue;
       }
 
+      // ⚠️ **The inside of a tight bend is a cleared sightline — #545**, the
+      // owner's ruling of 2026-11-02. @see SIGHTLINE_BEND_RADIUS_METRES. Every
+      // kind is cleared, posts too: the ruling places "no roadside scatter".
+      // Dropped after every draw, like the water above, so nothing else moves.
+      if (
+        inTheSightline(
+          profile,
+          origin,
+          at,
+          {
+            x: frame.x,
+            z: frame.z,
+            outwardX: frame.normalX * side,
+            outwardZ: frame.normalZ * side,
+          },
+          lateral,
+        )
+      ) {
+        continue;
+      }
+
       const x = frame.x + frame.normalX * lateral * side;
       const z = frame.z + frame.normalZ * lateral * side;
       // ⚠️ **Off EVERY stretch of the drawn road, not only its own — #613.**
@@ -1391,6 +1456,79 @@ function bandsAt(curvature: number): number {
     0,
     Math.min(SCATTER_BANDS_PER_SIDE, Math.floor((reach - verge) / bandWidthMetres())),
   );
+}
+
+/**
+ * Whether an item `lateral` metres out from the drawn road at `at`, on the side
+ * `outward` points to, stands in the cleared sightline on the inside of a
+ * tight bend — #545. @see SIGHTLINE_BEND_RADIUS_METRES
+ *
+ * The drawn road is read at five points {@link SIGHTLINE_WINDOW_METRES} apart,
+ * centred on the item. The bend is tight if the turn between two consecutive
+ * chords exceeds `window / 30 m` at ANY of the three inner points, and the
+ * inside is the side the two outermost points lie on.
+ *
+ * ⚠️ **Three turns, not the one at the item, and that is what clears a bend's
+ * ends.** The drawn road is the route averaged over 10 m either side, so its
+ * turn ramps up over the first 10 m of a bend and down over the last: read at
+ * the item alone, measured over 90° and 180° bends of 25 m, items 5–7 m into
+ * either end stood on a stretch reading about 33 m and kept their place. The
+ * turn one window further on is the bend's own. A turn never reads tighter
+ * than the tightest stretch it spans, so a 40 m bend and a straight are
+ * untouched however they are read.
+ *
+ * A chord of no length — the clamped end of a point-to-point route — reads as
+ * no turn. ⚠️ **Strict at both bounds**: a radius of exactly 30 m and an item
+ * exactly 8 m from the edge are kept, the ruling's "under" and "within" read
+ * literally. ⚠️ **The lateral test first**, so a candidate past 8 m — most of
+ * them — costs one subtraction; one nearer costs four reads of the drawn road,
+ * which are table lookups (`terrain.ts` §`centrelineIntegral`). Nothing
+ * reaches the renderer.
+ */
+function inTheSightline(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  at: number,
+  here: {
+    readonly x: number;
+    readonly z: number;
+    readonly outwardX: number;
+    readonly outwardZ: number;
+  },
+  lateral: number,
+): boolean {
+  if (!(lateral - ROAD_WIDTH_METRES / 2 < SIGHTLINE_CLEARING_METRES)) {
+    return false;
+  }
+  const window = SIGHTLINE_WINDOW_METRES;
+  const farBehind = drawnRoadPosition(profile, origin, at - 2 * window);
+  const behind = drawnRoadPosition(profile, origin, at - window);
+  const ahead = drawnRoadPosition(profile, origin, at + window);
+  const farAhead = drawnRoadPosition(profile, origin, at + 2 * window);
+  const inX = (farBehind.x + farAhead.x) / 2 - here.x;
+  const inZ = (farBehind.z + farAhead.z) / 2 - here.z;
+  if (!(here.outwardX * inX + here.outwardZ * inZ > 0)) {
+    return false;
+  }
+  const tight = window / SIGHTLINE_BEND_RADIUS_METRES;
+  return (
+    turnAt(farBehind, behind, here) > tight ||
+    turnAt(behind, here, ahead) > tight ||
+    turnAt(here, ahead, farAhead) > tight
+  );
+}
+
+/** The angle between the chords `from → via` and `via → to`, in `[0, π]`. */
+function turnAt(
+  from: { readonly x: number; readonly z: number },
+  via: { readonly x: number; readonly z: number },
+  to: { readonly x: number; readonly z: number },
+): number {
+  const inX = via.x - from.x;
+  const inZ = via.z - from.z;
+  const outX = to.x - via.x;
+  const outZ = to.z - via.z;
+  return Math.atan2(Math.abs(inX * outZ - inZ * outX), inX * outX + inZ * outZ);
 }
 
 /**

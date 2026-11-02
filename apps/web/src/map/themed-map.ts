@@ -32,8 +32,9 @@ import type { MapRenderer, MapView, MapViewOptions } from './port';
  * Create a map in `doc`'s palette, and repaint it in the other one whenever
  * the page changes. `optionsFor` builds a palette's style — `MapPanel.tsx`
  * passes `basemap.ts` §`basemapStyle` with that palette's line colour.
- * `explorable` is fixed at creation (`port.ts` §`MapCreateOptions`): a change
- * of palette repaints the map and cannot make it movable or still.
+ * `explorable` and `editable` (#2006) are fixed at creation (`port.ts`
+ * §`MapCreateOptions`): a change of palette repaints the map and cannot make
+ * it movable or still, nor editable.
  */
 export function createThemedMap(
   renderer: MapRenderer,
@@ -41,14 +42,19 @@ export function createThemedMap(
   doc: Document,
   optionsFor: (theme: Theme) => MapViewOptions,
   explorable = false,
+  editable = false,
 ): MapView {
-  const view = renderer.create(container, { ...optionsFor(documentTheme(doc)), explorable });
+  const view = renderer.create(container, {
+    ...optionsFor(documentTheme(doc)),
+    explorable,
+    ...(editable ? { editable } : {}),
+  });
   const stopWatching = watchDocumentTheme(doc, (theme) => {
     view.setStyle(optionsFor(theme));
   });
   return {
-    setTrack: (track, bounds) => {
-      view.setTrack(track, bounds);
+    setTrack: (track, bounds, fitNow) => {
+      view.setTrack(track, bounds, fitNow);
     },
     setStyle: (options) => {
       view.setStyle(options);
@@ -61,6 +67,13 @@ export function createThemedMap(
     },
     fitTrack: () => {
       view.fitTrack();
+    },
+    setWaypoints: (waypoints) => {
+      view.setWaypoints(waypoints);
+    },
+    centre: () => view.centre(),
+    listen: (handlers) => {
+      view.listen(handlers);
     },
     destroy: () => {
       stopWatching();

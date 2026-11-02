@@ -143,7 +143,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pacer 50 m ahead stays put on a 20 % hill where a level
                         gaze put it behind the rider's back. Since #783
                         `projectToFrame` restates the renderer's camera
-                        without `three`, for the names below
+                        without `three`, for the names below. ⚠️ Since #1994
+                        it LOOKS AT THE ROAD through a bend (`scene.ts`
+                        §`cameraPose`: up to 25 m up the route, nearer where
+                        that would push the rider past 20° off the axis) from
+                        the eye it always had, so in a bend the pose's x/z are
+                        not the rider; `GameView` damps its heading
+                        (`dampedHeading`, frame-rate independent, slower under
+                        reduced motion); `chase-camera-bend.test.ts` rides it
     src/game/name-tags.ts
                         other riders' names on the road (#783): DOM laid over
                         the world, so no draw call and no triangle in either
@@ -289,7 +296,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         negative side" did, and a test that measured the old
                         drawing now rides the MIRRORED fixture
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
-                        its digests to the digit
+                        its digests to the digit. ⚠️ **Since #1995 a rider
+                        FACES the line, not the road**: `RiderMarker.headingX`
+                        points from the drawn rear wheel to the front wheel
+                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
+                        off the road (`facingTurn`), so a rider crossing it no
+                        longer slides sideways and never turns in a step. Measure across the road
+                        with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
                         from `world.ts`'s ONE sun, never a second light
@@ -583,7 +596,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         as well). ⚠️ Since #617's review only
                         trees the CAMERA can see are ranked
                         (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
-                        the camera used to take the one full slot — and
+                        the camera used to take the one full slot — and, since
+                        #545, not one faded to nothing within
+                        `NEAR_TREE_FADE_METRES` of the eye
+                        (`near-tree-fade.ts`), and
                         `TreeHandOver` paces each tree's move between levels
                         inside the same slots, because a swap of ranks is
                         continuous and the ranked SET changing is not; the
@@ -1187,6 +1203,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         one door, no garage) — `unknown`, industry and towers
                         planned as before (`-commercial-archetypes`,
                         `town=commercial`);
+                        since #1790 a mapped `roof:shape` drawn as tagged
+                        (`MAPPED_ROOFS`: flat, gable, hip, a variant or a
+                        skillion), on a rectangle or an L, T, U or Z and never
+                        on a terraced footprint; `roof:orientation` and
+                        `roof:direction` turning a rectangle's gable ridge
+                        (`roofTurnedOf`); `building:levels` the storey count,
+                        the eaves at the mapped height (`storeyMetresOf`);
+                        `roof:levels` ≥ 1 admitting dormers below their pitch;
+                        untagged footprints planned as before
+                        (`-mapped-roof-shape`, `town=roofs`);
                         since #1791 a mapped `building_type` or `landmark`
                         (`building-types.ts`) over the land-use guess: a
                         house or bungalow by #1782's rule (a bungalow the
@@ -1196,7 +1222,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         barn planks under a gambrel, a shop or warehouse as
                         commercial or industrial, and a church, school or
                         any landmark a plain civic block whose plain painted
-                        door takes no wreath; untyped planned as before
+                        door takes no wreath; where a typed footprint also
+                        carries #1790's tags, its `roof:shape` and
+                        `building:levels` win over the type's default roof
+                        and storey (the type keeps its walls, pitch, doors);
+                        untyped planned as before
                         (`-building-type`, `town=typed`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and

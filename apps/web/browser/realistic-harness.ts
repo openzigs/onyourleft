@@ -64,6 +64,7 @@ import {
   countrysideFixture,
   houseStreetFixture,
   commercialStreetFixture,
+  mappedRoofStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
@@ -88,6 +89,7 @@ import {
   facadeTrimsOf,
   facadeWreathOf,
   firDepthPrepassOf,
+  nearTreeFadeOf,
   foliageOrderedOf,
   groundBlendOf,
   lapRaceDrawnOf,
@@ -116,6 +118,7 @@ import {
   rungWithLevers,
   seasonWithLevers,
   firPrepassWithLevers,
+  nearTreeFadeWithLevers,
   surfacesWithLevers,
   treesWithLevers,
   windowRevealsWithLevers,
@@ -482,7 +485,9 @@ async function run(): Promise<void> {
                     ? commercialStreetFixture(latitude)
                     : config.town === 'typed'
                       ? typedStreetFixture(latitude)
-                      : undefined;
+                      : config.town === 'roofs'
+                        ? mappedRoofStreetFixture(latitude)
+                        : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -538,6 +543,11 @@ async function run(): Promise<void> {
   // rung change.
   const firPrepass = firPrepassWithLevers(config.leversOff);
   firDepthPrepassOf(view, firPrepass);
+  // #545's before/after pair for the trees' fade near the camera, on one
+  // build. The vegetation is the realistic belts', so it is applied again
+  // after a rung change too.
+  const nearTreeFade = nearTreeFadeWithLevers(config.leversOff);
+  nearTreeFadeOf(view, nearTreeFade);
   // #1523's cost pairs: the ground without #627's blend, the road without
   // #628's wear — the code out of the program, not a uniform at zero. A
   // setting of the view's, so it survives a rung change; and set BEFORE the
@@ -641,6 +651,7 @@ async function run(): Promise<void> {
         view.setQuality(drawnRung(next));
         foliageOrderedOf(view, foliageOrdered);
         firDepthPrepassOf(view, firPrepass);
+        nearTreeFadeOf(view, nearTreeFade);
         groundBlendOf(view, 1, 1, 1, crag);
       }
       state = next;

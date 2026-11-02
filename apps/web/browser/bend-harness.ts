@@ -44,7 +44,11 @@
  */
 
 import type { SceneFrame } from '../src/game/port';
-import { CAMERA_ABOVE_METRES, verticalHalfTangent } from '../src/game/camera';
+import {
+  CAMERA_ABOVE_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
+  verticalHalfTangent,
+} from '../src/game/camera';
 import { qualitySettings } from '../src/game/quality';
 import { PLANNER_BENDS, plannerRoute } from '../src/game/route-fixtures-testing';
 import { sceneFrame } from '../src/game/scene';
@@ -133,6 +137,7 @@ function overTheBend(unsmoothed: boolean): SceneFrame {
       headingZ: 0,
       eyeRoadY: ALTITUDE_METRES - CAMERA_ABOVE_METRES,
       targetRoadY: 0,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
     },
   };
 }
