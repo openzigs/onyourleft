@@ -170,6 +170,7 @@ const POSE: CameraPose = {
   headingZ: 1,
   eyeRoadY: 0,
   targetRoadY: 0,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
 };
 
 function item(overrides: Partial<ScatterItem> = {}): ScatterItem {

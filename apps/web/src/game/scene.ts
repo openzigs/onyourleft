@@ -622,33 +622,99 @@ function mappedInView(
 }
 
 /**
- * Where the chase camera looks from.
+ * The nearest the camera's target is ever put, in metres: **10** — #1994.
+ * @see cameraPose
+ *
+ * Both the nearest point up the ROUTE a tight bend draws the target in to,
+ * and, past the end of a point-to-point route — where the corridor clamps on
+ * its final point and there is no road to look at — the nearest it is put to
+ * the point the camera stands behind, along the same line. Nearer, the camera
+ * would tip down at its own rider's front wheel; at 10 m it is pitched 7.9°
+ * down, against 3.9° on the flat.
+ */
+const CAMERA_TARGET_NEAREST_METRES = 10;
+
+/**
+ * The farthest off the middle of the frame, seen from the eye, a bend may put
+ * the rider: **20°** — #1994. @see cameraPose
+ *
+ * Inside the 24.7° half-width an upright phone sees (`camera.ts`
+ * §`verticalHalfTangent`), so the rider stays in every frame a device draws;
+ * a leaning rider leans INTO the bend, toward the middle.
+ */
+const RIDER_OFF_AXIS_RADIANS = (20 * Math.PI) / 180;
+
+/**
+ * Where the chase camera looks from, and what it looks at.
  *
  * `lateralMetres` is how far across the road the rider is drawn, positive on
  * the road's own normal side (#499); the camera is moved across with them.
  *
- * The heading is taken from the corridor's own centreline rather than from a
- * stored bearing, so the camera and the road cannot disagree: if the corridor
- * turns, the camera turns with it by construction. A separately-computed bearing
- * is the kind of second source of truth that drifts by a frame and reads as the
- * camera lagging the corner.
+ * Everything is read off the corridor's own centreline rather than a stored
+ * bearing, so the camera and the road cannot disagree. A separately-computed
+ * bearing is the kind of second source of truth that drifts by a frame and
+ * reads as the camera lagging the corner.
+ *
+ * ⚠️ **The camera LOOKS AT THE ROAD ahead — #1994.** Until then the target was
+ * {@link CAMERA_TARGET_AHEAD_METRES} straight on along the tangent of the
+ * corridor piece under the rider, which in a tight bend is a field or a
+ * junction. Now:
+ *
+ * - the **eye** is where it always was, {@link CAMERA_BEHIND_METRES} straight
+ *   back from the rider along the road's tangent there;
+ * - the **target** is ON the road, on the rider's line (moved across by the
+ *   same `lateralMetres` along that point's own normal), the farthest up the
+ *   ROUTE — up to {@link CAMERA_TARGET_AHEAD_METRES}, and no nearer than
+ *   {@link CAMERA_TARGET_NEAREST_METRES} — that keeps the rider within
+ *   {@link RIDER_OFF_AXIS_RADIANS} of the middle of the frame. On a straight,
+ *   and through any bend gentler than about 30 m of radius, that is the full
+ *   25 m; through a 20 m one it is about 18 m, through a 10 m hairpin 10 m;
+ * - the **heading** is from the eye to the target, and the pose's `x`/`z` are
+ *   the point on that line {@link CAMERA_BEHIND_METRES} past the eye — so
+ *   `camera.ts` §`cameraRig`, and every cull in `three-renderer.ts` that puts
+ *   the eye behind `x`/`z` along the heading, see the camera that is drawn. On
+ *   a straight that point is the rider and nothing changes.
+ *
+ * ⚠️ **Why the eye does not swing round with the view.** An eye swung round
+ * behind the rider on the line to the target keeps the rider in the middle of
+ * the frame, and stands up to 5 m from the centreline in a 20 m hairpin, over
+ * the pavement: `near-field-street.test.ts` (#545) measured its near plane
+ * cutting mapped walls and people at every aspect up to a 21 : 9 phone. Kept
+ * where it was, the eye is where #545 holds it, and the rider is drawn a little
+ * toward the OUTSIDE of a bend instead; and kept where it was with the target
+ * 25 m on regardless, a 10 m hairpin put the rider out of the frame altogether,
+ * which is what the shortened look-ahead is for.
+ *
+ * Where even {@link CAMERA_TARGET_NEAREST_METRES} up the road is further off
+ * the axis than that — a hairpin tighter than about 10 m, a turnaround where
+ * the road comes back past the rider — the target is that nearest point, and
+ * the damping turns the camera round with the road.
+ *
+ * Undamped: this is a function of one frame, and `GameView` damps the heading
+ * across frames (`camera.ts` §`dampedHeading`, §`turnedPose`).
  */
 export function cameraPose(
   corridor: RoadCorridor,
   atDistance: number,
   lateralMetres: number,
 ): CameraPose {
-  const here = placeOnCorridor(corridor, atDistance);
-  const heading = headingAt(corridor, here.index);
+  const rider = chaseRider(corridor, atDistance, lateralMetres);
+  const { tangent } = rider;
+  const eyeX = rider.x - tangent.headingX * CAMERA_BEHIND_METRES;
+  const eyeZ = rider.z - tangent.headingZ * CAMERA_BEHIND_METRES;
+  const target = roadTarget(corridor, atDistance, lateralMetres, tangent, eyeX, eyeZ);
+  const dx = target.x - eyeX;
+  const dz = target.z - eyeZ;
+  const range = Math.hypot(dx, dz);
+  const look = range > 1e-6 ? { headingX: dx / range, headingZ: dz / range } : tangent;
   return {
-    // #499: moved across the road by as much as the rider is, along the road's
-    // own normal, and NOT turned: the camera still looks down the road, and it
-    // does not roll with the lean (out of scope, and a rolling horizon on a
-    // phone is the fastest way to make somebody feel ill).
-    x: here.x - heading.headingZ * lateralMetres,
-    y: here.y,
-    z: here.z + heading.headingX * lateralMetres,
-    ...heading,
+    x: eyeX + look.headingX * CAMERA_BEHIND_METRES,
+    y: rider.y,
+    z: eyeZ + look.headingZ * CAMERA_BEHIND_METRES,
+    ...look,
+    targetAheadMetres: target.pastTheEnd
+      ? Math.max(range - CAMERA_BEHIND_METRES, CAMERA_TARGET_NEAREST_METRES)
+      : Math.max(range - CAMERA_BEHIND_METRES, 1),
     // #424 — the two heights the camera pitches by, read off the SAME corridor
     // the road is drawn from, so the gaze and the tarmac cannot disagree.
     // `camera.ts` §`cameraRig` says why these are the road's real heights and
@@ -660,8 +726,116 @@ export function cameraPose(
     // except the first 4.5 m and the last 25 m of a point-to-point route —
     // where they settle on the first or last point and the gaze goes level.
     eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
-    targetRoadY: placeOnCorridor(corridor, atDistance + CAMERA_TARGET_AHEAD_METRES).y,
+    targetRoadY: target.y,
   };
+}
+
+/**
+ * Where the chase camera's rider is, and which way the road runs there — #1994.
+ *
+ * The corridor at `atDistance`, moved across by `lateralMetres` along the
+ * road's own normal (#499), NOT rolled with the lean (out of scope, and a
+ * rolling horizon on a phone is the fastest way to make somebody feel ill).
+ * {@link cameraPose} stands its eye behind it along `tangent`; the demo's
+ * tour (`demo/camera-tour.ts`) points its other shots at it, because since
+ * #1994 the pose's own `x`/`z` are the rider only on a straight.
+ */
+export function chaseRider(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+): {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly tangent: { readonly headingX: number; readonly headingZ: number };
+} {
+  const here = placeOnCorridor(corridor, atDistance);
+  const tangent = headingAt(corridor, here.index);
+  return {
+    x: here.x - tangent.headingZ * lateralMetres,
+    y: here.y,
+    z: here.z + tangent.headingX * lateralMetres,
+    tangent,
+  };
+}
+
+interface RoadTarget {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Whether this is the end of a point-to-point route, clamped onto, rather than road. */
+  readonly pastTheEnd: boolean;
+}
+
+/**
+ * The point on the road the camera looks at — #1994. @see cameraPose
+ *
+ * The farthest point from {@link CAMERA_TARGET_NEAREST_METRES} to
+ * {@link CAMERA_TARGET_AHEAD_METRES} up the route that keeps the rider within
+ * {@link RIDER_OFF_AXIS_RADIANS} of the axis: down from the full look-ahead a
+ * metre at a time to the first that does, then halved six times between it
+ * and the metre beyond, so the target slides along the road by centimetres
+ * from one frame to the next rather than stepping a metre. Where none does,
+ * the nearest.
+ */
+function roadTarget(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+  tangent: { readonly headingX: number; readonly headingZ: number },
+  eyeX: number,
+  eyeZ: number,
+): RoadTarget {
+  const at = (reach: number): RoadTarget => {
+    const placed = placeOnCorridor(corridor, atDistance + reach);
+    // Past a point-to-point route's end the corridor's points all clamp onto
+    // its last one, so the piece the target is on has no length and no
+    // direction: the rider's own stands in for it.
+    const from = corridor.centre[placed.index] as CorridorPoint;
+    const to = corridor.centre[placed.index + 1];
+    const pastTheEnd = to === undefined || Math.hypot(to.x - from.x, to.z - from.z) < 1e-6;
+    const across = pastTheEnd ? tangent : headingAt(corridor, placed.index);
+    return {
+      x: placed.x - across.headingZ * lateralMetres,
+      y: placed.y,
+      z: placed.z + across.headingX * lateralMetres,
+      pastTheEnd,
+    };
+  };
+  // The eye looks at the rider along the tangent, so the rider is within the
+  // bound of an axis through `point` when the angle between them is.
+  const keepsRider = (point: { readonly x: number; readonly z: number }): boolean => {
+    const dx = point.x - eyeX;
+    const dz = point.z - eyeZ;
+    const along = dx * tangent.headingX + dz * tangent.headingZ;
+    const across = dx * tangent.headingZ - dz * tangent.headingX;
+    return Math.abs(Math.atan2(across, along)) <= RIDER_OFF_AXIS_RADIANS;
+  };
+  let reach = CAMERA_TARGET_AHEAD_METRES;
+  let point = at(reach);
+  if (keepsRider(point)) return point;
+  while (reach > CAMERA_TARGET_NEAREST_METRES) {
+    const beyond = reach;
+    reach = Math.max(CAMERA_TARGET_NEAREST_METRES, reach - 1);
+    point = at(reach);
+    if (keepsRider(point)) {
+      let near = reach;
+      let far = beyond;
+      for (let halving = 0; halving < 6; halving += 1) {
+        const middle = (near + far) / 2;
+        const tried = at(middle);
+        if (keepsRider(tried)) {
+          near = middle;
+          point = tried;
+        } else {
+          far = middle;
+        }
+      }
+      return point;
+    }
+  }
+  return point;
 }
 
 /**

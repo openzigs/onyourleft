@@ -947,20 +947,46 @@ describe('a rider faces the way the line takes them, not the way the road runs �
 });
 
 describe('the camera follows the rider across the road — #499', () => {
-  it('stands where the rider is, sideways as well as along', () => {
+  // ⚠️ **The EYE, since #1994.** Until then these held the pose's `x`/`z` to
+  // the rider; the camera now looks at the road through a bend, and its pose
+  // is the point on that sight line `CAMERA_BEHIND_METRES` past the eye
+  // (`scene.ts` §`cameraPose`), which is the rider only on a straight. What
+  // #499 asked — the camera moved across the road with the rider — is where
+  // the eye stands: straight back from the rider along the ROAD there.
+  // ⚠️ The road's heading, not the rider's: since #1995 a marker faces its
+  // wheel-to-wheel line, up to 12° off the road, and the eye never followed
+  // that. Read where the rider is DRAWN, which since #1998 can be behind the
+  // odometer in a bend.
+  it('stands its eye behind the rider, sideways as well as along', () => {
     for (const at of [300, 390, APEX, 470]) {
-      const frame = frameOf(hairpin, stateAt(hairpin, at, 8));
+      const input = {
+        profile: hairpin,
+        origin: corridorOrigin(hairpin),
+        state: stateAt(hairpin, at, 8),
+      };
+      const frame = sceneFrame(input);
       const rider = markerOf(frame, 'rider');
-      expect(frame.camera.x).toBeCloseTo(rider.x, 9);
-      expect(frame.camera.z).toBeCloseTo(rider.z, 9);
+      const road = roadHeadingAt(frame, drawnRiderDistance(input));
+      const eye = cameraRig(frame.camera).eye;
+      expect(eye.x).toBeCloseTo(rider.x - road.headingX * CAMERA_BEHIND_METRES, 9);
+      expect(eye.z).toBeCloseTo(rider.z - road.headingZ * CAMERA_BEHIND_METRES, 9);
     }
   });
 
-  it('stays on the centreline with the line switched off', () => {
-    const frame = frameOf(hairpin, stateAt(hairpin, APEX, 8), { centreline: true });
-    const centre = centreAt(frame, APEX);
-    expect(frame.camera.x).toBeCloseTo(centre.x, 6);
-    expect(frame.camera.z).toBeCloseTo(centre.z, 6);
+  it('stands it behind the centreline with the line switched off', () => {
+    const input = {
+      profile: hairpin,
+      origin: corridorOrigin(hairpin),
+      state: stateAt(hairpin, APEX, 8),
+      centreline: true,
+    };
+    const frame = sceneFrame(input);
+    const drawn = drawnRiderDistance(input);
+    const centre = centreAt(frame, drawn);
+    const road = roadHeadingAt(frame, drawn);
+    const eye = cameraRig(frame.camera).eye;
+    expect(eye.x).toBeCloseTo(centre.x - road.headingX * CAMERA_BEHIND_METRES, 6);
+    expect(eye.z).toBeCloseTo(centre.z - road.headingZ * CAMERA_BEHIND_METRES, 6);
   });
 
   it('moves across smoothly: never more than 30 cm in a metre of road', () => {

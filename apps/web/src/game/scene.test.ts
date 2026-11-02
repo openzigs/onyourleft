@@ -817,19 +817,51 @@ describe('a marker that has a front — #349', () => {
     for (const marker of frame.markers) {
       expect(Math.hypot(marker.headingX, marker.headingZ)).toBeCloseTo(1, 9);
     }
-    // The rider faces the way the camera does: both are read at the rider's
-    // own distance. ⚠️ To within a degree, not exactly, since #1995: a marker
-    // points from its rear wheel to its front wheel, a bicycle's length of
-    // road, which near a corner spans more than the one segment the camera's
-    // heading is read from.
-    const off = Math.acos(
-      Math.min(
-        1,
-        (rider?.headingX ?? 0) * frame.camera.headingX +
-          (rider?.headingZ ?? 0) * frame.camera.headingZ,
-      ),
-    );
-    expect(off).toBeLessThan((1 * Math.PI) / 180);
+    // The rider faces the ROAD at its own distance: the tangent of the
+    // corridor segment it is on, read here from the frame's own corridor.
+    // ⚠️ To within a degree, not exactly, since #1995: a marker points from
+    // its rear wheel to its front wheel, a bicycle's length of road, which
+    // near a corner spans more than the one segment the road's heading is read
+    // from. Until #1994 this compared the rider with the camera, because the
+    // camera's heading WAS that tangent; it no longer is (below).
+    const angle = (
+      a: { headingX: number; headingZ: number } | undefined,
+      b: { headingX: number; headingZ: number },
+    ): number =>
+      Math.acos(Math.min(1, (a?.headingX ?? 0) * b.headingX + (a?.headingZ ?? 0) * b.headingZ));
+    const centre = frame.corridor.centre;
+    let nearest = 0;
+    for (let index = 1; index < centre.length; index += 1) {
+      const here = centre[index];
+      const best = centre[nearest];
+      if (
+        here !== undefined &&
+        best !== undefined &&
+        Math.hypot(here.x - (rider?.x ?? 0), here.z - (rider?.z ?? 0)) <
+          Math.hypot(best.x - (rider?.x ?? 0), best.z - (rider?.z ?? 0))
+      ) {
+        nearest = index;
+      }
+    }
+    const before = centre[nearest - 1];
+    const after = centre[nearest + 1];
+    expect(before).toBeDefined();
+    expect(after).toBeDefined();
+    const roadDx = (after?.x ?? 0) - (before?.x ?? 0);
+    const roadDz = (after?.z ?? 0) - (before?.z ?? 0);
+    const road = {
+      headingX: roadDx / Math.hypot(roadDx, roadDz),
+      headingZ: roadDz / Math.hypot(roadDx, roadDz),
+    };
+    expect(angle(rider, road)).toBeLessThan((1 * Math.PI) / 180);
+    // ⚠️ **The rider no longer faces the way the camera does — #1994.** Until
+    // then both were the road's tangent at the rider; the camera now looks at
+    // the road up the route, which here is round the corner, so it is turned
+    // from the rider's heading TOWARD the bot's side of the corner.
+    const cross = (a: { headingX: number; headingZ: number } | undefined, b: typeof a): number =>
+      (a?.headingX ?? 0) * (b?.headingZ ?? 0) - (a?.headingZ ?? 0) * (b?.headingX ?? 0);
+    expect(Math.abs(cross(rider, frame.camera))).toBeGreaterThan(0.1);
+    expect(Math.sign(cross(rider, frame.camera))).toBe(Math.sign(cross(rider, bot)));
     // The bot is round the corner and faces ninety degrees away.
     const between =
       (rider?.headingX ?? 0) * (bot?.headingX ?? 0) + (rider?.headingZ ?? 0) * (bot?.headingZ ?? 0);

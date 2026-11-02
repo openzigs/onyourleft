@@ -60,8 +60,9 @@
  *
  * ⚠️ **The controls.** At 8 : 1, the frame `near-field.test.ts`' control
  * rides, the near rectangle is 5.6 m across, and the same measure on the same
- * frames DOES meet a gantry's leg, a person, a lamp post, a decoration and a
- * mapped wall. The classes 8 : 1 does not reach are held by a probe for every
+ * frames DOES meet a gantry's leg, a person, a lamp post and a mapped wall (and
+ * a decoration until #1994 turned the camera to the road in a bend). The
+ * classes 8 : 1 does not reach are held by a probe for every
  * class: near pyramids stood where the product's own numbers put one thing of
  * that class — since #1835 at every corner the product gives it, so a box
  * built too SMALL misses one, not only a box built in the wrong place — must
@@ -1067,20 +1068,20 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
   );
 
   it(
-    'the control: at 8 : 1 the same measure meets a gantry’s leg, a person, a lamp post, a decoration and a mapped wall',
+    'the control: at 8 : 1 the same measure meets a gantry’s leg, a person, a lamp post and a mapped wall',
     () => {
       // What makes the green rides mean something: on the same frames, a near
       // rectangle 5.6 m across reaches what stands at the road's edge. A measure
       // that could not find one would pass every ride above over nothing. The
       // classes 8 : 1 does not reach are held by the probe test below.
+      //
+      // ⚠️ A decoration's post-lights were in this list until #1994, met on
+      // three frames, in bends, where the camera looked straight on past the
+      // road toward them. It looks at the road there now and meets them on
+      // none, so the probe holds that class as it holds the others 8 : 1 does
+      // not reach.
       const control = rideAll().met.get('the control frame') ?? new Map<string, number>();
-      for (const what of [
-        'gantry',
-        'person',
-        'lamp-post',
-        'winter-lights post-lights',
-        'mapped building',
-      ]) {
+      for (const what of ['gantry', 'person', 'lamp-post', 'mapped building']) {
         expect(control.get(what) ?? 0, what).toBeGreaterThan(0);
       }
     },
@@ -1134,10 +1135,12 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       // The control — the defect, as built: the same frames before the cull,
       // pinned exactly as #1834 measured them, so a cull that has nothing to
       // drop cannot pass over nothing, and a change to the camera, the line
-      // or the placement that brings more to the plane shows here.
+      // or the placement that brings more to the plane shows here. Re-pinned
+      // by #1994, whose camera looks at the road through a bend from the eye
+      // it always had: 23 people and 282 mapped buildings until then.
       expect(Object.fromEntries(met.get(WIDEST_LABEL) ?? [])).toEqual({
-        person: 23,
-        'mapped building': 282,
+        person: 22,
+        'mapped building': 289,
       });
     },
     ALL_RIDES_TIMEOUT,

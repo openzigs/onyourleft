@@ -426,8 +426,28 @@ export interface CameraRig {
  * disagree. At either end of a point-to-point route the corridor clamps, so the
  * two heights are the first or last point's and the gaze settles to level.
  *
- * The heading is horizontal and is the road's own (`scene.ts` §`headingAt`), as
- * it always was.
+ * ## In a bend — #1994
+ *
+ * The heading is horizontal, and since #1994 it is **not the road's tangent**:
+ * it points from the eye at the road {@link CAMERA_TARGET_AHEAD_METRES}
+ * further along the ROUTE (`scene.ts` §`cameraPose`), and the target is that
+ * point — `pose.targetAheadMetres` past `pose.x`/`pose.z` along the heading.
+ * Until then the target was 25 m straight on along the tangent of the corridor
+ * piece under the rider, which in a tight bend is a field or a junction, and
+ * it swung through the bend with 25 m of lever on it. On a straight the two
+ * are the same point, so nothing above changes there.
+ *
+ * ⚠️ **The eye is still {@link CAMERA_BEHIND_METRES} straight back along the
+ * tangent, and in a bend `pose.x`/`pose.z` is not the rider.** It is the point
+ * that far past the eye on the line to the target, so the rig — and
+ * `three-renderer.ts` §`treeCanBeSeen`, which puts the eye behind that point
+ * along the heading and sees nothing behind the eye's vertical plane — is the
+ * camera that is drawn. `scene.ts` §`cameraPose` says why the eye does not
+ * swing round with the view, and the price: the rider is drawn toward the
+ * outside of a bend rather than in the middle of the frame. {@link
+ * riderFrameBox} is on a straight, as it always said. `GameView` damps the
+ * heading ({@link dampedHeading}, {@link turnedPose}), and while it lags the
+ * target is that same distance out along the lagging heading.
  */
 export function cameraRig(pose: CameraPose): CameraRig {
   return {
@@ -437,11 +457,126 @@ export function cameraRig(pose: CameraPose): CameraRig {
       z: pose.z - pose.headingZ * CAMERA_BEHIND_METRES,
     },
     target: {
-      x: pose.x + pose.headingX * CAMERA_TARGET_AHEAD_METRES,
+      x: pose.x + pose.headingX * pose.targetAheadMetres,
       y: pose.targetRoadY,
-      z: pose.z + pose.headingZ * CAMERA_TARGET_AHEAD_METRES,
+      z: pose.z + pose.headingZ * pose.targetAheadMetres,
     },
   };
+}
+
+/**
+ * `pose` turned to `heading` about `pose.x`/`pose.z` — #1994: what `GameView`
+ * hands the renderer once {@link dampedHeading} has damped the heading. The
+ * eye and the target swing round that point together.
+ *
+ * ⚠️ **About that point, and not about the eye, on purpose.** It is the rider
+ * on a straight and within a metre and a half of them through a bend, so the
+ * rider stays in the frame while the heading lags. Turned about the eye
+ * instead, a U-turn across the road at 30 km/h — the far end of an
+ * out-and-back course — put the rider 0.58 of the frame's width off its
+ * middle, outside it (`chase-camera-bend.test.ts` §"at a turnaround"). The
+ * price is the eye's: while the heading lags it stands off the line
+ * `scene.ts` keeps it on, by `CAMERA_BEHIND_METRES` times the sine of the lag
+ * — a few degrees through a bend — and swings round the rider at a
+ * turnaround, as the old camera's did.
+ */
+export function turnedPose(pose: CameraPose, heading: GroundHeading): CameraPose {
+  return { ...pose, headingX: heading.headingX, headingZ: heading.headingZ };
+}
+
+/** A unit vector in the ground plane, as {@link CameraPose} carries its heading. */
+export interface GroundHeading {
+  readonly headingX: number;
+  readonly headingZ: number;
+}
+
+/**
+ * How quickly the camera's heading settles onto the road ahead: the time
+ * constant of {@link dampedHeading}'s exponential approach, **0.1 s** — #1994.
+ *
+ * Short on purpose. The heading it settles onto is already continuous
+ * (`scene.ts` §`cameraPose` aims at a point ON the road, which moves with the
+ * rider), so the damping is not what makes a bend smooth; it is what makes a
+ * corridor that jumps — a room's correction, a road that doubles back — a
+ * turn instead of a cut. Every tenth of a second here is a tenth of a second
+ * the target trails the road through a bend at the rate the road turns:
+ * `chase-camera-bend.test.ts` measured the trail at 1.6 m from the centreline
+ * through a 90° corner at 30 km/h, against 2.5 m at 0.15 s; 3.5 m is the
+ * road's edge.
+ */
+export const CAMERA_YAW_SETTLE_SECONDS = 0.1;
+
+/**
+ * The fastest the camera ever turns, in radians a second: **90°/s** — #1994.
+ *
+ * Above what a ridden bend asks of it — measured by `chase-camera-bend.test.ts`
+ * at 30 km/h, 47°/s through a 90° corner smoothed by `terrain.ts`
+ * §`BEND_SMOOTHING_METRES` and 48°/s round a 10 m hairpin — and below the
+ * snap a road that doubles back would otherwise be: half a turn in a frame or
+ * two.
+ */
+export const CAMERA_MAXIMUM_YAW_RATE = Math.PI / 2;
+
+/**
+ * The fastest the camera turns for a rider who asked for reduced motion:
+ * **60°/s**, two thirds of {@link CAMERA_MAXIMUM_YAW_RATE} — #1994, §4e.
+ *
+ * The camera cannot stand still on a moving rider, so reduced motion is not
+ * none here: it is the gentlest swing that still follows a ridden bend — the
+ * two above, at 30 km/h, never reach it — and a turnaround swings round at
+ * two thirds of the speed.
+ */
+export const REDUCED_MOTION_MAXIMUM_YAW_RATE = Math.PI / 3;
+
+/**
+ * The camera's heading after `seconds` more of following `wanted` from `held`
+ * — #1994's damping.
+ *
+ * It turns toward `wanted` the short way round at a rate proportional to how
+ * far off it is ({@link CAMERA_YAW_SETTLE_SECONDS}), and never faster than
+ * {@link CAMERA_MAXIMUM_YAW_RATE} — or {@link REDUCED_MOTION_MAXIMUM_YAW_RATE}
+ * when `reducedMotion`. The two meet where the exponential's own rate equals
+ * the cap, so the turn rate is continuous and the cap is the most it ever is.
+ *
+ * ⚠️ **Frame-rate independent, exactly, for a `wanted` that holds over the
+ * step**: the step is the closed-form solution of that rule over `seconds` —
+ * the capped stretch first, then the exponential — and not an Euler step. So
+ * two frames of 16 ms land where one of 32 ms does, and a phone throttled to
+ * 20 fps sees the same camera at the same instant as a desktop at 120.
+ *
+ * `held` undefined is the first frame of a ride, which takes `wanted` as it
+ * is: there is nothing to turn from.
+ */
+export function dampedHeading(
+  held: GroundHeading | undefined,
+  wanted: GroundHeading,
+  seconds: number,
+  reducedMotion: boolean,
+): GroundHeading {
+  if (held === undefined) return { headingX: wanted.headingX, headingZ: wanted.headingZ };
+  const from = Math.atan2(held.headingX, held.headingZ);
+  const to = Math.atan2(wanted.headingX, wanted.headingZ);
+  // The short way round, in (−π, π].
+  let error = to - from;
+  error -= 2 * Math.PI * Math.ceil((error - Math.PI) / (2 * Math.PI));
+  const cap = reducedMotion ? REDUCED_MOTION_MAXIMUM_YAW_RATE : CAMERA_MAXIMUM_YAW_RATE;
+  // Below this the exponential turns no faster than the cap.
+  const knee = cap * CAMERA_YAW_SETTLE_SECONDS;
+  let left = Math.abs(error);
+  let time = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  if (left > knee) {
+    const capped = (left - knee) / cap;
+    if (time <= capped) {
+      left -= cap * time;
+      time = 0;
+    } else {
+      left = knee;
+      time -= capped;
+    }
+  }
+  left *= Math.exp(-time / CAMERA_YAW_SETTLE_SECONDS);
+  const yaw = to - Math.sign(error) * left;
+  return { headingX: Math.sin(yaw), headingZ: Math.cos(yaw) };
 }
 
 /**
