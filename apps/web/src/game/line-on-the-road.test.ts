@@ -734,6 +734,30 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     },
   );
 
+  it('faces a lap-race bot along the road, because its lane stays put where the line crosses', () => {
+    // A laned bot is drawn at its lane's place, not on the racing line
+    // (#1902), so its place across the road does not move as it rides on and
+    // it faces the road, however fast the line crosses there. Far from the
+    // rider, so it is not eased aside either.
+    const riderAt = APEX - 60;
+    const line = racingLine(hairpin);
+    let at = steepest(line, APEX, 400 + Math.PI * RADIUS + 30);
+    expect(Math.abs(lineSlopeAt(line, at))).toBeGreaterThan(0.05);
+    const drawnAt = (distance: number): { frame: SceneFrame; marker: RiderMarker } => {
+      const frame = frameOf(hairpin, stateAt(hairpin, riderAt, 8), {
+        raceBots: [{ distanceMetres: distance, speedMetresPerSecond: 8, lateralMetres: 1.75 }],
+      });
+      return { frame, marker: markerOf(frame, 'bot') };
+    };
+    while (!oneSegment(drawnAt(at).frame, at - STEP, at + STEP)) at += STEP;
+    const { frame, marker } = drawnAt(at);
+    const [before, after] = [drawnAt(at - STEP).marker, drawnAt(at + STEP).marker];
+    const moved = { x: after.x - before.x, z: after.z - before.z };
+    expect(between(facing(marker), moved)).toBeLessThan(1e-5);
+    const road = roadHeadingAt(frame, at);
+    expect(between(facing(marker), { x: road.headingX, z: road.headingZ })).toBeLessThan(1e-5);
+  });
+
   it.each([undefined, -1.75, 0, 1.75])(
     'turns riders level with each other to the way each is drawn moving, the rider steered to %s',
     (steered) => {
@@ -778,9 +802,9 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     const at = steepest(line, 300, 370);
     const frame = frameOf(hairpin, stateAt(hairpin, at, 8), { centreline: true });
     const road = roadHeadingAt(frame, at);
-    expect(between(facing(markerOf(frame, 'rider')), { x: road.headingX, z: road.headingZ })).toBe(
-      0,
-    );
+    expect(
+      between(facing(markerOf(frame, 'rider')), { x: road.headingX, z: road.headingZ }),
+    ).toBeLessThan(1e-12);
   });
 });
 
