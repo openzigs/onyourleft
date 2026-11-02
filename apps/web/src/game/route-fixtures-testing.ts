@@ -170,7 +170,9 @@ export function flatFloorValleyRoute(): RouteProfile {
  * A steep valley through a stream at **1 000 m** — #1997. Read over the 100 m
  * a gradient is measured on, a 12 % descent into it and a 10 % climb out, as
  * the owner's course read on the HUD; the last 40 m either side of the floor
- * are **20 %**, which is where a road drops to a stream. 40 m of rise either
+ * are **20 %**, which is where a road drops to a stream. The 20 % is this
+ * fixture's assumption, not a measurement of the owner's course: that it is the
+ * owner's defect stays a hypothesis until their replay (#1997 AC4). 40 m of rise either
  * side, and level beyond.
  *
  * `roughness` adds a step of that many metres up and down every 20 m, which

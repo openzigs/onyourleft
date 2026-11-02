@@ -963,7 +963,8 @@ interface BlockTop {
 
 /**
  * A block hung from its top: the top face runs straight along `top`, `width`
- * across, and the block reaches `drop` metres straight down from its middle.
+ * across, and the block's bottom face lies `drop` metres below the top face's
+ * middle, square to the face (so plumb below that middle it is `drop` / cos² θ).
  * `undefined` where the line has no length in plan.
  *
  * ⚠️ **Hung from the top, not centred on the middle** — #1997.
@@ -1008,7 +1009,7 @@ function hung(top: BlockTop, width: number, drop: number): BridgePart | undefine
  * the ribbon at the two ends are every place the line can be highest over it.
  * Zero where the corridor does not reach.
  */
-function sinkUnderDrawnRoad(
+export function sinkUnderDrawnRoad(
   rows: readonly CorridorPoint[],
   from: number,
   fromY: number,

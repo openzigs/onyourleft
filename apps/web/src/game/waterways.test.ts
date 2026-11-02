@@ -70,6 +70,7 @@ import {
   DRY,
   bridgeParts,
   inWater,
+  sinkUnderDrawnRoad,
   waterNearRoute,
   waterShaping,
   waterSurface,
@@ -239,6 +240,10 @@ describe('the bridge — #459', () => {
     const abutment = parts.find((part) => part.height === tallest);
     expect(abutment).toBeDefined();
     expect((abutment?.y ?? 0) - tallest / 2).toBeLessThan(water - STREAM_DEPTH_METRES);
+    // The abutments are 3 m long in plan along the road, not some other length.
+    const inPlan = (part: { length: number; axisX: number; axisZ: number }): number =>
+      part.length * Math.hypot(part.axisX, part.axisZ);
+    expect(parts.filter((part) => Math.abs(inPlan(part) - 3) < 0.01)).toHaveLength(2);
     // Nothing is placed in view of a corridor that cannot see the bridge.
     expect(bridgeParts(profile, origin, roadCorridor(profile, origin, 2_600), ways)).toEqual([]);
   });
@@ -584,6 +589,27 @@ describe('the road is continuous across the bridge — #501', () => {
     const worst = worstRiseRidingThrough(steepValleyRoute(0.3));
     expect(worst.rise).toBeLessThanOrEqual(0);
     expect(worst.sampled).toBeGreaterThan(1_000);
+  });
+});
+
+describe('sinkUnderDrawnRoad — #1997 review', () => {
+  const row = (along: number, y: number) => ({ x: 0, y, z: along, distance: along, along });
+  // Level road, rows 10 m apart: the line from (5 m, 1 m) to (15 m, 0 m)
+  // stands 1 m over the road at its start, 0.5 m at the one row inside it
+  // and 0 at its end — only the two ends' own check sees the 1 m.
+  it('sinks the line by what it stands over the drawn road at its FIRST end', () => {
+    const rows = [row(0, 0), row(10, 0), row(20, 0)];
+    expect(sinkUnderDrawnRoad(rows, 5, 1, 15, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('sinks the line by what it stands over the drawn road at its LAST end', () => {
+    const rows = [row(0, 0), row(10, 0), row(20, 0)];
+    expect(sinkUnderDrawnRoad(rows, 5, 0, 15, 1)).toBeCloseTo(1, 9);
+  });
+
+  it('is zero where the line stands nowhere over the road', () => {
+    const rows = [row(0, 0), row(10, 0), row(20, 0)];
+    expect(sinkUnderDrawnRoad(rows, 5, -1, 15, -1)).toBe(0);
   });
 });
 
