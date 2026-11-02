@@ -12,12 +12,21 @@
  * checked at all.
  */
 
+import {
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  type GeographicPosition,
+} from '@onyourleft/domain';
+
 import type {
   MapCreateOptions,
+  MapPointerHandlers,
   MapPort,
   MapRenderer,
   MapView,
   MapViewOptions,
+  MapWaypoint,
   ProtocolRegistrar,
   ProtocolRegistry,
 } from './port';
@@ -31,12 +40,26 @@ export interface RecordedMap {
   /** Every `setTrack`, in order. A map is created empty, so this is the whole history. */
   readonly tracks: (TrackFeature | undefined)[];
   readonly bounds: (TrackBounds | undefined)[];
+  /** Whether each `setTrack` moved the view to its bounds (#2006). */
+  readonly fits: boolean[];
   /** Every `setStyle`, in order (#672): the palettes it was repainted in. */
   readonly styles: MapViewOptions[];
   /** Every `zoom`, `pan` and `fitTrack`, in order (#2003), e.g. `'zoom in'`, `'pan north'`, `'fit'`. */
   readonly moves: string[];
+  /** Every `setWaypoints`, in order (#2006). */
+  readonly waypoints: (readonly MapWaypoint[])[];
+  /** What `centre()` answers (#2006). A test moves the view by setting it. */
+  centre: GeographicPosition;
+  /** The handlers the map's owner gave `listen`, which a test fires as the pointer would (#2006). */
+  handlers: MapPointerHandlers | undefined;
   destroyed: boolean;
 }
+
+/** Where a recorded map's view starts: an arbitrary place, chosen to be no default the screen has. */
+export const STUB_MAP_CENTRE = geographicPosition(
+  degreesLatitude(39.74),
+  degreesLongitude(-104.99),
+);
 
 export interface StubMapPort extends MapPort {
   readonly created: RecordedMap[];
@@ -76,15 +99,24 @@ export function stubMapPort(): StubMapPort {
         options,
         tracks: [],
         bounds: [],
+        fits: [],
         styles: [],
         moves: [],
+        waypoints: [],
+        centre: STUB_MAP_CENTRE,
+        handlers: undefined,
         destroyed: false,
       };
       created.push(record);
       return {
-        setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void {
+        setTrack(
+          track: TrackFeature | undefined,
+          bounds: TrackBounds | undefined,
+          fitNow?: boolean,
+        ): void {
           record.tracks.push(track);
           record.bounds.push(bounds);
+          record.fits.push(fitNow !== false);
         },
         setStyle(next: MapViewOptions): void {
           record.styles.push(next);
@@ -97,6 +129,15 @@ export function stubMapPort(): StubMapPort {
         },
         fitTrack(): void {
           record.moves.push('fit');
+        },
+        setWaypoints(waypoints: readonly MapWaypoint[]): void {
+          record.waypoints.push(waypoints);
+        },
+        centre(): GeographicPosition {
+          return record.centre;
+        },
+        listen(handlers: MapPointerHandlers): void {
+          record.handlers = handlers;
         },
         destroy(): void {
           record.destroyed = true;
