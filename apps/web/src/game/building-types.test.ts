@@ -28,6 +28,7 @@ import {
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_ROLES,
   FOOTPRINT_VERTEX_FLOATS,
+  baysOf,
   footprintPlans,
   STYLE_COMMERCIAL,
   STYLE_OFFSET,
@@ -94,6 +95,18 @@ const windowFaces = (plan: FootprintPlan): number =>
 /** The faces the wreath is drawn on (#1626): a door's. */
 const doorFaces = (plan: FootprintPlan): number =>
   everyVertex(plan).filter((vertex) => vertex.top === FACADE_DOOR).length;
+
+/** #1791: every garage-door vertex carries the door's width in the style float before its leaf. */
+function expectDoorWidth(plan: FootprintPlan, width: number): void {
+  const floats = plan.triangles.door;
+  let doors = 0;
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    if (floats[at + FACADE_OFFSET + 2] !== FACADE_GARAGE) continue;
+    doors += 1;
+    expect(floats[at + STYLE_OFFSET + 2]).toBeCloseTo(width, 1);
+  }
+  expect(doors).toBeGreaterThan(0);
+}
 
 const triangles = (plan: FootprintPlan, role: FootprintRole): number =>
   plan.triangles[role].length / (3 * FOOTPRINT_VERTEX_FLOATS);
@@ -318,6 +331,7 @@ describe('#1791: each type row, read back from the plan', () => {
         expect(plan.driveway).toHaveLength(0);
         expect(plan.garage).toBe(true);
         expect(verticesOf(plan, 'door').some((vertex) => vertex.top === FACADE_GARAGE)).toBe(true);
+        expectDoorWidth(plan, 6 / baysOf(6));
         expect(windowFaces(plan)).toBe(0);
       },
     ],
@@ -339,6 +353,8 @@ describe('#1791: each type row, read back from the plan', () => {
         expect(plan.driveway.length).toBeGreaterThan(0);
         expect(verticesOf(plan, 'door').every((vertex) => vertex.top === FACADE_GARAGE)).toBe(true);
         expect(verticesOf(plan, 'door').length).toBeGreaterThan(0);
+        // The door is one bay of its 6 m front, not a bay of a count rounded up to odd.
+        expectDoorWidth(plan, 6 / baysOf(6));
         expect(triangles(plan, 'chimney')).toBe(0);
         expect(plan.porch).toBe(false);
         // On a footprint the gable rule pitches, a low gable.

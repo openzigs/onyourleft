@@ -5491,8 +5491,9 @@ function planFootprint(
         )
       : undefined;
   const frontBays = front === undefined ? 0 : baysOf(front.length);
-  // #1791: a mapped garage's bays, an odd count so that its door has the middle one.
-  const garageBays = frontBays % 2 === 1 ? frontBays : frontBays + 1;
+  // #1791: a mapped garage's bays, at least one. Its door is the middle bay, which sits at the
+  // front's middle (along nought) whether the count is odd or even, so the count is not rounded.
+  const garageBays = Math.max(1, frontBays);
   const garage =
     front !== undefined &&
     frontFrame !== undefined &&
@@ -5512,8 +5513,8 @@ function planFootprint(
           { ring: drawn, others },
           groundAt,
         )
-      : // #1791: a mapped garage's own door, in the middle of an odd count of bays, and its
-        // driveway where one fits.
+      : // #1791: a mapped garage's own door, in the middle of its bays, and its driveway where
+        // one fits.
         family === 'garage' && front !== undefined && frontFrame !== undefined
         ? garageOf(
             { length: front.length, bays: garageBays, bay: (garageBays - 1) / 2 },
