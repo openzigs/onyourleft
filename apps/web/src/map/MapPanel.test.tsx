@@ -13,7 +13,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import {
   basemapStyle,
@@ -24,7 +24,7 @@ import {
   type BasemapConfig,
   type BasemapStyle,
 } from './basemap';
-import { MapPanel } from './MapPanel';
+import { MAP_OFFLINE_TEXT, MapPanel } from './MapPanel';
 import { countingMutationObservers, stubMapPort, type StubMapPort } from './testing';
 import { trackGeometry, type TrackGeometry } from './track';
 import type { TrackSegment } from '../detail/privacy';
@@ -343,5 +343,118 @@ describe('in the page’s palette, following it — #672', () => {
     } finally {
       observers.restore();
     }
+  });
+});
+
+describe('#2003 — a map the rider can move, and one that says it is offline', () => {
+  it('draws a ride’s map as the still picture it always was', async () => {
+    const port = stubMapPort();
+    mounted = await mount(<MapPanel port={port} basemap={BASEMAP} track={aTrack()} />);
+    await settle();
+    expect(port.created[0]?.options.explorable).toBe(false);
+    expect(document.querySelector('[role="group"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Zoom in');
+  });
+
+  it('creates an explorable map, with a named button for every gesture', async () => {
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} track={aTrack()} subject="route" explorable />,
+    );
+    await settle();
+    expect(port.created[0]?.options.explorable).toBe(true);
+    const group = document.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('Move the map');
+    expect(queryAll(group as Element, 'button').map((button) => button.textContent)).toEqual([
+      'Zoom in',
+      'Zoom out',
+      'Move north',
+      'Move west',
+      'Move east',
+      'Move south',
+      'Whole route',
+    ]);
+    // The credit stays the map's next sibling; the buttons come after it.
+    expect(document.querySelector('.oyl-map')?.nextElementSibling?.className).toBe(
+      'oyl-map__attribution',
+    );
+  });
+
+  it('moves the map it created when each button is pressed from the keyboard', async () => {
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} track={aTrack()} subject="route" explorable />,
+    );
+    await settle();
+    for (const button of queryAll(document, '.oyl-map__moves button')) {
+      await activateWithKeyboard(button);
+    }
+    expect(port.created[0]?.moves).toEqual([
+      'zoom in',
+      'zoom out',
+      'pan north',
+      'pan west',
+      'pan east',
+      'pan south',
+      'fit',
+    ]);
+  });
+
+  it('names a route’s map as a route’s, and still names no place', async () => {
+    mounted = await mount(
+      <MapPanel port={stubMapPort()} basemap={BASEMAP} track={aTrack()} subject="route" />,
+    );
+    await settle();
+    const label = document.querySelector('.oyl-map')?.getAttribute('aria-label') ?? '';
+    expect(label).toBe('Map of this route.');
+    expect(label).not.toMatch(/\d+\.\d+/);
+  });
+
+  it('speaks of the route, not a ride, when there is no basemap or no renderer', async () => {
+    const view = await mount(
+      <MapPanel port={stubMapPort()} basemap={undefined} track={aTrack()} subject="route" />,
+    );
+    mounted = view;
+    await settle();
+    expect(document.body.textContent).toContain('the route is not drawn on a map');
+    expect(document.body.textContent).not.toContain('ride');
+
+    await view.rerender(
+      <MapPanel port={undefined} basemap={BASEMAP} track={aTrack()} subject="route" />,
+    );
+    await settle();
+    expect(document.body.textContent).toContain('cannot draw a map');
+    expect(document.body.textContent).toContain('The route’s facts and downloads are unaffected');
+    expect(document.body.textContent).not.toContain('ride');
+  });
+
+  it('creates no map offline and says so, then draws it with its line once back online', async () => {
+    const port = stubMapPort();
+    // The SAME line both times, as a route's page memoises it: a new one would
+    // hand itself to the map whether or not the panel noticed the map was new.
+    const line = aTrack();
+    const view = await mount(
+      <MapPanel port={port} basemap={BASEMAP} track={line} subject="route" explorable offline />,
+    );
+    mounted = view;
+    await settle();
+    expect(port.created).toHaveLength(0);
+    expect(queryAll(document, '.oyl-map')).toHaveLength(0);
+    expect(document.body.textContent).toBe(MAP_OFFLINE_TEXT);
+
+    await view.rerender(
+      <MapPanel
+        port={port}
+        basemap={BASEMAP}
+        track={line}
+        subject="route"
+        explorable
+        offline={false}
+      />,
+    );
+    await settle();
+    expect(port.created).toHaveLength(1);
+    // The line is handed to the map created late, not only to one created on mount.
+    expect(port.created[0]?.tracks.at(-1)?.geometry.coordinates).toHaveLength(1);
   });
 });

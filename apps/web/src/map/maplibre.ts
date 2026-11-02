@@ -19,12 +19,20 @@
  * `import()` for the same reason it lazy-loads the chart, and `pnpm run build`
  * shows the split.
  *
- * ## Interaction is off
+ * ## Interaction is off, unless the map is created explorable
  *
- * `interactive: false`, and `MapPanel.tsx` records why at length: a pannable
- * map needs a keyboard equivalent for every gesture before it satisfies #48's
- * third criterion, and that is not this issue's scope. A non-interactive map is
- * a picture, is marked up as one, and puts nothing focusable in the tab order.
+ * `interactive: false` by default, and `MapPanel.tsx` records why at length: a
+ * pannable map needs a keyboard equivalent for every gesture before it
+ * satisfies #48's third criterion. A non-interactive map is a picture, is
+ * marked up as one, and puts nothing focusable in the tab order.
+ *
+ * Since #2003 a saved route's page creates its map `explorable`
+ * ({@link EXPLORABLE}): drag to pan, pinch and double-tap to zoom, and the
+ * keyboard's equivalents are buttons the panel renders, which reach the map
+ * through `MapView.zoom`, `pan` and `fitTrack`. ⚠️ **The canvas still takes no
+ * focus**: MapLibre gives an interactive map's canvas `tabindex="0"`, and a
+ * focusable element inside an `aria-hidden` one is an audit failure and a tab
+ * stop that announces nothing, so it is put back to `-1` below.
  *
  * ## The attribution control is off, and the attribution is not
  *
@@ -52,7 +60,15 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
 
 import { TRACK_LAYER_ID, TRACK_SOURCE_ID } from './basemap';
-import type { MapPort, MapRenderer, MapView, MapViewOptions } from './port';
+import type {
+  MapCreateOptions,
+  MapPanDirection,
+  MapPort,
+  MapRenderer,
+  MapView,
+  MapViewOptions,
+  MapZoomDirection,
+} from './port';
 import { createProtocolRegistry } from './protocol';
 import type { TrackBounds, TrackFeature } from './track';
 
@@ -149,8 +165,35 @@ function fullStyle(options: MapViewOptions, track: TrackFeature | undefined): St
   } as StyleSpecification;
 }
 
+/**
+ * The gestures an explorable map answers (#2003), and the ones it does not.
+ *
+ * - **Wheel zoom is off.** A map in a scrolling page that zooms on the wheel
+ *   catches the page's scroll the moment the pointer crosses it; the zoom
+ *   buttons, a double click and a pinch remain.
+ * - **Rotation and pitch are off.** The pan buttons are named north, south,
+ *   east and west, which is only true of a map that keeps north up.
+ * - **Box zoom and the keyboard handler are off.** The keyboard handler
+ *   listens on the canvas, which is kept out of the tab order (see the module
+ *   note), and its equivalents are the panel's buttons.
+ */
+const EXPLORABLE = {
+  interactive: true,
+  dragPan: true,
+  doubleClickZoom: true,
+  touchZoomRotate: true,
+  scrollZoom: false,
+  boxZoom: false,
+  dragRotate: false,
+  touchPitch: false,
+  keyboard: false,
+} as const;
+
+/** How far one press of a pan button moves the view: a third of the map. */
+const PAN_FRACTION = 1 / 3;
+
 const renderer: MapRenderer = {
-  create(container: HTMLElement, options: MapViewOptions): MapView {
+  create(container: HTMLElement, options: MapCreateOptions): MapView {
     /** The line the map shows, so a new style is handed it too. */
     let current: TrackFeature | undefined;
     const map = new MapLibreMap({
@@ -160,10 +203,18 @@ const renderer: MapRenderer = {
       // the configured one; a `style: 'https://…/style.json'` here would put
       // that back outside the assertion's reach.
       style: fullStyle(options, current),
-      interactive: false,
+      ...(options.explorable === true ? EXPLORABLE : { interactive: false }),
       attributionControl: false,
     });
     map.getCanvas().setAttribute('aria-hidden', 'true');
+    // MapLibre makes an interactive map's canvas a tab stop. See the module note.
+    map.getCanvas().setAttribute('tabindex', '-1');
+    if (options.explorable === true) {
+      // A pinch zooms; it does not also turn the map. See `EXPLORABLE`.
+      map.touchZoomRotate.disableRotation();
+    }
+    /** The box the line was last fitted to, for `fitTrack`. */
+    let fitted: TrackBounds | undefined;
 
     /**
      * The line, handed over before the style had loaded, waiting for it.
@@ -213,7 +264,32 @@ const renderer: MapRenderer = {
       setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void {
         current = track;
         waiting = draw(track) ? undefined : { track };
+        fitted = bounds;
         fit(map, bounds);
+      },
+      zoom(direction: MapZoomDirection): void {
+        // Animated unless the device asks for reduced motion, which MapLibre's
+        // camera honours on its own.
+        if (direction === 'in') {
+          map.zoomIn();
+        } else {
+          map.zoomOut();
+        }
+      },
+      pan(direction: MapPanDirection): void {
+        const x = map.getContainer().clientWidth * PAN_FRACTION;
+        const y = map.getContainer().clientHeight * PAN_FRACTION;
+        // Screen pixels, y downward: north is up the screen on a map kept north up.
+        const offset: Record<MapPanDirection, [number, number]> = {
+          north: [0, -y],
+          south: [0, y],
+          east: [x, 0],
+          west: [-x, 0],
+        };
+        map.panBy(offset[direction]);
+      },
+      fitTrack(): void {
+        fit(map, fitted);
       },
       setStyle(next: MapViewOptions): void {
         // `setStyle` diffs against the loaded style, so a change of palette

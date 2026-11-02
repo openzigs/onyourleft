@@ -1131,3 +1131,75 @@ test.describe('a hosted archive, rendered and timed over the internet', () => {
     console.log(measured);
   });
 });
+
+/**
+ * #2003: a saved route's map moves, in a real engine.
+ *
+ * jsdom proves the panel's buttons call `MapView.zoom`, `pan` and `fitTrack`;
+ * only MapLibre can say the options `maplibre.ts` §`EXPLORABLE` hands it make
+ * a map that a drag moves, and that its own interactive canvas — which it
+ * makes a tab stop — was taken back out of the tab order.
+ *
+ * The read is the line at the frame's centre, which a fitted map draws through
+ * it (`MapLoadResult.trackPainted`). A pan or a drag moves the line off it, and
+ * *Whole route* puts it back — which is also what says the read can be true
+ * after a move, rather than only false. The still map a ride's page draws, under
+ * the same drag, is the control: its line must not move.
+ *
+ * ⚠️ Not the pinch: Playwright's Chromium has no multi-touch gesture to send,
+ * and MapLibre's `touchZoomRotate` is a stock handler this change only turns on.
+ */
+test.describe('an explorable map — #2003', () => {
+  /** Whether the line is in the box at the frame's centre now. */
+  async function lineAtCentre(page: import('@playwright/test').Page): Promise<boolean> {
+    const probe = await probeNow(page);
+    return probe.centreColours.includes(probe.trackColour);
+  }
+
+  /** A mouse drag across the map, from its centre, 200 px left. */
+  async function drag(page: import('@playwright/test').Page): Promise<void> {
+    const box = await page.locator('#map').boundingBox();
+    if (box === null) throw new Error('the map has no box to drag');
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 200, y, { steps: 10 });
+    await page.mouse.up();
+  }
+
+  test('moves from its buttons and from a drag, keeps its canvas out of the tab order, and comes back', async ({
+    page,
+  }) => {
+    await page.goto(`/?tiles=off&explorable&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+    expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+
+    // MapLibre makes an interactive canvas `tabindex="0"`; the adapter takes it back.
+    await expect(page.locator('#map .maplibregl-interactive')).toHaveCount(1);
+    await expect(page.locator('#map canvas')).toHaveAttribute('tabindex', '-1');
+
+    await page.evaluate(() => window.__oylMapMove?.('pan north'));
+    await expect.poll(() => lineAtCentre(page)).toBe(false);
+    await page.evaluate(() => window.__oylMapMove?.('fit'));
+    await expect.poll(() => lineAtCentre(page)).toBe(true);
+
+    await drag(page);
+    await expect.poll(() => lineAtCentre(page)).toBe(false);
+    await page.evaluate(() => window.__oylMapMove?.('fit'));
+    await expect.poll(() => lineAtCentre(page)).toBe(true);
+  });
+
+  test('control: a ride’s still map does not move under the same drag', async ({ page }) => {
+    await page.goto(`/?tiles=off&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+    expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+    await expect(page.locator('#map .maplibregl-interactive')).toHaveCount(0);
+
+    await drag(page);
+    // Long enough for the drag's pan to have drawn, had there been one: the
+    // explorable case above sees its line leave the centre well inside this.
+    await page.waitForTimeout(1000);
+    expect(await lineAtCentre(page)).toBe(true);
+  });
+});
