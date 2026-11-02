@@ -52,7 +52,10 @@
  * focusable button is an audit failure, and the planner's list already places,
  * moves and inserts every waypoint from the keyboard. So each marker is our
  * own `aria-hidden` element, which MapLibre leaves out of the tab order and
- * gives no role, and the list stays the one keyboard path.
+ * gives no role, and the list stays the one keyboard path. Each shows its
+ * number in that list (`MapWaypoint.label`), so a marker and its row are
+ * named alike; the number is decoration for the eye, and the list is where a
+ * screen reader hears it.
  *
  * ## The attribution control is off, and the attribution is not
  *
@@ -355,11 +358,13 @@ function editing(map: MapLibreMap): {
         const held = markers.get(waypoint.id);
         if (held !== undefined) {
           held.setLngLat(at);
+          // An insert or a delete before it renumbers it (#2006's owner review).
+          held.getElement().textContent = waypoint.label;
           continue;
         }
-        const marker = new Marker({ element: markerElement(), draggable: true })
-          .setLngLat(at)
-          .addTo(map);
+        const element = markerElement();
+        element.textContent = waypoint.label;
+        const marker = new Marker({ element, draggable: true }).setLngLat(at).addTo(map);
         marker.on('dragend', () => {
           handlers?.moveWaypoint(waypoint.id, positionOf(marker.getLngLat()));
         });

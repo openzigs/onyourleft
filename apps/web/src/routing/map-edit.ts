@@ -63,7 +63,11 @@ export function draftGeometry(draft: RouteDraft): TrackGeometry | undefined {
 
 /** The waypoints, as the map draws them. */
 export function mapWaypoints(draft: RouteDraft): readonly MapWaypoint[] {
-  return draft.waypoints.map(({ id, position }) => ({ id, position }));
+  return draft.waypoints.map(({ id, position }, index) => ({
+    id,
+    position,
+    label: String(index + 1),
+  }));
 }
 
 /**

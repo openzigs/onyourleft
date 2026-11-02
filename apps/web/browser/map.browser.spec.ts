@@ -1318,6 +1318,18 @@ test.describe('the route planner’s map — #2006', () => {
     expect(Math.abs(placed.y + placed.height / 2 - (map.y + map.height / 2))).toBeLessThan(2);
   });
 
+  test('a marker shows its number in the list, and is renumbered in place', async ({ page }) => {
+    // The owner's review of #2006: the map and the list name a waypoint alike.
+    await editable(page);
+    await page.evaluate(() => window.__oylMapWaypointAtCentre?.());
+    const marker = page.locator('#map .oyl-map__waypoint');
+    await expect(marker).toHaveText('1');
+    // An insert before it makes it the second: the same marker, told again.
+    await page.evaluate(() => window.__oylMapWaypointAtCentre?.('2'));
+    await expect(marker).toHaveCount(1);
+    await expect(marker).toHaveText('2');
+  });
+
   test('a marker dragged off the line is one move, and not a pull on the line it lay on', async ({
     page,
   }) => {

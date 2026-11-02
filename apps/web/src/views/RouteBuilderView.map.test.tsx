@@ -205,10 +205,11 @@ describe('tap to add — #2006', () => {
     });
     expect(waypoints(planner)).toEqual([A, B]);
     expect(planner.view.container.textContent).toContain('Waypoint 2');
-    // And the map is handed both, as markers, with the planner's ids.
+    // And the map is handed both, as markers, with the planner's ids and the
+    // list's numbers (the owner's review of #2006).
     expect(planner.map().waypoints.at(-1)).toEqual([
-      { id: 'w1', position: A },
-      { id: 'w2', position: B },
+      { id: 'w1', position: A, label: '1' },
+      { id: 'w2', position: B, label: '2' },
     ]);
   });
 
@@ -315,6 +316,18 @@ describe('drag the line to insert — #2006', () => {
       map.dragLine(at(40.0201, -104.99), dropped);
     });
     expect(waypoints(planner)).toEqual([A, B, dropped, C]);
+    // The markers are renumbered with the list: C is now the fourth.
+    expect(
+      planner
+        .map()
+        .waypoints.at(-1)
+        ?.map(({ id, label }) => [id, label]),
+    ).toEqual([
+      ['w1', '1'],
+      ['w2', '2'],
+      ['w4', '3'],
+      ['w3', '4'],
+    ]);
   });
 
   it('on the first leg, when that is the one grabbed', async () => {

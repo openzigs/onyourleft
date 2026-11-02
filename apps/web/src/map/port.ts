@@ -173,6 +173,13 @@ export interface MapWaypoint {
   /** The planner's id, which a drag hands back. */
   readonly id: string;
   readonly position: GeographicPosition;
+  /**
+   * What the marker shows: its number in the planner's list, so the map and
+   * the list name a waypoint alike (#2006's owner review). It changes when a
+   * waypoint is inserted or deleted before this one, so the marker is told
+   * again rather than keeping the number it was created with.
+   */
+  readonly label: string;
 }
 
 /**

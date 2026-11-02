@@ -101,10 +101,17 @@ describe('the drawing canvas is inside the accessibility gate', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('audits clean with a waypoint selected and its moves shown', async () => {
+    await drawn(4);
+    await press('Waypoint 3');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('audits clean while a leg has no route', async () => {
     const provider = scriptedProvider();
     await drawn(3, provider);
     provider.failEveryRoute(new RoutingError('no-route', 'No path between these two points.', 0));
+    await press('Waypoint 2');
     await press('Move waypoint 2 north');
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
@@ -132,6 +139,9 @@ describe('every control on it is reachable by keyboard', () => {
     // A waypoint a keyboard cannot move is a route a keyboard user cannot draw,
     // which on this screen is the whole feature.
     const view = await drawn(2);
+    // The moves are the selected waypoint's (#2006's owner review): pressing
+    // "Waypoint 1" from the keyboard is the way to them.
+    await press('Waypoint 1');
     const names = tabbableElements(view.container).map((element) => element.textContent ?? '');
     expect(names).toContain('Waypoint 1');
     expect(names).toContain('Move waypoint 1 north');
@@ -225,6 +235,7 @@ describe('with its map and the save, the planner is inside the gate too — #200
 
   it('keeps every map gesture on a control in the tab order, and the map itself out of it', async () => {
     const view = await withMap();
+    await press('Waypoint 2');
     const names = tabbableElements(view.container).map((element) => element.textContent ?? '');
     // Tap to add, drag to move, drag the line to insert — each has a control.
     expect(names).toContain('Add a waypoint');

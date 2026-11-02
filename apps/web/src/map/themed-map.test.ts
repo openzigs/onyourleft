@@ -94,7 +94,7 @@ describe('a map in the page’s palette — #672', () => {
     expect(created?.options.editable).toBe(true);
     const here = created?.centre;
     expect(view.centre()).toBe(here);
-    const waypoints = here === undefined ? [] : [{ id: 'w1', position: here }];
+    const waypoints = here === undefined ? [] : [{ id: 'w1', position: here, label: '1' }];
     view.setWaypoints(waypoints);
     expect(created?.waypoints).toEqual([waypoints]);
     const handlers = {

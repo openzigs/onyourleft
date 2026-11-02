@@ -8,7 +8,7 @@ import {
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { addWaypoint, emptyDraft, type RouteDraft } from './draft';
+import { addWaypoint, emptyDraft, insertWaypoint, type RouteDraft } from './draft';
 import { draftGeometry, legMidpoint, mapWaypoints, nearestLeg } from './map-edit';
 
 function at(latitude: number, longitude: number): GeographicPosition {
@@ -67,11 +67,21 @@ describe('the line the planner draws — #2006', () => {
     expect(draftGeometry(routed)?.coordinates[0]).toHaveLength(3);
   });
 
-  it('hands the map each waypoint with its id', () => {
+  it('hands the map each waypoint with its id, numbered as the list numbers it', () => {
     const draft = drawn(A, B);
     expect(mapWaypoints(draft)).toEqual([
-      { id: 'w1', position: A },
-      { id: 'w2', position: B },
+      { id: 'w1', position: A, label: '1' },
+      { id: 'w2', position: B, label: '2' },
+    ]);
+  });
+
+  it('numbers by place in the route, not by id, so an insert renumbers the rest', () => {
+    // w3 goes between w1 and w2: it is the second waypoint, and w2 the third.
+    const draft = insertWaypoint(drawn(A, B), 0, C).draft;
+    expect(mapWaypoints(draft).map(({ id, label }) => [id, label])).toEqual([
+      ['w1', '1'],
+      ['w3', '2'],
+      ['w2', '3'],
     ]);
   });
 });

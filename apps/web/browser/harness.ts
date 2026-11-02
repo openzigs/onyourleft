@@ -275,8 +275,12 @@ declare global {
     __oylMapMove?: (move: MapMove) => void;
     /** Present on an `?editable` map (#2006): every gesture it reported, in order. */
     __oylMapEdits?: MapEdit[];
-    /** Present on an `?editable` map (#2006): put one waypoint, `w1`, at the view's centre. */
-    __oylMapWaypointAtCentre?: () => void;
+    /**
+     * Present on an `?editable` map (#2006): put one waypoint, `w1`, at the
+     * view's centre, numbered `label` (`1` unless given) — a second call
+     * renumbers the same marker, as an insert before it would.
+     */
+    __oylMapWaypointAtCentre?: (label?: string) => void;
     __oylMapProbe?: () => MapProbe;
     __oylHarness?: HarnessResult;
     __oylMapLoad?: MapLoadResult;
@@ -924,8 +928,8 @@ function run(): void {
         dragLine: (from, to) => edits.push({ kind: 'line', from: pair(from), to: pair(to) }),
       });
       window.__oylMapEdits = edits;
-      window.__oylMapWaypointAtCentre = (): void => {
-        view.setWaypoints([{ id: 'w1', position: view.centre() }]);
+      window.__oylMapWaypointAtCentre = (label = '1'): void => {
+        view.setWaypoints([{ id: 'w1', position: view.centre(), label }]);
       };
     }
     window.__oylMapMove = (move: MapMove): void => {

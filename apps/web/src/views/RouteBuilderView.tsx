@@ -467,11 +467,11 @@ export function RouteBuilderView({
         help={
           <p>
             Place waypoints in order, on the map or from this list. Every control here works from
-            the keyboard — a nudge moves a waypoint about{' '}
+            the keyboard. Select a waypoint to move it north, south, east or west, about{' '}
             {measurementText(
               formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units),
-            )}
-            .
+            )}{' '}
+            at a time.
           </p>
         }
       >
@@ -595,6 +595,12 @@ export function RouteBuilderView({
                 `aria-pressed` says whether it is the selected one — a name
                 that changed with the state would be announced as a different
                 control on every press.
+
+                #2006's owner review: the four nudges are the SELECTED
+                waypoint's alone, so a row is two buttons rather than six. The
+                keyboard path is whole — Tab to "Waypoint N", press it, and
+                the next four stops are its moves — and the section's help
+                says so.
               */}
               <Button
                 variant="toggle"
@@ -605,24 +611,26 @@ export function RouteBuilderView({
               >
                 {`Waypoint ${String(index + 1)}`}
               </Button>
-              {(
-                [
-                  ['North', 1, 0],
-                  ['South', -1, 0],
-                  ['East', 0, 1],
-                  ['West', 0, -1],
-                ] as const
-              ).map(([label, north, east]) => (
-                <Button
-                  variant="secondary"
-                  key={label}
-                  onClick={() => {
-                    nudge(waypoint.id, north, east);
-                  }}
-                >
-                  {`Move waypoint ${String(index + 1)} ${label.toLowerCase()}`}
-                </Button>
-              ))}
+              {waypoint.id === selected
+                ? (
+                    [
+                      ['North', 1, 0],
+                      ['South', -1, 0],
+                      ['East', 0, 1],
+                      ['West', 0, -1],
+                    ] as const
+                  ).map(([label, north, east]) => (
+                    <Button
+                      variant="secondary"
+                      key={label}
+                      onClick={() => {
+                        nudge(waypoint.id, north, east);
+                      }}
+                    >
+                      {`Move waypoint ${String(index + 1)} ${label.toLowerCase()}`}
+                    </Button>
+                  ))
+                : null}
               <Button
                 variant="secondary"
                 onClick={() => {
@@ -663,28 +671,39 @@ export function RouteBuilderView({
           <tbody>
             {draft.legs.map((leg, index) => (
               <tr key={`leg-${String(index)}`}>
-                <th scope="row">{`${String(index + 1)} to ${String(index + 2)}`}</th>
+                {/* #2006's owner review: "3 to 4" and "0.7 km" broke over two
+                    lines at tablet width. A failure's sentence still wraps. */}
+                <th
+                  scope="row"
+                  className="tw:whitespace-nowrap"
+                >{`${String(index + 1)} to ${String(index + 2)}`}</th>
                 <td>{leg.mode === 'snapped' ? 'Following roads' : 'Freehand'}</td>
                 <td>{surfaceWord(leg.surface)}</td>
-                <td>
+                <td className={leg.state === 'routed' ? 'tw:whitespace-nowrap' : undefined}>
                   {leg.state === 'routed'
                     ? measurementText(formatDistance(leg.distance, units))
                     : (leg.failure?.message ?? 'Being routed')}
                   {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
                 </td>
                 <td>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      apply(
-                        setLegMode(draft, index, leg.mode === 'snapped' ? 'freehand' : 'snapped'),
-                      );
-                    }}
-                  >
-                    {leg.mode === 'snapped'
-                      ? `Draw leg ${String(index + 1)} freehand`
-                      : `Follow roads on leg ${String(index + 1)}`}
-                  </Button>
+                  {/* #2006's owner review: with no routing service a leg cannot
+                      follow roads, so the offer is absent (`Button.tsx`'s rule
+                      for a control that cannot act). A snapped leg restored with
+                      none can still be drawn freehand. */}
+                  {provider !== undefined || leg.mode === 'snapped' ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        apply(
+                          setLegMode(draft, index, leg.mode === 'snapped' ? 'freehand' : 'snapped'),
+                        );
+                      }}
+                    >
+                      {leg.mode === 'snapped'
+                        ? `Draw leg ${String(index + 1)} freehand`
+                        : `Follow roads on leg ${String(index + 1)}`}
+                    </Button>
+                  ) : null}
                   {/* #2006: the list's way to do what pulling the line does. */}
                   <Button
                     variant="secondary"
@@ -810,7 +829,13 @@ export function RouteBuilderView({
             <form aria-label="Save this route" onSubmit={(event) => void onSave(event)}>
               <p>
                 <label htmlFor={nameId}>Name</label>{' '}
-                <input id={nameId} name="name" type="text" autoComplete="off" />
+                <input
+                  id={nameId}
+                  name="name"
+                  type="text"
+                  autoComplete="off"
+                  className="oyl-input oyl-planner__name"
+                />
               </p>
               <Button type="submit" variant="secondary">
                 Save to your routes

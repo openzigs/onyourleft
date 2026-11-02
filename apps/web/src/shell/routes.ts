@@ -357,7 +357,7 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/routes',
     navLabel: 'Routes',
     title: 'Routes',
-    summary: 'Rides you plan to do, imported from a GPX file.',
+    summary: 'Rides you plan to do, drawn on a map or imported from a GPX file.',
     notes: [
       'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
         'cannot be shared at all.',

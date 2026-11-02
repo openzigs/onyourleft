@@ -4307,6 +4307,16 @@ select.oyl-input {
 }
 
 /*
+ * The route planner's *Name* (#2006's owner review): a route's name is a
+ * phrase, and `.oyl-input`'s 8rem is a number box's width. The column's
+ * width on a phone, up to about forty characters on a tablet.
+ */
+.oyl-planner__name {
+  max-width: 100%;
+  width: 24rem;
+}
+
+/*
  * The same row layout as the trainer's form, and deliberately a second class
  * rather than a shared one: these two screens have no relationship, and a
  * `.oyl-form-row` would be a promise that a change for one is right for the
@@ -5578,17 +5588,28 @@ select.oyl-input {
  * surface round it, so it reads on the basemap and on the plain background
  * alike. `touch-action: none` so a finger dragging one moves the waypoint and
  * not the page. The `--new` one is the pull on the line, before it is let go.
- * Its position is set by `map/maplibre.ts` §`markerElement`.
+ * Its position is set by `map/maplibre.ts` §`markerElement`. Each carries its
+ * number in the list (#2006's owner review), in `accentInk` on `accent` — a
+ * declared pair in both palettes.
  */
 .oyl-map__waypoint {
+  align-items: center;
   background: var(--oyl-color-accent);
-  border: 3px solid var(--oyl-color-surface);
+  border: 2px solid var(--oyl-color-surface);
   border-radius: 50%;
   box-sizing: border-box;
+  color: var(--oyl-color-accent-ink);
   cursor: grab;
-  height: 1.25rem;
+  display: flex;
+  font-size: var(--oyl-font-size-sm);
+  font-weight: 700;
+  height: 1.75rem;
+  justify-content: center;
+  line-height: 1;
   touch-action: none;
-  width: 1.25rem;
+  user-select: none;
+  -webkit-user-select: none;
+  width: 1.75rem;
 }
 
 .oyl-map__waypoint--new {

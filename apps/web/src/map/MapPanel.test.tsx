@@ -539,12 +539,12 @@ describe('the route planner’s map — #2006', () => {
 
   it('puts the waypoints on the map, and again when they change', async () => {
     const port = stubMapPort();
-    const one = [{ id: 'w1', position: HERE }];
+    const one = [{ id: 'w1', position: HERE, label: '1' }];
     mounted = await mount(
       <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing([], [], one)} />,
     );
     await settle();
-    const two = [...one, { id: 'w2', position: HERE }];
+    const two = [...one, { id: 'w2', position: HERE, label: '2' }];
     await mounted.rerender(
       <MapPanel port={port} basemap={BASEMAP} subject="draft" editing={editing([], [], two)} />,
     );
