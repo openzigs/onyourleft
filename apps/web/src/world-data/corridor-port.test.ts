@@ -333,7 +333,7 @@ describe('#1789 building fields: through the real store and back, and a row with
   }
 
   /** What every covered tile's three footprints must carry, in the plan's order. */
-  function expectedFields(count: number): Record<string, unknown>[] {
+  function expectedFields(count: number): unknown[] {
     return Array.from({ length: count / 3 }).flatMap(() => [
       BUILDING_FIELDS_DECODED,
       BUILDING_PART_FIELDS_DECODED,
