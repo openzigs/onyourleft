@@ -645,7 +645,16 @@ function viewFor(
         />
       );
     case 'route-builder':
-      return <RouteBuilderView provider={props.routing} />;
+      return (
+        <RouteBuilderView
+          provider={props.routing}
+          // #2006: drawn on the map a saved route's page draws, and saved
+          // into the same routes.
+          map={props.map}
+          basemap={props.basemap}
+          routes={props.routes}
+        />
+      );
     case 'workouts':
       return (
         <WorkoutsView

@@ -4307,6 +4307,16 @@ select.oyl-input {
 }
 
 /*
+ * The route planner's *Name* (#2006's owner review): a route's name is a
+ * phrase, and `.oyl-input`'s 8rem is a number box's width. The column's
+ * width on a phone, up to about forty characters on a tablet.
+ */
+.oyl-planner__name {
+  max-width: 100%;
+  width: 24rem;
+}
+
+/*
  * The same row layout as the trainer's form, and deliberately a second class
  * rather than a shared one: these two screens have no relationship, and a
  * `.oyl-form-row` would be a promise that a change for one is right for the
@@ -4766,6 +4776,12 @@ select.oyl-input {
  * a WebGL canvas in a container with no height renders zero pixels and looks
  * exactly like a map that failed to load.
  */
+/*
+ * Positioned and clipped since #2006: the route planner's markers are placed
+ * by MapLibre with a `transform` from the map's top left, which needs the map
+ * to be their containing block, and a marker dragged past the edge must not
+ * draw over the page. MapLibre's own stylesheet would do both and is not loaded.
+ */
 .oyl-map {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
@@ -4773,6 +4789,8 @@ select.oyl-input {
   display: block;
   height: 20rem;
   margin-top: var(--oyl-space-sm);
+  overflow: hidden;
+  position: relative;
   width: 100%;
 }
 
@@ -5561,6 +5579,41 @@ select.oyl-input {
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
   margin-block: var(--oyl-space-sm);
+}
+
+/*
+ * The route planner's waypoints on its map (#2006) — `map/maplibre.ts` makes
+ * each one this element, `aria-hidden` and out of the tab order, because the
+ * planner's list is the keyboard's way to them. A disc in the accent with the
+ * surface round it, so it reads on the basemap and on the plain background
+ * alike. `touch-action: none` so a finger dragging one moves the waypoint and
+ * not the page. The `--new` one is the pull on the line, before it is let go.
+ * Its position is set by `map/maplibre.ts` §`markerElement`. Each carries its
+ * number in the list (#2006's owner review), in `accentInk` on `accent` — a
+ * declared pair in both palettes.
+ */
+.oyl-map__waypoint {
+  align-items: center;
+  background: var(--oyl-color-accent);
+  border: 2px solid var(--oyl-color-surface);
+  border-radius: 50%;
+  box-sizing: border-box;
+  color: var(--oyl-color-accent-ink);
+  cursor: grab;
+  display: flex;
+  font-size: var(--oyl-font-size-sm);
+  font-weight: 700;
+  height: 1.75rem;
+  justify-content: center;
+  line-height: 1;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  width: 1.75rem;
+}
+
+.oyl-map__waypoint--new {
+  cursor: grabbing;
 }
 
 /*

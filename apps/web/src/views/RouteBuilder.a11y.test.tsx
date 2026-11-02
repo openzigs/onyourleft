@@ -29,6 +29,10 @@ import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { RouteBuilderView } from './RouteBuilderView';
 import type { RouteDraft } from '../routing/draft';
+import { athleteId as toAthleteId } from '@onyourleft/store';
+import { OSM_ATTRIBUTION } from '../map/basemap';
+import { stubMapPort } from '../map/testing';
+import { routeStub } from '../routes/testing';
 
 let mounted: Mounted | undefined;
 
@@ -97,10 +101,17 @@ describe('the drawing canvas is inside the accessibility gate', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('audits clean with a waypoint selected and its moves shown', async () => {
+    await drawn(4);
+    await press('Waypoint 3');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('audits clean while a leg has no route', async () => {
     const provider = scriptedProvider();
     await drawn(3, provider);
     provider.failEveryRoute(new RoutingError('no-route', 'No path between these two points.', 0));
+    await press('Waypoint 2');
     await press('Move waypoint 2 north');
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
@@ -128,6 +139,9 @@ describe('every control on it is reachable by keyboard', () => {
     // A waypoint a keyboard cannot move is a route a keyboard user cannot draw,
     // which on this screen is the whole feature.
     const view = await drawn(2);
+    // The moves are the selected waypoint's (#2006's owner review): pressing
+    // "Waypoint 1" from the keyboard is the way to them.
+    await press('Waypoint 1');
     const names = tabbableElements(view.container).map((element) => element.textContent ?? '');
     expect(names).toContain('Waypoint 1');
     expect(names).toContain('Move waypoint 1 north');
@@ -181,5 +195,63 @@ describe('what the tables say without being looked at', () => {
     const view = await drawn(3, scriptedProvider({ heights: [10, null, 30, 40] }));
     await settle();
     expect(view.container.textContent).toContain('the dataset has no height here');
+  });
+});
+
+/**
+ * The planner with its map and its save — #2006. The map is the recording
+ * port, so what is audited is the panel, its credit, its seven buttons and the
+ * save form, where a rider meets them; the markers a real engine adds are
+ * `aria-hidden` and out of the tab order (`map/maplibre.ts` §"An editable map").
+ */
+describe('with its map and the save, the planner is inside the gate too — #2006', () => {
+  async function withMap(): Promise<Mounted> {
+    document.documentElement.lang = 'en';
+    const engine = stubMapPort();
+    mounted = await mount(
+      <main>
+        <h1>Draw a route</h1>
+        <RouteBuilderView
+          storage={isolatedStorage()}
+          map={() => Promise.resolve(engine)}
+          basemap={{
+            archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
+            attribution: OSM_ATTRIBUTION,
+          }}
+          routes={routeStub(toAthleteId('athlete-a'))}
+        />
+      </main>,
+    );
+    await settle();
+    await settle();
+    for (let index = 0; index < 3; index += 1) await press('Add a waypoint');
+    return mounted;
+  }
+
+  it('audits clean', async () => {
+    await withMap();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('keeps every map gesture on a control in the tab order, and the map itself out of it', async () => {
+    const view = await withMap();
+    await press('Waypoint 2');
+    const names = tabbableElements(view.container).map((element) => element.textContent ?? '');
+    // Tap to add, drag to move, drag the line to insert — each has a control.
+    expect(names).toContain('Add a waypoint');
+    expect(names).toContain('Move waypoint 2 north');
+    expect(names).toContain('Add a waypoint halfway along leg 1');
+    expect(names).toContain('Zoom in');
+    expect(names).toContain('Save to your routes');
+    const map = view.container.querySelector('.oyl-map');
+    expect(map?.getAttribute('role')).toBe('img');
+    expect(tabbableElements(view.container)).not.toContain(map);
+  });
+
+  it('labels the route’s name field', async () => {
+    const view = await withMap();
+    const input = view.container.querySelector<HTMLInputElement>('input[name="name"]');
+    const label = view.container.querySelector(`label[for="${input?.id ?? ''}"]`);
+    expect(label?.textContent).toBe('Name');
   });
 });
