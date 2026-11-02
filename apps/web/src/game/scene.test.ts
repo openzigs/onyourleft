@@ -817,10 +817,14 @@ describe('a marker that has a front — #349', () => {
     for (const marker of frame.markers) {
       expect(Math.hypot(marker.headingX, marker.headingZ)).toBeCloseTo(1, 9);
     }
-    // The rider faces the way the camera does, by construction: both are read
-    // at the rider's own distance.
-    expect(rider?.headingX).toBeCloseTo(frame.camera.headingX, 9);
-    expect(rider?.headingZ).toBeCloseTo(frame.camera.headingZ, 9);
+    // ⚠️ **The rider no longer faces the way the camera does — #1994.** Until
+    // then both were the road's tangent at the rider; the camera now looks at
+    // the road 25 m up the route, which here is round the corner, so it is
+    // turned from the rider's heading TOWARD the bot's side of the corner.
+    const cross = (a: { headingX: number; headingZ: number } | undefined, b: typeof a): number =>
+      (a?.headingX ?? 0) * (b?.headingZ ?? 0) - (a?.headingZ ?? 0) * (b?.headingX ?? 0);
+    expect(Math.abs(cross(rider, frame.camera))).toBeGreaterThan(0.1);
+    expect(Math.sign(cross(rider, frame.camera))).toBe(Math.sign(cross(rider, bot)));
     // The bot is round the corner and faces ninety degrees away.
     const between =
       (rider?.headingX ?? 0) * (bot?.headingX ?? 0) + (rider?.headingZ ?? 0) * (bot?.headingZ ?? 0);

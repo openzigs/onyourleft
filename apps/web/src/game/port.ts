@@ -62,16 +62,42 @@ import type { WorldStyle } from './world';
  */
 export interface CameraPose {
   /**
-   * The rider's position on the road — ⚠️ since #499 on their LINE, moved
-   * across the road with them (`scene.ts` §`cameraPose`), so the rider stays
-   * in the middle of the frame where `camera.ts` §`riderFrameBox` puts them.
+   * The point the eye stands `CAMERA_BEHIND_METRES` behind, along the heading.
+   *
+   * On a straight it is the rider's position on the road — ⚠️ since #499 on
+   * their LINE, moved across the road with them (`scene.ts` §`cameraPose`), so
+   * the rider stays in the middle of the frame where `camera.ts`
+   * §`riderFrameBox` puts them. ⚠️ **In a bend it is not the rider since
+   * #1994**: the eye stays straight back from the rider along the road's
+   * tangent, the camera looks from there at the road ahead, and this is the
+   * point on that sight line. `scene.ts` §`chaseRider` is the rider.
    */
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  /** Which way the rider is facing, as a unit vector in the ground plane. */
+  /**
+   * Which way the camera LOOKS, as a unit vector in the ground plane: from the
+   * eye toward the point on the road it looks at (`scene.ts` §`cameraPose`).
+   *
+   * ⚠️ **Not the road's tangent at the rider since #1994**, and a reviewer who
+   * remembers it as "which way the rider is facing" is reading the old file.
+   * On a straight the two are the same; in a bend this one points through the
+   * bend at the road ahead, and `GameView` damps it from frame to frame
+   * (`camera.ts` §`dampedHeading`, §`turnedPose`). A marker's own front is
+   * {@link RiderMarker.headingX}, never this.
+   */
   readonly headingX: number;
   readonly headingZ: number;
+  /**
+   * How far past {@link x}/{@link z}, over the ground along the heading, the
+   * camera's target is — #1994: the point on the road it looks at, which is
+   * `CAMERA_TARGET_AHEAD_METRES` up the route on a straight and nearer in a
+   * bend (`scene.ts` §`cameraPose` says how much nearer, and why).
+   *
+   * Required for {@link eyeRoadY}'s reason: a pose that left it out would
+   * compile and aim every bend's camera past the road into the field.
+   */
+  readonly targetAheadMetres: number;
   /**
    * The road's height under the CAMERA — `CAMERA_BEHIND_METRES` back along the
    * route from the rider — #424.
@@ -85,7 +111,7 @@ export interface CameraPose {
    * heights are for.
    */
   readonly eyeRoadY: number;
-  /** The road's height where the camera LOOKS, `CAMERA_TARGET_AHEAD_METRES` up the route. */
+  /** The road's height where the camera LOOKS, `CAMERA_TARGET_AHEAD_METRES` up the route. @see targetAheadMetres */
   readonly targetRoadY: number;
 }
 
@@ -130,11 +156,11 @@ export interface RiderMarker {
    * obviously wrong thing this frame could carry.
    *
    * ⚠️ Taken from the corridor by `scene.ts`, at the marker's **own** distance,
-   * rather than from {@link CameraPose.headingX} — the two agree for the rider
-   * by construction and cannot for the bot or the ghost, which are somewhere
-   * else on the road and may be round a bend. Reading the camera's heading here
-   * would be correct today and silently wrong the day anything but the rider
-   * grows a front.
+   * rather than from {@link CameraPose.headingX} — the two agreed for the rider
+   * until #1994 and do not in a bend now, where the camera looks through the
+   * bend at the road ahead while the bicycle points along the road it is on.
+   * The bot and the ghost were always elsewhere on the road, round a bend of
+   * their own.
    */
   readonly headingX: number;
   readonly headingZ: number;

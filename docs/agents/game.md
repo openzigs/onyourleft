@@ -143,7 +143,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pacer 50 m ahead stays put on a 20 % hill where a level
                         gaze put it behind the rider's back. Since #783
                         `projectToFrame` restates the renderer's camera
-                        without `three`, for the names below
+                        without `three`, for the names below. ⚠️ Since #1994
+                        it LOOKS AT THE ROAD through a bend (`scene.ts`
+                        §`cameraPose`: up to 25 m up the route, nearer where
+                        that would push the rider past 20° off the axis) from
+                        the eye it always had, so in a bend the pose's x/z are
+                        not the rider; `GameView` damps its heading
+                        (`dampedHeading`, frame-rate independent, slower under
+                        reduced motion); `chase-camera-bend.test.ts` rides it
     src/game/name-tags.ts
                         other riders' names on the road (#783): DOM laid over
                         the world, so no draw call and no triangle in either

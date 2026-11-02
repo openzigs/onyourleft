@@ -607,20 +607,29 @@ describe('a pacer or ghost just behind a steered rider, in front of the camera �
 });
 
 describe('the camera follows the rider across the road — #499', () => {
-  it('stands where the rider is, sideways as well as along', () => {
+  // ⚠️ **The EYE, since #1994.** Until then these held the pose's `x`/`z` to
+  // the rider; the camera now looks at the road through a bend, and its pose
+  // is the point on that sight line `CAMERA_BEHIND_METRES` past the eye
+  // (`scene.ts` §`cameraPose`), which is the rider only on a straight. What
+  // #499 asked — the camera moved across the road with the rider — is where
+  // the eye stands: straight back from the rider along the road there.
+  it('stands its eye behind the rider, sideways as well as along', () => {
     for (const at of [300, 390, APEX, 470]) {
       const frame = frameOf(hairpin, stateAt(hairpin, at, 8));
       const rider = markerOf(frame, 'rider');
-      expect(frame.camera.x).toBeCloseTo(rider.x, 9);
-      expect(frame.camera.z).toBeCloseTo(rider.z, 9);
+      const eye = cameraRig(frame.camera).eye;
+      expect(eye.x).toBeCloseTo(rider.x - rider.headingX * CAMERA_BEHIND_METRES, 9);
+      expect(eye.z).toBeCloseTo(rider.z - rider.headingZ * CAMERA_BEHIND_METRES, 9);
     }
   });
 
-  it('stays on the centreline with the line switched off', () => {
+  it('stands it behind the centreline with the line switched off', () => {
     const frame = frameOf(hairpin, stateAt(hairpin, APEX, 8), { centreline: true });
     const centre = centreAt(frame, APEX);
-    expect(frame.camera.x).toBeCloseTo(centre.x, 6);
-    expect(frame.camera.z).toBeCloseTo(centre.z, 6);
+    const rider = markerOf(frame, 'rider');
+    const eye = cameraRig(frame.camera).eye;
+    expect(eye.x).toBeCloseTo(centre.x - rider.headingX * CAMERA_BEHIND_METRES, 6);
+    expect(eye.z).toBeCloseTo(centre.z - rider.headingZ * CAMERA_BEHIND_METRES, 6);
   });
 
   it('moves across smoothly: never more than 30 cm in a metre of road', () => {

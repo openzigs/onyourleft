@@ -78,6 +78,7 @@ import type { KitColour } from '@onyourleft/store';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
   NEAR_PLANE_METRES,
   cameraRig,
   verticalHalfTangent,
@@ -12247,6 +12248,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
         headingZ: SHADOW_HEADING_SHARE * rider.headingZ,
         eyeRoadY: rider.y + SHADOW_ALTITUDE_METRES - CAMERA_ABOVE_METRES,
         targetRoadY: rider.y,
+        targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
       },
     };
     // `inTheFrame`'s projection, with the right-hand vector normalised: it

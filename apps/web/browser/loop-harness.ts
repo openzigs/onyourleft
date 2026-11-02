@@ -88,7 +88,11 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import { CAMERA_ABOVE_METRES, verticalHalfTangent } from '../src/game/camera';
+import {
+  CAMERA_ABOVE_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
+  verticalHalfTangent,
+} from '../src/game/camera';
 import type { SceneFrame } from '../src/game/port';
 import { qualitySettings } from '../src/game/quality';
 import { cameraPose, sceneFrame } from '../src/game/scene';
@@ -287,6 +291,7 @@ function startFromAboveFrame(profile: RouteProfile): SceneFrame {
       headingZ: 0,
       eyeRoadY: over.y + ABOVE_METRES - CAMERA_ABOVE_METRES,
       targetRoadY: over.y,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
     },
   };
 }
