@@ -44,11 +44,14 @@
  * village's is straight). Its mouth is cut along the main road's edge, so it
  * neither covers the carriageway nor leaves a gap. It stands
  * {@link SIDE_ROAD_LIFT_METRES} above the ground (`landform.ts`
- * §`terrainHeightAt`), and leaves the main road's height over
- * {@link SIDE_ROAD_RAMP_METRES} rather than dropping the verge's 0.25 m at
- * once, with a skirt down to the ground along that stretch. ⚠️ **It fades by
- * going under the ground**: over its last {@link SIDE_ROAD_FADE_METRES} it
- * sinks to {@link SIDE_ROAD_SINK_METRES} below it, and the ground covers it —
+ * §`terrainHeightAt`), and blends from the main road's height to the ground's
+ * over {@link SIDE_ROAD_RAMP_METRES} rather than dropping the verge's 0.25 m at
+ * once, with a skirt down to the ground along that stretch; past it, it
+ * follows the ground wherever the ground goes — never held level over ground
+ * falling away (#1993). ⚠️ **It fades by narrowing and going under the
+ * ground**: over its last {@link SIDE_ROAD_FADE_METRES} it narrows to
+ * {@link SIDE_ROAD_END_WIDTH_SHARE} of its width and sinks to
+ * {@link SIDE_ROAD_SINK_METRES} below it, and the ground covers it —
  * no transparency, so it costs no sorting and shares the road's own material
  * (`three-renderer.ts` §`SideRoadBelt`): the photograph, #628's wear and
  * the stylised road's grain, with no texture of its own. A **give-way line**
@@ -79,7 +82,7 @@ import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/dom
 import type { StreetFeature } from '@onyourleft/map-features';
 
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
-import { terrainHeightAt, VERGE_DROP_METRES } from './landform';
+import { terrainHeightAt } from './landform';
 import { nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
 import type { ScatterItem } from './scatter';
 import {
@@ -137,6 +140,13 @@ export const SIDE_ROAD_FADE_METRES = 20;
 
 /** How far below the ground a side road's far end is, in metres: **0.3**. */
 export const SIDE_ROAD_SINK_METRES = 0.3;
+
+/**
+ * The share of its width a side road's far end is drawn at: **0.25** — #1993.
+ * It narrows to it over its last {@link SIDE_ROAD_FADE_METRES} as it sinks,
+ * so it tapers into the ground rather than stopping square.
+ */
+export const SIDE_ROAD_END_WIDTH_SHARE = 0.25;
 
 /** A side road's width class, from its mapped `kind` and `kind_detail`. */
 export type WidthClass = 'highway' | 'major' | 'minor' | 'service';
@@ -661,13 +671,30 @@ function lineMetres(line: Float32Array): number {
   return total;
 }
 
+/** How far through its fade a side road is `out` metres from its mouth: `0` before it, `1` at its end. */
+function fadingAt(out: number): number {
+  return (out - (SIDE_ROAD_METRES - SIDE_ROAD_FADE_METRES)) / SIDE_ROAD_FADE_METRES;
+}
+
+/** `0` at `0`, `1` at `1`, level at both ends: the smoothstep of `share`, clamped. */
+function smooth(share: number): number {
+  const s = Math.min(1, Math.max(0, share));
+  return s * s * (3 - 2 * s);
+}
+
 /**
- * The height a side road's vertex stands at: the ground under it and the
- * lift, never under the main road's height less the verge's drop spread over
- * {@link SIDE_ROAD_RAMP_METRES}, and sunk over the last
- * {@link SIDE_ROAD_FADE_METRES}. `out` is how far from the mouth. The ground
- * is read with the ride's `land` mask, so under mapped built-up land the side
- * road stands on #1547's levelled ground, as the mesh beneath it does.
+ * The height a side road's vertex stands at, the lift above: the main road's
+ * height blending to the ground's across {@link SIDE_ROAD_RAMP_METRES} out
+ * from the road's edge, then the ground's, and sunk below it over the last
+ * {@link SIDE_ROAD_FADE_METRES}. `out` is how far from the mouth.
+ *
+ * ⚠️ **A blend, never a `max` — #1993.** A floor of the road's height less the
+ * verge's drop held an arm level over ground falling away beside the road,
+ * and its fade, read from the ground, then dropped it as a curtain. Both ends
+ * of each blend are where the stretch before it left off, so there is no step
+ * anywhere along an arm. The ground is read with the ride's `land` mask, so
+ * under mapped built-up land the side road stands on #1547's levelled ground,
+ * as the mesh beneath it does.
  */
 function heightAt(
   profile: RouteProfile,
@@ -682,22 +709,10 @@ function heightAt(
   if (near === undefined) return { y: SIDE_ROAD_LIFT_METRES, ground: 0 };
   const ground = terrainHeightAt(profile, origin, seed, near.along, near.lateral, land);
   const road = elevationAt(profile, distanceOnRoute(profile, near.along)) - origin.elevation;
-  const ramp = Math.min(
-    1,
-    Math.max(0, (Math.abs(near.lateral) - ROAD_HALF_WIDTH_METRES) / SIDE_ROAD_RAMP_METRES),
-  );
-  let y = Math.max(
-    ground + SIDE_ROAD_LIFT_METRES,
-    road + SIDE_ROAD_LIFT_METRES - VERGE_DROP_METRES * ramp,
-  );
-  const fading = (out - (SIDE_ROAD_METRES - SIDE_ROAD_FADE_METRES)) / SIDE_ROAD_FADE_METRES;
-  if (fading > 0) {
-    const share = Math.min(1, fading);
-    y =
-      ground +
-      SIDE_ROAD_LIFT_METRES -
-      (SIDE_ROAD_LIFT_METRES + SIDE_ROAD_SINK_METRES) * share * share * (3 - 2 * share);
-  }
+  const ramp = smooth((Math.abs(near.lateral) - ROAD_HALF_WIDTH_METRES) / SIDE_ROAD_RAMP_METRES);
+  const standing = road + (ground - road) * ramp + SIDE_ROAD_LIFT_METRES;
+  const sunk = ground - SIDE_ROAD_SINK_METRES;
+  const y = standing + (sunk - standing) * smooth(fadingAt(out));
   return { y, ground };
 }
 
@@ -775,15 +790,17 @@ function armMesh(
     r?: { x: number; z: number },
   ): Row => {
     const [ax, az] = acrossOf(station);
-    const lx = l?.x ?? station.x - ax * half;
-    const lz = l?.z ?? station.z - az * half;
-    const rx = r?.x ?? station.x + ax * half;
-    const rz = r?.z ?? station.z + az * half;
+    // Narrowing to its end's share over the fade, as it sinks — #1993.
+    const halfHere = half * (1 - (1 - SIDE_ROAD_END_WIDTH_SHARE) * smooth(fadingAt(out)));
+    const lx = l?.x ?? station.x - ax * halfHere;
+    const lz = l?.z ?? station.z - az * halfHere;
+    const rx = r?.x ?? station.x + ax * halfHere;
+    const rz = r?.z ?? station.z + az * halfHere;
     const lh = heightAt(profile, origin, seed, lx, lz, out, land);
     const rh = heightAt(profile, origin, seed, rx, rz, out, land);
     return {
-      l: mesh.vertex(lx, lh.y, lz, TARMAC, -half),
-      r: mesh.vertex(rx, rh.y, rz, TARMAC, half),
+      l: mesh.vertex(lx, lh.y, lz, TARMAC, -halfHere),
+      r: mesh.vertex(rx, rh.y, rz, TARMAC, halfHere),
       out,
       station,
     };

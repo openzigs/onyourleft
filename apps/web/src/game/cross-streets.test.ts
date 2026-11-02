@@ -17,6 +17,7 @@ import {
   JUNCTION_TOLERANCE_METRES,
   mappedJunctions,
   onSideRoad,
+  SIDE_ROAD_END_WIDTH_SHARE,
   SIDE_ROAD_FADE_METRES,
   SIDE_ROAD_FRAME_TRIANGLES,
   SIDE_ROAD_LIFT_METRES,
@@ -455,6 +456,86 @@ describe('what a side road is — #1565', () => {
         expect(y - ground).toBeCloseTo(-SIDE_ROAD_SINK_METRES, 2);
       }
     }
+  });
+
+  it('follows ground falling away beside the road, with no step, and tapers at its end — #1993', () => {
+    // A 6 % climb: the ground beside it takes a cross-slope (`landform.ts`
+    // §`CROSS_SLOPE_PER_GRADE`), up one side and down the other, so one arm of
+    // a crossroads runs over ground falling away from the road.
+    const climb = northRoute(3_000, (along) => 40 + 0.06 * along);
+    const origin = corridorOrigin(climb);
+    const seed = scatterSeed(climb);
+    const at = 1_500;
+    const junctions = mappedJunctions(
+      corridorOf([across(at, 120, 'major_road', 'ground', climb)], () => true, origin),
+      climb,
+      origin,
+      seed,
+    );
+    const drawn = sideRoadsAt(climb, origin, seed, at - 100, at + 100, at, junctions).filter(
+      (road) => road.junction.source === 'mapped',
+    );
+    expect(drawn).toHaveLength(1);
+    const crossing = drawn[0] as SideRoad;
+    const here = roadAt(crossing.junction.along, climb);
+    const half = SIDE_ROAD_WIDTHS.major / 2;
+    let falling = 0;
+    type Vertex = { out: number; y: number; ground: number; across: number };
+    for (const side of [1, -1] as const) {
+      // Each edge of the arm, from the mouth out.
+      const edges = new Map<1 | -1, Vertex[]>([
+        [1, []],
+        [-1, []],
+      ]);
+      for (const [x, y, z] of tarmac(crossing)) {
+        const lateral = (x - here.x) * here.normalX + (z - here.z) * here.normalZ;
+        if (lateral * side <= 0) continue;
+        const along = (x - here.x) * here.forwardX + (z - here.z) * here.forwardZ;
+        const ground = terrainHeightAt(
+          climb,
+          origin,
+          seed,
+          crossing.junction.along + along,
+          lateral,
+          NO_LAND_CLASS,
+        );
+        const out = Math.abs(lateral) - 3.5;
+        edges.get(along >= 0 ? 1 : -1)?.push({ out, y, ground, across: along });
+        // Near the mouth it is still coming down from the road's height, over the verge's drop.
+        if (out > 0.01 && out < SIDE_ROAD_RAMP_METRES / 2) {
+          expect(y - ground).toBeGreaterThan(SIDE_ROAD_LIFT_METRES + 0.05);
+        }
+        // Past the ramp and before the fade: ON the ground, never held level over it.
+        if (out > SIDE_ROAD_RAMP_METRES && out <= SIDE_ROAD_METRES - SIDE_ROAD_FADE_METRES) {
+          expect(y - ground).toBeCloseTo(SIDE_ROAD_LIFT_METRES, 2);
+          const road = 40 + 0.06 * (at + along) - origin.elevation;
+          if (road - ground > 2) falling += 1;
+        }
+      }
+      for (const edge of edges.values()) {
+        edge.sort((a, b) => a.out - b.out);
+        const last = edge.at(-1) as Vertex;
+        // Non-vacuity: the edge runs the arm's whole length.
+        expect(last.out).toBeCloseTo(SIDE_ROAD_METRES, 0);
+        // No vertical step: from one row to the next it rises or falls little more than the ground does.
+        for (let index = 1; index < edge.length; index += 1) {
+          const a = edge[index - 1] as Vertex;
+          const b = edge[index] as Vertex;
+          expect(Math.abs(b.y - a.y)).toBeLessThan(Math.abs(b.ground - a.ground) + 0.15);
+        }
+        // Full width until the fade, and a quarter of it at the far end.
+        for (const { out, across } of edge) {
+          if (out < SIDE_ROAD_METRES - SIDE_ROAD_FADE_METRES) {
+            expect(Math.abs(across)).toBeCloseTo(half, 2);
+          }
+        }
+        expect(Math.abs(last.across)).toBeCloseTo(half * SIDE_ROAD_END_WIDTH_SHARE, 2);
+        // And under the ground there, by its sink.
+        expect(last.y - last.ground).toBeCloseTo(-SIDE_ROAD_SINK_METRES, 2);
+      }
+    }
+    // Non-vacuity: the ground really falls away beside one arm, by more than two metres.
+    expect(falling).toBeGreaterThan(0);
   });
 
   it('stands on #1547’s levelled ground under mapped built-up land, not the unlevelled relief', () => {
