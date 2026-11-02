@@ -289,7 +289,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         negative side" did, and a test that measured the old
                         drawing now rides the MIRRORED fixture
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
-                        its digests to the digit
+                        its digests to the digit. ⚠️ **Since #1995 a rider
+                        FACES the line, not the road**: `RiderMarker.headingX`
+                        points from the drawn rear wheel to the front wheel
+                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
+                        off the road (`facingTurn`), so a rider crossing it no
+                        longer slides sideways and never turns in a step. Measure across the road
+                        with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
                         from `world.ts`'s ONE sun, never a second light
@@ -583,7 +589,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         as well). ⚠️ Since #617's review only
                         trees the CAMERA can see are ranked
                         (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
-                        the camera used to take the one full slot — and
+                        the camera used to take the one full slot — and, since
+                        #545, not one faded to nothing within
+                        `NEAR_TREE_FADE_METRES` of the eye
+                        (`near-tree-fade.ts`), and
                         `TreeHandOver` paces each tree's move between levels
                         inside the same slots, because a swap of ranks is
                         continuous and the ranked SET changing is not; the

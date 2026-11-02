@@ -11,6 +11,7 @@ import {
   DEFAULT_CONFIG,
   facadeTrimsWithLevers,
   firPrepassWithLevers,
+  nearTreeFadeWithLevers,
   archetypePorchesWithLevers,
   commercialArchetypesWithLevers,
   dormerVariantsWithLevers,
@@ -490,6 +491,21 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(() => parseConfig('?levers=-unprepared')).toThrow(/levers is a comma-separated list/);
     expect(configQuery(parseConfig('?levers=-fir-prepass'))).toBe(
       `?levers=${encodeURIComponent('-fir-prepass')}`,
+    );
+  });
+
+  it('fades the trees near the camera, as the product does, unless its #545 lever is off', () => {
+    expect(LEVERS).toContain('near-tree-fade');
+    // No lever is the product, and no OTHER lever touches the fade.
+    expect(nearTreeFadeWithLevers([])).toBe('fade');
+    expect(
+      nearTreeFadeWithLevers(parseConfig('?levers=-fir-prepass,-generated-trees').leversOff),
+    ).toBe('fade');
+    expect(nearTreeFadeWithLevers(parseConfig('?levers=-near-tree-fade').leversOff)).toBe('off');
+    // The gate's pop control is never a URL's to ask for.
+    expect(() => parseConfig('?levers=-cut')).toThrow(/levers is a comma-separated list/);
+    expect(configQuery(parseConfig('?levers=-near-tree-fade'))).toBe(
+      `?levers=${encodeURIComponent('-near-tree-fade')}`,
     );
   });
 

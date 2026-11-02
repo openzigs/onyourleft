@@ -32,6 +32,8 @@
 
 import type { GeographicPosition } from '@onyourleft/domain';
 import {
+  BUILDING_FIELD_NAMES,
+  BUILDING_FIELD_RULES,
   corridorTileCover,
   decodeTile,
   describeRefusal,
@@ -39,6 +41,8 @@ import {
   tileBox,
   type Box,
   type BuildingFeature,
+  type BuildingFieldName,
+  type BuildingFields,
   type CorridorFrame,
   type DecodeRefusal,
   type LandUseFeature,
@@ -76,12 +80,14 @@ export const READ_TIMEOUT_MS = 120_000;
  * by an older reader is read again rather than trusted (`records.ts`
  * §`WorldCorridorRecord.readerVersion`). **2** since #1565, which keeps the
  * streets a version-1 record never decoded; **3** since #1632 (ADR 0055
- * D-6.2), which keeps the place points a version-2 record never decoded. The
- * port trusts a record only at exactly this version, so a version-2 row is
- * read again here, and a version-3 row met by version-2 code is read again
- * there, never decoded as its own.
+ * D-6.2), which keeps the place points a version-2 record never decoded;
+ * **4** since #1789 (ADR 0054's entry of 2026-11-01), which keeps the twelve
+ * building fields a version-3 record never decoded. The port trusts a record
+ * only at exactly this version, so a version-3 row is read again here, and a
+ * version-4 row met by version-3 code is read again there, never decoded as
+ * its own: that is #1789's rollback, and there is no Dexie schema change.
  */
-export const CORRIDOR_READER_VERSION = 3;
+export const CORRIDOR_READER_VERSION = 4;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -518,8 +524,72 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
 /** Centimetres: far finer than a drawn edge, and half the bytes of float32 text. */
 const PACK_SCALE = 100;
 
-/** The packed format's version: 2 since #1565 added the streets, 3 since #1632 added the places. */
-const PACKED_VERSION = 3;
+/**
+ * The packed format's version: 2 since #1565 added the streets, 3 since #1632
+ * added the places, 4 since #1789 added the building fields.
+ */
+const PACKED_VERSION = 4;
+
+/**
+ * #1789: each building field's name in the packed format, short because a
+ * corridor holds thousands of footprints. A building packs a `b` object of the
+ * fields that are not `null` and no `b` at all when every one is, so a corridor
+ * read from an archive that carries none (Protomaps' own build) packs as it
+ * did at version 3 but for its `v`.
+ */
+const PACKED_BUILDING_FIELDS: Readonly<Record<BuildingFieldName, string>> = {
+  buildingType: 't',
+  levels: 'l',
+  roofLevels: 'rl',
+  roofShape: 'rs',
+  roofOrientation: 'ro',
+  roofDirectionDegrees: 'rd',
+  wallColour: 'wc',
+  roofColour: 'rc',
+  wallMaterial: 'wm',
+  roofMaterial: 'rm',
+  startYear: 'y',
+  landmark: 'lm',
+};
+
+/** A building's non-`null` fields, by their packed names; `undefined` when there are none. */
+function packedBuildingFields(
+  building: BuildingFields,
+): Readonly<Record<string, string | number>> | undefined {
+  let out: Record<string, string | number> | undefined;
+  for (const name of BUILDING_FIELD_NAMES) {
+    const value = building[name];
+    if (value === null) continue;
+    out ??= {};
+    out[PACKED_BUILDING_FIELDS[name]] = value;
+  }
+  return out;
+}
+
+/**
+ * A building's fields from its packed `b`. Each value is held to its rule
+ * again — an enum to the decoder's own list, a number to a finite number —
+ * and anything else is `null`, so a blob edited on the device cannot put a
+ * string into the plan.
+ */
+function buildingFieldsOfPacked(
+  packed: Readonly<Record<string, unknown>> | undefined,
+): BuildingFields {
+  const out: Record<string, string | number | null> = {};
+  for (const name of BUILDING_FIELD_NAMES) {
+    const value = packed?.[PACKED_BUILDING_FIELDS[name]];
+    const rule = BUILDING_FIELD_RULES[name];
+    out[name] =
+      rule.kind === 'enum'
+        ? (rule.values as readonly unknown[]).includes(value)
+          ? (value as string)
+          : null
+        : typeof value === 'number' && Number.isFinite(value)
+          ? value
+          : null;
+  }
+  return out as unknown as BuildingFields;
+}
 
 interface PackedFeatures {
   readonly v: typeof PACKED_VERSION;
@@ -528,6 +598,8 @@ interface PackedFeatures {
     kind: 'building' | 'building_part';
     h: number | null;
     mh: number | null;
+    /** #1789: the building fields that are not `null`, by their packed names. */
+    b?: Readonly<Record<string, string | number>>;
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
@@ -613,12 +685,16 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
       kind: f.kind,
       rings: f.rings.map(toInts),
     })),
-    buildings: features.buildings.map((f) => ({
-      kind: f.kind,
-      h: f.heightMetres,
-      mh: f.minHeightMetres,
-      rings: f.rings.map(toInts),
-    })),
+    buildings: features.buildings.map((f) => {
+      const fields = packedBuildingFields(f);
+      return {
+        kind: f.kind,
+        h: f.heightMetres,
+        mh: f.minHeightMetres,
+        ...(fields === undefined ? {} : { b: fields }),
+        rings: f.rings.map(toInts),
+      };
+    }),
     paths: features.paths.map((f) => ({
       kind: f.kind,
       detail: f.kindDetail,
@@ -669,6 +745,7 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       kind: f.kind,
       heightMetres: f.h,
       minHeightMetres: f.mh,
+      ...buildingFieldsOfPacked(f.b),
       rings: f.rings.map(fromInts),
     })),
     paths: packed.paths.map((f) => ({

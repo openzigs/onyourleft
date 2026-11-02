@@ -15,8 +15,18 @@ import {
   unixSeconds,
   type GeographicPosition,
 } from '@onyourleft/domain';
-import { corridorTileCover, tileBounds, type TileId } from '@onyourleft/map-features';
 import {
+  BUILDING_FIELD_NAMES,
+  corridorTileCover,
+  NO_BUILDING_FIELDS,
+  tileBounds,
+  type BuildingFeature,
+  type TileId,
+} from '@onyourleft/map-features';
+import {
+  BUILDING_FIELDS_DECODED,
+  BUILDING_PART_FIELDS_DECODED,
+  buildingFieldsTile,
   FIXTURE_FRAME,
   FIXTURE_TILE,
   HOSTILE_FIXTURES,
@@ -36,9 +46,11 @@ import {
   CORRIDOR_HALF_WIDTH_METRES,
   CORRIDOR_MAX_TILES,
   corridorStateText,
+  corridorFeaturesOfPacked,
   coveredLookup,
   describeCorridorFailure,
   packCorridorFeatures,
+  packedCorridorFeatures,
   planCorridor,
   readCorridorTiles,
   tileTouchesZone,
@@ -503,6 +515,72 @@ describe('packing', () => {
       expect(Math.abs(place.x - (before?.x ?? Number.NaN))).toBeLessThanOrEqual(0.005 + 1e-3);
       expect(Math.abs(place.z - (before?.z ?? Number.NaN))).toBeLessThanOrEqual(0.005 + 1e-3);
     });
+  });
+
+  it('keeps every building field through the pack, and packs none for a footprint with none (#1789)', async () => {
+    const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
+    const outcome = await read(plan, memoryArchive(() => buildingFieldsTile()).archive);
+    if (outcome.kind !== 'read') throw new Error(outcome.kind);
+    const fieldsOf = (building: BuildingFeature) =>
+      Object.fromEntries(BUILDING_FIELD_NAMES.map((name) => [name, building[name]]));
+    const tiles = outcome.features.buildings.length / 3;
+    expect(tiles).toBeGreaterThan(1);
+    const back = await unpackCorridorFeatures(await packCorridorFeatures(outcome.features));
+    expect(back.buildings.map(fieldsOf)).toStrictEqual(
+      Array.from({ length: tiles }).flatMap(() => [
+        BUILDING_FIELDS_DECODED,
+        BUILDING_PART_FIELDS_DECODED,
+        NO_BUILDING_FIELDS,
+      ]),
+    );
+    // A footprint with no field set packs as it did at version 3: no `b`.
+    const packed = packedCorridorFeatures(outcome.features);
+    expect(packed.buildings.map((building) => 'b' in building).slice(0, 3)).toStrictEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(packed.v).toBe(4);
+  });
+
+  it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
+    const back = corridorFeaturesOfPacked({
+      v: packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] })
+        .v,
+      landUse: [],
+      buildings: [
+        {
+          kind: 'building',
+          h: null,
+          mh: null,
+          b: { t: 'zz_not_listed', l: '3', rs: 'gabled', y: 1890, wc: Number.NaN },
+          rings: [],
+        },
+      ],
+      paths: [],
+      streets: [],
+      places: [],
+    });
+    const building = back.buildings[0] as BuildingFeature;
+    expect([
+      building.buildingType,
+      building.levels,
+      building.roofShape,
+      building.startYear,
+      building.wallColour,
+      building.landmark,
+    ]).toStrictEqual([null, null, 'gabled', 1890, null, null]);
+  });
+
+  it('refuses a blob of the reader before the building fields (#1789)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 3, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
   });
 
   it('refuses a blob of the reader before places (#1632)', async () => {
