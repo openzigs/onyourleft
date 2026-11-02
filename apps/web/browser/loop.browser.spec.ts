@@ -50,8 +50,18 @@ const BROKEN_BEYOND = 0.15;
  * 52.7 %: #543's mean gives the jump and the jog the same heading at the line.
  * {@link MAXIMUM_CORRIDOR_JOINT_DEGREES}, read from above, is the check that
  * does.
+ *
+ * ⚠️ **Twice {@link CENTRED_WITHIN} since #1994, and that is the camera, not
+ * the line or the road.** The chase camera now looks at the road up the
+ * ROUTE (`scene.ts` §`cameraPose`), which at this start is round the
+ * closing segment's 12 m jog, so the far road beyond it sits further off the
+ * middle: **57.4 %** on #1994's pull request, against 52.5 % when the camera
+ * looked straight on. The bound still sits under the 15 % the control's
+ * camera looking across the road reads ({@link BROKEN_BEYOND}), and the row
+ * check below is unchanged. A change to the line or the road that moves the
+ * reading is still one to re-measure here rather than a bound to widen.
  */
-const DRAWN_CENTRED_WITHIN = CENTRED_WITHIN;
+const DRAWN_CENTRED_WITHIN = 2 * CENTRED_WITHIN;
 
 async function measure(page: Page): Promise<LoopStartMeasurement> {
   const response = await page.goto('/loop.html');
