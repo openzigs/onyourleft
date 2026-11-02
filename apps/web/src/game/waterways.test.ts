@@ -39,6 +39,7 @@ import {
   northRoute,
   rollingRoute,
   steadyClimb,
+  steepValleyRoute,
   valleyRoute,
 } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -525,6 +526,64 @@ describe('the road is continuous across the bridge — #501', () => {
       sampled += worst.sampled;
     }
     expect(sampled).toBeGreaterThan(100);
+  });
+
+  /** The worst rise over every frame from the bridge 200 m ahead to the rider 40 m past it. */
+  function worstRiseRidingThrough(profile: RouteProfile): { rise: number; sampled: number } {
+    const crossing = waysOf(profile).crossings[0]?.distance ?? Number.NaN;
+    expect(crossing).toBeCloseTo(1_000, -1);
+    let rise = Number.NEGATIVE_INFINITY;
+    let sampled = 0;
+    // From where the bridge is past the corridor's two-metre rows
+    // (`terrain.ts` §`CORRIDOR_DENSE_AHEAD_METRES`) to the rider on it.
+    for (let rider = crossing - 200; rider <= crossing + 40; rider += 3) {
+      const worst = worstRise(profile, rider);
+      rise = Math.max(rise, worst.rise);
+      sampled += worst.sampled;
+    }
+    return { rise, sampled };
+  }
+
+  it('stands no part of a bridge above the road on a steep valley — #1997', () => {
+    // The owner's course: 12 % down into a valley and 10 % out, on the HUD,
+    // and 20 % over the last 40 m to the stream. The approach pieces are the
+    // tallest blocks — road to bed, 8.4 m at the outermost — and the renderer
+    // stands a block's height square to its sloping axis, so a block hung
+    // from its middle has its top face h/2·(sec θ − 1) higher than its
+    // middle: 8.3 cm at 20 %, 5.3 cm over the road once the 3 cm under it is
+    // spent. The 5 % and 12 % fixtures above are too gentle to show it.
+    const profile = steepValleyRoute();
+    const worst = worstRiseRidingThrough(profile);
+    expect(worst.rise).toBeLessThanOrEqual(0);
+    expect(worst.sampled).toBeGreaterThan(1_000);
+    // And hung from the road, each block under it still reaches a metre into
+    // the stream's bed at its middle, however steep: its height is square to
+    // its slope, so plumb it is that much shorter.
+    const [crossing] = waysOf(profile).crossings;
+    const bed =
+      (crossing?.waterElevation ?? 0) - STREAM_DEPTH_METRES - corridorOrigin(profile).elevation;
+    const blocks = frameAt(profile, (crossing?.distance ?? 0) - 50).water.bridges.filter(
+      (part) => part.width > ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 3,
+    );
+    expect(blocks.length).toBeGreaterThan(8);
+    for (const block of blocks) {
+      const plumb =
+        Math.hypot(block.axisX, block.axisZ) / Math.hypot(block.axisX, block.axisY, block.axisZ);
+      expect(block.y - (plumb * block.height) / 2).toBeCloseTo(bed - 1, 6);
+    }
+  });
+
+  it('stands no part of a bridge above the road DRAWN over a rough steep valley — #1997', () => {
+    // A real file's profile turns a corner every few samples, and the ribbon
+    // is drawn through rows two metres apart near the rider and a grid step
+    // apart past 150 m, neither of them on the profile's own corners: over a
+    // corner that crests, the drawn road is a chord BELOW the route's height,
+    // and a part placed at the route's height stood over it. Before #1997 the
+    // worst here was 23 cm with the bridge 194 m ahead, and 12 cm of it was
+    // this alone, with the blocks hung as the test above requires.
+    const worst = worstRiseRidingThrough(steepValleyRoute(0.3));
+    expect(worst.rise).toBeLessThanOrEqual(0);
+    expect(worst.sampled).toBeGreaterThan(1_000);
   });
 });
 

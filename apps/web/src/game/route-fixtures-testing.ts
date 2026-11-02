@@ -167,6 +167,28 @@ export function flatFloorValleyRoute(): RouteProfile {
 }
 
 /**
+ * A steep valley through a stream at **1 000 m** — #1997. Read over the 100 m
+ * a gradient is measured on, a 12 % descent into it and a 10 % climb out, as
+ * the owner's course read on the HUD; the last 40 m either side of the floor
+ * are **20 %**, which is where a road drops to a stream. 40 m of rise either
+ * side, and level beyond.
+ *
+ * `roughness` adds a step of that many metres up and down every 20 m, which
+ * is what a real file's elevation looks like after despiking: a corner in the
+ * profile every few samples, inside a bridge's span and its approaches. Zero
+ * is the smooth control.
+ */
+export function steepValleyRoute(roughness = 0): RouteProfile {
+  return northRoute(2_000, (along) => {
+    const out = Math.abs(along - 1_000);
+    const wall = along < 1_000 ? 0.12 : 0.1;
+    const rise = out < 40 ? out * 0.2 : 8 + (out - 40) * wall;
+    const step = Math.floor(along / 20) % 2 === 0 ? roughness : -roughness;
+    return Math.min(40, rise) + step;
+  });
+}
+
+/**
  * #459's lake fixture: a road that drops 30 m onto a **kilometre of level
  * valley floor** from 700 m to 1 700 m and climbs out again — a flat, low,
  * enclosed stretch, which is where a lake lies. The descents are too long and
