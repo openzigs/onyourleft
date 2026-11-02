@@ -95,6 +95,9 @@ Outer ring only, in metres, from the corridor's local frame.
   (`kind`, `kind_detail`). **Setback** below is that distance to the nearest road that is not `service` and not a motorway.
   ⚠️ **The nearest road is a `service` road for 26 to 92 % of small and large footprints alike** (a driveway, a
   parking aisle, the lane behind a shop), so a setback that includes `service` roads measures the footprint's own drive.
+  **The search radius is 150 m.** Every road within 150 m of the outline is found; the search collects whole 50 m grid
+  cells, so a farther road is sometimes found too, and a setback over 150 m (the barn's 248 m below) is such a road.
+  "None within 150 m" means the search found no road; every rule here treats it as a setback of 150 m.
 - **Land under it**: the product's own `land-class.ts` §`landClassMask` at the footprint's centroid and §`kindAt`, and
   `footprint-buildings.ts` §`footprintUse` of the two.
 - **Stretch class** at the footprint: the product's urban class of the 100 m window nearest its centroid.
@@ -114,8 +117,8 @@ farm line 20: the rules are validated on the town and suburb lines and **only de
 
 ### Quantisation
 
-A z15 tile carries coordinates in a grid of 4,096; one step is **about 0.23 to 0.24 m** at these latitudes. A vertex is
-therefore off by up to about 0.12 m, and the corner angle of a short wall by `atan(0.24 / length)`: more than 2° for a wall
+A z15 tile carries coordinates in a grid of 4,096; one step is **about 0.23 to 0.25 m** at these latitudes. A vertex is
+therefore off by up to about 0.12 m, and the corner angle of a short wall by `atan(0.25 / length)`: more than 2° for a wall
 under 6 m. Among untagged footprints with a short side under 5 m, **40 %** have every corner within 2° of a right angle;
 with a short side of 8 to 15 m, 66 %. **No threshold below about 3° means anything for a small building**, and none is
 used below.
@@ -126,7 +129,8 @@ A comparison that cannot fail is not a measurement, so each was run against a co
 
 - **Leave-one-out copy of a neighbour's type** (#2027): exact-type accuracy on the 4,347 mapped footprints is **97.6 %** with the
   labels as mapped (50 m, ±25 % area). With the labels **shuffled among the same footprints** it falls to **41.8 %**, the chance rate for a set dominated by `house`.
-- **The garage and shed rules' precision**: 332 of 386 mapped footprints they call garage or shed are one (86 %). With the labels shuffled,
+- **The garage and shed rules' precision**, run on the proposed pair together (shed 12 to 20 m², then garage 20 to 75 m²
+  with aspect ≤ 1.75; the "with the shed rule" column of the #2023 table): 332 of 386 mapped footprints they call garage or shed are one (86 %). With the labels shuffled,
   **44 of 386** are (11 %), the share of mapped footprints that are garages or sheds.
 
 ## Results
@@ -173,7 +177,7 @@ buildings (36 of 110 are on `commercial` land). **On the course 3 % of the untag
   0.95 rectangular, against 37 %.** The untagged are *more* rectangular than the mapped, which is what an imported,
   regularised outline looks like beside a hand-drawn one. The median untagged footprint on every corridor but the suburb
   line is 0.97 to 0.99 rectangular.
-- Within 5° of a right angle at every corner: **80 % of untagged against 71 % of mapped** (the course: 73 % against 37 %, on 54 mapped footprints, landmarks included).
+- Within 5° of a right angle at every corner: **80 % of untagged against 71 % of mapped** (the course: 73 % against 37 %, on 54 mapped footprints, landmarks included: the 55 of the corridor table less one outside the drawn 12 to 20,000 m²).
   Within 0.5°: 14 to 30 % of untagged by corridor. Quantisation (above) limits the small ones, so this is read as
   "square-cornered" and not as "traced".
 - **Consequence for the shape signals.** Rectangularity and corner count separate few footprints: most are clean rectangles
@@ -280,21 +284,23 @@ mapped sheds 95 % are under 75 m², 88 % within 40 m, 77 % farther back. Mapped 
 (they are half of a semi), against 1.21 for garages and 1.31 for sheds: **aspect, not rectangularity, separates them**, because a
 garage is 0.98 rectangular and so is a terrace.
 
-Each rule below is the issue's, then swept on the mapped footprints of the five corridors (the garage rule needs a shed
-rule above it, so both are scored together; a footprint under 12 m² is not drawn):
+Each rule below is the issue's, then swept on the mapped footprints of the five corridors. The garage rule runs below a
+shed rule (shed up to the garage rule's lower bound, garage from there), so a garage row is given two ways: the garage
+rule **alone**, and **with the shed rule** above it, which is what #2023 implements. The two shed rows are the shed rule
+alone. Recall is of the 492 drawn mapped garages and sheds; a footprint under 12 m² is not drawn.
 
-| Rule | of the mapped footprints it calls a garage or shed, how many are one | recall of mapped garages and sheds | mapped houses called one | untagged on the course (of 200) |
-|---|---|---|---|---|
-| shed under 20 m², anywhere | 30 of 47 (64 %); a shed 25, a garage 5, a house-like 16, other 1 | 32 % of drawn mapped sheds (25 of 78) | 16 of 3,554 | 2 |
-| garage under 75 m², aspect ≤ 1.5, rectangularity ≥ 0.9, a house-sized footprint within 40 m, farther back (as written) | 261 of 290 (90 %) | 59 % overall | 43 of 3,554 (1.2 %) | 9 |
-| the same with aspect ≤ 1.75 | 302 of 339 (89 %) | 67 % | 51 | 9 |
-| the same with aspect ≤ 2.0 | 319 of 377 (85 %) | 71 % | 72 | 9 |
-| shed under 25 m² | 60 of 84 (71 % garage-or-shed; 37 are sheds, 44 % by type) | 47 % of sheds | 23 | 3 |
-| garage under 90 m², aspect ≤ 1.75, shed under 25 | 301 of 356 (85 %) | 73 % | 76 | 13 |
-| the same without the "farther back" test | 329 of 426 (77 %) | 79 % | 118 | 17 |
+| Rule | precision, garage rule alone: of the mapped footprints it calls a garage, how many are a garage or shed | precision with the shed rule: of those the pair calls a garage or shed, how many are one | recall of mapped garages and sheds, with the shed rule | mapped houses called a garage or shed, with the shed rule (of 3,554) | untagged on the course (of 200), with the shed rule |
+|---|---|---|---|---|---|
+| shed under 20 m², anywhere (alone) | — | 30 of 47 (64 %); a shed 25, a garage 5, a house-like 16, other 1 | 6 % (30); 32 % of drawn mapped sheds (25 of 78) | 16 | 2 |
+| garage 20 to 75 m², aspect ≤ 1.5, rectangularity ≥ 0.9, a house-sized footprint within 40 m, farther back (as written), shed under 20 | 261 of 290 (90 %) | 291 of 337 (86 %) | 59 % (291) | 43 (1.2 %) | 11 (9 garages) |
+| **the same with aspect ≤ 1.75 (proposed)** | 302 of 339 (89 %) | **332 of 386 (86 %)** | **67 % (332)** | **51 (1.4 %)** | **11 (9 garages)** |
+| the same with aspect ≤ 2.0 | 319 of 377 (85 %) | 349 of 424 (82 %) | 71 % (349) | 72 (2.0 %) | 11 (9 garages) |
+| shed under 25 m² (alone) | — | 60 of 84 (71 % garage-or-shed; 37 are sheds, 44 % by type) | 12 % (60); 47 % of sheds | 23 | 3 |
+| garage 25 to 90 m², aspect ≤ 1.75, shed under 25 | 301 of 356 (85 %) | 361 of 440 (82 %) | 73 % (361) | 76 (2.1 %) | 13 (10 garages) |
+| the same without the "farther back" test | 329 of 426 (77 %) | 389 of 510 (76 %) | 79 % (389) | 118 (3.3 %) | 17 (14 garages) |
 
-The "farther back" test **earns its place**: removing it costs 8 points of precision and puts 42 more mapped houses in the
-garage column. The distance to a house-sized footprint (40 m) is not binding: the 90th percentile for mapped garages is 24 m.
+The "farther back" test **earns its place**: removing it costs about 7 points of the garage rule's precision (6 with the
+shed rule) and puts 42 more mapped houses in the garage column. The distance to a house-sized footprint (40 m) is not binding: the 90th percentile for mapped garages is 24 m.
 On the town line 243 of 4,221 untagged footprints (5.8 %) would become garages and 115 (2.7 %) sheds; on the course 11 of 200 (5.5 %), on the demo 5 of 81, on the farm line 6 of 324, on the suburb line 1 of 110.
 
 ⚠️ **The setback must be to a road that is not a `service` road.** For under-75 m² footprints the nearest road is a service
@@ -399,7 +405,7 @@ footprints (204, 4 of them under the draw floor) each rule would change, rule by
 | Issue | Rule | The issue says | Proposed | Why | On the course | Confidence |
 |---|---|---|---|---|---|---|
 | #2023 | shed | under 20 m² | **12 to 20 m²**, anywhere | 32 % of drawn mapped sheds are under 20 m²; precision 64 % as garage-or-shed, 53 % as a shed. Raising it to 25 m² recalls 47 % of sheds at 44 % precision | 2 | measured (n = 47 mapped) |
-| #2023 | garage | under 75 m², roughly square, within 40 m, farther back | **20 to 75 m², aspect ≤ 1.75, rectangularity ≥ 0.9, a house-sized (60 to 400 m²) footprint within 40 m, farther from the nearest non-service street than that footprint** | 89 % of 339 mapped footprints called garage or shed are one; 51 of 3,554 mapped houses (1.4 %) are called one; aspect ≤ 1.5 loses 8 points of recall for 1 of precision | 9 | measured |
+| #2023 | garage | under 75 m², roughly square, within 40 m, farther back | **20 to 75 m², aspect ≤ 1.75, rectangularity ≥ 0.9, a house-sized (60 to 400 m²) footprint within 40 m, farther from the nearest non-service street than that footprint** | with the shed rule above it, 86 % of the 386 mapped footprints the pair calls a garage or shed are one (the garage rule alone: 89 % of 339), and 51 of 3,554 mapped houses (1.4 %) are called one; aspect ≤ 1.5 loses 8 points of recall for under 1 of precision | 9 (11 with the shed rule) | measured |
 | #2024 | barn | 100 m² or more, rectangular, rural, behind a house | **`rural` stretch class only; 100 m² or more; rectangularity ≥ 0.9; a house-sized footprint within 80 m nearer the road; at least 40 m from the nearest non-service street**; pole building above 250 m² unchanged | without the setback test it fires on 22 of 200 untagged and on mapped houses; with it, 1 of 223 mapped houses passes | 10 (7 pole) | **unmeasured** (5 mapped barns) |
 | #2025 | manufactured home | aspect ≥ 3.5, short side 4 to 5.8 m, area 70 to 140 m² | **keep these, and add "no other footprint within 1.5 m"** | the numbers agree with 14 × 60 to 18 × 80 ft; without the isolation test 181 mapped row houses and semis pass in one corridor | **0** | thresholds measured, **rule unmeasured** (no mapped truth, no park in any corridor) |
 | #2026 | commercial | 300 m² or more, on a primary, secondary or tertiary street, village or town, or within 30 m of parking | **1,000 m² or more, within 50 m of a primary, secondary or tertiary street, `village` or `town` window; drop the parking half** | at 300 m² 61 to 70 % of the mapped footprints that pass are houses; at 1,000 m² none are, and 47 % are commercial | 2 | measured (34 mapped); parking **cannot be measured** |
@@ -415,8 +421,8 @@ the suburb line 29 of 110, and the town line 702 of 4,221.
   owner-approved before/after frames the epic asks of every rule. They are worth building only if the course changes or a different
   one is wanted; the data does not support spending the draw-call and triangle budget on them first.
 - **#2026's parking half should be dropped**, and its area line raised to 1,000 m². At 300 m² the rule turns mapped houses into shops.
-- **#2024 is the riskiest rule**: it is the only one that can turn a house into a barn (on the course 10 of 200) and its precision cannot be measured with five mapped barns.
-- **#2023 is the safest and the most useful** on the course (11 of 200), and the evidence for it is the strongest (339 mapped footprints).
+- **#2024 is the riskiest rule.** #2023 also turns mapped houses into something else (51 of 3,554 with the shed rule), but that rate is measured; #2024 would change 10 of 200 on the course and its precision cannot be measured with five mapped barns.
+- **#2023 is the safest and the most useful** on the course (11 of 200), and the evidence for it is the strongest (386 mapped footprints called a garage or shed).
 - **Farm buildings are largely not mapped in the three states tried** (3, 31 and 0 footprints on three 6 to 7 km lines, in Iowa, Wisconsin and Kansas). No rule helps there; it is a map-coverage finding, not a rule one.
 
 ## Could not confirm, and limits
@@ -424,9 +430,8 @@ the suburb line 29 of 110, and the town line 702 of 4,221.
 - **Streets GL's defaults for a missing tag** were not read (its source was not opened).
 - **Which build of the archive the course's stored corridor came from.** The record does not keep the archive's identity.
 - **Precision of every rule on untagged footprints.** Only mapped footprints are labelled; untagged ones are untagged because nobody tagged them, and a rule
-  validated on the tagged may not hold there. The two numbers that matter, #2023's 89 % and #2026's 47 %, are upper bounds in that sense.
-- **A mapped type in the course's own data** is 46 footprints (19 `house`, 7 `school`, 5 `church`, 3 each `warehouse`, `garage` and `retail`, 2 each `shed` and `commercial`, 1 each
-  `apartments` and `barn`), too few to validate any rule on; the course is only described.
+  validated on the tagged may not hold there. The two numbers that matter, #2023's 86 % (garage and shed rules together) and #2026's 47 %, are upper bounds in that sense.
+- **A mapped type in the course's own data** is 46 footprints, too few to validate any rule on; the course is only described.
 - **The seam-cut footprints** (59) were excluded without checking whether their other half was read.
 - **The stretch class** is the product's, built per 100 m of route; a footprint takes the class of the window nearest its centroid, as `footprint-buildings.ts` takes it from the nearest road.
 - **The three public lines are the ones chosen**, not a random draw of US places. They show how the numbers move between a town, a bulk-tagged suburb and a farm area, not what the US is like.
