@@ -7,7 +7,7 @@
  */
 
 import type { Metres, RouteProfile } from '@onyourleft/domain';
-import type { BuildingFeature } from '@onyourleft/map-features';
+import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 import { describe, expect, it } from 'vitest';
 
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
@@ -189,6 +189,7 @@ function uniformTownBeside(profile: RouteProfile) {
         kind: 'building',
         heightMetres: 6,
         minHeightMetres: null,
+        ...NO_BUILDING_FIELDS,
         rings: [ring(x, z, 10)],
       });
     }

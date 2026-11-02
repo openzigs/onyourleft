@@ -17,6 +17,8 @@ import {
   WIRE_VARINT,
 } from './protobuf';
 import {
+  BUILDING_FIELD_NAMES,
+  BUILDING_FIELD_RULES,
   BUILDING_KINDS,
   COORDINATE_BUFFER_EXTENTS,
   EARTH_LAYER,
@@ -45,10 +47,12 @@ import {
   READ_LAYERS,
   STREET_KINDS,
   GEOMETRY_LINE,
+  type BuildingFieldRule,
   type ReadLayer,
 } from './schema';
 import type {
   BuildingFeature,
+  BuildingFields,
   CorridorFrame,
   DecodedTile,
   DecodeRefusal,
@@ -83,9 +87,12 @@ import type {
  * Only the layers {@link READ_LAYERS} names are decoded; every other layer is
  * skipped by its length after its name is compared. Of those, only `kind`,
  * `kind_detail`, `height`, `min_height`, `is_bridge` and `is_tunnel` are ever
- * looked at — and in `places`, only `kind`, `kind_detail` and
- * `population_rank` (#1632, ADR 0055 D-3), so a place's name, `wikidata` or
- * `population` is never turned into a value (`schema.ts`).
+ * looked at — in `places`, only `kind`, `kind_detail` and `population_rank`
+ * (#1632, ADR 0055 D-3), so a place's name, `wikidata` or `population` is
+ * never turned into a value (`schema.ts`); and in `buildings`, since #1789,
+ * the twelve keys of `schema.ts` §`BUILDING_FIELD_RULES` too, each value
+ * whitelisted or clamped, and `null` where it cannot be. A building field
+ * never refuses a tile and never drops a footprint.
  *
  * `places` is read up to `limits.maxPlacesPerTile` points and no further: the
  * decoder stops there rather than refusing the tile.
@@ -157,13 +164,20 @@ interface FramedLayer {
     isBridge: number;
     isTunnel: number;
     populationRank: number;
+    /** #1789: the key index of each building field, in `BUILDING_FIELD_NAMES` order; `-1` for none. */
+    fields: Int32Array;
   };
   /** Decoded values by index, filled as features ask for them. */
   readonly identifiers: Map<number, string | null>;
   readonly heights: Map<number, number | null>;
   readonly flags: Map<number, boolean>;
   readonly ranks: Map<number, number | null>;
+  /** #1789: building field values, keyed `index · FIELD_SLOTS + slot`. */
+  readonly fieldValues: Map<number, string | number | null>;
 }
+
+/** The building fields' slots: one per name in `BUILDING_FIELD_NAMES`. */
+const FIELD_SLOTS = BUILDING_FIELD_NAMES.length;
 
 function decodeChecked(
   bytes: Uint8Array,
@@ -320,10 +334,13 @@ function frameLayer(
     isBridge: -1,
     isTunnel: -1,
     populationRank: -1,
+    fields: new Int32Array(FIELD_SLOTS).fill(-1),
   };
   // ADR 0055 D-3: in `places`, only its three keys are ever matched, so no
   // other key of a place - a height, a flag, its name - has a value decoded.
   const isPlaces = name === 'places';
+  // #1789: the building fields are matched in `buildings` and nowhere else.
+  const isBuildings = name === 'buildings';
   let f = 0;
   let v = 0;
   let k = 0;
@@ -350,6 +367,14 @@ function frameLayer(
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_MIN_HEIGHT)) keys.minHeight = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_BRIDGE)) keys.isBridge = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_TUNNEL)) keys.isTunnel = k;
+        else if (isBuildings) {
+          for (let slot = 0; slot < FIELD_SLOTS; slot++) {
+            const field = BUILDING_FIELD_NAMES[slot] as keyof typeof BUILDING_FIELD_RULES;
+            if (bytesEqualAscii(bytes, range.start, range.end, BUILDING_FIELD_RULES[field].key)) {
+              keys.fields[slot] = k;
+            }
+          }
+        }
         k++;
       }
     } else {
@@ -367,6 +392,7 @@ function frameLayer(
     heights: new Map(),
     flags: new Map(),
     ranks: new Map(),
+    fieldValues: new Map(),
   };
 }
 
@@ -509,6 +535,7 @@ function decodeFeature(
           kind: kind as BuildingFeature['kind'],
           heightMetres: attributes.height,
           minHeightMetres: attributes.minHeight,
+          ...buildingFieldsOf(attributes.fields),
           rings,
         });
       }
@@ -536,6 +563,21 @@ interface Attributes {
   isBridge: boolean;
   isTunnel: boolean;
   populationRank: number | null;
+  /** #1789: each building field's value, in `BUILDING_FIELD_NAMES` order; `null` for none. */
+  fields: (string | number | null)[];
+}
+
+/**
+ * A footprint's building fields, from what {@link readTags} read. Each value
+ * has already passed its rule, so this only names it: an enum value is the
+ * schema's own constant and a number is inside its range.
+ */
+function buildingFieldsOf(values: readonly (string | number | null)[]): BuildingFields {
+  const out: Record<string, string | number | null> = {};
+  BUILDING_FIELD_NAMES.forEach((name, slot) => {
+    out[name] = values[slot] ?? null;
+  });
+  return out as unknown as BuildingFields;
 }
 
 /** A place's three fields, or `null` when any is outside ADR 0055 D-2's lists. */
@@ -561,8 +603,9 @@ function gradeOf(attributes: Attributes): StreetGrade {
 }
 
 /**
- * Reads the values of the keys `frameLayer` matched: six, or `places`' three.
- * Every other key's value is skipped without being decoded.
+ * Reads the values of the keys `frameLayer` matched: six, `places`' three, or
+ * in `buildings` the six and the building fields. Every other key's value is
+ * skipped without being decoded.
  */
 function readTags(
   bytes: Uint8Array,
@@ -577,6 +620,7 @@ function readTags(
     isBridge: false,
     isTunnel: false,
     populationRank: null,
+    fields: new Array<string | number | null>(FIELD_SLOTS).fill(null),
   };
   if (tags === null) return out;
   const reader = new ProtoReader(bytes, tags.start, tags.end);
@@ -594,9 +638,90 @@ function readTags(
     else if (key === layer.keys.isTunnel) out.isTunnel = cachedFlag(bytes, layer, value);
     else if (key === layer.keys.populationRank) {
       out.populationRank = cachedRank(bytes, layer, value);
+    } else {
+      const slot = layer.keys.fields.indexOf(key);
+      if (slot >= 0) out.fields[slot] = cachedField(bytes, layer, slot, value);
     }
   }
   return out;
+}
+
+function cachedField(
+  bytes: Uint8Array,
+  layer: FramedLayer,
+  slot: number,
+  index: number,
+): string | number | null {
+  const cacheKey = index * FIELD_SLOTS + slot;
+  let value = layer.fieldValues.get(cacheKey);
+  if (value === undefined) {
+    const name = BUILDING_FIELD_NAMES[slot] as keyof typeof BUILDING_FIELD_RULES;
+    value = fieldValue(bytes, layer, index, BUILDING_FIELD_RULES[name]);
+    layer.fieldValues.set(cacheKey, value);
+  }
+  return value;
+}
+
+/**
+ * One building field's value by its rule (`schema.ts` §`BuildingFieldRule`),
+ * else `null` (#1789). An enum is the rule's own constant, never the tile's
+ * string, and a number is never parsed out of a string.
+ */
+function fieldValue(
+  bytes: Uint8Array,
+  layer: FramedLayer,
+  index: number,
+  rule: BuildingFieldRule,
+): string | number | null {
+  if (rule.kind === 'enum') return enumValue(bytes, layer, index, rule.values);
+  const value = numericValue(bytes, layer, index);
+  if (value === null || !Number.isFinite(value)) return null;
+  switch (rule.kind) {
+    case 'clamped':
+      if (value <= rule.min) return rule.min;
+      if (value >= rule.max) return rule.max;
+      return Math.floor(value);
+    case 'index':
+      return Number.isInteger(value) && value >= 0 && value < rule.size ? value : null;
+    case 'direction': {
+      const turn = 360 / rule.step;
+      // Wrapped in whole steps, so a direction is a multiple of the step
+      // however large the number: 400 is 45, and -15 is 345.
+      const steps = Math.round(value / rule.step) % turn;
+      return ((steps + turn) % turn) * rule.step;
+    }
+  }
+}
+
+/**
+ * The constant in `values` that a string value equals byte for byte, else
+ * `null`. A value of another type, or a string of any other bytes — however
+ * long — is `null`, and is never turned into a string.
+ */
+function enumValue(
+  bytes: Uint8Array,
+  layer: FramedLayer,
+  index: number,
+  values: readonly string[],
+): string | null {
+  const reader = new ProtoReader(
+    bytes,
+    layer.values[index * 2] as number,
+    layer.values[index * 2 + 1] as number,
+  );
+  let result: string | null = null;
+  while (!reader.atEnd()) {
+    const tag = reader.uint32();
+    if (tag >>> 3 === 1 && (tag & 7) === WIRE_BYTES) {
+      const range = reader.bytes();
+      result =
+        values.find((value) => bytesEqualAscii(bytes, range.start, range.end, value)) ?? null;
+    } else {
+      reader.skip(tag & 7);
+      result = null;
+    }
+  }
+  return result;
 }
 
 function cachedRank(bytes: Uint8Array, layer: FramedLayer, index: number): number | null {

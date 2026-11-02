@@ -6,6 +6,11 @@ import { describe, expect, it } from 'vitest';
 
 import { decodeTile } from './decode';
 import {
+  BUILDING_FIELDS_DECODED,
+  BUILDING_PART_FIELDS_DECODED,
+  buildingFieldCaseTile,
+  buildingFieldControlTile,
+  buildingFieldsTile,
   buildingPartTile,
   DROPPED_PLACE_FIXTURES,
   FIXTURE_EXTENT,
@@ -13,6 +18,7 @@ import {
   FIXTURE_TILE,
   footprintTile,
   footwayTile,
+  HOSTILE_BUILDING_FIELD_CASES,
   HOSTILE_FIXTURES,
   KEPT_PLACE,
   LIMIT_NAMES,
@@ -41,7 +47,13 @@ import {
   MAX_PLACES_PER_TILE,
   MAX_VERTICES_PER_TILE,
 } from './limits';
-import type { DecodedTile, DecodeRefusal } from './types';
+import {
+  BUILDING_FIELD_NAMES,
+  BUILDING_FIELD_RULES,
+  NO_BUILDING_FIELDS,
+  type BuildingFieldName,
+} from './schema';
+import type { BuildingFeature, DecodedTile, DecodeRefusal } from './types';
 
 function decoded(bytes: Uint8Array): DecodedTile {
   const result = decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
@@ -247,6 +259,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'line',
         'places',
         'populationRank',
+        // #1789: the building fields, from the one list.
+        ...BUILDING_FIELD_NAMES,
       ];
       for (const key of keys) expect(allowed).toContain(key);
       const poisonValues: unknown[] = Object.values(POISON);
@@ -319,6 +333,109 @@ describe('decodeTile reads places: the kind and the rank, never the name (#1632,
     expect(over.buildings).toHaveLength(1);
     expect(decoded(placesTileOf(MAX_PLACES_PER_TILE)).places).toHaveLength(MAX_PLACES_PER_TILE);
   });
+});
+
+/** A footprint's building fields alone, by name. */
+function fieldsOf(building: BuildingFeature | undefined): Record<string, unknown> {
+  return Object.fromEntries(
+    BUILDING_FIELD_NAMES.map((name) => [name, building === undefined ? undefined : building[name]]),
+  );
+}
+
+describe('decodeTile reads the building fields, whitelisted and clamped (#1789)', () => {
+  it('reads every field of a footprint #1557’s profile wrote, and of a building_part', () => {
+    const tile = decoded(buildingFieldsTile());
+    expect(tile.buildings.map((b) => [b.kind, b.heightMetres, b.minHeightMetres])).toStrictEqual([
+      ['building', 14, null],
+      ['building_part', 40, 3],
+      ['building', null, null],
+    ]);
+    expect(fieldsOf(tile.buildings[0])).toStrictEqual(BUILDING_FIELDS_DECODED);
+    expect(fieldsOf(tile.buildings[1])).toStrictEqual(BUILDING_PART_FIELDS_DECODED);
+    // A footprint that carries none of the keys has every field null.
+    expect(fieldsOf(tile.buildings[2])).toStrictEqual(NO_BUILDING_FIELDS);
+  });
+
+  it('gives every field null for a tile that carries none, as Protomaps’ own build does', () => {
+    const tile = decoded(residentialBlockTile());
+    expect(tile.buildings).toHaveLength(3);
+    for (const building of tile.buildings) {
+      expect(fieldsOf(building)).toStrictEqual(NO_BUILDING_FIELDS);
+    }
+    expect(fieldsOf(decoded(buildingPartTile()).buildings[0])).toStrictEqual(NO_BUILDING_FIELDS);
+  });
+
+  it('stores no string from a tile: every field is a number in its range, a member of its whitelist, or null', () => {
+    // Derived from the field list: a footprint key outside the three base
+    // fields, the rings and the list is a red test, and so is a value of
+    // another shape, so a new string-typed field cannot slip in.
+    const base = ['kind', 'heightMetres', 'minHeightMetres', 'rings'];
+    const tiles = [
+      ...Object.values(NAMED_FIXTURES).map((build) => decoded(build())),
+      ...HOSTILE_BUILDING_FIELD_CASES.map((fieldCase) => decoded(buildingFieldCaseTile(fieldCase))),
+    ];
+    let checked = 0;
+    let set = 0;
+    for (const tile of tiles) {
+      for (const building of tile.buildings) {
+        const extra = Object.keys(building).filter((key) => !base.includes(key));
+        expect(extra.sort()).toStrictEqual([...BUILDING_FIELD_NAMES].sort());
+        for (const name of extra as BuildingFieldName[]) {
+          const value: unknown = building[name];
+          checked += 1;
+          if (value === null) continue;
+          set += 1;
+          const rule = BUILDING_FIELD_RULES[name];
+          switch (rule.kind) {
+            case 'enum':
+              expect(rule.values as readonly unknown[], name).toContain(value);
+              break;
+            case 'clamped':
+              expect(Number.isInteger(value), name).toBe(true);
+              expect(value as number).toBeGreaterThanOrEqual(rule.min);
+              expect(value as number).toBeLessThanOrEqual(rule.max);
+              break;
+            case 'index':
+              expect(Number.isInteger(value), name).toBe(true);
+              expect(value as number).toBeGreaterThanOrEqual(0);
+              expect(value as number).toBeLessThan(rule.size);
+              break;
+            case 'direction':
+              expect(Number.isInteger(value), name).toBe(true);
+              expect((value as number) % rule.step).toBe(0);
+              expect(value as number).toBeGreaterThanOrEqual(0);
+              expect(value as number).toBeLessThan(360);
+              break;
+          }
+        }
+      }
+    }
+    // Not vacuous: thousands of fields were looked at, and many were set.
+    expect(checked).toBeGreaterThan(1000);
+    expect(set).toBeGreaterThan(100);
+  });
+
+  for (const fieldCase of HOSTILE_BUILDING_FIELD_CASES) {
+    it(`${fieldCase.name}: ${fieldCase.expected === null ? 'null' : `clamped to ${String(fieldCase.expected)}`}, and the tile’s other features decode unchanged`, () => {
+      const result = decodeTile(buildingFieldCaseTile(fieldCase), FIXTURE_TILE, FIXTURE_FRAME);
+      if ('reason' in result) throw new Error(`refused: ${result.reason}`);
+      const control = decoded(buildingFieldControlTile());
+      // The case's footprint is kept, with the value its rule made of the
+      // hostile one, and every other field null.
+      expect(result.buildings).toHaveLength(3);
+      expect(fieldsOf(result.buildings[1])).toStrictEqual({
+        ...NO_BUILDING_FIELDS,
+        [fieldCase.field]: fieldCase.expected,
+      });
+      // The rest of the tile is as it is without the case's footprint.
+      expect([result.buildings[0], result.buildings[2]]).toStrictEqual(control.buildings);
+      expect(fieldsOf(result.buildings[0])).toStrictEqual(BUILDING_FIELDS_DECODED);
+      expect(result.landUse).toStrictEqual(control.landUse);
+      expect(result.paths).toStrictEqual(control.paths);
+      expect(result.landUse).toHaveLength(1);
+      expect(result.paths).toHaveLength(1);
+    });
+  }
 });
 
 describe('decodeTile refuses hostile input, and never throws', () => {

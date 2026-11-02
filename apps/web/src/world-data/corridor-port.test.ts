@@ -18,8 +18,17 @@ import {
   type GeographicPosition,
   type RouteProfile,
 } from '@onyourleft/domain';
-import { corridorTileCover, tileBounds, type PlaceFeature } from '@onyourleft/map-features';
 import {
+  BUILDING_FIELD_NAMES,
+  corridorTileCover,
+  NO_BUILDING_FIELDS,
+  tileBounds,
+  type PlaceFeature,
+} from '@onyourleft/map-features';
+import {
+  BUILDING_FIELDS_DECODED,
+  BUILDING_PART_FIELDS_DECODED,
+  buildingFieldsTile,
   lakeTile,
   PLACE_SENTINEL,
   placesTile,
@@ -30,6 +39,9 @@ import {
 import {
   openActivityStore,
   privacyZoneId,
+  SCHEMA_VERSION,
+  SCHEMA_VERSIONS,
+  TABLE,
   type ActivityStore,
   type PrivacyZoneRecord,
   type RouteRecord,
@@ -191,6 +203,35 @@ describe('read once, then from the store', () => {
   });
 });
 
+/** Keeps a row for `route` as another reader would have: its version, and its packed blob. */
+async function keepRow(route: RouteRecord, readerVersion: number, features: Blob): Promise<void> {
+  const covered = corridorTileCover(route.profile.positions, CORRIDOR_HALF_WIDTH_METRES, 600);
+  // It matches the route in everything but its reader version.
+  const routeDigest = await routeDigestOf(route.profile.positions);
+  await harness.write((store) =>
+    store.putWorldCorridor({
+      owner: ATHLETE_A,
+      routeId: route.id,
+      routeDigest,
+      archive: { url: ARCHIVE_URL, identity: '"fixture-1"' },
+      readerVersion,
+      halfWidthMetres: CORRIDOR_HALF_WIDTH_METRES,
+      readAt: '2026-10-20T12:00:00.000Z',
+      tiles: covered.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' as const })),
+      features,
+      licence: 'ODbL-1.0',
+    }),
+  );
+}
+
+/** A gzip blob of `value` as JSON, as a packed `features` is. */
+async function gzipJson(value: unknown): Promise<Blob> {
+  const stream = new Blob([JSON.stringify(value)])
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'));
+  return new Blob([await new Response(stream).arrayBuffer()]);
+}
+
 describe('#1632 place points: kept, read back, and a row of another reader version read again', () => {
   /** The route's corridor with every other tile #1632's places fixture. */
   function tilesWithPlaces(profile: RouteProfile): ArchiveTile[] {
@@ -212,35 +253,6 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     return new Response(json).text();
   }
 
-  /** Keeps a row for `route` as another reader would have: its version, and its packed blob. */
-  async function keepRow(route: RouteRecord, readerVersion: number, features: Blob): Promise<void> {
-    const covered = corridorTileCover(route.profile.positions, CORRIDOR_HALF_WIDTH_METRES, 600);
-    // It matches the route in everything but its reader version.
-    const routeDigest = await routeDigestOf(route.profile.positions);
-    await harness.write((store) =>
-      store.putWorldCorridor({
-        owner: ATHLETE_A,
-        routeId: route.id,
-        routeDigest,
-        archive: { url: ARCHIVE_URL, identity: '"fixture-1"' },
-        readerVersion,
-        halfWidthMetres: CORRIDOR_HALF_WIDTH_METRES,
-        readAt: '2026-10-20T12:00:00.000Z',
-        tiles: covered.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' as const })),
-        features,
-        licence: 'ODbL-1.0',
-      }),
-    );
-  }
-
-  /** A gzip blob of `value` as JSON, as a packed `features` is. */
-  async function gzipJson(value: unknown): Promise<Blob> {
-    const stream = new Blob([JSON.stringify(value)])
-      .stream()
-      .pipeThrough(new CompressionStream('gzip'));
-    return new Blob([await new Response(stream).arrayBuffer()]);
-  }
-
   it('reads a corridor that holds places, keeps it, and a fresh store hands back the same places', async () => {
     const route = await savedRoute();
     const source = countingSource(await buildArchive({ tiles: tilesWithPlaces(route.profile) }));
@@ -257,7 +269,7 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(second)).toStrictEqual(first);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(CORRIDOR_READER_VERSION).toBe(3);
+    expect(CORRIDOR_READER_VERSION).toBe(4);
     // No name, `wikidata` or population reached the store (ADR 0055 D-3).
     const text = await keptText(route);
     expect(text).toContain('"places"');
@@ -303,6 +315,102 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(state).length).toBeGreaterThan(0);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+  });
+});
+
+describe('#1789 building fields: through the real store and back, and a row without them read again', () => {
+  /** The route's corridor, every tile #1789's fixture: three footprints, two with every field set. */
+  function tilesWithFields(profile: RouteProfile): ArchiveTile[] {
+    return corridorTiles(profile).map((tile) => ({ ...tile, bytes: buildingFieldsTile() }));
+  }
+
+  /** The buildings a ride hands `footprintPlans` (its `corridor.buildings`), by field. */
+  function fieldsHandedToThePlan(state: CorridorState): Record<string, unknown>[] {
+    if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+    return state.corridor.buildings.map((building) =>
+      Object.fromEntries(BUILDING_FIELD_NAMES.map((name) => [name, building[name]])),
+    );
+  }
+
+  /** What every covered tile's three footprints must carry, in the plan's order. */
+  function expectedFields(count: number): Record<string, unknown>[] {
+    return Array.from({ length: count / 3 }).flatMap(() => [
+      BUILDING_FIELDS_DECODED,
+      BUILDING_PART_FIELDS_DECODED,
+      NO_BUILDING_FIELDS,
+    ]);
+  }
+
+  it('reads a tile with every field set, keeps it, and a fresh connection hands the plan every field, equal', async () => {
+    const route = await savedRoute();
+    const source = countingSource(await buildArchive({ tiles: tilesWithFields(route.profile) }));
+    // 1–3: the synthetic tile, the corridor read, the write with the real store.
+    const first = await load(portOver(freshStore(), source, on()), route);
+    const calls = source.calls.length;
+    expect(calls).toBeGreaterThan(0);
+
+    // 4: every connection closed.
+    for (const store of stores) store.close();
+    // 5: read back through the port the ride uses, which unpacks with
+    // `corridorFeaturesOfPacked`, into what `footprintPlans` is handed.
+    const second = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBe(calls);
+    const handed = fieldsHandedToThePlan(second);
+    // 6: every field equal, on every footprint, and not vacuously.
+    expect(handed.length).toBeGreaterThanOrEqual(6);
+    expect(handed).toStrictEqual(expectedFields(handed.length));
+    expect(handed).toStrictEqual(fieldsHandedToThePlan(first));
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(4);
+  });
+
+  it('reads again a row kept at reader version 3, whose footprints have no fields, and never hands it to the ride', async () => {
+    const route = await savedRoute();
+    const source = countingSource(await buildArchive({ tiles: tilesWithFields(route.profile) }));
+    // Version 3's packed shape: a footprint with a height and no fields.
+    await keepRow(
+      route,
+      3,
+      await gzipJson({
+        v: 3,
+        landUse: [],
+        buildings: [{ kind: 'building', h: 9, mh: null, rings: [[0, 0, 1_000, 0, 1_000, 1_000]] }],
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    const handed = fieldsHandedToThePlan(state);
+    // The version-3 row's one footprint is not among them: every footprint is the tile's.
+    expect(handed).toStrictEqual(expectedFields(handed.length));
+    expect(handed.length).toBeGreaterThanOrEqual(6);
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+  });
+
+  it('reads again a row whose blob is of a packed version this does not read, though its reader version matches', async () => {
+    // The second guard behind the reader version: a blob this code did not
+    // write is read again, and never thrown into the ride.
+    const route = await savedRoute();
+    const source = countingSource(await buildArchive({ tiles: tilesWithFields(route.profile) }));
+    await keepRow(
+      route,
+      CORRIDOR_READER_VERSION,
+      await gzipJson({ v: 5, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    );
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(state.kind).toBe('ready');
+    expect(source.calls.length).toBeGreaterThan(0);
+    expect(fieldsHandedToThePlan(state).length).toBeGreaterThan(0);
+  });
+
+  it('changes no Dexie schema: the store is at version 20, and worldCorridors and its keys are as #1545 declared them', () => {
+    expect(SCHEMA_VERSION).toBe(20);
+    expect(SCHEMA_VERSIONS).toHaveLength(20);
+    expect(SCHEMA_VERSIONS.at(-1)?.[TABLE.worldCorridors]).toBe('[owner+routeId], owner');
   });
 });
 
