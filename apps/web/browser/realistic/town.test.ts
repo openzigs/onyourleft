@@ -29,7 +29,10 @@ import {
   commercialStreetFixture,
   houseStreetFixture,
   mixedTownFixture,
+  planFingerprint,
+  typedStreetFixture,
 } from '../../src/game/footprint-fixtures-testing';
+import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 import { BUILDING_ARCHETYPES } from '../../src/game/building-archetypes';
 import { HOUSE_ARCHETYPES, ROOF_VARIANTS } from '../../src/game/house-archetypes';
 import { mappedBuildingsOf, onMappedGround } from '../../src/game/mapped-buildings';
@@ -315,4 +318,35 @@ describe('the realistic page’s `commercial-archetypes` lever — #1783', () =>
     expect(dropped.plans.length).toBeGreaterThan(0);
     expect(planted).toBeGreaterThan(0);
   }, 30_000);
+});
+
+describe('the realistic page’s `building-type` lever — #1791', () => {
+  const street = typedStreetFixture();
+
+  it('draws the typed street’s church as no house on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=typed').leversOff);
+    const churches = plans.filter((_, index) => street.rows[index] === 'church');
+    expect(churches.length).toBeGreaterThan(0);
+    expect(churches.every((plan) => plan.archetype === 'unknown' && plan.dormers === 0)).toBe(true);
+  });
+
+  it('plans the fully typed street, with `levers=-building-type`, as the same street untyped', () => {
+    const off = plannedTown(street, parseConfig('?town=typed&levers=-building-type').leversOff);
+    const untyped = plannedTown(
+      {
+        ...street,
+        corridor: {
+          ...street.corridor,
+          buildings: street.corridor.buildings.map((building): BuildingFeature => ({
+            ...building,
+            ...NO_BUILDING_FIELDS,
+          })),
+        },
+      },
+      parseConfig('?town=typed').leversOff,
+    );
+    expect(planFingerprint(off.plans)).toBe(planFingerprint(untyped.plans));
+    // Not vacuous: the product's page plans the typed street otherwise.
+    expect(planFingerprint(plannedTown(street, []).plans)).not.toBe(planFingerprint(untyped.plans));
+  });
 });

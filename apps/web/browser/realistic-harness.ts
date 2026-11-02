@@ -67,6 +67,8 @@ import {
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
+  // #1791's street of every mapped building type, which `town=typed` rides.
+  typedStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -478,7 +480,9 @@ async function run(): Promise<void> {
                   ? houseStreetFixture(latitude)
                   : config.town === 'commercial'
                     ? commercialStreetFixture(latitude)
-                    : undefined;
+                    : config.town === 'typed'
+                      ? typedStreetFixture(latitude)
+                      : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

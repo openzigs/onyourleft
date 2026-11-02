@@ -63,7 +63,8 @@ export interface BuildingArchetypeInput {
   /** Whether it is drawn with four corners. */
   readonly fourCorners: boolean;
   readonly storeys: number;
-  readonly use: 'residential' | 'commercial' | 'industrial' | 'farmland';
+  /** `civic` since #1791: a mapped church, school or town hall, which no cue takes. */
+  readonly use: 'residential' | 'commercial' | 'industrial' | 'farmland' | 'civic';
   readonly urban: UrbanClass;
   /** #1635: it has a party wall. */
   readonly terraced: boolean;
@@ -145,6 +146,20 @@ export function buildingArchetypeOf(input: BuildingArchetypeInput): BuildingArch
   return (
     BUILDING_ARCHETYPES.find((archetype) => fits(input, BUILDING_CUES[archetype])) ?? 'unknown'
   );
+}
+
+/**
+ * The archetype of a footprint mapped as an apartment block — #1791: the
+ * garden apartment wherever its cue fits but for its area and aspect bands,
+ * which the mapped type answers; its storeys, its clean rectangle (its roof is
+ * built over one), its urban class and #1635's terrace still decide. Else
+ * `unknown`.
+ */
+export function apartmentArchetypeOf(input: BuildingArchetypeInput): BuildingArchetype {
+  const cue = BUILDING_CUES['garden-apartment'];
+  return fits(input, { ...cue, area: [0, Number.POSITIVE_INFINITY], aspect: 1 })
+    ? 'garden-apartment'
+    : 'unknown';
 }
 
 /**

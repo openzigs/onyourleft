@@ -12,6 +12,7 @@ import {
   facadeTrimsWithLevers,
   firPrepassWithLevers,
   archetypePorchesWithLevers,
+  buildingTypesWithLevers,
   commercialArchetypesWithLevers,
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
@@ -426,6 +427,26 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=commercial&levers=-commercial-archetypes'))).toBe(
       `?levers=${encodeURIComponent('-commercial-archetypes')}&town=commercial`,
     );
+  });
+
+  it('draws each footprint as its mapped type says, as the product does, unless #1791’s lever takes it out', () => {
+    expect(LEVERS).toContain('building-type');
+    expect(buildingTypesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(buildingTypesWithLevers(LEVERS.filter((lever) => lever !== 'building-type'))).toBe(true);
+    expect(buildingTypesWithLevers(parseConfig('?levers=-building-type').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=typed&levers=-building-type'))).toBe(
+      `?levers=${encodeURIComponent('-building-type')}&town=typed`,
+    );
+  });
+
+  it('rides the typed street through #1791’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=typed').town).toBe('typed');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'typed'\s*\?\s*typedStreetFixture\(latitude\)/);
   });
 
   it('pitches the split houses, as the product does, unless #1660’s lever takes it out', () => {
