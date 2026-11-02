@@ -663,15 +663,16 @@ describe('a rider faces the way the line takes them, not the way the road runs â
   }
 
   /**
-   * That a marker faces the way it is drawn moving, held to the facing limit:
-   * turned off the road by `facingTurn` of the angle it moves at off the road.
+   * That a marker faces the way it is drawn moving from its rear wheel's place
+   * to its front wheel's, held to the facing limit: turned off the road by
+   * `facingTurn` of the angle that moves at off the road.
    */
   function expectFacesItsMotion(
     marker: RiderMarker,
     moved: { readonly x: number; readonly z: number },
     road: { readonly headingX: number; readonly headingZ: number },
   ): void {
-    expect(offRoad(road, facing(marker))).toBeCloseTo(facingTurn(offRoad(road, moved)), 5);
+    expect(offRoad(road, facing(marker))).toBeCloseTo(facingTurn(offRoad(road, moved)), 2);
   }
 
   /** Where the line crosses the road fastest between two distances, to the decimetre. */
@@ -683,31 +684,26 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     return best;
   }
 
-  /** Whether two distances fall between the same two corridor points of a frame. */
-  function oneSegment(frame: SceneFrame, a: number, b: number): boolean {
-    return frame.corridor.centre.every((point) => point.along <= a === point.along <= b);
-  }
-
-  /** How far a drawn rider moves between two nearby places: a step that stays inside one corridor segment. */
-  const STEP = 0.01;
+  /**
+   * Half a bicycle: a marker points from its rear wheel to its front wheel, so
+   * the way it is drawn moving is read between its places this far behind and
+   * ahead, inside one corridor segment.
+   */
+  const SPAN = BICYCLE_LENGTH_METRES / 2;
 
   it('turns the rider to the way it is drawn moving where the line crosses the approach', () => {
     // On the straight before the hairpin the line crosses from the right-hand
     // side to the outside of the bend. A straight, so the corridors built
     // around the rider at each of the three distances lie on one line.
     const line = racingLine(hairpin);
-    let at = steepest(line, 300, 370);
+    const at = steepest(line, 300, 370);
     // Not a vacuous crossing: three degrees or more off the road.
     expect(Math.abs(lineSlopeAt(line, at))).toBeGreaterThan(0.05);
-    // Inside one corridor segment, where the road's heading and normal are one.
-    while (!oneSegment(frameOf(hairpin, stateAt(hairpin, at, 8)), at - STEP, at + STEP)) {
-      at += STEP;
-    }
     const slope = lineSlopeAt(line, at);
     const frame = frameOf(hairpin, stateAt(hairpin, at, 8));
     const rider = markerOf(frame, 'rider');
-    const before = markerOf(frameOf(hairpin, stateAt(hairpin, at - STEP, 8)), 'rider');
-    const after = markerOf(frameOf(hairpin, stateAt(hairpin, at + STEP, 8)), 'rider');
+    const before = markerOf(frameOf(hairpin, stateAt(hairpin, at - SPAN, 8)), 'rider');
+    const after = markerOf(frameOf(hairpin, stateAt(hairpin, at + SPAN, 8)), 'rider');
     const moved = { x: after.x - before.x, z: after.z - before.z };
     const road = roadHeadingAt(frame, at);
     // It faces the way it is drawn moving, held to the limitâ€¦
@@ -725,7 +721,7 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       // where the line crosses back from the inside to the right-hand side.
       const riderAt = APEX - 60;
       const line = racingLine(hairpin);
-      let at = steepest(line, APEX, 400 + Math.PI * RADIUS + 30);
+      const at = steepest(line, APEX, 400 + Math.PI * RADIUS + 30);
       expect(Math.abs(lineSlopeAt(line, at))).toBeGreaterThan(0.05);
       // An attempt ridden at a steady 10 m/s, for the ghost.
       const ghost = buildGhostTrack({ elapsedSeconds: [0, 200], distanceMetres: [0, 2_000] });
@@ -738,13 +734,10 @@ describe('a rider faces the way the line takes them, not the way the road runs â
             : frameOf(hairpin, stateAt(hairpin, riderAt, 8, undefined, distance / 10), { ghost });
         return { frame, marker: markerOf(frame, kind) };
       };
-      // Inside one corridor segment, where the road's heading and normal are
-      // one and the drawn path is the line's own.
       const { frame } = drawnAt(at);
-      while (!oneSegment(frame, at - STEP, at + STEP)) at += STEP;
       const here = drawnAt(at).marker;
-      const before = drawnAt(at - STEP).marker;
-      const after = drawnAt(at + STEP).marker;
+      const before = drawnAt(at - SPAN).marker;
+      const after = drawnAt(at + SPAN).marker;
       const moved = { x: after.x - before.x, z: after.z - before.z };
       const road = roadHeadingAt(frame, at);
       expectFacesItsMotion(here, moved, road);
@@ -760,7 +753,7 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     // rider, so it is not eased aside either.
     const riderAt = APEX - 60;
     const line = racingLine(hairpin);
-    let at = steepest(line, APEX, 400 + Math.PI * RADIUS + 30);
+    const at = steepest(line, APEX, 400 + Math.PI * RADIUS + 30);
     expect(Math.abs(lineSlopeAt(line, at))).toBeGreaterThan(0.05);
     const drawnAt = (distance: number): { frame: SceneFrame; marker: RiderMarker } => {
       const frame = frameOf(hairpin, stateAt(hairpin, riderAt, 8), {
@@ -768,9 +761,8 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       });
       return { frame, marker: markerOf(frame, 'bot') };
     };
-    while (!oneSegment(drawnAt(at).frame, at - STEP, at + STEP)) at += STEP;
     const { frame, marker } = drawnAt(at);
-    const [before, after] = [drawnAt(at - STEP).marker, drawnAt(at + STEP).marker];
+    const [before, after] = [drawnAt(at - SPAN).marker, drawnAt(at + SPAN).marker];
     const moved = { x: after.x - before.x, z: after.z - before.z };
     expect(between(facing(marker), moved)).toBeLessThan(1e-5);
     const road = roadHeadingAt(frame, at);
@@ -789,20 +781,14 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 10_000] });
       let checked = 0;
       for (const gap of [0, 1, 2.5]) {
-        let at = start;
+        const at = start;
         const frameAt = (distance: number): SceneFrame =>
           frameOf(
             hairpin,
             stateAt(hairpin, distance, 8, { distance: distance + gap, speed: 8 }, distance / 10),
             { botDistance: distance + gap, ghost, steeredLateral: steered },
           );
-        while (
-          !oneSegment(frameAt(at), at - STEP, at + STEP) ||
-          !oneSegment(frameAt(at), at + gap - STEP, at + gap + STEP)
-        ) {
-          at += STEP;
-        }
-        const [before, here, after] = [frameAt(at - STEP), frameAt(at), frameAt(at + STEP)];
+        const [before, here, after] = [frameAt(at - SPAN), frameAt(at), frameAt(at + SPAN)];
         for (const kind of ['rider', 'bot', 'ghost'] as const) {
           const moved = {
             x: markerOf(after, kind).x - markerOf(before, kind).x,
@@ -826,12 +812,11 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     let steepestMotion = 0;
     for (let at = 360; at <= exit; at += 0.5) {
       const frameAt = (distance: number): SceneFrame => frameOf(tight, stateAt(tight, distance, 9));
-      if (!oneSegment(frameAt(at), at - STEP, at + STEP)) continue;
       const here = frameAt(at);
       const road = roadHeadingAt(here, at);
       const rider = markerOf(here, 'rider');
-      const before = markerOf(frameAt(at - STEP), 'rider');
-      const after = markerOf(frameAt(at + STEP), 'rider');
+      const before = markerOf(frameAt(at - SPAN), 'rider');
+      const after = markerOf(frameAt(at + SPAN), 'rider');
       const motion = offRoad(road, { x: after.x - before.x, z: after.z - before.z });
       steepestMotion = Math.max(steepestMotion, Math.abs(motion));
       expect(Math.abs(offRoad(road, facing(rider)))).toBeLessThanOrEqual(
@@ -840,6 +825,65 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     }
     // Not vacuous: somewhere the drawn place moves half as far again as the limit off the road.
     expect(steepestMotion).toBeGreaterThan(1.5 * FACING_TURN_LIMIT_RADIANS);
+  });
+
+  it.each([8, 12, 20])(
+    'turns by a hair, never a step, from one frame to the next through a radius-%i m hairpin',
+    (radius) => {
+      // #1995's review: the line's derivative was nought where the line is held
+      // at the road's edge and the full slope just outside, so the facing
+      // jumped by up to 9Â° in a frame at a hairpin's entry and exit. Walked in
+      // 2 cm steps, about a frame's riding at 4 km/h, from the approach to well
+      // past the exit, the rider's heading never changes by more than half a
+      // degree.
+      const route = hairpinRoute(radius);
+      const exit = 400 + Math.PI * radius + 40;
+      // The corridor built around the rider at each step, as `sceneFrame`
+      // builds a frame's, and the riders placed on it without the scenery
+      // (#588), which a marker does not read.
+      const origin = corridorOrigin(route);
+      const headingOf = (distance: number): number => {
+        const [rider] = placedRiders(
+          { profile: route, origin, state: stateAt(route, distance, 9) },
+          roadCorridor(route, origin, distance),
+        );
+        if (rider === undefined) throw new Error('no rider placed');
+        return Math.atan2(rider.marker.headingX, rider.marker.headingZ);
+      };
+      let previous = headingOf(360);
+      let largest = 0;
+      for (let at = 360.02; at <= exit; at += 0.02) {
+        const heading = headingOf(at);
+        let change = Math.abs(heading - previous);
+        if (change > Math.PI) change = 2 * Math.PI - change;
+        largest = Math.max(largest, change);
+        previous = heading;
+      }
+      expect(largest).toBeLessThan((0.5 * Math.PI) / 180);
+    },
+  );
+
+  it('points along the road again as the line comes back across it after the bend', () => {
+    // The owner's frames: coming out of a hairpin the line swings back across
+    // the road within a few metres, and the bicycle was drawn 60â€“90Â° across a
+    // straight road. From where the road is straight again after the hairpin
+    // until the line has settled, the rider is never more than the limit off
+    // the road, and points along it, within 2Â°, once the line stops moving.
+    const tight = hairpinRoute(8);
+    const out = 400 + Math.PI * 8;
+    const line = racingLine(tight);
+    let crossing = 0;
+    for (let at = out + 2; at <= out + 60; at += 0.5) {
+      const frame = frameOf(tight, stateAt(tight, at, 9));
+      const off = Math.abs(offRoad(roadHeadingAt(frame, at), facing(markerOf(frame, 'rider'))));
+      expect(off).toBeLessThanOrEqual(FACING_TURN_LIMIT_RADIANS + 1e-9);
+      if (Math.abs(lineSlopeAt(line, at)) > 0.05) crossing += 1;
+      if (Math.abs(lineSlopeAt(line, at)) < 1e-4) {
+        expect(off).toBeLessThan((2 * Math.PI) / 180);
+      }
+    }
+    // Not vacuous: the line does come back across the road there.
+    expect(crossing).toBeGreaterThan(4);
   });
 
   it('holds the turn off the road smoothly: the motionâ€™s own angle when small, never past the limit', () => {

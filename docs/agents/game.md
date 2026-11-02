@@ -273,10 +273,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
                         its digests to the digit. ⚠️ **Since #1995 a rider
                         FACES the line, not the road**: `RiderMarker.headingX`
-                        is the road's heading turned by how fast the drawn place
-                        crosses the road (`lineSlopeAt`), held smoothly to
-                        12° (`facingTurn`), so a rider crossing it no longer
-                        slides sideways. Measure across the road
+                        points from the drawn rear wheel to the front wheel
+                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
+                        off the road (`facingTurn`), so a rider crossing it no
+                        longer slides sideways and never turns in a step. Measure across the road
                         with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown

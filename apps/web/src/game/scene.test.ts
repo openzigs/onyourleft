@@ -817,10 +817,19 @@ describe('a marker that has a front — #349', () => {
     for (const marker of frame.markers) {
       expect(Math.hypot(marker.headingX, marker.headingZ)).toBeCloseTo(1, 9);
     }
-    // The rider faces the way the camera does, by construction: both are read
-    // at the rider's own distance.
-    expect(rider?.headingX).toBeCloseTo(frame.camera.headingX, 9);
-    expect(rider?.headingZ).toBeCloseTo(frame.camera.headingZ, 9);
+    // The rider faces the way the camera does: both are read at the rider's
+    // own distance. ⚠️ To within a degree, not exactly, since #1995: a marker
+    // points from its rear wheel to its front wheel, a bicycle's length of
+    // road, which near a corner spans more than the one segment the camera's
+    // heading is read from.
+    const off = Math.acos(
+      Math.min(
+        1,
+        (rider?.headingX ?? 0) * frame.camera.headingX +
+          (rider?.headingZ ?? 0) * frame.camera.headingZ,
+      ),
+    );
+    expect(off).toBeLessThan((1 * Math.PI) / 180);
     // The bot is round the corner and faces ninety degrees away.
     const between =
       (rider?.headingX ?? 0) * (bot?.headingX ?? 0) + (rider?.headingZ ?? 0) * (bot?.headingZ ?? 0);

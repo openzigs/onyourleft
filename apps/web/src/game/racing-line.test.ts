@@ -33,6 +33,7 @@ import {
   ROAD_SIDE,
   leanAt,
   lineOffsetAt,
+  LINE_SLOPE_SPAN_METRES,
   lineSlopeAt,
   racingLine,
   rollRatePerMetre,
@@ -245,26 +246,22 @@ describe('a loop — #499 criterion 4', () => {
 });
 
 describe('how fast the line crosses the road — #1995', () => {
-  /** A central difference of {@link lineOffsetAt}, this test's own reading of the slope. */
-  const STEP = 1e-3;
-  const differenced = (line: RacingLine, at: number): number =>
-    (lineOffsetAt(line, at + STEP) - lineOffsetAt(line, at - STEP)) / (2 * STEP);
+  /** This test's own reading: the line's change over one bicycle, rear wheel to front. */
+  const chord = (line: RacingLine, at: number): number =>
+    (lineOffsetAt(line, at + LINE_SLOPE_SPAN_METRES / 2) -
+      lineOffsetAt(line, at - LINE_SLOPE_SPAN_METRES / 2)) /
+    LINE_SLOPE_SPAN_METRES;
 
   it.each([
     ['the hairpin', hairpin],
     ['the S-bend', sBend],
     ['the stadium, a loop', stadiumRoute(30)],
-  ] as const)('is the slope of the offset the rider is drawn at, on %s', (_, route) => {
+  ] as const)('is the drawn offset’s change from rear wheel to front, on %s', (_, route) => {
     const line = racingLine(route);
     let moving = 0;
     for (let at = 1; at < route.totalDistance - 1; at += 0.7) {
-      // Where the offset is clamped on either side of the step, the difference
-      // straddles the clamp and is not a slope of anything.
-      const low = lineOffsetAt(line, at - STEP);
-      const high = lineOffsetAt(line, at + STEP);
-      if (Math.max(Math.abs(low), Math.abs(high)) >= LINE_LIMIT_METRES) continue;
       const slope = lineSlopeAt(line, at);
-      expect(slope).toBeCloseTo(differenced(line, at), 5);
+      expect(slope).toBeCloseTo(chord(line, at), 12);
       if (Math.abs(slope) > 0.05) moving += 1;
     }
     // The line does cross the road somewhere on each, or this proves nothing.
@@ -279,20 +276,20 @@ describe('how fast the line crosses the road — #1995', () => {
     }
   });
 
-  it('is nought where the offset is held at the edge, because the drawn rider does not move', () => {
-    // The hairpin's line is pinned to the edge through its apex, and the curve
-    // between two pinned samples bows past it and is clamped back.
+  it('has no step where the line reaches the road’s edge, which the curve’s own derivative had', () => {
+    // #1995's review: the derivative was nought where the offset is held at the
+    // edge and the full slope just outside, a step of up to 9° in the drawn
+    // facing. Walked in 1 cm steps, the chord never moves by more than a hair.
     const line = racingLine(hairpin);
     let held = 0;
-    for (let at = BEND_START; at < BEND_START + BEND_LENGTH; at += 0.1) {
-      if (
-        Math.abs(lineOffsetAt(line, at - STEP)) === LINE_LIMIT_METRES &&
-        Math.abs(lineOffsetAt(line, at + STEP)) === LINE_LIMIT_METRES
-      ) {
-        held += 1;
-        expect(lineSlopeAt(line, at)).toBe(0);
-      }
+    let previous = lineSlopeAt(line, BEND_START - 20);
+    for (let at = BEND_START - 20; at < BEND_START + BEND_LENGTH + 20; at += 0.01) {
+      if (Math.abs(lineOffsetAt(line, at)) === LINE_LIMIT_METRES) held += 1;
+      const slope = lineSlopeAt(line, at);
+      expect(Math.abs(slope - previous)).toBeLessThan(0.005);
+      previous = slope;
     }
+    // The line is held at the edge somewhere on the walk, or this proves nothing.
     expect(held).toBeGreaterThan(0);
   });
 

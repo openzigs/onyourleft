@@ -146,7 +146,7 @@
 import { distanceOnRoute, type GeographicPosition, type RouteProfile } from '@onyourleft/domain';
 import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
 
-import { RIDER_HALF_WIDTH_METRES } from './bicycle';
+import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES } from './bicycle';
 import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition } from './terrain';
 
 /**
@@ -455,22 +455,30 @@ export function lineOffsetAt(line: RacingLine, distance: number): number {
 }
 
 /**
+ * Over how much road {@link lineSlopeAt} reads the line: one bicycle, rear
+ * wheel to front ({@link BICYCLE_LENGTH_METRES}) — #1995.
+ */
+export const LINE_SLOPE_SPAN_METRES = BICYCLE_LENGTH_METRES;
+
+/**
  * How fast the line moves across the road, in metres sideways per metre
- * ridden, positive toward the road's normal: the slope of
- * {@link lineOffsetAt}'s own curve — #1995.
+ * ridden, positive toward the road's normal — #1995: the line's change from a
+ * bicycle's rear wheel to its front wheel, over {@link LINE_SLOPE_SPAN_METRES}.
  *
  * It is what turns a rider to the line rather than to the road
- * (`scene.ts` §`markerAt`): a rider crossing the road at this rate is
- * pointing `atan(slope)` off the road's heading, and drawn along the road's
- * heading they slide sideways. Nought where {@link lineOffsetAt} is clamped,
- * because there the drawn offset does not move.
+ * (`scene.ts` §`markerAt`). ⚠️ **A chord, not the curve's own derivative.**
+ * The derivative is nought where {@link lineOffsetAt} is held at the road's
+ * edge and the full slope just outside, so the rider's facing stepped by up to
+ * 9° in one frame where a hairpin's line reached the edge (#1995's review).
+ * The chord is continuous wherever {@link lineOffsetAt} is, held or not, and
+ * is what a bicycle whose wheels both follow the line actually points along.
  */
 export function lineSlopeAt(line: RacingLine, distance: number): number {
-  const value = sampled(line.profile, line.offsets, distance);
-  if (Math.abs(value) > LINE_LIMIT_METRES) {
-    return 0;
-  }
-  return sampled(line.profile, line.offsets, distance, true);
+  const half = LINE_SLOPE_SPAN_METRES / 2;
+  return (
+    (lineOffsetAt(line, distance + half) - lineOffsetAt(line, distance - half)) /
+    LINE_SLOPE_SPAN_METRES
+  );
 }
 
 /**
@@ -624,20 +632,11 @@ function curvatureAt(line: RacingLine, distance: number): number {
   return low + (high - low) * fraction;
 }
 
-/**
- * A per-sample value at a distance, Catmull-Rom between samples — or, with
- * `slope`, that same curve's rate of change per metre (#1995), so the two
- * cannot be read off different interpolations. @see lineOffsetAt
- */
-function sampled(
-  profile: RouteProfile,
-  values: Float64Array,
-  distance: number,
-  slope = false,
-): number {
+/** A per-sample value at a distance, Catmull-Rom between samples. @see lineOffsetAt */
+function sampled(profile: RouteProfile, values: Float64Array, distance: number): number {
   const count = values.length;
   if (count < 2) {
-    return count === 1 && !slope ? (values[0] as number) : 0;
+    return count === 1 ? (values[0] as number) : 0;
   }
   const on = distanceOnRoute(profile, distance);
   const raw = on / profile.resolution;
@@ -648,16 +647,6 @@ function sampled(
   const p2 = values[index + 1] as number;
   const p3 = values[neighbour(profile, count, index + 2)] as number;
   const t2 = t * t;
-  if (slope) {
-    return (
-      (0.5 *
-        (-p0 +
-          p2 +
-          2 * (2 * p0 - 5 * p1 + 4 * p2 - p3) * t +
-          3 * (-p0 + 3 * p1 - 3 * p2 + p3) * t2)) /
-      profile.resolution
-    );
-  }
   const t3 = t2 * t;
   return (
     0.5 *

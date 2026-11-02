@@ -688,32 +688,16 @@ function headingAt(
 }
 
 /**
- * How far the drawn road moves on the ground per metre of route distance
- * between a corridor point and the next — #1995.
- *
- * Not 1: `CorridorPoint.along` is the route's distance, and the drawn road is
- * smoothed through a bend (#543) and projected onto the ground, so a segment
- * is up to a few per cent longer or shorter than the distance it spans. A
- * rider's sideways rate is per metre of route distance, so it is compared with
- * this, not with 1, or the rider faces a degree off the way it moves through a
- * bend. 1 where the segment has no length or no span.
- */
-function alongStretch(corridor: RoadCorridor, index: number): number {
-  const from = corridor.centre[index] as CorridorPoint;
-  const ahead = corridor.centre[index + 1];
-  if (ahead === undefined) return 1;
-  const span = ahead.along - from.along;
-  const length = Math.hypot(ahead.x - from.x, ahead.z - from.z);
-  return span > 0 && length > 0 ? length / span : 1;
-}
-
-/**
  * The most a drawn rider is turned off the road's heading toward the way its
  * place on the line moves: **12°** — #1995.
  *
- * A rider changing line at riding speed points a few degrees off the road, ten
- * or so at the most; the drawn line can cross the road far faster than that
- * in a hairpin, and facing all of it stood the bicycle side-on to the road.
+ * A judgement, not a measurement, and the reason is the camera. A rider moving
+ * across the road by the width of a lane over a few bicycle lengths, the most
+ * the line does outside a hairpin, points about 10° off it; in a hairpin the
+ * drawn line can cross the road far faster, and facing all of that stood the
+ * bicycle side-on to the road (#1995's review on the owner's course). 12° keeps
+ * every ordinary change of line drawn as it is and reads, from the chase
+ * camera, as a bicycle pointing along the road.
  */
 export const FACING_TURN_LIMIT_RADIANS = (12 * Math.PI) / 180;
 
@@ -1149,6 +1133,39 @@ function pedalling(atDistance: number): number {
 const GHOST_SPEED_HALF_WINDOW_SECONDS = 0.5;
 
 /**
+ * The angle, off the road's heading `road`, from where a rider's rear wheel is
+ * drawn to where its front wheel is — #1995. Each wheel is half of
+ * {@link BICYCLE_LENGTH_METRES} along the road from `atDistance`, at the
+ * rider's place across the road moved on by `across.rate` over that half, and
+ * on the road's own normal there, as {@link markerAt} places a rider. Nought
+ * where the two coincide, at a clamped end of the corridor.
+ */
+function wheelToWheel(
+  corridor: RoadCorridor,
+  atDistance: number,
+  across: Across,
+  road: { readonly headingX: number; readonly headingZ: number },
+): number {
+  const half = BICYCLE_LENGTH_METRES / 2;
+  const wheel = (offset: number): { x: number; z: number } => {
+    const at = placeOnCorridor(corridor, atDistance + offset);
+    const heading = headingAt(corridor, at.index);
+    const lateral = across.metres + across.rate * offset;
+    return { x: at.x - heading.headingZ * lateral, z: at.z + heading.headingX * lateral };
+  };
+  const rear = wheel(-half);
+  const front = wheel(half);
+  const dx = front.x - rear.x;
+  const dz = front.z - rear.z;
+  if (Math.hypot(dx, dz) < 1e-9) return 0;
+  // The signed angle from the road's heading to the wheels', positive toward
+  // the road's normal `(−headingZ, headingX)`.
+  const along = dx * road.headingX + dz * road.headingZ;
+  const normal = -dx * road.headingZ + dz * road.headingX;
+  return Math.atan2(normal, along);
+}
+
+/**
  * A marker on the road at a distance.
  *
  * ⚠️ Clamped to the corridor rather than extrapolated. A bot or ghost far enough
@@ -1170,19 +1187,20 @@ function markerAt(
   // camera's — #349. @see RiderMarker.headingX
   const road = headingAt(corridor, at.index);
   const lateral = across.metres;
-  // ⚠️ #1995: the marker FACES the tangent of the line it is drawn on, the
-  // road's heading plus the line's sideways rate along the road's normal —
-  // not the road's heading, which slid a rider crossing the road sideways.
-  // Between two corridor points this is exactly the direction the drawn
-  // position below moves in, because the normal is the segment's own and the
-  // road part moves at the segment's own `stretch`.
-  // ⚠️ But turned at most FACING_TURN_LIMIT_RADIANS off the road, smoothly:
-  // where a hairpin's line swings across the road within a few metres, and the
-  // smoothed road there is shorter than the route, that direction is 40°+ off
-  // the road, and drawn so the bicycle stood side-on to it (#1995's review on
-  // the owner's course). A pure function of distance, so frame-rate
-  // independent, and every rider's marker is placed here, bots included.
-  const turn = facingTurn(Math.atan2(across.rate, alongStretch(corridor, at.index)));
+  // ⚠️ #1995: the marker FACES the way its bicycle points, from where its
+  // rear wheel is drawn to where its front wheel is, half a bicycle behind and
+  // ahead on the road, each across the road by the line's chord rate
+  // (`racing-line.ts` §`lineSlopeAt`) — not the road's heading, which slid a
+  // rider crossing the road sideways. Both wheels are placed as this marker
+  // is, so the facing moves continuously with the drawn position: no step
+  // where the line reaches the road's edge, and none at a corridor point.
+  // ⚠️ But turned at most FACING_TURN_LIMIT_RADIANS off the road, by a smooth
+  // saturation: where a hairpin's line swings across the road within a few
+  // metres that direction is 40°+ off the road, and was drawn side-on to it
+  // (#1995's review on the owner's course). A pure function of distance, so
+  // frame-rate independent, and every rider's marker is placed here, bots
+  // included.
+  const turn = facingTurn(wheelToWheel(corridor, atDistance, across, road));
   const cos = Math.cos(turn);
   const sin = Math.sin(turn);
   // #499: across the road along its own normal, `(−headingZ, headingX)` —
