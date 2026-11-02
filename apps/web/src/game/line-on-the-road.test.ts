@@ -52,7 +52,7 @@ import {
   northRoute,
   sBendRoute,
 } from './route-fixtures-testing';
-import { placedRiders, sceneFrame } from './scene';
+import { FACING_TURN_LIMIT_RADIANS, facingTurn, placedRiders, sceneFrame } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
 
@@ -651,6 +651,29 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     z: marker.headingZ,
   });
 
+  /** The signed angle from the road's heading to a direction, positive toward the road's normal. */
+  function offRoad(
+    road: { readonly headingX: number; readonly headingZ: number },
+    v: { readonly x: number; readonly z: number },
+  ): number {
+    return Math.atan2(
+      road.headingX * v.z - road.headingZ * v.x,
+      road.headingX * v.x + road.headingZ * v.z,
+    );
+  }
+
+  /**
+   * That a marker faces the way it is drawn moving, held to the facing limit:
+   * turned off the road by `facingTurn` of the angle it moves at off the road.
+   */
+  function expectFacesItsMotion(
+    marker: RiderMarker,
+    moved: { readonly x: number; readonly z: number },
+    road: { readonly headingX: number; readonly headingZ: number },
+  ): void {
+    expect(offRoad(road, facing(marker))).toBeCloseTo(facingTurn(offRoad(road, moved)), 5);
+  }
+
   /** Where the line crosses the road fastest between two distances, to the decimetre. */
   function steepest(line: RacingLine, from: number, to: number): number {
     let best = from;
@@ -686,16 +709,12 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     const before = markerOf(frameOf(hairpin, stateAt(hairpin, at - STEP, 8)), 'rider');
     const after = markerOf(frameOf(hairpin, stateAt(hairpin, at + STEP, 8)), 'rider');
     const moved = { x: after.x - before.x, z: after.z - before.z };
-    // It faces the way it is drawn movingâ€¦
-    expect(between(facing(rider), moved)).toBeLessThan(1e-5);
+    const road = roadHeadingAt(frame, at);
+    // It faces the way it is drawn moving, held to the limitâ€¦
+    expectFacesItsMotion(rider, moved, road);
     // â€¦which is the road's heading turned by the line's rate, toward the
     // normal when the line is moving toward it.
-    const road = roadHeadingAt(frame, at);
-    const turned = Math.atan2(
-      road.headingX * rider.headingZ - road.headingZ * rider.headingX,
-      road.headingX * rider.headingX + road.headingZ * rider.headingZ,
-    );
-    expect(turned).toBeCloseTo(Math.atan(slope), 3);
+    expect(offRoad(road, facing(rider))).toBeCloseTo(facingTurn(Math.atan(slope)), 3);
   });
 
   it.each(['bot', 'ghost'] as const)(
@@ -727,9 +746,9 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       const before = drawnAt(at - STEP).marker;
       const after = drawnAt(at + STEP).marker;
       const moved = { x: after.x - before.x, z: after.z - before.z };
-      expect(between(facing(here), moved)).toBeLessThan(1e-5);
-      // And that is not the road's heading: the line is crossing it.
       const road = roadHeadingAt(frame, at);
+      expectFacesItsMotion(here, moved, road);
+      // And that is not the road's heading: the line is crossing it.
       expect(between(facing(here), { x: road.headingX, z: road.headingZ })).toBeGreaterThan(0.04);
     },
   );
@@ -789,13 +808,55 @@ describe('a rider faces the way the line takes them, not the way the road runs â
             x: markerOf(after, kind).x - markerOf(before, kind).x,
             z: markerOf(after, kind).z - markerOf(before, kind).z,
           };
-          expect(between(facing(markerOf(here, kind)), moved)).toBeLessThan(1e-5);
+          expectFacesItsMotion(markerOf(here, kind), moved, roadHeadingAt(here, at));
           checked += 1;
         }
       }
       expect(checked).toBe(9);
     },
   );
+
+  it('never stands side-on where a tight hairpinâ€™s line swings across the road', () => {
+    // #1995's review, on the owner's course: coming out of a hairpin the drawn
+    // line crossed the road within a few metres, and a rider facing all of
+    // that was drawn side-on to a straight road. A tighter hairpin than the
+    // file's own, ridden through from approach to exit.
+    const tight = hairpinRoute(8);
+    const exit = 400 + Math.PI * 8 + 40;
+    let steepestMotion = 0;
+    for (let at = 360; at <= exit; at += 0.5) {
+      const frameAt = (distance: number): SceneFrame => frameOf(tight, stateAt(tight, distance, 9));
+      if (!oneSegment(frameAt(at), at - STEP, at + STEP)) continue;
+      const here = frameAt(at);
+      const road = roadHeadingAt(here, at);
+      const rider = markerOf(here, 'rider');
+      const before = markerOf(frameAt(at - STEP), 'rider');
+      const after = markerOf(frameAt(at + STEP), 'rider');
+      const motion = offRoad(road, { x: after.x - before.x, z: after.z - before.z });
+      steepestMotion = Math.max(steepestMotion, Math.abs(motion));
+      expect(Math.abs(offRoad(road, facing(rider)))).toBeLessThanOrEqual(
+        FACING_TURN_LIMIT_RADIANS + 1e-9,
+      );
+    }
+    // Not vacuous: somewhere the drawn place moves half as far again as the limit off the road.
+    expect(steepestMotion).toBeGreaterThan(1.5 * FACING_TURN_LIMIT_RADIANS);
+  });
+
+  it('holds the turn off the road smoothly: the motionâ€™s own angle when small, never past the limit', () => {
+    const degree = Math.PI / 180;
+    // Small turns are the motion's own, within 3 per cent at 3Â°.
+    expect(facingTurn(3 * degree) / (3 * degree)).toBeGreaterThan(0.97);
+    // Large ones are held just under the limit, on both sides.
+    for (const angle of [30, 45, 90]) {
+      expect(facingTurn(angle * degree)).toBeLessThan(FACING_TURN_LIMIT_RADIANS);
+      expect(facingTurn(angle * degree)).toBeGreaterThan(0.75 * FACING_TURN_LIMIT_RADIANS);
+      expect(facingTurn(-angle * degree)).toBeCloseTo(-facingTurn(angle * degree), 12);
+    }
+    // And it only ever grows with the angle: no step where the hold starts.
+    for (let angle = 0; angle < 90; angle += 0.5) {
+      expect(facingTurn((angle + 0.5) * degree)).toBeGreaterThan(facingTurn(angle * degree));
+    }
+  });
 
   it('faces along the road with the line switched off', () => {
     const line = racingLine(hairpin);

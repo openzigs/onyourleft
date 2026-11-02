@@ -708,6 +708,27 @@ function alongStretch(corridor: RoadCorridor, index: number): number {
 }
 
 /**
+ * The most a drawn rider is turned off the road's heading toward the way its
+ * place on the line moves: **12°** — #1995.
+ *
+ * A rider changing line at riding speed points a few degrees off the road, ten
+ * or so at the most; the drawn line can cross the road far faster than that
+ * in a hairpin, and facing all of it stood the bicycle side-on to the road.
+ */
+export const FACING_TURN_LIMIT_RADIANS = (12 * Math.PI) / 180;
+
+/**
+ * How far a rider is drawn turned off the road, given the angle its drawn
+ * place moves at off the road — #1995: that angle where it is small, and never
+ * more than {@link FACING_TURN_LIMIT_RADIANS}, by a smooth saturation
+ * (`limit · tanh(angle / limit)`), so the turn has no kink where it starts to
+ * be held back.
+ */
+export function facingTurn(motion: number): number {
+  return FACING_TURN_LIMIT_RADIANS * Math.tanh(motion / FACING_TURN_LIMIT_RADIANS);
+}
+
+/**
  * How far apart, side to side, two riders level on the road are drawn: **1.2 m**
  * between their middles — two handlebars 0.4 m wide and 0.8 m of air between
  * them. #499: every rider used to be on the centreline, so two level riders
@@ -1155,11 +1176,15 @@ function markerAt(
   // Between two corridor points this is exactly the direction the drawn
   // position below moves in, because the normal is the segment's own and the
   // road part moves at the segment's own `stretch`.
-  const stretch = alongStretch(corridor, at.index);
-  const facingX = road.headingX * stretch - road.headingZ * across.rate;
-  const facingZ = road.headingZ * stretch + road.headingX * across.rate;
-  // Never nought: the stretch is positive and the normal is square to the heading.
-  const facing = Math.hypot(facingX, facingZ);
+  // ⚠️ But turned at most FACING_TURN_LIMIT_RADIANS off the road, smoothly:
+  // where a hairpin's line swings across the road within a few metres, and the
+  // smoothed road there is shorter than the route, that direction is 40°+ off
+  // the road, and drawn so the bicycle stood side-on to it (#1995's review on
+  // the owner's course). A pure function of distance, so frame-rate
+  // independent, and every rider's marker is placed here, bots included.
+  const turn = facingTurn(Math.atan2(across.rate, alongStretch(corridor, at.index)));
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
   // #499: across the road along its own normal, `(−headingZ, headingX)` —
   // the rider's right, on the screen and since #583 on the map (it was called
   // the left until then) — and at the road's
@@ -1169,8 +1194,8 @@ function markerAt(
     x: at.x - road.headingZ * lateral,
     y: at.y,
     z: at.z + road.headingX * lateral,
-    headingX: facingX / facing,
-    headingZ: facingZ / facing,
+    headingX: road.headingX * cos - road.headingZ * sin,
+    headingZ: road.headingZ * cos + road.headingX * sin,
     lean: roll.bicycle,
     bodyLean: roll.body,
     pedalling: motion.pedalling,

@@ -140,7 +140,9 @@ export interface RiderMarker {
    * reviewer who remembers it equal to the road's heading is reading the old
    * contract: it is the road's heading turned by how fast the rider's drawn
    * place moves across the road (`racing-line.ts` §`lineSlopeAt`), which is
-   * the way the marker moves as the line carries it. Facing the road while the
+   * the way the marker moves as the line carries it, held smoothly to at most
+   * 12° off the road (`scene.ts` §`facingTurn`), because a hairpin's line can
+   * cross the road far faster than a bicycle turns. Facing the road while the
    * line crossed it drew every rider sliding sideways. A position across the
    * road is still measured along the ROAD's normal — the camera's heading, or
    * the corridor's — never this one's.
