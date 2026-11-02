@@ -161,6 +161,18 @@ function aTree(): RealisticShape {
   } as unknown as Parameters<typeof prepareRealisticShape>[2]);
 }
 
+/** A loaded tree that also carries a middle level (#617), as every committed tree does. */
+function aTreeWithMiddle(): RealisticShape {
+  const near = aTree();
+  return {
+    ...near,
+    middle: {
+      parts: near.parts.map((part) => ({ geometry: aGeometry(), material: part.material })),
+      triangles: 12,
+    },
+  };
+}
+
 /** A shrub or a rock: one part, no impostor. */
 function aPlant(): RealisticShape {
   const scene = {
@@ -177,6 +189,18 @@ function aPlant(): RealisticShape {
     },
   } as unknown as Parameters<typeof prepareRealisticShape>[0];
   return prepareRealisticShape(scene, 'plant');
+}
+
+/** A belt of every realistic kind, its trees carrying a middle level. */
+function aBeltWithMiddle(): RealisticVegetationBelt {
+  return new RealisticVegetationBelt(
+    new Map([
+      ['tree-broadleaf', [aTreeWithMiddle()]],
+      ['tree-conifer', [aTreeWithMiddle()]],
+      ['shrub', [aPlant()]],
+      ['rock', [aPlant()]],
+    ] as const),
+  );
 }
 
 /** A belt of every realistic kind, as a view builds one. */
@@ -283,6 +307,25 @@ describe('RealisticVegetationBelt — what the tree shader is handed near the ca
     expect([...treesDrawn(belt).values()].map((each) => each.share)).toEqual([1]);
     expect(belt.drawnItems).toBe(1);
     expect(belt.grounded.count).toBe(1);
+  });
+
+  it('keeps half of every tree 5.25 m from the eye at whatever level its rank draws it, the middle level and its impostor too', () => {
+    const belt = aBeltWithMiddle();
+    // Eight trees on the 5.25 m ring, spread across the view: by their
+    // distance from the pose they take the full mesh, the middle level and
+    // the middle-to-impostor band, each a keep of one half.
+    const ring = [-60, -45, -30, -15, 15, 30, 45, 60].map((degrees) => {
+      const angle = (degrees * Math.PI) / 180;
+      return tree(5.25 * Math.sin(angle), -CAMERA_BEHIND_METRES + 5.25 * Math.cos(angle));
+    });
+    for (let frame = 0; frame < 30; frame += 1) belt.update(ring, POSE);
+    const levels = belt.levelsOf('tree-broadleaf');
+    expect(levels.middle.some((parts) => (parts?.[0] as unknown as DrawnMesh).count > 0)).toBe(
+      true,
+    );
+    const drawn = [...treesDrawn(belt).values()];
+    expect(drawn).toHaveLength(ring.length);
+    for (const each of drawn) expect(each.share).toBeCloseTo(0.5, 6);
   });
 
   it('fades the blob under a fading tree with it', () => {
