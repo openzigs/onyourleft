@@ -6,8 +6,8 @@
  * read here, at load: since #1634 `urban-class`, since #1660
  * `split-roofs`, since #1782 `house-archetypes`, since #1785
  * `roof-variants`, since #1786 `dormer-variants`, since #1784
- * `archetype-porches`, since #1783 `commercial-archetypes` and since #1790
- * `mapped-roof-shape`. Its own
+ * `archetype-porches`, since #1783 `commercial-archetypes`, since #1790
+ * `mapped-roof-shape` and since #1791 `building-type`. Its own
  * module so that a test reads the plans the page draws, and a lever parsed
  * but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -25,6 +25,7 @@ import type { RouteProfile } from '@onyourleft/domain';
 
 import {
   archetypePorchesWithLevers,
+  buildingTypesWithLevers,
   commercialArchetypesWithLevers,
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
@@ -66,8 +67,8 @@ export function plannedTown(
     urban,
     // #1660: the L-, T-, U- and Z-shaped houses' split roofs, #1782: the houses'
     // archetypes, #1785: their roof variants, #1786: their dormers, #1784: their porches
-    // and eaves, #1783: the commercial and multi-family archetypes, and #1790: the mapped
-    // roof and storey tags, unless their lever is off.
+    // and eaves, #1783: the commercial and multi-family archetypes, #1790: the mapped roof
+    // and storey tags, and #1791: the mapped building type, unless their lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
@@ -76,6 +77,7 @@ export function plannedTown(
       archetypePorches: archetypePorchesWithLevers(leversOff),
       commercialArchetypes: commercialArchetypesWithLevers(leversOff),
       mappedRoofShape: mappedRoofShapeWithLevers(leversOff),
+      buildingTypes: buildingTypesWithLevers(leversOff),
     },
   );
   return { land, plans, urban };

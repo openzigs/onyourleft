@@ -1213,6 +1213,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `roof:levels` ≥ 1 admitting dormers below their pitch;
                         untagged footprints planned as before
                         (`-mapped-roof-shape`, `town=roofs`);
+                        since #1791 a mapped `building_type` or `landmark`
+                        (`building-types.ts`) over the land-use guess: a
+                        house or bungalow by #1782's rule (a bungalow the
+                        bungalow alone), a terrace by #1635's in any class,
+                        apartments a garden apartment, a garage or shed one
+                        windowless storey (a garage door, a plain door), a
+                        barn planks under a gambrel, a shop or warehouse as
+                        commercial or industrial, and a church, school or
+                        any landmark a plain civic block whose plain painted
+                        door takes no wreath; where a typed footprint also
+                        carries #1790's tags, its `roof:shape` and
+                        `building:levels` win over the type's default roof
+                        and storey (the type keeps its walls, pitch, doors);
+                        untyped planned as before
+                        (`-building-type`, `town=typed`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

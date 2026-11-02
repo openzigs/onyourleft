@@ -14,6 +14,8 @@ import {
   NO_BUILDING_FIELDS,
   type BuildingFeature,
   type BuildingFields,
+  type BuildingType,
+  type Landmark,
   type LandUseFeature,
 } from '@onyourleft/map-features';
 
@@ -974,6 +976,235 @@ export function commercialStreetFixture(latitude = FIXTURE_LATITUDE): {
       paths: [],
       streets: [],
     },
+  };
+}
+
+/** One row of {@link typedStreetFixture}: what it is mapped as, and its footprints about the slot's middle. */
+interface TypedRow {
+  readonly row: string;
+  readonly buildingType: BuildingType | null;
+  readonly landmark: Landmark | null;
+  readonly footprints: readonly (readonly (readonly [number, number])[])[];
+  readonly height: number | null;
+  /** How far out its middle stands, metres. */
+  readonly lateral: number;
+}
+
+/** #1791's rows, in order along the road: a footprint, or three, for each row of the issue's table. */
+const TYPED_ROWS: readonly TypedRow[] = [
+  {
+    row: 'house',
+    buildingType: 'house',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 12, 8.5)],
+    height: 6.5,
+    lateral: 22,
+  },
+  {
+    row: 'bungalow',
+    buildingType: 'bungalow',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 7.5, 13)],
+    height: 3.5,
+    lateral: 22,
+  },
+  // A Cape's shape, which the bungalow alone being admitted leaves no archetype.
+  {
+    row: 'bungalow-capelike',
+    buildingType: 'bungalow',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 10.5, 8)],
+    height: 3.5,
+    lateral: 22,
+  },
+  {
+    row: 'terrace',
+    buildingType: 'terrace',
+    landmark: null,
+    footprints: [
+      rectangleBeside(-6, 0, 6, 10),
+      rectangleBeside(0, 0, 6, 10),
+      rectangleBeside(6, 0, 6, 10),
+    ],
+    height: 9.5,
+    lateral: 22,
+  },
+  {
+    row: 'apartments',
+    buildingType: 'apartments',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 36, 14)],
+    height: 6.5,
+    lateral: 30,
+  },
+  // `residential`, two storeys over 300 m²: an apartment block.
+  {
+    row: 'residential-block',
+    buildingType: 'residential',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 36, 14)],
+    height: 6.5,
+    lateral: 30,
+  },
+  // A house of a garden apartment's shape, which untyped is one: a house.
+  {
+    row: 'house-large',
+    buildingType: 'house',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 30, 12)],
+    height: 6.5,
+    lateral: 30,
+  },
+  // One storey, which no garden apartment is: still no garage.
+  {
+    row: 'apartments-low',
+    buildingType: 'apartments',
+    landmark: null,
+    footprints: [rectangleBeside(-11, 0, 18, 8), rectangleBeside(11, 0, 18, 8)],
+    height: 3.5,
+    lateral: 22,
+  },
+  {
+    row: 'garage',
+    buildingType: 'garage',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 6, 6)],
+    height: null,
+    lateral: 20,
+  },
+  // Too far back for a driveway: its door alone.
+  {
+    row: 'garage-set-back',
+    buildingType: 'garage',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 6, 6)],
+    height: null,
+    lateral: 60,
+  },
+  // A row of lock-ups of a Richmond house's shape, which a house model fits untyped.
+  {
+    row: 'garages-long',
+    buildingType: 'garages',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 7, 19)],
+    height: null,
+    lateral: 22,
+  },
+  {
+    row: 'shed',
+    buildingType: 'shed',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 4, 3.5)],
+    height: null,
+    lateral: 20,
+  },
+  {
+    row: 'barn',
+    buildingType: 'barn',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 12, 18)],
+    height: 7,
+    lateral: 26,
+  },
+  {
+    row: 'retail',
+    buildingType: 'retail',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 12, 12)],
+    height: 6.5,
+    lateral: 22,
+  },
+  {
+    row: 'warehouse',
+    buildingType: 'warehouse',
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 30, 20)],
+    height: 8,
+    lateral: 30,
+  },
+  // A Cape's shape on residential land: what a church must never be drawn as.
+  {
+    row: 'church',
+    buildingType: 'church',
+    landmark: 'worship',
+    footprints: [rectangleBeside(0, 0, 10.5, 8)],
+    height: 3.5,
+    lateral: 22,
+  },
+  {
+    row: 'school',
+    buildingType: 'school',
+    landmark: 'school',
+    footprints: [rectangleBeside(0, 0, 30, 15)],
+    height: 6.5,
+    lateral: 28,
+  },
+  // The church's shape with no type: today's rule, a Cape.
+  {
+    row: 'untyped',
+    buildingType: null,
+    landmark: null,
+    footprints: [rectangleBeside(0, 0, 10.5, 8)],
+    height: 3.5,
+    lateral: 22,
+  },
+];
+
+/** The along-road spacing of {@link typedStreetFixture}'s rows, metres. */
+const TYPED_ROW_METRES = 45;
+
+/**
+ * #1791's fixture: a street with a footprint for each row of the issue's
+ * table, mapped with its `building_type` (and a church's and a school's
+ * `landmark`), for the owner's look pair (`?town=typed` against
+ * `levers=-building-type`) and for the plans to be asserted over. Along a
+ * level road from 1 000 m, a row every 45 m, mirrored on both sides, every
+ * footprint on residential land: a house, a bungalow, a bungalow of a Cape's
+ * shape, a row of three terraced houses, an apartment block and a one-storey
+ * one, a garage, a garage too far back for a driveway, a row of lock-ups of a
+ * Richmond house's shape, a shed, a barn, a shop, a warehouse, a church of a
+ * Cape's shape, a school, and the church's shape untyped. `rows` names each footprint of the corridor, in
+ * its order. Nothing here is a real place.
+ */
+export function typedStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly string[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: string[] = [];
+  TYPED_ROWS.forEach((each, index) => {
+    const along = 1_000 + index * TYPED_ROW_METRES;
+    for (const side of [1, -1]) {
+      for (const corners of each.footprints) {
+        const ring = corners.map(([a, n]) => [along + a, side * each.lateral + n] as const);
+        buildings.push({
+          ...buildingBeside(profile, origin, [ring], each.height),
+          buildingType: each.buildingType,
+          landmark: each.landmark,
+        });
+        rows.push(each.row);
+      }
+    }
+  });
+  const end = 1_000 + TYPED_ROWS.length * TYPED_ROW_METRES;
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'typed-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, end, -70, 70)],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+    rows,
   };
 }
 
