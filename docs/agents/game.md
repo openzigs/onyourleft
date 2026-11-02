@@ -1362,8 +1362,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         every procedural village's centre, whose middle plots
                         are empty for it (`settlements.ts`). ⚠️ **Drawn in the
                         ROAD's material** by one mesh in both worlds
-                        (`three-renderer.ts` §`SideRoadBelt`), and it fades by
-                        sinking under the ground, not by transparency. Every
+                        (`three-renderer.ts` §`SideRoadBelt`); it blends from
+                        the road's height to the ground's and then follows the
+                        ground, never held level over it (#1993), and it fades
+                        by narrowing and sinking under the ground, not by
+                        transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
                         is broken at its crossroads with dropped kerbs
