@@ -138,6 +138,19 @@ export interface RiderMarker {
    * else on the road and may be round a bend. Reading the camera's heading here
    * would be correct today and silently wrong the day anything but the rider
    * grows a front.
+   *
+   * ⚠️ **Since #1995 it is the LINE's direction, not the road's**, and a
+   * reviewer who remembers it equal to the road's heading is reading the old
+   * contract: it is the direction from where the rider's rear wheel is drawn
+   * to where its front wheel is (`scene.ts` §`wheelToWheel`, across the road
+   * by `racing-line.ts` §`lineSlopeAt`'s chord), held to at most 12° off the
+   * road by a smooth saturation (`scene.ts` §`facingTurn`), because a
+   * hairpin's line can cross the road far faster than a bicycle turns. It
+   * changes continuously as the rider rides on, with no step where the line
+   * reaches the road's edge. Facing the road while the
+   * line crossed it drew every rider sliding sideways. A position across the
+   * road is still measured along the ROAD's normal — the camera's heading, or
+   * the corridor's — never this one's.
    */
   readonly headingX: number;
   readonly headingZ: number;
