@@ -13,6 +13,7 @@ import type { RouteProfile } from '@onyourleft/domain';
 import {
   NO_BUILDING_FIELDS,
   type BuildingFeature,
+  type BuildingFields,
   type LandUseFeature,
 } from '@onyourleft/map-features';
 
@@ -969,6 +970,81 @@ export function commercialStreetFixture(latitude = FIXTURE_LATITUDE): {
         landBeside(profile, origin, 'landuse', 'commercial', 1_750, 2_650, 15, 80),
         landBeside(profile, origin, 'landuse', 'residential', 1_750, 2_650, -80, -15),
       ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/** One house of {@link mappedRoofStreetFixture}: a {@link StreetHouse} and the tags it carries. */
+interface TaggedHouse extends StreetHouse {
+  readonly tags: Partial<BuildingFields>;
+}
+
+/**
+ * #1790's fixture: a street of houses each carrying the tags #1789 decodes,
+ * for the owner's look pair (`?town=roofs`, whose before is
+ * `levers=-mapped-roof-shape`) and for the plans to be asserted over. Along a
+ * level road from 1 000 m to 1 500 m, both sides, on residential land, a house
+ * every 25 m, its middle 22 m out, square to the road, each 12 m along by 8 m
+ * deep and one storey unless named: every `roof:shape` in turn (a `pyramidal`
+ * one on a 9 m square); a gable `across`, a gable facing 0° and one facing
+ * 90°; a skillion facing 180°; a hipped L, 18 by 9; a gable 12 by 10 with
+ * `roof:levels=1`; and a flat-roofed block 12 m high tagged
+ * `building:levels=2`. Every tag is synthetic, and nothing here is a real
+ * place.
+ */
+export function mappedRoofStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const house = (tags: Partial<BuildingFields>, corners = rectangleBeside(0, 0, 12, 8)) => ({
+    corners,
+    height: 3.5,
+    tags,
+  });
+  const street: readonly TaggedHouse[] = [
+    house({ roofShape: 'flat' }),
+    house({ roofShape: 'gabled' }),
+    house({ roofShape: 'hipped' }),
+    house({ roofShape: 'pyramidal' }, rectangleBeside(0, 0, 9, 9)),
+    house({ roofShape: 'skillion' }),
+    house({ roofShape: 'half-hipped' }),
+    house({ roofShape: 'gambrel' }),
+    house({ roofShape: 'saltbox' }),
+    house({ roofShape: 'side_hipped' }),
+    house({ roofShape: 'mansard' }),
+    house({ roofShape: 'gabled', roofOrientation: 'across' }),
+    house({ roofShape: 'gabled', roofDirectionDegrees: 0 }),
+    house({ roofShape: 'gabled', roofDirectionDegrees: 90 }),
+    house({ roofShape: 'skillion', roofDirectionDegrees: 180 }),
+    house({ roofShape: 'hipped' }, ellAbout(18, 9)),
+    house({ roofShape: 'gabled', roofLevels: 1 }, rectangleBeside(0, 0, 12, 10)),
+    { corners: rectangleBeside(0, 0, 12, 8), height: 12, tags: { levels: 2 } },
+  ];
+  const buildings: BuildingFeature[] = [];
+  let index = 0;
+  for (let along = 1_000; along < 1_500; along += 25) {
+    for (const side of [1, -1]) {
+      const each = street[index % street.length] as TaggedHouse;
+      const ring = each.corners.map(([a, n]) => [along + a, side * 22 + n] as const);
+      buildings.push({ ...buildingBeside(profile, origin, [ring], each.height), ...each.tags });
+      index += 1;
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'mapped-roof-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, 1_550, -70, 70)],
       buildings,
       paths: [],
       streets: [],

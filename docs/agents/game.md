@@ -1196,6 +1196,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         one door, no garage) — `unknown`, industry and towers
                         planned as before (`-commercial-archetypes`,
                         `town=commercial`);
+                        since #1790 a mapped `roof:shape` drawn as tagged
+                        (`MAPPED_ROOFS`: flat, gable, hip, a variant or a
+                        skillion), on a rectangle or an L, T, U or Z and never
+                        on a terraced footprint; `roof:orientation` and
+                        `roof:direction` turning a rectangle's gable ridge
+                        (`roofTurnedOf`); `building:levels` the storey count,
+                        the eaves at the mapped height (`storeyMetresOf`);
+                        `roof:levels` ≥ 1 admitting dormers below their pitch;
+                        untagged footprints planned as before
+                        (`-mapped-roof-shape`, `town=roofs`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
