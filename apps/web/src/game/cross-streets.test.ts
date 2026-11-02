@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { metres, type RouteProfile } from '@onyourleft/domain';
+import { distanceOnRoute, elevationAt, metres, type RouteProfile } from '@onyourleft/domain';
 import type { StreetFeature, StreetGrade } from '@onyourleft/map-features';
 
 import {
@@ -35,7 +35,7 @@ import {
   type SideRoad,
 } from './cross-streets';
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
-import { terrainHeightAt, VERGE_DROP_METRES } from './landform';
+import { RELIEF_CLEAR_METRES, terrainHeightAt, VERGE_DROP_METRES } from './landform';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { distanceToDrawnRoad } from './road-grid';
 import { hairpinRoute, northRoute, valleyRoute } from './route-fixtures-testing';
@@ -480,7 +480,8 @@ describe('what a side road is — #1565', () => {
     const here = roadAt(crossing.junction.along, climb);
     const half = SIDE_ROAD_WIDTHS.major / 2;
     let falling = 0;
-    type Vertex = { out: number; y: number; ground: number; across: number };
+    // `forward` is the vertex's distance along the main road's direction from the junction.
+    type Vertex = { out: number; y: number; ground: number; forward: number };
     for (const side of [1, -1] as const) {
       // Each edge of the arm, from the mouth out.
       const edges = new Map<1 | -1, Vertex[]>([
@@ -500,7 +501,7 @@ describe('what a side road is — #1565', () => {
           NO_LAND_CLASS,
         );
         const out = Math.abs(lateral) - 3.5;
-        edges.get(along >= 0 ? 1 : -1)?.push({ out, y, ground, across: along });
+        edges.get(along >= 0 ? 1 : -1)?.push({ out, y, ground, forward: along });
         // Near the mouth it is still coming down from the road's height, over the verge's drop.
         if (out > 0.01 && out < SIDE_ROAD_RAMP_METRES / 2) {
           expect(y - ground).toBeGreaterThan(SIDE_ROAD_LIFT_METRES + 0.05);
@@ -508,7 +509,9 @@ describe('what a side road is — #1565', () => {
         // Past the ramp and before the fade: ON the ground, never held level over it.
         if (out > SIDE_ROAD_RAMP_METRES && out <= SIDE_ROAD_METRES - SIDE_ROAD_FADE_METRES) {
           expect(y - ground).toBeCloseTo(SIDE_ROAD_LIFT_METRES, 2);
-          const road = 40 + 0.06 * (at + along) - origin.elevation;
+          const road =
+            elevationAt(climb, distanceOnRoute(climb, crossing.junction.along + along)) -
+            origin.elevation;
           if (road - ground > 2) falling += 1;
         }
       }
@@ -524,18 +527,25 @@ describe('what a side road is — #1565', () => {
           expect(Math.abs(b.y - a.y)).toBeLessThan(Math.abs(b.ground - a.ground) + 0.15);
         }
         // Full width until the fade, and a quarter of it at the far end.
-        for (const { out, across } of edge) {
+        for (const { out, forward } of edge) {
           if (out < SIDE_ROAD_METRES - SIDE_ROAD_FADE_METRES) {
-            expect(Math.abs(across)).toBeCloseTo(half, 2);
+            expect(Math.abs(forward)).toBeCloseTo(half, 2);
           }
         }
-        expect(Math.abs(last.across)).toBeCloseTo(half * SIDE_ROAD_END_WIDTH_SHARE, 2);
+        expect(Math.abs(last.forward)).toBeCloseTo(half * SIDE_ROAD_END_WIDTH_SHARE, 2);
         // And under the ground there, by its sink.
         expect(last.y - last.ground).toBeCloseTo(-SIDE_ROAD_SINK_METRES, 2);
       }
     }
     // Non-vacuity: the ground really falls away beside one arm, by more than two metres.
     expect(falling).toBeGreaterThan(0);
+  });
+
+  it('keeps the whole ramp inside the landform clear band, where the ground never rises above the road — #1993', () => {
+    // The blend has no floor: it keeps the tarmac above the ground only because
+    // the ground within RELIEF_CLEAR_METRES of the road is never above the road
+    // less the verge's drop. A longer ramp would bury an uphill arm mid-ramp.
+    expect(3.5 + SIDE_ROAD_RAMP_METRES).toBeLessThanOrEqual(RELIEF_CLEAR_METRES);
   });
 
   it('stands on #1547’s levelled ground under mapped built-up land, not the unlevelled relief', () => {
