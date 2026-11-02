@@ -15,12 +15,19 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { POISON } from '@onyourleft/map-features/testing';
+import { BUILDING_FIELD_NAMES, NO_BUILDING_FIELDS } from '@onyourleft/map-features';
+import {
+  BUILDING_FIELDS_DECODED,
+  BUILDING_PART_FIELDS_DECODED,
+  buildingFieldsTile,
+  POISON,
+} from '@onyourleft/map-features/testing';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   buildCorridorFixtureArchive,
   corridorFixtureRoute,
+  corridorFixtureTiles,
   expectedCorridorCounts,
 } from '../../browser/corridor-fixture';
 import {
@@ -195,6 +202,74 @@ describe('demo:bake draws what a ride would get — #1651', () => {
           '<trkpt lat="40" lon="-105"><ele>&x;</ele></trkpt></trkseg></trk></gpx>',
       ),
     ).toThrow(/DOCTYPE/i);
+  });
+});
+
+describe('demo:bake carries the building fields — #1789, ADR 0056’s entry of 2026-11-01', () => {
+  it('publishes every field in the packed bundle, as the store packs it, and the demo reads them back', async () => {
+    // The browser gate's route, over an archive whose every tile is #1789's
+    // fixture: two footprints with every field set, and one with none.
+    const tiles = corridorFixtureTiles().map((tile) => ({ ...tile, bytes: buildingFieldsTile() }));
+    const baked = await bakeRoute({
+      routeId: 'fields',
+      gpx: fixtureGpx(),
+      archive: corridorArchiveFrom(countingSource(await buildArchive({ tiles }))),
+      archiveUrl: 'file:building-fields.pmtiles',
+    });
+    const { bundle, features } = await readRouteBundle(baked.bytes);
+    expect(bundle.readerVersion).toBe(4);
+    expect(bundle.features.v).toBe(4);
+
+    // In the packed bundle, as the file publishes them: short names, an enum
+    // as the decoder's constant, a number as a number, and no `b` at all for
+    // a footprint with none.
+    const covered = bundle.tiles.planned - bundle.tiles.uncovered.length;
+    expect(covered).toBeGreaterThan(1);
+    expect(bundle.features.buildings).toHaveLength(3 * covered);
+    expect(bundle.features.buildings.slice(0, 3).map((building) => building.b)).toStrictEqual([
+      {
+        t: 'church',
+        l: 3,
+        rl: 1,
+        rs: 'gabled',
+        ro: 'across',
+        rd: 135,
+        wc: 4,
+        rc: 11,
+        wm: 'stone',
+        rm: 'slate',
+        y: 1887,
+        lm: 'worship',
+      },
+      {
+        t: 'retail',
+        l: 12,
+        rl: 0,
+        rs: 'flat',
+        ro: 'along',
+        rd: 345,
+        wc: 19,
+        rc: 0,
+        wm: 'glass',
+        rm: 'concrete',
+        y: 1972,
+        lm: 'school',
+      },
+      undefined,
+    ]);
+
+    // Read back as the demo reads a bundle, every footprint's fields equal.
+    expect(
+      features.buildings.map((building) =>
+        Object.fromEntries(BUILDING_FIELD_NAMES.map((name) => [name, building[name]])),
+      ),
+    ).toStrictEqual(
+      Array.from({ length: covered }).flatMap(() => [
+        BUILDING_FIELDS_DECODED,
+        BUILDING_PART_FIELDS_DECODED,
+        NO_BUILDING_FIELDS,
+      ]),
+    );
   });
 });
 

@@ -138,7 +138,12 @@
  * at 12 m/s calls for more than 60°, which no tyre holds. The drawn lean stops
  * at {@link MAXIMUM_LEAN_RADIANS}. A rider drawn at the cap is NOT cornering
  * legally; they are going faster than the bend allows and the game does not
- * slow them, which is out of scope here.
+ * slow them, which is out of scope here. ⚠️ **Since #1998 the DRAWN rider is
+ * slowed**, and a reviewer who remembers a hairpin drawn at this cap is
+ * reading the old file: `bend-easing.ts` eases each rider's drawn place and
+ * speed off for a bend so this lean stays at or under 25°, and the speed it is
+ * handed here is that drawn speed. The cap still binds where nothing is eased
+ * — a Delivery round and a lap race (`scene.ts` §`easingLine`).
  *
  * Pure: no clock, no `three`, no DOM, no platform API.
  */

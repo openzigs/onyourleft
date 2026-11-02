@@ -52,7 +52,31 @@ describe('a map in the page’s palette — #672', () => {
       document,
       optionsFor,
     );
-    expect(port.created[0]?.options).toEqual(optionsFor(theme));
+    // Still, unless it was asked to be explorable (#2003).
+    expect(port.created[0]?.options).toEqual({ ...optionsFor(theme), explorable: false });
+    view.destroy();
+  });
+
+  it('is created explorable when asked, keeps it through a repaint, and passes every move on — #2003', async () => {
+    const port = stubMapPort();
+    const view = createThemedMap(
+      port.renderer,
+      document.createElement('div'),
+      document,
+      optionsFor,
+      true,
+    );
+    expect(port.created[0]?.options.explorable).toBe(true);
+    document.documentElement.setAttribute('data-theme', 'dark');
+    await delivered();
+    expect(port.created).toHaveLength(1);
+
+    view.zoom('in');
+    view.zoom('out');
+    view.pan('north');
+    view.pan('west');
+    view.fitTrack();
+    expect(port.created[0]?.moves).toEqual(['zoom in', 'zoom out', 'pan north', 'pan west', 'fit']);
     view.destroy();
   });
 

@@ -115,7 +115,10 @@ export interface RiderMarker {
    * Where the bicycle's origin is — on the road surface between its two tyre
    * contacts. ⚠️ **On the rider's LINE since #499, not on the centreline**: up
    * to 3.2 m across the road (`scene.ts` §`lateralOf`). How far along the road
-   * it is has not changed: that is still the odometer.
+   * it is has not changed: that is still the odometer. ⚠️ **Except in a sharp
+   * bend, since #1998**: along the road it is the odometer EASED off for the
+   * bend (`bend-easing.ts`) — behind it by the speed the drawn rider lost, and
+   * back on it once that is given back after the bend. Never ahead of it.
    */
   readonly x: number;
   readonly y: number;

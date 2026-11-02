@@ -589,7 +589,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`theme-selection.ts` §`watchDocumentTheme`, a
                         `MutationObserver` on `data-theme`) that repaints a
                         live map through `MapView.setStyle` when the page
-                        changes palette, ended by the map's `destroy`
+                        changes palette, ended by the map's `destroy`. Since
+                        #2003 a chosen route's page draws its route through the
+                        same `MapPanel`, created `explorable`: drag and pinch,
+                        with buttons for every gesture, the canvas out of the
+                        tab order, and a sentence instead of a map offline
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46),
                         and since #14's fourth criterion the step that turns a
                         finished recording into an activity — the write order,
