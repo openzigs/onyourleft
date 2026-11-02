@@ -236,6 +236,7 @@
 
 import type { RouteProfile } from '@onyourleft/domain';
 import {
+  NO_BUILDING_FIELDS,
   simplifyRing,
   triangulate,
   type BuildingFeature,
@@ -4452,6 +4453,8 @@ function terracePlans(
           kind: 'building',
           heightMetres: storeys * STOREY_METRES,
           minHeightMetres: null,
+          // A terrace block is the plan's own, and was never in a tile.
+          ...NO_BUILDING_FIELDS,
           rings: [ring],
         },
         corridor,

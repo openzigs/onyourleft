@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildingFieldCaseTile,
+  HOSTILE_BUILDING_FIELD_CASES,
   HOSTILE_FIXTURES,
   LIMIT_NAMES,
   NAMED_FIXTURES,
@@ -27,6 +29,7 @@ const DIGESTS: Readonly<Record<string, string>> = {
   buildingPart: 'af4566be1ffb30a9abb4d78678fb87bd87b31537ddd2a3609636dbfad403db44',
   streets: 'fe3bd3eeeb96e84b90626f48bf57bd8919aba69332ead3951515eb4797ffbaf0',
   places: '9851995321b9ab45bce3c24df91e06b9f33fa6949f846806cdaf111a1ffd6d5d',
+  buildingFields: '28639c36c4c37e47b25fa3e4af834afd3ae772121bf486742dbe6bcc72f27dd7',
 };
 
 describe('the synthetic fixtures', () => {
@@ -38,6 +41,10 @@ describe('the synthetic fixtures', () => {
     }
     for (const fixture of HOSTILE_FIXTURES)
       expect(sha256(fixture.bytes())).toBe(sha256(fixture.bytes()));
+    for (const fieldCase of HOSTILE_BUILDING_FIELD_CASES)
+      expect(sha256(buildingFieldCaseTile(fieldCase))).toBe(
+        sha256(buildingFieldCaseTile(fieldCase)),
+      );
   });
 
   it('are pinned by digest', () => {

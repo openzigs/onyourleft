@@ -18,6 +18,7 @@
  * where a rider reads it.
  */
 
+import { NO_BUILDING_FIELDS } from '@onyourleft/map-features';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -107,6 +108,7 @@ const FAR_AWAY: WorldCorridor = {
       kind: 'building',
       heightMetres: 9,
       minHeightMetres: 0,
+      ...NO_BUILDING_FIELDS,
       rings: [Float32Array.of(50_000, 50_000, 50_010, 50_000, 50_010, 50_010)],
     },
   ],

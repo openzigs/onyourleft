@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { distanceOnRoute, metres, type RouteProfile } from '@onyourleft/domain';
-import type { BuildingFeature } from '@onyourleft/map-features';
+import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 
 import { DOOR_PAINTS, paintsOf, roofPaintsOf, TRIM_PAINTS } from './building-paint';
 import {
@@ -255,6 +255,7 @@ describe('a road wholly inside the footprint — rule 3', () => {
     kind: 'building',
     heightMetres: null,
     minHeightMetres: null,
+    ...NO_BUILDING_FIELDS,
     rings: [
       Float32Array.of(mx - 60, mz - 60, mx + 60, mz - 60, mx + 60, mz + 60, mx - 60, mz + 60),
     ],

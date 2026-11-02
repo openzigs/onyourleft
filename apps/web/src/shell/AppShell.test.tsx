@@ -17,6 +17,7 @@ import {
   geographicPosition,
   kilograms,
   routeProfile,
+  unixSeconds,
   watts,
   type Kilograms,
   type RoutePoint,
@@ -39,6 +40,9 @@ import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
 import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
+import { OSM_ATTRIBUTION } from '../map/basemap';
+import { stubMapPort } from '../map/testing';
+import { routeStub, stubRouteId } from '../routes/testing';
 
 import { AppShell } from './AppShell';
 import {
@@ -265,6 +269,47 @@ describe('the router', () => {
     const text = document.querySelector('main')?.textContent ?? '';
     expect(text).toContain('a ride you sync is also kept on your instance');
     expect(text).toContain('clearing its storage in Android’s settings');
+  });
+
+  it('hands a chosen route the map engine and the basemap, so it is drawn on the map — #2003', async () => {
+    // Two optional props passed through the shell: left out, the route's page
+    // says the browser cannot draw a map, and nothing else would notice.
+    const points: RoutePoint[] = Array.from({ length: 20 }, (_unused, index) => ({
+      position: geographicPosition(degreesLatitude(51.5 + index * 0.001), degreesLongitude(-0.1)),
+      elevation: altitudeMetres(30),
+    }));
+    const owner = athleteId('local');
+    const engine = stubMapPort();
+    globalThis.location.hash = '#/routes/selected/route-1';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        routes={routeStub(owner, [
+          {
+            id: stubRouteId('route-1'),
+            createdBy: owner,
+            name: 'Box Hill loop',
+            profile: routeProfile(points),
+            visibility: 'private',
+            createdAt: unixSeconds(1),
+            updatedAt: unixSeconds(1),
+          },
+        ])}
+        map={() => Promise.resolve(engine)}
+        basemap={{
+          archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
+          attribution: OSM_ATTRIBUTION,
+        }}
+      />,
+    );
+    await settle();
+    await settle();
+    await settle();
+    expect(engine.created).toHaveLength(1);
+    expect(engine.created[0]?.options.style.sources.basemap?.url).toBe(
+      'pmtiles://https://tiles.example.org/basemap.pmtiles',
+    );
+    expect(document.querySelector('main .oyl-map')).not.toBeNull();
   });
 
   it('hands About the platform and the rider’s instance, for where the rides are — #1450', async () => {

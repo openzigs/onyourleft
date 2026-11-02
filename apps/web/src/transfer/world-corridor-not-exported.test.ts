@@ -13,6 +13,9 @@
  * #1632 (ADR 0055 D-7.2): the corridor holds place points — the fixture's,
  * and in the last export case ones the product decoded and packed from tiles
  * whose places carry a name — and none of them, nor the name, is exported.
+ *
+ * #1789 (ADR 0054 D-3.5): the same holds for a corridor whose footprints carry
+ * every building field, decoded and packed by the product.
  */
 
 import {
@@ -28,6 +31,7 @@ import {
 } from '@onyourleft/store/testing';
 import { decodeTile } from '@onyourleft/map-features';
 import {
+  buildingFieldsTile,
   FIXTURE_FRAME,
   FIXTURE_TILE,
   PLACE_SENTINEL,
@@ -121,12 +125,27 @@ async function packedPlaces(): Promise<Blob> {
   });
 }
 
+/** A corridor's features as the product packs them, every footprint field populated (#1789). */
+async function packedBuildingFields(): Promise<Blob> {
+  const decoded = decodeTile(buildingFieldsTile(), FIXTURE_TILE, FIXTURE_FRAME);
+  if ('reason' in decoded) throw new Error(decoded.reason);
+  expect(decoded.buildings.some((building) => building.roofShape !== null)).toBe(true);
+  return packCorridorFeatures({
+    landUse: [],
+    buildings: decoded.buildings,
+    paths: [],
+    streets: [],
+    places: [],
+  });
+}
+
 describe('the account export carries no world corridor — #1545', () => {
   it.each([
     ['fit', 'fixture'],
     ['gpx', 'fixture'],
     ['tcx', 'fixture'],
     ['fit', 'decoded places'],
+    ['gpx', 'decoded building fields'],
   ] as const)(
     'finds no trace of one in any file of a %s export, its features the %s',
     async (format, features) => {
@@ -136,7 +155,12 @@ describe('the account export carries no world corridor — #1545', () => {
       const corridor = await worldCorridorFor(
         ATHLETE_A,
         route.id,
-        features === 'fixture' ? {} : { features: await packedPlaces() },
+        features === 'fixture'
+          ? {}
+          : {
+              features:
+                features === 'decoded places' ? await packedPlaces() : await packedBuildingFields(),
+            },
       );
       await harness.write(async (store) => {
         await store.putRoute(route);
