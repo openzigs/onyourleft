@@ -29,7 +29,7 @@ import { describe, expect, it } from 'vitest';
 
 import { metres, metresPerSecond, type RouteProfile } from '@onyourleft/domain';
 
-import { CAMERA_BEHIND_METRES, cameraRig } from './camera';
+import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES, cameraRig } from './camera';
 import { clearOfTheCamera, type ShapeTriangles, type ShapesOf } from './near-field';
 import { fittedRealistic, modelTriangles } from './near-field-testing';
 import { NEAR_TREE_FADE_METRES, nearTreeKeep, type NearTreeFade } from './near-tree-fade';
@@ -63,6 +63,7 @@ const POSE: CameraPose = {
   z: 0,
   headingX: 0,
   headingZ: 1,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
   eyeRoadY: 0,
   targetRoadY: 0,
 };

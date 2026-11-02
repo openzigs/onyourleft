@@ -164,11 +164,13 @@ describe('the demo camera tour — #1649', () => {
         }
         pins[preset.id] = createHash('sha256').update(JSON.stringify(poses)).digest('hex');
       }
+      // Re-pinned by #1994: the chase camera looks at the road through a bend,
+      // and every pose carries `targetAheadMetres`.
       expect(pins).toMatchInlineSnapshot(`
       {
-        "climb": "5f45b97c3d48c95886abae4cea8b1e07abbb5ffaba22a92af9d5dec6f6cc6955",
-        "group": "53a7e3fe54febde909eba1f2355c203bb13b741db42f54bfb6e2f96cf64b84e2",
-        "sprint": "91c00ab7e0a3663019fb67353143d0184fdf6ae2c3eb2abd1fa19b96a109a7d5",
+        "climb": "86af9f3aac21f20efca50e8ff2049479605b6d7161c5e7939d27ce47de248762",
+        "group": "7d8b8d37c7435d01063dcd615116c2c97928e3943098875cf3024b51025578a3",
+        "sprint": "63e9e2ffd6cc7f57292a83cae0e53503798b7088bb7d8ef6190e98c44e6a318e",
       }
     `);
     },

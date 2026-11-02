@@ -88,10 +88,14 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import { CAMERA_ABOVE_METRES, verticalHalfTangent } from '../src/game/camera';
+import {
+  CAMERA_ABOVE_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
+  verticalHalfTangent,
+} from '../src/game/camera';
 import type { SceneFrame } from '../src/game/port';
 import { qualitySettings } from '../src/game/quality';
-import { cameraPose, sceneFrame } from '../src/game/scene';
+import { cameraPose, chaseRider, sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from '../src/game/terrain';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
@@ -221,9 +225,26 @@ function startFrame(profile: RouteProfile): SceneFrame {
   // what #440 is about. `bend-harness.ts` is where the smoothing is gated, and
   // since #572 `drawnStartFrame` below is this loop's start as it IS drawn.
   const corridor = roadCorridor(profile, origin, state.ride.distance, { unsmoothed: true });
+  // ⚠️ **The camera as it looked before #1994**: from the rider, straight on
+  // along the corridor piece under them. That piece is what this page reads —
+  // on the stored profile it is the stretched segment across the jump, and
+  // the old aim looked across the road down it. #1994's camera looks at the
+  // road up the ROUTE instead, so it looks down the road across the jump as
+  // well (48.4 % of the width on the control, measured on #1994's pull
+  // request), and the break would pass unseen. The road and its corridor are
+  // the product's; only the aim is the old one, because the aim is the
+  // instrument here.
+  const rider = chaseRider(corridor, state.ride.distance, 0);
   return {
     ...withCorridor(frame, profile, origin, corridor),
-    camera: cameraPose(corridor, state.ride.distance, 0),
+    camera: {
+      ...cameraPose(corridor, state.ride.distance, 0),
+      x: rider.x,
+      z: rider.z,
+      headingX: rider.tangent.headingX,
+      headingZ: rider.tangent.headingZ,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+    },
     scatter: [],
     markers: [],
     // #966: and the start gate, which since then stands over this very line in
@@ -287,6 +308,7 @@ function startFromAboveFrame(profile: RouteProfile): SceneFrame {
       headingZ: 0,
       eyeRoadY: over.y + ABOVE_METRES - CAMERA_ABOVE_METRES,
       targetRoadY: over.y,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
     },
   };
 }

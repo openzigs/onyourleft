@@ -47,6 +47,7 @@ import { mixedTownFixture } from './footprint-fixtures-testing';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { GameView } from './port';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
@@ -1156,7 +1157,16 @@ describe('the generated trees, loaded and drawn through the product’s own path
     };
   }
 
-  const POSE = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+  const POSE = {
+    x: 0,
+    y: 0,
+    z: 0,
+    headingX: 0,
+    headingZ: 1,
+    eyeRoadY: 0,
+    targetRoadY: 0,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
   // Far first; with one full tree, four middle and a band at each hand-over,
   // the six nearest are meshes and every one beyond is its impostor.
   const DISTANCES = [95, 85, 75, 65, 55, 45, 35, 25, 18, 10];

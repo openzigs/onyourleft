@@ -25,6 +25,7 @@ import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isBuiltKind } from './buildings';
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { REALISTIC_LADDER, type QualitySettings } from './quality';
 import {
   blobCasters,
@@ -295,6 +296,7 @@ const POSE: CameraPose = {
   headingZ: 1,
   eyeRoadY: 0,
   targetRoadY: 0,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
 };
 
 function item(kind: SceneryKind, z: number, x = 12): ScatterItem {

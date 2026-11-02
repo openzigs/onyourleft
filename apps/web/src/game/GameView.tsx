@@ -90,6 +90,7 @@ import {
 import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
+import { dampedHeading, turnedPose, type GroundHeading } from './camera';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
 import type { EnteredRoom, RoomsPort } from '../net/rooms-port';
@@ -1200,7 +1201,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const lapRaceRef = useRef<LapRaceRide | undefined>(undefined);
   /**
    * Whether the rider asked for reduced motion, read at the press: a race's
-   * hit is then drawn steady (`lap-race/in-view.ts` §`hitLook`, WCAG 2.3.1).
+   * hit is then drawn steady (`lap-race/in-view.ts` §`hitLook`, WCAG 2.3.1),
+   * and the chase camera turns more gently (`camera.ts` §`dampedHeading`, #1994).
    */
   const reducedMotionRef = useRef(false);
   /** The throw the rider asked for since the last step that ran, already resolved to a side. */
@@ -1958,6 +1960,11 @@ export function GameView(props: GameViewProps): JSX.Element {
     // rung at most — `thermal.ts` §`forecastForFrame` says why, and why a
     // spent reading is neutral rather than absent.
     let spentReading = 0;
+    // #1994: the chase camera's heading on the last DRAWN frame, and when it
+    // was drawn, which `camera.ts` §`dampedHeading` turns from. Undefined until
+    // the first, which takes the road's own: a resumed ride starts afresh.
+    let cameraHeading: GroundHeading | undefined;
+    let cameraHeadingAt = 0;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -2514,7 +2521,7 @@ export function GameView(props: GameViewProps): JSX.Element {
                 SIMULATION_STEP_SECONDS - simulation.pendingSecondsAt(at),
                 reducedMotionRef.current,
               );
-        const scene = sceneFrame({
+        const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
           // #679: the board before a line reads in the rider's own units.
@@ -2571,6 +2578,19 @@ export function GameView(props: GameViewProps): JSX.Element {
                 ...(raceDrawn.riderHit === undefined ? {} : { riderHit: raceDrawn.riderHit }),
               }),
         });
+        // #1994: the camera's heading, damped from the last drawn frame's, by
+        // the wall clock between them, so a corridor that jumps turns the view
+        // rather than cutting it, at a rate no frame rate changes — and more
+        // gently for a rider who asked for reduced motion (§4e).
+        // `GameView.test.tsx` reads it back off the frames the renderer was handed.
+        cameraHeading = dampedHeading(
+          cameraHeading,
+          unturned.camera,
+          (at - cameraHeadingAt) / 1000,
+          reducedMotionRef.current,
+        );
+        cameraHeadingAt = at;
+        const scene = { ...unturned, camera: turnedPose(unturned.camera, cameraHeading) };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
         // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,

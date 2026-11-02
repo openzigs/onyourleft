@@ -68,7 +68,7 @@ import {
 import type { RigPoint } from '../game/camera';
 import { cameraRig } from '../game/camera';
 import type { CameraPose } from '../game/port';
-import { cameraPose } from '../game/scene';
+import { cameraPose, chaseRider } from '../game/scene';
 import type { DrawnRide } from '../game/simulation';
 import {
   drawnRoadFrame,
@@ -295,6 +295,7 @@ export function poseLookingAt(eye: RigPoint, look: RigPoint): CameraPose {
     headingZ,
     eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
     targetRoadY: eye.y + dy * reach,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
   };
 }
 
@@ -316,8 +317,11 @@ function sightOf(
   startedAt: number,
   chase: CameraPose,
   world: TourWorld,
+  at: RigPoint,
 ): Sight {
-  const rider: RigPoint = { x: chase.x, y: chase.y + RIDER_AIM_METRES, z: chase.z };
+  // #1994: the rider, not the chase pose's own `x`/`z`, which are the rider
+  // only on a straight (`scene.ts` §`cameraPose`).
+  const rider: RigPoint = { x: at.x, y: at.y + RIDER_AIM_METRES, z: at.z };
   switch (shot.kind) {
     case 'behind': {
       const rig = cameraRig(chase);
@@ -327,9 +331,9 @@ function sightOf(
       return {
         eye: aboveGround(
           {
-            x: chase.x - chase.headingX * OVERHEAD_BEHIND_METRES,
+            x: at.x - chase.headingX * OVERHEAD_BEHIND_METRES,
             y: chase.eyeRoadY + OVERHEAD_ABOVE_METRES,
-            z: chase.z - chase.headingZ * OVERHEAD_BEHIND_METRES,
+            z: at.z - chase.headingZ * OVERHEAD_BEHIND_METRES,
           },
           world,
         ),
@@ -370,11 +374,12 @@ export function cameraAt(
   world: TourWorld,
 ): CameraPose {
   const chase = cameraPose(world.corridor, drawn.riderDistance, world.riderLateral);
+  const at = chaseRider(world.corridor, drawn.riderDistance, world.riderLateral);
   const { shot, startedAt, previous } = shotAt(tour, rideSeconds);
   const into = rideSeconds - startedAt;
   if (shot.into === 'blend' && previous !== undefined && into < BLEND_SECONDS) {
-    const from = sightOf(tour, previous.shot, previous.startedAt, chase, world);
-    const to = sightOf(tour, shot, startedAt, chase, world);
+    const from = sightOf(tour, previous.shot, previous.startedAt, chase, world, at);
+    const to = sightOf(tour, shot, startedAt, chase, world, at);
     const share = into / BLEND_SECONDS;
     return poseLookingAt(
       aboveGround(lerp(from.eye, to.eye, share), world),
@@ -382,6 +387,6 @@ export function cameraAt(
     );
   }
   if (shot.kind === 'behind') return chase;
-  const sight = sightOf(tour, shot, startedAt, chase, world);
+  const sight = sightOf(tour, shot, startedAt, chase, world, at);
   return poseLookingAt(sight.eye, sight.look);
 }

@@ -78,6 +78,7 @@ import type { KitColour } from '@onyourleft/store';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
   NEAR_PLANE_METRES,
   cameraRig,
   verticalHalfTangent,
@@ -88,7 +89,7 @@ import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-vie
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
-import { sceneFrame as builtSceneFrame } from '../src/game/scene';
+import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
@@ -373,6 +374,29 @@ import { observePair, PRESENCE_PAIR_GAP_MILLISECONDS } from '../src/camera/prese
  */
 function sceneFrame(input: Parameters<typeof builtSceneFrame>[0]): SceneFrame {
   return retainedFrame(builtSceneFrame(input));
+}
+
+/**
+ * `frame`'s camera aimed as the chase camera was before #1994: from behind the
+ * rider at `distance` (on the centreline), straight on along the road there.
+ *
+ * #1994's camera looks at the road up the ROUTE, so in a bend it is turned
+ * toward the bend and the rider is off the middle of the frame. A probe that
+ * holds the camera still to read something ELSE in a bend — the line's offset
+ * ({@link lineProbe}), which way a bend turns on the screen ({@link
+ * bendProbe}) — uses this one, so its reading is of what it measures and not
+ * of where #1994 points the camera.
+ */
+function straightOnCamera(frame: SceneFrame, distance: number): CameraPose {
+  const rider = chaseRider(frame.corridor, distance, 0);
+  return {
+    ...frame.camera,
+    x: rider.x,
+    z: rider.z,
+    headingX: rider.tangent.headingX,
+    headingZ: rider.tangent.headingZ,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
 }
 
 /** How a frame is built: {@link sceneFrame}'s copy, or {@link lentSceneFrame}. */
@@ -1391,14 +1415,18 @@ function lineProbe(
   const origin = corridorOrigin(profile);
   const onTheLine = sceneFrame({ profile, origin, state });
   const onTheCentre = sceneFrame({ profile, origin, state, centreline: true });
-  const still = onTheCentre.camera;
+  // #1994: aimed straight on, as it was. Through the product's camera, which
+  // now looks at the road round the bend, the CENTRELINE rider read 14.4 % of
+  // the width off the middle on #1994's pull request — the control below
+  // would be reading the camera, not the line. @see straightOnCamera
+  const still = straightOnCamera(onTheCentre, apex);
   const riderOnly = (frame: SceneFrame): SceneFrame => ({
     ...frame,
     camera: still,
     scatter: [],
     markers: frame.markers.filter((marker) => marker.kind === 'rider'),
   });
-  const nobody: SceneFrame = { ...onTheCentre, scatter: [], markers: [] };
+  const nobody: SceneFrame = { ...onTheCentre, camera: still, scatter: [], markers: [] };
   const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
   if (gl === null) {
     view.destroy();
@@ -1560,12 +1588,15 @@ function bendProbe(
       ...atStartLine(profile),
       ride: { speed: metresPerSecond(9), distance: metres(395) },
     };
-    const frame = sceneFrame({
+    const built = sceneFrame({
       profile,
       origin: corridorOrigin(profile),
       state,
       centreline: true,
     });
+    // #1994: aimed straight on, as it was, so the far road is where the bend
+    // takes it and not where the camera has turned to. @see straightOnCamera
+    const frame = { ...built, camera: straightOnCamera(built, 395) };
     const road: SceneFrame = { ...frame, scatter: [], markers: [] };
     const present = drawn(road);
     const absent = drawn({ ...road, corridor: { ...road.corridor, indices: new Uint32Array(0) } });
@@ -12281,6 +12312,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
         headingZ: SHADOW_HEADING_SHARE * rider.headingZ,
         eyeRoadY: rider.y + SHADOW_ALTITUDE_METRES - CAMERA_ABOVE_METRES,
         targetRoadY: rider.y,
+        targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
       },
     };
     // `inTheFrame`'s projection, with the right-hand vector normalised: it
