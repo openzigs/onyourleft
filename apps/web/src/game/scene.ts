@@ -44,6 +44,7 @@ import {
   type LandClassMask,
 } from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
+import { easedPlace, type EasedPlace } from './bend-easing';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RaceHitLook, RiderMarker, SceneFrame, WaterFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
@@ -253,6 +254,14 @@ export interface SceneInput {
    */
   readonly centreline?: boolean | undefined;
   /**
+   * Draws every rider at their own odometer and speed, never eased off for a
+   * bend, as every frame did before #1998 — the control the owner's frames
+   * and a test of a lean past 25° are drawn with, and nothing else. Absent,
+   * or `false`, is the easing (`bend-easing.ts`). Optional the safe way
+   * round, for {@link centreline}'s reason.
+   */
+  readonly uneased?: boolean | undefined;
+  /**
    * Leaves the trees, shrubs and rocks standing on a settlement's ground, as
    * every frame did before #1534 — the browser gate's control, and nothing
    * else. Absent, or `false`, clears them (`settlements.ts`
@@ -362,7 +371,9 @@ export interface RemoteRiderInput {
 
 /** Builds one frame. */
 export function sceneFrame(input: SceneInput): SceneFrame {
-  const riderDistance: number = input.riderDistance ?? input.state.ride.distance;
+  // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
+  // where the corridor, the camera and the scenery are built around.
+  const riderDistance: number = drawnRider(input).distance;
   const corridor = roadCorridor(input.profile, input.origin, riderDistance);
   // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
   // keyed on a profile is a second source of truth a route change has to
@@ -762,11 +773,53 @@ const LEVEL_LANES: Readonly<Record<RiderMarker['kind'], number>> = {
  * `line-on-the-road.test.ts` checks that it and `sceneFrame` agree.
  */
 export function placedRiders(input: SceneInput, corridor: RoadCorridor): readonly PlacedRider[] {
-  const riderDistance: number = input.riderDistance ?? input.state.ride.distance;
   // #499. Computed once per route and cached against the profile object
   // (`racing-line.ts` §`racingLine`), so this is the first frame's cost only.
   const line = input.centreline === true ? undefined : racingLine(input.profile);
-  return ridersOnTheRoad(corridor, input, riderDistance, line);
+  return ridersOnTheRoad(corridor, input, drawnRider(input), line);
+}
+
+/**
+ * The line a frame's riders are eased off for sharp bends on — #1998
+ * (`bend-easing.ts`) — or none.
+ *
+ * ⚠️ **None in a Delivery round or a lap race**, where the drawn place is the
+ * place the game's own events meet the rider: a round's obstacles meet them at
+ * their odometer and a crash is drawn as one (#1853), and a race draws its
+ * racers at their race positions (ADR 0060 D-3.3). Eased there, a crash would
+ * be drawn metres short of what it hit. None with the line switched off, the
+ * browser gate's control, which draws the riders as they were before #499,
+ * and none when {@link SceneInput.uneased} asks for the riders as they were
+ * before #1998.
+ */
+function easingLine(input: SceneInput): RacingLine | undefined {
+  if (input.centreline === true || input.uneased === true) return undefined;
+  if (input.steeredLateral !== undefined || input.raceBots !== undefined) return undefined;
+  return racingLine(input.profile);
+}
+
+/**
+ * Where along the road {@link sceneFrame} draws the rider, and builds the
+ * corridor and stands the chase camera — #1998. For a caller that places a
+ * camera of its own on the frame's road (`demo/player.ts`, the demo's tour):
+ * the odometer is NOT that place in a sharp bend, and a camera stood on it
+ * there stands metres ahead of the rider it is following.
+ */
+export function drawnRiderDistance(input: SceneInput): number {
+  return drawnRider(input).distance;
+}
+
+/**
+ * Where, and how fast, the rider is drawn — their odometer (#323's blend of
+ * the last two steps, when given) eased off for a sharp bend (#1998). One
+ * function, because the corridor and the camera are built around this place
+ * and the rider's marker is put at it: two would be a camera off its rider.
+ */
+function drawnRider(input: SceneInput): EasedPlace {
+  const odometer: number = input.riderDistance ?? input.state.ride.distance;
+  const speed: number = input.state.ride.speed;
+  const easing = easingLine(input);
+  return easing === undefined ? { distance: odometer, speed } : easedPlace(easing, odometer, speed);
 }
 
 /** A rider on the road, and how far across it they were drawn. */
@@ -806,9 +859,15 @@ interface Rider {
 function ridersOnTheRoad(
   corridor: RoadCorridor,
   input: SceneInput,
-  riderDistance: number,
+  drawn: EasedPlace,
   line: RacingLine | undefined,
 ): readonly PlacedRider[] {
+  // #1998: every rider is eased by the one rule the rider is, from their own
+  // odometer and speed, so a pacer or a ghost level with the rider is drawn
+  // level with them. Each one's cranks still turn from their own odometer.
+  const easing = easingLine(input);
+  const ease = (distance: number, speed: number): EasedPlace =>
+    easing === undefined ? { distance, speed } : easedPlace(easing, distance, speed);
   // ⚠️ **The rider's crank angle is the only one that comes from outside this
   // file — #349, #368.** It is the integral of a cadence *reading*, which needs
   // a clock and the sensors, and `GameView` is where both are. The other two
@@ -817,8 +876,8 @@ function ridersOnTheRoad(
   const riders: Rider[] = [
     {
       kind: 'rider',
-      distance: riderDistance,
-      speed: input.state.ride.speed,
+      distance: drawn.distance,
+      speed: drawn.speed,
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
       steered: input.steeredLateral,
@@ -827,11 +886,12 @@ function ridersOnTheRoad(
   ];
   const bot = input.state.bot;
   if (input.botDistance !== undefined) {
+    // The bot's own simulated speed, from the same step as its odometer.
+    const place = ease(input.botDistance, bot?.state.speed ?? 0);
     riders.push({
       kind: 'bot',
-      distance: input.botDistance,
-      // The bot's own simulated speed, from the same step as its odometer.
-      speed: bot?.state.speed ?? 0,
+      distance: place.distance,
+      speed: place.speed,
       crankAngle: pedalling(input.botDistance),
       // #625: a simulated rider pedals while it moves — its cranks turn from
       // its odometer, so a stopped one's are still.
@@ -852,10 +912,11 @@ function ridersOnTheRoad(
     const clock: number = ghostClock(input.state);
     const at = ghostDistanceAt(input.ghost, seconds(clock));
     const speed = ghostSpeed(input.ghost, clock);
+    const place = ease(at, speed);
     riders.push({
       kind: 'ghost',
-      distance: at,
-      speed,
+      distance: place.distance,
+      speed: place.speed,
       crankAngle: pedalling(at),
       pedalling: speed > 0,
     });
@@ -868,11 +929,13 @@ function ridersOnTheRoad(
   const last = corridor.centre[corridor.centre.length - 1];
   for (const remote of input.remoteRiders ?? []) {
     if (first === undefined || last === undefined) break;
-    if (remote.distanceMetres < first.along || remote.distanceMetres > last.along) continue;
+    // #1998: on the corridor by where they are DRAWN, which is where `markerAt` puts them.
+    const place = ease(remote.distanceMetres, remote.speedMetresPerSecond);
+    if (place.distance < first.along || place.distance > last.along) continue;
     riders.push({
       kind: 'remote',
-      distance: remote.distanceMetres,
-      speed: remote.speedMetresPerSecond,
+      distance: place.distance,
+      speed: place.speed,
       // ⚠️ From their own odometer at a fixed gear, never an invented rate: a
       // frame carries no cadence (`@onyourleft/protocol` §`FrameRider`), and
       // `bicycle.ts` §`simulatedCrankAngle` is the rule for a rider with none.

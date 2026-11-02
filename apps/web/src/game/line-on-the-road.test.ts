@@ -34,6 +34,7 @@ import {
   lowestPedalHeight,
   pedallingShare,
 } from './bicycle';
+import { easedPlace } from './bend-easing';
 import { CAMERA_BEHIND_METRES, cameraRig } from './camera';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
@@ -173,10 +174,20 @@ describe('the bot and the ghost ride it too, at their own speeds — #499', () =
     });
     const bot = markerOf(frame, 'bot');
     const line = racingLine(hairpin);
-    expect(across(frame, bot, botAt)).toBeCloseTo(lineOffsetAt(line, botAt), 6);
-    expect(combinedLean(bot.lean, bot.bodyLean)).toBeCloseTo(leanAt(line, botAt, 11), 12);
+    // #1998: at the place and speed its OWN odometer and speed are eased to,
+    // by the one rule the rider is — eased back here, coming out of the bend.
+    const place = easedPlace(line, botAt, 11);
+    expect(place.distance).toBeLessThan(botAt - 1);
+    expect(across(frame, bot, place.distance)).toBeCloseTo(lineOffsetAt(line, place.distance), 6);
+    expect(combinedLean(bot.lean, bot.bodyLean)).toBeCloseTo(
+      leanAt(line, place.distance, place.speed),
+      12,
+    );
     // …and not at the rider's speed, which would be a different lean here.
-    expect(combinedLean(bot.lean, bot.bodyLean)).not.toBeCloseTo(leanAt(line, botAt, 6), 3);
+    expect(combinedLean(bot.lean, bot.bodyLean)).not.toBeCloseTo(
+      leanAt(line, place.distance, 6),
+      3,
+    );
   });
 
   it('leans the ghost at the speed its replay was ridden at', () => {
@@ -187,8 +198,13 @@ describe('the bot and the ghost ride it too, at their own speeds — #499', () =
     const frame = frameOf(hairpin, stateAt(hairpin, APEX - 100, 5, undefined, clock), { ghost });
     const drawn = markerOf(frame, 'ghost');
     const line = racingLine(hairpin);
-    expect(across(frame, drawn, ghostAt)).toBeCloseTo(lineOffsetAt(line, ghostAt), 6);
-    expect(combinedLean(drawn.lean, drawn.bodyLean)).toBeCloseTo(leanAt(line, ghostAt, 10), 9);
+    // #1998: eased from its own odometer and replayed speed, as the rider is.
+    const place = easedPlace(line, ghostAt, 10);
+    expect(across(frame, drawn, place.distance)).toBeCloseTo(lineOffsetAt(line, place.distance), 6);
+    expect(combinedLean(drawn.lean, drawn.bodyLean)).toBeCloseTo(
+      leanAt(line, place.distance, place.speed),
+      9,
+    );
   });
 
   it('leaves a ghost that has finished upright, because it has stopped', () => {
@@ -434,6 +450,9 @@ describe('a pacer or ghost just behind a steered rider, in front of the camera �
       botDistance: bot ? at + gap : undefined,
       ghost: ghost ? track : undefined,
       steeredLateral: steered,
+      // #1998: a round is never eased, so the ordinary ride it is compared
+      // with is drawn uneased too: what differs is #1863's hold alone.
+      uneased: true,
     };
   }
 
@@ -806,6 +825,9 @@ describe('a racer’s cranks in a tight bend — #546', () => {
             ghost,
             // A cadence reading that has the rider's cranks at every angle in turn.
             crankAngle: at * 1.7,
+            // #1998: un-eased, so the leans reach the pedal strike this holds
+            // the cranks clear of — as they still do in a round or a race.
+            uneased: true,
           };
           const markers = placedRiders(input, roadCorridor(route, origin, at)).map(
             (placed) => placed.marker,
@@ -838,6 +860,8 @@ describe('a racer’s cranks in a tight bend — #546', () => {
           botDistance: at + 10,
           ghost,
           crankAngle: at,
+          // #1998: un-eased, or nobody leans far enough to park.
+          uneased: true,
         },
       );
       for (const marker of frame.markers) {
@@ -899,7 +923,8 @@ describe('what each rider is drawn pedalling with, and on whose clock — #625',
       const frame = frameOf(
         route,
         stateAt(route, at, 14, { distance: at + 10, speed: 14 }, at / 14),
-        { botDistance: at + 10, ghost, crankAngle: at, pedalling: true },
+        // #1998: un-eased, or nobody leans far enough to park.
+        { botDistance: at + 10, ghost, crankAngle: at, pedalling: true, uneased: true },
       );
       for (const marker of frame.markers) {
         expect(marker.pedalling).toBeCloseTo(pedallingShare(marker.lean), 12);
