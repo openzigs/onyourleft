@@ -251,3 +251,28 @@ the question returns to the owner; it does not become option C by default.
   handful of cities. That is no more than the route's own footprints already say, and the store
   never leaves the device; if the store ever does leave it, this is one more reason ADR 0054 D-3.5
   is load-bearing.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-01** — **D-6.1's sentence of records no longer lists every building field: see
+  [ADR 0054](0054-towns-from-real-map-data.md)'s entry of this date**
+  ([#1788](https://github.com/openzigs/onyourleft/issues/1788), on the owner's ruling D4 of
+  2026-10-27 on [#1656](https://github.com/openzigs/onyourleft/issues/1656)). From
+  [#1789](https://github.com/openzigs/onyourleft/issues/1789)'s decoder, the building footprints in
+  `worldCorridors` also carry the twelve fields
+  [#1557](https://github.com/openzigs/onyourleft/issues/1557)'s profile writes on z15 buildings,
+  each a whitelisted value, a clamped whole number or a palette index, and each `null` where the
+  configured archive carries none. ADR 0054's entry names each one as `BuildingFeature` stores it.
+  D-6.1's sentence reads, from #1789: building footprint polygons with `kind`, `height` and
+  `min_height`, and with the building type, levels, roof levels, roof shape, roof orientation, roof
+  direction, wall colour, roof colour, wall material, roof material, start year and landmark flag;
+  land-use polygons with `kind`; water polygons; footway lines with `kind` and `kind_detail`; street
+  lines with `kind`, `kind_detail` and whether each is a bridge or a tunnel; place points with
+  `kind`, `kind_detail` and `population_rank`; and which tiles were read and when — no OSM
+  identifier, no name, no address. What still stands, unchanged: D-1 to D-8. The place points are
+  read, held and used exactly as above, and no building field is a prior in `urban-class.ts` under
+  this ADR.
