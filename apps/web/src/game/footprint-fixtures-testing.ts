@@ -10,7 +10,11 @@
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
-import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
+import {
+  NO_BUILDING_FIELDS,
+  type BuildingFeature,
+  type LandUseFeature,
+} from '@onyourleft/map-features';
 
 import {
   EAVES_OVERHANG_METRES,
@@ -106,6 +110,7 @@ export function buildingBeside(
     kind: part === undefined ? 'building' : 'building_part',
     heightMetres,
     minHeightMetres: part?.minHeightMetres ?? null,
+    ...NO_BUILDING_FIELDS,
     rings: rings.map((ring) => ringBeside(profile, origin, ring)),
   };
 }

@@ -11,9 +11,9 @@ map data and names no rendering library.** The archive read is #1539's one modul
 
 | Module | What it is |
 |---|---|
-| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name. A refusal, never a throw |
+| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name; and since #1789 (ADR 0054's entry of 2026-11-01) the twelve building fields #1557's archive writes on `buildings`, each whitelisted or clamped at read and `null` where it cannot be. A refusal, never a throw |
 | `src/limits.ts` | The five bounds, with what each sits above on the published archive, and the count of places kept a tile (#1632), at which the decoder stops |
-| `src/schema.ts` | What is read: the layers, the keys, the geometry types each layer carries, the footway set (#1551) |
+| `src/schema.ts` | What is read: the layers, the keys, the geometry types each layer carries, the footway set (#1551), and the building fields' rules, `BUILDING_FIELD_RULES` (#1789) |
 | `src/protobuf.ts` | A bounded protobuf reader: every read is inside its message or a refusal |
 | `src/refusal.ts` | `describeRefusal`: the layer and the limit, never a coordinate or the tile's `x`/`y` (ADR 0004 D) |
 | `src/projection.ts` | The game's projection, restated (see below) |
@@ -49,6 +49,11 @@ the path to it, can hand back anything. So:
   bytes; no other value — a `name`, a `pmap:*` field, an address — is ever decoded into a string,
   and the feature id is skipped unread (ADR 0012 D-3's trap). A `kind` must be `[a-z0-9_]{1,64}`, or
   the feature is dropped. A height outside `[0, 1000]` m is `null`.
+- **The building fields (#1789) are looked up in `buildings` alone**, by the same byte comparison,
+  and no tile string is kept: an enum value is compared byte for byte with its whitelist and kept as
+  the list's own constant, a number is clamped (or, for a palette index, kept only inside the
+  palette), and a string where a number belongs is `null` — never parsed. A field never refuses a
+  tile or drops a footprint.
 - **A refused tile's message names the layer and the limit, and nothing else.** The layer is always
   one of the four this package reads, never a name the tile supplied.
 
@@ -70,7 +75,8 @@ in the lockfile through `maplibre-gl`.
 ## Fixtures
 
 `src/fixtures/` holds a residential block with three footprints, a wood with a hole, a lake, a
-sidewalk, a `building_part` with a `min_height`, a tile at each limit and one over each, and the
-hostile tiles of `hostile.ts`. **No OpenStreetMap data of any kind**: rectangles, regular polygons
+sidewalk, a `building_part` with a `min_height`, footprints with every building field set (#1789), a
+tile at each limit and one over each, and the hostile tiles of `hostile.ts`, among them a hostile value
+under each building field's key. **No OpenStreetMap data of any kind**: rectangles, regular polygons
 and evenly spaced points, for the reason `apps/web/browser/pmtiles-fixture.ts` gives. They are code
 rather than committed binaries, and `fixtures.test.ts` pins the named ones by SHA-256.
