@@ -719,17 +719,6 @@ export function cameraPose(
 }
 
 /**
- * The point on the road the camera looks at — #1994. @see cameraPose
- *
- * The farthest point from {@link CAMERA_TARGET_NEAREST_METRES} to
- * {@link CAMERA_TARGET_AHEAD_METRES} up the route that keeps the rider within
- * {@link RIDER_OFF_AXIS_RADIANS} of the axis: down from the full look-ahead a
- * metre at a time to the first that does, then halved six times between it
- * and the metre beyond, so the target slides along the road by centimetres
- * from one frame to the next rather than stepping a metre. Where none does,
- * the nearest.
- */
-/**
  * Where the chase camera's rider is, and which way the road runs there — #1994.
  *
  * The corridor at `atDistance`, moved across by `lateralMetres` along the
@@ -767,6 +756,17 @@ interface RoadTarget {
   readonly pastTheEnd: boolean;
 }
 
+/**
+ * The point on the road the camera looks at — #1994. @see cameraPose
+ *
+ * The farthest point from {@link CAMERA_TARGET_NEAREST_METRES} to
+ * {@link CAMERA_TARGET_AHEAD_METRES} up the route that keeps the rider within
+ * {@link RIDER_OFF_AXIS_RADIANS} of the axis: down from the full look-ahead a
+ * metre at a time to the first that does, then halved six times between it
+ * and the metre beyond, so the target slides along the road by centimetres
+ * from one frame to the next rather than stepping a metre. Where none does,
+ * the nearest.
+ */
 function roadTarget(
   corridor: RoadCorridor,
   atDistance: number,
@@ -777,16 +777,18 @@ function roadTarget(
 ): RoadTarget {
   const at = (reach: number): RoadTarget => {
     const placed = placeOnCorridor(corridor, atDistance + reach);
-    const across = headingAt(corridor, placed.index);
     // Past a point-to-point route's end the corridor's points all clamp onto
-    // its last one, so the piece the target is on has no length.
+    // its last one, so the piece the target is on has no length and no
+    // direction: the rider's own stands in for it.
     const from = corridor.centre[placed.index] as CorridorPoint;
     const to = corridor.centre[placed.index + 1];
+    const pastTheEnd = to === undefined || Math.hypot(to.x - from.x, to.z - from.z) < 1e-6;
+    const across = pastTheEnd ? tangent : headingAt(corridor, placed.index);
     return {
       x: placed.x - across.headingZ * lateralMetres,
       y: placed.y,
       z: placed.z + across.headingX * lateralMetres,
-      pastTheEnd: to === undefined || Math.hypot(to.x - from.x, to.z - from.z) < 1e-6,
+      pastTheEnd,
     };
   };
   // The eye looks at the rider along the tangent, so the rider is within the

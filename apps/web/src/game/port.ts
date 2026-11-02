@@ -111,7 +111,7 @@ export interface CameraPose {
    * heights are for.
    */
   readonly eyeRoadY: number;
-  /** The road's height where the camera LOOKS, `CAMERA_TARGET_AHEAD_METRES` up the route. @see targetAheadMetres */
+  /** The road's height where the camera LOOKS: up to `CAMERA_TARGET_AHEAD_METRES` up the route, nearer in a bend (`scene.ts` §`cameraPose`). @see targetAheadMetres */
   readonly targetRoadY: number;
 }
 

@@ -68,6 +68,14 @@ interface Ridden {
    * 0.5 at its edge.
    */
   readonly riderOffCentre: number;
+  /**
+   * The biggest change in how far the target `cameraPose` asked for moved from
+   * one frame to the next, metres, before the damping. The target legitimately
+   * travels several times the rider's speed (25 m of lever), so it is the
+   * CHANGE in that step that tells a slide from a jump (`scene.ts`
+   * §`roadTarget` bisects between its one-metre steps for the slide).
+   */
+  readonly targetStep: number;
 }
 
 /** The short way round from `from` to `to`, radians, in (−π, π]. */
@@ -95,12 +103,28 @@ function ride(
   let turned = 0;
   let tangentOffRoad = 0;
   let riderOffCentre = 0;
+  let targetStep = 0;
+  let previous: { readonly x: number; readonly z: number } | undefined;
+  let previousStep: { readonly x: number; readonly z: number } | undefined;
   for (let along = from; along <= to; along += options.speed * seconds) {
     const corridor = roadCorridor(profile, origin, along);
     const pose = cameraPose(corridor, along, 0);
     held = dampedHeading(held, pose, seconds, options.reducedMotion);
     const rig = cameraRig(turnedPose(pose, held));
     offRoad = Math.max(offRoad, roadAt(rig.target.x, rig.target.z));
+    // The target `cameraPose` asked for, before the damping smooths it.
+    const asked = cameraRig(pose).target;
+    if (previous !== undefined) {
+      const step = { x: asked.x - previous.x, z: asked.z - previous.z };
+      if (previousStep !== undefined) {
+        targetStep = Math.max(
+          targetStep,
+          Math.hypot(step.x - previousStep.x, step.z - previousStep.z),
+        );
+      }
+      previousStep = step;
+    }
+    previous = asked;
     const now = Math.atan2(held.headingX, held.headingZ);
     if (yaw !== undefined) {
       const turn = Math.abs(turnBetween(yaw, now));
@@ -127,7 +151,7 @@ function ride(
       ),
     );
   }
-  return { offRoad, turnRate, turned, tangentOffRoad, riderOffCentre };
+  return { offRoad, turnRate, turned, tangentOffRoad, riderOffCentre, targetStep };
 }
 
 /** Half the road: a target nearer the centreline than this is on the tarmac. */
@@ -142,6 +166,9 @@ const ON_THE_ROAD = ROAD_WIDTH_METRES / 2;
  * 0.36 off in the corner and OUT of the frame (0.63) in the hairpin.
  */
 const RIDER_IN_THE_MIDDLE = 0.2;
+
+/** The farthest the target may move in a 60 fps frame, metres: a few centimetres. */
+const TARGET_STEP_METRES = 0.25;
 
 /** A tolerance on a rate measured over one frame, radians a second. */
 const RATE_ROUNDING = 1e-6;
@@ -188,6 +215,24 @@ describe('the chase camera through a hairpin — #1994', () => {
     const ridden = ride(hairpin, 330, 500, { speed: THIRTY_KMH, fps: 60, reducedMotion: true });
     expect(ridden.offRoad).toBeLessThan(ON_THE_ROAD);
     expect(ridden.turnRate).toBeLessThanOrEqual(REDUCED_MOTION_MAXIMUM_YAW_RATE + RATE_ROUNDING);
+  });
+});
+
+describe('the chase camera target slides along the road — #1994', () => {
+  it('speeds up and slows down by decimetres a frame, not by a metre, through the hairpin', () => {
+    // Without the bisection in `scene.ts` §`roadTarget` the target steps a
+    // whole metre of road at once as the farthest point that keeps the rider
+    // in the frame changes: 0.81 m here against 0.16 m with it. Ridden to
+    // 420 m, short of the exit: at 428 m, as the rider comes out, a reach
+    // that was out of bounds comes back in and the target jumps 1.2 m to it
+    // (a second feasible stretch opening, which bisecting cannot smooth);
+    // the damping in `camera.ts` §`dampedHeading` takes that one.
+    const ridden = ride(hairpinRoute(10), 330, 420, {
+      speed: THIRTY_KMH,
+      fps: 60,
+      reducedMotion: false,
+    });
+    expect(ridden.targetStep).toBeLessThan(TARGET_STEP_METRES);
   });
 });
 
