@@ -135,6 +135,15 @@ export interface RiderMarker {
    * else on the road and may be round a bend. Reading the camera's heading here
    * would be correct today and silently wrong the day anything but the rider
    * grows a front.
+   *
+   * ⚠️ **Since #1995 it is the LINE's direction, not the road's**, and a
+   * reviewer who remembers it equal to the road's heading is reading the old
+   * contract: it is the road's heading turned by how fast the rider's drawn
+   * place moves across the road (`racing-line.ts` §`lineSlopeAt`), which is
+   * the way the marker moves between two frames. Facing the road while the
+   * line crossed it drew every rider sliding sideways. A position across the
+   * road is still measured along the ROAD's normal — the camera's heading, or
+   * the corridor's — never this one's.
    */
   readonly headingX: number;
   readonly headingZ: number;

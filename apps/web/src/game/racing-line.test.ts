@@ -33,6 +33,7 @@ import {
   ROAD_SIDE,
   leanAt,
   lineOffsetAt,
+  lineSlopeAt,
   racingLine,
   rollRatePerMetre,
   solvedLine,
@@ -240,6 +241,74 @@ describe('a loop — #499 criterion 4', () => {
     for (const at of [3, 250, 480, 900]) {
       expect(lineOffsetAt(line, at + route.totalDistance)).toBeCloseTo(lineOffsetAt(line, at), 12);
     }
+  });
+});
+
+describe('how fast the line crosses the road — #1995', () => {
+  /** A central difference of {@link lineOffsetAt}, this test's own reading of the slope. */
+  const STEP = 1e-3;
+  const differenced = (line: RacingLine, at: number): number =>
+    (lineOffsetAt(line, at + STEP) - lineOffsetAt(line, at - STEP)) / (2 * STEP);
+
+  it.each([
+    ['the hairpin', hairpin],
+    ['the S-bend', sBend],
+    ['the stadium, a loop', stadiumRoute(30)],
+  ] as const)('is the slope of the offset the rider is drawn at, on %s', (_, route) => {
+    const line = racingLine(route);
+    let moving = 0;
+    for (let at = 1; at < route.totalDistance - 1; at += 0.7) {
+      // Where the offset is clamped on either side of the step, the difference
+      // straddles the clamp and is not a slope of anything.
+      const low = lineOffsetAt(line, at - STEP);
+      const high = lineOffsetAt(line, at + STEP);
+      if (Math.max(Math.abs(low), Math.abs(high)) >= LINE_LIMIT_METRES) continue;
+      const slope = lineSlopeAt(line, at);
+      expect(slope).toBeCloseTo(differenced(line, at), 5);
+      if (Math.abs(slope) > 0.05) moving += 1;
+    }
+    // The line does cross the road somewhere on each, or this proves nothing.
+    expect(moving).toBeGreaterThan(10);
+  });
+
+  it('reads the same slope on lap two as on lap one', () => {
+    const route = stadiumRoute(30);
+    const line = racingLine(route);
+    for (const at of [3, 250, 480, 900]) {
+      expect(lineSlopeAt(line, at + route.totalDistance)).toBeCloseTo(lineSlopeAt(line, at), 12);
+    }
+  });
+
+  it('is nought where the offset is held at the edge, because the drawn rider does not move', () => {
+    // The hairpin's line is pinned to the edge through its apex, and the curve
+    // between two pinned samples bows past it and is clamped back.
+    const line = racingLine(hairpin);
+    let held = 0;
+    for (let at = BEND_START; at < BEND_START + BEND_LENGTH; at += 0.1) {
+      if (
+        Math.abs(lineOffsetAt(line, at - STEP)) === LINE_LIMIT_METRES &&
+        Math.abs(lineOffsetAt(line, at + STEP)) === LINE_LIMIT_METRES
+      ) {
+        held += 1;
+        expect(lineSlopeAt(line, at)).toBe(0);
+      }
+    }
+    expect(held).toBeGreaterThan(0);
+  });
+
+  it('is nought on a line of one sample, which is held wherever it is read', () => {
+    const one: RacingLine = {
+      profile: hairpin,
+      offsets: Float64Array.of(1.5),
+      curvatures: Float64Array.of(0),
+    };
+    expect(lineOffsetAt(one, 10)).toBe(1.5);
+    expect(lineSlopeAt(one, 10)).toBe(0);
+  });
+
+  it('is nought on a straight held at home', () => {
+    const route = northRoute(2_000, () => 0);
+    expect(Math.abs(lineSlopeAt(racingLine(route), 1_000))).toBeLessThan(1e-6);
   });
 });
 

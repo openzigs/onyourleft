@@ -51,6 +51,7 @@ import {
   LINE_LIMIT_METRES,
   leanAt,
   lineOffsetAt,
+  lineSlopeAt,
   racingLine,
   type RacingLine,
 } from './racing-line';
@@ -687,6 +688,26 @@ function headingAt(
 }
 
 /**
+ * How far the drawn road moves on the ground per metre of route distance
+ * between a corridor point and the next — #1995.
+ *
+ * Not 1: `CorridorPoint.along` is the route's distance, and the drawn road is
+ * smoothed through a bend (#543) and projected onto the ground, so a segment
+ * is up to a few per cent longer or shorter than the distance it spans. A
+ * rider's sideways rate is per metre of route distance, so it is compared with
+ * this, not with 1, or the rider faces a degree off the way it moves through a
+ * bend. 1 where the segment has no length or no span.
+ */
+function alongStretch(corridor: RoadCorridor, index: number): number {
+  const from = corridor.centre[index] as CorridorPoint;
+  const ahead = corridor.centre[index + 1];
+  if (ahead === undefined) return 1;
+  const span = ahead.along - from.along;
+  const length = Math.hypot(ahead.x - from.x, ahead.z - from.z);
+  return span > 0 && length > 0 ? length / span : 1;
+}
+
+/**
  * How far apart, side to side, two riders level on the road are drawn: **1.2 m**
  * between their middles — two handlebars 0.4 m wide and 0.8 m of air between
  * them. #499: every rider used to be on the centreline, so two level riders
@@ -902,11 +923,12 @@ function ridersOnTheRoad(
   // wall clock. @see RiderMarker.rideSeconds
   const rideClock: number = ghostClock(input.state);
   return riders.map((rider) => {
-    const lateral = line === undefined ? 0 : lateralOf(rider, riders, line);
+    const across = line === undefined ? STRAIGHT_DOWN_THE_MIDDLE : lateralOf(rider, riders, line);
+    const lateral = across.metres;
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
     const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
-    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, roll, {
+    const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
       rideSeconds: rideClock,
@@ -974,24 +996,54 @@ function levelness(one: Rider, other: Rider): number {
  * that place is at most `1.75 + 1.2 = 2.95 m` out, inside
  * {@link DRAWN_LIMIT_METRES}.
  */
-function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
-  if (rider.steered !== undefined) return rider.steered;
-  if (rider.laned !== undefined) return lanedLateral(rider, rider.laned, riders, line);
+function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Across {
+  if (rider.steered !== undefined) return { metres: rider.steered, rate: 0 };
+  if (rider.laned !== undefined) {
+    return { metres: lanedLateral(rider, rider.laned, riders, line), rate: 0 };
+  }
   let level = 0;
   for (const other of riders) {
     if (other === rider) continue;
     level = Math.max(level, levelness(rider, other));
   }
   const side = rider.lane ?? LEVEL_LANES[rider.kind];
-  const drawn =
-    lineOffsetAt(line, rider.distance) * (1 - LINE_GIVEN_UP * level) +
-    side * SIDE_BY_SIDE_METRES * level;
+  const kept = 1 - LINE_GIVEN_UP * level;
+  const drawn = lineOffsetAt(line, rider.distance) * kept + side * SIDE_BY_SIDE_METRES * level;
+  // #1995: the share of the line this rider keeps moves at that share of the
+  // line's own rate.
+  const drawnRate = lineSlopeAt(line, rider.distance) * kept;
   const steered = riders.find((other) => other.steered !== undefined);
-  if (steered?.steered === undefined) return drawn;
+  if (steered?.steered === undefined) return { metres: drawn, rate: drawnRate };
   const clear = steered.steered + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(drawn, clear) : Math.max(drawn, clear);
-  return drawn + (aside - drawn) * Math.max(levelness(rider, steered), heldBehind(rider, steered));
+  const held = Math.max(levelness(rider, steered), heldBehind(rider, steered));
+  // A place held clear of the steered rider is theirs, and does not move as
+  // this one rides on.
+  const asideRate = aside === drawn ? drawnRate : 0;
+  return {
+    metres: drawn + (aside - drawn) * held,
+    rate: drawnRate + (asideRate - drawnRate) * held,
+  };
 }
+
+/**
+ * Where a rider is drawn across the road, and how fast that place moves —
+ * #1995. @see lateralOf
+ */
+interface Across {
+  /** Metres from the centreline, positive on the road's normal side. */
+  readonly metres: number;
+  /**
+   * Metres sideways per metre ridden, the same sign: the line's own rate
+   * ({@link lineSlopeAt}) for a rider on it, scaled by the share of it they
+   * keep. Nought for a rider whose place is not the line's — a Delivery
+   * round's steered rider and a lap race's laned bot.
+   */
+  readonly rate: number;
+}
+
+/** Every rider's place with the line switched off: on the centreline, not moving across it. */
+const STRAIGHT_DOWN_THE_MIDDLE: Across = { metres: 0, rate: 0 };
 
 /**
  * Where a lap-race bot is drawn across the road — #1902: in its lane
@@ -1017,7 +1069,7 @@ function lanedLateral(
   line: RacingLine,
 ): number {
   const own = riders[0] as Rider;
-  const ownLateral = lateralOf(own, riders, line);
+  const ownLateral = lateralOf(own, riders, line).metres;
   const side = laned > 0 ? 1 : -1;
   const clear = ownLateral + side * SIDE_BY_SIDE_METRES;
   const aside = side < 0 ? Math.min(laned, clear) : Math.max(laned, clear);
@@ -1088,24 +1140,37 @@ function markerAt(
   corridor: RoadCorridor,
   atDistance: number,
   kind: RiderMarker['kind'],
-  lateral: number,
+  across: Across,
   roll: RiderRoll,
   motion: Pick<RiderMarker, 'pedalling' | 'rideSeconds'>,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
-  // ⚠️ The heading is the road's at **this** marker's own distance, not the
+  // ⚠️ The road's heading at **this** marker's own distance, not the
   // camera's — #349. @see RiderMarker.headingX
-  const heading = headingAt(corridor, at.index);
+  const road = headingAt(corridor, at.index);
+  const lateral = across.metres;
+  // ⚠️ #1995: the marker FACES the tangent of the line it is drawn on, the
+  // road's heading plus the line's sideways rate along the road's normal —
+  // not the road's heading, which slid a rider crossing the road sideways.
+  // Between two corridor points this is exactly the direction the drawn
+  // position below moves in, because the normal is the segment's own and the
+  // road part moves at the segment's own `stretch`.
+  const stretch = alongStretch(corridor, at.index);
+  const facingX = road.headingX * stretch - road.headingZ * across.rate;
+  const facingZ = road.headingZ * stretch + road.headingX * across.rate;
+  // Never nought: the stretch is positive and the normal is square to the heading.
+  const facing = Math.hypot(facingX, facingZ);
   // #499: across the road along its own normal, `(−headingZ, headingX)` —
   // the rider's right, on the screen and since #583 on the map (it was called
   // the left until then) — and at the road's
   // height, which is flat across its width (`ribbonNormals` says why).
   return {
     kind,
-    x: at.x - heading.headingZ * lateral,
+    x: at.x - road.headingZ * lateral,
     y: at.y,
-    z: at.z + heading.headingX * lateral,
-    ...heading,
+    z: at.z + road.headingX * lateral,
+    headingX: facingX / facing,
+    headingZ: facingZ / facing,
     lean: roll.bicycle,
     bodyLean: roll.body,
     pedalling: motion.pedalling,

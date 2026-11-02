@@ -455,6 +455,25 @@ export function lineOffsetAt(line: RacingLine, distance: number): number {
 }
 
 /**
+ * How fast the line moves across the road, in metres sideways per metre
+ * ridden, positive toward the road's normal: the slope of
+ * {@link lineOffsetAt}'s own curve — #1995.
+ *
+ * It is what turns a rider to the line rather than to the road
+ * (`scene.ts` §`markerAt`): a rider crossing the road at this rate is
+ * pointing `atan(slope)` off the road's heading, and drawn along the road's
+ * heading they slide sideways. Nought where {@link lineOffsetAt} is clamped,
+ * because there the drawn offset does not move.
+ */
+export function lineSlopeAt(line: RacingLine, distance: number): number {
+  const value = sampled(line.profile, line.offsets, distance);
+  if (Math.abs(value) > LINE_LIMIT_METRES) {
+    return 0;
+  }
+  return sampled(line.profile, line.offsets, distance, true);
+}
+
+/**
  * The COMBINED lean — rider and bicycle together, the one physics fixes — in
  * radians, positive toward the road's normal, which is the side the line bends
  * toward when its curvature is positive, so the rider always leans INTO the
@@ -605,11 +624,20 @@ function curvatureAt(line: RacingLine, distance: number): number {
   return low + (high - low) * fraction;
 }
 
-/** A per-sample value at a distance, Catmull-Rom between samples. @see lineOffsetAt */
-function sampled(profile: RouteProfile, values: Float64Array, distance: number): number {
+/**
+ * A per-sample value at a distance, Catmull-Rom between samples — or, with
+ * `slope`, that same curve's rate of change per metre (#1995), so the two
+ * cannot be read off different interpolations. @see lineOffsetAt
+ */
+function sampled(
+  profile: RouteProfile,
+  values: Float64Array,
+  distance: number,
+  slope = false,
+): number {
   const count = values.length;
   if (count < 2) {
-    return count === 1 ? (values[0] as number) : 0;
+    return count === 1 && !slope ? (values[0] as number) : 0;
   }
   const on = distanceOnRoute(profile, distance);
   const raw = on / profile.resolution;
@@ -620,6 +648,16 @@ function sampled(profile: RouteProfile, values: Float64Array, distance: number):
   const p2 = values[index + 1] as number;
   const p3 = values[neighbour(profile, count, index + 2)] as number;
   const t2 = t * t;
+  if (slope) {
+    return (
+      (0.5 *
+        (-p0 +
+          p2 +
+          2 * (2 * p0 - 5 * p1 + 4 * p2 - p3) * t +
+          3 * (-p0 + 3 * p1 - 3 * p2 + p3) * t2)) /
+      profile.resolution
+    );
+  }
   const t3 = t2 * t;
   return (
     0.5 *
