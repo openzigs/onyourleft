@@ -386,6 +386,89 @@ describe('save to your routes — #2006', () => {
     expect(link?.getAttribute('href')).toContain('route-1700000000250');
   });
 
+  it('saves the draft on the screen, not the profile of the one before it, while a new profile is awaited', async () => {
+    const scripted = scriptedProvider({ heights: [10, 20, 30] });
+    let hold = false;
+    const provider = {
+      ...scripted,
+      heights: (request: Parameters<typeof scripted.heights>[0]) =>
+        hold ? new Promise<never>(() => undefined) : scripted.heights(request),
+    };
+    const engine = stubMapPort();
+    const routes = routeStub(ATHLETE);
+    mounted = await mount(
+      <main>
+        <RouteBuilderView
+          provider={provider}
+          storage={isolatedStorage()}
+          map={() => Promise.resolve(engine)}
+          basemap={BASEMAP}
+          preferences={undefined}
+          routes={routes}
+        />
+      </main>,
+    );
+    await settle();
+    await settle();
+    const planner: Planner = {
+      view: mounted,
+      engine,
+      storage: isolatedStorage(),
+      routes,
+      map: () => engine.created.at(-1)!,
+    };
+    for (const point of [A, B]) {
+      await gesture(planner, (map) => {
+        map.tap(point);
+      });
+    }
+    await settle();
+    // The profile for A to B is now held; the next one will never arrive.
+    hold = true;
+    await gesture(planner, (map) => {
+      map.tap(C);
+    });
+    await settle();
+    const input = planner.view.container.querySelector<HTMLInputElement>('input[name="name"]');
+    await typeInto(input!, 'Edited');
+    await submitForm(
+      planner.view.container.querySelector<HTMLFormElement>('form[aria-label="Save this route"]')!,
+    );
+    await settle();
+    const [route] = await routes.store.listRoutes(ATHLETE);
+    expect(route?.profile.positions.at(-1)).toEqual(C);
+    expect(planner.view.container.textContent).toContain('saved flat');
+  });
+
+  it('stops saying it saved once the route is edited', async () => {
+    const planner = await drawnAndNamed('Foothills');
+    expect(planner.view.container.textContent).toContain('Saved “Foothills”');
+    await gesture(planner, (map) => {
+      map.tap(at(40.04, -104.98));
+    });
+    expect(planner.view.container.textContent).not.toContain('Saved “Foothills”');
+  });
+
+  it('says the device could not store it, when the store refuses the write', async () => {
+    const planner = await open();
+    for (const point of [A, B]) {
+      await gesture(planner, (map) => {
+        map.tap(point);
+      });
+    }
+    planner.routes.store.putRoute = () => Promise.reject(new Error('quota'));
+    await typeInto(
+      planner.view.container.querySelector<HTMLInputElement>('input[name="name"]')!,
+      'X',
+    );
+    await submitForm(
+      planner.view.container.querySelector<HTMLFormElement>('form[aria-label="Save this route"]')!,
+    );
+    await settle();
+    expect(planner.view.container.textContent).toContain('could not be saved on this device');
+    expect(planner.view.container.textContent).not.toContain('Saved “X”');
+  });
+
   it('writes nothing, and says why, when the route has no name', async () => {
     const planner = await drawnAndNamed('  ');
     expect(await planner.routes.store.listRoutes(ATHLETE)).toEqual([]);

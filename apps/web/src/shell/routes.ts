@@ -454,7 +454,7 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
   path: '/routes/new',
   navLabel: 'Draw a route',
   title: 'Draw a route',
-  summary: 'Place waypoints and have the roads between them worked out.',
+  summary: 'Place waypoints on a map or from a list, and save the route.',
   help: ['Every control works from the keyboard, and a half-drawn route survives closing the tab.'],
 };
 

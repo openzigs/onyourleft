@@ -53,7 +53,7 @@
     "A GPX imported on the Files screen becomes a ride and will not appear here; that screen offers to make a route from it too.",
     "There are two ways to get one:",
     "Import a GPX file on the Routes screen — a course from a route planner, read on this device.",
-    "Draw one on this device — place waypoints and have the roads between them worked out.",
+    "Draw one on this device — place waypoints on a map or from a list, and save the route here.",
     "Ride with others",
     "Help with Ride with others",
     "A private group ride or race is held on an instance.",
@@ -968,7 +968,7 @@
   ],
   "route-builder empty": [
     "Draw a route",
-    "Place waypoints and have the roads between them worked out.",
+    "Place waypoints on a map or from a list, and save the route.",
     "Help with Draw a route",
     "Every control works from the keyboard, and a half-drawn route survives closing the tab.",
     "!No routing service: Nothing can work out the roads between waypoints until a routing service is configured, so each leg is a straight line: the distance is at least the one shown, and climbing stays empty.",
@@ -2687,7 +2687,7 @@
   ],
   "route-builder populated": [
     "Draw a route",
-    "Place waypoints and have the roads between them worked out.",
+    "Place waypoints on a map or from a list, and save the route.",
     "Help with Draw a route",
     "Every control works from the keyboard, and a half-drawn route survives closing the tab.",
     "!No routing service: Nothing can work out the roads between waypoints until a routing service is configured, so each leg is a straight line: the distance is at least the one shown, and climbing stays empty.",

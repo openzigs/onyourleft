@@ -291,6 +291,8 @@ export function RouteBuilderView({
   // Keep the draft across a reload. Waypoints and leg modes only — see
   // `draft-storage.ts` on why the geometry is dropped.
   useEffect(() => {
+    // A save message describes the draft that was saved, not the next one.
+    setSaved(undefined);
     if (isEmpty(draft)) keep.current.forget();
     else keep.current.write(draft);
   }, [draft]);
@@ -415,7 +417,7 @@ export function RouteBuilderView({
       setSaved({
         kind: 'refused',
         refusal: {
-          code: 'not-a-route',
+          code: 'could-not-store',
           message: 'The route could not be saved on this device. Nothing was lost from the plan.',
         },
       });

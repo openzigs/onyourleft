@@ -394,7 +394,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           <ButtonLink variant="secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
             Draw one on this device
           </ButtonLink>{' '}
-          — place waypoints and have the roads between them worked out.
+          — place waypoints on a map or from a list, and save the route here.
         </p>
       </div>
     );

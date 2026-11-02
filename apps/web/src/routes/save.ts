@@ -59,7 +59,8 @@ export interface SaveRefusal {
     | 'not-a-loop'
     | 'edited-elsewhere'
     | 'cannot-be-shared'
-    | 'legs-without-a-line';
+    | 'legs-without-a-line'
+    | 'could-not-store';
   readonly message: string;
 }
 
