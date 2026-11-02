@@ -70,6 +70,7 @@ import {
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
+import { nearTreeKeep } from './near-tree-fade';
 import {
   FOLIAGE_TINT,
   MASONRY_TINT,
@@ -588,21 +589,26 @@ describe('the trees’ three levels and the dithered hand-over — #617', () => 
 
   it('ranks only the trees the camera can see — #617’s review', () => {
     // Two trees BEHIND the camera, which is 4.5 m behind the rider, and one
-    // ahead: the one ahead is the nearest tree in the picture.
-    const passed = [item('tree-broadleaf', -8, 0), item('tree-conifer', -12, 0)];
+    // ahead: the one ahead is the nearest tree in the picture. ⚠️ At 11 m and
+    // 14 m behind the rider since #545, where they were 8 m and 12 m: a tree
+    // within 4.5 m of the eye is faded to nothing (`near-tree-fade.ts`), and
+    // 8 m behind the rider is 3.5 m behind the eye — not drawn at all, as the
+    // impostor or otherwise. 11 m is 6.5 m from the eye, which the fade leaves
+    // whole, so what this holds is the ranking and nothing of the fade's.
+    const passed = [item('tree-broadleaf', -11, 0), item('tree-conifer', -14, 0)];
     const ahead = item('tree-broadleaf', 15, 2);
     const belt = beltWith();
     belt.update([...passed, ahead], POSE);
     expect(levelsOfZ(belt, 15)).toEqual(['full']);
     // Still drawn, as the impostor nothing sees — the cull is `inView`'s.
-    expect(levelsOfZ(belt, -8)).toEqual(['impostor']);
+    expect(levelsOfZ(belt, -11)).toEqual(['impostor']);
     expect(belt.drawnItems).toBe(3);
     // The control is the ranking before the review: the two passed trees take
     // the full slot and the band, and the tree in the picture is middle.
     const before = beltWith({ ...REALISTIC_TREE_LEVELS, rankOnly: 'in-view' });
     before.update([...passed, ahead], POSE);
     expect(levelsOfZ(before, 15)).toEqual(['middle']);
-    expect(levelsOfZ(before, -8)).toEqual(['full']);
+    expect(levelsOfZ(before, -11)).toEqual(['full']);
   });
 
   it('changes no tree’s shape in one frame as the rider passes trees — #617’s review', () => {
@@ -617,12 +623,21 @@ describe('the trees’ three levels and the dithered hand-over — #617', () => 
       let largest = 0;
       for (let at = 0; at <= 140; at += 1) {
         const riderZ = at * 0.1;
-        belt.update(road, { ...POSE, z: riderZ });
+        const pose = { ...POSE, z: riderZ };
+        belt.update(road, pose);
         const now = new Map<number, readonly [number, number]>();
         // Only trees still well ahead of the camera: one that has left the
-        // picture may go to its impostor at once.
+        // picture may go to its impostor at once. ⚠️ And since #545 only trees
+        // the fade near the camera leaves whole: a fading tree's split is
+        // scaled by its keep and it goes when that reaches nothing, which
+        // `near-tree-fade.test.ts` holds to its own pace. Every OTHER tree's
+        // split is still read, so a fading tree ranked out moving the rest
+        // up a rank at once would be red here.
         for (const tree of road) {
-          if (tree.z - riderZ > -CAMERA_BEHIND_METRES + 1.5)
+          if (
+            tree.z - riderZ > -CAMERA_BEHIND_METRES + 1.5 &&
+            nearTreeKeep(tree.x, tree.z, pose, 'fade') === 1
+          )
             now.set(tree.z, splitOfZ(belt, tree.z));
         }
         for (const [z, [low, high]] of now) {

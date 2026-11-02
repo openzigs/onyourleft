@@ -596,7 +596,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         as well). ⚠️ Since #617's review only
                         trees the CAMERA can see are ranked
                         (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
-                        the camera used to take the one full slot — and
+                        the camera used to take the one full slot — and, since
+                        #545, not one faded to nothing within
+                        `NEAR_TREE_FADE_METRES` of the eye
+                        (`near-tree-fade.ts`), and
                         `TreeHandOver` paces each tree's move between levels
                         inside the same slots, because a swap of ranks is
                         continuous and the ranked SET changing is not; the
