@@ -53,7 +53,13 @@ import {
   northRoute,
   sBendRoute,
 } from './route-fixtures-testing';
-import { FACING_TURN_LIMIT_RADIANS, facingTurn, placedRiders, sceneFrame } from './scene';
+import {
+  FACING_TURN_LIMIT_RADIANS,
+  drawnRiderDistance,
+  facingTurn,
+  placedRiders,
+  sceneFrame,
+} from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
 
@@ -832,7 +838,14 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     for (let at = 360; at <= exit; at += 0.5) {
       const frameAt = (distance: number): SceneFrame => frameOf(tight, stateAt(tight, distance, 9));
       const here = frameAt(at);
-      const road = roadHeadingAt(here, at);
+      // Since #1998 the rider is drawn eased off for the bend, behind the
+      // odometer: the road's heading is read where it is drawn.
+      const drawn = drawnRiderDistance({
+        profile: tight,
+        origin: corridorOrigin(tight),
+        state: stateAt(tight, at, 9),
+      });
+      const road = roadHeadingAt(here, drawn);
       const rider = markerOf(here, 'rider');
       const before = markerOf(frameAt(at - SPAN), 'rider');
       const after = markerOf(frameAt(at + SPAN), 'rider');
@@ -857,15 +870,13 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       // degree.
       const route = hairpinRoute(radius);
       const exit = 400 + Math.PI * radius + 40;
-      // The corridor built around the rider at each step, as `sceneFrame`
-      // builds a frame's, and the riders placed on it without the scenery
+      // The corridor built around where the rider is drawn at each step, as
+      // `sceneFrame` builds a frame's, and the riders placed on it without the scenery
       // (#588), which a marker does not read.
       const origin = corridorOrigin(route);
       const headingOf = (distance: number): number => {
-        const [rider] = placedRiders(
-          { profile: route, origin, state: stateAt(route, distance, 9) },
-          roadCorridor(route, origin, distance),
-        );
+        const input = { profile: route, origin, state: stateAt(route, distance, 9) };
+        const [rider] = placedRiders(input, roadCorridor(route, origin, drawnRiderDistance(input)));
         if (rider === undefined) throw new Error('no rider placed');
         return Math.atan2(rider.marker.headingX, rider.marker.headingZ);
       };
@@ -893,11 +904,14 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     const line = racingLine(tight);
     let crossing = 0;
     for (let at = out + 2; at <= out + 60; at += 0.5) {
-      const frame = frameOf(tight, stateAt(tight, at, 9));
-      const off = Math.abs(offRoad(roadHeadingAt(frame, at), facing(markerOf(frame, 'rider'))));
+      const state = stateAt(tight, at, 9);
+      const frame = frameOf(tight, state);
+      // Where the rider is drawn, eased off for the bend since #1998.
+      const drawn = drawnRiderDistance({ profile: tight, origin: corridorOrigin(tight), state });
+      const off = Math.abs(offRoad(roadHeadingAt(frame, drawn), facing(markerOf(frame, 'rider'))));
       expect(off).toBeLessThanOrEqual(FACING_TURN_LIMIT_RADIANS + 1e-9);
-      if (Math.abs(lineSlopeAt(line, at)) > 0.05) crossing += 1;
-      if (Math.abs(lineSlopeAt(line, at)) < 1e-4) {
+      if (Math.abs(lineSlopeAt(line, drawn)) > 0.05) crossing += 1;
+      if (Math.abs(lineSlopeAt(line, drawn)) < 1e-4) {
         expect(off).toBeLessThan((2 * Math.PI) / 180);
       }
     }
