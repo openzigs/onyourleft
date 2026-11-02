@@ -250,8 +250,14 @@ export interface MapProbe {
   readonly registrations: number;
 }
 
+/** One press of an explorable map's buttons (#2003), as `MapPanel.tsx` makes it. */
+export type MapMove =
+  'zoom in' | 'zoom out' | 'pan north' | 'pan south' | 'pan east' | 'pan west' | 'fit';
+
 declare global {
   interface Window {
+    /** Present once the map exists: what a button below an explorable map does (#2003). */
+    __oylMapMove?: (move: MapMove) => void;
     __oylMapProbe?: () => MapProbe;
     __oylHarness?: HarnessResult;
     __oylMapLoad?: MapLoadResult;
@@ -760,6 +766,16 @@ function registerProtocol(): boolean {
 }
 
 /**
+ * `?explorable` builds the map a saved route's page builds (#2003): drag and
+ * pinch on, the canvas out of the tab order, and the buttons' moves on
+ * `window.__oylMapMove`. Absent, the still map a ride's page draws — which is
+ * the explorable cases' control.
+ */
+function explorableMap(): boolean {
+  return new URL(window.location.href).searchParams.has('explorable');
+}
+
+/**
  * Whether to draw map tiles — `?tiles=off` is the rider's Settings switch
  * turned off (`map/tiles-preference.ts`, the owner's decision of 2026-09-25),
  * handed to the **real** `basemapStyle` the way `MapPanel.tsx` hands it.
@@ -856,10 +872,22 @@ function run(): void {
     }
     // Through the same function `MapPanel.tsx` uses, so the palette the map
     // is drawn in, and the watch that repaints it, are the product's (#672).
-    const view = createThemedMap(mapLibrePort.renderer, container, document, optionsFor);
+    const view = createThemedMap(
+      mapLibrePort.renderer,
+      container,
+      document,
+      optionsFor,
+      explorableMap(),
+    );
     created = true;
     const track = trackFor();
     view.setTrack(trackFeature(track), trackBounds(track));
+    window.__oylMapMove = (move: MapMove): void => {
+      const [verb, direction] = move.split(' ');
+      if (verb === 'zoom') view.zoom(direction as 'in' | 'out');
+      else if (verb === 'pan') view.pan(direction as 'north' | 'south' | 'east' | 'west');
+      else view.fitTrack();
+    };
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }

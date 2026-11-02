@@ -231,6 +231,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         marker's `pedalling` says a reading turns the cranks,
                         and a breath on the RIDE's clock (`rideSeconds`), so a
                         held ride holds it. The stylised rider does not move
+    src/game/bend-easing.ts
+                        the drawn rider eases off for a sharp bend (#1998, the
+                        owner's ruling of 2026-11-02): each rider is DRAWN at
+                        its odometer less a lag, at a speed whose lean on the
+                        line is at most 25°, braking at 3 m/s² and picking up
+                        at 1 m/s², and the lag is given back after the bend at
+                        up to 15 % over the rider's speed. ⚠️ **A drawing,
+                        never physics**: the simulation, the trainer's grade,
+                        recording, the HUD, the ghost's replay and the pacer's
+                        gap stay on the odometer, and `bend-easing.test.ts`
+                        holds a ride's distance, speed and grades identical
+                        eased or not. Stateless — the lag a rider holding this
+                        speed would have here — so a pacer or ghost level with
+                        the rider is drawn level. ⚠️ Not in a Delivery round
+                        or a lap race (`scene.ts` §`easingLine`), where the
+                        drawn place is where the game meets the rider; there
+                        #546's 38.7° cap and its parked cranks still bind.
+                        `SceneInput.uneased` is the control
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
@@ -271,7 +289,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         negative side" did, and a test that measured the old
                         drawing now rides the MIRRORED fixture
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
-                        its digests to the digit
+                        its digests to the digit. ⚠️ **Since #1995 a rider
+                        FACES the line, not the road**: `RiderMarker.headingX`
+                        points from the drawn rear wheel to the front wheel
+                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
+                        off the road (`facingTurn`), so a rider crossing it no
+                        longer slides sideways and never turns in a step. Measure across the road
+                        with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
                         from `world.ts`'s ONE sun, never a second light

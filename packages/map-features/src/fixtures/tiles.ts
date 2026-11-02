@@ -491,7 +491,118 @@ export function placesTile(): Uint8Array {
   ]);
 }
 
-/** The seven named fixtures, for the walks that run over all of them. */
+/**
+ * #1789: every building field set, to a value its rule admits, as #1557's
+ * profile writes them: an enum as a string, a number as a number. Made up;
+ * the combination describes no real building.
+ */
+export const BUILDING_FIELDS_SET = {
+  building_type: 'church',
+  levels: 3,
+  roof_levels: 1,
+  roof_shape: 'gabled',
+  roof_orientation: 'across',
+  roof_direction: 135,
+  wall_colour: 4,
+  roof_colour: 11,
+  wall_material: 'stone',
+  roof_material: 'slate',
+  start_year: 1887,
+  landmark: 'worship',
+} as const;
+
+/** {@link BUILDING_FIELDS_SET} as the decoder hands it back, by `BuildingFeature`'s names. */
+export const BUILDING_FIELDS_DECODED = {
+  buildingType: 'church',
+  levels: 3,
+  roofLevels: 1,
+  roofShape: 'gabled',
+  roofOrientation: 'across',
+  roofDirectionDegrees: 135,
+  wallColour: 4,
+  roofColour: 11,
+  wallMaterial: 'stone',
+  roofMaterial: 'slate',
+  startYear: 1887,
+  landmark: 'worship',
+} as const;
+
+/**
+ * #1789: a second set, every value another, on a `building_part`, so a field
+ * swapped for its neighbour in a round trip shows.
+ */
+export const BUILDING_PART_FIELDS_SET = {
+  building_type: 'retail',
+  levels: 12,
+  roof_levels: 0,
+  roof_shape: 'flat',
+  roof_orientation: 'along',
+  roof_direction: 345,
+  wall_colour: 19,
+  roof_colour: 0,
+  wall_material: 'glass',
+  roof_material: 'concrete',
+  start_year: 1972,
+  landmark: 'school',
+} as const;
+
+export const BUILDING_PART_FIELDS_DECODED = {
+  buildingType: 'retail',
+  levels: 12,
+  roofLevels: 0,
+  roofShape: 'flat',
+  roofOrientation: 'along',
+  roofDirectionDegrees: 345,
+  wallColour: 19,
+  roofColour: 0,
+  wallMaterial: 'glass',
+  roofMaterial: 'concrete',
+  startYear: 1972,
+  landmark: 'school',
+} as const;
+
+/**
+ * #1789: three footprints from an archive #1557's profile built — one with
+ * {@link BUILDING_FIELDS_SET}, a `building_part` with
+ * {@link BUILDING_PART_FIELDS_SET}, and one with none of the fields — each
+ * also carrying a name, the `pmap:*` fields, an address and an id.
+ */
+export function buildingFieldsTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'buildings',
+      features: [
+        {
+          id: POISON.id,
+          type: 3,
+          tags: { ...poisonTags, kind: 'building', height: 14, ...BUILDING_FIELDS_SET },
+          geometry: polygon([outerRing(rectangle(1500, 1500, 1700, 1760))]),
+        },
+        {
+          id: POISON.id + 1,
+          type: 3,
+          tags: {
+            ...poisonTags,
+            kind: 'building_part',
+            height: 40,
+            min_height: 3,
+            ...BUILDING_PART_FIELDS_SET,
+          },
+          geometry: polygon([outerRing(rectangle(2000, 1500, 2200, 1700))]),
+        },
+        {
+          id: POISON.id + 2,
+          type: 3,
+          tags: { ...poisonTags, kind: 'building', addr_housenumber: POISON.address },
+          geometry: polygon([outerRing(rectangle(2400, 1500, 2560, 1640))]),
+        },
+      ],
+    },
+  ]);
+}
+
+/** The eight named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
@@ -500,4 +611,5 @@ export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   buildingPart: buildingPartTile,
   streets: streetsTile,
   places: placesTile,
+  buildingFields: buildingFieldsTile,
 };

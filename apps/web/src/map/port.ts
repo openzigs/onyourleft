@@ -68,6 +68,19 @@ export interface MapView {
    * paint changes against the source it already has.
    */
   setStyle(options: MapViewOptions): void;
+  /**
+   * Zoom one step in or out about the map's centre (#2003).
+   *
+   * The keyboard's and a single pointer's way to do what a pinch or a double
+   * tap does on a map created {@link MapCreateOptions.explorable}: WCAG 2.2
+   * SC 2.1.1 and 2.5.7 want every gesture to have one, and `MapPanel.tsx`
+   * renders them as ordinary buttons beside the map.
+   */
+  zoom(direction: MapZoomDirection): void;
+  /** Move the view a third of the map's width or height (#2003). The drag's equivalent. */
+  pan(direction: MapPanDirection): void;
+  /** Fit the view to the line it holds again, after the rider has moved it (#2003). */
+  fitTrack(): void;
   /** Release the map and everything it holds. Idempotent. */
   destroy(): void;
 }
@@ -92,8 +105,34 @@ export interface MapViewOptions {
   readonly trackColour: string;
 }
 
+/** @see MapView.zoom */
+export type MapZoomDirection = 'in' | 'out';
+
+/** @see MapView.pan — compass directions, because the map keeps north up. */
+export type MapPanDirection = 'north' | 'south' | 'east' | 'west';
+
+/**
+ * What a map is created with: its first style, and whether a rider may move it.
+ *
+ * A separate type from {@link MapViewOptions} because {@link MapView.setStyle}
+ * takes those and a change of palette must not be able to change the other.
+ */
+export interface MapCreateOptions extends MapViewOptions {
+  /**
+   * Whether the rider can drag and pinch the map (#2003) — a saved route's
+   * page, where looking along the route is the point. Off, the default, is the
+   * picture a ride's page draws (`MapPanel.tsx` §"The map is a picture").
+   *
+   * ⚠️ **The gestures are the pointer's half only.** The map surface stays out
+   * of the tab order; its keyboard half is {@link MapView.zoom},
+   * {@link MapView.pan} and {@link MapView.fitTrack}, which the panel puts on
+   * buttons.
+   */
+  readonly explorable?: boolean;
+}
+
 export interface MapRenderer {
-  create(container: HTMLElement, options: MapViewOptions): MapView;
+  create(container: HTMLElement, options: MapCreateOptions): MapView;
 }
 
 /**

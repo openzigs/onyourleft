@@ -5551,6 +5551,19 @@ select.oyl-input {
 }
 
 /*
+ * A saved route's map buttons (#2003) — the keyboard's and a single
+ * pointer's way to zoom and pan (`map/MapPanel.tsx`). They wrap rather than
+ * scroll: seven buttons do not fit one row on a phone, and WCAG 1.4.10's
+ * reflow walk visits a chosen route.
+ */
+.oyl-map__moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin-block: var(--oyl-space-sm);
+}
+
+/*
  * THE ILLUSTRATION KIT'S PAINT — #936, the menus' house style
  * (`docs/architecture.md` §"House style for the menus").
  *
