@@ -259,6 +259,22 @@
  * pitch, an outbuilding's blind walls and garage door, a civic block's plain
  * door. Each lever switches its own half alone.
  *
+ * ## Inferred types (#2023, spike 0033, the owner's ruling of 2026-11-02)
+ *
+ * A footprint with no mapped type or landmark may be **inferred** one
+ * ({@link footprintKindOf}), which then feeds #1791's table as a mapped type
+ * does — and **never over a mapped one**: a footprint of 12 to 20 m² is a
+ * shed, and one of 20 to 75 m², roughly square and rectangular, with a
+ * house-sized footprint within 40 m that stands nearer the street, is a
+ * garage. The street is the nearest ground one that is neither a service road
+ * nor a highway (spike 0033: the nearest road to a small footprint is mostly
+ * its own drive). A mapped `roof:shape`, `building:levels` or height still
+ * beats the inferred garage's roof and storey, as it beats a mapped one's.
+ * Only while the type is read; untagged footprints no rule calls are planned
+ * as before, and so is every one with `?levers=-inferred-outbuildings`
+ * ({@link FootprintPlanOptions}' `inferredOutbuildings`). A plan says what it
+ * was inferred ({@link FootprintPlan.family}, {@link FootprintPlan.inferred}).
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -281,6 +297,7 @@ import {
   type BuildingFeature,
   type Ring,
   type RoofShape,
+  type StreetFeature,
 } from '@onyourleft/map-features';
 
 import {
@@ -309,6 +326,7 @@ import {
   type BuildingFamily,
 } from './building-types';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
+import { widthClassOf } from './cross-streets';
 import type { AnchorKind } from './decorations';
 import {
   FRONT_PORCH,
@@ -746,6 +764,15 @@ export interface FootprintPlan {
    */
   readonly urban: UrbanClass;
   /**
+   * What its mapped `building_type` or `landmark` draws it as — #1791
+   * (`building-types.ts`), `residential` resolved — or, since #2023, what an
+   * untagged footprint was inferred to be ({@link inferred}); `undefined`
+   * where it is neither, or with `levers=-building-type`.
+   */
+  readonly family: Exclude<BuildingFamily, 'residential'> | undefined;
+  /** #2023: whether {@link family} was inferred ({@link footprintKindOf}) rather than mapped. */
+  readonly inferred: boolean;
+  /**
    * The US house it is — #1782 (`house-archetypes.ts`), which set its roof,
    * porch, shutters, dormers, garage and cladding together; `unknown` where
    * none fits, or with `levers=-house-archetypes`, and planned as before.
@@ -1140,6 +1167,107 @@ export function footprintUse(landClass: LandClass, kind: string | undefined): Fo
   if (RESIDENTIAL_KINDS.has(kind)) return 'residential';
   if (INDUSTRIAL_KINDS.has(kind)) return 'industrial';
   return 'commercial';
+}
+
+/** #2023: an untagged footprint under this is inferred a shed, m² — **20**, spike 0033's (12 to 20). */
+export const INFERRED_SHED_MAX_AREA = 20;
+
+/** #2023: an untagged footprint under this may be inferred a garage, m² — **75**, spike 0033's (20 to 75). */
+export const INFERRED_GARAGE_MAX_AREA = 75;
+
+/** #2023: a garage's longest minimum-area rectangle, long side over short — **1.75**, spike 0033's. */
+export const INFERRED_GARAGE_MAX_ASPECT = 1.75;
+
+/** #2023: a garage's least area over its minimum-area rectangle's — **0.9**, spike 0033's. */
+export const INFERRED_GARAGE_MIN_RECTANGULARITY = 0.9;
+
+/** #2023: how near a house-sized footprint's outline must come to a garage's, metres — **40**. */
+export const INFERRED_GARAGE_HOME_METRES = 40;
+
+/** #2023: a house-sized footprint's area, m² — **60 to 400**, spike 0033's. */
+export const HOUSE_SIZED_AREA: readonly [least: number, most: number] = [60, 400];
+
+/**
+ * #2023: the farthest a setback is searched, metres — **150**, spike 0033's.
+ * A footprint with no street within it reads as standing this far back.
+ */
+export const SETBACK_SEARCH_METRES = 150;
+
+/**
+ * What the inference rules read of an untagged footprint — #2023, spike 0033.
+ * The two methods are asked only where a rule needs them, so a footprint no
+ * rule could call is never measured against the streets.
+ */
+export interface UntaggedCues {
+  /** Its mapped area, m². */
+  readonly area: number;
+  /** Its minimum-area rectangle's long side over its short. */
+  readonly aspect: number;
+  /** Its area over its minimum-area rectangle's. */
+  readonly rectangularity: number;
+  /**
+   * How far its outline stands from the nearest ground street that is neither
+   * a service road nor a highway, metres, at most {@link SETBACK_SEARCH_METRES}.
+   * A service road is left out because it is mostly the footprint's own drive.
+   */
+  setback(): number;
+  /**
+   * The {@link setback} of the nearest house-sized footprint whose outline
+   * comes within `metres` of this one's: untagged, or mapped as a home, of
+   * {@link HOUSE_SIZED_AREA}. `undefined` where there is none.
+   */
+  homeSetback(metres: number): number | undefined;
+}
+
+/** Which inference rules run — the planner's levers ({@link FootprintPlanOptions}). */
+export interface InferenceRules {
+  /** #2023: a garage or a shed. */
+  readonly outbuildings: boolean;
+}
+
+/** What a footprint is drawn as, and whether that was inferred rather than mapped. */
+export interface FootprintKind {
+  readonly family: BuildingFamily | undefined;
+  readonly inferred: boolean;
+}
+
+/**
+ * A footprint's kind — #2023, the owner's ruling of 2026-11-02 and spike
+ * 0033's thresholds. **A mapped family always wins**: `mapped` is returned as
+ * it is, never inferred over. Untagged (`mapped` and `cues` absent where the
+ * type is not read), the first rule that holds:
+ *
+ * - **shed**: {@link FOOTPRINT_MIN_AREA} to {@link INFERRED_SHED_MAX_AREA} m², anywhere;
+ * - **garage**: up to {@link INFERRED_GARAGE_MAX_AREA} m², an aspect of at most
+ *   {@link INFERRED_GARAGE_MAX_ASPECT} and a rectangularity of at least
+ *   {@link INFERRED_GARAGE_MIN_RECTANGULARITY}, with a house-sized footprint
+ *   within {@link INFERRED_GARAGE_HOME_METRES} m, and set farther back from
+ *   the street than that house.
+ *
+ * Otherwise none, and the footprint is planned by today's rule. The inferred
+ * family feeds #1791's table (`building-types.ts`) as a mapped one does.
+ */
+export function footprintKindOf(
+  mapped: BuildingFamily | undefined,
+  cues: UntaggedCues | undefined,
+  rules: InferenceRules,
+): FootprintKind {
+  if (mapped !== undefined || cues === undefined) return { family: mapped, inferred: false };
+  if (rules.outbuildings) {
+    if (cues.area >= FOOTPRINT_MIN_AREA && cues.area < INFERRED_SHED_MAX_AREA) {
+      return { family: 'shed', inferred: true };
+    }
+    if (
+      cues.area >= INFERRED_SHED_MAX_AREA &&
+      cues.area < INFERRED_GARAGE_MAX_AREA &&
+      cues.aspect <= INFERRED_GARAGE_MAX_ASPECT &&
+      cues.rectangularity >= INFERRED_GARAGE_MIN_RECTANGULARITY
+    ) {
+      const home = cues.homeSetback(INFERRED_GARAGE_HOME_METRES);
+      if (home !== undefined && cues.setback() > home) return { family: 'garage', inferred: true };
+    }
+  }
+  return { family: undefined, inferred: false };
 }
 
 /**
@@ -1681,6 +1809,282 @@ class TaggedNeighbours {
     const middle = Math.floor(near.length / 2);
     const upper = near[middle] as number;
     return near.length % 2 === 1 ? upper : ((near[middle - 1] as number) + upper) / 2;
+  }
+}
+
+/** The cell of {@link StreetSetbacks}' and {@link HomeNeighbours}' grids, metres: **50**. */
+const SETBACK_CELL_METRES = 50;
+
+/** A grid cell's key, as {@link RingGrid} keys its own. */
+function setbackCell(ix: number, iz: number): number {
+  return (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
+}
+
+/** Every grid cell a box meets, `minX, maxX, minZ, maxZ` grown by `reach`. */
+function cellsOf(
+  [minX, maxX, minZ, maxZ]: readonly [number, number, number, number],
+  reach: number,
+  each: (key: number) => void,
+): void {
+  for (
+    let ix = Math.floor((minX - reach) / SETBACK_CELL_METRES);
+    ix <= Math.floor((maxX + reach) / SETBACK_CELL_METRES);
+    ix += 1
+  ) {
+    for (
+      let iz = Math.floor((minZ - reach) / SETBACK_CELL_METRES);
+      iz <= Math.floor((maxZ + reach) / SETBACK_CELL_METRES);
+      iz += 1
+    ) {
+      each(setbackCell(ix, iz));
+    }
+  }
+}
+
+/**
+ * The squared distance between two segments — #2023: 0 only where they cross
+ * or touch. Not {@link segmentToSegmentSquared}, whose {@link segmentsMeet}
+ * calls two collinear segments met however far apart they lie on their line,
+ * which two mirrored footprints' end walls are.
+ */
+function segmentGapSquared(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  cx: number,
+  cz: number,
+  dx: number,
+  dz: number,
+): number {
+  const side = (px: number, pz: number, qx: number, qz: number, rx: number, rz: number): number =>
+    Math.sign((qx - px) * (rz - pz) - (qz - pz) * (rx - px));
+  // A proper crossing: each segment's ends strictly either side of the other's line.
+  if (
+    side(ax, az, bx, bz, cx, cz) * side(ax, az, bx, bz, dx, dz) < 0 &&
+    side(cx, cz, dx, dz, ax, az) * side(cx, cz, dx, dz, bx, bz) < 0
+  ) {
+    return 0;
+  }
+  // Otherwise the nearest pair has an end of one: a touch or an overlap reads 0 here.
+  const abx = bx - ax;
+  const abz = bz - az;
+  const cdx = dx - cx;
+  const cdz = dz - cz;
+  return Math.min(
+    squaredToSegment(cx, cz, ax, az, abx, abz, abx * abx + abz * abz),
+    squaredToSegment(dx, dz, ax, az, abx, abz, abx * abx + abz * abz),
+    squaredToSegment(ax, az, cx, cz, cdx, cdz, cdx * cdx + cdz * cdz),
+    squaredToSegment(bx, bz, cx, cz, cdx, cdz, cdx * cdx + cdz * cdz),
+  );
+}
+
+/** The least distance from any edge of `ring` to the segment `(ax, az)`–`(bx, bz)`, squared. */
+function ringToSegmentSquared(ring: Ring, ax: number, az: number, bx: number, bz: number): number {
+  const n = ring.length / 2;
+  let least = Number.POSITIVE_INFINITY;
+  for (let i = 0, j = n - 1; i < n; j = i, i += 1) {
+    least = Math.min(
+      least,
+      segmentGapSquared(
+        ring[j * 2] as number,
+        ring[j * 2 + 1] as number,
+        ring[i * 2] as number,
+        ring[i * 2 + 1] as number,
+        ax,
+        az,
+        bx,
+        bz,
+      ),
+    );
+  }
+  return least;
+}
+
+/**
+ * A corridor's streets that a footprint stands back from, in a grid — #2023,
+ * spike 0033: every `ground` street but a service road and a highway
+ * (`cross-streets.ts` §`widthClassOf`). A service road is left out because
+ * the nearest road to a small footprint is mostly its own drive.
+ */
+class StreetSetbacks {
+  /** `ax, az, bx, bz` a segment. */
+  readonly #segments: number[] = [];
+  readonly #cells = new Map<number, number[]>();
+
+  constructor(streets: readonly StreetFeature[]) {
+    for (const street of streets) {
+      if (street.grade !== 'ground') continue;
+      const width = widthClassOf(street);
+      if (width === 'service' || width === 'highway') continue;
+      const line = street.line;
+      for (let i = 0; i + 3 < line.length; i += 2) {
+        const segment = this.#segments.length / 4;
+        const ax = line[i] as number;
+        const az = line[i + 1] as number;
+        const bx = line[i + 2] as number;
+        const bz = line[i + 3] as number;
+        this.#segments.push(ax, az, bx, bz);
+        cellsOf(
+          [Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz)],
+          0,
+          (key) => {
+            const cell = this.#cells.get(key);
+            if (cell === undefined) this.#cells.set(key, [segment]);
+            else cell.push(segment);
+          },
+        );
+      }
+    }
+  }
+
+  /** How far `ring` stands from the nearest street, metres, at most {@link SETBACK_SEARCH_METRES}. */
+  of(ring: Ring): number {
+    const seen = new Set<number>();
+    let least = SETBACK_SEARCH_METRES * SETBACK_SEARCH_METRES;
+    const segments = this.#segments;
+    cellsOf(boundsOf(ring), SETBACK_SEARCH_METRES, (key) => {
+      for (const segment of this.#cells.get(key) ?? []) {
+        if (seen.has(segment)) continue;
+        seen.add(segment);
+        const at = segment * 4;
+        least = Math.min(
+          least,
+          ringToSegmentSquared(
+            ring,
+            segments[at] as number,
+            segments[at + 1] as number,
+            segments[at + 2] as number,
+            segments[at + 3] as number,
+          ),
+        );
+      }
+    });
+    return Math.sqrt(least);
+  }
+}
+
+/** #2023: the mapped types a house-sized neighbour may carry — a home's; untagged is one too. */
+const HOME_FAMILIES: ReadonlySet<BuildingFamily> = new Set([
+  'house',
+  'bungalow',
+  'terrace',
+  'residential',
+]);
+
+/**
+ * A corridor's house-sized footprints, in a grid — #2023, spike 0033: each
+ * one untagged or mapped as a home ({@link HOME_FAMILIES}), of
+ * {@link HOUSE_SIZED_AREA}, by its index in the corridor's buildings. Each
+ * one's setback is measured the first time it is asked for, and kept.
+ */
+class HomeNeighbours {
+  readonly #rings = new Map<number, Ring>();
+  readonly #cells = new Map<number, number[]>();
+  readonly #setbacks = new Map<number, number>();
+  readonly #streets: StreetSetbacks;
+
+  constructor(buildings: readonly BuildingFeature[], streets: StreetSetbacks) {
+    this.#streets = streets;
+    buildings.forEach((building, index) => {
+      const outer = building.rings[0];
+      if (outer === undefined || outer.length < 6) return;
+      const family = buildingFamilyOf(building.buildingType, building.landmark);
+      if (family !== undefined && !HOME_FAMILIES.has(family)) return;
+      const area = footprintArea(building.rings);
+      if (area < HOUSE_SIZED_AREA[0] || area > HOUSE_SIZED_AREA[1]) return;
+      this.#rings.set(index, outer);
+      cellsOf(boundsOf(outer), 0, (key) => {
+        const cell = this.#cells.get(key);
+        if (cell === undefined) this.#cells.set(key, [index]);
+        else cell.push(index);
+      });
+    });
+  }
+
+  /**
+   * The setback of the house-sized footprint, not the `own`th, whose outline
+   * comes nearest `ring`'s, if it comes within `metres`; else `undefined`.
+   */
+  setbackNear(own: number, ring: Ring, metres: number): number | undefined {
+    let nearest: number | undefined;
+    let least = metres * metres;
+    const seen = new Set<number>();
+    cellsOf(boundsOf(ring), metres, (key) => {
+      for (const index of this.#cells.get(key) ?? []) {
+        if (index === own || seen.has(index)) continue;
+        seen.add(index);
+        const other = this.#rings.get(index) as Ring;
+        const gap = ringToRingSquared(ring, other);
+        if (gap <= least) {
+          least = gap;
+          nearest = index;
+        }
+      }
+    });
+    if (nearest === undefined) return undefined;
+    let setback = this.#setbacks.get(nearest);
+    if (setback === undefined) {
+      setback = this.#streets.of(this.#rings.get(nearest) as Ring);
+      this.#setbacks.set(nearest, setback);
+    }
+    return setback;
+  }
+}
+
+/** The least distance between two rings, squared: 0 where one stands inside the other or they cross. */
+function ringToRingSquared(a: Ring, b: Ring): number {
+  if (insideRing(b, a[0] as number, a[1] as number)) return 0;
+  if (insideRing(a, b[0] as number, b[1] as number)) return 0;
+  const m = b.length / 2;
+  let least = Number.POSITIVE_INFINITY;
+  for (let k = 0, l = m - 1; k < m; l = k, k += 1) {
+    least = Math.min(
+      least,
+      ringToSegmentSquared(
+        a,
+        b[l * 2] as number,
+        b[l * 2 + 1] as number,
+        b[k * 2] as number,
+        b[k * 2 + 1] as number,
+      ),
+    );
+  }
+  return least;
+}
+
+/**
+ * What an untagged footprint is measured against — #2023: the corridor's
+ * streets and house-sized footprints, built the first time a footprint asks.
+ */
+class Untagged {
+  readonly rules: InferenceRules;
+  readonly #corridor: WorldCorridor;
+  #homes: HomeNeighbours | undefined;
+  #streets: StreetSetbacks | undefined;
+
+  constructor(corridor: WorldCorridor, rules: InferenceRules) {
+    this.#corridor = corridor;
+    this.rules = rules;
+  }
+
+  /** The `own`th footprint's cues, its `outer` ring as mapped and its `area`. */
+  cuesOf(own: number, outer: Ring, area: number): UntaggedCues {
+    const rectangle = minimumAreaRectangle(outer);
+    const streets = (): StreetSetbacks => {
+      this.#streets ??= new StreetSetbacks(this.#corridor.streets);
+      return this.#streets;
+    };
+    return {
+      area,
+      aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
+      rectangularity: rectangle.area > 0 ? Math.abs(signedArea(outer)) / rectangle.area : 0,
+      setback: () => streets().of(outer),
+      homeSetback: (metres) => {
+        this.#homes ??= new HomeNeighbours(this.#corridor.buildings, streets());
+        return this.#homes.setbackNear(own, outer, metres);
+      },
+    };
   }
 }
 
@@ -4479,7 +4883,13 @@ export function footprintPlans(
   const tagged = urban === undefined ? undefined : new TaggedNeighbours(corridor.buildings);
   // #1635: every footprint measured before any is built, so a party wall is found between two.
   const measured: (Measured | undefined)[] = [];
-  for (const building of corridor.buildings) {
+  // #1791: each footprint's mapped building type, unless the lever is off.
+  const typed = options.buildingTypes ?? true;
+  // #2023: and what an untagged one is inferred to be, while the type is read.
+  const untagged = typed
+    ? new Untagged(corridor, { outbuildings: options.inferredOutbuildings ?? true })
+    : undefined;
+  for (const [own, building] of corridor.buildings.entries()) {
     const each = measureFootprint(
       building,
       corridor,
@@ -4492,8 +4902,8 @@ export function footprintPlans(
       tagged,
       mapped,
       false,
-      // #1791: its mapped building type, unless the lever is off.
-      options.buildingTypes ?? true,
+      typed,
+      untagged === undefined ? undefined : { untagged, own },
     );
     if (typeof each === 'string') {
       counts[each] += 1;
@@ -5172,6 +5582,8 @@ interface Measured {
   readonly use: FootprintUse;
   /** #1791: what its mapped building type draws it as, or `undefined` untyped (or the lever off). */
   readonly family: Exclude<BuildingFamily, 'residential'> | undefined;
+  /** #2023: whether {@link family} was inferred from an untagged footprint. */
+  readonly inferred: boolean;
   readonly storeys: number;
   readonly wallHeight: number;
   /** #1790: how tall a storey of its windows is ({@link storeyMetresOf}). */
@@ -5198,6 +5610,8 @@ function measureFootprint(
   terrace = false,
   // #1791: whether its mapped building type is read.
   typed = false,
+  // #2023: what an untagged footprint is inferred against, and its index in the corridor.
+  inference?: { readonly untagged: Untagged; readonly own: number },
 ): Measured | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -5281,10 +5695,22 @@ function measureFootprint(
   const span =
     building.heightMetres === null ? null : Math.max(0, building.heightMetres - minHeight);
   const landClass = land.classAt(centroid.x, centroid.z);
-  // #1791: what its mapped type draws it as, which overrides the land's guess.
-  const typedFamily = typed
+  // #1791: what its mapped type draws it as, which overrides the land's guess. #2023: or,
+  // untagged, what it is inferred to be — never over a mapped type.
+  const mappedFamily = typed
     ? buildingFamilyOf(building.buildingType, building.landmark)
     : undefined;
+  const kind =
+    inference === undefined
+      ? { family: mappedFamily, inferred: false }
+      : footprintKindOf(
+          mappedFamily,
+          mappedFamily === undefined
+            ? inference.untagged.cuesOf(inference.own, outer, area)
+            : undefined,
+          inference.untagged.rules,
+        );
+  const typedFamily = kind.family;
   // #1637: a terraced block is a shop below and flats above, on any land.
   const use: FootprintUse = terrace
     ? 'commercial'
@@ -5329,6 +5755,7 @@ function measureFootprint(
     part,
     use,
     family,
+    inferred: kind.inferred,
     storeys,
     wallHeight,
     storey,
@@ -5424,6 +5851,14 @@ export interface FootprintPlanOptions {
    * is ignored and every plan is as before (`?levers=-mapped-roof-shape`).
    */
   readonly mappedRoofShape?: boolean;
+  /**
+   * #2023: an untagged footprint inferred a garage or a shed from its size,
+   * shape, a house beside it and its setback from the street
+   * ({@link footprintKindOf}), and drawn as #1791's; `true` by default, and
+   * only while `buildingTypes` is on. Off, every untagged footprint is planned
+   * as before (`?levers=-inferred-outbuildings`).
+   */
+  readonly inferredOutbuildings?: boolean;
 }
 
 /**
@@ -5511,7 +5946,7 @@ function planFootprint(
 ): FootprintPlan {
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
-  const { storeys, wallHeight, base, floor, eaves, family } = measured;
+  const { storeys, wallHeight, base, floor, eaves, family, inferred } = measured;
   // #1791: a mapped garage or shed stands on a home's land and is no home — no window, no
   // house feature; a civic block is no house and no shop.
   const outbuilding = family === 'garage' || family === 'shed';
@@ -6318,6 +6753,8 @@ function planFootprint(
     porch: frontPorchSpec !== undefined,
     frontStep,
     urban: urbanClass,
+    family,
+    inferred,
     archetype,
     buildingArchetype,
     model,

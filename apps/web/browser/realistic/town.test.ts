@@ -34,6 +34,7 @@ import {
   mixedTownFixture,
   planFingerprint,
   typedStreetFixture,
+  untaggedStreetFixture,
 } from '../../src/game/footprint-fixtures-testing';
 import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 import { BUILDING_ARCHETYPES } from '../../src/game/building-archetypes';
@@ -383,10 +384,34 @@ describe('the realistic page’s `building-type` lever — #1791', () => {
           })),
         },
       },
-      parseConfig('?town=typed').leversOff,
+      // #2023: untyped, the shed's footprint is inferred a shed; that is its own lever's.
+      parseConfig('?town=typed&levers=-inferred-outbuildings').leversOff,
     );
     expect(planFingerprint(off.plans)).toBe(planFingerprint(untyped.plans));
     // Not vacuous: the product's page plans the typed street otherwise.
     expect(planFingerprint(plannedTown(street, []).plans)).not.toBe(planFingerprint(untyped.plans));
+  });
+});
+
+describe('the realistic page’s `inferred-outbuildings` lever — #2023', () => {
+  const street = untaggedStreetFixture();
+
+  it('draws the untagged street’s garages and sheds as inferred on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=untagged').leversOff);
+    const garages = plans.filter(
+      (_, index) => street.rows[index] === 'garage' && street.subjects[index] === true,
+    );
+    expect(garages).toHaveLength(2);
+    expect(garages.every((plan) => plan.family === 'garage' && plan.inferred)).toBe(true);
+  });
+
+  it('plans the untagged street, with `levers=-inferred-outbuildings`, inferring nothing', () => {
+    const off = plannedTown(
+      street,
+      parseConfig('?town=untagged&levers=-inferred-outbuildings').leversOff,
+    );
+    expect(off.plans.some((plan) => plan.inferred)).toBe(false);
+    // Not vacuous: on, the page plans the street otherwise.
+    expect(planFingerprint(off.plans)).not.toBe(planFingerprint(plannedTown(street, []).plans));
   });
 });

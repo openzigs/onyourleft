@@ -17,6 +17,7 @@ import {
   type BuildingType,
   type Landmark,
   type LandUseFeature,
+  type StreetFeature,
 } from '@onyourleft/map-features';
 
 import {
@@ -1280,6 +1281,211 @@ export function mappedRoofStreetFixture(latitude = FIXTURE_LATITUDE): {
       paths: [],
       streets: [],
     },
+  };
+}
+
+/** One footprint of an {@link UntaggedRow}: its corners about the slot's middle, and a mapped type. */
+interface UntaggedFootprint {
+  readonly corners: readonly (readonly [number, number])[];
+  readonly buildingType?: BuildingType;
+}
+
+/** One row of {@link untaggedStreetFixture}: the footprint the row is named for, and its neighbours. */
+interface UntaggedRow {
+  readonly row: string;
+  /** The footprint the row is about. */
+  readonly subject: UntaggedFootprint;
+  /** The rest of the slot: a house, mostly. */
+  readonly others: readonly UntaggedFootprint[];
+  /** Service roads in the slot, each `(along, lateral)` pairs about its middle. */
+  readonly service?: readonly (readonly (readonly [number, number])[])[];
+}
+
+/** {@link untaggedStreetFixture}'s house: 12 m along the road by 9 m deep, its front 17.5 m out. */
+const FRONT_HOUSE: UntaggedFootprint = { corners: rectangleBeside(0, 22, 12, 9) };
+
+/** #2023's rows, in order along the road. */
+const UNTAGGED_ROWS: readonly UntaggedRow[] = [
+  // A two-car garage behind a house: inferred a garage.
+  { row: 'garage', subject: { corners: rectangleBeside(0, 40, 6, 6) }, others: [FRONT_HOUSE] },
+  // An oblong one, 5 by 8 m, aspect 1.6: a garage too.
+  {
+    row: 'garage-oblong',
+    subject: { corners: rectangleBeside(0, 40, 5, 8) },
+    others: [FRONT_HOUSE],
+  },
+  // 4 by 3.5 m behind a house: a shed.
+  { row: 'shed', subject: { corners: rectangleBeside(0, 42, 4, 3.5) }, others: [FRONT_HOUSE] },
+  // And with no house near it: a shed is a shed anywhere.
+  { row: 'shed-alone', subject: { corners: rectangleBeside(0, 60, 4, 3.5) }, others: [] },
+  // Beside the house and nearer the street than it: not set back, so no garage.
+  {
+    row: 'garage-beside',
+    subject: { corners: rectangleBeside(11, 20, 6, 6) },
+    others: [FRONT_HOUSE],
+  },
+  // In front of a house that stands back: no garage.
+  {
+    row: 'garage-in-front',
+    subject: { corners: rectangleBeside(0, 22, 6, 6) },
+    others: [{ corners: rectangleBeside(0, 40, 12, 9) }],
+  },
+  // No house within 40 m: no garage.
+  { row: 'garage-alone', subject: { corners: rectangleBeside(0, 40, 6, 6) }, others: [] },
+  // 4 by 9 m, aspect 2.25: half a semi, not a garage.
+  { row: 'garage-long', subject: { corners: rectangleBeside(0, 40, 4, 9) }, others: [FRONT_HOUSE] },
+  // An L in a 6 m square, rectangularity 0.75: not a garage.
+  {
+    row: 'garage-ragged',
+    subject: {
+      corners: [
+        [-3, 37],
+        [3, 37],
+        [3, 40],
+        [0, 40],
+        [0, 43],
+        [-3, 43],
+      ],
+    },
+    others: [FRONT_HOUSE],
+  },
+  // 9 by 9 m, 81 m²: too big for a garage.
+  { row: 'garage-big', subject: { corners: rectangleBeside(0, 40, 9, 9) }, others: [FRONT_HOUSE] },
+  // A garage's footprint mapped as a house: the mapped type wins.
+  {
+    row: 'mapped-house',
+    subject: { corners: rectangleBeside(0, 40, 6, 6), buildingType: 'house' },
+    others: [FRONT_HOUSE],
+  },
+  // A shed's footprint mapped as a house: the mapped type wins.
+  {
+    row: 'mapped-small-house',
+    subject: { corners: rectangleBeside(0, 42, 4, 3.5), buildingType: 'house' },
+    others: [FRONT_HOUSE],
+  },
+  // A three-car garage, 8 by 8.5 m, 68 m²: house-sized itself, and still a garage.
+  {
+    row: 'garage-three-car',
+    subject: { corners: rectangleBeside(0, 42, 8, 8.5) },
+    others: [FRONT_HOUSE],
+  },
+  // Two garages side by side behind a house: each a garage, neither the other's house.
+  {
+    row: 'garage-pair',
+    subject: { corners: rectangleBeside(-3.5, 40, 6, 6) },
+    others: [{ corners: rectangleBeside(3.5, 40, 6, 6) }, FRONT_HOUSE],
+  },
+  // Behind a 500 m² hall, which is no house: no garage.
+  {
+    row: 'garage-by-a-hall',
+    subject: { corners: rectangleBeside(0, 40, 6, 6) },
+    others: [{ corners: rectangleBeside(0, 22, 25, 20) }],
+  },
+  // Behind a house-sized footprint mapped as a shop, which is no house: no garage.
+  {
+    row: 'garage-by-a-shop',
+    subject: { corners: rectangleBeside(0, 40, 6, 6) },
+    others: [{ ...FRONT_HOUSE, buildingType: 'retail' }],
+  },
+  // A garage behind a house with a driveway, a service road, past both: the driveway is no street.
+  {
+    row: 'garage-driveway',
+    subject: { corners: rectangleBeside(3, 40, 6, 6) },
+    others: [FRONT_HOUSE],
+    service: [
+      [
+        [8, 0],
+        [8, 50],
+      ],
+    ],
+  },
+];
+
+/** The along-road spacing of {@link untaggedStreetFixture}'s rows, metres: no row's house is within 40 m of the next's footprints. */
+const UNTAGGED_ROW_METRES = 60;
+
+/**
+ * #2023's fixture: a street of untagged footprints the inference rules are
+ * asked about, for the owner's look pair (`?town=untagged` against
+ * `levers=-inferred-outbuildings`) and for the plans to be asserted over.
+ * Along a level road from 1 000 m, a row every 60 m, mirrored on both sides,
+ * every footprint on residential land, and the road mapped as a residential
+ * street down its middle: in most rows a house 12 m by 9 m, its front 17.5 m
+ * out, and behind or beside it the row's subject — a garage, an oblong garage,
+ * a shed, a shed with no house, and the footprints no rule may call: one
+ * beside the house nearer the street, one in front of a house, one with no
+ * house within 40 m, one too long, one too ragged, one too big, two mapped as
+ * houses, one behind a hall and one behind a shop; a three-car garage, two
+ * garages side by side, and a garage beside a driveway (a service road). `rows` names each
+ * footprint of the corridor, in its order, and `subjects` says which are the
+ * row's subject. Nothing here is a real place, and every type is synthetic.
+ */
+export function untaggedStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly string[];
+  readonly subjects: readonly boolean[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: string[] = [];
+  const subjects: boolean[] = [];
+  const streets: StreetFeature[] = [];
+  const end = 1_000 + UNTAGGED_ROWS.length * UNTAGGED_ROW_METRES;
+  const street = (
+    kindDetail: string,
+    pairs: readonly (readonly [number, number])[],
+  ): StreetFeature => ({
+    kind: 'minor_road',
+    kindDetail,
+    grade: 'ground',
+    line: ringBeside(profile, origin, pairs),
+  });
+  streets.push(
+    street('residential', [
+      [950, 0],
+      [end, 0],
+    ]),
+  );
+  UNTAGGED_ROWS.forEach((each, index) => {
+    const along = 1_000 + index * UNTAGGED_ROW_METRES;
+    for (const side of [1, -1]) {
+      for (const [at, footprint] of [each.subject, ...each.others].entries()) {
+        const ring = footprint.corners.map(([a, n]) => [along + a, side * n] as const);
+        buildings.push({
+          ...buildingBeside(profile, origin, [ring]),
+          buildingType: footprint.buildingType ?? null,
+        });
+        rows.push(each.row);
+        subjects.push(at === 0);
+      }
+      for (const line of each.service ?? []) {
+        streets.push(
+          street(
+            'service',
+            line.map(([a, n]) => [along + a, side * n] as const),
+          ),
+        );
+      }
+    }
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'untagged-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, end, -80, 80)],
+      buildings,
+      paths: [],
+      streets,
+    },
+    rows,
+    subjects,
   };
 }
 
