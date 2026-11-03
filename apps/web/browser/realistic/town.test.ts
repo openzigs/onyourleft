@@ -390,3 +390,22 @@ describe('the realistic page’s `building-type` lever — #1791', () => {
     expect(planFingerprint(plannedTown(street, []).plans)).not.toBe(planFingerprint(untyped.plans));
   });
 });
+
+describe('the realistic page’s `steeples` lever — #2021', () => {
+  const street = typedStreetFixture();
+  const churchesOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
+    plans.filter((_, index) => street.rows[index] === 'church');
+
+  it('draws the typed street’s church with its steeple on the product’s page', () => {
+    const churches = churchesOf(plannedTown(street, parseConfig('?town=typed').leversOff).plans);
+    expect(churches).toHaveLength(2);
+    expect(churches.every((plan) => plan.steeple)).toBe(true);
+  });
+
+  it('plans the typed street, with `levers=-steeples`, with no steeple', () => {
+    const off = plannedTown(street, parseConfig('?town=typed&levers=-steeples').leversOff);
+    expect(off.plans.some((plan) => plan.steeple)).toBe(false);
+    // Not vacuous: on, the page plans the street otherwise.
+    expect(planFingerprint(off.plans)).not.toBe(planFingerprint(plannedTown(street, []).plans));
+  });
+});

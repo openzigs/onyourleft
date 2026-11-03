@@ -1228,6 +1228,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and storey (the type keeps its walls, pitch, doors);
                         untyped planned as before
                         (`-building-type`, `town=typed`);
+                        since #2021 a mapped place of worship (`worship`
+                        landmark, church, chapel, cathedral) a steeple: a
+                        square tower and pyramidal spire at the long axis's
+                        end away from the front door, stepped onto the
+                        footprint, 12 triangles
+                        in `wall` and `roof`, left off before holes over a
+                        cap (`STEEPLE`, `-steeples`, `town=typed`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
