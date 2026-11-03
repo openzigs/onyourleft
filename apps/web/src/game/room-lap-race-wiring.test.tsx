@@ -443,6 +443,12 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
     await act(async () => {
       room.accept();
       room.welcome(0, 'race', 'off', { laps: 2, items: 'on' });
+      await Promise.resolve();
+    });
+    // The realistic gap: the ride steps with the welcome in and no frame yet.
+    await pump();
+    await pump();
+    await act(async () => {
       roomFrame(room, 9, 9, leftHolding);
       await Promise.resolve();
     });

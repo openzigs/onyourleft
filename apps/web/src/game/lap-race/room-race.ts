@@ -247,11 +247,16 @@ export function stepRoomLapRace(ride: RoomLapRaceRide, step: RoomLapRaceStep): R
     const asked = riderTick(input, 'rider');
     input = asked.next;
     const lane = asked.lanes['rider'] as number;
-    const shownLane = laneSent?.value ?? own?.lane ?? STARTING_LANE;
+    // With no room lane to compare to (before a first frame, or after a
+    // rejoin's welcome until the next), only a lane the rider asked for goes:
+    // the held lane is not an ask.
+    const shownLane = laneSent?.value ?? own?.lane ?? (laneAsked ? STARTING_LANE : lane);
     if (lane !== shownLane) {
       const sequence = step.sendLane(lane);
       if (sequence !== undefined) laneSent = { value: lane, sequence, atLocalMs: nowLocalMs };
     }
+    // A steer made while the session is lost goes nowhere (`sendLane` answers
+    // `undefined`): the room is authoritative, so the lane returns to its word.
     laneAsked = false;
     const held = useSent === undefined ? (own?.held ?? 'none') : 'none';
     if (asked.uses.length > 0 && ride.itemsOn && held !== 'none') {
