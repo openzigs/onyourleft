@@ -16,8 +16,10 @@ import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-featur
 
 import type { BuildingFamily } from './building-types';
 import {
+  FACADE_DOOR,
   FACADE_GARAGE,
   FACADE_OFFSET,
+  FACADE_PAINT,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_SURFACES,
@@ -329,6 +331,16 @@ function garageDoorVertices(plan: FootprintPlan): number {
   return doors;
 }
 
+/** Every vertex of `role` whose facade `top` is `top`. */
+function facadeVertices(plan: FootprintPlan, role: 'wall' | 'door', top: number): number {
+  const floats = plan.triangles[role];
+  let found = 0;
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    if (floats[at + FACADE_OFFSET + 2] === top) found += 1;
+  }
+  return found;
+}
+
 describe('#2023: the rule, read back through `footprintPlans`', () => {
   const plans = plannedStreet();
 
@@ -525,6 +537,20 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
       expect(pole.porch).toBe(false);
       expect(pole.garage).toBe(false);
       expect(pole.triangles.chimney.length).toBe(0);
+      // A plain, painted door as an outbuilding's: the wreath is drawn on a door's face (#1626).
+      expect(pole.triangles.door.length).toBeGreaterThan(0);
+      expect(facadeVertices(pole, 'door', FACADE_DOOR)).toBe(0);
+      expect(facadeVertices(pole, 'door', FACADE_PAINT)).toBeGreaterThan(0);
+    }
+  });
+
+  it('lets a mapped flat roof beat the pole building’s 20° gable and its grey sheet', () => {
+    const tagged = plannedStreet({}, withSubjects(['pole-building'], { roofShape: 'flat' }));
+    for (const pole of subjectsOf(tagged, 'pole-building')) {
+      // Still a pole building, but with the mapped roof, and not the belt's `slate`.
+      expect(pole.family).toBe('pole-building');
+      expect(pole.roof).toBe('flat');
+      expect(pole.surfaces.roof).not.toBe('slate');
     }
   });
 

@@ -219,6 +219,8 @@ export type Layer = (typeof LAYERS)[number];
  *   has a class; on `route.ts`' road the two are the same picture. The
  *   product always builds the class. Since #1637 off also takes a city
  *   centre's street and terraced blocks with it — `town=city-street`'s before.
+ *   Since #2024 off also takes every inferred barn and pole building with it:
+ *   their rule needs a `rural` stretch, and `NO_URBAN_CLASS` reads `unknown`.
  *
  * - `split-roofs` — #1660: L-, T-, U- and Z-shaped mapped houses pitched over
  *   their 2–3 rectangles (`rectilinear-roofs.ts`), and no roof over a notch.
@@ -306,7 +308,8 @@ export type Layer = (typeof LAYERS)[number];
  *   `building-type` is on. The owner's BY-EYE pair and the tablet's cost pair
  *   (plan-time only: no call, no byte, no shader term); pair it with
  *   `town=untagged` past 2 150 m, or a ride's corridor. The product always
- *   infers them.
+ *   infers them. Needs `urban-class` on: a barn stands on a `rural` stretch, so
+ *   with `-urban-class` (every stretch `unknown`) none is inferred either.
  * - `mapped-roof-shape` — #1790: each mapped footprint's `roof:shape`,
  *   `roof:orientation`, `roof:direction`, `building:levels` and `roof:levels`,
  *   where #1789 carries them (`footprint-buildings.ts` §`MAPPED_ROOFS`,
