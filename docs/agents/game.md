@@ -774,6 +774,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on (the rider hit), and holds every write and its time
                         equal, and the recorded ride's channels and laps. ⚠️
                         The bots ride still air on a windy ride: stated
+    src/game/lap-race/room-race.ts
+                        a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
+                        the room's first frame of a room whose welcome says
+                        `lapRace`, `GameView` sends the rider's lane and
+                        item-use INPUTS (`room-port.ts` §`changeLane`,
+                        §`useItem`), shows them at once (lane, item gone, a
+                        tailwind's own offset) until a frame covers the input
+                        (`ackSequence` past it, or a frame interval after),
+                        then the room's; the rider's offset is DRAWN eased to
+                        the room's. The HUD reads `roomLapRaceState`, the
+                        room's frame as `@onyourleft/domain` shapes a race.
+                        ⚠️ **Nothing of it reaches the trainer**:
+                        `room-lap-race-wiring.test.tsx` holds every write
+                        equal to a solo race with items off while the room
+                        overrules three predictions
     src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
                         a lap race's lanes and item use (#1901, ADR 0060
                         D-5.4, D-13): race INPUTS only, a lane and "use the

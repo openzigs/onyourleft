@@ -62,6 +62,7 @@ import {
 } from '../instance/instance-transport';
 import {
   RoomSession,
+  type RoomLapRace,
   type RoomLink,
   type RoomRace,
   type RoomReportAnswer,
@@ -119,6 +120,20 @@ export interface RoomConnection {
    * room's newest frame, `1` alone or with drafting off. The room corrects it.
    */
   draftFactor(): number;
+  /**
+   * A lap race, as the room has said it — #1911: its laps and items, and its
+   * newest frame's offsets, lanes, held items, laps and item events.
+   * `undefined` in any other room. @see RoomSession.lapRace
+   */
+  lapRace(): RoomLapRace | undefined;
+  /**
+   * Ask the room to use the item it holds for this rider — #1911, ADR 0060
+   * D-5.4: an input, never an outcome. Answers the input's sequence, or
+   * `undefined` when nothing was sent (not joined, not a lap race, items off).
+   */
+  useItem(): number | undefined;
+  /** Ask the room for lane `lane` — #1911. As {@link useItem}. */
+  changeLane(lane: number): number | undefined;
   /**
    * Report the rider in seat `riderId` to the instance's moderators, with one
    * of the short fixed reasons — #789. By seat, never by athlete: the room
@@ -288,6 +303,9 @@ export function roomPortOver(
         own: () => session.own(),
         standings: () => session.standings(),
         draftFactor: () => session.draftFactor(),
+        lapRace: () => session.lapRace(),
+        useItem: () => session.useItem(),
+        changeLane: (lane) => session.changeLane(lane),
         report: async (riderId, reason) => {
           try {
             return await joined.report(request.roomId, riderId, reason);
