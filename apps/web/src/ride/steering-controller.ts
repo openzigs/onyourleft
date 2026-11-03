@@ -48,7 +48,8 @@ export type SteeringControllerState =
   /** Nothing paired. `dropped` once a paired controller's link went. */
   | { readonly kind: 'none'; readonly dropped: boolean }
   | { readonly kind: 'pairing' }
-  | { readonly kind: 'connected'; readonly name: string }
+  /** `name` is what the controller advertised, `undefined` where it advertised none. */
+  | { readonly kind: 'connected'; readonly name: string | undefined }
   | { readonly kind: 'failed'; readonly reason: SteeringPairingFailure };
 
 export interface SteeringController extends ControllerPort {
@@ -60,9 +61,6 @@ export interface SteeringController extends ControllerPort {
   /** Let the paired controller go. */
   forget(): void;
 }
-
-/** The name shown for a controller that advertised none. */
-export const UNNAMED_CONTROLLER = 'Steering controller';
 
 function failureOf(error: unknown): SteeringPairingFailure {
   const code: unknown =
@@ -144,7 +142,7 @@ export function createSteeringController(port: SteeringControllerPort): Steering
           set({ kind: 'none', dropped: true });
         }),
       ];
-      set({ kind: 'connected', name: opened.name ?? UNNAMED_CONTROLLER });
+      set({ kind: 'connected', name: opened.name });
     },
     forget() {
       generation += 1;

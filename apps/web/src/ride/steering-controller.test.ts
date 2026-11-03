@@ -85,10 +85,10 @@ describe('the steering controller, by state', () => {
     expect(steering.state).toEqual({ kind: 'connected', name: 'Ctrl 1' });
   });
 
-  it('names a controller that advertised no name', async () => {
+  it('gives no name for a controller that advertised none, so the screen repeats nothing', async () => {
     const steering = createSteeringController(opens({ ...handLink().link, name: undefined }));
     await steering.pair();
-    expect(steering.state).toEqual({ kind: 'connected', name: 'Steering controller' });
+    expect(steering.state).toStrictEqual({ kind: 'connected', name: undefined });
   });
 
   it('says why a pairing failed, by the client error, and lists nothing', async () => {
