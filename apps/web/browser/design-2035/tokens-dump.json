@@ -1,0 +1,760 @@
+{
+ "req": [
+  {
+   "f": "ink",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "body text on the page"
+  },
+  {
+   "f": "ink",
+   "b": "surface",
+   "min": 4.5,
+   "where": "body text on a panel"
+  },
+  {
+   "f": "inkMuted",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "helper and empty-state text on the page"
+  },
+  {
+   "f": "inkMuted",
+   "b": "surface",
+   "min": 4.5,
+   "where": "helper and empty-state text on a panel"
+  },
+  {
+   "f": "border",
+   "b": "canvas",
+   "min": 3,
+   "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "border",
+   "b": "surface",
+   "min": 3,
+   "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "accentInk",
+   "b": "accent",
+   "min": 4.5,
+   "where": "the label of a primary button"
+  },
+  {
+   "f": "accentInk",
+   "b": "accentHover",
+   "min": 4.5,
+   "where": "the label of a primary button under a pointer"
+  },
+  {
+   "f": "accentInk",
+   "b": "accent",
+   "min": 4.5,
+   "where": "a primary button at rest (#668)"
+  },
+  {
+   "f": "accentInk",
+   "b": "accentHover",
+   "min": 4.5,
+   "where": "a primary button under a pointer or a press (#668)"
+  },
+  {
+   "f": "accent",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "the label of a secondary button, an off toggle and an unchecked segment (#668)"
+  },
+  {
+   "f": "accent",
+   "b": "canvas",
+   "min": 3,
+   "where": "the border of a secondary button, a toggle and a segment, on the page (#668)"
+  },
+  {
+   "f": "accentHover",
+   "b": "surface",
+   "min": 4.5,
+   "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)"
+  },
+  {
+   "f": "accentHover",
+   "b": "canvas",
+   "min": 3,
+   "where": "the border of a button under a pointer, on the page (#668, #688)"
+  },
+  {
+   "f": "accentHover",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "the label of a tertiary (text) button under a pointer or a press, on the page (#992)"
+  },
+  {
+   "f": "accentHover",
+   "b": "selected",
+   "min": 4.5,
+   "where": "the label of an on toggle and of the checked segment (#668)"
+  },
+  {
+   "f": "accent",
+   "b": "selected",
+   "min": 3,
+   "where": "the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)"
+  },
+  {
+   "f": "accentHover",
+   "b": "selected",
+   "min": 3,
+   "where": "the doubled border of an on toggle under a pointer (#668)"
+  },
+  {
+   "f": "focus",
+   "b": "selected",
+   "min": 3,
+   "where": "the focus ring on a checked segment's radio, landing on the segment's fill (#668)"
+  },
+  {
+   "f": "inkMuted",
+   "b": "surface",
+   "min": 4.5,
+   "where": "the label of a disabled button of any kind (#668)"
+  },
+  {
+   "f": "border",
+   "b": "surface",
+   "min": 3,
+   "where": "the border of a disabled button, and the doubled border of a disabled on toggle (#668)"
+  },
+  {
+   "f": "accent",
+   "b": "canvas",
+   "min": 3,
+   "where": "a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)"
+  },
+  {
+   "f": "hudInk",
+   "b": "hudSurface",
+   "min": 4.5,
+   "where": "a metric on the ride HUD, over its own opaque panel (#94)"
+  },
+  {
+   "f": "hudInkMuted",
+   "b": "hudSurface",
+   "min": 4.5,
+   "where": "a field label on the ride HUD (#94)"
+  },
+  {
+   "f": "hudBorder",
+   "b": "hudSurface",
+   "min": 3,
+   "where": "the edge of a HUD control (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "hudInk",
+   "b": "hudSurface",
+   "min": 3,
+   "where": "the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)"
+  },
+  {
+   "f": "hudStaleInk",
+   "b": "hudSurface",
+   "min": 4.5,
+   "where": "the mark on a HUD reading whose sensor has dropped (#94)"
+  },
+  {
+   "f": "accent",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "link text"
+  },
+  {
+   "f": "accent",
+   "b": "surface",
+   "min": 4.5,
+   "where": "link text and the active navigation item in the header"
+  },
+  {
+   "f": "focus",
+   "b": "canvas",
+   "min": 3,
+   "where": "the focus ring, offset onto the page (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "surface",
+   "min": 3,
+   "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "ink",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "body text on a card resting on a panel"
+  },
+  {
+   "f": "inkMuted",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "a label on a card resting on a panel"
+  },
+  {
+   "f": "border",
+   "b": "surfaceRaised",
+   "min": 3,
+   "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "accent",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "link text on a raised card"
+  },
+  {
+   "f": "focus",
+   "b": "surfaceRaised",
+   "min": 3,
+   "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "ink",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "the wordmark and the navigation, on the app header"
+  },
+  {
+   "f": "inkMuted",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "secondary text on the app header"
+  },
+  {
+   "f": "ink",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "a route tile's facts band, on the game's chooser (#1011)"
+  },
+  {
+   "f": "border",
+   "b": "surfaceOverlay",
+   "min": 3,
+   "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "accent",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "a navigation link on the app header"
+  },
+  {
+   "f": "accentInk",
+   "b": "accent",
+   "min": 4.5,
+   "where": "the current destination's label and icon, on the navigation's active indicator (#944)"
+  },
+  {
+   "f": "accent",
+   "b": "surfaceOverlay",
+   "min": 3,
+   "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)"
+  },
+  {
+   "f": "focus",
+   "b": "surfaceOverlay",
+   "min": 3,
+   "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "infoInk",
+   "b": "infoSurface",
+   "min": 4.5,
+   "where": "an info message"
+  },
+  {
+   "f": "infoBorder",
+   "b": "canvas",
+   "min": 3,
+   "where": "the edge of an info message"
+  },
+  {
+   "f": "successInk",
+   "b": "successSurface",
+   "min": 4.5,
+   "where": "a success message"
+  },
+  {
+   "f": "successBorder",
+   "b": "canvas",
+   "min": 3,
+   "where": "the edge of a success message"
+  },
+  {
+   "f": "warningInk",
+   "b": "warningSurface",
+   "min": 4.5,
+   "where": "a warning message — the Chrome-on-Linux path"
+  },
+  {
+   "f": "warningBorder",
+   "b": "canvas",
+   "min": 3,
+   "where": "the edge of a warning message"
+  },
+  {
+   "f": "dangerInk",
+   "b": "dangerSurface",
+   "min": 4.5,
+   "where": "an error message — the Safari and Firefox path"
+  },
+  {
+   "f": "dangerBorder",
+   "b": "canvas",
+   "min": 3,
+   "where": "the edge of an error message"
+  },
+  {
+   "f": "dangerAction",
+   "b": "dangerSurface",
+   "min": 4.5,
+   "where": "the label of a danger button at rest (#1002)"
+  },
+  {
+   "f": "dangerAction",
+   "b": "canvas",
+   "min": 3,
+   "where": "the edge of a danger button, at rest and under a pointer, on the dialog (#1002)"
+  },
+  {
+   "f": "dangerActionInk",
+   "b": "dangerAction",
+   "min": 4.5,
+   "where": "the label of a danger button under a pointer or a press (#1002)"
+  },
+  {
+   "f": "focus",
+   "b": "infoSurface",
+   "min": 3,
+   "where": "the focus ring round a link in an info message (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "successSurface",
+   "min": 3,
+   "where": "the focus ring round a link in a success message (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "warningSurface",
+   "min": 3,
+   "where": "the focus ring round a link in a warning message (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "dangerSurface",
+   "min": 3,
+   "where": "the focus ring round a link in an error message (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "link",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "link text on canvas"
+  },
+  {
+   "f": "link",
+   "b": "surface",
+   "min": 4.5,
+   "where": "link text on surface"
+  },
+  {
+   "f": "link",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "link text on surfaceRaised"
+  },
+  {
+   "f": "link",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "link text on surfaceOverlay"
+  },
+  {
+   "f": "link",
+   "b": "infoSurface",
+   "min": 4.5,
+   "where": "link text on infoSurface"
+  },
+  {
+   "f": "link",
+   "b": "successSurface",
+   "min": 4.5,
+   "where": "link text on successSurface"
+  },
+  {
+   "f": "link",
+   "b": "warningSurface",
+   "min": 4.5,
+   "where": "link text on warningSurface"
+  },
+  {
+   "f": "link",
+   "b": "dangerSurface",
+   "min": 4.5,
+   "where": "link text on dangerSurface"
+  },
+  {
+   "f": "linkVisited",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "a visited link on canvas"
+  },
+  {
+   "f": "linkVisited",
+   "b": "surface",
+   "min": 4.5,
+   "where": "a visited link on surface"
+  },
+  {
+   "f": "linkVisited",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "a visited link on surfaceRaised"
+  },
+  {
+   "f": "linkVisited",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "a visited link on surfaceOverlay"
+  },
+  {
+   "f": "linkVisited",
+   "b": "infoSurface",
+   "min": 4.5,
+   "where": "a visited link on infoSurface"
+  },
+  {
+   "f": "linkVisited",
+   "b": "successSurface",
+   "min": 4.5,
+   "where": "a visited link on successSurface"
+  },
+  {
+   "f": "linkVisited",
+   "b": "warningSurface",
+   "min": 4.5,
+   "where": "a visited link on warningSurface"
+  },
+  {
+   "f": "linkVisited",
+   "b": "dangerSurface",
+   "min": 4.5,
+   "where": "a visited link on dangerSurface"
+  },
+  {
+   "f": "linkHover",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on canvas"
+  },
+  {
+   "f": "linkHover",
+   "b": "surface",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on surface"
+  },
+  {
+   "f": "linkHover",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on surfaceRaised"
+  },
+  {
+   "f": "linkHover",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on surfaceOverlay"
+  },
+  {
+   "f": "linkHover",
+   "b": "infoSurface",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on infoSurface"
+  },
+  {
+   "f": "linkHover",
+   "b": "successSurface",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on successSurface"
+  },
+  {
+   "f": "linkHover",
+   "b": "warningSurface",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on warningSurface"
+  },
+  {
+   "f": "linkHover",
+   "b": "dangerSurface",
+   "min": 4.5,
+   "where": "a link under a pointer or focused from the keyboard on dangerSurface"
+  },
+  {
+   "f": "linkActive",
+   "b": "canvas",
+   "min": 4.5,
+   "where": "a link being pressed on canvas"
+  },
+  {
+   "f": "linkActive",
+   "b": "surface",
+   "min": 4.5,
+   "where": "a link being pressed on surface"
+  },
+  {
+   "f": "linkActive",
+   "b": "surfaceRaised",
+   "min": 4.5,
+   "where": "a link being pressed on surfaceRaised"
+  },
+  {
+   "f": "linkActive",
+   "b": "surfaceOverlay",
+   "min": 4.5,
+   "where": "a link being pressed on surfaceOverlay"
+  },
+  {
+   "f": "linkActive",
+   "b": "infoSurface",
+   "min": 4.5,
+   "where": "a link being pressed on infoSurface"
+  },
+  {
+   "f": "linkActive",
+   "b": "successSurface",
+   "min": 4.5,
+   "where": "a link being pressed on successSurface"
+  },
+  {
+   "f": "linkActive",
+   "b": "warningSurface",
+   "min": 4.5,
+   "where": "a link being pressed on warningSurface"
+  },
+  {
+   "f": "linkActive",
+   "b": "dangerSurface",
+   "min": 4.5,
+   "where": "a link being pressed on dangerSurface"
+  },
+  {
+   "f": "ink",
+   "b": "illoSky",
+   "min": 4.5,
+   "where": "a hero title drawn on the sky of a menu illustration"
+  },
+  {
+   "f": "inkMuted",
+   "b": "illoSky",
+   "min": 4.5,
+   "where": "the line under a hero title, on the sky"
+  },
+  {
+   "f": "ink",
+   "b": "illoHillFar",
+   "min": 4.5,
+   "where": "a card title where it overlaps the far hills"
+  },
+  {
+   "f": "accent",
+   "b": "illoHillNear",
+   "min": 3,
+   "where": "the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "focus",
+   "b": "illoSky",
+   "min": 3,
+   "where": "the focus ring of a control over art, where it lands on illoSky (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "illoSun",
+   "min": 3,
+   "where": "the focus ring of a control over art, where it lands on illoSun (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "illoHillFar",
+   "min": 3,
+   "where": "the focus ring of a control over art, where it lands on illoHillFar (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "illoHillNear",
+   "min": 3,
+   "where": "the focus ring of a control over art, where it lands on illoHillNear (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "focus",
+   "b": "illoRoad",
+   "min": 3,
+   "where": "the focus ring of a control over art, where it lands on illoRoad (WCAG 2.2 SC 2.4.13)"
+  },
+  {
+   "f": "bandRecovery",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "bandEndurance",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "bandTempo",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "bandThreshold",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "bandVo2",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "bandAnaerobic",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  },
+  {
+   "f": "bandSprint",
+   "b": "surface",
+   "min": 3,
+   "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)"
+  }
+ ],
+ "light": {
+  "canvas": "#ffffff",
+  "surface": "#f2f5f4",
+  "surfaceRaised": "#e7eae9",
+  "surfaceOverlay": "#dde0df",
+  "border": "#767e7e",
+  "ink": "#141b1a",
+  "inkMuted": "#4a5b5c",
+  "accent": "#0b5c55",
+  "accentHover": "#07443f",
+  "accentInk": "#ffffff",
+  "selected": "#d4ebe7",
+  "link": "#0b5c55",
+  "linkVisited": "#5b3a8c",
+  "linkHover": "#07443f",
+  "linkActive": "#042e2a",
+  "focus": "#141b1a",
+  "infoSurface": "#e3f0f4",
+  "infoInk": "#0e4a57",
+  "infoBorder": "#2c7288",
+  "successSurface": "#e2f2e9",
+  "successInk": "#14513a",
+  "successBorder": "#2a7a58",
+  "warningSurface": "#fbefda",
+  "warningInk": "#654100",
+  "warningBorder": "#8a6212",
+  "dangerSurface": "#fbe8e8",
+  "dangerInk": "#7a1d1d",
+  "dangerBorder": "#a83232",
+  "dangerAction": "#9e2626",
+  "dangerActionInk": "#ffffff",
+  "illoSky": "#cfe4ef",
+  "illoSun": "#f4c65a",
+  "illoHillFar": "#a7d3a3",
+  "illoHillNear": "#7db678",
+  "illoRoad": "#6f726c",
+  "bandRecovery": "#5e8f88",
+  "bandEndurance": "#467f75",
+  "bandTempo": "#336d61",
+  "bandThreshold": "#2e5878",
+  "bandVo2": "#7a3622",
+  "bandAnaerobic": "#5e2537",
+  "bandSprint": "#3d1d3a",
+  "hudSurface": "#10161c",
+  "hudInk": "#f5f8fa",
+  "hudInkMuted": "#a8b6c2",
+  "hudBorder": "#7b8b99",
+  "hudStaleInk": "#f0b45f"
+ },
+ "dark": {
+  "canvas": "#121816",
+  "surface": "#19201f",
+  "surfaceRaised": "#222a29",
+  "surfaceOverlay": "#2b3433",
+  "border": "#869391",
+  "ink": "#e4ebe9",
+  "inkMuted": "#a9b7b5",
+  "accent": "#6cc9bd",
+  "accentHover": "#9ddcd3",
+  "accentInk": "#0d1f1c",
+  "selected": "#1d4540",
+  "link": "#6cc9bd",
+  "linkVisited": "#c4a8f0",
+  "linkHover": "#9ddcd3",
+  "linkActive": "#c6ede7",
+  "focus": "#e4ebe9",
+  "infoSurface": "#12303a",
+  "infoInk": "#a9dcec",
+  "infoBorder": "#4f9db5",
+  "successSurface": "#13301f",
+  "successInk": "#a7e0c1",
+  "successBorder": "#4ea77e",
+  "warningSurface": "#33280f",
+  "warningInk": "#f1d08f",
+  "warningBorder": "#b98c31",
+  "dangerSurface": "#3a1818",
+  "dangerInk": "#f4b8b8",
+  "dangerBorder": "#d46a6a",
+  "dangerAction": "#f08c8c",
+  "dangerActionInk": "#2a0d0d",
+  "illoSky": "#152637",
+  "illoSun": "#9a7a30",
+  "illoHillFar": "#1d3a2b",
+  "illoHillNear": "#2f5d3b",
+  "illoRoad": "#5f6a63",
+  "bandRecovery": "#467a73",
+  "bandEndurance": "#529085",
+  "bandTempo": "#62a596",
+  "bandThreshold": "#7fb0d6",
+  "bandVo2": "#f2b391",
+  "bandAnaerobic": "#f5c9d3",
+  "bandSprint": "#f8e7f3",
+  "hudSurface": "#10161c",
+  "hudInk": "#f5f8fa",
+  "hudInkMuted": "#a8b6c2",
+  "hudBorder": "#7b8b99",
+  "hudStaleInk": "#f0b45f"
+ },
+ "elev": [
+  1.05,
+  1.2
+ ],
+ "band": 1.15,
+ "illo": 1.2,
+ "fonts": {
+  "sm": "0.8rem",
+  "md": "1rem",
+  "lg": "1.25rem",
+  "xl": "1.5625rem",
+  "xxl": "1.953125rem",
+  "display": "2.44140625rem",
+  "metric": "3.814697265625rem",
+  "zoom": "7.450580596923828rem"
+ }
+}

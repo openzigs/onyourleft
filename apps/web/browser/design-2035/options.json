@@ -1,0 +1,3638 @@
+{
+ "A": {
+  "name": "Hi-Vis",
+  "accentSource": "The fluorescent yellow-green of high-visibility cycling clothing (the background material class of EN ISO 20471), moved toward green in sRGB so it reads as lime, not as yellow.",
+  "themes": {
+   "dark": {
+    "canvas": "#101215",
+    "surface": "#242729",
+    "surfaceRaised": "#333639",
+    "surfaceOverlay": "#414447",
+    "ink": "#edeef1",
+    "inkMuted": "#b3b7ba",
+    "border": "#93969a",
+    "accent": "#aff13c",
+    "accentHover": "#c7fd7b",
+    "accentInk": "#121809",
+    "selected": "#304216",
+    "link": "#aade5b",
+    "linkVisited": "#c5acf2",
+    "linkHover": "#cdf39c",
+    "linkActive": "#e6fad0",
+    "focus": "#aff13c",
+    "infoSurface": "#142b3d",
+    "infoInk": "#93cbfc",
+    "infoBorder": "#1e72ac",
+    "successSurface": "#162e1b",
+    "successInk": "#99d3a4",
+    "successBorder": "#287b42",
+    "warningSurface": "#35260d",
+    "warningInk": "#e5c182",
+    "warningBorder": "#906500",
+    "dangerSurface": "#3e211e",
+    "dangerInk": "#ffb2ac",
+    "dangerBorder": "#ac514c",
+    "dangerAction": "#fb8981",
+    "dangerActionInk": "#321312",
+    "illoSky": "#102239",
+    "illoSun": "#897626",
+    "illoHillFar": "#263a22",
+    "illoHillNear": "#304f2a",
+    "illoRoad": "#53595e",
+    "bandRecovery": "#949aa1",
+    "bandEndurance": "#2d74ca",
+    "bandTempo": "#5fc372",
+    "bandThreshold": "#f9df5d",
+    "bandVo2": "#f59441",
+    "bandAnaerobic": "#cb574d",
+    "bandSprint": "#cf91f3",
+    "hudSurface": "#101215",
+    "hudInk": "#f4f7f9",
+    "hudInkMuted": "#9da3a8",
+    "hudBorder": "#787c82",
+    "hudStaleInk": "#f1af48"
+   },
+   "light": {
+    "canvas": "#ffffff",
+    "surface": "#eceef1",
+    "surfaceRaised": "#dcdee1",
+    "surfaceOverlay": "#cdd0d2",
+    "ink": "#131415",
+    "inkMuted": "#535456",
+    "border": "#6d6e70",
+    "accent": "#405e00",
+    "accentHover": "#2c4300",
+    "accentInk": "#ffffff",
+    "selected": "#cdf39c",
+    "link": "#3d5b00",
+    "linkVisited": "#5e3a91",
+    "linkHover": "#2c4300",
+    "linkActive": "#1b2b00",
+    "focus": "#131415",
+    "infoSurface": "#dceeff",
+    "infoInk": "#004876",
+    "infoBorder": "#328bcd",
+    "successSurface": "#dbf2df",
+    "successInk": "#005122",
+    "successBorder": "#3b9655",
+    "warningSurface": "#f9ebd3",
+    "warningInk": "#5d4000",
+    "warningBorder": "#ae7c00",
+    "dangerSurface": "#ffe7e4",
+    "dangerInk": "#792b29",
+    "dangerBorder": "#cc6660",
+    "dangerAction": "#a21a21",
+    "dangerActionInk": "#ffffff",
+    "illoSky": "#c6d9f2",
+    "illoSun": "#e0c24b",
+    "illoHillFar": "#adcca7",
+    "illoHillNear": "#8fb686",
+    "illoRoad": "#91969c",
+    "bandRecovery": "#6c7278",
+    "bandEndurance": "#00468c",
+    "bandTempo": "#007d30",
+    "bandThreshold": "#968200",
+    "bandVo2": "#8f4c00",
+    "bandAnaerobic": "#820b0f",
+    "bandSprint": "#7e439f",
+    "hudSurface": "#101215",
+    "hudInk": "#f4f7f9",
+    "hudInkMuted": "#9da3a8",
+    "hudBorder": "#787c82",
+    "hudStaleInk": "#f1af48"
+   }
+  },
+  "rows": [
+   {
+    "f": "ink",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "body text on the page",
+    "dark": 16.170421830920933,
+    "light": 18.44402094434079
+   },
+   {
+    "f": "ink",
+    "b": "surface",
+    "min": 4.5,
+    "where": "body text on a panel",
+    "dark": 12.954746701990656,
+    "light": 15.867621685800149
+   },
+   {
+    "f": "inkMuted",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "helper and empty-state text on the page",
+    "dark": 9.29009153312293,
+    "light": 7.580388358540904
+   },
+   {
+    "f": "inkMuted",
+    "b": "surface",
+    "min": 4.5,
+    "where": "helper and empty-state text on a panel",
+    "dark": 7.442649542993486,
+    "light": 6.521502825644816
+   },
+   {
+    "f": "border",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.315770964878151,
+    "light": 5.103795954731641
+   },
+   {
+    "f": "border",
+    "b": "surface",
+    "min": 3,
+    "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)",
+    "dark": 5.059806969372291,
+    "light": 4.3908594343712055
+   },
+   {
+    "f": "accentInk",
+    "b": "accent",
+    "min": 4.5,
+    "where": "the label of a primary button",
+    "dark": 13.33269123707177,
+    "light": 7.449240912896756
+   },
+   {
+    "f": "accentInk",
+    "b": "accentHover",
+    "min": 4.5,
+    "where": "the label of a primary button under a pointer",
+    "dark": 15.310069338897696,
+    "light": 10.995015102642162
+   },
+   {
+    "f": "accent",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "the label of a secondary button, an off toggle and an unchecked segment (#668)",
+    "dark": 13.820257014234013,
+    "light": 7.449240912896756
+   },
+   {
+    "f": "accent",
+    "b": "canvas",
+    "min": 3,
+    "where": "the border of a secondary button, a toggle and a segment, on the page (#668)",
+    "dark": 13.820257014234013,
+    "light": 7.449240912896756
+   },
+   {
+    "f": "accentHover",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)",
+    "dark": 12.714024152584047,
+    "light": 9.459148881085838
+   },
+   {
+    "f": "accentHover",
+    "b": "canvas",
+    "min": 3,
+    "where": "the border of a button under a pointer, on the page (#668, #688)",
+    "dark": 15.86994624018465,
+    "light": 10.995015102642162
+   },
+   {
+    "f": "accentHover",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "the label of a tertiary (text) button under a pointer or a press, on the page (#992)",
+    "dark": 15.86994624018465,
+    "light": 10.995015102642162
+   },
+   {
+    "f": "accentHover",
+    "b": "selected",
+    "min": 4.5,
+    "where": "the label of an on toggle and of the checked segment (#668)",
+    "dark": 9.269037760716415,
+    "light": 8.846339939738217
+   },
+   {
+    "f": "accent",
+    "b": "selected",
+    "min": 3,
+    "where": "the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)",
+    "dark": 8.071891497866252,
+    "light": 5.993490394811261
+   },
+   {
+    "f": "accentHover",
+    "b": "selected",
+    "min": 3,
+    "where": "the doubled border of an on toggle under a pointer (#668)",
+    "dark": 9.269037760716415,
+    "light": 8.846339939738217
+   },
+   {
+    "f": "focus",
+    "b": "selected",
+    "min": 3,
+    "where": "the focus ring on a checked segment's radio, landing on the segment's fill (#668)",
+    "dark": 8.071891497866252,
+    "light": 14.839641201591562
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "a metric on the ride HUD, over its own opaque panel (#94)",
+    "dark": 17.437139107722523,
+    "light": 17.437139107722523
+   },
+   {
+    "f": "hudInkMuted",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "a field label on the ride HUD (#94)",
+    "dark": 7.3593471347427855,
+    "light": 7.3593471347427855
+   },
+   {
+    "f": "hudBorder",
+    "b": "hudSurface",
+    "min": 3,
+    "where": "the edge of a HUD control (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.4703342030751525,
+    "light": 4.4703342030751525
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "min": 3,
+    "where": "the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)",
+    "dark": 17.437139107722523,
+    "light": 17.437139107722523
+   },
+   {
+    "f": "hudStaleInk",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "the mark on a HUD reading whose sensor has dropped (#94)",
+    "dark": 9.796218101599257,
+    "light": 9.796218101599257
+   },
+   {
+    "f": "accent",
+    "b": "surface",
+    "min": 4.5,
+    "where": "link text and the active navigation item in the header",
+    "dark": 11.07193930052317,
+    "light": 6.408675039403396
+   },
+   {
+    "f": "focus",
+    "b": "canvas",
+    "min": 3,
+    "where": "the focus ring, offset onto the page (WCAG 2.2 SC 2.4.13)",
+    "dark": 13.820257014234013,
+    "light": 18.44402094434079
+   },
+   {
+    "f": "focus",
+    "b": "surface",
+    "min": 3,
+    "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)",
+    "dark": 11.07193930052317,
+    "light": 15.867621685800149
+   },
+   {
+    "f": "ink",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "body text on a card resting on a panel",
+    "dark": 10.478027347605925,
+    "light": 13.682730094139082
+   },
+   {
+    "f": "inkMuted",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a label on a card resting on a panel",
+    "dark": 6.019746062510758,
+    "light": 5.6235247309504865
+   },
+   {
+    "f": "border",
+    "b": "surfaceRaised",
+    "min": 3,
+    "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.09246101203532,
+    "light": 3.7862602040461883
+   },
+   {
+    "f": "accent",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "link text on a raised card",
+    "dark": 8.955179553150808,
+    "light": 5.526232762637295
+   },
+   {
+    "f": "focus",
+    "b": "surfaceRaised",
+    "min": 3,
+    "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)",
+    "dark": 8.955179553150808,
+    "light": 13.682730094139082
+   },
+   {
+    "f": "ink",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "the wordmark and the navigation, on the app header",
+    "dark": 8.44810232456071,
+    "light": 11.899736185884652
+   },
+   {
+    "f": "inkMuted",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "secondary text on the app header",
+    "dark": 4.853531014650581,
+    "light": 4.890724312523924
+   },
+   {
+    "f": "border",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.2996219843660946,
+    "light": 3.2928733702466806
+   },
+   {
+    "f": "accent",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a navigation link on the app header",
+    "dark": 7.220278272810365,
+    "light": 4.806110441756397
+   },
+   {
+    "f": "accent",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
+    "dark": 7.220278272810365,
+    "light": 4.806110441756397
+   },
+   {
+    "f": "focus",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)",
+    "dark": 7.220278272810365,
+    "light": 11.899736185884652
+   },
+   {
+    "f": "infoInk",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "an info message",
+    "dark": 8.448610361604509,
+    "light": 8.09529896222801
+   },
+   {
+    "f": "infoBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of an info message",
+    "dark": 3.62506950872553,
+    "light": 3.6776133621217335
+   },
+   {
+    "f": "successInk",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a success message",
+    "dark": 8.473591764908292,
+    "light": 8.080835955979246
+   },
+   {
+    "f": "successBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a success message",
+    "dark": 3.5752522491650085,
+    "light": 3.697394451679684
+   },
+   {
+    "f": "warningInk",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a warning message — the Chrome-on-Linux path",
+    "dark": 8.562214422912348,
+    "light": 8.11897147695379
+   },
+   {
+    "f": "warningBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a warning message",
+    "dark": 3.615680124053246,
+    "light": 3.6953648313737144
+   },
+   {
+    "f": "dangerInk",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "an error message — the Safari and Firefox path",
+    "dark": 8.476669198354234,
+    "light": 8.1269892483989
+   },
+   {
+    "f": "dangerBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of an error message",
+    "dark": 3.6050787623754315,
+    "light": 3.7254334536335487
+   },
+   {
+    "f": "dangerAction",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "the label of a danger button at rest (#1002)",
+    "dark": 6.243148769984395,
+    "light": 6.578966628249749
+   },
+   {
+    "f": "dangerAction",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a danger button, at rest and under a pointer, on the dialog (#1002)",
+    "dark": 8.037558651060348,
+    "light": 7.760545598138328
+   },
+   {
+    "f": "dangerActionInk",
+    "b": "dangerAction",
+    "min": 4.5,
+    "where": "the label of a danger button under a pointer or a press (#1002)",
+    "dark": 7.270356885180656,
+    "light": 7.760545598138328
+   },
+   {
+    "f": "focus",
+    "b": "infoSurface",
+    "min": 3,
+    "where": "the focus ring round a link in an info message (WCAG 2.2 SC 2.4.13)",
+    "dark": 10.723211980803455,
+    "light": 15.560555634717996
+   },
+   {
+    "f": "focus",
+    "b": "successSurface",
+    "min": 3,
+    "where": "the focus ring round a link in a success message (WCAG 2.2 SC 2.4.13)",
+    "dark": 10.737655712210746,
+    "light": 15.614540136793725
+   },
+   {
+    "f": "focus",
+    "b": "warningSurface",
+    "min": 3,
+    "where": "the focus ring round a link in a warning message (WCAG 2.2 SC 2.4.13)",
+    "dark": 10.78485456995025,
+    "light": 15.679094849015199
+   },
+   {
+    "f": "focus",
+    "b": "dangerSurface",
+    "min": 3,
+    "where": "the focus ring round a link in an error message (WCAG 2.2 SC 2.4.13)",
+    "dark": 10.734841800240005,
+    "light": 15.635833428086071
+   },
+   {
+    "f": "link",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "link text on canvas",
+    "dark": 11.889395420493388,
+    "light": 7.792629561289473
+   },
+   {
+    "f": "link",
+    "b": "surface",
+    "min": 4.5,
+    "where": "link text on surface",
+    "dark": 9.525051833698985,
+    "light": 6.704096584430742
+   },
+   {
+    "f": "link",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "link text on surfaceRaised",
+    "dark": 7.704029719510134,
+    "light": 5.7809762487528005
+   },
+   {
+    "f": "link",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "link text on surfaceOverlay",
+    "dark": 6.211515700686657,
+    "light": 5.027658353539409
+   },
+   {
+    "f": "link",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "link text on infoSurface",
+    "dark": 9.225046052778541,
+    "light": 6.574360666533434
+   },
+   {
+    "f": "link",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "link text on successSurface",
+    "dark": 9.237471815473969,
+    "light": 6.597169208553438
+   },
+   {
+    "f": "link",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "link text on warningSurface",
+    "dark": 9.27807640643654,
+    "light": 6.624443681961144
+   },
+   {
+    "f": "link",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "link text on dangerSurface",
+    "dark": 9.235051041962727,
+    "light": 6.606165659581261
+   },
+   {
+    "f": "linkVisited",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a visited link on canvas",
+    "dark": 9.431297980755172,
+    "light": 8.433647277707795
+   },
+   {
+    "f": "linkVisited",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a visited link on surface",
+    "dark": 7.55577545775878,
+    "light": 7.255572135706473
+   },
+   {
+    "f": "linkVisited",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a visited link on surfaceRaised",
+    "dark": 6.111244295235876,
+    "light": 6.256516394027059
+   },
+   {
+    "f": "linkVisited",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a visited link on surfaceOverlay",
+    "dark": 4.927303148176733,
+    "light": 5.441230954593994
+   },
+   {
+    "f": "linkVisited",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a visited link on infoSurface",
+    "dark": 7.31779498728567,
+    "light": 7.115164207652147
+   },
+   {
+    "f": "linkVisited",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a visited link on successSurface",
+    "dark": 7.327651760189087,
+    "light": 7.139848968656448
+   },
+   {
+    "f": "linkVisited",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a visited link on warningSurface",
+    "dark": 7.359861471718624,
+    "light": 7.169367026277007
+   },
+   {
+    "f": "linkVisited",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a visited link on dangerSurface",
+    "dark": 7.325731474462104,
+    "light": 7.149585463137942
+   },
+   {
+    "f": "linkHover",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on canvas",
+    "dark": 15.094141362829868,
+    "light": 10.995015102642162
+   },
+   {
+    "f": "linkHover",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surface",
+    "dark": 12.09249703465309,
+    "light": 9.459148881085838
+   },
+   {
+    "f": "linkHover",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surfaceRaised",
+    "dark": 9.780624626992418,
+    "light": 8.156671719492703
+   },
+   {
+    "f": "linkHover",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surfaceOverlay",
+    "dark": 7.885808550197151,
+    "light": 7.093777407653854
+   },
+   {
+    "f": "linkHover",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on infoSurface",
+    "dark": 11.711625719777484,
+    "light": 9.276097914089789
+   },
+   {
+    "f": "linkHover",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on successSurface",
+    "dark": 11.727400804382919,
+    "light": 9.308279639399169
+   },
+   {
+    "f": "linkHover",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on warningSurface",
+    "dark": 11.778950224205603,
+    "light": 9.346762573134917
+   },
+   {
+    "f": "linkHover",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on dangerSurface",
+    "dark": 11.724327519636825,
+    "light": 9.320973187083313
+   },
+   {
+    "f": "linkActive",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a link being pressed on canvas",
+    "dark": 16.92866191987521,
+    "light": 15.084547875230383
+   },
+   {
+    "f": "linkActive",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a link being pressed on surface",
+    "dark": 13.562201992545564,
+    "light": 12.977425026126864
+   },
+   {
+    "f": "linkActive",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a link being pressed on surfaceRaised",
+    "dark": 10.969347887736916,
+    "light": 11.190498958537884
+   },
+   {
+    "f": "linkActive",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a link being pressed on surfaceOverlay",
+    "dark": 8.844238549394426,
+    "light": 9.732267206824302
+   },
+   {
+    "f": "linkActive",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a link being pressed on infoSurface",
+    "dark": 13.135040117648517,
+    "light": 12.726289302393699
+   },
+   {
+    "f": "linkActive",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a link being pressed on successSurface",
+    "dark": 13.152732483687997,
+    "light": 12.770440835757235
+   },
+   {
+    "f": "linkActive",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a link being pressed on warningSurface",
+    "dark": 13.210547146964766,
+    "light": 12.823237275861871
+   },
+   {
+    "f": "linkActive",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a link being pressed on dangerSurface",
+    "dark": 13.149285676267851,
+    "light": 12.787855675660634
+   },
+   {
+    "f": "ink",
+    "b": "illoSky",
+    "min": 4.5,
+    "where": "a hero title drawn on the sky of a menu illustration",
+    "dark": 13.818274478213123,
+    "light": 12.830412762985901
+   },
+   {
+    "f": "inkMuted",
+    "b": "illoSky",
+    "min": 4.5,
+    "where": "the line under a hero title, on the sky",
+    "dark": 7.938756086556915,
+    "light": 5.273227125327857
+   },
+   {
+    "f": "ink",
+    "b": "illoHillFar",
+    "min": 4.5,
+    "where": "a card title where it overlaps the far hills",
+    "dark": 10.580771088353108,
+    "light": 10.514846472861658
+   },
+   {
+    "f": "accent",
+    "b": "illoHillNear",
+    "min": 3,
+    "where": "the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.792599795850543,
+    "light": 3.2646665254116196
+   },
+   {
+    "f": "focus",
+    "b": "illoSky",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoSky (WCAG 2.2 SC 2.4.13)",
+    "dark": 11.809964315028605,
+    "light": 12.830412762985901
+   },
+   {
+    "f": "focus",
+    "b": "illoSun",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoSun (WCAG 2.2 SC 2.4.13)",
+    "dark": 3.3034477147617696,
+    "light": 10.528701980929847
+   },
+   {
+    "f": "focus",
+    "b": "illoHillFar",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoHillFar (WCAG 2.2 SC 2.4.13)",
+    "dark": 9.042990800042011,
+    "light": 10.514846472861658
+   },
+   {
+    "f": "focus",
+    "b": "illoHillNear",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoHillNear (WCAG 2.2 SC 2.4.13)",
+    "dark": 6.792599795850543,
+    "light": 8.083183035030233
+   },
+   {
+    "f": "focus",
+    "b": "illoRoad",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoRoad (WCAG 2.2 SC 2.4.13)",
+    "dark": 5.2292640658768,
+    "light": 6.18888859586597
+   },
+   {
+    "f": "bandRecovery",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 5.293335922511307,
+    "light": 4.18617580237671
+   },
+   {
+    "f": "bandEndurance",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.1938584852619143,
+    "light": 8.01265518909483
+   },
+   {
+    "f": "bandTempo",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.824597754419873,
+    "light": 4.543759674048606
+   },
+   {
+    "f": "bandThreshold",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 11.265836483790185,
+    "light": 3.290897487993837
+   },
+   {
+    "f": "bandVo2",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.58067775369248,
+    "light": 5.642795111583525
+   },
+   {
+    "f": "bandAnaerobic",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.585456595713449,
+    "light": 9.015556425484107
+   },
+   {
+    "f": "bandSprint",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.439445100722518,
+    "light": 5.6623870319512015
+   }
+  ],
+  "numerals": [
+   {
+    "f": "ink",
+    "b": "surfaceRaised",
+    "where": "a primary metric numeral on a metric card",
+    "min": 7,
+    "dark": 10.478027347605925,
+    "light": 13.682730094139082
+   },
+   {
+    "f": "ink",
+    "b": "surface",
+    "where": "a primary metric numeral on a panel",
+    "min": 7,
+    "dark": 12.954746701990656,
+    "light": 15.867621685800149
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "where": "a primary metric numeral on a HUD panel",
+    "min": 7,
+    "dark": 17.437139107722523,
+    "light": 17.437139107722523
+   }
+  ],
+  "elevation": [
+   {
+    "theme": "dark",
+    "steps": [
+     {
+      "from": "canvas",
+      "to": "surface",
+      "ratio": 1.2482236976841972
+     },
+     {
+      "from": "surface",
+      "to": "surfaceRaised",
+      "ratio": 1.2363726751439168
+     },
+     {
+      "from": "surfaceRaised",
+      "to": "surfaceOverlay",
+      "ratio": 1.240281775132354
+     }
+    ],
+    "raisedOnCanvas": 1.5432696722838424
+   },
+   {
+    "theme": "light",
+    "steps": [
+     {
+      "from": "canvas",
+      "to": "surface",
+      "ratio": 1.162368331534287
+     },
+     {
+      "from": "surface",
+      "to": "surfaceRaised",
+      "ratio": 1.1596824300873225
+     },
+     {
+      "from": "surfaceRaised",
+      "to": "surfaceOverlay",
+      "ratio": 1.1498347425860918
+     }
+    ],
+    "raisedOnCanvas": 1.3479781313702284
+   }
+  ],
+  "zones": [
+   {
+    "theme": "dark",
+    "cols": [
+     {
+      "kind": "normal",
+      "colours": [
+       "#949aa1",
+       "#2d74ca",
+       "#5fc372",
+       "#f9df5d",
+       "#f59441",
+       "#cb574d",
+       "#cf91f3"
+      ],
+      "adjacent": [
+       1.6573482973454987,
+       2.13678777125287,
+       1.6507693038016775,
+       1.7119568691034626,
+       1.835380676915719,
+       1.7959902536321655
+      ],
+      "onSurface": [
+       5.293335922511307,
+       3.1938584852619143,
+       6.824597754419873,
+       11.265836483790185,
+       6.58067775369248,
+       3.585456595713449,
+       6.439445100722518
+      ]
+     },
+     {
+      "kind": "deuteranopia",
+      "colours": [
+       "#9699a1",
+       "#2c6dc8",
+       "#b7ab77",
+       "#fae364",
+       "#c8b441",
+       "#91854a",
+       "#8eabf0"
+      ],
+      "adjacent": [
+       1.7846202509401397,
+       2.2053611240277644,
+       1.7832454146656136,
+       1.613848231478031,
+       1.7781877409336801,
+       1.6319957301957342
+      ],
+      "onSurface": [
+       5.2732096656751555,
+       2.9548077037102005,
+       6.516418038740226,
+       11.620372587627799,
+       7.200412257468204,
+       4.049298109370305,
+       6.608437224781997
+      ]
+     },
+     {
+      "kind": "protanopia",
+      "colours": [
+       "#989aa1",
+       "#497bcd",
+       "#c5b46c",
+       "#f3da4e",
+       "#b19e37",
+       "#746c4b",
+       "#7ea6f7"
+      ],
+      "adjacent": [
+       1.4949806884545742,
+       2.024618339434338,
+       1.4773544894339725,
+       1.9128436081728384,
+       1.9591104109384758,
+       2.177036911595675
+      ],
+      "onSurface": [
+       5.34765734638863,
+       3.5770745319237087,
+       7.242210698856242,
+       10.699312489382017,
+       5.593406823050252,
+       2.8550748297901354,
+       6.215603289820864
+      ]
+     },
+     {
+      "kind": "tritanopia",
+      "colours": [
+       "#919c9c",
+       "#008895",
+       "#4cbfaf",
+       "#ffd0c3",
+       "#ff7f83",
+       "#de4155",
+       "#cc9fb7"
+      ],
+      "adjacent": [
+       1.5011949422004087,
+       1.8925169305483998,
+       1.6060282383934235,
+       1.7482906502415723,
+       1.7254395401674718,
+       1.844605425735476
+      ],
+      "onSurface": [
+       5.324349228086982,
+       3.5467407186189304,
+       6.7122668582517235,
+       10.780090117984575,
+       6.166074340382146,
+       3.5736252687148133,
+       6.5919285602167434
+      ]
+     }
+    ]
+   },
+   {
+    "theme": "light",
+    "cols": [
+     {
+      "kind": "normal",
+      "colours": [
+       "#6c7278",
+       "#00468c",
+       "#007d30",
+       "#968200",
+       "#8f4c00",
+       "#820b0f",
+       "#7e439f"
+      ],
+      "adjacent": [
+       1.9140751768106887,
+       1.7634416791140164,
+       1.3807053214588356,
+       1.7146675434801915,
+       1.5977111072094359,
+       1.5921830094996945
+      ],
+      "onSurface": [
+       4.18617580237671,
+       8.01265518909483,
+       4.543759674048606,
+       3.290897487993837,
+       5.642795111583525,
+       9.015556425484107,
+       5.6623870319512015
+      ]
+     },
+     {
+      "kind": "deuteranopia",
+      "colours": [
+       "#6e7178",
+       "#00418b",
+       "#726836",
+       "#968512",
+       "#706300",
+       "#524807",
+       "#3c5e9d"
+      ],
+      "adjacent": [
+       2.018034352645163,
+       1.7609162067839395,
+       1.509933267632922,
+       1.62955251505264,
+       1.5177004829030853,
+       1.4331107028216032
+      ],
+      "onSurface": [
+       4.205180316346401,
+       8.48619833745429,
+       4.819194862743136,
+       3.1916608276987275,
+       5.200978928971452,
+       7.893528232068744,
+       5.507968237574001
+      ]
+     },
+     {
+      "kind": "protanopia",
+      "colours": [
+       "#707278",
+       "#1b4d8f",
+       "#7e7128",
+       "#917f00",
+       "#605400",
+       "#362f0d",
+       "#265aa2"
+      ],
+      "adjacent": [
+       1.743496425654541,
+       1.7086541578836307,
+       1.2242811980281487,
+       1.8946730956763487,
+       1.7622753149007289,
+       1.9541590738865922
+      ],
+      "onSurface": [
+       4.136981910462302,
+       7.2128131738885175,
+       4.221341773938874,
+       3.4480165020404208,
+       6.532864099864059,
+       11.5127051387916,
+       5.8913858613844505
+      ]
+     },
+     {
+      "kind": "tritanopia",
+      "colours": [
+       "#697374",
+       "#005762",
+       "#007a6c",
+       "#a3776e",
+       "#9d3c40",
+       "#90000f",
+       "#7a536a"
+      ],
+      "adjacent": [
+       1.6951713777945696,
+       1.5751623529980454,
+       1.3551781409937385,
+       1.7188334196822947,
+       1.438370609041815,
+       1.492614155274934
+      ],
+      "onSurface": [
+       4.196513873774711,
+       7.1138102053407035,
+       4.516239352598043,
+       3.332579840231433,
+       5.728149603149269,
+       8.239202033364446,
+       5.519981171454732
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "B": {
+  "name": "Blue Hour",
+  "accentSource": "The indigo of the sky in the half hour after sunset (the \"blue hour\" of an evening ride), taken toward violet so that it is not any product's blue.",
+  "themes": {
+   "dark": {
+    "canvas": "#101322",
+    "surface": "#242838",
+    "surfaceRaised": "#343949",
+    "surfaceOverlay": "#43495a",
+    "ink": "#e8ecf9",
+    "inkMuted": "#b8bfd3",
+    "border": "#969db0",
+    "accent": "#bab8ff",
+    "accentHover": "#cdcdff",
+    "accentInk": "#120e2c",
+    "selected": "#363167",
+    "link": "#bab8ff",
+    "linkVisited": "#f0a7e8",
+    "linkHover": "#d0d0ff",
+    "linkActive": "#e2e2ff",
+    "focus": "#ebebfa",
+    "infoSurface": "#142b3d",
+    "infoInk": "#93cbfc",
+    "infoBorder": "#2073ae",
+    "successSurface": "#162e1b",
+    "successInk": "#99d3a4",
+    "successBorder": "#2a7c43",
+    "warningSurface": "#35260d",
+    "warningInk": "#e5c182",
+    "warningBorder": "#906600",
+    "dangerSurface": "#3e211e",
+    "dangerInk": "#ffb2ac",
+    "dangerBorder": "#ad534d",
+    "dangerAction": "#fb8981",
+    "dangerActionInk": "#321312",
+    "illoSky": "#1e1f3a",
+    "illoSun": "#a37133",
+    "illoHillFar": "#37324f",
+    "illoHillNear": "#49426d",
+    "illoRoad": "#565960",
+    "bandRecovery": "#949aa1",
+    "bandEndurance": "#2f77cc",
+    "bandTempo": "#5fc372",
+    "bandThreshold": "#f9df5d",
+    "bandVo2": "#f59441",
+    "bandAnaerobic": "#cb574d",
+    "bandSprint": "#cf91f3",
+    "hudSurface": "#0f1322",
+    "hudInk": "#f1f3fb",
+    "hudInkMuted": "#9ea6b9",
+    "hudBorder": "#737c95",
+    "hudStaleInk": "#f1af48"
+   },
+   "light": {
+    "canvas": "#f9fbff",
+    "surface": "#e9ebf4",
+    "surfaceRaised": "#dadde5",
+    "surfaceOverlay": "#ccced7",
+    "ink": "#141619",
+    "inkMuted": "#51535b",
+    "border": "#6a6d74",
+    "accent": "#5031ba",
+    "accentHover": "#3b2190",
+    "accentInk": "#ffffff",
+    "selected": "#dcddff",
+    "link": "#5031ba",
+    "linkVisited": "#7b2776",
+    "linkHover": "#3b2190",
+    "linkActive": "#241b54",
+    "focus": "#141619",
+    "infoSurface": "#dceeff",
+    "infoInk": "#004876",
+    "infoBorder": "#2e87c9",
+    "successSurface": "#dbf2df",
+    "successInk": "#005122",
+    "successBorder": "#399353",
+    "warningSurface": "#f9ebd3",
+    "warningInk": "#5d4000",
+    "warningBorder": "#ab7900",
+    "dangerSurface": "#ffe7e4",
+    "dangerInk": "#792b29",
+    "dangerBorder": "#ca645e",
+    "dangerAction": "#a21a21",
+    "dangerActionInk": "#ffffff",
+    "illoSky": "#d2d5f2",
+    "illoSun": "#ffb557",
+    "illoHillFar": "#c3bfe9",
+    "illoHillNear": "#aca6dd",
+    "illoRoad": "#94979d",
+    "bandRecovery": "#6c7278",
+    "bandEndurance": "#00468c",
+    "bandTempo": "#007d30",
+    "bandThreshold": "#968200",
+    "bandVo2": "#8f4c00",
+    "bandAnaerobic": "#820b0f",
+    "bandSprint": "#7e439f",
+    "hudSurface": "#0f1322",
+    "hudInk": "#f1f3fb",
+    "hudInkMuted": "#9ea6b9",
+    "hudBorder": "#737c95",
+    "hudStaleInk": "#f1af48"
+   }
+  },
+  "rows": [
+   {
+    "f": "ink",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "body text on the page",
+    "dark": 15.635223347134332,
+    "light": 17.496780603623268
+   },
+   {
+    "f": "ink",
+    "b": "surface",
+    "min": 4.5,
+    "where": "body text on a panel",
+    "dark": 12.396780329037203,
+    "light": 15.238407141409867
+   },
+   {
+    "f": "inkMuted",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "helper and empty-state text on the page",
+    "dark": 10.042367282231947,
+    "light": 7.402878260019135
+   },
+   {
+    "f": "inkMuted",
+    "b": "surface",
+    "min": 4.5,
+    "where": "helper and empty-state text on a panel",
+    "dark": 7.9623436402113965,
+    "light": 6.447361688989969
+   },
+   {
+    "f": "border",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.805457638092913,
+    "light": 5.002076641177041
+   },
+   {
+    "f": "border",
+    "b": "surface",
+    "min": 3,
+    "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)",
+    "dark": 5.395878364185249,
+    "light": 4.3564403153690545
+   },
+   {
+    "f": "accentInk",
+    "b": "accent",
+    "min": 4.5,
+    "where": "the label of a primary button",
+    "dark": 10.123539404355839,
+    "light": 8.435585069155376
+   },
+   {
+    "f": "accentInk",
+    "b": "accentHover",
+    "min": 4.5,
+    "where": "the label of a primary button under a pointer",
+    "dark": 12.243131726088162,
+    "light": 11.626444007218721
+   },
+   {
+    "f": "accent",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "the label of a secondary button, an off toggle and an unchecked segment (#668)",
+    "dark": 10.004588082027857,
+    "light": 8.142677246637218
+   },
+   {
+    "f": "accent",
+    "b": "canvas",
+    "min": 3,
+    "where": "the border of a secondary button, a toggle and a segment, on the page (#668)",
+    "dark": 10.004588082027857,
+    "light": 8.142677246637218
+   },
+   {
+    "f": "accentHover",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)",
+    "dark": 9.593214889213277,
+    "light": 9.774180223926237
+   },
+   {
+    "f": "accentHover",
+    "b": "canvas",
+    "min": 3,
+    "where": "the border of a button under a pointer, on the page (#668, #688)",
+    "dark": 12.09927524960453,
+    "light": 11.222740367238156
+   },
+   {
+    "f": "accentHover",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "the label of a tertiary (text) button under a pointer or a press, on the page (#992)",
+    "dark": 12.09927524960453,
+    "light": 11.222740367238156
+   },
+   {
+    "f": "accentHover",
+    "b": "selected",
+    "min": 4.5,
+    "where": "the label of an on toggle and of the checked segment (#668)",
+    "dark": 7.685322440541965,
+    "light": 8.763963293118385
+   },
+   {
+    "f": "accent",
+    "b": "selected",
+    "min": 3,
+    "where": "the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)",
+    "dark": 6.354800904103783,
+    "light": 6.3587076027849525
+   },
+   {
+    "f": "accentHover",
+    "b": "selected",
+    "min": 3,
+    "where": "the doubled border of an on toggle under a pointer (#668)",
+    "dark": 7.685322440541965,
+    "light": 8.763963293118385
+   },
+   {
+    "f": "focus",
+    "b": "selected",
+    "min": 3,
+    "where": "the focus ring on a checked segment's radio, landing on the segment's fill (#668)",
+    "dark": 9.930724318238529,
+    "light": 13.66343138486383
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "a metric on the ride HUD, over its own opaque panel (#94)",
+    "dark": 16.676120518465734,
+    "light": 16.676120518465734
+   },
+   {
+    "f": "hudInkMuted",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "a field label on the ride HUD (#94)",
+    "dark": 7.574496701771154,
+    "light": 7.574496701771154
+   },
+   {
+    "f": "hudBorder",
+    "b": "hudSurface",
+    "min": 3,
+    "where": "the edge of a HUD control (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.439727777868641,
+    "light": 4.439727777868641
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "min": 3,
+    "where": "the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)",
+    "dark": 16.676120518465734,
+    "light": 16.676120518465734
+   },
+   {
+    "f": "hudStaleInk",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "the mark on a HUD reading whose sensor has dropped (#94)",
+    "dark": 9.648172490486244,
+    "light": 9.648172490486244
+   },
+   {
+    "f": "accent",
+    "b": "surface",
+    "min": 4.5,
+    "where": "link text and the active navigation item in the header",
+    "dark": 7.932389450524515,
+    "light": 7.091672114792203
+   },
+   {
+    "f": "focus",
+    "b": "canvas",
+    "min": 3,
+    "where": "the focus ring, offset onto the page (WCAG 2.2 SC 2.4.13)",
+    "dark": 15.634290933645719,
+    "light": 17.496780603623268
+   },
+   {
+    "f": "focus",
+    "b": "surface",
+    "min": 3,
+    "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.396041041536312,
+    "light": 15.238407141409867
+   },
+   {
+    "f": "ink",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "body text on a card resting on a panel",
+    "dark": 9.738729631235532,
+    "light": 13.340082071175274
+   },
+   {
+    "f": "inkMuted",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a label on a card resting on a panel",
+    "dark": 6.255100912079235,
+    "light": 5.644181394783226
+   },
+   {
+    "f": "border",
+    "b": "surfaceRaised",
+    "min": 3,
+    "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.238923262094685,
+    "light": 3.8137366199695206
+   },
+   {
+    "f": "accent",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "link text on a raised card",
+    "dark": 6.231569337997859,
+    "light": 6.208226828125051
+   },
+   {
+    "f": "focus",
+    "b": "surfaceRaised",
+    "min": 3,
+    "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)",
+    "dark": 9.738148857768566,
+    "light": 13.340082071175274
+   },
+   {
+    "f": "ink",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "the wordmark and the navigation, on the app header",
+    "dark": 7.607897706015596,
+    "light": 11.546593401992158
+   },
+   {
+    "f": "inkMuted",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "secondary text on the app header",
+    "dark": 4.886486192949815,
+    "light": 4.8853573242603945
+   },
+   {
+    "f": "border",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.311447774279662,
+    "light": 3.30100413611596
+   },
+   {
+    "f": "accent",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a navigation link on the app header",
+    "dark": 4.868103322159518,
+    "light": 5.373570458504982
+   },
+   {
+    "f": "accent",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
+    "dark": 4.868103322159518,
+    "light": 5.373570458504982
+   },
+   {
+    "f": "focus",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)",
+    "dark": 7.607444005656888,
+    "light": 11.546593401992158
+   },
+   {
+    "f": "infoInk",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "an info message",
+    "dark": 8.448610361604509,
+    "light": 8.09529896222801
+   },
+   {
+    "f": "infoBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of an info message",
+    "dark": 3.6238090852086735,
+    "light": 3.736441675033702
+   },
+   {
+    "f": "successInk",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a success message",
+    "dark": 8.473591764908292,
+    "light": 8.080835955979246
+   },
+   {
+    "f": "successBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a success message",
+    "dark": 3.56903436449066,
+    "light": 3.7042152309442193
+   },
+   {
+    "f": "warningInk",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a warning message — the Chrome-on-Linux path",
+    "dark": 8.562214422912348,
+    "light": 8.11897147695379
+   },
+   {
+    "f": "warningBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a warning message",
+    "dark": 3.589985787175921,
+    "light": 3.7081665555505627
+   },
+   {
+    "f": "dangerInk",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "an error message — the Safari and Firefox path",
+    "dark": 8.476669198354234,
+    "light": 8.1269892483989
+   },
+   {
+    "f": "dangerBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of an error message",
+    "dark": 3.620652636673968,
+    "light": 3.6884132293353558
+   },
+   {
+    "f": "dangerAction",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "the label of a danger button at rest (#1002)",
+    "dark": 6.243148769984395,
+    "light": 6.578966628249749
+   },
+   {
+    "f": "dangerAction",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a danger button, at rest and under a pointer, on the dialog (#1002)",
+    "dark": 7.9041277887222385,
+    "light": 7.491077091322455
+   },
+   {
+    "f": "dangerActionInk",
+    "b": "dangerAction",
+    "min": 4.5,
+    "where": "the label of a danger button under a pointer or a press (#1002)",
+    "dark": 7.270356885180656,
+    "light": 7.760545598138328
+   },
+   {
+    "f": "focus",
+    "b": "infoSurface",
+    "min": 3,
+    "where": "the focus ring round a link in an info message (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.335511516918432,
+    "light": 15.292399274717182
+   },
+   {
+    "f": "focus",
+    "b": "successSurface",
+    "min": 3,
+    "where": "the focus ring round a link in a success message (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.352126950376325,
+    "light": 15.345453457342057
+   },
+   {
+    "f": "focus",
+    "b": "warningSurface",
+    "min": 3,
+    "where": "the focus ring round a link in a warning message (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.406422440782867,
+    "light": 15.408895692794925
+   },
+   {
+    "f": "focus",
+    "b": "dangerSurface",
+    "min": 3,
+    "where": "the focus ring round a link in an error message (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.348889949785008,
+    "light": 15.366379799560127
+   },
+   {
+    "f": "link",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "link text on canvas",
+    "dark": 10.004588082027857,
+    "light": 8.142677246637218
+   },
+   {
+    "f": "link",
+    "b": "surface",
+    "min": 4.5,
+    "where": "link text on surface",
+    "dark": 7.932389450524515,
+    "light": 7.091672114792203
+   },
+   {
+    "f": "link",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "link text on surfaceRaised",
+    "dark": 6.231569337997859,
+    "light": 6.208226828125051
+   },
+   {
+    "f": "link",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "link text on surfaceOverlay",
+    "dark": 4.868103322159518,
+    "light": 5.373570458504982
+   },
+   {
+    "f": "link",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "link text on infoSurface",
+    "dark": 7.893655812832023,
+    "light": 7.116799052446541
+   },
+   {
+    "f": "link",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "link text on successSurface",
+    "dark": 7.904288246899935,
+    "light": 7.141489485245877
+   },
+   {
+    "f": "link",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "link text on warningSurface",
+    "dark": 7.93903264423363,
+    "light": 7.17101432520363
+   },
+   {
+    "f": "link",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "link text on dangerSurface",
+    "dark": 7.902216847712416,
+    "light": 7.151228216872834
+   },
+   {
+    "f": "linkVisited",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a visited link on canvas",
+    "dark": 10.01316428848631,
+    "light": 8.467344835549568
+   },
+   {
+    "f": "linkVisited",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a visited link on surface",
+    "dark": 7.939189311656105,
+    "light": 7.374433670620465
+   },
+   {
+    "f": "linkVisited",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a visited link on surfaceRaised",
+    "dark": 6.2369112096236226,
+    "light": 6.455763353847071
+   },
+   {
+    "f": "linkVisited",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a visited link on surfaceOverlay",
+    "dark": 4.872276393435379,
+    "light": 5.587827282368895
+   },
+   {
+    "f": "linkVisited",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a visited link on infoSurface",
+    "dark": 7.900422470430293,
+    "light": 7.400562478055206
+   },
+   {
+    "f": "linkVisited",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a visited link on successSurface",
+    "dark": 7.91106401891141,
+    "light": 7.426237376165319
+   },
+   {
+    "f": "linkVisited",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a visited link on warningSurface",
+    "dark": 7.945838200092512,
+    "light": 7.456939440555743
+   },
+   {
+    "f": "linkVisited",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a visited link on dangerSurface",
+    "dark": 7.908990844063869,
+    "light": 7.43636441380277
+   },
+   {
+    "f": "linkHover",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on canvas",
+    "dark": 12.429575182140141,
+    "light": 11.222740367238156
+   },
+   {
+    "f": "linkHover",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surface",
+    "dark": 9.855101503521876,
+    "light": 9.774180223926237
+   },
+   {
+    "f": "linkHover",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surfaceRaised",
+    "dark": 7.7420238548855815,
+    "light": 8.556561401441247
+   },
+   {
+    "f": "linkHover",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surfaceOverlay",
+    "dark": 6.048070719263766,
+    "light": 7.4061864758016425
+   },
+   {
+    "f": "linkHover",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on infoSurface",
+    "dark": 9.806979316198495,
+    "light": 9.808811720297394
+   },
+   {
+    "f": "linkHover",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on successSurface",
+    "dark": 9.820188919385824,
+    "light": 9.842841598735243
+   },
+   {
+    "f": "linkHover",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on warningSurface",
+    "dark": 9.863354924350395,
+    "light": 9.883534555510233
+   },
+   {
+    "f": "linkHover",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on dangerSurface",
+    "dark": 9.817615438926419,
+    "light": 9.856264119761809
+   },
+   {
+    "f": "linkActive",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a link being pressed on canvas",
+    "dark": 14.545016504946968,
+    "light": 14.907146906239317
+   },
+   {
+    "f": "linkActive",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a link being pressed on surface",
+    "dark": 11.532382396513446,
+    "light": 12.983026936226327
+   },
+   {
+    "f": "linkActive",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a link being pressed on surfaceRaised",
+    "dark": 9.059671235812498,
+    "light": 11.365665929143457
+   },
+   {
+    "f": "linkActive",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a link being pressed on surfaceOverlay",
+    "dark": 7.07741713982145,
+    "light": 9.837624875656632
+   },
+   {
+    "f": "linkActive",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a link being pressed on infoSurface",
+    "dark": 11.476070093106774,
+    "light": 13.029027893844022
+   },
+   {
+    "f": "linkActive",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a link being pressed on successSurface",
+    "dark": 11.491527893841555,
+    "light": 13.074229723386063
+   },
+   {
+    "f": "linkActive",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a link being pressed on warningSurface",
+    "dark": 11.542040501510114,
+    "light": 13.128282108529435
+   },
+   {
+    "f": "linkActive",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a link being pressed on dangerSurface",
+    "dark": 11.48851642199246,
+    "light": 13.09205883519366
+   },
+   {
+    "f": "ink",
+    "b": "illoSky",
+    "min": 4.5,
+    "where": "a hero title drawn on the sky of a menu illustration",
+    "dark": 13.561918186793541,
+    "light": 12.550380037671419
+   },
+   {
+    "f": "inkMuted",
+    "b": "illoSky",
+    "min": 4.5,
+    "where": "the line under a hero title, on the sky",
+    "dark": 8.71070150132034,
+    "light": 5.3100588982990455
+   },
+   {
+    "f": "ink",
+    "b": "illoHillFar",
+    "min": 4.5,
+    "where": "a card title where it overlaps the far hills",
+    "dark": 10.277992078186804,
+    "light": 10.314120369433574
+   },
+   {
+    "f": "accent",
+    "b": "illoHillNear",
+    "min": 3,
+    "where": "the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.987296561512355,
+    "light": 3.7167629944711815
+   },
+   {
+    "f": "focus",
+    "b": "illoSky",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoSky (WCAG 2.2 SC 2.4.13)",
+    "dark": 13.561109415779013,
+    "light": 12.550380037671419
+   },
+   {
+    "f": "focus",
+    "b": "illoSun",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoSun (WCAG 2.2 SC 2.4.13)",
+    "dark": 3.582769738248543,
+    "light": 10.35709998329888
+   },
+   {
+    "f": "focus",
+    "b": "illoHillFar",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoHillFar (WCAG 2.2 SC 2.4.13)",
+    "dark": 10.277379145564302,
+    "light": 10.314120369433574
+   },
+   {
+    "f": "focus",
+    "b": "illoHillNear",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoHillNear (WCAG 2.2 SC 2.4.13)",
+    "dark": 7.7937087240128085,
+    "light": 7.986487085286958
+   },
+   {
+    "f": "focus",
+    "b": "illoRoad",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoRoad (WCAG 2.2 SC 2.4.13)",
+    "dark": 5.944857588121395,
+    "light": 6.191113408907945
+   },
+   {
+    "f": "bandRecovery",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 5.15177032712661,
+    "light": 4.090672115909223
+   },
+   {
+    "f": "bandEndurance",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.226115457553079,
+    "light": 7.8298539535335
+   },
+   {
+    "f": "bandTempo",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.64207991340079,
+    "light": 4.440098045923103
+   },
+   {
+    "f": "bandThreshold",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 10.96454163443973,
+    "light": 3.2158187391005
+   },
+   {
+    "f": "bandVo2",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.40468333771853,
+    "light": 5.514060017651021
+   },
+   {
+    "f": "bandAnaerobic",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.4895667249158002,
+    "light": 8.809874936020494
+   },
+   {
+    "f": "bandSprint",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.2672278273478925,
+    "light": 5.533204966675776
+   }
+  ],
+  "numerals": [
+   {
+    "f": "ink",
+    "b": "surfaceRaised",
+    "where": "a primary metric numeral on a metric card",
+    "min": 7,
+    "dark": 9.738729631235532,
+    "light": 13.340082071175274
+   },
+   {
+    "f": "ink",
+    "b": "surface",
+    "where": "a primary metric numeral on a panel",
+    "min": 7,
+    "dark": 12.396780329037203,
+    "light": 15.238407141409867
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "where": "a primary metric numeral on a HUD panel",
+    "min": 7,
+    "dark": 16.676120518465734,
+    "light": 16.676120518465734
+   }
+  ],
+  "elevation": [
+   {
+    "theme": "dark",
+    "steps": [
+     {
+      "from": "canvas",
+      "to": "surface",
+      "ratio": 1.2612325887965978
+     },
+     {
+      "from": "surface",
+      "to": "surfaceRaised",
+      "ratio": 1.2729360808288963
+     },
+     {
+      "from": "surfaceRaised",
+      "to": "surfaceOverlay",
+      "ratio": 1.2800815688590397
+     }
+    ],
+    "raisedOnCanvas": 1.6054684685964244
+   },
+   {
+    "theme": "light",
+    "steps": [
+     {
+      "from": "canvas",
+      "to": "surface",
+      "ratio": 1.1482027249473041
+     },
+     {
+      "from": "surface",
+      "to": "surfaceRaised",
+      "ratio": 1.1423023531719059
+     },
+     {
+      "from": "surfaceRaised",
+      "to": "surfaceOverlay",
+      "ratio": 1.155326216724119
+     }
+    ],
+    "raisedOnCanvas": 1.3115946746257001
+   }
+  ],
+  "zones": [
+   {
+    "theme": "dark",
+    "cols": [
+     {
+      "kind": "normal",
+      "colours": [
+       "#949aa1",
+       "#2f77cc",
+       "#5fc372",
+       "#f9df5d",
+       "#f59441",
+       "#cb574d",
+       "#cf91f3"
+      ],
+      "adjacent": [
+       1.5968958318169084,
+       2.058847552355931,
+       1.6507693038016775,
+       1.7119568691034626,
+       1.835380676915719,
+       1.7959902536321655
+      ],
+      "onSurface": [
+       5.15177032712661,
+       3.226115457553079,
+       6.64207991340079,
+       10.96454163443973,
+       6.40468333771853,
+       3.4895667249158002,
+       6.2672278273478925
+      ]
+     },
+     {
+      "kind": "deuteranopia",
+      "colours": [
+       "#9699a1",
+       "#3270ca",
+       "#b7ab77",
+       "#fae364",
+       "#c8b441",
+       "#91854a",
+       "#8eabf0"
+      ],
+      "adjacent": [
+       1.7110299718676083,
+       2.1144212501316693,
+       1.7832454146656136,
+       1.613848231478031,
+       1.7781877409336801,
+       1.6319957301957342
+      ],
+      "onSurface": [
+       5.1321823292586375,
+       2.999469567243643,
+       6.3421421921032,
+       11.309595983225353,
+       7.007843589398456,
+       3.9410032068485745,
+       6.43170040626457
+      ]
+     },
+     {
+      "kind": "protanopia",
+      "colours": [
+       "#989aa1",
+       "#4d7ecf",
+       "#c5b46c",
+       "#f3da4e",
+       "#b19e37",
+       "#746c4b",
+       "#7ea6f7"
+      ],
+      "adjacent": [
+       1.436668083896925,
+       1.9456469055426782,
+       1.4773544894339725,
+       1.9128436081728384,
+       1.9591104109384758,
+       2.177036911595675
+      ],
+      "onSurface": [
+       5.204638972486584,
+       3.622714968630148,
+       7.048524168378387,
+       10.413168824037669,
+       5.4438160963845865,
+       2.778718374416083,
+       6.049372468032944
+      ]
+     },
+     {
+      "kind": "tritanopia",
+      "colours": [
+       "#919c9c",
+       "#008b97",
+       "#4cbfaf",
+       "#ffd0c3",
+       "#ff7f83",
+       "#de4155",
+       "#cc9fb7"
+      ],
+      "adjacent": [
+       1.4473755027178512,
+       1.8246681804959446,
+       1.6060282383934235,
+       1.7482906502415723,
+       1.7254395401674718,
+       1.844605425735476
+      ],
+      "onSurface": [
+       5.181954209228517,
+       3.580241754470732,
+       6.532753207865719,
+       10.491786126287566,
+       6.001168126614331,
+       3.4780518163110226,
+       6.415633251356439
+      ]
+     }
+    ]
+   },
+   {
+    "theme": "light",
+    "cols": [
+     {
+      "kind": "normal",
+      "colours": [
+       "#6c7278",
+       "#00468c",
+       "#007d30",
+       "#968200",
+       "#8f4c00",
+       "#820b0f",
+       "#7e439f"
+      ],
+      "adjacent": [
+       1.9140751768106887,
+       1.7634416791140164,
+       1.3807053214588356,
+       1.7146675434801915,
+       1.5977111072094359,
+       1.5921830094996945
+      ],
+      "onSurface": [
+       4.090672115909223,
+       7.8298539535335,
+       4.440098045923103,
+       3.2158187391005,
+       5.514060017651021,
+       8.809874936020494,
+       5.533204966675776
+      ]
+     },
+     {
+      "kind": "deuteranopia",
+      "colours": [
+       "#6e7178",
+       "#00418b",
+       "#726836",
+       "#968512",
+       "#706300",
+       "#524807",
+       "#3c5e9d"
+      ],
+      "adjacent": [
+       2.018034352645163,
+       1.7609162067839395,
+       1.509933267632922,
+       1.62955251505264,
+       1.5177004829030853,
+       1.4331107028216032
+      ],
+      "onSurface": [
+       4.109243059663683,
+       8.29259365777003,
+       4.709249438345088,
+       3.118846070414516,
+       5.082323458106018,
+       7.71344476663718,
+       5.382309092696357
+      ]
+     },
+     {
+      "kind": "protanopia",
+      "colours": [
+       "#707278",
+       "#1b4d8f",
+       "#7e7128",
+       "#917f00",
+       "#605400",
+       "#362f0d",
+       "#265aa2"
+      ],
+      "adjacent": [
+       1.743496425654541,
+       1.7086541578836307,
+       1.2242811980281487,
+       1.8946730956763487,
+       1.7622753149007289,
+       1.9541590738865922
+      ],
+      "onSurface": [
+       4.042600536637977,
+       7.048259585977442,
+       4.125035808713649,
+       3.369353229762503,
+       6.383822914261225,
+       11.25005353650019,
+       5.756979401950711
+      ]
+     },
+     {
+      "kind": "tritanopia",
+      "colours": [
+       "#697374",
+       "#005762",
+       "#007a6c",
+       "#a3776e",
+       "#9d3c40",
+       "#90000f",
+       "#7a536a"
+      ],
+      "adjacent": [
+       1.6951713777945696,
+       1.5751623529980454,
+       1.3551781409937385,
+       1.7188334196822947,
+       1.438370609041815,
+       1.492614155274934
+      ],
+      "onSurface": [
+       4.100774333875337,
+       6.951515277580063,
+       4.413205574872375,
+       3.2565501474486713,
+       5.597467226306081,
+       8.051232343393476,
+       5.394047962723809
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "C": {
+  "name": "Monochrome + Zones",
+  "accentSource": "No hue at all: the accent is the ink itself (white on black, black on white). Colour is spent only on power zones and status, so a zone is the brightest thing on any screen.",
+  "themes": {
+   "dark": {
+    "canvas": "#000000",
+    "surface": "#1b1918",
+    "surfaceRaised": "#2a2827",
+    "surfaceOverlay": "#373433",
+    "ink": "#f5f3f2",
+    "inkMuted": "#a4a1a0",
+    "border": "#868482",
+    "accent": "#f6f6f6",
+    "accentHover": "#ffffff",
+    "accentInk": "#000000",
+    "selected": "#5f5c5b",
+    "link": "#f6f6f6",
+    "linkVisited": "#c3b6df",
+    "linkHover": "#ffffff",
+    "linkActive": "#d9d9d9",
+    "focus": "#ffffff",
+    "infoSurface": "#142b3d",
+    "infoInk": "#93cbfc",
+    "infoBorder": "#126aa4",
+    "successSurface": "#162e1b",
+    "successInk": "#99d3a4",
+    "successBorder": "#1e743a",
+    "warningSurface": "#35260d",
+    "warningInk": "#e5c182",
+    "warningBorder": "#865e00",
+    "dangerSurface": "#3e211e",
+    "dangerInk": "#ffb2ac",
+    "dangerBorder": "#a34a45",
+    "dangerAction": "#fb8981",
+    "dangerActionInk": "#321312",
+    "illoSky": "#0d2339",
+    "illoSun": "#97772c",
+    "illoHillFar": "#4a301b",
+    "illoHillNear": "#643f1f",
+    "illoRoad": "#5d5752",
+    "bandRecovery": "#949aa1",
+    "bandEndurance": "#006fd9",
+    "bandTempo": "#39c85f",
+    "bandThreshold": "#ffdf23",
+    "bandVo2": "#ff8f1f",
+    "bandAnaerobic": "#dd453e",
+    "bandSprint": "#d58cff",
+    "hudSurface": "#0d0d0d",
+    "hudInk": "#ffffff",
+    "hudInkMuted": "#a5a5a5",
+    "hudBorder": "#7c7c7c",
+    "hudStaleInk": "#f1af48"
+   },
+   "light": {
+    "canvas": "#ffffff",
+    "surface": "#f1eeec",
+    "surfaceRaised": "#e1dfdd",
+    "surfaceOverlay": "#d3d0cf",
+    "ink": "#0e0d0c",
+    "inkMuted": "#575553",
+    "border": "#716e6d",
+    "accent": "#111111",
+    "accentHover": "#000000",
+    "accentInk": "#ffffff",
+    "selected": "#d0cecc",
+    "link": "#111111",
+    "linkVisited": "#4d2f78",
+    "linkHover": "#000000",
+    "linkActive": "#303030",
+    "focus": "#000000",
+    "infoSurface": "#dceeff",
+    "infoInk": "#004876",
+    "infoBorder": "#328bcd",
+    "successSurface": "#dbf2df",
+    "successInk": "#005122",
+    "successBorder": "#3b9655",
+    "warningSurface": "#f9ebd3",
+    "warningInk": "#5d4000",
+    "warningBorder": "#ae7c00",
+    "dangerSurface": "#ffe7e4",
+    "dangerInk": "#792b29",
+    "dangerBorder": "#cc6660",
+    "dangerAction": "#a21a21",
+    "dangerActionInk": "#ffffff",
+    "illoSky": "#c4d9f1",
+    "illoSun": "#eebc4b",
+    "illoHillFar": "#e2bc9d",
+    "illoHillNear": "#d3a279",
+    "illoRoad": "#9b9490",
+    "bandRecovery": "#6c7278",
+    "bandEndurance": "#00468c",
+    "bandTempo": "#007d30",
+    "bandThreshold": "#978200",
+    "bandVo2": "#8f4c00",
+    "bandAnaerobic": "#850009",
+    "bandSprint": "#8737b0",
+    "hudSurface": "#0d0d0d",
+    "hudInk": "#ffffff",
+    "hudInkMuted": "#a5a5a5",
+    "hudBorder": "#7c7c7c",
+    "hudStaleInk": "#f1af48"
+   }
+  },
+  "rows": [
+   {
+    "f": "ink",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "body text on the page",
+    "dark": 18.984893280312683,
+    "light": 19.4165629728269
+   },
+   {
+    "f": "ink",
+    "b": "surface",
+    "min": 4.5,
+    "where": "body text on a panel",
+    "dark": 15.835997196871118,
+    "light": 16.810300350947745
+   },
+   {
+    "f": "inkMuted",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "helper and empty-state text on the page",
+    "dark": 8.18406335291829,
+    "light": 7.421664720990676
+   },
+   {
+    "f": "inkMuted",
+    "b": "surface",
+    "min": 4.5,
+    "where": "helper and empty-state text on a panel",
+    "dark": 6.826628014297436,
+    "light": 6.425463313897821
+   },
+   {
+    "f": "border",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)",
+    "dark": 5.636513308307538,
+    "light": 5.056172156878941
+   },
+   {
+    "f": "border",
+    "b": "surface",
+    "min": 3,
+    "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.701622897351088,
+    "light": 4.377488060177499
+   },
+   {
+    "f": "accentInk",
+    "b": "accent",
+    "min": 4.5,
+    "where": "the label of a primary button",
+    "dark": 19.43163712554589,
+    "light": 18.883060964594996
+   },
+   {
+    "f": "accentInk",
+    "b": "accentHover",
+    "min": 4.5,
+    "where": "the label of a primary button under a pointer",
+    "dark": 21,
+    "light": 21
+   },
+   {
+    "f": "accent",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "the label of a secondary button, an off toggle and an unchecked segment (#668)",
+    "dark": 19.43163712554589,
+    "light": 18.883060964594996
+   },
+   {
+    "f": "accent",
+    "b": "canvas",
+    "min": 3,
+    "where": "the border of a secondary button, a toggle and a segment, on the page (#668)",
+    "dark": 19.43163712554589,
+    "light": 18.883060964594996
+   },
+   {
+    "f": "accentHover",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)",
+    "dark": 17.516871768731704,
+    "light": 18.18119447112973
+   },
+   {
+    "f": "accentHover",
+    "b": "canvas",
+    "min": 3,
+    "where": "the border of a button under a pointer, on the page (#668, #688)",
+    "dark": 21,
+    "light": 21
+   },
+   {
+    "f": "accentHover",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "the label of a tertiary (text) button under a pointer or a press, on the page (#992)",
+    "dark": 21,
+    "light": 21
+   },
+   {
+    "f": "accentHover",
+    "b": "selected",
+    "min": 4.5,
+    "where": "the label of an on toggle and of the checked segment (#668)",
+    "dark": 6.6277337227996975,
+    "light": 13.382428689901612
+   },
+   {
+    "f": "accent",
+    "b": "selected",
+    "min": 3,
+    "where": "the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)",
+    "dark": 6.132748412675576,
+    "light": 12.033391276464632
+   },
+   {
+    "f": "accentHover",
+    "b": "selected",
+    "min": 3,
+    "where": "the doubled border of an on toggle under a pointer (#668)",
+    "dark": 6.6277337227996975,
+    "light": 13.382428689901612
+   },
+   {
+    "f": "focus",
+    "b": "selected",
+    "min": 3,
+    "where": "the focus ring on a checked segment's radio, landing on the segment's fill (#668)",
+    "dark": 6.6277337227996975,
+    "light": 13.382428689901612
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "a metric on the ride HUD, over its own opaque panel (#94)",
+    "dark": 19.435548355403956,
+    "light": 19.435548355403956
+   },
+   {
+    "f": "hudInkMuted",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "a field label on the ride HUD (#94)",
+    "dark": 7.890131527111344,
+    "light": 7.890131527111344
+   },
+   {
+    "f": "hudBorder",
+    "b": "hudSurface",
+    "min": 3,
+    "where": "the edge of a HUD control (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.656317842595499,
+    "light": 4.656317842595499
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "min": 3,
+    "where": "the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)",
+    "dark": 19.435548355403956,
+    "light": 19.435548355403956
+   },
+   {
+    "f": "hudStaleInk",
+    "b": "hudSurface",
+    "min": 4.5,
+    "where": "the mark on a HUD reading whose sensor has dropped (#94)",
+    "dark": 10.14879838101015,
+    "light": 10.14879838101015
+   },
+   {
+    "f": "accent",
+    "b": "surface",
+    "min": 4.5,
+    "where": "link text and the active navigation item in the header",
+    "dark": 16.208642656414938,
+    "light": 16.348409695595247
+   },
+   {
+    "f": "focus",
+    "b": "canvas",
+    "min": 3,
+    "where": "the focus ring, offset onto the page (WCAG 2.2 SC 2.4.13)",
+    "dark": 21,
+    "light": 21
+   },
+   {
+    "f": "focus",
+    "b": "surface",
+    "min": 3,
+    "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)",
+    "dark": 17.516871768731704,
+    "light": 18.18119447112973
+   },
+   {
+    "f": "ink",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "body text on a card resting on a panel",
+    "dark": 13.264447469853328,
+    "light": 14.609273840371895
+   },
+   {
+    "f": "inkMuted",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a label on a card resting on a panel",
+    "dark": 5.718076832557703,
+    "light": 5.584156805306836
+   },
+   {
+    "f": "border",
+    "b": "surfaceRaised",
+    "min": 3,
+    "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.938143532716405,
+    "light": 3.804329516366191
+   },
+   {
+    "f": "accent",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "link text on a raised card",
+    "dark": 13.576580394704754,
+    "light": 14.207860009120923
+   },
+   {
+    "f": "focus",
+    "b": "surfaceRaised",
+    "min": 3,
+    "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)",
+    "dark": 14.672370961167292,
+    "light": 15.800672398980348
+   },
+   {
+    "f": "ink",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "the wordmark and the navigation, on the app header",
+    "dark": 11.158100766277748,
+    "light": 12.660639836156161
+   },
+   {
+    "f": "inkMuted",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "secondary text on the app header",
+    "dark": 4.810066731539678,
+    "light": 4.839323218463987
+   },
+   {
+    "f": "border",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.3127804584385427,
+    "light": 3.2968952701583696
+   },
+   {
+    "f": "accent",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a navigation link on the app header",
+    "dark": 11.420668101696787,
+    "light": 12.312767929704801
+   },
+   {
+    "f": "accent",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
+    "dark": 11.420668101696787,
+    "light": 12.312767929704801
+   },
+   {
+    "f": "focus",
+    "b": "surfaceOverlay",
+    "min": 3,
+    "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.342451054745851,
+    "light": 13.693125654183186
+   },
+   {
+    "f": "infoInk",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "an info message",
+    "dark": 8.448610361604509,
+    "light": 8.09529896222801
+   },
+   {
+    "f": "infoBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of an info message",
+    "dark": 3.6234004957715182,
+    "light": 3.6776133621217335
+   },
+   {
+    "f": "successInk",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a success message",
+    "dark": 8.473591764908292,
+    "light": 8.080835955979246
+   },
+   {
+    "f": "successBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a success message",
+    "dark": 3.614457992344857,
+    "light": 3.697394451679684
+   },
+   {
+    "f": "warningInk",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a warning message — the Chrome-on-Linux path",
+    "dark": 8.562214422912348,
+    "light": 8.11897147695379
+   },
+   {
+    "f": "warningBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a warning message",
+    "dark": 3.6147479316288744,
+    "light": 3.6953648313737144
+   },
+   {
+    "f": "dangerInk",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "an error message — the Safari and Firefox path",
+    "dark": 8.476669198354234,
+    "light": 8.1269892483989
+   },
+   {
+    "f": "dangerBorder",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of an error message",
+    "dark": 3.62275200584791,
+    "light": 3.7254334536335487
+   },
+   {
+    "f": "dangerAction",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "the label of a danger button at rest (#1002)",
+    "dark": 6.243148769984395,
+    "light": 6.578966628249749
+   },
+   {
+    "f": "dangerAction",
+    "b": "canvas",
+    "min": 3,
+    "where": "the edge of a danger button, at rest and under a pointer, on the dialog (#1002)",
+    "dark": 8.997105863233584,
+    "light": 7.760545598138328
+   },
+   {
+    "f": "dangerActionInk",
+    "b": "dangerAction",
+    "min": 4.5,
+    "where": "the label of a danger button under a pointer or a press (#1002)",
+    "dark": 7.270356885180656,
+    "light": 7.760545598138328
+   },
+   {
+    "f": "focus",
+    "b": "infoSurface",
+    "min": 3,
+    "where": "the focus ring round a link in an info message (WCAG 2.2 SC 2.4.13)",
+    "dark": 14.556246147291553,
+    "light": 17.716943030762597
+   },
+   {
+    "f": "focus",
+    "b": "successSurface",
+    "min": 3,
+    "where": "the focus ring round a link in a success message (WCAG 2.2 SC 2.4.13)",
+    "dark": 14.575852820182687,
+    "light": 17.77840872455092
+   },
+   {
+    "f": "focus",
+    "b": "warningSurface",
+    "min": 3,
+    "where": "the focus ring round a link in a warning message (WCAG 2.2 SC 2.4.13)",
+    "dark": 14.639923006648939,
+    "light": 17.85190945200845
+   },
+   {
+    "f": "focus",
+    "b": "dangerSurface",
+    "min": 3,
+    "where": "the focus ring round a link in an error message (WCAG 2.2 SC 2.4.13)",
+    "dark": 14.572033069593381,
+    "light": 17.802652847808464
+   },
+   {
+    "f": "link",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "link text on canvas",
+    "dark": 19.43163712554589,
+    "light": 18.883060964594996
+   },
+   {
+    "f": "link",
+    "b": "surface",
+    "min": 4.5,
+    "where": "link text on surface",
+    "dark": 16.208642656414938,
+    "light": 16.348409695595247
+   },
+   {
+    "f": "link",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "link text on surfaceRaised",
+    "dark": 13.576580394704754,
+    "light": 14.207860009120923
+   },
+   {
+    "f": "link",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "link text on surfaceOverlay",
+    "dark": 11.420668101696787,
+    "light": 12.312767929704801
+   },
+   {
+    "f": "link",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "link text on infoSurface",
+    "dark": 13.46912824020452,
+    "light": 15.930957874102216
+   },
+   {
+    "f": "link",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "link text on successSurface",
+    "dark": 13.48727060938832,
+    "light": 15.986227419008696
+   },
+   {
+    "f": "link",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "link text on warningSurface",
+    "dark": 13.546555781482521,
+    "light": 16.052318786509773
+   },
+   {
+    "f": "link",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "link text on dangerSurface",
+    "dark": 13.483736132847296,
+    "light": 16.008027574127997
+   },
+   {
+    "f": "linkVisited",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a visited link on canvas",
+    "dark": 11.077142459602177,
+    "light": 10.534894958936775
+   },
+   {
+    "f": "linkVisited",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a visited link on surface",
+    "dark": 9.239851620420222,
+    "light": 9.12080828482637
+   },
+   {
+    "f": "linkVisited",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a visited link on surfaceRaised",
+    "dark": 7.739425874141916,
+    "light": 7.926591619229977
+   },
+   {
+    "f": "linkVisited",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a visited link on surfaceOverlay",
+    "dark": 6.510432792099379,
+    "light": 6.869316210778204
+   },
+   {
+    "f": "linkVisited",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a visited link on infoSurface",
+    "dark": 7.678172011932566,
+    "light": 8.887911134407187
+   },
+   {
+    "f": "linkVisited",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a visited link on successSurface",
+    "dark": 7.688514198064657,
+    "light": 8.91874611667567
+   },
+   {
+    "f": "linkVisited",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a visited link on warningSurface",
+    "dark": 7.722310130583701,
+    "light": 8.955618613969506
+   },
+   {
+    "f": "linkVisited",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a visited link on dangerSurface",
+    "dark": 7.6864993446628525,
+    "light": 8.930908463908516
+   },
+   {
+    "f": "linkHover",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on canvas",
+    "dark": 21,
+    "light": 21
+   },
+   {
+    "f": "linkHover",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surface",
+    "dark": 17.516871768731704,
+    "light": 18.18119447112973
+   },
+   {
+    "f": "linkHover",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surfaceRaised",
+    "dark": 14.672370961167292,
+    "light": 15.800672398980348
+   },
+   {
+    "f": "linkHover",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on surfaceOverlay",
+    "dark": 12.342451054745851,
+    "light": 13.693125654183186
+   },
+   {
+    "f": "linkHover",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on infoSurface",
+    "dark": 14.556246147291553,
+    "light": 17.716943030762597
+   },
+   {
+    "f": "linkHover",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on successSurface",
+    "dark": 14.575852820182687,
+    "light": 17.77840872455092
+   },
+   {
+    "f": "linkHover",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on warningSurface",
+    "dark": 14.639923006648939,
+    "light": 17.85190945200845
+   },
+   {
+    "f": "linkHover",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a link under a pointer or focused from the keyboard on dangerSurface",
+    "dark": 14.572033069593381,
+    "light": 17.802652847808464
+   },
+   {
+    "f": "linkActive",
+    "b": "canvas",
+    "min": 4.5,
+    "where": "a link being pressed on canvas",
+    "dark": 14.877435225839799,
+    "light": 13.19811185826915
+   },
+   {
+    "f": "linkActive",
+    "b": "surface",
+    "min": 4.5,
+    "where": "a link being pressed on surface",
+    "dark": 12.409815480887987,
+    "light": 11.426544683186421
+   },
+   {
+    "f": "linkActive",
+    "b": "surfaceRaised",
+    "min": 4.5,
+    "where": "a link being pressed on surfaceRaised",
+    "dark": 10.394630884964725,
+    "light": 9.930430559886124
+   },
+   {
+    "f": "linkActive",
+    "b": "surfaceOverlay",
+    "min": 4.5,
+    "where": "a link being pressed on surfaceOverlay",
+    "dark": 8.744000766432357,
+    "light": 8.60587638444022
+   },
+   {
+    "f": "linkActive",
+    "b": "infoSurface",
+    "min": 4.5,
+    "where": "a link being pressed on infoSurface",
+    "dark": 10.312362342271914,
+    "light": 11.134771233646992
+   },
+   {
+    "f": "linkActive",
+    "b": "successSurface",
+    "min": 4.5,
+    "where": "a link being pressed on successSurface",
+    "dark": 10.326252675887728,
+    "light": 11.17340128612625
+   },
+   {
+    "f": "linkActive",
+    "b": "warningSurface",
+    "min": 4.5,
+    "where": "a link being pressed on warningSurface",
+    "dark": 10.371643154414352,
+    "light": 11.219595134823804
+   },
+   {
+    "f": "linkActive",
+    "b": "dangerSurface",
+    "min": 4.5,
+    "where": "a link being pressed on dangerSurface",
+    "dark": 10.323546576270049,
+    "light": 11.188638269490951
+   },
+   {
+    "f": "ink",
+    "b": "illoSky",
+    "min": 4.5,
+    "where": "a hero title drawn on the sky of a menu illustration",
+    "dark": 14.419555966150625,
+    "light": 13.445941097996434
+   },
+   {
+    "f": "inkMuted",
+    "b": "illoSky",
+    "min": 4.5,
+    "where": "the line under a hero title, on the sky",
+    "dark": 6.2160243834662205,
+    "light": 5.139491825982523
+   },
+   {
+    "f": "ink",
+    "b": "illoHillFar",
+    "min": 4.5,
+    "where": "a card title where it overlaps the far hills",
+    "dark": 10.975344577583913,
+    "light": 11.015573105961725
+   },
+   {
+    "f": "accent",
+    "b": "illoHillNear",
+    "min": 3,
+    "where": "the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)",
+    "dark": 8.550197705478109,
+    "light": 8.285171553579742
+   },
+   {
+    "f": "focus",
+    "b": "illoSky",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoSky (WCAG 2.2 SC 2.4.13)",
+    "dark": 15.95008572437842,
+    "light": 14.542468893855677
+   },
+   {
+    "f": "focus",
+    "b": "illoSun",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoSun (WCAG 2.2 SC 2.4.13)",
+    "dark": 4.207605662562566,
+    "light": 11.93031644362799
+   },
+   {
+    "f": "focus",
+    "b": "illoHillFar",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoHillFar (WCAG 2.2 SC 2.4.13)",
+    "dark": 12.14029664144976,
+    "light": 11.913902349706994
+   },
+   {
+    "f": "focus",
+    "b": "illoHillNear",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoHillNear (WCAG 2.2 SC 2.4.13)",
+    "dark": 9.240299757295723,
+    "light": 9.214004178210114
+   },
+   {
+    "f": "focus",
+    "b": "illoRoad",
+    "min": 3,
+    "where": "the focus ring of a control over art, where it lands on illoRoad (WCAG 2.2 SC 2.4.13)",
+    "dark": 7.117320857993342,
+    "light": 7.032397614896116
+   },
+   {
+    "f": "bandRecovery",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 6.169327291846057,
+    "light": 4.212737024593157
+   },
+   {
+    "f": "bandEndurance",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 3.566540700513267,
+    "light": 8.06349536520508
+   },
+   {
+    "f": "bandTempo",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 8.008485817236918,
+    "light": 4.572589760528015
+   },
+   {
+    "f": "bandThreshold",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 13.205502791531215,
+    "light": 3.3003224625989462
+   },
+   {
+    "f": "bandVo2",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 7.674700459928458,
+    "light": 5.678598561308583
+   },
+   {
+    "f": "bandAnaerobic",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 4.166712657144237,
+    "light": 9.084902309920762
+   },
+   {
+    "f": "bandSprint",
+    "b": "surface",
+    "min": 3,
+    "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
+    "dark": 7.527633907780943,
+    "light": 5.675287319994052
+   }
+  ],
+  "numerals": [
+   {
+    "f": "ink",
+    "b": "surfaceRaised",
+    "where": "a primary metric numeral on a metric card",
+    "min": 7,
+    "dark": 13.264447469853328,
+    "light": 14.609273840371895
+   },
+   {
+    "f": "ink",
+    "b": "surface",
+    "where": "a primary metric numeral on a panel",
+    "min": 7,
+    "dark": 15.835997196871118,
+    "light": 16.810300350947745
+   },
+   {
+    "f": "hudInk",
+    "b": "hudSurface",
+    "where": "a primary metric numeral on a HUD panel",
+    "min": 7,
+    "dark": 19.435548355403956,
+    "light": 19.435548355403956
+   }
+  ],
+  "elevation": [
+   {
+    "theme": "dark",
+    "steps": [
+     {
+      "from": "canvas",
+      "to": "surface",
+      "ratio": 1.198844193030277
+     },
+     {
+      "from": "surface",
+      "to": "surfaceRaised",
+      "ratio": 1.1938678360227413
+     },
+     {
+      "from": "surfaceRaised",
+      "to": "surfaceOverlay",
+      "ratio": 1.188772869836543
+     }
+    ],
+    "raisedOnCanvas": 1.4312615224614862
+   },
+   {
+    "theme": "light",
+    "steps": [
+     {
+      "from": "canvas",
+      "to": "surface",
+      "ratio": 1.1550396225807003
+     },
+     {
+      "from": "surface",
+      "to": "surfaceRaised",
+      "ratio": 1.1506595423308064
+     },
+     {
+      "from": "surfaceRaised",
+      "to": "surfaceOverlay",
+      "ratio": 1.1539127587099383
+     }
+    ],
+    "raisedOnCanvas": 1.329057363492656
+   }
+  ],
+  "zones": [
+   {
+    "theme": "dark",
+    "cols": [
+     {
+      "kind": "normal",
+      "colours": [
+       "#949aa1",
+       "#006fd9",
+       "#39c85f",
+       "#ffdf23",
+       "#ff8f1f",
+       "#dd453e",
+       "#d58cff"
+      ],
+      "adjacent": [
+       1.729779023959608,
+       2.245449159204717,
+       1.6489387748066673,
+       1.720653836652058,
+       1.841907779930404,
+       1.8066121969975721
+      ],
+      "onSurface": [
+       6.169327291846057,
+       3.566540700513267,
+       8.008485817236918,
+       13.205502791531215,
+       7.674700459928458,
+       4.166712657144237,
+       7.527633907780943
+      ]
+     },
+     {
+      "kind": "deuteranopia",
+      "colours": [
+       "#9699a1",
+       "#0068d7",
+       "#b9ab67",
+       "#ffe435",
+       "#ccb61e",
+       "#968839",
+       "#87acfc"
+      ],
+      "adjacent": [
+       1.8599405782052587,
+       2.293106003526362,
+       1.8054814039305245,
+       1.5958090656902297,
+       1.7485854392269955,
+       1.588560145222219
+      ],
+      "onSurface": [
+       6.145870351383629,
+       3.304336936029461,
+       7.5771948656830626,
+       13.680484423948618,
+       8.572757680149815,
+       4.902681612137643,
+       7.788204613755677
+      ]
+     },
+     {
+      "kind": "protanopia",
+      "colours": [
+       "#989aa1",
+       "#2c7add",
+       "#cab656",
+       "#f6d900",
+       "#b19c00",
+       "#70673c",
+       "#73a6ff"
+      ],
+      "adjacent": [
+       1.5140755656700797,
+       2.094603597446256,
+       1.4359966585647712,
+       1.9467645120666235,
+       2.0639405061247262,
+       2.335344177054802
+      ],
+      "onSurface": [
+       6.232638339503752,
+       4.116464515260434,
+       8.622361382424362,
+       12.381682134099306,
+       6.360133471384942,
+       3.0815488394705652,
+       7.196477138567567
+      ]
+     },
+     {
+      "kind": "tritanopia",
+      "colours": [
+       "#919c9c",
+       "#008999",
+       "#00c4b0",
+       "#ffcdbf",
+       "#ff757b",
+       "#f31145",
+       "#d19dba"
+      ],
+      "adjacent": [
+       1.4765844605371892,
+       1.8901200129745188,
+       1.5475184420084507,
+       1.823296653365934,
+       1.6239592349594947,
+       1.857100578296444
+      ],
+      "onSurface": [
+       6.205472973000484,
+       4.202585858680173,
+       7.9433916377350995,
+       12.292545051490777,
+       6.741933644641903,
+       4.151541183735478,
+       7.709829533136661
+      ]
+     }
+    ]
+   },
+   {
+    "theme": "light",
+    "cols": [
+     {
+      "kind": "normal",
+      "colours": [
+       "#6c7278",
+       "#00468c",
+       "#007d30",
+       "#978200",
+       "#8f4c00",
+       "#850009",
+       "#8737b0"
+      ],
+      "adjacent": [
+       1.9140751768106887,
+       1.7634416791140164,
+       1.3854978755400709,
+       1.720619310889029,
+       1.5998493663245017,
+       1.6007827970074096
+      ],
+      "onSurface": [
+       4.212737024593157,
+       8.06349536520508,
+       4.572589760528015,
+       3.3003224625989462,
+       5.678598561308583,
+       9.084902309920762,
+       5.675287319994052
+      ]
+     },
+     {
+      "kind": "deuteranopia",
+      "colours": [
+       "#6e7178",
+       "#00418b",
+       "#726836",
+       "#968612",
+       "#706300",
+       "#534900",
+       "#2a5fad"
+      ],
+      "adjacent": [
+       2.018034352645163,
+       1.7609162067839395,
+       1.524611633445715,
+       1.6453937236939973,
+       1.4967506694710195,
+       1.4386128592232166
+      ],
+      "onSurface": [
+       4.2318621219168415,
+       8.54004313768604,
+       4.849772581333215,
+       3.1809888334463476,
+       5.233979061693311,
+       7.833961664586761,
+       5.445496760550808
+      ]
+     },
+     {
+      "kind": "protanopia",
+      "colours": [
+       "#707278",
+       "#1b4d8f",
+       "#7e7128",
+       "#917f00",
+       "#605400",
+       "#352e06",
+       "#0059b4"
+      ],
+      "adjacent": [
+       1.743496425654541,
+       1.7086541578836307,
+       1.2242811980281487,
+       1.8946730956763487,
+       1.7901868084932135,
+       1.9989641156056086
+      ],
+      "onSurface": [
+       4.163230998177829,
+       7.258578364497232,
+       4.248126123713552,
+       3.4698941146492057,
+       6.574315023871554,
+       11.769252030613602,
+       5.887675490886926
+      ]
+     },
+     {
+      "kind": "tritanopia",
+      "colours": [
+       "#697374",
+       "#005762",
+       "#007a6c",
+       "#a4776e",
+       "#9d3c40",
+       "#940006",
+       "#82506f"
+      ],
+      "adjacent": [
+       1.6951713777945696,
+       1.5751623529980454,
+       1.3604768154513238,
+       1.7255539669389355,
+       1.3944569594959713,
+       1.4705786485275012
+      ],
+      "onSurface": [
+       4.223140690897978,
+       7.158947223609835,
+       4.544894823053657,
+       3.340663193548018,
+       5.764494625833676,
+       8.038339648970894,
+       5.4661065948562015
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}
