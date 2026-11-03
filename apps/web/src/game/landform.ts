@@ -49,7 +49,10 @@
  * 3. **On the inside of a bend the ground is folded in, never through.** A
  *    cross-section longer than the bend's radius would cross the centre of
  *    curvature and stand on the far side of the road; {@link BEND_FOLD_SHARE}
- *    of the radius is the most it reaches.
+ *    of the radius is the most it reaches. Since #2096 the fold also tapers
+ *    back out, {@link REACH_TAPER_PER_METRE} metres of reach a metre of road,
+ *    rather than jumping from the fold to the full 420 m between two rows —
+ *    which stood the relief up on end as a wall beside the road.
  *
  * ⚠️ **What it does not cover, stated rather than hidden:** two stretches of
  * the same corridor that pass within the ground's reach of each other other
@@ -57,6 +60,13 @@
  * turning. The ground of one could then stand over the other. Nothing in a
  * `RouteProfile` can say which of two crossing roads is on top, which is the
  * same reason a tunnel is impossible here (`waterways.ts`).
+ *
+ * ⚠️ **Nor the inside of a sharp bend, where the two legs' ground overlaps**
+ * (#2096). Each leg's ground reaches out across the inside of the turn, so
+ * past the fold the ground of one leg lies over the ground of the other,
+ * two sheets at different invented heights. Rule 3 and {@link clearReach}
+ * keep both off the road; neither trims one sheet against the other. Trimming
+ * that overlap is a follow-up if it is still visible with the taper in.
  *
  * ## ⚠️ A mapped town stands on the flat — #1547
  *
@@ -511,6 +521,7 @@ export function terrainCorridor(
   const normals2d = ribbonNormals(centre);
   const lent = terrainScratchFor(rows);
   const reach = steadied(
+    centre,
     clearReach(centre, normals2d, foldReach(centre, normals2d, lent.reach)),
     lent.steadied,
   );
@@ -1095,23 +1106,73 @@ function clearReach(
 }
 
 /**
- * Each row's reach, no further than either neighbour's — an erosion over the
- * rows, per side.
+ * How fast the ground's reach may change from one row to the next, in metres
+ * of reach per metre of road between them: **2** — #2096.
  *
- * ⚠️ **What stops a quad twisting where a reach changes.** A row stopped short
- * beside a row that was not makes a quad whose outer edge runs back past its
- * inner one, and that triangle turns over: wound towards the ground and culled
- * — a hole — or overlapping the one beside it. On a 25 m hairpin the reaches
- * alone left one such triangle; taking the least of three rows removes it, at
- * the cost of stopping the ground one row early either side of a bend.
+ * ⚠️ **What stops a fold standing up as a wall.** On a folded row every outer
+ * column collapses onto one point, and until #2096 the row two metres on could
+ * reach the full 420 m again: the triangles between the two then lay in one
+ * cross-section's plane, nearly vertical, as tall as the invented relief on
+ * that row (up to {@link RELIEF_MAX_METRES}) — a flat green wall beside the
+ * road after a sharp bend, with the grass smeared down it. Capping the change
+ * tapers the ground back out over many rows instead, so no two neighbouring
+ * rows' outer columns stand far enough apart for a triangle between them to
+ * stand up. 2 is the issue's upper bound, chosen because it gives back the
+ * most ground: a fold at 20 m reaches 420 m again 200 m of road later.
  */
-function steadied(reach: Float64Array, out: Float64Array): Float64Array {
+export const REACH_TAPER_PER_METRE = 2;
+
+/**
+ * Each row's reach, no further than either neighbour's — an erosion over the
+ * rows, per side — and then no further than {@link REACH_TAPER_PER_METRE} times
+ * the road between it and ANY other row past that row's own.
+ *
+ * ⚠️ **The erosion is what stops a quad twisting where a reach changes.** A
+ * row stopped short beside a row that was not makes a quad whose outer edge
+ * runs back past its inner one, and that triangle turns over: wound towards
+ * the ground and culled — a hole — or overlapping the one beside it. On a 25 m
+ * hairpin the reaches alone left one such triangle; taking the least of three
+ * rows removes it, at the cost of stopping the ground one row early either side
+ * of a bend. It is also what carries {@link foldReach}'s limit, written on a
+ * pair's first row, to the pair's second.
+ *
+ * ⚠️ **The taper is #2096's, and only ever takes reach away**, so every bound
+ * the erosion's answer kept — the fold, {@link clearReach}'s clearance, the
+ * twist — still holds after it. One pass forward and one back is the whole of
+ * it: on a chain of rows the least of `reach[j] + k · (road from j to r)` over
+ * every `j` is what the two passes leave, because the road between two rows is
+ * the sum of the gaps between them.
+ */
+function steadied(
+  centre: readonly CorridorPoint[],
+  reach: Float64Array,
+  out: Float64Array,
+): Float64Array {
   const rows = reach.length / 2;
   for (let row = 0; row < rows; row += 1) {
     for (let side = 0; side < 2; side += 1) {
       const at = (index: number): number =>
         reach[Math.min(rows - 1, Math.max(0, index)) * 2 + side] as number;
       out[row * 2 + side] = Math.min(at(row - 1), at(row), at(row + 1));
+    }
+  }
+  const gap = (row: number): number => {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
+    return REACH_TAPER_PER_METRE * Math.hypot(to.x - from.x, to.z - from.z);
+  };
+  for (let row = 1; row < rows; row += 1) {
+    const most = gap(row - 1);
+    for (let side = 0; side < 2; side += 1) {
+      const at = row * 2 + side;
+      out[at] = Math.min(out[at] as number, (out[at - 2] as number) + most);
+    }
+  }
+  for (let row = rows - 2; row >= 0; row -= 1) {
+    const most = gap(row);
+    for (let side = 0; side < 2; side += 1) {
+      const at = row * 2 + side;
+      out[at] = Math.min(out[at] as number, (out[at + 2] as number) + most);
     }
   }
   return out;
