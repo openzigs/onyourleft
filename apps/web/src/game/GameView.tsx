@@ -1430,13 +1430,17 @@ export function GameView(props: GameViewProps): JSX.Element {
       // — rather than one lap of the route's length.
       const lapRoom = roomRef.current?.lapRace();
       const lapsDone = lapRoom?.newest?.riders.get(lapRoom.riderId)?.lapsDone;
+      // ⚠️ The standings are the room's word too, and they outlast the lap
+      // frame, which a rejoin clears until the next one: a rider they have
+      // across the line is across, whatever the frame says.
+      const placeAcross = placeAcrossOf(roomRef.current?.standings());
       const race = raceFactOf(
         roomIdRef.current,
         roomRef.current?.race(),
         lapRoom === undefined
           ? acrossTheRoomsLine(roomRef.current, course?.totalDistance)
-          : (lapsDone ?? 0) >= lapRoom.config.laps,
-        placeAcrossOf(roomRef.current?.standings()),
+          : (lapsDone ?? 0) >= lapRoom.config.laps || placeAcross !== undefined,
+        placeAcross,
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
       // #1816: a round the ride ends first is ended here, counting only the

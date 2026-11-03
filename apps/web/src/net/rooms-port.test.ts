@@ -462,7 +462,12 @@ describe('a private lap race — #1912', () => {
       kind: 'joined',
       room: { lapRace: { laps: 5, items: false } },
     });
-    for (const lapRace of [{ laps: 5, items: false, seed: 7 }, { laps: 0, items: true }, 'yes']) {
+    for (const lapRace of [
+      { laps: 5, items: false, seed: 7 },
+      { laps: 0, items: true },
+      { laps: 11, items: true },
+      'yes',
+    ]) {
       instance.joined = { status: 200, body: { ...joined, lapRace } };
       expect(await port(instance).join('abcde-fghjk-mnpqr'), JSON.stringify(lapRace)).toEqual({
         kind: 'refused',

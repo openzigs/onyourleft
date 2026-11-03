@@ -54,6 +54,7 @@ import {
   type InstanceStorage,
 } from '../instance/instance-port';
 import type { LoadedFrom } from '../instance/instance-pin';
+import { LAP_RACE_MOST_LAPS } from '../game/lap-race/choice';
 import {
   isRoomId,
   roomPath,
@@ -223,6 +224,7 @@ function isLapRaceSettings(value: unknown): value is RoomLapRaceSettings {
     typeof laps === 'number' &&
     Number.isInteger(laps) &&
     laps >= 1 &&
+    laps <= LAP_RACE_MOST_LAPS &&
     typeof items === 'boolean'
   );
 }

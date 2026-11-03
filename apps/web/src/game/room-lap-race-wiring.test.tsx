@@ -22,11 +22,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { kilograms, watts } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
-import type { FrameRider, HeldItem, ItemEvent } from '@onyourleft/protocol';
+import {
+  FLAG_FINISHED,
+  type FrameRider,
+  type HeldItem,
+  type ItemEvent,
+} from '@onyourleft/protocol';
 import type { RoomRaceFact } from '@onyourleft/store';
 
 import { roomPortOver } from '../net/room-port';
-import { lapFrameRider, ManualClock, ScriptedRoom } from '../net/testing';
+import { lapFrameRider, ManualClock, ScriptedRoom, standingsRider } from '../net/testing';
 import { BACKOFF_BASE_MS } from '../net/room-session';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
@@ -522,6 +527,30 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
     for (const fact of kept) {
       expect(Object.keys(fact).filter((key) => LAP_WORDS.test(key))).toEqual([]);
     }
+  });
+
+  it('counts a rider the room’s standings have across the line as across, whatever the lap frame says — #1912', async () => {
+    const kept: RoomRaceFact[] = [];
+    const room = new ScriptedRoom();
+    await mountRide({ room, races: kept });
+    await joinedLapRace(room, HOLDING_TAILWIND);
+    for (let index = 0; index < 6; index += 1) await pump();
+    // The lap frame says one lap of two (as a rejoin leaves it until the next frame), while
+    // the standings, which the session keeps, have this rider across.
+    await act(async () => {
+      room.frame(9, [lapFrameRider(0, CIRCUIT.totalDistance * 1.6, { lapsDone: 1 })]);
+      room.standings(9, [standingsRider(0, 0, 3, FLAG_FINISHED)]);
+      await Promise.resolve();
+    });
+    await pump();
+    await clickThrough(buttonStarting('End ride'));
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({
+      roomId: 'room-1',
+      crossedTheLine: true,
+      placeAcross: 1,
+      across: 1,
+    });
   });
 
   it('runs no lap race in a room that is not one: no field, no pick-ups, no input', async () => {
