@@ -12,7 +12,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { elevationAt, metres, type RouteProfile } from '@onyourleft/domain';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  elevationAt,
+  geographicPosition,
+  metres,
+  routeProfile,
+  type RouteProfile,
+  type RoutePoint,
+} from '@onyourleft/domain';
 
 import { NO_LAND_CLASS } from './land-class';
 import {
@@ -38,14 +48,17 @@ import {
   PLANNER_BENDS,
   hillRoute,
   northRoute,
+  plannerCornerRoute,
   plannerRoute,
   rollingRoute,
   steadyClimb,
 } from './route-fixtures-testing';
+import { horizontalSpread } from './camera';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { ROAD_COLUMNS, corridorOrigin, roadCorridor, type RoadCorridor } from './terrain';
+import { waterways } from './waterways';
 
 const COLUMNS = TERRAIN_COLUMN_OFFSETS.length;
 
@@ -153,6 +166,65 @@ function roadVertex(corridor: RoadCorridor, row: number, column: number): readon
  */
 function meshHeightAt(ground: TerrainMesh, x: number, z: number): number | undefined {
   return heightOver(ground, x, z, -1e-6);
+}
+
+/**
+ * The height of the HIGHEST triangle of the ground over a point in plan —
+ * the one drawn on top where two overlap — or `undefined` where none is.
+ */
+function topHeightAt(ground: TerrainMesh, x: number, z: number): number | undefined {
+  let top: number | undefined;
+  for (const each of heightsOver(ground, x, z, -1e-6)) {
+    if (top === undefined || each.height > top) top = each.height;
+  }
+  return top;
+}
+
+/**
+ * Every triangle of a mesh over a point in plan: its height there and the
+ * row pair it spans (its lowest vertex's row). `inside` is as {@link heightOver}'s.
+ */
+function heightsOver(
+  mesh: { readonly vertices: Float32Array; readonly indices: Uint32Array },
+  x: number,
+  z: number,
+  inside: number,
+): { readonly height: number; readonly row: number }[] {
+  const { vertices, indices } = mesh;
+  const found: { readonly height: number; readonly row: number }[] = [];
+  for (let at = 0; at + 2 < indices.length; at += 3) {
+    const ia = indices[at] as number;
+    const ib = indices[at + 1] as number;
+    const ic = indices[at + 2] as number;
+    const ax = vertices[ia * 3] as number;
+    const az = vertices[ia * 3 + 2] as number;
+    const bx = vertices[ib * 3] as number;
+    const bz = vertices[ib * 3 + 2] as number;
+    const cx = vertices[ic * 3] as number;
+    const cz = vertices[ic * 3 + 2] as number;
+    if (
+      x < Math.min(ax, bx, cx) - 1 ||
+      x > Math.max(ax, bx, cx) + 1 ||
+      z < Math.min(az, bz, cz) - 1 ||
+      z > Math.max(az, bz, cz) + 1
+    ) {
+      continue;
+    }
+    const area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+    if (Math.abs(area) < 1e-9) continue;
+    const u = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / area;
+    const v = ((cx - x) * (az - z) - (ax - x) * (cz - z)) / area;
+    const w = 1 - u - v;
+    if (u < inside || v < inside || w < inside) continue;
+    found.push({
+      height:
+        u * (vertices[ia * 3 + 1] as number) +
+        v * (vertices[ib * 3 + 1] as number) +
+        w * (vertices[ic * 3 + 1] as number),
+      row: Math.floor(Math.min(ia, ib, ic) / (COLUMNS * 2)),
+    });
+  }
+  return found;
 }
 
 /**
@@ -649,7 +721,7 @@ describe('no scenery stands over ground that is not drawn — #2099', () => {
       for (const bend of PLANNER_BENDS) {
         for (const before of [300, 100, 0, -30]) {
           const { corridor, ground } = frameAt(profile, bend.middleMetres - before);
-          const points: { readonly x: number; readonly z: number }[] = [];
+          const points: { readonly x: number; readonly y: number; readonly z: number }[] = [];
           const centre = corridor.centre;
           for (let row = 0; row + 1 < centre.length; row += 3) {
             const from = centre[row] as (typeof centre)[number];
@@ -660,17 +732,29 @@ describe('no scenery stands over ground that is not drawn — #2099', () => {
             if (!(apart > 0)) continue;
             for (const lateral of laterals) {
               // Half-way between the rows, out along the normal `(−z, x)`.
+              // `y` is the point's index: what comes back is a copy wherever
+              // the ground under it is not at that height, which is
+              // everywhere (#2101).
               points.push({
                 x: (from.x + to.x) / 2 + (-dz / apart) * lateral,
+                y: points.length,
                 z: (from.z + to.z) / 2 + (dx / apart) * lateral,
               });
             }
           }
-          const standing = new Set(standingOnGround(points, ground));
+          const standing = standingOnGround(points, ground);
+          const at = new Map(
+            standing.map((each) => [`${String(each.x)},${String(each.z)}`, each.y]),
+          );
           for (const point of points) {
-            const over = meshHeightAt(ground, point.x, point.z) !== undefined;
-            expect(standing.has(point), `(${String(point.x)}, ${String(point.z)})`).toBe(over);
-            if (over) kept += 1;
+            const top = topHeightAt(ground, point.x, point.z);
+            const y = at.get(`${String(point.x)},${String(point.z)}`);
+            expect(y !== undefined, `(${String(point.x)}, ${String(point.z)})`).toBe(
+              top !== undefined,
+            );
+            // #2101: and at the height of the highest triangle under it.
+            if (top !== undefined) expect(y).toBeCloseTo(top, 6);
+            if (top !== undefined) kept += 1;
             else dropped += 1;
           }
         }
@@ -682,6 +766,324 @@ describe('no scenery stands over ground that is not drawn — #2099', () => {
     60_000,
   );
 });
+
+describe('one leg’s ground does not rise through another’s at a very sharp bend — #2101', () => {
+  // A planner's corner of 143°, the owner's, sampled every 25 m and level, so
+  // every metre of height off the road is the invented relief; both hands, so
+  // each side is the inside. `bend` is the corner's route distance.
+  const bend = 1_500;
+  const corners: readonly (readonly [string, RouteProfile])[] = [
+    ['a 143° corner to the right', plannerCornerRoute(143)],
+    ['a 143° corner to the left', plannerCornerRoute(143, 'left')],
+  ];
+  /**
+   * And a climbing hairpin, whose legs' roads are up to 14 m apart in height
+   * where they pass: with the corners, its middle's route distance.
+   */
+  const sharp: readonly (readonly [string, RouteProfile, number])[] = [
+    ...corners.map(([name, profile]) => [name, profile, bend] as const),
+    ['a 25 m hairpin climbing at 4 %', hairpinRoute(25), 400 + (25 * Math.PI) / 2],
+  ];
+  /** The owner's tablet, 16 : 10: how far to each side the camera sees, per metre ahead. */
+  const spread = horizontalSpread(16 / 10);
+
+  /** The frame at an odometer reading, as the renderer is handed it. */
+  const sceneAt = (profile: RouteProfile, at: number): ReturnType<typeof sceneFrame> => {
+    const start = atStartLine(profile);
+    return sceneFrame({
+      profile,
+      origin: corridorOrigin(profile),
+      state: { ...start, ride: { ...start.ride, distance: metres(at) } },
+    });
+  };
+
+  /** Points on the ground in front of the camera, every 4 m, out to 150 m, inside its view. */
+  const inView = (
+    camera: ReturnType<typeof sceneFrame>['camera'],
+  ): { readonly x: number; readonly z: number; readonly ahead: number }[] => {
+    const points: { readonly x: number; readonly z: number; readonly ahead: number }[] = [];
+    for (let ahead = 4; ahead <= 150; ahead += 4) {
+      for (let across = -150; across <= 150; across += 4) {
+        if (Math.abs(across) > ahead * spread) continue;
+        points.push({
+          // Across along `(−z, x)` of the heading: the rider's right.
+          x: camera.x + camera.headingX * ahead - camera.headingZ * across,
+          z: camera.z + camera.headingZ * ahead + camera.headingX * across,
+          ahead,
+        });
+      }
+    }
+    return points;
+  };
+
+  /** How far a point is from the stretch of road between `row` and the next. */
+  const fromStretch = (corridor: RoadCorridor, row: number, x: number, z: number): number => {
+    const from = corridor.centre[row] as RoadCorridor['centre'][number];
+    const to = corridor.centre[Math.min(row + 1, corridor.centre.length - 1)] as typeof from;
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const span = dx * dx + dz * dz;
+    const t =
+      span > 0 ? Math.min(1, Math.max(0, ((x - from.x) * dx + (z - from.z) * dz) / span)) : 0;
+    return Math.hypot(x - (from.x + dx * t), z - (from.z + dz * t));
+  };
+
+  it.each(sharp)(
+    'draws the leg whose road is nearer on top, within the chase camera’s view, %s',
+    (_name, profile, middle) => {
+      // ⚠️ Through the built mesh: wherever triangles of two legs — rows more
+      // than 40 m apart along the road — lie over the same point, the one
+      // drawn on top must be the leg nearer it. Measured before #2101 on this
+      // sweep: the other leg up to 13 m above it, which is the sheet the
+      // owner saw rise through the road's own leaving a 143° bend.
+      let judged = 0;
+      let worst = 0;
+      let where = '';
+      for (let at = middle - 150; at <= middle + 60; at += 10) {
+        const frame = sceneAt(profile, at);
+        const { corridor } = frame;
+        const ground = frame.terrain.mesh;
+        for (const point of inView(frame.camera)) {
+          const hits = heightsOver(ground, point.x, point.z, 1e-3);
+          if (hits.length < 2) continue;
+          const alongs = hits.map((hit) => (corridor.centre[hit.row] as { along: number }).along);
+          if (Math.max(...alongs) - Math.min(...alongs) < 40) continue;
+          const near = hits.map((hit) => fromStretch(corridor, hit.row, point.x, point.z));
+          const owner = near.indexOf(Math.min(...near));
+          const ownAlong = alongs[owner] as number;
+          const others = hits.filter(
+            (_, index) => Math.abs((alongs[index] as number) - ownAlong) >= 40,
+          );
+          const above =
+            Math.max(...others.map((hit) => hit.height)) -
+            (hits[owner] as { height: number }).height;
+          judged += 1;
+          if (above > worst) {
+            worst = above;
+            where = `at ${String(at)}, ${String(point.ahead)} m ahead`;
+          }
+        }
+      }
+      // Within a few centimetres on these sweeps since #2101 (0.07 m, measured
+      // on the right-hand corner): the two legs are held to the road's height
+      // at the line between them, and each sinks past it under the other.
+      expect(worst, where).toBeLessThanOrEqual(0.3);
+      // Non-vacuity: the view really does hold both legs' ground, many times.
+      expect(judged).toBeGreaterThan(500);
+    },
+    120_000,
+  );
+
+  it.each(corners)(
+    'stands no scenery more than 0.3 m off the drawn ground, swept along the bend, %s',
+    (_name, profile) => {
+      // ⚠️ Read off the frame's own triangles — the highest one under an
+      // item, the one drawn on top. Measured before #2101 on this sweep: 295
+      // items more than 0.3 m off it, up to 15 m, where `terrainHeightAt` put
+      // them on the leg they were placed from while another leg's ground, or
+      // a folded row's, was the one drawn there.
+      let items = 0;
+      let overlapped = 0;
+      for (let at = bend - 200; at <= bend + 200; at += 13) {
+        const frame = sceneAt(profile, at);
+        const ground = frame.terrain.mesh;
+        for (const each of frame.scatter) {
+          const hits = heightsOver(ground, each.x, each.z, -1e-6);
+          // #2099: nothing stands over no ground at all.
+          expect(hits.length, `${each.kind} at ${String(at)}`).toBeGreaterThan(0);
+          const top = Math.max(...hits.map((hit) => hit.height));
+          expect(Math.abs(each.y - top), `${each.kind} at ${String(at)}`).toBeLessThanOrEqual(0.3);
+          items += 1;
+          const alongs = hits.map(
+            (hit) => (frame.corridor.centre[hit.row] as { along: number }).along,
+          );
+          if (Math.max(...alongs) - Math.min(...alongs) >= 40) overlapped += 1;
+        }
+      }
+      // Non-vacuity: a sweep's worth of scenery, and some of it where two
+      // legs' ground lies under it — the case the owner's boulder was.
+      expect(items).toBeGreaterThan(5_000);
+      expect(overlapped).toBeGreaterThan(20);
+    },
+    120_000,
+  );
+
+  it.each(corners)(
+    'sinks a leg’s ground only under another leg’s ground that is there, %s',
+    (_name, profile) => {
+      // ⚠️ `landform.ts` §`seamReach`'s rules 2 and 3, read back off the mesh
+      // where a rider can see it. On this level, dry fixture the invented
+      // relief stands no lower than `RELIEF_SLOPE` a metre past the clear
+      // band, out from a vertex's own row; a vertex lower than that, the
+      // verge and the metre `SHALLOW_SINK_METRES` allows has been sunk, and
+      // another leg's ground — rows more than 40 m away along the road — or
+      // the road itself must be drawn over it. Out of the camera's view a
+      // ray can run on past the other leg's road and the corridor's end,
+      // sunk under nothing: measured, 220 m out behind the camera.
+      expect(waterways(profile, scatterSeed(profile)).crossings).toHaveLength(0);
+      let sunk = 0;
+      for (let at = bend - 150; at <= bend + 60; at += 10) {
+        const frame = sceneAt(profile, at);
+        const { corridor, camera } = frame;
+        const ground = frame.terrain.mesh;
+        const road = { vertices: corridor.vertices, indices: corridor.indices };
+        for (let row = 0; row < ground.rows; row += 1) {
+          const centre = corridor.centre[row] as RoadCorridor['centre'][number];
+          for (let side = 0; side < 2; side += 1) {
+            for (let column = 2; column < COLUMNS; column += 1) {
+              const [x, y, z] = groundVertex(ground, row, side, column);
+              const ahead = (x - camera.x) * camera.headingX + (z - camera.z) * camera.headingZ;
+              const across = (x - camera.x) * -camera.headingZ + (z - camera.z) * camera.headingX;
+              if (!(ahead > 0 && ahead <= 400 && Math.abs(across) <= ahead * spread)) continue;
+              const lateral = Math.hypot(x - centre.x, z - centre.z);
+              const lowest =
+                centre.y -
+                VERGE_DROP_METRES -
+                Math.min(RELIEF_MAX_METRES, 0.18 * Math.max(0, lateral - RELIEF_CLEAR_METRES)) -
+                1.01;
+              if (!(y < lowest)) continue;
+              sunk += 1;
+              const covers = heightsOver(ground, x, z, -1e-6).filter(
+                (hit) =>
+                  Math.abs((corridor.centre[hit.row] as { along: number }).along - centre.along) >=
+                    40 && hit.height > y,
+              );
+              const tarmac = heightOver(road, x, z, -1e-6);
+              expect(
+                covers.length > 0 || (tarmac !== undefined && tarmac > y),
+                `row ${String(row)}, column ${String(column)}, at ${String(at)}`,
+              ).toBe(true);
+            }
+          }
+        }
+      }
+      // Non-vacuity: the sweep really does sink ground under the other leg's.
+      expect(sunk).toBeGreaterThan(100);
+    },
+    120_000,
+  );
+
+  it.each(corners)(
+    'opens no hole and no pit in the view where the legs used to overlap, %s',
+    (_name, profile) => {
+      // ⚠️ The two ways of stopping the overlap that #2101 tried and threw
+      // away: cutting each leg back to the line between them left sky where
+      // the other leg's ground did not reach — past the corridor's first rows,
+      // 40 m ahead of the camera at the apex — and sinking a leg where nothing
+      // covered it left a pit. On this level fixture the invented relief can
+      // reach no lower than `RELIEF_SLOPE` a metre past the clear band, so
+      // within 100 m nothing drawn may lie further under the road than that,
+      // the verge and the metre `SHALLOW_SINK_METRES` allows.
+      expect(waterways(profile, scatterSeed(profile)).crossings).toHaveLength(0);
+      const deepest = 0.18 * (100 - RELIEF_CLEAR_METRES) + VERGE_DROP_METRES + 1;
+      let looked = 0;
+      for (let at = bend - 150; at <= bend + 60; at += 10) {
+        const frame = sceneAt(profile, at);
+        const road = { vertices: frame.corridor.vertices, indices: frame.corridor.indices };
+        const level = (frame.corridor.centre[0] as { y: number }).y;
+        for (const point of inView(frame.camera)) {
+          if (point.ahead > 100) continue;
+          if (heightOver(road, point.x, point.z, -1e-6) !== undefined) continue;
+          const top = topHeightAt(frame.terrain.mesh, point.x, point.z);
+          expect(top, `hole at ${String(at)}, ${String(point.ahead)} m ahead`).not.toBeUndefined();
+          expect(top as number, `pit at ${String(at)}`).toBeGreaterThan(level - deepest);
+          looked += 1;
+        }
+      }
+      expect(looked).toBeGreaterThan(10_000);
+    },
+    120_000,
+  );
+
+  it('stands no triangle the rider sees on end where a seam starts, on a 100° bend then a 145° one', () => {
+    // ⚠️ `landform.ts` §`SEAM_DEEPEN_PER_METRE`. A seam is found row by row,
+    // and rule 3 holds on one row and fails on the next, so a side sunk tens
+    // of metres stood beside one sunk a metre at most: measured on this road
+    // before the sinking was let deepen only along the road, 19 triangles
+    // within 60 m of it drawn on top and steeper than #2096's |ny| 0.15. One
+    // is #2096's own, at |ny| 0.052 122 m past the 145° bend, there before
+    // #2101 as well: so at most one.
+    const profile = routeProfile(bendThenSharpBend(), { loop: false });
+    let steep = 0;
+    let judged = 0;
+    for (let at = 200; at < 900; at += 11) {
+      const { corridor, ground } = frameAt(profile, at);
+      const v = ground.vertices;
+      for (let index = 0; index + 2 < ground.indices.length; index += 3) {
+        const [a, b, c] = [0, 1, 2].map((k) => (ground.indices[index + k] as number) * 3) as [
+          number,
+          number,
+          number,
+        ];
+        const e1 = [0, 1, 2].map((k) => (v[b + k] as number) - (v[a + k] as number));
+        const e2 = [0, 1, 2].map((k) => (v[c + k] as number) - (v[a + k] as number));
+        const nx = (e1[1] as number) * (e2[2] as number) - (e1[2] as number) * (e2[1] as number);
+        const ny = (e1[2] as number) * (e2[0] as number) - (e1[0] as number) * (e2[2] as number);
+        const nz = (e1[0] as number) * (e2[1] as number) - (e1[1] as number) * (e2[0] as number);
+        const length = Math.hypot(nx, ny, nz);
+        if (length < 1e-3) continue;
+        const x = ((v[a] as number) + (v[b] as number) + (v[c] as number)) / 3;
+        const z = ((v[a + 2] as number) + (v[b + 2] as number) + (v[c + 2] as number)) / 3;
+        if (!corridor.centre.some((point) => Math.hypot(x - point.x, z - point.z) <= 60)) continue;
+        judged += 1;
+        if (Math.abs(ny) / length >= 0.15) continue;
+        // Under another leg's ground it is not on the screen.
+        const y = ((v[a + 1] as number) + (v[b + 1] as number) + (v[c + 1] as number)) / 3;
+        if ((topHeightAt(ground, x, z) ?? y) > y + 0.05) continue;
+        steep += 1;
+      }
+    }
+    expect(steep).toBeLessThanOrEqual(1);
+    expect(judged).toBeGreaterThan(100_000);
+  }, 120_000);
+});
+
+/**
+ * A level road with a 100° bend to the right of 20 m radius, 120 m on, and a
+ * 145° bend to the left of 15 m: one corridor holds a bend #2101 leaves as it
+ * was and one whose legs meet. Sampled every 5 m.
+ */
+function bendThenSharpBend(): RoutePoint[] {
+  const points: RoutePoint[] = [];
+  let east = 0;
+  let north = 0;
+  let heading = Math.PI / 2;
+  const push = (): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + north / 111_320),
+        degreesLongitude(-0.12 + east / (111_320 * Math.cos((51.5 * Math.PI) / 180))),
+      ),
+      elevation: altitudeMetres(0),
+    });
+  };
+  const straight = (length: number): void => {
+    for (let along = 0; along < length; along += 5) {
+      push();
+      east += 5 * Math.cos(heading);
+      north += 5 * Math.sin(heading);
+    }
+  };
+  const bend = (radius: number, degrees: number, right: boolean): void => {
+    const arc = (radius * degrees * Math.PI) / 180;
+    const steps = Math.max(4, Math.round(arc / 5));
+    const turn = ((degrees * Math.PI) / 180 / steps) * (right ? -1 : 1);
+    for (let step = 0; step < steps; step += 1) {
+      push();
+      heading += turn / 2;
+      east += (arc / steps) * Math.cos(heading);
+      north += (arc / steps) * Math.sin(heading);
+      heading += turn / 2;
+    }
+  };
+  straight(400);
+  bend(20, 100, true);
+  straight(120);
+  bend(15, 145, false);
+  straight(400);
+  push();
+  return points;
+}
 
 describe('the ground is the same place on every lap — #458', () => {
   it('builds identical heights a whole lap apart', () => {

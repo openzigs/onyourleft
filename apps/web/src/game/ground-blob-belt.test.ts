@@ -219,8 +219,13 @@ describe('GroundBlobBelt.update — #1674', () => {
         }
       }
     }
+    // ⚠️ Re-taken for #2101, which moves the ground under some of these
+    // blobs on purpose: `hairpinRoute(30)`'s legs now meet on the line between
+    // them and each sinks past it under the other's (`landform.ts`
+    // §`seamReach`), so a blob there lies on ground at another height. The
+    // count of blobs drawn did not move. `ee765c15…a951e1` before it.
     expect(`${drawn} ${hash.digest('hex')}`).toBe(
-      '2622 ee765c1568ed59830db525349f375b18ac43d5230de43830bbc852a6dca951e1',
+      '2622 f4cf25843b8d9a66eb8148be5f9ed9c8e45d387524370bb663db1134097191cd',
     );
   });
 });
