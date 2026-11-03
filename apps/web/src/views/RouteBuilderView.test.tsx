@@ -131,6 +131,16 @@ describe('every control works from the keyboard', () => {
     expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['false', 'false']);
   });
 
+  it('closes the loop with a routed leg when a routing service is configured (#2102)', async () => {
+    const provider = scriptedProvider();
+    await open({ provider });
+    await place(3);
+    provider.routeCalls.length = 0;
+    await press('Close the loop');
+    // The leg back is snapped like any other: it asks the routing service.
+    expect(provider.routeCalls).toHaveLength(1);
+  });
+
   it('moves one in each of the four directions', async () => {
     const provider = scriptedProvider();
     await open({ provider });
