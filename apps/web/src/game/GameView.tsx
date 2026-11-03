@@ -27,7 +27,15 @@
  * its own could not be rendered there at all.
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+} from 'react';
 
 import type { KitColour } from '@onyourleft/store';
 
@@ -120,6 +128,15 @@ import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } f
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
+import {
+  simulatedClock,
+  simulatedRideText,
+  simulatedRiderFromHash,
+  simulatedRiderKey,
+  simulatedSensors,
+  simulatedStartMetres,
+  type SimulatedRider,
+} from './simulated-rider';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
 import {
   EASED_SPOKEN_PREFIX,
@@ -710,7 +727,71 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
   return world.realistic ? worldRung(world) : rungFor(world.quality.level, shadowMap);
 }
 
+/**
+ * The game screen — and, when the fragment asks for one (#1992), the same
+ * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
+ * asked for. Keyed on the choice, so changing it is a new screen and a ride
+ * in progress is never switched between a real rider and a simulated one.
+ */
 export function GameView(props: GameViewProps): JSX.Element {
+  const simulated = simulatedRiderFromHash(globalThis.location.hash);
+  return <GameScreen key={simulatedRiderKey(simulated)} given={props} asked={simulated} />;
+}
+
+/**
+ * What a simulated ride is given in place of the shell's props — #1992.
+ *
+ * ⚠️ **No trainer port, no room and no rooms, and no Delivery round**, and
+ * that is the whole of the mode's safety and its "no fake records". The
+ * trainer port is the game's only way to a trainer AND to the recording
+ * (`trainer-port.ts` §`recordGameRide`, §`gameRideEnded`, §`courseLine`), so
+ * without it nothing is written to a machine and nothing reaches the store,
+ * an export or sync; without the room ports nothing is posted to a room; and
+ * a round would keep the week's counts on this device (`delivery-progress.ts`).
+ * The sensors are the simulated rider's, and the clock runs at its speed-up.
+ */
+function useSimulatedRide(
+  given: GameViewProps,
+  simulated: SimulatedRider | undefined,
+): GameViewProps {
+  const givenPort = given.port;
+  const port = useMemo((): GamePort | undefined => {
+    if (simulated === undefined || givenPort === undefined) return givenPort;
+    const sensors = simulatedSensors(simulated);
+    return { ...givenPort, readSensors: () => sensors };
+  }, [givenPort, simulated]);
+  const givenNow = given.now;
+  const now = useMemo(
+    () =>
+      simulated === undefined
+        ? givenNow
+        : simulatedClock(givenNow ?? (() => performance.now()), simulated.speedup),
+    [givenNow, simulated],
+  );
+  if (simulated === undefined) return given;
+  return {
+    ...given,
+    port,
+    now,
+    trainer: undefined,
+    room: undefined,
+    roomId: undefined,
+    madeTheRoom: undefined,
+    rooms: undefined,
+    delivery: false,
+  };
+}
+
+function GameScreen({
+  given,
+  asked,
+}: {
+  readonly given: GameViewProps;
+  readonly asked: SimulatedRider | undefined;
+}): JSX.Element {
+  // #1992: held for this screen's life — the key above makes a new screen of a new choice.
+  const [simulated] = useState(asked);
+  const props = useSimulatedRide(given, simulated);
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
   // the control that shows the refusal and the button the refusal blocks.
@@ -1680,6 +1761,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         // term written specifically so a tailwind could exceed the ground
         // speed had, between them, never seen a value other than zero.
         ...(air === undefined ? {} : { wind: air }),
+        // #1992: a simulated ride may start along the road — the same
+        // odometer start the demo's group preset uses (#1647), so the world
+        // drawn there is the one this ride would have drawn on arriving.
+        ...startOf(simulated, profile.totalDistance),
       });
       simulationRef.current = simulation;
       // #1312: the rider is on the line of this course, so a lap begins here
@@ -1925,6 +2010,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       props.delivery,
       props.lapRace,
       soundsOut,
+      simulated,
     ],
   );
 
@@ -3246,6 +3332,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // here (#577's review, finding 1): `ride/side-camera.ts`
         // §`sideCameraLostNotice`.
         sideCamera={sideCameraOnHud(sideCamera)}
+        // #1992: a simulated ride says so on the stage, for every frame of it.
+        simulated={simulated === undefined ? undefined : simulatedRideText(simulated)}
         // #1552, ADR 0054 D-3.6: the OpenStreetMap credit, for the WHOLE ride
         // whose world was given a corridor at the start — never per frame,
         // because the notice is for the work, not for what is in view. Keyed
@@ -3458,6 +3546,16 @@ export function GameView(props: GameViewProps): JSX.Element {
       />
     </section>
   );
+}
+
+/** The simulation's start for a simulated ride, or nothing: the start line. */
+function startOf(
+  simulated: SimulatedRider | undefined,
+  totalMetres: number,
+): { readonly startMetres?: number } {
+  const startMetres =
+    simulated === undefined ? undefined : simulatedStartMetres(simulated, totalMetres);
+  return startMetres === undefined ? {} : { startMetres };
 }
 
 /**

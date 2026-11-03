@@ -6682,6 +6682,17 @@ select.oyl-input {
   font-variant-numeric: tabular-nums;
 }
 
+/* #1992: the simulated rider's mark, first in the actions panel. The same
+   sentence size as the lines above, in the HUD's full ink and bold rather than
+   muted, because it is the one line on the stage that says the ride is not a
+   real effort. Only a simulated ride renders it. */
+.oyl-hud__simulated {
+  margin: 0;
+  color: var(--oyl-color-hud-ink);
+  font-size: var(--oyl-font-size-md);
+  font-weight: 700;
+}
+
 /* #1810: A DELIVERY ROUND'S THROWS, a row of three ride-time controls under
    *Pause* and *End ride*, each at #94's 72 px floor (set inline from
    CONTROL_MINIMUM_PIXELS). Only a Delivery round shows it, and since #1816

@@ -172,6 +172,12 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
   readonly sideCamera?:
     { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
   /**
+   * The simulated rider's mark — #1992: the sentence that says this ride is
+   * simulated, first in the actions panel for every frame of the ride, so a
+   * screenshot of it cannot pass for a real effort. Absent on every real ride.
+   */
+  readonly simulated?: string | undefined;
+  /**
    * Another rider's ghost — #331: whose it is, and *Stop ghost*, which takes
    * it off the road and the HUD for the rest of the ride. `undefined` for the
    * rider's own best and for no ghost. Their name also labels the gap field.
@@ -311,6 +317,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     workout,
     sound,
     sideCamera,
+    simulated,
     ghostStop,
     onFollowNext,
     report,
@@ -353,6 +360,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       }
       moreActions={
         <>
+          {simulated === undefined ? null : <p className="oyl-hud__simulated">{simulated}</p>}
           {/*
               #1244: *Keep the plan*, on a row of its own under Pause and End ride
               and only while a re-plan waits. ⚠️ **Not a third control in the row
