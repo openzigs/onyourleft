@@ -12,13 +12,18 @@ import { emptyRiderStance, stanceOf, type DrawnPosture, type RiderStance } from 
 import type { RidingInputs } from './port';
 import {
   DROPS_ABOVE_METRES_PER_SECOND,
+  DROPS_DESCENT_GRADE_PERCENT,
+  DROPS_DESCENT_METRES_PER_SECOND,
   DROPS_LEAVE_BELOW_METRES_PER_SECOND,
+  DROPS_LEAVE_DESCENT_GRADE_PERCENT,
+  DROPS_LEAVE_DESCENT_METRES_PER_SECOND,
   POSTURE_DWELL_SECONDS,
   POSTURE_TRANSITION_SECONDS,
   STAND_ABOVE_GRADE_PERCENT,
   STAND_ABOVE_WATTS,
   STAND_BELOW_RPM,
   STAND_LEAVE_ABOVE_RPM,
+  STAND_LEAVE_BELOW_WATTS,
   STAND_LEAVE_BELOW_GRADE_PERCENT,
   TOPS_BELOW_WATTS,
   TOPS_LEAVE_ABOVE_WATTS,
@@ -117,6 +122,32 @@ describe('hysteresis: a position is kept on a gentler threshold than it is taken
     const grinding = riding({ cadence, power: STAND_ABOVE_WATTS + 50, grade: 3, speed: 4 });
     expect(wantedPosture(grinding, 'hoods')).toBe('hoods');
     expect(wantedPosture(grinding, 'standing')).toBe('standing');
+  });
+
+  it('keeps standing at a low cadence until the power is well back down', () => {
+    const power = (STAND_ABOVE_WATTS + STAND_LEAVE_BELOW_WATTS) / 2;
+    const grinding = riding({ cadence: STAND_BELOW_RPM - 5, power, grade: 3, speed: 4 });
+    expect(wantedPosture(grinding, 'hoods')).toBe('hoods');
+    expect(wantedPosture(grinding, 'standing')).toBe('standing');
+    expect(wantedPosture({ ...grinding, power: STAND_LEAVE_BELOW_WATTS - 10 }, 'standing')).toBe(
+      'hoods',
+    );
+  });
+
+  it('keeps the drops on a descent until the grade and the speed are each below the keep thresholds', () => {
+    const grade = (DROPS_DESCENT_GRADE_PERCENT + DROPS_LEAVE_DESCENT_GRADE_PERCENT) / 2;
+    const speed = (DROPS_DESCENT_METRES_PER_SECOND + DROPS_LEAVE_DESCENT_METRES_PER_SECOND) / 2;
+    // Between on the grade, fast enough on the speed to take it.
+    const gentler = riding({ grade, speed: DROPS_DESCENT_METRES_PER_SECOND + 0.5 });
+    expect(wantedPosture(gentler, 'hoods')).toBe('hoods');
+    expect(wantedPosture(gentler, 'drops')).toBe('drops');
+    // Steep enough on the grade to take it, between on the speed.
+    const slower = riding({ grade: DROPS_DESCENT_GRADE_PERCENT - 1, speed });
+    expect(wantedPosture(slower, 'hoods')).toBe('hoods');
+    expect(wantedPosture(slower, 'drops')).toBe('drops');
+    // Past the keep thresholds, the drops are let go.
+    const past = riding({ grade: DROPS_LEAVE_DESCENT_GRADE_PERCENT + 1, speed });
+    expect(wantedPosture(past, 'drops')).toBe('hoods');
   });
 
   it('keeps the drops and the tops the same way', () => {
