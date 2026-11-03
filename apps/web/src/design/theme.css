@@ -7612,31 +7612,72 @@ select.oyl-input {
   }
 
   /*
-   * #1912: a LAP RACE in a ROOM puts *Use item* (#1901) and the room's row
-   * (*Follow*, #789's *Report*) in one actions panel. One under the other
-   * they were a row of 72 px and a row of 48 px more than either ride
-   * alone, and ran the panel 24 px below a 736×360 stage and over the
-   * leaning rider at 360×752 (`ride-room.browser.spec.ts` §"#1912"). So on a
-   * phone the panel flows its controls as a row that wraps: *Use item* takes
-   * the row of *Pause* and *End ride* where there is width for it (an
-   * upright phone), and else shares the room's row (a phone on its side).
-   * Nothing gives way, and the order is the document's. ⚠️ For the owner's
-   * approval, with the screenshots, in #1912.
+   * #1912: a LAP RACE in a ROOM, on a phone — **the room's row, *Follow*
+   * and #789's *Report*, gives way** to *Use item* (#1901). The owner's
+   * ruling on PR #2098 (2026-11-03), recorded as #419 asks: with the row,
+   * the actions panel ran 19 px below a 736×360 stage, and with *Report*
+   * open it covered the leaning rider by 50 to 97 px. The *Following*
+   * reading already gives way on a phone (above), so *Follow* had nothing to
+   * show there. Not visually hidden but not rendered: a control nobody can
+   * see must not take focus (SC 2.4.7). Reporting stays where the race ends,
+   * on the finish order — its references to report and *Block*
+   * (`RaceResult.tsx`) — and on a tablet both stay. `ride-room.browser.spec.ts` §"#1912" holds it with *Follow*
+   * pressed and with *Report* open at every overlay viewport.
    */
-  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__item):has(> .oyl-hud__room-row) {
-    flex-flow: row wrap;
-    align-items: end;
-    column-gap: var(--oyl-space-sm);
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--lap-race) .oyl-hud__actions > .oyl-hud__room-row {
+    display: none;
+  }
+
+  /* And *Use item* keeps only the panel's own 8 px gap under *Pause* (#669),
+     not that and its half rem margin as well: without anchor positioning at
+     360×752 the panel otherwise begins at the very top edge of the leaning
+     rider's box, 0.2 px from it (§"#1912, the owner's ruling", measured). */
+  .oyl-game--riding
+    .oyl-hud:has(.oyl-hud__field--lap-race):has(.oyl-hud__field--room)
+    .oyl-hud__actions
+    > .oyl-hud__item {
+    margin-block-start: 0;
+  }
+}
+
+/*
+ * #1912 on a TABLET, where the room's row stays (the owner's ruling on PR
+ * #2098). *Use item* (#1901) under *Pause* and the room's row under that ran
+ * the actions panel up into the race's standings: 14 px at 1024×768 with
+ * *Follow* pressed and 63 px with *Report* open, and 31 px at 1280×800 with
+ * *Report* open (`ride-room.browser.spec.ts` §"#1912", on a Mac). So,
+ * recorded as #419 asks, in a room's lap race on a tablet:
+ *
+ * - *Report*'s reasons, open, take the row IN PLACE OF *Follow* and
+ *   *Report*, as on a phone on its side (§"#789"; `RoomReport.tsx` says the
+ *   ways out: Escape, and closing by themselves).
+ * - The standings' sentence, *You are 5 of 9.*, is visually hidden by clip:
+ *   the race's *Place* says the same, *5 of 9*, in the secondary panel above
+ *   it, and a screen reader still reads it.
+ *
+ * *Follow*, *Report* and *Use item* all stay, and the order is the
+ * document's. ⚠️ A layout for the owner's screenshots, as #1912 asks.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__item)
+    > .oyl-hud__room-row:has(> .oyl-hud__report-reasons, > .oyl-hud__report-said)
+    > :is(.oyl-hud__follow, .oyl-hud__report) {
+    display: none;
   }
 
   .oyl-game--riding
-    .oyl-hud__actions:has(> .oyl-hud__item):has(> .oyl-hud__room-row)
-    > :not(.oyl-hud__item, .oyl-hud__room-row, .oyl-hud__controls) {
-    flex-basis: 100%;
-  }
-
-  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__room-row) > .oyl-hud__item {
-    margin-block-start: 0;
+    .oyl-hud:has(.oyl-hud__field--lap-race):has(.oyl-hud__field--room)
+    .oyl-hud__standings-summary {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
@@ -8930,6 +8971,45 @@ select.oyl-input {
       border: 1px solid var(--oyl-color-hud-border);
       border-radius: var(--oyl-radius);
       padding: var(--oyl-space-sm);
+    }
+
+    /*
+     * #1912, the owner's ruling on PR #2098 (2026-11-03): **in a ROOM's LAP
+     * RACE the moving time takes the free cell in the secondary panel** that
+     * the room's readings left when they gave way (§"#1912: a LAP RACE in a
+     * room" above), so the controls and the trainer line keep their whole
+     * width. Lifted beside *Pause*, it cost the trainer line 7 rem and a
+     * second line, and the actions panel began 17 px into the leaning
+     * rider's box at 360×800 and 360×752 (`ride-room.browser.spec.ts`
+     * §"#1912", which holds the time inside the secondary panel here). With
+     * *Trainer notice* (#437) the time keeps its own surface, as above.
+     */
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__field--lap-race):has(.oyl-hud__field--room):not(
+        :has(.oyl-hud__controls > .oyl-hud__notice-toggle)
+      )
+      .oyl-hud__controls {
+      padding-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__field--lap-race):has(.oyl-hud__field--room):not(
+        :has(.oyl-hud__controls > .oyl-hud__notice-toggle)
+      )
+      .oyl-hud__actions
+      > .oyl-hud__trainer {
+      margin-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__field--lap-race):has(.oyl-hud__field--room):not(
+        :has(.oyl-hud__controls > .oyl-hud__notice-toggle)
+      )
+      .oyl-hud__fields--secondary
+      > .oyl-hud__field--moving {
+      position: static;
+      grid-area: auto;
+      width: auto;
     }
   }
 }

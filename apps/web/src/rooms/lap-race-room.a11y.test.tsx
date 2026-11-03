@@ -228,3 +228,48 @@ describe('a private lap race on the room panel — #1912', () => {
     expect(document.body.textContent).toContain(ROOM_LAP_RACE_TEXT.noInstance);
   });
 });
+
+/**
+ * The owner's ruling on PR #2098 (2026-11-03): "Approve with the tidy-ups".
+ * Each sentence is written out here as the owner wrote it, not read from
+ * `ROOM_LAP_RACE_TEXT`, so a rewording of the constant is red.
+ */
+describe('a lap race’s words, as the owner approved them — #1912', () => {
+  it('names the kind and the items box in the approved words', async () => {
+    await shown(panel({}));
+    expect(labelled('Lap race')?.closest('label')?.textContent).toBe(
+      'Lap race — laps of a loop, then a finish order',
+    );
+    await click(labelled('Lap race'));
+    expect(labelled('Race with items')?.closest('label')?.textContent).toBe(
+      'Race with items — pick-ups round the lap; an item moves where you appear in the game, never your trainer',
+    );
+  });
+
+  it('labels the status of a rider in one “Lap race:”, and an ordinary race still “Race:”', async () => {
+    const entered: EnteredRoom = {
+      roomId: 'room-lap',
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      madeIt: false,
+      lapRace: { laps: 3, items: true },
+      profile: LOOP.profile,
+      routeSha256: 'a'.repeat(64),
+    };
+    await shown(panel({ entered }));
+    expect(document.querySelector('.oyl-status__label')?.textContent).toBe('Lap race: ');
+    mounted?.unmount();
+    await shown(panel({ entered: { ...entered, lapRace: undefined } }));
+    expect(document.querySelector('.oyl-status__label')?.textContent).toBe('Race: ');
+  });
+
+  it('says, with no instance, the approved one line', async () => {
+    await shown(panel({ rooms: undefined }));
+    expect(
+      [...document.querySelectorAll('.oyl-rooms p')].map((each) => each.textContent),
+    ).toContain(
+      'Connect this device to one in Settings to make a room or a lap race, or join one by its code.',
+    );
+  });
+});

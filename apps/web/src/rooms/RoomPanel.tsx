@@ -86,23 +86,25 @@ export const ROOM_REFERENCES_TEXT =
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
 
 /**
- * A lap race on this screen — #1912. ⚠️ Draft wording awaiting the owner's
- * approval, like every sentence in the room work; "Lap race" is the mode's
- * name (the owner, 2026-10-31) and nothing here names another game
- * (ADR 0060 D-1.5).
+ * A lap race on this screen — #1912. Approved by the owner on PR #2098
+ * (2026-11-03) with four tidy-ups: the no-instance line, the status label
+ * *Lap race*, a kind's detail that no longer names items, and the items box's
+ * "where you appear in the game". "Lap race" is the mode's name (the owner,
+ * 2026-10-31) and nothing here names another game (ADR 0060 D-1.5).
  */
 export const ROOM_LAP_RACE_TEXT = {
   kind: 'Lap race',
-  kindDetail: ' — laps of a loop, picking up items round the lap, then a finish order',
+  kindDetail: ' — laps of a loop, then a finish order',
   notALoop: 'A lap race needs a loop: choose a route that ends where it starts.',
   laps: 'Laps',
   items: 'Race with items',
-  itemsDetail: ' — pick-ups round the lap; an item moves where you are drawn, never your trainer',
+  itemsDetail:
+    ' — pick-ups round the lap; an item moves where you appear in the game, never your trainer',
   entered: (laps: number, items: boolean): string =>
     `You are in a lap race: ${String(laps)} lap${laps === 1 ? '' : 's'} of the room’s loop, ` +
     `items ${items ? 'on' : 'off'}.`,
   /** #1912: the panel's one line with no instance, now naming the lap race (#1013: one line). */
-  noInstance: ' to make a room, a lap race among them, or join one by its code.',
+  noInstance: ' to make a room or a lap race, or join one by its code.',
 } as const;
 
 /** The laps a lap race may be made with on this screen: the solo race's choice (#1907). */
@@ -286,7 +288,14 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
     return (
       <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
         {heading}
-        <StatusMessage tone="info" label={ROOM_KIND_LABEL[entered.kind]} live>
+        <StatusMessage
+          tone="info"
+          label={
+            // #1912, the owner's tidy-up: a lap race is labelled as one, not "Race".
+            entered.lapRace === undefined ? ROOM_KIND_LABEL[entered.kind] : ROOM_LAP_RACE_TEXT.kind
+          }
+          live
+        >
           {entered.lapRace === undefined
             ? `You are in a ${entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.`
             : ROOM_LAP_RACE_TEXT.entered(entered.lapRace.laps, entered.lapRace.items)}

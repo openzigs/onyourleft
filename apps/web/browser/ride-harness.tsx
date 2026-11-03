@@ -586,16 +586,22 @@ const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
  * tallest. `?room=following` is the same with *Report* not pressed: the
  * state the reasons open from, and `ride-room.browser.spec.ts` §"#789"'s control.
  */
-const REPORT_OPEN = ROOM_QUERY === 'report';
-const FOLLOWING = ROOM_QUERY === 'following' || REPORT_OPEN;
+const REPORT_OPEN = ROOM_QUERY === 'report' || ROOM_QUERY === 'lap-race-report';
+const FOLLOWING = ROOM_QUERY === 'following' || ROOM_QUERY === 'lap-race-following' || REPORT_OPEN;
 /**
  * `ride.html?room=lap-race` — #1912: that running race a LAP RACE, its
  * welcome saying three laps with items, its frame giving every rider their
  * lap slots and this rider the widest item name (*Tailwind*), so the HUD
  * carries the race's *Place* and *Item* beside the room's readings, row and
  * standings. `ride-room.browser.spec.ts` §"#1912" measures it.
+ * `?room=lap-race-following` is the same with *Follow* pressed, and
+ * `?room=lap-race-report` with *Report* open too, as `following` and `report`
+ * are above: the owner's ruling on PR #2098 asked for both.
  */
-const LAP_RACE = ROOM_QUERY === 'lap-race';
+const LAP_RACE =
+  ROOM_QUERY === 'lap-race' ||
+  ROOM_QUERY === 'lap-race-following' ||
+  ROOM_QUERY === 'lap-race-report';
 const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING || LAP_RACE;
 const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
 /**
