@@ -270,9 +270,15 @@
  * nor a highway (spike 0033: the nearest road to a small footprint is mostly
  * its own drive). A mapped `roof:shape`, `building:levels` or height still
  * beats the inferred garage's roof and storey, as it beats a mapped one's.
+ * Since #2024, on a `rural` stretch, one of 100 m² or more, rectangular, at
+ * least 40 m back from the street and behind a house-sized footprint within
+ * 80 m is a **barn** — planks under a gambrel on a seeded share, a steep gable
+ * on the rest — and over 250 m² a **pole building**: corrugated walls with no
+ * window, a plain door, and a low 20° gable in grey `slate` at any size.
  * Only while the type is read; untagged footprints no rule calls are planned
- * as before, and so is every one with `?levers=-inferred-outbuildings`
- * ({@link FootprintPlanOptions}' `inferredOutbuildings`). A plan says what it
+ * as before, and so is every one with `?levers=-inferred-outbuildings` or
+ * `-inferred-barns` ({@link FootprintPlanOptions}' `inferredOutbuildings`,
+ * `inferredBarns`), each for its own rule. A plan says what it
  * was inferred ({@link FootprintPlan.family}, {@link FootprintPlan.inferred}).
  *
  * ## The surfaces
@@ -321,7 +327,9 @@ import {
   BARN_FEATURES,
   buildingFamilyOf,
   CIVIC_FEATURES,
+  INFERRED_BARN_FEATURES,
   OUTBUILDING_FEATURES,
+  POLE_BUILDING_FEATURES,
   resolvedFamily,
   type BuildingFamily,
 } from './building-types';
@@ -1193,6 +1201,28 @@ export const HOUSE_SIZED_AREA: readonly [least: number, most: number] = [60, 400
  */
 export const SETBACK_SEARCH_METRES = 150;
 
+/** #2024: an untagged footprint of at least this may be inferred a barn, m² — **100**. */
+export const INFERRED_BARN_MIN_AREA = 100;
+
+/** #2024: a barn's least area over its minimum-area rectangle's — **0.9**, spike 0033's. */
+export const INFERRED_BARN_MIN_RECTANGULARITY = 0.9;
+
+/** #2024: how near a house-sized footprint's outline must come to a barn's, metres — **80**, spike 0033's. */
+export const INFERRED_BARN_HOME_METRES = 80;
+
+/**
+ * #2024: the least a barn stands back from the street, metres — **40**, the
+ * owner's ruling of 2026-11-02 in place of "on farmland": only 3 % of a farm
+ * line's footprints stand on land classed farmland (spike 0033).
+ */
+export const INFERRED_BARN_MIN_SETBACK_METRES = 40;
+
+/**
+ * #2024: an inferred barn over this is a metal pole building, m² — **250**,
+ * between a 40 by 60 ft pole building (223 m²) and a 40 by 80 ft one (297 m²).
+ */
+export const POLE_BUILDING_MIN_AREA = 250;
+
 /**
  * What the inference rules read of an untagged footprint — #2023, spike 0033.
  * The two methods are asked only where a rule needs them, so a footprint no
@@ -1205,6 +1235,8 @@ export interface UntaggedCues {
   readonly aspect: number;
   /** Its area over its minimum-area rectangle's. */
   readonly rectangularity: number;
+  /** #2024: how built-up the stretch of route it stands beside is (`urban-class.ts`). */
+  readonly urban: UrbanClass;
   /**
    * How far its outline stands from the nearest ground street that is neither
    * a service road nor a highway, metres, at most {@link SETBACK_SEARCH_METRES}.
@@ -1223,6 +1255,8 @@ export interface UntaggedCues {
 export interface InferenceRules {
   /** #2023: a garage or a shed. */
   readonly outbuildings: boolean;
+  /** #2024: a barn or a pole building. */
+  readonly barns: boolean;
 }
 
 /** What a footprint is drawn as, and whether that was inferred rather than mapped. */
@@ -1242,7 +1276,12 @@ export interface FootprintKind {
  *   {@link INFERRED_GARAGE_MAX_ASPECT} and a rectangularity of at least
  *   {@link INFERRED_GARAGE_MIN_RECTANGULARITY}, with a house-sized footprint
  *   within {@link INFERRED_GARAGE_HOME_METRES} m, and set farther back from
- *   the street than that house.
+ *   the street than that house;
+ * - **barn** (#2024): on a `rural` stretch, at least {@link INFERRED_BARN_MIN_AREA}
+ *   m² and a rectangularity of {@link INFERRED_BARN_MIN_RECTANGULARITY}, at least
+ *   {@link INFERRED_BARN_MIN_SETBACK_METRES} m back from the street, with a
+ *   house-sized footprint within {@link INFERRED_BARN_HOME_METRES} m that stands
+ *   nearer it — and over {@link POLE_BUILDING_MIN_AREA} m² a **pole building**.
  *
  * Otherwise none, and the footprint is planned by today's rule. The inferred
  * family feeds #1791's table (`building-types.ts`) as a mapped one does.
@@ -1265,6 +1304,23 @@ export function footprintKindOf(
     ) {
       const home = cues.homeSetback(INFERRED_GARAGE_HOME_METRES);
       if (home !== undefined && cues.setback() > home) return { family: 'garage', inferred: true };
+    }
+  }
+  if (
+    rules.barns &&
+    cues.urban === 'rural' &&
+    cues.area >= INFERRED_BARN_MIN_AREA &&
+    cues.rectangularity >= INFERRED_BARN_MIN_RECTANGULARITY
+  ) {
+    const setback = cues.setback();
+    if (setback >= INFERRED_BARN_MIN_SETBACK_METRES) {
+      const home = cues.homeSetback(INFERRED_BARN_HOME_METRES);
+      if (home !== undefined && home < setback) {
+        return {
+          family: cues.area > POLE_BUILDING_MIN_AREA ? 'pole-building' : 'barn',
+          inferred: true,
+        };
+      }
     }
   }
   return { family: undefined, inferred: false };
@@ -2068,8 +2124,8 @@ class Untagged {
     this.rules = rules;
   }
 
-  /** The `own`th footprint's cues, its `outer` ring as mapped and its `area`. */
-  cuesOf(own: number, outer: Ring, area: number): UntaggedCues {
+  /** The `own`th footprint's cues, its `outer` ring as mapped, its `area` and its stretch's class. */
+  cuesOf(own: number, outer: Ring, area: number, urban: UrbanClass): UntaggedCues {
     const rectangle = minimumAreaRectangle(outer);
     const streets = (): StreetSetbacks => {
       this.#streets ??= new StreetSetbacks(this.#corridor.streets);
@@ -2079,6 +2135,7 @@ class Untagged {
       area,
       aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
       rectangularity: rectangle.area > 0 ? Math.abs(signedArea(outer)) / rectangle.area : 0,
+      urban,
       setback: () => streets().of(outer),
       homeSetback: (metres) => {
         this.#homes ??= new HomeNeighbours(this.#corridor.buildings, streets());
@@ -4887,7 +4944,10 @@ export function footprintPlans(
   const typed = options.buildingTypes ?? true;
   // #2023: and what an untagged one is inferred to be, while the type is read.
   const untagged = typed
-    ? new Untagged(corridor, { outbuildings: options.inferredOutbuildings ?? true })
+    ? new Untagged(corridor, {
+        outbuildings: options.inferredOutbuildings ?? true,
+        barns: options.inferredBarns ?? true,
+      })
     : undefined;
   for (const [own, building] of corridor.buildings.entries()) {
     const each = measureFootprint(
@@ -5556,6 +5616,7 @@ const FAMILY_USE: Readonly<Record<BuildingFamily, FootprintUse>> = {
   garage: 'residential',
   shed: 'residential',
   barn: 'farmland',
+  'pole-building': 'farmland',
   commercial: 'commercial',
   industrial: 'industrial',
   civic: 'civic',
@@ -5706,7 +5767,7 @@ function measureFootprint(
       : footprintKindOf(
           mappedFamily,
           mappedFamily === undefined
-            ? inference.untagged.cuesOf(inference.own, outer, area)
+            ? inference.untagged.cuesOf(inference.own, outer, area, urbanClass)
             : undefined,
           inference.untagged.rules,
         );
@@ -5859,6 +5920,15 @@ export interface FootprintPlanOptions {
    * as before (`?levers=-inferred-outbuildings`).
    */
   readonly inferredOutbuildings?: boolean;
+  /**
+   * #2024: an untagged footprint on a rural stretch inferred a barn — a
+   * gambrel or a steep-gabled plank barn, by a seeded share — or over
+   * {@link POLE_BUILDING_MIN_AREA} m² a metal pole building
+   * ({@link footprintKindOf}); `true` by default, and only while
+   * `buildingTypes` is on. Off, every untagged footprint is planned as before
+   * (`?levers=-inferred-barns`).
+   */
+  readonly inferredBarns?: boolean;
 }
 
 /**
@@ -5918,6 +5988,7 @@ const TYPED_FEATURES: Partial<Record<BuildingFamily, ArchetypeFeatures>> = {
   garage: OUTBUILDING_FEATURES,
   shed: OUTBUILDING_FEATURES,
   barn: BARN_FEATURES,
+  'pole-building': POLE_BUILDING_FEATURES,
   civic: CIVIC_FEATURES,
 };
 
@@ -5950,10 +6021,12 @@ function planFootprint(
   // #1791: a mapped garage or shed stands on a home's land and is no home — no window, no
   // house feature; a civic block is no house and no shop.
   const outbuilding = family === 'garage' || family === 'shed';
+  // #2024: a pole building has no window, and a plain door, as an outbuilding.
+  const pole = family === 'pole-building';
   const civic = use === 'civic';
   // #1791: a civic block's and a shed's door is plain, so wears no wreath; a garage's is its garage door.
   const doorKind: 'door' | 'plain' | 'none' =
-    civic || family === 'shed' ? 'plain' : family === 'garage' ? 'none' : 'door';
+    civic || family === 'shed' || pole ? 'plain' : family === 'garage' ? 'none' : 'door';
   const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
   const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   const groundAt = (x: number, z: number): number => {
@@ -6008,7 +6081,8 @@ function planFootprint(
     (mappedRoof !== undefined
       ? mappedRoof.roof !== 'flat'
       : pitchedFootprint({
-          area,
+          // #2024: a pole building's low gable, at any size.
+          area: pole ? Math.min(area, FOOTPRINT_GABLE_MAX_AREA) : area,
           rectangularity,
           wallHeight,
           use,
@@ -6058,7 +6132,10 @@ function planFootprint(
         ? GARDEN_APARTMENT_FEATURES
         : family === undefined
           ? SEEDED_FEATURES
-          : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
+          : // #2024: an inferred barn's gambrel on a seeded share only.
+            measured.inferred && family === 'barn'
+            ? INFERRED_BARN_FEATURES
+            : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -6144,7 +6221,8 @@ function planFootprint(
     !part &&
     storeys <= TOWER_STOREYS &&
     share(STREAM_SIDING) < shareOf(features.siding, SIDING_SHARE);
-  const shingled = roof !== 'flat' && share(STREAM_SHINGLE) < SHINGLE_SHARE;
+  // #2024: a pole building's roof is its grey sheet, never shingles.
+  const shingled = roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
   const { least, most } = CLAPBOARD_COURSE_METRES;
   const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
   const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
@@ -6369,7 +6447,7 @@ function planFootprint(
       ? { hipped: { rectangles: roofRectangles, end: -chimneyEnd } }
       : {}),
     // #1791: a mapped garage or shed has no window.
-    ...(outbuilding ? { blind: true } : {}),
+    ...(outbuilding || pole ? { blind: true } : {}),
   };
   // The slope the gutters' downpipe and the dormers are on: the one facing the front.
   // Since #1785 each rectangle's, for a saltbox's front.
@@ -6712,8 +6790,16 @@ function planFootprint(
       : // #1791: a mapped barn's planks, under any roof.
         family === 'barn'
         ? 'planks'
-        : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
-  const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
+        : // #2024: a pole building's metal sheet.
+          pole
+          ? 'corrugated'
+          : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
+  const roofSurface = shingled
+    ? SHINGLE_SURFACE
+    : pole && roof !== 'flat'
+      ? 'slate'
+      : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
   const driveway = drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING;

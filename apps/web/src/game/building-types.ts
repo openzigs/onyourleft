@@ -22,6 +22,11 @@
  * | `industrial`, `warehouse` | `industrial` | corrugated walls under a flat roof |
  * | `church`, `chapel`, `cathedral`, `school`, `civic`, `government`, `townhall`, or any `landmark` | `civic` | a plain civic block, brick or render, flat or a low hip, one central plain door |
  * | none (`yes` and unknown values decode to none) | — | today's rule and #1782's archetypes |
+ * | none, inferred a barn over 250 m² (#2024, `footprint-buildings.ts` §`footprintKindOf`) | `pole-building` | a metal pole building: corrugated walls with no window, a plain door, a low gable in grey |
+ *
+ * An inferred garage, shed or barn (#2023, #2024) is drawn by its row here,
+ * but an inferred barn wears a gambrel on a seeded share only
+ * ({@link INFERRED_BARN_FEATURES}), the steep gable on the rest.
  *
  * A civic block's door and a shed's are plain: the leaf alone in the door's
  * paint, which takes no wreath in the winter lights (#1626's is drawn on a
@@ -49,6 +54,7 @@ export type BuildingFamily =
   | 'garage'
   | 'shed'
   | 'barn'
+  | 'pole-building'
   | 'commercial'
   | 'industrial'
   | 'civic';
@@ -139,4 +145,24 @@ export const CIVIC_FEATURES: ArchetypeFeatures = {
   ...SEEDED_FEATURES,
   hip: 1,
   pitches: [25],
+};
+
+/**
+ * An inferred barn's (#2024): a barn's, but a gambrel on a seeded share of
+ * {@link INFERRED_BARN_GAMBREL_SHARE} only — "a gambrel or steep-gable plank
+ * barn, by a seeded share" — and the steep gable on the rest.
+ */
+export const INFERRED_BARN_GAMBREL_SHARE = 0.5;
+
+/** @see INFERRED_BARN_GAMBREL_SHARE */
+export const INFERRED_BARN_FEATURES: ArchetypeFeatures = {
+  ...BARN_FEATURES,
+  roofVariant: ['gambrel', INFERRED_BARN_GAMBREL_SHARE],
+};
+
+/** A pole building's (#2024): a low gable, about a 4-in-12 pitch, never a hip or a variant. */
+export const POLE_BUILDING_FEATURES: ArchetypeFeatures = {
+  ...SEEDED_FEATURES,
+  hip: 0,
+  pitches: [20],
 };
