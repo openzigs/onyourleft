@@ -54,12 +54,12 @@
    },
    "light": {
     "canvas": "#ffffff",
-    "surface": "#eceef1",
-    "surfaceRaised": "#dcdee1",
-    "surfaceOverlay": "#cdd0d2",
+    "surface": "#ebeef0",
+    "surfaceRaised": "#dbdde0",
+    "surfaceOverlay": "#cbcdd0",
     "ink": "#131415",
-    "inkMuted": "#535456",
-    "border": "#6d6e70",
+    "inkMuted": "#515355",
+    "border": "#6a6c6e",
     "accent": "#405e00",
     "accentHover": "#2c4300",
     "accentInk": "#ffffff",
@@ -117,7 +117,7 @@
     "min": 4.5,
     "where": "body text on a panel",
     "dark": 12.954746701990656,
-    "light": 15.867621685800149
+    "light": 15.827167358208062
    },
    {
     "f": "inkMuted",
@@ -125,7 +125,7 @@
     "min": 4.5,
     "where": "helper and empty-state text on the page",
     "dark": 9.29009153312293,
-    "light": 7.580388358540904
+    "light": 7.725291260159716
    },
    {
     "f": "inkMuted",
@@ -133,7 +133,7 @@
     "min": 4.5,
     "where": "helper and empty-state text on a panel",
     "dark": 7.442649542993486,
-    "light": 6.521502825644816
+    "light": 6.629220278724854
    },
    {
     "f": "border",
@@ -141,7 +141,7 @@
     "min": 3,
     "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)",
     "dark": 6.315770964878151,
-    "light": 5.103795954731641
+    "light": 5.272385355164865
    },
    {
     "f": "border",
@@ -149,7 +149,7 @@
     "min": 3,
     "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)",
     "dark": 5.059806969372291,
-    "light": 4.3908594343712055
+    "light": 4.524334777377475
    },
    {
     "f": "accentInk",
@@ -189,7 +189,7 @@
     "min": 4.5,
     "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)",
     "dark": 12.714024152584047,
-    "light": 9.459148881085838
+    "light": 9.435032884677868
    },
    {
     "f": "accentHover",
@@ -285,7 +285,7 @@
     "min": 4.5,
     "where": "link text and the active navigation item in the header",
     "dark": 11.07193930052317,
-    "light": 6.408675039403396
+    "light": 6.392336192624154
    },
    {
     "f": "focus",
@@ -301,7 +301,7 @@
     "min": 3,
     "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)",
     "dark": 11.07193930052317,
-    "light": 15.867621685800149
+    "light": 15.827167358208062
    },
    {
     "f": "ink",
@@ -309,7 +309,7 @@
     "min": 4.5,
     "where": "body text on a card resting on a panel",
     "dark": 10.478027347605925,
-    "light": 13.682730094139082
+    "light": 13.552805410823897
    },
    {
     "f": "inkMuted",
@@ -317,7 +317,7 @@
     "min": 4.5,
     "where": "a label on a card resting on a panel",
     "dark": 6.019746062510758,
-    "light": 5.6235247309504865
+    "light": 5.676602163207164
    },
    {
     "f": "border",
@@ -325,7 +325,7 @@
     "min": 3,
     "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)",
     "dark": 4.09246101203532,
-    "light": 3.7862602040461883
+    "light": 3.8741884421548494
    },
    {
     "f": "accent",
@@ -333,7 +333,7 @@
     "min": 4.5,
     "where": "link text on a raised card",
     "dark": 8.955179553150808,
-    "light": 5.526232762637295
+    "light": 5.473758290315488
    },
    {
     "f": "focus",
@@ -341,7 +341,7 @@
     "min": 3,
     "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)",
     "dark": 8.955179553150808,
-    "light": 13.682730094139082
+    "light": 13.552805410823897
    },
    {
     "f": "ink",
@@ -349,7 +349,7 @@
     "min": 4.5,
     "where": "the wordmark and the navigation, on the app header",
     "dark": 8.44810232456071,
-    "light": 11.899736185884652
+    "light": 11.578141008878761
    },
    {
     "f": "inkMuted",
@@ -357,7 +357,7 @@
     "min": 4.5,
     "where": "secondary text on the app header",
     "dark": 4.853531014650581,
-    "light": 4.890724312523924
+    "light": 4.849512577257852
    },
    {
     "f": "border",
@@ -365,7 +365,7 @@
     "min": 3,
     "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
     "dark": 3.2996219843660946,
-    "light": 3.2928733702466806
+    "light": 3.3097132821233597
    },
    {
     "f": "accent",
@@ -373,7 +373,7 @@
     "min": 4.5,
     "where": "a navigation link on the app header",
     "dark": 7.220278272810365,
-    "light": 4.806110441756397
+    "light": 4.676223365767275
    },
    {
     "f": "accent",
@@ -381,7 +381,7 @@
     "min": 3,
     "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
     "dark": 7.220278272810365,
-    "light": 4.806110441756397
+    "light": 4.676223365767275
    },
    {
     "f": "focus",
@@ -389,7 +389,7 @@
     "min": 3,
     "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)",
     "dark": 7.220278272810365,
-    "light": 11.899736185884652
+    "light": 11.578141008878761
    },
    {
     "f": "infoInk",
@@ -525,7 +525,7 @@
     "min": 4.5,
     "where": "link text on surface",
     "dark": 9.525051833698985,
-    "light": 6.704096584430742
+    "light": 6.687004563660026
    },
    {
     "f": "link",
@@ -533,7 +533,7 @@
     "min": 4.5,
     "where": "link text on surfaceRaised",
     "dark": 7.704029719510134,
-    "light": 5.7809762487528005
+    "light": 5.7260828537063295
    },
    {
     "f": "link",
@@ -541,7 +541,7 @@
     "min": 4.5,
     "where": "link text on surfaceOverlay",
     "dark": 6.211515700686657,
-    "light": 5.027658353539409
+    "light": 4.891783855745957
    },
    {
     "f": "link",
@@ -589,7 +589,7 @@
     "min": 4.5,
     "where": "a visited link on surface",
     "dark": 7.55577545775878,
-    "light": 7.255572135706473
+    "light": 7.237074134061491
    },
    {
     "f": "linkVisited",
@@ -597,7 +597,7 @@
     "min": 4.5,
     "where": "a visited link on surfaceRaised",
     "dark": 6.111244295235876,
-    "light": 6.256516394027059
+    "light": 6.197107496419818
    },
    {
     "f": "linkVisited",
@@ -605,7 +605,7 @@
     "min": 4.5,
     "where": "a visited link on surfaceOverlay",
     "dark": 4.927303148176733,
-    "light": 5.441230954593994
+    "light": 5.294179490205375
    },
    {
     "f": "linkVisited",
@@ -653,7 +653,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surface",
     "dark": 12.09249703465309,
-    "light": 9.459148881085838
+    "light": 9.435032884677868
    },
    {
     "f": "linkHover",
@@ -661,7 +661,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surfaceRaised",
     "dark": 9.780624626992418,
-    "light": 8.156671719492703
+    "light": 8.079219852594083
    },
    {
     "f": "linkHover",
@@ -669,7 +669,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surfaceOverlay",
     "dark": 7.885808550197151,
-    "light": 7.093777407653854
+    "light": 6.902065207869046
    },
    {
     "f": "linkHover",
@@ -717,7 +717,7 @@
     "min": 4.5,
     "where": "a link being pressed on surface",
     "dark": 13.562201992545564,
-    "light": 12.977425026126864
+    "light": 12.944339223244476
    },
    {
     "f": "linkActive",
@@ -725,7 +725,7 @@
     "min": 4.5,
     "where": "a link being pressed on surfaceRaised",
     "dark": 10.969347887736916,
-    "light": 11.190498958537884
+    "light": 11.084239314203474
    },
    {
     "f": "linkActive",
@@ -733,7 +733,7 @@
     "min": 4.5,
     "where": "a link being pressed on surfaceOverlay",
     "dark": 8.844238549394426,
-    "light": 9.732267206824302
+    "light": 9.46924875446904
    },
    {
     "f": "linkActive",
@@ -781,7 +781,7 @@
     "min": 4.5,
     "where": "the line under a hero title, on the sky",
     "dark": 7.938756086556915,
-    "light": 5.273227125327857
+    "light": 5.374027490060373
    },
    {
     "f": "ink",
@@ -845,7 +845,7 @@
     "min": 3,
     "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 5.293335922511307,
-    "light": 4.18617580237671
+    "light": 4.175503193045536
    },
    {
     "f": "bandEndurance",
@@ -853,7 +853,7 @@
     "min": 3,
     "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 3.1938584852619143,
-    "light": 8.01265518909483
+    "light": 7.992227012502229
    },
    {
     "f": "bandTempo",
@@ -861,7 +861,7 @@
     "min": 3,
     "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.824597754419873,
-    "light": 4.543759674048606
+    "light": 4.532175408555424
    },
    {
     "f": "bandThreshold",
@@ -869,7 +869,7 @@
     "min": 3,
     "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 11.265836483790185,
-    "light": 3.290897487993837
+    "light": 3.28250738091368
    },
    {
     "f": "bandVo2",
@@ -877,7 +877,7 @@
     "min": 3,
     "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.58067775369248,
-    "light": 5.642795111583525
+    "light": 5.628408867286857
    },
    {
     "f": "bandAnaerobic",
@@ -885,7 +885,7 @@
     "min": 3,
     "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 3.585456595713449,
-    "light": 9.015556425484107
+    "light": 8.992571363180291
    },
    {
     "f": "bandSprint",
@@ -893,7 +893,7 @@
     "min": 3,
     "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.439445100722518,
-    "light": 5.6623870319512015
+    "light": 5.647950838268267
    }
   ],
   "numerals": [
@@ -903,7 +903,7 @@
     "where": "a primary metric numeral on a metric card",
     "min": 7,
     "dark": 10.478027347605925,
-    "light": 13.682730094139082
+    "light": 13.552805410823897
    },
    {
     "f": "ink",
@@ -911,7 +911,7 @@
     "where": "a primary metric numeral on a panel",
     "min": 7,
     "dark": 12.954746701990656,
-    "light": 15.867621685800149
+    "light": 15.827167358208062
    },
    {
     "f": "hudInk",
@@ -950,20 +950,20 @@
      {
       "from": "canvas",
       "to": "surface",
-      "ratio": 1.162368331534287
+      "ratio": 1.165339351439638
      },
      {
       "from": "surface",
       "to": "surfaceRaised",
-      "ratio": 1.1596824300873225
+      "ratio": 1.1678148455940904
      },
      {
       "from": "surfaceRaised",
       "to": "surfaceOverlay",
-      "ratio": 1.1498347425860918
+      "ratio": 1.170551075550976
      }
     ],
-    "raisedOnCanvas": 1.3479781313702284
+    "raisedOnCanvas": 1.360900594766198
    }
   ],
   "zones": [
@@ -1111,13 +1111,13 @@
        1.5921830094996945
       ],
       "onSurface": [
-       4.18617580237671,
-       8.01265518909483,
-       4.543759674048606,
-       3.290897487993837,
-       5.642795111583525,
-       9.015556425484107,
-       5.6623870319512015
+       4.175503193045536,
+       7.992227012502229,
+       4.532175408555424,
+       3.28250738091368,
+       5.628408867286857,
+       8.992571363180291,
+       5.647950838268267
       ]
      },
      {
@@ -1140,13 +1140,13 @@
        1.4331107028216032
       ],
       "onSurface": [
-       4.205180316346401,
-       8.48619833745429,
-       4.819194862743136,
-       3.1916608276987275,
-       5.200978928971452,
-       7.893528232068744,
-       5.507968237574001
+       4.1944592552151345,
+       8.464562867794585,
+       4.806908378254917,
+       3.1835237233964424,
+       5.187719090190417,
+       7.873403768347551,
+       5.493925732915031
       ]
      },
      {
@@ -1169,13 +1169,13 @@
        1.9541590738865922
       ],
       "onSurface": [
-       4.136981910462302,
-       7.2128131738885175,
-       4.221341773938874,
-       3.4480165020404208,
-       6.532864099864059,
-       11.5127051387916,
-       5.8913858613844505
+       4.1264347204194385,
+       7.194424185748087,
+       4.210579509348591,
+       3.439225821755845,
+       6.516208634436182,
+       11.48335362320987,
+       5.876365837695512
       ]
      },
      {
@@ -1198,13 +1198,13 @@
        1.492614155274934
       ],
       "onSurface": [
-       4.196513873774711,
-       7.1138102053407035,
-       4.516239352598043,
-       3.332579840231433,
-       5.728149603149269,
-       8.239202033364446,
-       5.519981171454732
+       4.185814907643803,
+       7.095673624183596,
+       4.504725249862799,
+       3.32408346445105,
+       5.713545748511768,
+       8.218196278075144,
+       5.505908039952484
       ]
      }
     ]
@@ -1266,12 +1266,12 @@
    },
    "light": {
     "canvas": "#f9fbff",
-    "surface": "#e9ebf4",
-    "surfaceRaised": "#dadde5",
-    "surfaceOverlay": "#ccced7",
+    "surface": "#e7eaf2",
+    "surfaceRaised": "#d7dae2",
+    "surfaceOverlay": "#c8cbd3",
     "ink": "#141619",
-    "inkMuted": "#51535b",
-    "border": "#6a6d74",
+    "inkMuted": "#4f5159",
+    "border": "#686b72",
     "accent": "#5031ba",
     "accentHover": "#3b2190",
     "accentInk": "#ffffff",
@@ -1329,7 +1329,7 @@
     "min": 4.5,
     "where": "body text on a panel",
     "dark": 12.396780329037203,
-    "light": 15.238407141409867
+    "light": 15.061187177049597
    },
    {
     "f": "inkMuted",
@@ -1337,7 +1337,7 @@
     "min": 4.5,
     "where": "helper and empty-state text on the page",
     "dark": 10.042367282231947,
-    "light": 7.402878260019135
+    "light": 7.638762307335604
    },
    {
     "f": "inkMuted",
@@ -1345,7 +1345,7 @@
     "min": 4.5,
     "where": "helper and empty-state text on a panel",
     "dark": 7.9623436402113965,
-    "light": 6.447361688989969
+    "light": 6.575428446988027
    },
    {
     "f": "border",
@@ -1353,7 +1353,7 @@
     "min": 3,
     "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)",
     "dark": 6.805457638092913,
-    "light": 5.002076641177041
+    "light": 5.15184707728385
    },
    {
     "f": "border",
@@ -1361,7 +1361,7 @@
     "min": 3,
     "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)",
     "dark": 5.395878364185249,
-    "light": 4.3564403153690545
+    "light": 4.434697725045478
    },
    {
     "f": "accentInk",
@@ -1401,7 +1401,7 @@
     "min": 4.5,
     "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)",
     "dark": 9.593214889213277,
-    "light": 9.774180223926237
+    "light": 9.660508246608613
    },
    {
     "f": "accentHover",
@@ -1497,7 +1497,7 @@
     "min": 4.5,
     "where": "link text and the active navigation item in the header",
     "dark": 7.932389450524515,
-    "light": 7.091672114792203
+    "light": 7.009197229604044
    },
    {
     "f": "focus",
@@ -1513,7 +1513,7 @@
     "min": 3,
     "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)",
     "dark": 12.396041041536312,
-    "light": 15.238407141409867
+    "light": 15.061187177049597
    },
    {
     "f": "ink",
@@ -1521,7 +1521,7 @@
     "min": 4.5,
     "where": "body text on a card resting on a panel",
     "dark": 9.738729631235532,
-    "light": 13.340082071175274
+    "light": 12.961226958748536
    },
    {
     "f": "inkMuted",
@@ -1529,7 +1529,7 @@
     "min": 4.5,
     "where": "a label on a card resting on a panel",
     "dark": 6.255100912079235,
-    "light": 5.644181394783226
+    "light": 5.658625674760286
    },
    {
     "f": "border",
@@ -1537,7 +1537,7 @@
     "min": 3,
     "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)",
     "dark": 4.238923262094685,
-    "light": 3.8137366199695206
+    "light": 3.8163740369250294
    },
    {
     "f": "accent",
@@ -1545,7 +1545,7 @@
     "min": 4.5,
     "where": "link text on a raised card",
     "dark": 6.231569337997859,
-    "light": 6.208226828125051
+    "light": 6.031914683987486
    },
    {
     "f": "focus",
@@ -1553,7 +1553,7 @@
     "min": 3,
     "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)",
     "dark": 9.738148857768566,
-    "light": 13.340082071175274
+    "light": 12.961226958748536
    },
    {
     "f": "ink",
@@ -1561,7 +1561,7 @@
     "min": 4.5,
     "where": "the wordmark and the navigation, on the app header",
     "dark": 7.607897706015596,
-    "light": 11.546593401992158
+    "light": 11.168205483752887
    },
    {
     "f": "inkMuted",
@@ -1569,7 +1569,7 @@
     "min": 4.5,
     "where": "secondary text on the app header",
     "dark": 4.886486192949815,
-    "light": 4.8853573242603945
+    "light": 4.875826531893754
    },
    {
     "f": "border",
@@ -1577,7 +1577,7 @@
     "min": 3,
     "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
     "dark": 3.311447774279662,
-    "light": 3.30100413611596
+    "light": 3.288427058864927
    },
    {
     "f": "accent",
@@ -1585,7 +1585,7 @@
     "min": 4.5,
     "where": "a navigation link on the app header",
     "dark": 4.868103322159518,
-    "light": 5.373570458504982
+    "light": 5.197475737878989
    },
    {
     "f": "accent",
@@ -1593,7 +1593,7 @@
     "min": 3,
     "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
     "dark": 4.868103322159518,
-    "light": 5.373570458504982
+    "light": 5.197475737878989
    },
    {
     "f": "focus",
@@ -1601,7 +1601,7 @@
     "min": 3,
     "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)",
     "dark": 7.607444005656888,
-    "light": 11.546593401992158
+    "light": 11.168205483752887
    },
    {
     "f": "infoInk",
@@ -1737,7 +1737,7 @@
     "min": 4.5,
     "where": "link text on surface",
     "dark": 7.932389450524515,
-    "light": 7.091672114792203
+    "light": 7.009197229604044
    },
    {
     "f": "link",
@@ -1745,7 +1745,7 @@
     "min": 4.5,
     "where": "link text on surfaceRaised",
     "dark": 6.231569337997859,
-    "light": 6.208226828125051
+    "light": 6.031914683987486
    },
    {
     "f": "link",
@@ -1753,7 +1753,7 @@
     "min": 4.5,
     "where": "link text on surfaceOverlay",
     "dark": 4.868103322159518,
-    "light": 5.373570458504982
+    "light": 5.197475737878989
    },
    {
     "f": "link",
@@ -1801,7 +1801,7 @@
     "min": 4.5,
     "where": "a visited link on surface",
     "dark": 7.939189311656105,
-    "light": 7.374433670620465
+    "light": 7.288670318837253
    },
    {
     "f": "linkVisited",
@@ -1809,7 +1809,7 @@
     "min": 4.5,
     "where": "a visited link on surfaceRaised",
     "dark": 6.2369112096236226,
-    "light": 6.455763353847071
+    "light": 6.27242123209904
    },
    {
     "f": "linkVisited",
@@ -1817,7 +1817,7 @@
     "min": 4.5,
     "where": "a visited link on surfaceOverlay",
     "dark": 4.872276393435379,
-    "light": 5.587827282368895
+    "light": 5.4047112533164325
    },
    {
     "f": "linkVisited",
@@ -1865,7 +1865,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surface",
     "dark": 9.855101503521876,
-    "light": 9.774180223926237
+    "light": 9.660508246608613
    },
    {
     "f": "linkHover",
@@ -1873,7 +1873,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surfaceRaised",
     "dark": 7.7420238548855815,
-    "light": 8.556561401441247
+    "light": 8.313557121974794
    },
    {
     "f": "linkHover",
@@ -1881,7 +1881,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surfaceOverlay",
     "dark": 6.048070719263766,
-    "light": 7.4061864758016425
+    "light": 7.163481862838747
    },
    {
     "f": "linkHover",
@@ -1929,7 +1929,7 @@
     "min": 4.5,
     "where": "a link being pressed on surface",
     "dark": 11.532382396513446,
-    "light": 12.983026936226327
+    "light": 12.832036642452513
    },
    {
     "f": "linkActive",
@@ -1937,7 +1937,7 @@
     "min": 4.5,
     "where": "a link being pressed on surfaceRaised",
     "dark": 9.059671235812498,
-    "light": 11.365665929143457
+    "light": 11.042883758807752
    },
    {
     "f": "linkActive",
@@ -1945,7 +1945,7 @@
     "min": 4.5,
     "where": "a link being pressed on surfaceOverlay",
     "dark": 7.07741713982145,
-    "light": 9.837624875656632
+    "light": 9.51524075182697
    },
    {
     "f": "linkActive",
@@ -1993,7 +1993,7 @@
     "min": 4.5,
     "where": "the line under a hero title, on the sky",
     "dark": 8.71070150132034,
-    "light": 5.3100588982990455
+    "light": 5.479257707252088
    },
    {
     "f": "ink",
@@ -2057,7 +2057,7 @@
     "min": 3,
     "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 5.15177032712661,
-    "light": 4.090672115909223
+    "light": 4.0430983268731655
    },
    {
     "f": "bandEndurance",
@@ -2065,7 +2065,7 @@
     "min": 3,
     "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 3.226115457553079,
-    "light": 7.8298539535335
+    "light": 7.738794144872754
    },
    {
     "f": "bandTempo",
@@ -2073,7 +2073,7 @@
     "min": 3,
     "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.64207991340079,
-    "light": 4.440098045923103
+    "light": 4.388460495478851
    },
    {
     "f": "bandThreshold",
@@ -2081,7 +2081,7 @@
     "min": 3,
     "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 10.96454163443973,
-    "light": 3.2158187391005
+    "light": 3.178419339212845
    },
    {
     "f": "bandVo2",
@@ -2089,7 +2089,7 @@
     "min": 3,
     "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.40468333771853,
-    "light": 5.514060017651021
+    "light": 5.449932480518022
    },
    {
     "f": "bandAnaerobic",
@@ -2097,7 +2097,7 @@
     "min": 3,
     "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 3.4895667249158002,
-    "light": 8.809874936020494
+    "light": 8.707417657665117
    },
    {
     "f": "bandSprint",
@@ -2105,7 +2105,7 @@
     "min": 3,
     "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.2672278273478925,
-    "light": 5.533204966675776
+    "light": 5.468854777191232
    }
   ],
   "numerals": [
@@ -2115,7 +2115,7 @@
     "where": "a primary metric numeral on a metric card",
     "min": 7,
     "dark": 9.738729631235532,
-    "light": 13.340082071175274
+    "light": 12.961226958748536
    },
    {
     "f": "ink",
@@ -2123,7 +2123,7 @@
     "where": "a primary metric numeral on a panel",
     "min": 7,
     "dark": 12.396780329037203,
-    "light": 15.238407141409867
+    "light": 15.061187177049597
    },
    {
     "f": "hudInk",
@@ -2162,20 +2162,20 @@
      {
       "from": "canvas",
       "to": "surface",
-      "ratio": 1.1482027249473041
+      "ratio": 1.161713243314913
      },
      {
       "from": "surface",
       "to": "surfaceRaised",
-      "ratio": 1.1423023531719059
+      "ratio": 1.1620186287135135
      },
      {
       "from": "surfaceRaised",
       "to": "surfaceOverlay",
-      "ratio": 1.155326216724119
+      "ratio": 1.160546963216613
      }
     ],
-    "raisedOnCanvas": 1.3115946746257001
+    "raisedOnCanvas": 1.3499324299551236
    }
   ],
   "zones": [
@@ -2323,13 +2323,13 @@
        1.5921830094996945
       ],
       "onSurface": [
-       4.090672115909223,
-       7.8298539535335,
-       4.440098045923103,
-       3.2158187391005,
-       5.514060017651021,
-       8.809874936020494,
-       5.533204966675776
+       4.0430983268731655,
+       7.738794144872754,
+       4.388460495478851,
+       3.178419339212845,
+       5.449932480518022,
+       8.707417657665117,
+       5.468854777191232
       ]
      },
      {
@@ -2352,13 +2352,13 @@
        1.4331107028216032
       ],
       "onSurface": [
-       4.109243059663683,
-       8.29259365777003,
-       4.709249438345088,
-       3.118846070414516,
-       5.082323458106018,
-       7.71344476663718,
-       5.382309092696357
+       4.061453293855266,
+       8.196152268663777,
+       4.6544817050851455,
+       3.0825744454136306,
+       5.023216940360778,
+       7.6237387761125115,
+       5.319713795383978
       ]
      },
      {
@@ -2381,13 +2381,13 @@
        1.9541590738865922
       ],
       "onSurface": [
-       4.042600536637977,
-       7.048259585977442,
-       4.125035808713649,
-       3.369353229762503,
-       6.383822914261225,
-       11.25005353650019,
-       5.756979401950711
+       3.9955858115175986,
+       6.966289580776932,
+       4.077062376043085,
+       3.3301682510600354,
+       6.309580189359009,
+       11.119217415094047,
+       5.690026755590186
       ]
      },
      {
@@ -2410,13 +2410,13 @@
        1.492614155274934
       ],
       "onSurface": [
-       4.100774333875337,
-       6.951515277580063,
-       4.413205574872375,
-       3.2565501474486713,
-       5.597467226306081,
-       8.051232343393476,
-       5.394047962723809
+       4.053083057841373,
+       6.8706703914767875,
+       4.361880779082658,
+       3.218677048527461,
+       5.532369678173372,
+       7.957597943438702,
+       5.331316144441188
       ]
      }
     ]
@@ -2478,12 +2478,12 @@
    },
    "light": {
     "canvas": "#ffffff",
-    "surface": "#f1eeec",
-    "surfaceRaised": "#e1dfdd",
-    "surfaceOverlay": "#d3d0cf",
+    "surface": "#f0edeb",
+    "surfaceRaised": "#dfdcda",
+    "surfaceOverlay": "#cfcccb",
     "ink": "#0e0d0c",
-    "inkMuted": "#575553",
-    "border": "#716e6d",
+    "inkMuted": "#555251",
+    "border": "#6e6b6a",
     "accent": "#111111",
     "accentHover": "#000000",
     "accentInk": "#ffffff",
@@ -2541,7 +2541,7 @@
     "min": 4.5,
     "where": "body text on a panel",
     "dark": 15.835997196871118,
-    "light": 16.810300350947745
+    "light": 16.659743327975157
    },
    {
     "f": "inkMuted",
@@ -2549,7 +2549,7 @@
     "min": 4.5,
     "where": "helper and empty-state text on the page",
     "dark": 8.18406335291829,
-    "light": 7.421664720990676
+    "light": 7.743384203328113
    },
    {
     "f": "inkMuted",
@@ -2557,7 +2557,7 @@
     "min": 4.5,
     "where": "helper and empty-state text on a panel",
     "dark": 6.826628014297436,
-    "light": 6.425463313897821
+    "light": 6.64395616762249
    },
    {
     "f": "border",
@@ -2565,7 +2565,7 @@
     "min": 3,
     "where": "the edge of a control on the page (WCAG 2.2 SC 1.4.11)",
     "dark": 5.636513308307538,
-    "light": 5.056172156878941
+    "light": 5.284083852644021
    },
    {
     "f": "border",
@@ -2573,7 +2573,7 @@
     "min": 3,
     "where": "the edge of a control on a panel (WCAG 2.2 SC 1.4.11)",
     "dark": 4.701622897351088,
-    "light": 4.377488060177499
+    "light": 4.533834377986764
    },
    {
     "f": "accentInk",
@@ -2613,7 +2613,7 @@
     "min": 4.5,
     "where": "a secondary button, an off toggle or a segment under a pointer or a press (#688)",
     "dark": 17.516871768731704,
-    "light": 18.18119447112973
+    "light": 18.018359396412897
    },
    {
     "f": "accentHover",
@@ -2709,7 +2709,7 @@
     "min": 4.5,
     "where": "link text and the active navigation item in the header",
     "dark": 16.208642656414938,
-    "light": 16.348409695595247
+    "light": 16.201989474497516
    },
    {
     "f": "focus",
@@ -2725,7 +2725,7 @@
     "min": 3,
     "where": "the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)",
     "dark": 17.516871768731704,
-    "light": 18.18119447112973
+    "light": 18.018359396412897
    },
    {
     "f": "ink",
@@ -2733,7 +2733,7 @@
     "min": 4.5,
     "where": "body text on a card resting on a panel",
     "dark": 13.264447469853328,
-    "light": 14.609273840371895
+    "light": 14.22703903248399
    },
    {
     "f": "inkMuted",
@@ -2741,7 +2741,7 @@
     "min": 4.5,
     "where": "a label on a card resting on a panel",
     "dark": 5.718076832557703,
-    "light": 5.584156805306836
+    "light": 5.673786316272523
    },
    {
     "f": "border",
@@ -2749,7 +2749,7 @@
     "min": 3,
     "where": "the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)",
     "dark": 3.938143532716405,
-    "light": 3.804329516366191
+    "light": 3.871790662832213
    },
    {
     "f": "accent",
@@ -2757,7 +2757,7 @@
     "min": 4.5,
     "where": "link text on a raised card",
     "dark": 13.576580394704754,
-    "light": 14.207860009120923
+    "light": 13.836127731362048
    },
    {
     "f": "focus",
@@ -2765,7 +2765,7 @@
     "min": 3,
     "where": "the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)",
     "dark": 14.672370961167292,
-    "light": 15.800672398980348
+    "light": 15.387266021297565
    },
    {
     "f": "ink",
@@ -2773,7 +2773,7 @@
     "min": 4.5,
     "where": "the wordmark and the navigation, on the app header",
     "dark": 11.158100766277748,
-    "light": 12.660639836156161
+    "light": 12.160857106366935
    },
    {
     "f": "inkMuted",
@@ -2781,7 +2781,7 @@
     "min": 4.5,
     "where": "secondary text on the app header",
     "dark": 4.810066731539678,
-    "light": 4.839323218463987
+    "light": 4.8497866974786366
    },
    {
     "f": "border",
@@ -2789,7 +2789,7 @@
     "min": 3,
     "where": "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
     "dark": 3.3127804584385427,
-    "light": 3.2968952701583696
+    "light": 3.309493485535726
    },
    {
     "f": "accent",
@@ -2797,7 +2797,7 @@
     "min": 4.5,
     "where": "a navigation link on the app header",
     "dark": 11.420668101696787,
-    "light": 12.312767929704801
+    "light": 11.826717552567038
    },
    {
     "f": "accent",
@@ -2805,7 +2805,7 @@
     "min": 3,
     "where": "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
     "dark": 11.420668101696787,
-    "light": 12.312767929704801
+    "light": 11.826717552567038
    },
    {
     "f": "focus",
@@ -2813,7 +2813,7 @@
     "min": 3,
     "where": "the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)",
     "dark": 12.342451054745851,
-    "light": 13.693125654183186
+    "light": 13.152585222786449
    },
    {
     "f": "infoInk",
@@ -2949,7 +2949,7 @@
     "min": 4.5,
     "where": "link text on surface",
     "dark": 16.208642656414938,
-    "light": 16.348409695595247
+    "light": 16.201989474497516
    },
    {
     "f": "link",
@@ -2957,7 +2957,7 @@
     "min": 4.5,
     "where": "link text on surfaceRaised",
     "dark": 13.576580394704754,
-    "light": 14.207860009120923
+    "light": 13.836127731362048
    },
    {
     "f": "link",
@@ -2965,7 +2965,7 @@
     "min": 4.5,
     "where": "link text on surfaceOverlay",
     "dark": 11.420668101696787,
-    "light": 12.312767929704801
+    "light": 11.826717552567038
    },
    {
     "f": "link",
@@ -3013,7 +3013,7 @@
     "min": 4.5,
     "where": "a visited link on surface",
     "dark": 9.239851620420222,
-    "light": 9.12080828482637
+    "light": 9.039120170170538
    },
    {
     "f": "linkVisited",
@@ -3021,7 +3021,7 @@
     "min": 4.5,
     "where": "a visited link on surfaceRaised",
     "dark": 7.739425874141916,
-    "light": 7.926591619229977
+    "light": 7.719201487599373
    },
    {
     "f": "linkVisited",
@@ -3029,7 +3029,7 @@
     "min": 4.5,
     "where": "a visited link on surfaceOverlay",
     "dark": 6.510432792099379,
-    "light": 6.869316210778204
+    "light": 6.5981477981199665
    },
    {
     "f": "linkVisited",
@@ -3077,7 +3077,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surface",
     "dark": 17.516871768731704,
-    "light": 18.18119447112973
+    "light": 18.018359396412897
    },
    {
     "f": "linkHover",
@@ -3085,7 +3085,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surfaceRaised",
     "dark": 14.672370961167292,
-    "light": 15.800672398980348
+    "light": 15.387266021297565
    },
    {
     "f": "linkHover",
@@ -3093,7 +3093,7 @@
     "min": 4.5,
     "where": "a link under a pointer or focused from the keyboard on surfaceOverlay",
     "dark": 12.342451054745851,
-    "light": 13.693125654183186
+    "light": 13.152585222786449
    },
    {
     "f": "linkHover",
@@ -3141,7 +3141,7 @@
     "min": 4.5,
     "where": "a link being pressed on surface",
     "dark": 12.409815480887987,
-    "light": 11.426544683186421
+    "light": 11.324205848397735
    },
    {
     "f": "linkActive",
@@ -3149,7 +3149,7 @@
     "min": 4.5,
     "where": "a link being pressed on surfaceRaised",
     "dark": 10.394630884964725,
-    "light": 9.930430559886124
+    "light": 9.670612292477589
    },
    {
     "f": "linkActive",
@@ -3157,7 +3157,7 @@
     "min": 4.5,
     "where": "a link being pressed on surfaceOverlay",
     "dark": 8.744000766432357,
-    "light": 8.60587638444022
+    "light": 8.266156714083497
    },
    {
     "f": "linkActive",
@@ -3205,7 +3205,7 @@
     "min": 4.5,
     "where": "the line under a hero title, on the sky",
     "dark": 6.2160243834662205,
-    "light": 5.139491825982523
+    "light": 5.3622820909558335
    },
    {
     "f": "ink",
@@ -3269,7 +3269,7 @@
     "min": 3,
     "where": "a bandRecovery block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 6.169327291846057,
-    "light": 4.212737024593157
+    "light": 4.175006756141802
    },
    {
     "f": "bandEndurance",
@@ -3277,7 +3277,7 @@
     "min": 3,
     "where": "a bandEndurance block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 3.566540700513267,
-    "light": 8.06349536520508
+    "light": 7.99127679494794
    },
    {
     "f": "bandTempo",
@@ -3285,7 +3285,7 @@
     "min": 3,
     "where": "a bandTempo block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 8.008485817236918,
-    "light": 4.572589760528015
+    "light": 4.531636565924253
    },
    {
     "f": "bandThreshold",
@@ -3293,7 +3293,7 @@
     "min": 3,
     "where": "a bandThreshold block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 13.205502791531215,
-    "light": 3.3003224625989462
+    "light": 3.270763994609381
    },
    {
     "f": "bandVo2",
@@ -3301,7 +3301,7 @@
     "min": 3,
     "where": "a bandVo2 block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 7.674700459928458,
-    "light": 5.678598561308583
+    "light": 5.627739690485441
    },
    {
     "f": "bandAnaerobic",
@@ -3309,7 +3309,7 @@
     "min": 3,
     "where": "a bandAnaerobic block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 4.166712657144237,
-    "light": 9.084902309920762
+    "light": 9.003535777662382
    },
    {
     "f": "bandSprint",
@@ -3317,7 +3317,7 @@
     "min": 3,
     "where": "a bandSprint block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)",
     "dark": 7.527633907780943,
-    "light": 5.675287319994052
+    "light": 5.624458105430719
    }
   ],
   "numerals": [
@@ -3327,7 +3327,7 @@
     "where": "a primary metric numeral on a metric card",
     "min": 7,
     "dark": 13.264447469853328,
-    "light": 14.609273840371895
+    "light": 14.22703903248399
    },
    {
     "f": "ink",
@@ -3335,7 +3335,7 @@
     "where": "a primary metric numeral on a panel",
     "min": 7,
     "dark": 15.835997196871118,
-    "light": 16.810300350947745
+    "light": 16.659743327975157
    },
    {
     "f": "hudInk",
@@ -3374,20 +3374,20 @@
      {
       "from": "canvas",
       "to": "surface",
-      "ratio": 1.1550396225807003
+      "ratio": 1.1654779182715542
      },
      {
       "from": "surface",
       "to": "surfaceRaised",
-      "ratio": 1.1506595423308064
+      "ratio": 1.170991609001471
      },
      {
       "from": "surfaceRaised",
       "to": "surfaceOverlay",
-      "ratio": 1.1539127587099383
+      "ratio": 1.1699043009916863
      }
     ],
-    "raisedOnCanvas": 1.329057363492656
+    "raisedOnCanvas": 1.364764862772492
    }
   ],
   "zones": [
@@ -3535,13 +3535,13 @@
        1.6007827970074096
       ],
       "onSurface": [
-       4.212737024593157,
-       8.06349536520508,
-       4.572589760528015,
-       3.3003224625989462,
-       5.678598561308583,
-       9.084902309920762,
-       5.675287319994052
+       4.175006756141802,
+       7.99127679494794,
+       4.531636565924253,
+       3.270763994609381,
+       5.627739690485441,
+       9.003535777662382,
+       5.624458105430719
       ]
      },
      {
@@ -3564,13 +3564,13 @@
        1.4386128592232166
       ],
       "onSurface": [
-       4.2318621219168415,
-       8.54004313768604,
-       4.849772581333215,
-       3.1809888334463476,
-       5.233979061693311,
-       7.833961664586761,
-       5.445496760550808
+       4.193960564573737,
+       8.463556492948904,
+       4.806336871875565,
+       3.152499145643373,
+       5.187102308192295,
+       7.7637988524014885,
+       5.396725604547686
       ]
      },
      {
@@ -3593,13 +3593,13 @@
        1.9989641156056086
       ],
       "onSurface": [
-       4.163230998177829,
-       7.258578364497232,
-       4.248126123713552,
-       3.4698941146492057,
-       6.574315023871554,
-       11.769252030613602,
-       5.887675490886926
+       4.12594411739955,
+       7.193568821136496,
+       4.210078902126441,
+       3.4388169228664762,
+       6.515433904711642,
+       11.663843827824211,
+       5.834944077668207
       ]
      },
      {
@@ -3622,13 +3622,13 @@
        1.4705786485275012
       ],
       "onSurface": [
-       4.223140690897978,
-       7.158947223609835,
-       4.544894823053657,
-       3.340663193548018,
-       5.764494625833676,
-       8.038339648970894,
-       5.4661065948562015
+       4.185317244752343,
+       7.094830000294202,
+       4.504189670855475,
+       3.310743424437746,
+       5.7128664495555475,
+       7.966346379253774,
+       5.41715085230601
       ]
      }
     ]

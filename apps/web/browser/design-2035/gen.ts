@@ -207,7 +207,7 @@ const A: Option = {
     const LIME = 128;
     const n = neutrals(t, t === 'dark'
       ? { neutralHue: 250, neutralChroma: 0.006, canvasY: 0.0062, step: 1.24, inkY: 0.86 }
-      : { neutralHue: 250, neutralChroma: 0.004, canvasY: 1, step: 1.155, inkY: 0.007 });
+      : { neutralHue: 250, neutralChroma: 0.004, canvasY: 1, step: 1.165, inkY: 0.007 });
     const p: Palette = { ...n };
     if (t === 'dark') {
       p.accent = hY(LIME, 0.21, 0.72);
@@ -254,7 +254,7 @@ const B: Option = {
     const VIO = 285;
     const n = neutrals(t, t === 'dark'
       ? { neutralHue: 272, neutralChroma: 0.03, canvasY: 0.007, step: 1.27, inkY: 0.84 }
-      : { neutralHue: 272, neutralChroma: 0.012, canvasY: 0.96, step: 1.15, inkY: 0.008 });
+      : { neutralHue: 272, neutralChroma: 0.012, canvasY: 0.96, step: 1.165, inkY: 0.008 });
     const p: Palette = { ...n };
     if (t === 'dark') {
       p.accent = hY(VIO, 0.2, 0.52);
@@ -300,7 +300,7 @@ const C: Option = {
   build(t) {
     const n = neutrals(t, t === 'dark'
       ? { neutralHue: 60, neutralChroma: 0.004, canvasY: 0.0, step: 1.2, inkY: 0.9 }
-      : { neutralHue: 60, neutralChroma: 0.004, canvasY: 1, step: 1.15, inkY: 0.004 });
+      : { neutralHue: 60, neutralChroma: 0.004, canvasY: 1, step: 1.165, inkY: 0.004 });
     const p: Palette = { ...n };
     if (t === 'dark') {
       p.accent = hY(60, 0.0, 0.92);
