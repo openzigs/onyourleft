@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * #2023: an untagged footprint is inferred a garage or a shed, with spike
- * 0033's thresholds (the owner's ruling of 2026-11-02), and drawn as #1791's.
+ * #2023: an untagged footprint is inferred a garage or a shed, and since
+ * #2024 a barn or a pole building, with spike 0033's thresholds (the owner's
+ * rulings of 2026-11-02), and drawn as #1791's.
  * The rule is held twice: as a table over the pure {@link footprintKindOf},
  * and where a rider sees it — the plans `footprintPlans` returns, and the
  * vertex floats the belt uploads — over #2023's street of untagged footprints
@@ -15,14 +16,17 @@ import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-featur
 
 import type { BuildingFamily } from './building-types';
 import {
+  FACADE_DOOR,
   FACADE_GARAGE,
   FACADE_OFFSET,
+  FACADE_PAINT,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintKindOf,
   footprintPlans,
+  INFERRED_BARN_HOME_METRES,
   INFERRED_GARAGE_HOME_METRES,
   type FootprintPlan,
   type FootprintPlanOptions,
@@ -38,7 +42,7 @@ import {
   untaggedStreetFixture,
 } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
-import { urbanClassMap } from './urban-class';
+import { urbanClassMap, type UrbanClass } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** A footprint's cues, its setbacks given. `home` is the nearest house's setback, or none. */
@@ -46,13 +50,18 @@ function cues(
   area: number,
   setback: number,
   home: number | undefined,
-  shape: { readonly aspect?: number; readonly rectangularity?: number } = {},
+  shape: {
+    readonly aspect?: number;
+    readonly rectangularity?: number;
+    readonly urban?: UrbanClass;
+  } = {},
 ): UntaggedCues & { readonly asked: number[] } {
   const asked: number[] = [];
   return {
     area,
     aspect: shape.aspect ?? 1,
     rectangularity: shape.rectangularity ?? 1,
+    urban: shape.urban ?? 'village',
     setback: () => setback,
     homeSetback: (metres) => {
       asked.push(metres);
@@ -62,8 +71,19 @@ function cues(
   };
 }
 
-const ON: InferenceRules = { outbuildings: true };
-const OFF: InferenceRules = { outbuildings: false };
+const ON: InferenceRules = { outbuildings: true, barns: true };
+const OFF: InferenceRules = { outbuildings: false, barns: false };
+const OUTBUILDINGS_ONLY: InferenceRules = { outbuildings: true, barns: false };
+const BARNS_ONLY: InferenceRules = { outbuildings: false, barns: true };
+
+/** A rural footprint's cues, rectangular unless `rectangularity` says. */
+const rural = (
+  area: number,
+  setback: number,
+  home: number | undefined,
+  rectangularity = 1,
+): UntaggedCues & { readonly asked: number[] } =>
+  cues(area, setback, home, { rectangularity, urban: 'rural' });
 
 describe('#2023: the pure rule, spike 0033’s thresholds', () => {
   // [what, mapped, cues, rules, family, inferred]
@@ -112,17 +132,92 @@ describe('#2023: the pure rule, spike 0033’s thresholds', () => {
     ['untagged, its cues not read', undefined, undefined, ON, undefined, false],
     ['a shed with the rule off', undefined, cues(14, 30, 10), OFF, undefined, false],
     ['a garage with the rule off', undefined, cues(40, 30, 10), OFF, undefined, false],
+    [
+      'a garage with only the barn rule on',
+      undefined,
+      cues(40, 30, 10),
+      BARNS_ONLY,
+      undefined,
+      false,
+    ],
+    [
+      'a shed with only the barn rule on',
+      undefined,
+      cues(14, 30, 10),
+      BARNS_ONLY,
+      undefined,
+      false,
+    ],
+    // #2024: barns and pole buildings.
+    ['a barn at 100 m²', undefined, rural(100, 40, 20), ON, 'barn', true],
+    ['a barn at 250 m²', undefined, rural(250, 60, 20), ON, 'barn', true],
+    [
+      'a pole building just over 250 m²',
+      undefined,
+      rural(250.1, 60, 20),
+      ON,
+      'pole-building',
+      true,
+    ],
+    ['a pole building of 2 000 m²', undefined, rural(2_000, 60, 20), ON, 'pole-building', true],
+    ['a barn with no street within 150 m', undefined, rural(180, 150, 20), ON, 'barn', true],
+    ['99.9 m²: too small for a barn', undefined, rural(99.9, 60, 20), ON, undefined, false],
+    ['rectangularity 0.9 for a barn', undefined, rural(180, 60, 20, 0.9), ON, 'barn', true],
+    ['rectangularity 0.89: too ragged', undefined, rural(180, 60, 20, 0.89), ON, undefined, false],
+    ['39.9 m back: too near the street', undefined, rural(180, 39.9, 20), ON, undefined, false],
+    ['no house within 80 m', undefined, rural(180, 60, undefined), ON, undefined, false],
+    ['level with the house', undefined, rural(180, 60, 60), ON, undefined, false],
+    [
+      'behind a house that stands farther back',
+      undefined,
+      rural(180, 60, 70),
+      ON,
+      undefined,
+      false,
+    ],
+    [
+      'a barn’s footprint in a village',
+      undefined,
+      cues(180, 60, 20, { urban: 'village' }),
+      ON,
+      undefined,
+      false,
+    ],
+    ['…in a town', undefined, cues(180, 60, 20, { urban: 'town' }), ON, undefined, false],
+    [
+      '…where the class is unknown',
+      undefined,
+      cues(180, 60, 20, { urban: 'unknown' }),
+      ON,
+      undefined,
+      false,
+    ],
+    ['mapped a house, a barn’s size', 'house', rural(180, 60, 20), ON, 'house', false],
+    ['mapped a barn, too big for a barn', 'barn', rural(2_000, 60, 20), ON, 'barn', false],
+    [
+      'a barn with the barn rule off',
+      undefined,
+      rural(180, 60, 20),
+      OUTBUILDINGS_ONLY,
+      undefined,
+      false,
+    ],
+    ['a barn with only the barn rule on', undefined, rural(180, 60, 20), BARNS_ONLY, 'barn', true],
   ];
 
   it.each(table)('%s', (_, mapped, each, rules, family, inferred) => {
     expect(footprintKindOf(mapped, each, rules)).toStrictEqual({ family, inferred });
   });
 
-  it('asks for a house within 40 m', () => {
+  it('asks for a house within 40 m of a garage, and within 80 m of a barn', () => {
     const each = cues(40, 30, 10);
     footprintKindOf(undefined, each, ON);
     expect(each.asked).toStrictEqual([INFERRED_GARAGE_HOME_METRES]);
     expect(INFERRED_GARAGE_HOME_METRES).toBe(40);
+    const barn = rural(180, 60, 20);
+    footprintKindOf(undefined, barn, ON);
+    expect(barn.asked).toStrictEqual([INFERRED_BARN_HOME_METRES]);
+    expect(INFERRED_BARN_HOME_METRES).toBe(80);
   });
 
   it('measures no street or neighbour for a footprint no rule could call', () => {
@@ -134,7 +229,25 @@ describe('#2023: the pure rule, spike 0033’s thresholds', () => {
     for (const area of [14, 80, 120, 400, 2_000]) {
       footprintKindOf(
         undefined,
-        { area, aspect: 1, rectangularity: 1, setback: count, homeSetback: count },
+        {
+          area,
+          aspect: 1,
+          rectangularity: 1,
+          urban: 'village',
+          setback: count,
+          homeSetback: count,
+        },
+        ON,
+      );
+    }
+    // #2024: nor a rural footprint between a garage's size and a barn's, nor a ragged one.
+    for (const [area, rectangularity] of [
+      [80, 1],
+      [180, 0.8],
+    ] as const) {
+      footprintKindOf(
+        undefined,
+        { area, aspect: 1, rectangularity, urban: 'rural', setback: count, homeSetback: count },
         ON,
       );
     }
@@ -142,7 +255,14 @@ describe('#2023: the pure rule, spike 0033’s thresholds', () => {
     // Control: a garage's size is measured.
     footprintKindOf(
       undefined,
-      { area: 40, aspect: 1, rectangularity: 1, setback: count, homeSetback: count },
+      {
+        area: 40,
+        aspect: 1,
+        rectangularity: 1,
+        urban: 'village',
+        setback: count,
+        homeSetback: count,
+      },
       ON,
     );
     expect(measured).toBe(2);
@@ -212,6 +332,16 @@ function garageDoorVertices(plan: FootprintPlan): number {
   return doors;
 }
 
+/** Every vertex of `role` whose facade `top` is `top`. */
+function facadeVertices(plan: FootprintPlan, role: 'wall' | 'door', top: number): number {
+  const floats = plan.triangles[role];
+  let found = 0;
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    if (floats[at + FACADE_OFFSET + 2] === top) found += 1;
+  }
+  return found;
+}
+
 describe('#2023: the rule, read back through `footprintPlans`', () => {
   const plans = plannedStreet();
 
@@ -226,6 +356,16 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
     ['garage-pair', 'garage', true],
     ['garage-by-a-hall', undefined, false],
     ['garage-by-a-shop', undefined, false],
+    // #2024
+    ['barn-in-village', undefined, false],
+    ['barn', 'barn', true],
+    ['pole-building', 'pole-building', true],
+    ['barn-near-street', undefined, false],
+    ['barn-alone', undefined, false],
+    ['barn-in-front', undefined, false],
+    ['barn-small', undefined, false],
+    ['barn-ragged', undefined, false],
+    ['mapped-barnlike-house', 'house', false],
     ['garage-beside', undefined, false],
     ['garage-in-front', undefined, false],
     ['garage-alone', undefined, false],
@@ -251,7 +391,8 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
       (_, index) =>
         subjects[index] === false &&
         rows[index] !== 'garage-pair' &&
-        rows[index] !== 'garage-by-a-shop',
+        rows[index] !== 'garage-by-a-shop' &&
+        rows[index] !== 'barn-in-front',
     );
     expect(houses.length).toBeGreaterThan(20);
     for (const house of houses) {
@@ -365,6 +506,83 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
     }
   });
 
+  it('draws an inferred barn as a mapped one is: planks, a steep gable, no house feature', () => {
+    for (const barn of subjectsOf(plans, 'barn')) {
+      expect(barn.urban).toBe('rural');
+      expect(barn.surfaces.wall).toBe('planks');
+      expect(barn.roof).toBe('gable');
+      expect(barn.pitchDegrees).toBeGreaterThanOrEqual(40);
+      expect(barn.porch).toBe(false);
+      expect(barn.dormers).toBe(0);
+      expect(barn.garage).toBe(false);
+      expect(barn.triangles.chimney.length).toBe(0);
+      expect(barn.archetype).toBe('unknown');
+      expect(barn.model).toBeUndefined();
+    }
+    // Control: with the rule off it is a house.
+    for (const untagged of subjectsOf(plannedStreet({ inferredBarns: false }), 'barn')) {
+      expect(untagged.surfaces.wall).not.toBe('planks');
+    }
+  });
+
+  it('draws a pole building as metal: corrugated, blind, a low gable at 320 m², a grey sheet roof', () => {
+    for (const pole of subjectsOf(plans, 'pole-building')) {
+      expect(pole.surfaces.wall).toBe('corrugated');
+      expect(pole.surfaces.roof).toBe('slate');
+      expect(pole.cladding.roof).toBe('photograph');
+      // Over the gable rule's 300 m², and still pitched.
+      expect(pole.roof).toBe('gable');
+      expect(pole.roofVariant).toBe('plain');
+      expect(pole.pitchDegrees).toBe(20);
+      expect(windowFaces(pole)).toBe(0);
+      expect(pole.porch).toBe(false);
+      expect(pole.garage).toBe(false);
+      expect(pole.triangles.chimney.length).toBe(0);
+      // A plain, painted door as an outbuilding's: the wreath is drawn on a door's face (#1626).
+      expect(pole.triangles.door.length).toBeGreaterThan(0);
+      expect(facadeVertices(pole, 'door', FACADE_DOOR)).toBe(0);
+      expect(facadeVertices(pole, 'door', FACADE_PAINT)).toBeGreaterThan(0);
+    }
+  });
+
+  it('lets a mapped flat roof beat the pole building’s 20° gable and its grey sheet', () => {
+    const tagged = plannedStreet({}, withSubjects(['pole-building'], { roofShape: 'flat' }));
+    for (const pole of subjectsOf(tagged, 'pole-building')) {
+      // Still a pole building, but with the mapped roof, and not the belt's `slate`.
+      expect(pole.family).toBe('pole-building');
+      expect(pole.roof).toBe('flat');
+      expect(pole.surfaces.roof).not.toBe('slate');
+    }
+  });
+
+  it('wears a gambrel on a seeded share of inferred barns, the steep gable on the rest', () => {
+    // A farm road: a farmhouse and a barn behind it every 100 m, both sides, on no land.
+    const street = untaggedStreetFixture();
+    const buildings: BuildingFeature[] = [];
+    for (let along = 1_000; along <= 2_900; along += 100) {
+      for (const side of [1, -1]) {
+        for (const [lateral, length, depth] of [
+          [22, 12, 9],
+          [70, 12, 15],
+        ] as const) {
+          const [a, n] = [along + (along % 7), side * lateral];
+          buildings.push(
+            buildingBeside(street.profile, street.origin, [rectangleBeside(a, n, length, depth)]),
+          );
+        }
+      }
+    }
+    const farm: WorldCorridor = { ...street.corridor, landUse: [], buildings };
+    const barns = plannedStreet({}, farm).filter((_, index) => index % 2 === 1);
+    expect(barns).toHaveLength(40);
+    expect(barns.every((plan) => plan.urban === 'rural' && plan.family === 'barn')).toBe(true);
+    const gambrels = barns.filter((plan) => plan.roofVariant === 'gambrel').length;
+    // About half, and both: 10 to 30 of 40.
+    expect(gambrels).toBeGreaterThanOrEqual(10);
+    expect(gambrels).toBeLessThanOrEqual(30);
+    expect(barns.filter((plan) => plan.roofVariant === 'plain').length).toBe(40 - gambrels);
+  });
+
   it('lets a mapped roof shape and storey count beat the inferred garage’s', () => {
     const tagged = plannedStreet({}, withSubjects(['garage'], { roofShape: 'flat', levels: 2 }));
     for (const garage of subjectsOf(tagged, 'garage')) {
@@ -400,15 +618,51 @@ describe('#2023: the lever', () => {
     };
   };
 
-  it('plans every untagged footprint as before with `inferredOutbuildings: false`', () => {
+  /**
+   * Each plan of `off` that is not of `kept`'s families planned as with the
+   * type unread, which is as before #2023 — paint aside, which `paintTown`
+   * moves off a neighbour's.
+   */
+  const asBefore = (off: readonly FootprintPlan[], kept: readonly string[]): number => {
+    const none = plannedStreet({ buildingTypes: false }, stripped());
+    let compared = 0;
+    off.forEach((plan, index) => {
+      if (plan.family !== undefined && kept.includes(plan.family)) return;
+      expect(plan.inferred).toBe(false);
+      expect(planFingerprint([plan], false)).toBe(
+        planFingerprint([none[index] as FootprintPlan], false),
+      );
+      compared += 1;
+    });
+    return compared;
+  };
+
+  it('plans every garage’s and shed’s footprint as before with `inferredOutbuildings: false`, and keeps the barns', () => {
     const off = plannedStreet({ inferredOutbuildings: false }, stripped());
+    expect(off.some((plan) => plan.family === 'garage' || plan.family === 'shed')).toBe(false);
+    expect(off.some((plan) => plan.family === 'barn')).toBe(true);
+    expect(asBefore(off, ['barn', 'pole-building'])).toBeGreaterThan(80);
+    // Not vacuous: on, the street plans otherwise.
+    expect(planFingerprint(plannedStreet({}, stripped()))).not.toBe(planFingerprint(off));
+  });
+
+  it('plans every barn’s footprint as before with `inferredBarns: false`, and keeps the garages', () => {
+    const off = plannedStreet({ inferredBarns: false }, stripped());
+    expect(off.some((plan) => plan.family === 'barn' || plan.family === 'pole-building')).toBe(
+      false,
+    );
+    expect(off.some((plan) => plan.family === 'garage')).toBe(true);
+    expect(asBefore(off, ['garage', 'shed'])).toBeGreaterThan(70);
+    // Not vacuous: on, the street plans otherwise.
+    expect(planFingerprint(plannedStreet({}, stripped()))).not.toBe(planFingerprint(off));
+  });
+
+  it('plans every untagged footprint as before with both levers off', () => {
+    const off = plannedStreet({ inferredOutbuildings: false, inferredBarns: false }, stripped());
     expect(off.every((plan) => !plan.inferred && plan.family === undefined)).toBe(true);
-    // As the type unread plans it, which is as before #2023.
     expect(planFingerprint(off)).toBe(
       planFingerprint(plannedStreet({ buildingTypes: false }, stripped())),
     );
-    // Not vacuous: on, the street plans otherwise.
-    expect(planFingerprint(plannedStreet({}, stripped()))).not.toBe(planFingerprint(off));
   });
 
   it('infers nothing while the type is not read (`buildingTypes: false`)', () => {
