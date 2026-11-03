@@ -51,6 +51,14 @@ const host = new RoomHost({
   onSocketClosed: (socketId) => send({ type: 'socket-closed', socketId }),
   onProtocolClose: (roomId, reason, count) =>
     send({ type: 'protocol-close', roomId, reason, count }),
+  onItemEvent: (roomId, event) =>
+    send({
+      type: 'item-event',
+      roomId,
+      riderId: event.riderId,
+      event: event.event,
+      item: event.item,
+    }),
   maxBufferedBytes: settings.maxBufferedBytes,
   pingIntervalMs: settings.pingIntervalMs,
 });

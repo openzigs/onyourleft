@@ -542,6 +542,17 @@ export class RoomRouter {
           count: message.count,
         });
         return;
+      case 'item-event':
+        // A lap race's item event (#1909): the room, a rider id, what happened
+        // and an item key — no athlete, no name, no place.
+        this.#options.event?.('room-item-event', {
+          worker: slot.index,
+          room: message.roomId,
+          riderId: message.riderId,
+          itemEvent: message.event,
+          item: message.item,
+        });
+        return;
       case 'metrics': {
         const waiting = this.#metricsWaiting.get(message.id);
         this.#metricsWaiting.delete(message.id);

@@ -30,7 +30,10 @@ import { decodeRoomMessage, encodeMessage, utf8ByteLength } from './codec';
 import type { Frame, Standings } from './messages';
 import {
   MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ITEM_EVENTS,
+  MAXIMUM_LAPS,
   MAXIMUM_MESSAGE_BYTES,
+  MAXIMUM_RACE_OFFSET_CENTIMETRES,
   MAXIMUM_RIDERS,
   MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
 } from './schema';
@@ -66,6 +69,30 @@ function atEveryBound(count: number): Frame {
   };
 }
 
+/**
+ * #1908: a lap race's frame — nine slots a rider and the tick's item events,
+ * every one at its bound, the longest item key in every slot that holds one.
+ * The largest legal message of version 3, and the reason
+ * {@link MAXIMUM_MESSAGE_BYTES} went from 8 KiB to 16 KiB.
+ */
+function lapRaceAtEveryBound(count: number): Frame {
+  return {
+    ...atEveryBound(count),
+    riders: atEveryBound(count).riders.map((rider) => ({
+      ...rider,
+      raceOffsetCentimetres: -MAXIMUM_RACE_OFFSET_CENTIMETRES,
+      lane: 2,
+      held: 'crosswind-gust',
+      lapsDone: MAXIMUM_LAPS,
+    })),
+    itemEvents: Array.from({ length: MAXIMUM_ITEM_EVENTS }, (_, index) => ({
+      riderId: 2_147_483_647 - (index % count),
+      event: 'pick-up',
+      item: 'crosswind-gust',
+    })),
+  };
+}
+
 describe('frame size — #768', () => {
   it('is 1 132 bytes for 50 riders mid-race', () => {
     const text = encodeMessage(midRace(50));
@@ -75,6 +102,13 @@ describe('frame size — #768', () => {
   it('fits the largest legal frame inside the byte limit, so a real room is never refused', () => {
     const largest = encodeMessage(atEveryBound(MAXIMUM_RIDERS));
     expect(utf8ByteLength(largest)).toBe(3_682);
+    expect(utf8ByteLength(largest)).toBeLessThan(MAXIMUM_MESSAGE_BYTES);
+    expect(decodeRoomMessage(largest).ok).toBe(true);
+  });
+
+  it('fits the largest legal lap-race frame inside the byte limit — #1908', () => {
+    const largest = encodeMessage(lapRaceAtEveryBound(MAXIMUM_RIDERS));
+    expect(utf8ByteLength(largest)).toBe(14_597);
     expect(utf8ByteLength(largest)).toBeLessThan(MAXIMUM_MESSAGE_BYTES);
     expect(decodeRoomMessage(largest).ok).toBe(true);
   });

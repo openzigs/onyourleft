@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Kysely } from 'kysely';
+import { PHYSICS_VERSION } from '@onyourleft/physics';
 import {
   appliedMigrations,
   migrateDownOne,
@@ -40,6 +41,8 @@ import {
 import { MIGRATIONS, type InstanceMigration } from './migrations/index.ts';
 import { openDatabase } from './node-sqlite.ts';
 import { openKysely } from './open-sql-store.ts';
+import { createSqlStore } from './sql-store.ts';
+import { planFor } from '../room/room-plan.ts';
 
 const DIRECTORY = fileURLToPath(new URL('./migrations/', import.meta.url));
 const MIGRATION_FILE = /^(\d{4}-[a-z0-9-]+)\.ts$/;
@@ -293,6 +296,95 @@ describe('the migrations (#769)', () => {
       }
     },
   );
+
+  it('takes a lap race’s columns away with 0037, and every room made before reads the same through the room plan, down and up again (#1910)', async () => {
+    const path = await freshPath();
+    await withKysely(path, async (db) => {
+      await migrateToLatest(db);
+      while ((await appliedMigrations(db)).at(-1) !== '0036-notice-erasure') {
+        await migrateDownOne(db);
+      }
+    });
+    // An existing room — the fixture's race and its course — as every room
+    // made before 0037 is. Its physics moved to this build's, so it opens.
+    seedEveryTable(path);
+    {
+      const database = openDatabase(path);
+      try {
+        database
+          .prepare(`UPDATE room SET physics_version = ? WHERE id = 'room'`)
+          .run(PHYSICS_VERSION);
+      } finally {
+        database.close();
+      }
+    }
+    const columns = (): string[] => {
+      const database = openDatabase(path);
+      try {
+        return (database.prepare(`PRAGMA table_info(room_course)`).all() as { name: string }[])
+          .map((column) => column.name)
+          .filter((name) => name.startsWith('lap_'));
+      } finally {
+        database.close();
+      }
+    };
+    // Read as the room is opened: the store's course read, into the plan.
+    const plan = () =>
+      withKysely(path, async (db) => {
+        const store = createSqlStore(db);
+        const room = await store.getRoom('room');
+        return room === undefined
+          ? undefined
+          : planFor(room, await store.getRoomCourse('room'), 'any-seated-rider');
+      });
+    const before = await plan();
+    expect(before).toMatchObject({ roomId: 'room', kind: 'race', lengthMetres: 450 });
+    expect(before?.lapRace).toBeUndefined();
+    expect(columns()).toEqual([]);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    expect(columns()).toEqual(['lap_laps', 'lap_items', 'lap_seed']);
+    expect(await plan()).toEqual(before);
+
+    await withKysely(path, (db) => migrateDownOne(db));
+    expect(columns()).toEqual([]);
+    expect(await plan()).toEqual(before);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    expect(columns()).toEqual(['lap_laps', 'lap_items', 'lap_seed']);
+    expect(await plan()).toEqual(before);
+  });
+
+  it('holds 0037’s three columns together and in range, as a CHECK (#1910)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    seedEveryTable(path);
+    const database = openDatabase(path);
+    try {
+      const set = (laps: unknown, items: unknown, seed: unknown) => () =>
+        database
+          .prepare(
+            `UPDATE room_course SET lap_laps = ?, lap_items = ?, lap_seed = ? WHERE room_id = 'room'`,
+          )
+          .run(laps as number, items as number, seed as number);
+      expect(set(3, 1, 4_294_967_295)).not.toThrow();
+      expect(set(null, null, null)).not.toThrow();
+      for (const [laps, items, seed] of [
+        [3, 1, null],
+        [3, null, 7],
+        [null, 1, 7],
+        [0, 1, 7],
+        [101, 1, 7],
+        [3, 2, 7],
+        [3, 1, -1],
+        [3, 1, 4_294_967_296],
+      ]) {
+        expect(set(laps, items, seed), JSON.stringify([laps, items, seed])).toThrow(/CHECK/);
+      }
+    } finally {
+      database.close();
+    }
+  });
 
   it('refuses to undo 0007 while the moderation log holds an entry, and changes nothing (#891)', async () => {
     const path = await freshPath();

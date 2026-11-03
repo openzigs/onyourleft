@@ -222,6 +222,19 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `k` from the distances the room holds, before the
                         tick re-simulates; a room's maker may turn it off
                         (migration 0024), and off is `k = 1` for everybody.
+                        ⚠️ **And runs a lap race with items since #1909**
+                        (ADR 0060, protocol 3): settings' `lapRace` (laps,
+                        items, the room's own seed) runs `@onyourleft/domain`'s
+                        `stepRace` each tick from the room's effort distances
+                        and the riders' `lane` and `item-use` INPUTS (one use a
+                        tick, never queued); frames carry each rider's offset,
+                        lane, held item and laps and the tick's item events.
+                        A frame's `decimetres` stays the EFFORT distance.
+                        `lap-race-conformance.test.ts` holds both adapters to it.
+                        Since #1910 a rider makes one, private, on their own
+                        loop (`rooms/rooms.ts` §`lapRace`): migration 0037's
+                        `room_course.lap_laps`, `lap_items` and `lap_seed`
+                        (drawn from the CSPRNG, never sent), read by `planFor`.
                         ⚠️ **Mounted by two adapters since #780**, and a
                         reviewer who remembers "not by the instance" is
                         reading the old file: the Node adapter

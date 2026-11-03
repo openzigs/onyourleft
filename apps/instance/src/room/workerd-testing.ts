@@ -97,11 +97,13 @@ const worker :Workerd.Worker = (
   compatibilityDate = "${COMPATIBILITY_DATE}",
   durableObjectNamespaces = [
     (className = "ConformanceRoom", uniqueKey = "conformance-room", enableSql = true),
+    (className = "LapConformanceRoom", uniqueKey = "lap-conformance-room", enableSql = true),
     (className = "WallClockRoom", uniqueKey = "wall-clock-room", enableSql = true),
   ],
   durableObjectStorage = (localDisk = "storage"),
   bindings = [
     (name = "CONFORMANCE", durableObjectNamespace = "ConformanceRoom"),
+    (name = "LAP_CONFORMANCE", durableObjectNamespace = "LapConformanceRoom"),
     (name = "WALL_CLOCK", durableObjectNamespace = "WallClockRoom"),
   ],
 );
