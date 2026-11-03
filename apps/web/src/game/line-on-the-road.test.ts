@@ -934,7 +934,14 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       const exit = 400 + Math.PI * radius + 40;
       const origin = corridorOrigin(route);
       const ghost = buildGhostTrack({ elapsedSeconds: [0, 200], distanceMetres: [0, 2_000] });
-      const headingsAt = (distance: number): { bot: number; ghost: number } => {
+      const headingsAt = (
+        distance: number,
+      ): {
+        bot: number;
+        ghost: number;
+        botApart: number;
+        ghostApart: number;
+      } => {
         const input = {
           profile: route,
           origin,
@@ -948,7 +955,20 @@ describe('a rider faces the way the line takes them, not the way the road runs â
           if (found === undefined) throw new Error(`no ${kind} placed`);
           return Math.atan2(found.marker.headingX, found.marker.headingZ);
         };
-        return { bot: yaw('bot'), ghost: yaw('ghost') };
+        const at = (kind: RiderMarker['kind']): { x: number; z: number } => {
+          const found = placed.find((rider) => rider.marker.kind === kind);
+          if (found === undefined) throw new Error(`no ${kind} placed`);
+          return found.marker;
+        };
+        const rider = at('rider');
+        const apart = (kind: RiderMarker['kind']): number =>
+          Math.hypot(at(kind).x - rider.x, at(kind).z - rider.z);
+        return {
+          bot: yaw('bot'),
+          ghost: yaw('ghost'),
+          botApart: apart('bot'),
+          ghostApart: apart('ghost'),
+        };
       };
       const step = (from: number, to: number): number => {
         const change = Math.abs(to - from);
@@ -956,14 +976,22 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       };
       let previous = headingsAt(360);
       const largest = { bot: 0, ghost: 0 };
+      const farthest = { bot: previous.botApart, ghost: previous.ghostApart };
       for (let at = 360.02; at <= exit; at += 0.02) {
         const headings = headingsAt(at);
+        farthest.bot = Math.max(farthest.bot, headings.botApart);
+        farthest.ghost = Math.max(farthest.ghost, headings.ghostApart);
         largest.bot = Math.max(largest.bot, step(previous.bot, headings.bot));
         largest.ghost = Math.max(largest.ghost, step(previous.ghost, headings.ghost));
         previous = headings;
       }
       expect(largest.bot).toBeLessThan((0.5 * Math.PI) / 180);
       expect(largest.ghost).toBeLessThan((0.5 * Math.PI) / 180);
+      // Not vacuous: each is drawn at least a metre off the rider somewhere in
+      // the walk (acceptance criterion 1's 1â€“2 m), so it does cross corridor
+      // points the rider does not.
+      expect(farthest.bot).toBeGreaterThanOrEqual(1);
+      expect(farthest.ghost).toBeGreaterThanOrEqual(1);
     },
     // About 4,000 frames placed per case: a second alone, and well past the
     // default five on a loaded machine.
