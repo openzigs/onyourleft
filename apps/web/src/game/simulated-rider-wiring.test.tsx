@@ -348,6 +348,59 @@ describe('a simulated rider rides the rider’s own route with nothing paired �
   });
 });
 
+describe('a sped-up ride is timed on the wall clock, so the world holds its rung — #1992', () => {
+  /** The settings `setQuality` was handed over `frames` frames of `frameMs` each. */
+  async function rungs(hash: string, frameMs: number, frames: number): Promise<string[]> {
+    const seen: string[] = [];
+    globalThis.location.hash = hash;
+    const base = capturingRenderer([]);
+    mounted = await mount(
+      <GameView
+        port={gamePort()}
+        renderer={() =>
+          Promise.resolve({
+            ...base,
+            create: (...args: Parameters<GameRenderer['create']>) => {
+              const made = base.create(...args);
+              return {
+                ...made,
+                setQuality: (quality: Parameters<typeof made.setQuality>[0]) => {
+                  seen.push(JSON.stringify(quality));
+                },
+              };
+            },
+          })
+        }
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < frames; index += 1) {
+      const next = pending.shift();
+      if (next === undefined) break;
+      nowMs += frameMs;
+      await act(async () => {
+        next(nowMs);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+    return seen;
+  }
+
+  it('draws a 60 fps ride at 32x on the same rungs as at 1x, and the standard world is not dropped', async () => {
+    const real = await rungs(`#/game?simulate=${String(POWER)}`, 16.7, 150);
+    mounted?.unmount();
+    mounted = undefined;
+    pending = [];
+    nowMs = START_MS;
+    const fast = await rungs(`#/game?simulate=${String(POWER)}&speedup=32`, 16.7, 150);
+
+    expect(fast).toEqual(real);
+  });
+});
+
 describe('a simulated ride runs no Delivery round, so the week on this device is not its to count — #1992', () => {
   it('rides an ordinary ride when the developer route also asks for a round', async () => {
     await ride(`#/game?simulate=${String(POWER)}&delivery=on`, { frames: 4 });

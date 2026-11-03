@@ -430,6 +430,13 @@ export interface GameViewProps {
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
   /**
+   * The wall clock the frame pacer and the quality ladder are timed on, when
+   * `now` is not it. Only a simulated ride (#1992) sets one: its `now` runs
+   * faster than the wall, and a 16.7 ms frame read on it is 16.7k ms, which
+   * the ladder would count as a hot frame and drop the world for.
+   */
+  readonly frameNow?: (() => number) | undefined;
+  /**
    * The rider's local calendar day — #1622. Read ONCE, when a live ride
    * starts, for the ride's holiday (`season.ts`). Absent, it is this device's
    * own clock in its own time zone (`season.ts` §`deviceToday`); a test
@@ -773,6 +780,7 @@ function useSimulatedRide(
     ...given,
     port,
     now,
+    frameNow: givenNow ?? (() => performance.now()),
     trainer: undefined,
     room: undefined,
     roomId: undefined,
@@ -2065,6 +2073,7 @@ function GameScreen({
       return;
     }
     const clock = props.now ?? (() => performance.now());
+    const wallClock = props.frameNow ?? clock;
     let frame = 0;
     let lastFrameAt = clock();
     loopRunningRef.current = true;
@@ -2196,7 +2205,7 @@ function GameScreen({
       // settled, the announcer listens and the gradient is sampled — so what is
       // written to a trainer, and when, does not depend on the rung. What a cap
       // skips is the picture: the HUD's re-render and the world's draw.
-      const paced = pacer.frame(at, frameCapRef.current);
+      const paced = pacer.frame(wallClock(), frameCapRef.current);
       // ⚠️ **Read once**, and both halves used: the rider's power drives the
       // simulation and the cadence drives the cranks. Two calls would be two
       // samples of a live sensor on one frame, which is a HUD and a pair of
@@ -2901,7 +2910,7 @@ function GameScreen({
     // through `qualityRef`, which does not go stale (#482; it was `setQuality`'s
     // updater form until then), and the level is applied to the live renderer
     // by the effect below instead.
-  }, [phase, chosen, port, props.renderer, props.now, props.thermal]);
+  }, [phase, chosen, port, props.renderer, props.now, props.frameNow, props.thermal]);
 
   useEffect(() => {
     // #426, the latch: a step down takes the shadow map away for the rest of

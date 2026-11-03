@@ -173,7 +173,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
     { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
   /**
    * The simulated rider's mark — #1992: the sentence that says this ride is
-   * simulated, first in the actions panel for every frame of the ride, so a
+   * simulated, in the actions panel (after Pause and End ride) for every frame of the ride, so a
    * screenshot of it cannot pass for a real effort. Absent on every real ride.
    */
   readonly simulated?: string | undefined;
