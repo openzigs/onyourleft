@@ -1090,3 +1090,84 @@ test.describe('a room ride with sounds on, a side camera paired or a notice stan
     });
   }
 });
+
+/**
+ * #1912 — a LAP RACE in a room on the HUD, `ride-harness.tsx` §`LAP_RACE`:
+ * the running race of §"#1347" a lap race, so beside the room's readings,
+ * row and standings the HUD carries the race's *Place* and *Item* — this
+ * rider holding the widest item name, *Tailwind*.
+ *
+ * ## What is held, at every overlay viewport, both ways
+ *
+ * Every panel a rider can see is whole on the stage and over no other panel;
+ * none is over the leaning rider's box; and *Place* and *Item* are laid out,
+ * on the stage and uncovered — 736×360 among them, the #1356 class.
+ *
+ * ## The control
+ *
+ * The same page with the *Item* field forced to the full width of the stage
+ * and tall is over another panel or the rider at 736×360, so "whole and over
+ * nothing" can fail here.
+ */
+const LAP_RACE_ROOM = '?room=lap-race';
+const LAP_RACE_READINGS = ['reading: Place', 'reading: Item'] as const;
+
+test.describe('a lap race in a room on the HUD — #1912', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test.describe(viewport.name, () => {
+      test('every panel is whole, over no other panel and clear of the rider; Place and Item on the stage', async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, LAP_RACE_ROOM);
+        const rider = riderBox(viewport);
+        for (const [how, seen] of await bothWays(page)) {
+          const panels = seenPanels(seen);
+          expect(panels.length, how).toBeGreaterThanOrEqual(4);
+          expect(
+            panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+            how,
+          ).toEqual([]);
+          const collisions: string[] = [];
+          panels.forEach((a, index) => {
+            for (const b of panels.slice(index + 1)) {
+              if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
+          });
+          expect(collisions, how).toEqual([]);
+          expect(panels.filter((each) => overlap(each.box, rider)).map(describeItem), how).toEqual(
+            [],
+          );
+          for (const name of LAP_RACE_READINGS) {
+            const reading = named(seen.items, name);
+            expect(
+              reading.box.width * reading.box.height,
+              `${how}: ${name} laid out`,
+            ).toBeGreaterThan(1);
+            expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
+            expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
+          }
+        }
+      });
+    });
+  }
+
+  test('the control — the Item field forced wide and tall is over another panel or the rider — 736×360', async ({
+    page,
+  }) => {
+    const viewport = OVERLAY_VIEWPORTS.find((each) => each.width === 736 && each.height === 360);
+    if (viewport === undefined) throw new Error('no 736×360 viewport');
+    await openRide(page, viewport, LAP_RACE_ROOM);
+    await page.addStyleTag({
+      content:
+        '.oyl-game--riding .oyl-hud .oyl-hud__field--lap-race { min-width: 100vw !important; min-height: 60vh !important; }',
+    });
+    const seen = await measure(page);
+    const panels = seenPanels(seen);
+    const rider = riderBox(viewport);
+    const crossed =
+      panels.some((a, index) => panels.slice(index + 1).some((b) => overlap(a.box, b.box))) ||
+      panels.some((each) => overlap(each.box, rider)) ||
+      panels.some((each) => !inside(each.box, viewport));
+    expect(crossed).toBe(true);
+  });
+});

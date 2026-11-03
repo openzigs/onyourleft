@@ -1425,10 +1425,17 @@ export function GameView(props: GameViewProps): JSX.Element {
       // ADR 0028 D-2: the room's position wins).
       // #1364: and, for that rider, their place among the riders the room's
       // newest standings have across the line — the room's word again.
+      // #1912: a lap race's line is its last lap's, and the room says when a
+      // rider has ridden it — its frame's laps, at the drawn distance (#1909)
+      // — rather than one lap of the route's length.
+      const lapRoom = roomRef.current?.lapRace();
+      const lapsDone = lapRoom?.newest?.riders.get(lapRoom.riderId)?.lapsDone;
       const race = raceFactOf(
         roomIdRef.current,
         roomRef.current?.race(),
-        acrossTheRoomsLine(roomRef.current, course?.totalDistance),
+        lapRoom === undefined
+          ? acrossTheRoomsLine(roomRef.current, course?.totalDistance)
+          : (lapsDone ?? 0) >= lapRoom.config.laps,
         placeAcrossOf(roomRef.current?.standings()),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);

@@ -97,6 +97,12 @@ export interface EnteredRoom {
    * code — and its start. Absent for a room shared by its code.
    */
   readonly listed?: { readonly startsAt: number } | undefined;
+  /**
+   * #1912: a LAP RACE — its laps of the room's loop and whether items are on,
+   * as its maker chose them and the instance told a joiner. Absent for any
+   * other room.
+   */
+  readonly lapRace?: RoomLapRaceSettings | undefined;
   /** The road everybody in the room rides — read back from the room's own route. */
   readonly profile: RouteProfile;
   /**
@@ -104,6 +110,13 @@ export interface EnteredRoom {
    * must name when this device joins it (`net/room-session.ts`).
    */
   readonly routeSha256: string;
+}
+
+/** A lap race's settings, as a room is made with them and a joiner is told them (#1912). */
+export interface RoomLapRaceSettings {
+  /** Laps of the room's loop: 1 to `apps/instance` §`MAXIMUM_ROOM_LAPS`. */
+  readonly laps: number;
+  readonly items: boolean;
 }
 
 /** Why a request about a room will not be answered as asked, however often it is asked. */
@@ -201,6 +214,19 @@ export type RaceBlockAnswer =
   | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
   | { readonly kind: 'unreachable' };
 
+/** Whether an instance's answer names a lap race's settings, and nothing else (#1912). */
+function isLapRaceSettings(value: unknown): value is RoomLapRaceSettings {
+  if (typeof value !== 'object' || value === null) return false;
+  const { laps, items, ...rest } = value as Record<string, unknown>;
+  return (
+    Object.keys(rest).length === 0 &&
+    typeof laps === 'number' &&
+    Number.isInteger(laps) &&
+    laps >= 1 &&
+    typeof items === 'boolean'
+  );
+}
+
 /** What the game may ask about rooms. */
 export interface RoomsPort {
   /** Make a room on one of the rider's own routes. */
@@ -212,6 +238,11 @@ export interface RoomsPort {
     readonly route: RoomRouteSource;
     /** #788: list it as a PUBLIC room starting then, in Unix seconds. Absent: a private room, by its code. */
     readonly startsAt?: number | undefined;
+    /**
+     * #1912: make it a private LAP RACE on the route, which must be a loop;
+     * `kind` is then `race`. The instance refuses one that is public.
+     */
+    readonly lapRace?: RoomLapRaceSettings | undefined;
   }): Promise<CreateRoomAnswer>;
   /** Join a room by the code a friend shared, and fetch and check its route. */
   join(code: string): Promise<JoinRoomAnswer>;
@@ -383,6 +414,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
         loop?: unknown;
         routeSha256?: unknown;
         creator?: unknown;
+        lapRace?: unknown;
       } | null;
       if (answer.status !== 200) {
         const reason = refusalOf(answer);
@@ -395,7 +427,8 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
         !POSITIONS.includes(room.ridingPosition as RoomRidingPosition) ||
         typeof room.drafting !== 'boolean' ||
         typeof room.loop !== 'boolean' ||
-        typeof room.routeSha256 !== 'string'
+        typeof room.routeSha256 !== 'string' ||
+        (room.lapRace !== undefined && !isLapRaceSettings(room.lapRace))
       ) {
         return { kind: 'refused', reason: 'instance-refused' };
       }
@@ -417,6 +450,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           // The route's bytes were just checked against this digest (`routeOf`).
           routeSha256: room.routeSha256,
           ...(listed === undefined ? {} : { listed }),
+          ...(room.lapRace === undefined ? {} : { lapRace: room.lapRace }),
         },
       };
     } catch {
@@ -445,6 +479,9 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             ...(request.startsAt === undefined
               ? {}
               : { visibility: 'public', startsAt: request.startsAt }),
+            ...(request.lapRace === undefined
+              ? {}
+              : { lapRace: { laps: request.lapRace.laps, items: request.lapRace.items } }),
           },
         });
         const made = answer.body as { roomId?: unknown; code?: unknown } | null;
@@ -470,6 +507,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             ...(request.startsAt === undefined
               ? { code: made.code as string }
               : { listed: { startsAt: request.startsAt } }),
+            ...(request.lapRace === undefined ? {} : { lapRace: request.lapRace }),
             profile: shared.profile,
             // The bytes this device sent, digested here rather than taken from the answer.
             routeSha256: await routeDigest(shared.gpx),

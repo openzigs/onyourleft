@@ -26,6 +26,14 @@
  * move for anybody but yourself once it runs (`apps/instance` §`room-host.ts`
  * `start`; it reverses #785's first rule, any rider on the line).
  *
+ * ## A lap race — #1912 (ADR 0060)
+ *
+ * A third kind, on a route that is a LOOP: a race of a chosen number of laps
+ * of it, with items on or off, held by the room (#1909) and stored with it
+ * (#1910). Private only — the epic leaves public lap races out — so choosing
+ * it takes the listing away. On a route that is not a loop the choice says
+ * why, as the solo race's does (`StageChooser.tsx` §`LAP_RACE_CHOICE_TEXT`).
+ *
  * ## The code
  *
  * Shown to the rider who made the room, once, to share; kept in this screen's
@@ -40,6 +48,7 @@ import { formatModerationItem, type RouteProfile } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
+import { LAP_RACE_MOST_LAPS } from '../game/lap-race/choice';
 import type {
   CreateRoomAnswer,
   EnteredRoom,
@@ -75,6 +84,29 @@ export const ROOM_REFERENCES_TEXT =
 
 /** What a room's kind is called on this screen. */
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
+
+/**
+ * A lap race on this screen — #1912. ⚠️ Draft wording awaiting the owner's
+ * approval, like every sentence in the room work; "Lap race" is the mode's
+ * name (the owner, 2026-10-31) and nothing here names another game
+ * (ADR 0060 D-1.5).
+ */
+export const ROOM_LAP_RACE_TEXT = {
+  kind: 'Lap race',
+  kindDetail: ' — laps of a loop, picking up items round the lap, then a finish order',
+  notALoop: 'A lap race needs a loop: choose a route that ends where it starts.',
+  laps: 'Laps',
+  items: 'Race with items',
+  itemsDetail: ' — pick-ups round the lap; an item moves where you are drawn, never your trainer',
+  entered: (laps: number, items: boolean): string =>
+    `You are in a lap race: ${String(laps)} lap${laps === 1 ? '' : 's'} of the room’s loop, ` +
+    `items ${items ? 'on' : 'off'}.`,
+  /** #1912: the panel's one line with no instance, now naming the lap race (#1013: one line). */
+  noInstance: ' to make a room, a lap race among them, or join one by its code.',
+} as const;
+
+/** The laps a lap race may be made with on this screen: the solo race's choice (#1907). */
+const LAPS: readonly number[] = Array.from({ length: LAP_RACE_MOST_LAPS }, (_, index) => index + 1);
 
 /**
  * Every sentence the panel says about a refusal — ⚠️ draft wording awaiting
@@ -198,7 +230,10 @@ function refusalText(
 
 export function RoomPanel(props: RoomPanelProps): JSX.Element {
   const [routeId, setRouteId] = useState<string | undefined>(undefined);
-  const [kind, setKind] = useState<'group' | 'race'>('group');
+  const [kind, setKind] = useState<'group' | 'race' | 'lap-race'>('group');
+  // #1912: a lap race's laps and items, the solo race's defaults (`lap-race/choice.ts`).
+  const [laps, setLaps] = useState(3);
+  const [items, setItems] = useState(true);
   // #787: on by default, the maker's to turn off, and fixed for the room.
   const [drafting, setDrafting] = useState(true);
   // #788: private unless the maker lists it, and then from when it starts.
@@ -226,8 +261,8 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
       <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
         {heading}
         <p>
-          <a href={settings}>Connect this device to one in Settings</a> to make a room or join one
-          by its code.
+          <a href={settings}>Connect this device to one in Settings</a>
+          {ROOM_LAP_RACE_TEXT.noInstance}
         </p>
       </section>
     );
@@ -252,7 +287,9 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
       <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
         {heading}
         <StatusMessage tone="info" label={ROOM_KIND_LABEL[entered.kind]} live>
-          You are in a {entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.
+          {entered.lapRace === undefined
+            ? `You are in a ${entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.`
+            : ROOM_LAP_RACE_TEXT.entered(entered.lapRace.laps, entered.lapRace.items)}
           {entered.kind === 'race'
             ? !entered.madeIt
               ? ' The race starts when the rider who made the room starts it.'
@@ -313,6 +350,8 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
 
   const rooms = props.rooms;
   const chosen = props.routes.find((route) => route.id === routeId) ?? props.routes[0];
+  // #1912: a lap race only on a loop, and only private.
+  const lapRace = kind === 'lap-race' && chosen?.profile.loop === true;
   return (
     <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
       {heading}
@@ -398,7 +437,51 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                     : ' — a countdown, then a finish order with each rider’s watts per kilogram'}
                 </label>
               ))}
+              <label>
+                <input
+                  type="radio"
+                  name="oyl-room-kind"
+                  checked={kind === 'lap-race'}
+                  onChange={() => {
+                    setKind('lap-race');
+                    setListed(false);
+                  }}
+                />
+                {ROOM_LAP_RACE_TEXT.kind}
+                {ROOM_LAP_RACE_TEXT.kindDetail}
+              </label>
             </fieldset>
+            {kind === 'lap-race' && !lapRace ? <p>{ROOM_LAP_RACE_TEXT.notALoop}</p> : undefined}
+            {lapRace ? (
+              <>
+                <label>
+                  {ROOM_LAP_RACE_TEXT.laps}
+                  <select
+                    value={laps}
+                    onChange={(event) => {
+                      setLaps(Number(event.target.value));
+                    }}
+                  >
+                    {LAPS.map((each) => (
+                      <option key={each} value={each}>
+                        {each}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={items}
+                    onChange={(event) => {
+                      setItems(event.target.checked);
+                    }}
+                  />
+                  {ROOM_LAP_RACE_TEXT.items}
+                  {ROOM_LAP_RACE_TEXT.itemsDetail}
+                </label>
+              </>
+            ) : undefined}
             <label>
               <input
                 type="checkbox"
@@ -410,17 +493,19 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
               {ROOM_DRAFTING_TEXT.choice}
               {ROOM_DRAFTING_TEXT.choiceDetail}
             </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={listed}
-                onChange={(event) => {
-                  setListed(event.target.checked);
-                }}
-              />
-              {LIST_ROOM_TEXT.choice}
-              {LIST_ROOM_TEXT.choiceDetail}
-            </label>
+            {kind === 'lap-race' ? undefined : (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={listed}
+                  onChange={(event) => {
+                    setListed(event.target.checked);
+                  }}
+                />
+                {LIST_ROOM_TEXT.choice}
+                {LIST_ROOM_TEXT.choiceDetail}
+              </label>
+            )}
             {listed ? <p data-oyl-kept-visible="">{PUBLIC_ROOMS_TEXT.sent}</p> : undefined}
             {listed ? (
               <label>
@@ -439,22 +524,25 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 </select>
               </label>
             ) : undefined}
-            {kind === 'race' ? <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p> : undefined}
+            {kind !== 'group' ? (
+              <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p>
+            ) : undefined}
             <Button
               variant="secondary"
-              unavailable={busy !== undefined}
+              unavailable={busy !== undefined || (kind === 'lap-race' && !lapRace)}
               onClick={() => {
-                if (busy !== undefined) return;
+                if (busy !== undefined || (kind === 'lap-race' && !lapRace)) return;
                 setBusy('making');
                 setProblem(undefined);
                 const startsAt = listed ? Math.floor(Date.now() / 1000) + startsIn * 60 : undefined;
                 void rooms
                   .create({
-                    kind,
+                    kind: kind === 'group' ? 'group' : 'race',
                     ridingPosition: props.position,
                     drafting,
                     route: chosen,
                     startsAt,
+                    ...(lapRace ? { lapRace: { laps, items } } : {}),
                   })
                   .then((answer) => {
                     setBusy(undefined);

@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { kilograms, watts } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import type { FrameRider, HeldItem, ItemEvent } from '@onyourleft/protocol';
+import type { RoomRaceFact } from '@onyourleft/store';
 
 import { roomPortOver } from '../net/room-port';
 import { lapFrameRider, ManualClock, ScriptedRoom } from '../net/testing';
@@ -34,7 +35,9 @@ import { LANE_OFFSETS_METRES } from './lanes';
 import type { LapRaceChoice } from './lap-race/choice';
 import type { GameRenderer, SceneFrame } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
+import { ROOM_LAP_RACE_TEXT } from '../rooms/RoomPanel';
 import { ROOM_LOST_TEXT } from './room-ride';
+import { LAP_RACE_CHOICE_TEXT } from './StageChooser';
 import { circuitRoute } from './route-fixtures-testing';
 import { GameSimulation, type RiderInput } from './simulation';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
@@ -125,7 +128,7 @@ interface Write {
   readonly atMs: number;
 }
 
-function trainerPort(written: Write[]): GameTrainerPort {
+function trainerPort(written: Write[], races: RoomRaceFact[] = []): GameTrainerPort {
   const control: GradientTrainer = {
     setSimulationParameters: async (parameters) => {
       written.push({ parameters, atMs: nowMs });
@@ -141,6 +144,10 @@ function trainerPort(written: Write[]): GameTrainerPort {
     simulationControl: () => control,
     requestTrainerControl: async () => Promise.resolve(),
     noteGameRideEnded: () => undefined,
+    // #1912: the race the ride was in, as the device keeps it.
+    noteRoomRace: (race) => {
+      races.push(race);
+    },
     subscribe: () => () => undefined,
   });
 }
@@ -265,11 +272,14 @@ async function mountRide(options: {
   readonly lapRace?: LapRaceChoice | undefined;
   readonly writes?: Write[] | undefined;
   readonly drawn?: SceneFrame[] | undefined;
+  readonly races?: RoomRaceFact[] | undefined;
 }): Promise<void> {
   mounted = await mount(
     <GameView
       port={port()}
-      {...(options.writes === undefined ? {} : { trainer: trainerPort(options.writes) })}
+      {...(options.writes === undefined && options.races === undefined
+        ? {}
+        : { trainer: trainerPort(options.writes ?? [], options.races) })}
       renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
       now={() => nowMs}
       riderMass={MASS}
@@ -453,6 +463,65 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
     expect(drawn.length).toBeGreaterThan(0);
     expect(inputs.at(-1)?.steeredLateral).toBeCloseTo(LANE_OFFSETS_METRES[0] ?? Number.NaN, 1);
     expect(room.socket.sent.slice(lanesBefore).filter((m) => m.type === 'lane')).toEqual([]);
+  });
+
+  it('offers a rider with no instance the solo lap race, and says the networked one needs an instance — #1912', async () => {
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        riderMass={MASS}
+      />,
+    );
+    await settle();
+    const text = mounted.container.textContent ?? '';
+    // The solo race (#1907), on this loop, with nothing missing …
+    expect(text).toContain(LAP_RACE_CHOICE_TEXT.label);
+    expect(text).not.toContain(LAP_RACE_CHOICE_TEXT.notALoop);
+    // … and the race against others, which says what it needs.
+    expect(text).toContain(ROOM_LAP_RACE_TEXT.noInstance);
+    // A solo race rides with no instance at all.
+    const offer = queryAll<HTMLInputElement>(mounted.container, 'input').find((each) =>
+      (each.closest('label')?.textContent ?? '').includes(LAP_RACE_CHOICE_TEXT.label),
+    );
+    expect(offer).toBeDefined();
+    await clickThrough(offer);
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 4; index += 1) await pump();
+    expect(raceFields()[0]).toMatch(/^Place/u);
+  });
+
+  it('keeps a lap race left on its last lap as not over the line, and one ridden to the end as over it, and nothing of the items — #1912', async () => {
+    const LAP_WORDS =
+      /item|offset|lane|held|hit|pick|lap(?!s?Done)|puddle|gust|tow|tailwind|cape/iu;
+    const kept: RoomRaceFact[] = [];
+    for (const lapsDone of [1, 2]) {
+      pending = [];
+      const room = new ScriptedRoom();
+      await mountRide({ room, races: kept });
+      await joinedLapRace(room, HOLDING_TAILWIND);
+      for (let index = 0; index < 6; index += 1) await pump();
+      // The room has the rider well past one lap of the route: lap 2 of 2, or over the line.
+      await act(async () => {
+        room.frame(9, [
+          lapFrameRider(0, CIRCUIT.totalDistance * 1.6, { lapsDone, held: 'tow', lane: 2 }),
+        ]);
+        await Promise.resolve();
+      });
+      await pump();
+      await clickThrough(buttonStarting('End ride'));
+      mounted?.unmount();
+      mounted = undefined;
+    }
+    expect(kept).toHaveLength(2);
+    // Left on lap 2 of 2: not over the line, though one lap of the route is behind them.
+    expect(kept[0]).toEqual({ roomId: 'room-1', place: null, finishers: null });
+    // Ridden to the end: over the line, by the room's laps.
+    expect(kept[1]).toMatchObject({ roomId: 'room-1', crossedTheLine: true });
+    for (const fact of kept) {
+      expect(Object.keys(fact).filter((key) => LAP_WORDS.test(key))).toEqual([]);
+    }
   });
 
   it('runs no lap race in a room that is not one: no field, no pick-ups, no input', async () => {
