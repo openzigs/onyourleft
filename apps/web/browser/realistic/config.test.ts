@@ -18,6 +18,7 @@ import {
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
   inferredBarnsWithLevers,
+  inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
@@ -481,6 +482,21 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(inferredBarnsWithLevers(parseConfig('?levers=-inferred-barns').leversOff)).toBe(false);
     expect(configQuery(parseConfig('?town=untagged&levers=-inferred-barns'))).toBe(
       `?levers=${encodeURIComponent('-inferred-barns')}&town=untagged`,
+    );
+  });
+
+  it('infers a big untagged footprint on a main street commercial, as the product does, unless #2026’s lever takes it out', () => {
+    expect(LEVERS).toContain('inferred-commercial');
+    expect(inferredCommercialWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      inferredCommercialWithLevers(LEVERS.filter((lever) => lever !== 'inferred-commercial')),
+    ).toBe(true);
+    expect(
+      inferredCommercialWithLevers(parseConfig('?levers=-inferred-commercial').leversOff),
+    ).toBe(false);
+    expect(configQuery(parseConfig('?town=untagged&levers=-inferred-commercial'))).toBe(
+      `?levers=${encodeURIComponent('-inferred-commercial')}&town=untagged`,
     );
   });
 

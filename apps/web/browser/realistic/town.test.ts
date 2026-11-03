@@ -460,3 +460,28 @@ describe('the realistic page’s `inferred-barns` lever — #2024', () => {
     expect(off.plans.some((plan) => plan.family === 'garage')).toBe(true);
   });
 });
+
+describe('the realistic page’s `inferred-commercial` lever — #2026', () => {
+  const street = untaggedStreetFixture();
+  const shopsOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
+    plans.filter(
+      (_, index) => street.rows[index] === 'commercial' && street.subjects[index] === true,
+    );
+
+  it('draws the untagged street’s big footprints on the main street as shops on the product’s page', () => {
+    const shops = shopsOf(plannedTown(street, parseConfig('?town=untagged').leversOff).plans);
+    expect(shops).toHaveLength(2);
+    expect(shops.every((plan) => plan.family === 'commercial' && plan.inferred)).toBe(true);
+  });
+
+  it('plans the untagged street, with `levers=-inferred-commercial`, inferring no shop', () => {
+    const off = plannedTown(
+      street,
+      parseConfig('?town=untagged&levers=-inferred-commercial').leversOff,
+    );
+    expect(off.plans.some((plan) => plan.family === 'commercial' && plan.inferred)).toBe(false);
+    // The garages and barns stay: only the shop rule is off.
+    expect(off.plans.some((plan) => plan.family === 'garage')).toBe(true);
+    expect(off.plans.some((plan) => plan.family === 'barn')).toBe(true);
+  });
+});

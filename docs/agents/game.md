@@ -1253,6 +1253,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         gable), and over 250 m² a pole building (corrugated,
                         blind, a 20° gable in `slate` at any size)
                         (`-inferred-barns`, `town=untagged` past 2 150 m);
+                        since #2026 on a `village` or `town` stretch one of
+                        ≥ 1 000 m² within 50 m of a primary, secondary or
+                        tertiary street commercial, drawn as a mapped shop;
+                        no parking half (`-inferred-commercial`,
+                        `town=untagged` at 400–700 m);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

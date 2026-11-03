@@ -292,10 +292,15 @@
  * 80 m is a **barn** — planks under a gambrel on a seeded share, a steep gable
  * on the rest — and over 250 m² a **pole building**: corrugated walls with no
  * window, a plain door, and a low 20° gable in grey `slate` at any size.
+ * Since #2026, on a `village` or `town` stretch, one of 1 000 m² or more within
+ * 50 m of a primary, secondary or tertiary street is **commercial**, and drawn
+ * as a mapped shop; the issue's parking half is dropped, since no parking
+ * polygon reaches the corridor (spike 0033).
  * Only while the type is read; untagged footprints no rule calls are planned
- * as before, and so is every one with `?levers=-inferred-outbuildings` or
- * `-inferred-barns` ({@link FootprintPlanOptions}' `inferredOutbuildings`,
- * `inferredBarns`), each for its own rule. A plan says what it
+ * as before, and so is every one with `?levers=-inferred-outbuildings`,
+ * `-inferred-barns` or `-inferred-commercial` ({@link FootprintPlanOptions}'
+ * `inferredOutbuildings`, `inferredBarns`, `inferredCommercial`), each for its
+ * own rule. A plan says what it
  * was inferred ({@link FootprintPlan.family}, {@link FootprintPlan.inferred}).
  *
  * ## The surfaces
@@ -1275,6 +1280,26 @@ export const INFERRED_BARN_MIN_SETBACK_METRES = 40;
 export const POLE_BUILDING_MIN_AREA = 250;
 
 /**
+ * #2026: an untagged footprint of at least this may be inferred commercial,
+ * m² — **1 000**, the owner's ruling of 2026-11-02 (spike 0033: at 300 m²,
+ * 104 of 148 mapped footprints that passed were houses; at 1 000, none).
+ */
+export const INFERRED_COMMERCIAL_MIN_AREA = 1_000;
+
+/** #2026: how near a main street a commercial footprint's outline must come, metres — **50**. */
+export const INFERRED_COMMERCIAL_STREET_METRES = 50;
+
+/** #2026: the stretches a commercial footprint is inferred on: a `village` or a `town`. */
+export const INFERRED_COMMERCIAL_CLASSES: ReadonlySet<UrbanClass> = new Set(['village', 'town']);
+
+/** #2026: the `kind_detail`s of a `major_road` that make it a main street: primary, secondary, tertiary. */
+export const MAIN_STREET_DETAILS: ReadonlySet<string> = new Set([
+  'primary',
+  'secondary',
+  'tertiary',
+]);
+
+/**
  * What the inference rules read of an untagged footprint — #2023, spike 0033.
  * The two methods are asked only where a rule needs them, so a footprint no
  * rule could call is never measured against the streets.
@@ -1302,6 +1327,12 @@ export interface UntaggedCues {
    * `undefined` where there is none.
    */
   homeSetback(metres: number): number | undefined;
+  /**
+   * #2026: how far its outline stands from the nearest ground main street —
+   * a primary, secondary or tertiary road ({@link MAIN_STREET_DETAILS}) —
+   * metres, at most {@link SETBACK_SEARCH_METRES}.
+   */
+  mainStreet(): number;
 }
 
 /** Which inference rules run — the planner's levers ({@link FootprintPlanOptions}). */
@@ -1310,6 +1341,8 @@ export interface InferenceRules {
   readonly outbuildings: boolean;
   /** #2024: a barn or a pole building. */
   readonly barns: boolean;
+  /** #2026: a shop or a commercial building. */
+  readonly commercial: boolean;
 }
 
 /** What a footprint is drawn as, and whether that was inferred rather than mapped. */
@@ -1334,7 +1367,11 @@ export interface FootprintKind {
  *   m² and a rectangularity of {@link INFERRED_BARN_MIN_RECTANGULARITY}, at least
  *   {@link INFERRED_BARN_MIN_SETBACK_METRES} m back from the street, with a
  *   house-sized footprint within {@link INFERRED_BARN_HOME_METRES} m that stands
- *   nearer it — and over {@link POLE_BUILDING_MIN_AREA} m² a **pole building**.
+ *   nearer it — and over {@link POLE_BUILDING_MIN_AREA} m² a **pole building**;
+ * - **commercial** (#2026): on a `village` or `town` stretch, at least
+ *   {@link INFERRED_COMMERCIAL_MIN_AREA} m², within
+ *   {@link INFERRED_COMMERCIAL_STREET_METRES} m of a main street. The issue's
+ *   parking half is dropped: no parking polygon reaches the archive's corridor.
  *
  * Otherwise none, and the footprint is planned by today's rule. The inferred
  * family feeds #1791's table (`building-types.ts`) as a mapped one does.
@@ -1358,6 +1395,14 @@ export function footprintKindOf(
       const home = cues.homeSetback(INFERRED_GARAGE_HOME_METRES);
       if (home !== undefined && cues.setback() > home) return { family: 'garage', inferred: true };
     }
+  }
+  if (
+    rules.commercial &&
+    INFERRED_COMMERCIAL_CLASSES.has(cues.urban) &&
+    cues.area >= INFERRED_COMMERCIAL_MIN_AREA &&
+    cues.mainStreet() <= INFERRED_COMMERCIAL_STREET_METRES
+  ) {
+    return { family: 'commercial', inferred: true };
   }
   if (
     rules.barns &&
@@ -2013,21 +2058,36 @@ function ringToSegmentSquared(ring: Ring, ax: number, az: number, bx: number, bz
 }
 
 /**
- * A corridor's streets that a footprint stands back from, in a grid — #2023,
- * spike 0033: every `ground` street but a service road and a highway
- * (`cross-streets.ts` §`widthClassOf`). A service road is left out because
- * the nearest road to a small footprint is mostly its own drive.
+ * A footprint's street — #2023, spike 0033: a `ground` street but a service
+ * road and a highway (`cross-streets.ts` §`widthClassOf`). A service road is
+ * left out because the nearest road to a small footprint is mostly its own drive.
+ */
+function setbackStreet(street: StreetFeature): boolean {
+  const width = widthClassOf(street);
+  return street.grade === 'ground' && width !== 'service' && width !== 'highway';
+}
+
+/**
+ * A main street — #2026: a `ground` primary, secondary or tertiary road
+ * ({@link MAIN_STREET_DETAILS}). The `kind_detail` is the OSM `highway` value,
+ * which only a `major_road` carries, so it is the whole test.
+ */
+function mainStreet(street: StreetFeature): boolean {
+  return street.grade === 'ground' && MAIN_STREET_DETAILS.has(street.kindDetail);
+}
+
+/**
+ * A corridor's streets that a footprint stands back from, in a grid — #2023:
+ * those `keeps` admits, {@link setbackStreet}'s or since #2026 {@link mainStreet}'s.
  */
 class StreetSetbacks {
   /** `ax, az, bx, bz` a segment. */
   readonly #segments: number[] = [];
   readonly #cells = new Map<number, number[]>();
 
-  constructor(streets: readonly StreetFeature[]) {
+  constructor(streets: readonly StreetFeature[], keeps: (street: StreetFeature) => boolean) {
     for (const street of streets) {
-      if (street.grade !== 'ground') continue;
-      const width = widthClassOf(street);
-      if (width === 'service' || width === 'highway') continue;
+      if (!keeps(street)) continue;
       const line = street.line;
       for (let i = 0; i + 3 < line.length; i += 2) {
         const segment = this.#segments.length / 4;
@@ -2183,6 +2243,7 @@ class Untagged {
   readonly #kept: (index: number) => boolean;
   #homes: HomeNeighbours | undefined;
   #streets: StreetSetbacks | undefined;
+  #mainStreets: StreetSetbacks | undefined;
 
   /** `kept` says whether the planner keeps the corridor's `index`th footprint. */
   constructor(corridor: WorldCorridor, rules: InferenceRules, kept: (index: number) => boolean) {
@@ -2195,7 +2256,7 @@ class Untagged {
   cuesOf(own: number, outer: Ring, area: number, urban: UrbanClass): UntaggedCues {
     const rectangle = minimumAreaRectangle(outer);
     const streets = (): StreetSetbacks => {
-      this.#streets ??= new StreetSetbacks(this.#corridor.streets);
+      this.#streets ??= new StreetSetbacks(this.#corridor.streets, setbackStreet);
       return this.#streets;
     };
     return {
@@ -2207,6 +2268,10 @@ class Untagged {
       homeSetback: (metres) => {
         this.#homes ??= new HomeNeighbours(this.#corridor.buildings, streets());
         return this.#homes.setbackNear(own, outer, metres, this.#kept);
+      },
+      mainStreet: () => {
+        this.#mainStreets ??= new StreetSetbacks(this.#corridor.streets, mainStreet);
+        return this.#mainStreets.of(outer);
       },
     };
   }
@@ -5133,6 +5198,7 @@ export function footprintPlans(
         {
           outbuildings: options.inferredOutbuildings ?? true,
           barns: options.inferredBarns ?? true,
+          commercial: options.inferredCommercial ?? true,
         },
         kept,
       )
@@ -6131,6 +6197,14 @@ export interface FootprintPlanOptions {
    * (`?levers=-inferred-barns`).
    */
   readonly inferredBarns?: boolean;
+  /**
+   * #2026: an untagged footprint of 1 000 m² or more on a village or town
+   * stretch, within 50 m of a primary, secondary or tertiary street, inferred
+   * commercial ({@link footprintKindOf}) and drawn as #1791's mapped shop;
+   * `true` by default, and only while `buildingTypes` is on. Off, every such
+   * footprint is planned as before (`?levers=-inferred-commercial`).
+   */
+  readonly inferredCommercial?: boolean;
 }
 
 /**
