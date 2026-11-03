@@ -264,6 +264,26 @@ describe('a lap race’s words, as the owner approved them — #1912', () => {
     expect(document.querySelector('.oyl-status__label')?.textContent).toBe('Race: ');
   });
 
+  it('says the laps and items after “Lap race:” without repeating it — the owner, 2026-11-03', async () => {
+    const entered: EnteredRoom = {
+      roomId: 'room-lap',
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      madeIt: false,
+      lapRace: { laps: 3, items: true },
+      profile: LOOP.profile,
+      routeSha256: 'a'.repeat(64),
+    };
+    const statusLine = (): string =>
+      document.querySelector('.oyl-status__label')?.parentElement?.textContent ?? '';
+    await shown(panel({ entered }));
+    expect(statusLine()).toMatch(/^Lap race: 3 laps of the room’s loop, items on\. /);
+    mounted?.unmount();
+    await shown(panel({ entered: { ...entered, lapRace: { laps: 3, items: false } } }));
+    expect(statusLine()).toMatch(/^Lap race: 3 laps of the room’s loop, items off\. /);
+  });
+
   it('says, with no instance, the approved one line', async () => {
     await shown(panel({ rooms: undefined }));
     expect(

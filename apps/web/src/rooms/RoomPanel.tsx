@@ -91,6 +91,8 @@ export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
  * *Lap race*, a kind's detail that no longer names items, and the items box's
  * "where you appear in the game". "Lap race" is the mode's name (the owner,
  * 2026-10-31) and nothing here names another game (ADR 0060 D-1.5).
+ * `entered` follows the status label "Lap race:" without repeating it: the
+ * owner's ruling of 2026-11-03, "Lap race: 3 laps of the room's loop, items on."
  */
 export const ROOM_LAP_RACE_TEXT = {
   kind: 'Lap race',
@@ -101,7 +103,7 @@ export const ROOM_LAP_RACE_TEXT = {
   itemsDetail:
     ' — pick-ups round the lap; an item moves where you appear in the game, never your trainer',
   entered: (laps: number, items: boolean): string =>
-    `You are in a lap race: ${String(laps)} lap${laps === 1 ? '' : 's'} of the room’s loop, ` +
+    `${String(laps)} lap${laps === 1 ? '' : 's'} of the room’s loop, ` +
     `items ${items ? 'on' : 'off'}.`,
   /** #1912: the panel's one line with no instance, now naming the lap race (#1013: one line). */
   noInstance: ' to make a room or a lap race, or join one by its code.',
