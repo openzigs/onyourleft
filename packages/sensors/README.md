@@ -27,6 +27,7 @@ is `navigator`. It is the transport boundary (#40); nothing it declares escapes 
 | Heart Rate, CSC and Cycling Power clients | #41, #42 | `protocol/`, its own directory on the same terms, exported as `@onyourleft/sensors/protocol` — [below](#the-protocol-clients) |
 | The FTMS client and trainer control | #43 | `protocol/`, split into `fitness-machine.ts` (reads) and `fitness-machine-control.ts` (writes) — [below](#trainer-control) |
 | Driving simulation mode from a route | #90 | `protocol/simulation-writer.ts` and `protocol/trainer-control-choice.ts` — [below](#driving-simulation-mode-from-a-route-90). The gradient itself is `@onyourleft/domain` |
+| The OpenBikeControl v1 codec: a steering and button controller's notifications, and the app information this program writes | #1822 | `protocol/open-bike-control.ts`. Written from the MIT specification in this repository's own words; no BikeControl or qdomyos-zwift code. Not a trainer path: it imports no seam module |
 | The device simulator | #44 | `src/simulator/`, exported as `@onyourleft/sensors/simulator` — [below](#the-device-simulator) |
 | The transport conformance suite | #44 | `src/simulator/conformance.ts`, exported as `@onyourleft/sensors/conformance` |
 | CoreBluetooth and Android BLE | #15 | the Capacitor plugin, behind the same interface |
