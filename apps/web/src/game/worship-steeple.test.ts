@@ -141,7 +141,7 @@ function insideFootprint(plan: FootprintPlan, x: number, z: number): boolean {
 }
 
 describe('#2021: a mapped place of worship’s steeple, read back from the plan', () => {
-  it('gives the typed street’s church a steeple, and its school none — 22 triangles, on the far level too', () => {
+  it('gives the typed street’s church a steeple, and its school none — 24 triangles, on the far level too', () => {
     const street = typedStreetFixture();
     const land = landClassMask(street.corridor);
     const plan = (options: FootprintPlanOptions): readonly FootprintPlan[] =>
@@ -164,11 +164,11 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
         churches += 1;
         expect(each.steeple).toBe(true);
         // The tower's four sides, and the spire's four faces (#2021); since #2100 the belfry's
-        // band, its four sides and its underside: measured.
-        expect(triangles(each, 'wall') - triangles(without, 'wall')).toBe(18);
+        // band, its four sides, underside and top: measured.
+        expect(triangles(each, 'wall') - triangles(without, 'wall')).toBe(20);
         expect(triangles(each, 'roof') - triangles(without, 'roof')).toBe(4);
-        expect(each.triangleCount - without.triangleCount).toBe(22);
-        expect(each.farTriangleCount - without.farTriangleCount).toBe(22);
+        expect(each.triangleCount - without.triangleCount).toBe(24);
+        expect(each.farTriangleCount - without.farTriangleCount).toBe(24);
         expect(each.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
         expect(each.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
       } else {
@@ -383,7 +383,11 @@ function shaderUp(floats: Float32Array, at: number): number {
   return top >= -0.5 && kind < 1.5 ? v * STOREY_METRES : v;
 }
 
-/** What #1661's splash grime leaves of the light at a height `up`, on the oldest building. */
+/**
+ * What #1661's splash grime leaves of the light at a height `up`, on the oldest building.
+ * It models the splash term only, not the shader's upright gate (`oylUpFacing < 0.3`), so
+ * it is stricter than the shader: an inexact twin, not an exact one.
+ */
 const splashLight = (up: number): number =>
   weatheringAt({ effect: 'splash', up }, { plane: [0, 0], age: 1 }).light;
 
@@ -407,10 +411,29 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
     expect(flat.surfaces.roof).toBe('slate');
     // Without its steeple the same church's flat roof is the gravel it always was.
     expect(planOne(flatAt, CHURCH, { steeples: false }).surfaces.roof).toBe('flat-roof');
-    const hipped = planOne(hipAt, CHURCH);
+    // A pitched church whose roof, steeple-less, is the seeded tile: the steeple turns it slate.
+    let tiled: typeof hipAt | undefined;
+    for (let along = 40; along < 400 && tiled === undefined; along += 10) {
+      const at = [rectangleBeside(1_000, along, 10, 24)];
+      const bare = planOne(at, CHURCH, { steeples: false });
+      if (bare.roof !== 'flat' && bare.surfaces.roof === 'roof-tiles') tiled = at;
+    }
+    expect(tiled).toBeDefined();
+    const hipped = planOne(tiled as typeof hipAt, CHURCH);
     expect(hipped.steeple).toBe(true);
     expect(hipped.roof).not.toBe('flat');
     expect(hipped.surfaces.roof).toBe('slate');
+  });
+
+  it('closes the belfry band on top, so no slit shows between the spire and the band', () => {
+    const plan = planOne(hipAt, CHURCH);
+    const roofTop = apexOf(planOne(hipAt, CHURCH, { steeples: false }))[1];
+    const walls = plan.triangles.wall;
+    const caps = verticesAbove(plan, 'wall', roofTop).filter(
+      (at) => (walls[at + 4] as number) > 0.99,
+    );
+    // Two triangles, three corners each.
+    expect(caps).toHaveLength(6);
   });
 
   it('shades every face of the spire as a roof slope at the steepest pitch the town builds', () => {

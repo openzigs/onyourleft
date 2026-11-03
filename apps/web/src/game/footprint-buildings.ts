@@ -270,7 +270,7 @@
  * rising above the
  * roof under a pyramidal spire. Its tower is `wall` in the walls' cladding and
  * its spire `roof`, so it costs 12 triangles, on the far level too, and no
- * draw call. Since #2100 a belfry's band rings the tower's top (22 triangles
+ * draw call. Since #2100 a belfry's band rings the tower's top, capped (24 triangles
  * in all, still no draw call), the tower stands 6 m over the roof, the spire
  * is shaded as a roof slope, and a church with a steeple roofs in `slate`, so
  * its spire is never the flat roof's gravel. Over a cap it is left off
@@ -4888,7 +4888,8 @@ function steeple(
     { top: false, bottom: false },
     true,
   );
-  // #2100: the belfry's band round the tower's top, closed underneath, where the spire stands.
+  // #2100: the belfry's band round the tower's top, closed underneath and on top (the spire
+  // stands inside it), so no slit shows between the spire's foot and the band's face.
   const band = half + STEEPLE.band.proud;
   box(
     writing.wall,
@@ -4897,7 +4898,7 @@ function steeple(
     [band, band],
     [top - STEEPLE.band.height, top, floor],
     plainIn(styles.wall),
-    { top: false, bottom: true },
+    { top: true, bottom: true },
     true,
   );
   const rise = 2 * half * STEEPLE.spire;
