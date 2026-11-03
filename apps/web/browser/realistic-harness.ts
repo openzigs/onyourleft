@@ -64,9 +64,14 @@ import {
   countrysideFixture,
   houseStreetFixture,
   commercialStreetFixture,
+  mappedRoofStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
+  // #1791's street of every mapped building type, which `town=typed` rides.
+  typedStreetFixture,
+  // #2023's street of untagged garages and sheds, which `town=untagged` rides.
+  untaggedStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -86,6 +91,7 @@ import {
   facadeTrimsOf,
   facadeWreathOf,
   firDepthPrepassOf,
+  nearTreeFadeOf,
   foliageOrderedOf,
   groundBlendOf,
   lapRaceDrawnOf,
@@ -114,6 +120,7 @@ import {
   rungWithLevers,
   seasonWithLevers,
   firPrepassWithLevers,
+  nearTreeFadeWithLevers,
   surfacesWithLevers,
   treesWithLevers,
   windowRevealsWithLevers,
@@ -333,8 +340,9 @@ declare global {
       /**
        * #1815: the village ceiling that same frame is held to,
        * `realistic-budget.ts` §`villageDrawCallCeiling` of the frame the page
-       * drew — the Delivery one while it carries a round, the frozen 50
-       * otherwise. Absent with the result.
+       * drew — the Delivery one while it carries a round, since #1971 the
+       * lap race's while it carries a race in the realistic world, the
+       * frozen 50 otherwise. Absent with the result, and on a stylised race.
        */
       readonly villageCeiling?: number;
       /**
@@ -349,8 +357,9 @@ declare global {
        * #1972: the scene ceiling that same frame is held to,
        * `realistic-budget.ts` §`stylisedSceneDrawCallCeiling` of the frame the
        * page drew — the lap race's 14 while it carries a race. Absent unless
-       * `?race=` asked for one, because the stylised world's own 11 is the
-       * scenery-free frame's and this page's ordinary frames carry scenery.
+       * `?race=` asked for one in the stylised world, because the stylised
+       * world's own 11 is the scenery-free frame's and this page's ordinary
+       * frames carry scenery; a realistic race's is `villageCeiling` (#1971).
        */
       readonly raceCeiling?: number;
     };
@@ -476,7 +485,13 @@ async function run(): Promise<void> {
                   ? houseStreetFixture(latitude)
                   : config.town === 'commercial'
                     ? commercialStreetFixture(latitude)
-                    : undefined;
+                    : config.town === 'typed'
+                      ? typedStreetFixture(latitude)
+                      : config.town === 'roofs'
+                        ? mappedRoofStreetFixture(latitude)
+                        : config.town === 'untagged'
+                          ? untaggedStreetFixture(latitude)
+                          : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -532,6 +547,11 @@ async function run(): Promise<void> {
   // rung change.
   const firPrepass = firPrepassWithLevers(config.leversOff);
   firDepthPrepassOf(view, firPrepass);
+  // #545's before/after pair for the trees' fade near the camera, on one
+  // build. The vegetation is the realistic belts', so it is applied again
+  // after a rung change too.
+  const nearTreeFade = nearTreeFadeWithLevers(config.leversOff);
+  nearTreeFadeOf(view, nearTreeFade);
   // #1523's cost pairs: the ground without #627's blend, the road without
   // #628's wear — the code out of the program, not a uniform at zero. A
   // setting of the view's, so it survives a rung change; and set BEFORE the
@@ -635,6 +655,7 @@ async function run(): Promise<void> {
         view.setQuality(drawnRung(next));
         foliageOrderedOf(view, foliageOrdered);
         firDepthPrepassOf(view, firPrepass);
+        nearTreeFadeOf(view, nearTreeFade);
         groundBlendOf(view, 1, 1, 1, crag);
       }
       state = next;
@@ -663,8 +684,10 @@ async function run(): Promise<void> {
       origin,
       distance,
       elapsed: config.at === undefined ? elapsed : 0,
-      // #1972: a race is held to the SCENERY-FREE frame's ceiling, so it carries none.
-      rung: config.race === undefined ? worldRung(state) : SCENERY_FREE,
+      // #1972: a stylised race is held to the SCENERY-FREE frame's ceiling, so
+      // it carries none; #1971: a realistic one is held on the village's frame.
+      rung:
+        config.race === undefined || config.world === 'realistic' ? worldRung(state) : SCENERY_FREE,
       // #1534's pair: the villages' ground left wooded.
       settlementsWooded: config.leversOff.includes('settlement-clearing'),
       // #1541's pair: the people off.
@@ -740,13 +763,16 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(delivery === undefined ? {} : { delivery }),
-        // A race is the stylised world's frame; the village's ceiling is no part of it.
-        ...(drawn === undefined || config.race !== undefined
+        // A stylised race is the scenery-free frame's; the village's ceiling is
+        // no part of it. #1971: a realistic race's frame is the village's.
+        ...(drawn === undefined || (config.race !== undefined && config.world !== 'realistic')
           ? {}
           : { villageCeiling: villageDrawCallCeiling(drawn) }),
         ...(race === undefined || drawn === undefined
           ? {}
-          : { race, raceCeiling: stylisedSceneDrawCallCeiling(drawn) }),
+          : config.world === 'realistic'
+            ? { race }
+            : { race, raceCeiling: stylisedSceneDrawCallCeiling(drawn) }),
       });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);

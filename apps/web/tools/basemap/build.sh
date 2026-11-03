@@ -187,6 +187,18 @@ else
   echo "${want}" >"${PBF}.md5"
 fi
 
+# --- The region's outline ---------------------------------------------------
+# Geofabrik's .poly beside the extract (north-america/us.poly), handed to
+# Planetiler as --polygon so the output is clipped to the extract. Without it
+# Planetiler fills the bounding box with land and ocean polygons: the first US
+# build (2026-10-31) addressed 368 848 915 tiles against 21 635 078 and answered
+# a tile in London, Toronto or Mexico City with bare land and no roads (#1557's
+# review). Fetched every build, because the outline changes with the extract.
+POLY_URL="${GEOFABRIK}/${REGION}.poly"
+POLY="${EXTRACTS}/${AREA}.poly"
+curl -sSfL -o "${POLY}.part" "${POLY_URL}" || { echo "build.sh: could not read ${POLY_URL}" >&2; rm -f "${POLY}.part"; exit 1; }
+mv "${POLY}.part" "${POLY}"
+
 # --- Tiles ------------------------------------------------------------------
 # Upstream's run(): every other source (Natural Earth, the OSM water and land
 # polygons, Daylight landcover, QRank, the pgf encoding) is downloaded into
@@ -194,7 +206,7 @@ fi
 run_profile() {
   local jar="$1" output="$2"
   (cd "${WORK}" && java "-Xmx${XMX}" "-Doyl.build_year=${BUILD_YEAR}" -jar "${jar}" \
-    --area="${AREA}" --osm_path="${PBF}" --download --force --output="${output}" \
+    --area="${AREA}" --osm_path="${PBF}" --polygon="${POLY}" --download --force --output="${output}" \
     --nodemap-type=sparsearray --nodemap-storage=mmap)
 }
 
@@ -218,6 +230,7 @@ RECORD="${OUTPUT%.pmtiles}.build.txt"
   echo "patch $(sha256 "${HERE}/profile/protomaps-basemaps.patch")"
   echo "jar $(sha256 "${WORK}/jars/onyourleft.jar")"
   echo "extract ${NAME} ${SOURCE} md5 ${want} $(bytes "${PBF}") $(sha256 "${PBF}")"
+  echo "polygon ${POLY_URL} $(bytes "${POLY}") $(sha256 "${POLY}")"
   # Every shared source. An extract in data/sources is not this build's input:
   # the extract is the line above.
   for source in "${WORK}"/data/sources/*; do

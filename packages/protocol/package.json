@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@onyourleft/domain": "workspace:*",
     "@onyourleft/physics": "workspace:*",
     "typescript": "6.0.3",
     "vitest": "4.1.12"

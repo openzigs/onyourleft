@@ -62,7 +62,7 @@ import { PMTiles } from 'pmtiles';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
 import { MAP_COLOURS } from '../src/map/basemap';
-import type { HarnessResult, LabelLoadResult, MapLoadResult, MapProbe } from './harness';
+import type { HarnessResult, LabelLoadResult, MapEdit, MapLoadResult, MapProbe } from './harness';
 import {
   centreTrack,
   coldLoadReport,
@@ -1129,5 +1129,303 @@ test.describe('a hosted archive, rendered and timed over the internet', () => {
     // is the only artefact anybody reads on a green run. Criterion 8 says
     // "recorded in the PR", and a number nobody can see is not recorded.
     console.log(measured);
+  });
+});
+
+/**
+ * #2003: a saved route's map moves, in a real engine.
+ *
+ * jsdom proves the panel's buttons call `MapView.zoom`, `pan` and `fitTrack`;
+ * only MapLibre can say the options `maplibre.ts` §`EXPLORABLE` hands it make
+ * a map that a drag moves, and that its own interactive canvas — which it
+ * makes a tab stop — was taken back out of the tab order.
+ *
+ * The read is the line at the frame's centre, which a fitted map draws through
+ * it (`MapLoadResult.trackPainted`). A pan or a drag moves the line off it, and
+ * *Whole route* puts it back — which is also what says the read can be true
+ * after a move, rather than only false. The still map a ride's page draws, under
+ * the same drag, is the control: its line must not move.
+ *
+ * ⚠️ Not the pinch: Playwright's Chromium has no multi-touch gesture to send,
+ * and MapLibre's `touchZoomRotate` is a stock handler this change only turns on.
+ */
+test.describe('an explorable map — #2003', () => {
+  /** Whether the line is in the box at the frame's centre now. */
+  async function lineAtCentre(page: import('@playwright/test').Page): Promise<boolean> {
+    const probe = await probeNow(page);
+    return probe.centreColours.includes(probe.trackColour);
+  }
+
+  /** A mouse drag across the map, from its centre, 200 px left. */
+  async function drag(page: import('@playwright/test').Page): Promise<void> {
+    const box = await page.locator('#map').boundingBox();
+    if (box === null) throw new Error('the map has no box to drag');
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 200, y, { steps: 10 });
+    await page.mouse.up();
+  }
+
+  test('moves from its buttons and from a drag, keeps its canvas out of the tab order, and comes back', async ({
+    page,
+  }) => {
+    await page.goto(`/?tiles=off&explorable&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+    expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+
+    // MapLibre makes an interactive canvas `tabindex="0"`; the adapter takes it back.
+    await expect(page.locator('#map .maplibregl-interactive')).toHaveCount(1);
+    await expect(page.locator('#map canvas')).toHaveAttribute('tabindex', '-1');
+
+    await page.evaluate(() => window.__oylMapMove?.('pan north'));
+    await expect.poll(() => lineAtCentre(page)).toBe(false);
+    await page.evaluate(() => window.__oylMapMove?.('fit'));
+    await expect.poll(() => lineAtCentre(page)).toBe(true);
+
+    await drag(page);
+    await expect.poll(() => lineAtCentre(page)).toBe(false);
+    await page.evaluate(() => window.__oylMapMove?.('fit'));
+    await expect.poll(() => lineAtCentre(page)).toBe(true);
+  });
+
+  test('control: a ride’s still map does not move under the same drag', async ({ page }) => {
+    await page.goto(`/?tiles=off&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+    expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+    await expect(page.locator('#map .maplibregl-interactive')).toHaveCount(0);
+
+    await drag(page);
+    // Long enough for the drag's pan to have drawn, had there been one: the
+    // explorable case above sees its line leave the centre well inside this.
+    await page.waitForTimeout(1000);
+    expect(await lineAtCentre(page)).toBe(true);
+  });
+
+  test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true });
+
+    test('a one-finger drag is left to the page, not taken as a pan', async ({ page }) => {
+      await page.goto(`/?tiles=off&explorable&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+      const load = await mapLoad(page);
+      expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+
+      const box = await page.locator('#map').boundingBox();
+      if (box === null) throw new Error('the map has no box to drag');
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 10; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: x - step * 20, y }],
+        });
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+      // Long enough for a pan to have drawn, had MapLibre taken the drag: it
+      // would have called `preventDefault` and the page could not have scrolled.
+      await page.waitForTimeout(1000);
+      expect(await lineAtCentre(page)).toBe(true);
+
+      // The compass buttons are what a touch moves the map with.
+      await page.evaluate(() => window.__oylMapMove?.('pan north'));
+      await expect.poll(() => lineAtCentre(page)).toBe(false);
+    });
+  });
+});
+
+/**
+ * The route planner's map — #2006, in the real engine.
+ *
+ * `views/RouteBuilderView.map.test.tsx` fires each gesture into the planner
+ * through the recording port and reads the draft back. What it cannot say is
+ * that MapLibre reports those gestures at all: that a click is a tap, that a
+ * dragged marker is one move with its id, that a pull on the line is a pull
+ * and not a pan, and that a drag that starts on a marker lying ON the line
+ * moves the marker rather than bending the line. This is that half, through
+ * the adapter and `MapView.listen` — the seam the planner uses.
+ *
+ * The harness line runs from the frame's lower left to its upper right through
+ * the centre, fitted height-first: its ends are 176 px above and below the
+ * centre (400 px less 24 px of padding each side, halved), and at London's
+ * latitude a degree of longitude is cos(51.5°) of a degree of latitude across,
+ * so 110 px either side. Half way out along it is where the line is grabbed;
+ * the grab line is 24 px wide, so a few pixels of rounding do not matter.
+ */
+test.describe('the route planner’s map — #2006', () => {
+  type Box = {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+
+  async function editable(page: import('@playwright/test').Page): Promise<Box> {
+    await page.goto(`/?tiles=off&editable&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+    expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+    const box = await page.locator('#map').boundingBox();
+    if (box === null) throw new Error('the map has no box');
+    return box;
+  }
+
+  async function edits(page: import('@playwright/test').Page): Promise<readonly MapEdit[]> {
+    return page.evaluate(() => window.__oylMapEdits ?? []);
+  }
+
+  async function pull(
+    page: import('@playwright/test').Page,
+    from: readonly [number, number],
+    to: readonly [number, number],
+  ): Promise<void> {
+    await page.mouse.move(from[0], from[1]);
+    await page.mouse.down();
+    await page.mouse.move(to[0], to[1], { steps: 10 });
+    await page.mouse.up();
+  }
+
+  test('a click away from the line is one tap, where it was clicked', async ({ page }) => {
+    const box = await editable(page);
+    // The upper left, well away from a line that runs lower left to upper right.
+    await page.mouse.click(box.x + 60, box.y + 60);
+    await expect.poll(() => edits(page)).toHaveLength(1);
+    const [edit] = await edits(page);
+    expect(edit?.kind).toBe('tap');
+    if (edit?.kind !== 'tap') return;
+    // West and north of the line's middle, which is the view's centre.
+    expect(edit.at[0]).toBeLessThan(-0.1273);
+    expect(edit.at[1]).toBeGreaterThan(51.5079);
+  });
+
+  test('a marker is ours: out of the tab order, hidden from the tree, and given no role', async ({
+    page,
+  }) => {
+    await editable(page);
+    await page.evaluate(() => window.__oylMapWaypointAtCentre?.());
+    const marker = page.locator('#map .oyl-map__waypoint');
+    await expect(marker).toHaveCount(1);
+    await expect(marker).toHaveAttribute('aria-hidden', 'true');
+    expect(await marker.getAttribute('tabindex')).toBeNull();
+    expect(await marker.getAttribute('role')).toBeNull();
+    // And it is drawn where it is: at the view's centre, give or take a pixel.
+    const map = await page.locator('#map').boundingBox();
+    const placed = await marker.boundingBox();
+    if (map === null || placed === null) throw new Error('nothing to measure');
+    expect(Math.abs(placed.x + placed.width / 2 - (map.x + map.width / 2))).toBeLessThan(2);
+    expect(Math.abs(placed.y + placed.height / 2 - (map.y + map.height / 2))).toBeLessThan(2);
+  });
+
+  test('a marker shows its number in the list, and is renumbered in place', async ({ page }) => {
+    // The owner's review of #2006: the map and the list name a waypoint alike.
+    await editable(page);
+    await page.evaluate(() => window.__oylMapWaypointAtCentre?.());
+    const marker = page.locator('#map .oyl-map__waypoint');
+    await expect(marker).toHaveText('1');
+    // An insert before it makes it the second: the same marker, told again.
+    await page.evaluate(() => window.__oylMapWaypointAtCentre?.('2'));
+    await expect(marker).toHaveCount(1);
+    await expect(marker).toHaveText('2');
+  });
+
+  test('a marker dragged off the line is one move, and not a pull on the line it lay on', async ({
+    page,
+  }) => {
+    const box = await editable(page);
+    await page.evaluate(() => window.__oylMapWaypointAtCentre?.());
+    const centre = [box.x + box.width / 2, box.y + box.height / 2] as const;
+    await pull(page, centre, [centre[0] + 150, centre[1]]);
+    await expect.poll(() => edits(page)).toHaveLength(1);
+    const [edit] = await edits(page);
+    expect(edit?.kind).toBe('move');
+    if (edit?.kind !== 'move') return;
+    expect(edit.id).toBe('w1');
+    // Moved east of the centre, and not north or south of it.
+    expect(edit.at[0]).toBeGreaterThan(-0.1271);
+    expect(edit.at[1]).toBeCloseTo(51.5079, 3);
+  });
+
+  test('a pull on the line is one pull, from where it was grabbed, and does not pan the map', async ({
+    page,
+  }) => {
+    const box = await editable(page);
+    const grabbed = [box.x + box.width / 2 + 55, box.y + box.height / 2 - 88] as const;
+    await pull(page, grabbed, [grabbed[0] + 120, grabbed[1] + 60]);
+    await expect.poll(() => edits(page)).toHaveLength(1);
+    const [edit] = await edits(page);
+    expect(edit?.kind).toBe('line');
+    if (edit?.kind !== 'line') return;
+    // Grabbed on the line's upper half; let go to its east.
+    expect(edit.from[1]).toBeGreaterThan(51.5079);
+    expect(edit.to[0]).toBeGreaterThan(edit.from[0]);
+    // The view did not move under the pull: the line is still at the centre.
+    expect((await probeNow(page)).centreColours).toContain((await probeNow(page)).trackColour);
+    await expect(page.locator('#map .oyl-map__waypoint')).toHaveCount(0);
+  });
+
+  test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true });
+
+    /** One finger, pressed at `from` and lifted at `to`, through the protocol a real touch uses. */
+    async function swipe(
+      page: import('@playwright/test').Page,
+      from: readonly [number, number],
+      to: readonly [number, number],
+    ): Promise<void> {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: from[0], y: from[1] }],
+      });
+      for (let step = 1; step <= 10; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [
+            {
+              x: from[0] + ((to[0] - from[0]) * step) / 10,
+              y: from[1] + ((to[1] - from[1]) * step) / 10,
+            },
+          ],
+        });
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+
+    test('a finger drags a marker, and pulls the line', async ({ page }) => {
+      const box = await editable(page);
+      await page.evaluate(() => window.__oylMapWaypointAtCentre?.());
+      const centre = [box.x + box.width / 2, box.y + box.height / 2] as const;
+      await swipe(page, centre, [centre[0] + 150, centre[1]]);
+      await expect.poll(() => edits(page)).toHaveLength(1);
+      expect((await edits(page))[0]?.kind).toBe('move');
+
+      const grabbed = [centre[0] - 55, centre[1] + 88] as const;
+      await swipe(page, grabbed, [grabbed[0] - 100, grabbed[1]]);
+      await expect.poll(() => edits(page)).toHaveLength(2);
+      const pulled = (await edits(page))[1];
+      expect(pulled?.kind).toBe('line');
+      if (pulled?.kind !== 'line') return;
+      expect(pulled.to[0]).toBeLessThan(pulled.from[0]);
+    });
+  });
+
+  test('control: the same pull on a saved route’s map pans it, and reports nothing', async ({
+    page,
+  }) => {
+    await page.goto(`/?tiles=off&explorable&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    await mapLoad(page);
+    const box = await page.locator('#map').boundingBox();
+    if (box === null) throw new Error('the map has no box');
+    const grabbed = [box.x + box.width / 2 + 55, box.y + box.height / 2 - 88] as const;
+    await pull(page, grabbed, [grabbed[0] + 120, grabbed[1] + 60]);
+    await expect
+      .poll(async () => {
+        const probe = await probeNow(page);
+        return probe.centreColours.includes(probe.trackColour);
+      })
+      .toBe(false);
+    expect(await page.evaluate(() => window.__oylMapEdits)).toBeUndefined();
   });
 });

@@ -163,14 +163,19 @@ function fits(input: ArchetypeInput, cue: ArchetypeCue): boolean {
 /**
  * The archetype a footprint is — the first of {@link HOUSE_ARCHETYPES} whose
  * cue it fits — or `unknown`: always for a terraced, non-residential or flat
- * one, and for one that is no clean rectangle or L.
+ * one, and for one that is no clean rectangle or L. Since #1791 a mapped
+ * building type may narrow the archetypes it `admits`: a `bungalow` admits
+ * the bungalow alone, where its cue fits.
  */
-export function houseArchetypeOf(input: ArchetypeInput): HouseArchetype {
+export function houseArchetypeOf(
+  input: ArchetypeInput,
+  admits: readonly Exclude<HouseArchetype, 'unknown'>[] = HOUSE_ARCHETYPES,
+): HouseArchetype {
   if (input.terraced || !input.residential || !input.pitched) return 'unknown';
   if (input.shape === 'rectangle' && input.rectangularity < ARCHETYPE_MIN_RECTANGULARITY) {
     return 'unknown';
   }
-  return HOUSE_ARCHETYPES.find((archetype) => fits(input, ARCHETYPE_CUES[archetype])) ?? 'unknown';
+  return admits.find((archetype) => fits(input, ARCHETYPE_CUES[archetype])) ?? 'unknown';
 }
 
 /**

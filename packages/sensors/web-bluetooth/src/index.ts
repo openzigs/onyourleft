@@ -62,6 +62,19 @@ export type {
 
 export { createFitnessMachineChannel } from './fitness-machine-channel';
 
+// An OpenBikeControl steering and button controller (#1824): beside the
+// transport rather than inside it, because a controller is neither a sensor
+// nor a trainer. `open-bike-control-client.ts` says why.
+
+export type {
+  ControllerConnection,
+  ControllerStep,
+  OpenBikeControlClient,
+  OpenBikeControlClientOptions,
+} from './open-bike-control-client';
+
+export { createOpenBikeControlClient } from './open-bike-control-client';
+
 export type { WebBluetoothTransport, WebBluetoothTransportOptions } from './transport';
 
 export { createWebBluetoothTransport } from './transport';

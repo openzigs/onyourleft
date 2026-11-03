@@ -410,8 +410,9 @@ export interface AppShellProps {
    * How to get a map engine (#63), or `undefined` where there is none.
    *
    * A loader rather than a port: `maplibre-gl` is the largest dependency in
-   * this client and is fetched only when a ride with GPS is opened. The
-   * accessibility suite passes a resolved stub, or nothing at all.
+   * this client and is fetched only when a ride with GPS, or a saved route
+   * (#2003), is opened. The accessibility suite passes a resolved stub, or
+   * nothing at all.
    */
   readonly map?: (() => Promise<MapPort>) | undefined;
   /** Where the basemap archive is, or `undefined` for a build configured with none (#534). */
@@ -634,10 +635,26 @@ function viewFor(
       return <SegmentsView port={props.segments} match={props.match} />;
     case 'routes':
       return (
-        <RoutesView port={props.routes} save={props.transfer?.save} selected={match.parameter} />
+        <RoutesView
+          port={props.routes}
+          save={props.transfer?.save}
+          selected={match.parameter}
+          // #2003: a chosen route is drawn on the map a ride's page draws.
+          map={props.map}
+          basemap={props.basemap}
+        />
       );
     case 'route-builder':
-      return <RouteBuilderView provider={props.routing} />;
+      return (
+        <RouteBuilderView
+          provider={props.routing}
+          // #2006: drawn on the map a saved route's page draws, and saved
+          // into the same routes.
+          map={props.map}
+          basemap={props.basemap}
+          routes={props.routes}
+        />
+      );
     case 'workouts':
       return (
         <WorkoutsView

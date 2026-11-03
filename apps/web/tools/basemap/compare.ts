@@ -269,3 +269,40 @@ export function strictPasses(summary: Summary): boolean {
     [...summary.layers.values()].every((layer) => layer.differingTiles === 0)
   );
 }
+
+/** The part of a PMTiles header that says how much of the world an archive covers. */
+export interface CoverageHeader {
+  readonly minLon: number;
+  readonly minLat: number;
+  readonly maxLon: number;
+  readonly maxLat: number;
+  readonly numAddressedTiles: number;
+}
+
+export interface Coverage {
+  readonly bounds: readonly [number, number, number, number];
+  readonly addressedTiles: number;
+}
+
+/**
+ * What each archive claims to cover, side by side (#1557's review): the first
+ * US build addressed 368 848 915 tiles against the old file's 21 635 078 and
+ * bounds of the whole northern hemisphere's land and ocean, and nothing in the
+ * report said so until the tiles outside the US turned up bare on the tablet.
+ * `ratio` is ours over theirs; a build clipped to the same outline is near 1.
+ */
+export function describeCoverage(
+  ours: CoverageHeader,
+  theirs: CoverageHeader,
+): { ours: Coverage; theirs: Coverage; addressedTilesRatio: number | null } {
+  const of = (h: CoverageHeader): Coverage => ({
+    bounds: [h.minLon, h.minLat, h.maxLon, h.maxLat],
+    addressedTiles: h.numAddressedTiles,
+  });
+  return {
+    ours: of(ours),
+    theirs: of(theirs),
+    addressedTilesRatio:
+      theirs.numAddressedTiles > 0 ? ours.numAddressedTiles / theirs.numAddressedTiles : null,
+  };
+}

@@ -14,7 +14,7 @@ import {
   type TagValue,
 } from '@onyourleft/map-features/testing';
 import { describe, expect, it } from 'vitest';
-import { compareTile, emptySummary, strictPasses } from './compare';
+import { compareTile, describeCoverage, emptySummary, strictPasses } from './compare';
 import { readTile } from './mvt';
 
 const YEAR = 2026;
@@ -344,5 +344,31 @@ describe('readTile', () => {
 
   it('throws a RangeError on a truncated tile', () => {
     expect(() => readTile(new Uint8Array([0x1a, 0x05, 0x0a]))).toThrow(RangeError);
+  });
+});
+
+describe('describeCoverage — #1557', () => {
+  const old = { minLon: -125, minLat: 24, maxLon: -66, maxLat: 50, numAddressedTiles: 21_635_078 };
+  const unclipped = {
+    minLon: -180,
+    minLat: 15.9,
+    maxLon: 180,
+    maxLat: 73,
+    numAddressedTiles: 368_848_915,
+  };
+
+  it('puts both archives bounds and addressed-tile counts side by side', () => {
+    const report = describeCoverage(unclipped, old);
+    expect(report.ours).toEqual({ bounds: [-180, 15.9, 180, 73], addressedTiles: 368_848_915 });
+    expect(report.theirs).toEqual({ bounds: [-125, 24, -66, 50], addressedTiles: 21_635_078 });
+  });
+
+  it('gives the ratio that flags an archive filled far beyond the one it replaces', () => {
+    expect(describeCoverage(unclipped, old).addressedTilesRatio).toBeCloseTo(17.05, 2);
+    expect(describeCoverage(old, old).addressedTilesRatio).toBe(1);
+  });
+
+  it('has no ratio when the other archive addresses nothing', () => {
+    expect(describeCoverage(old, { ...old, numAddressedTiles: 0 }).addressedTilesRatio).toBeNull();
   });
 });

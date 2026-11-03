@@ -170,6 +170,7 @@ const POSE: CameraPose = {
   headingZ: 1,
   eyeRoadY: 0,
   targetRoadY: 0,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
 };
 
 function item(overrides: Partial<ScatterItem> = {}): ScatterItem {
@@ -2720,6 +2721,29 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     );
     // With no room there is nothing for the stylised belt in the realistic world.
     expect(realisticRemoteSplit([riderAt()]).stylised).toEqual([]);
+  });
+
+  it('draws a lap race’s nearest bots realistically in the realistic world and the rest stylised, as a room’s riders — #1971', () => {
+    const racer = (z: number): RiderMarker => ({ ...riderAt({ z }, {}, 0, 'bot'), racer: true });
+    // The rider, and seven bots ahead, the farthest first.
+    const bots = [28, 24, 20, 16, 12, 8, 4].map(racer);
+    const split = realisticRemoteSplit([riderAt(), ...bots]);
+    expect(split.realistic.map((m) => [m.kind, m.z])).toEqual([
+      ['rider', 0],
+      ['bot', 4],
+      ['bot', 8],
+    ]);
+    expect(split.realistic).toHaveLength(1 + REALISTIC_REMOTE_RIDERS);
+    // Every one of the seven is drawn in one world or the other: none is lost.
+    expect(split.stylised.map((m) => m.z)).toEqual([12, 16, 20, 24, 28]);
+    // The pacer is no racer: it keeps its own realistic place, as before.
+    const paced = realisticRemoteSplit([riderAt(), riderAt({ z: 50 }, {}, 0, 'bot'), racer(4)]);
+    expect(paced.realistic.map((m) => [m.kind, m.z, m.racer])).toEqual([
+      ['rider', 0, undefined],
+      ['bot', 50, undefined],
+      ['bot', 4, true],
+    ]);
+    expect(paced.stylised).toEqual([]);
   });
 
   it('carries a colour on every vertex, which is what keeps it one material', () => {

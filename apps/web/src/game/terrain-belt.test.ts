@@ -21,7 +21,7 @@ import {
   terrainCorridor,
 } from './landform';
 import { hillRoute, northRoute, valleyRoute } from './route-fixtures-testing';
-import { cameraRig } from './camera';
+import { CAMERA_TARGET_AHEAD_METRES, cameraRig } from './camera';
 import {
   directionalFogColour,
   REALISTIC_HORIZON_HAZE_SHARE,
@@ -203,6 +203,7 @@ describe('the distant hills a view draws — #458', () => {
     headingZ: 1,
     eyeRoadY: 12,
     targetRoadY: 12,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
   };
   /**
    * The horizon a view hands the ring, in linear light — deliberately NOT
@@ -626,7 +627,16 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
 
   it('draws every wall, hedge and fence of a kind in one instanced mesh', () => {
     const belt = new ScatterBelt(new Map());
-    const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+    const pose = {
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      eyeRoadY: 0,
+      targetRoadY: 0,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+    };
     const items = (['wall', 'hedge', 'fence'] as const).flatMap((kind, at) =>
       Array.from({ length: 40 }, (_, index) => ({
         kind,
@@ -649,7 +659,16 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
 });
 
 describe('the buildings a view draws, since #500', () => {
-  const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+  const pose = {
+    x: 0,
+    y: 0,
+    z: 0,
+    headingX: 0,
+    headingZ: 1,
+    eyeRoadY: 0,
+    targetRoadY: 0,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
 
   it('draws each building in the shape its own variant names, two shapes a kind', () => {
     const belt = new ScatterBelt(new Map());

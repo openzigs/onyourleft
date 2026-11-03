@@ -15,7 +15,14 @@
  * key is never turned into a string. That is what keeps an OSM id or a name out of
  * the store by construction rather than by a filter somebody might loosen —
  * ADR 0012 D-3's trap.
+ *
+ * Since #1789 (ADR 0054's entry of 2026-11-01), `buildings` is also looked up
+ * for the twelve keys of {@link BUILDING_FIELD_RULES}, and in no other layer;
+ * each value is whitelisted or clamped and kept as a constant or a number of
+ * the decoder's own, never as the tile's string.
  */
+
+import type { BuildingFields } from './types';
 
 /** The layers decoded, in the order their features are returned. */
 export const READ_LAYERS = ['landuse', 'water', 'buildings', 'roads', 'places'] as const;
@@ -181,3 +188,170 @@ export const MAX_KIND_LENGTH = 64;
  * only make the renderer draw a spike.
  */
 export const MAX_HEIGHT_METRES = 1_000;
+
+/*
+ * ## The building fields (#1789, ADR 0054's entry of 2026-11-01)
+ *
+ * Twelve keys this project's archive writes on the z15 `buildings` features
+ * (#1557's profile, `apps/web/tools/basemap/`), and Protomaps' published build
+ * does not. They are looked up **in `buildings` alone**, and each value is
+ * whitelisted or clamped again here, at read: an archive a self-hoster
+ * configures was not built by that profile, and a value can be any length or
+ * shape. A value the rule cannot bring within it, and an absent one, is
+ * `null`.
+ *
+ * No string from a tile is kept: an enum value is compared byte for byte with
+ * the lists below, and what is kept is the list's own constant. A number is
+ * clamped, a palette index is kept only inside the palette, and a string where
+ * a number belongs is `null` — the decoder never parses a tile's string into a
+ * number. `apps/web/tools/basemap/building-fields.test.ts` holds these lists
+ * equal to the profile's.
+ */
+
+/** `building_type`: the profile's 29 building types. `yes`, and every other value, is `null`. */
+export const BUILDING_TYPES = [
+  'house',
+  'detached',
+  'semidetached_house',
+  'terrace',
+  'bungalow',
+  'farm',
+  'apartments',
+  'residential',
+  'garage',
+  'garages',
+  'carport',
+  'shed',
+  'barn',
+  'farm_auxiliary',
+  'cowshed',
+  'stable',
+  'commercial',
+  'retail',
+  'office',
+  'supermarket',
+  'industrial',
+  'warehouse',
+  'church',
+  'chapel',
+  'cathedral',
+  'school',
+  'civic',
+  'government',
+  'townhall',
+] as const;
+
+/** `roof_shape`: #1557's 2026-10-24 table, plus `saltbox`. */
+export const ROOF_SHAPES = [
+  'flat',
+  'gabled',
+  'hipped',
+  'pyramidal',
+  'skillion',
+  'half-hipped',
+  'gambrel',
+  'side_hipped',
+  'mansard',
+  'saltbox',
+] as const;
+
+export const ROOF_ORIENTATIONS = ['along', 'across'] as const;
+
+export const WALL_MATERIALS = [
+  'brick',
+  'wood',
+  'stone',
+  'concrete',
+  'glass',
+  'metal',
+  'plaster',
+] as const;
+
+export const ROOF_MATERIALS = ['roof_tiles', 'slate', 'metal', 'asphalt', 'concrete'] as const;
+
+/** `landmark`: a kind of building, never a name (ADR 0054 D-5.7). */
+export const LANDMARKS = ['worship', 'townhall', 'school'] as const;
+
+/** The profile's palette (`BuildingPalette.ENTRIES`): a colour is an index below this, else `null`. */
+export const BUILDING_PALETTE_SIZE = 20;
+
+/** `roof_direction`'s step: a direction is kept as a multiple of it in `[0, 360)`. */
+export const ROOF_DIRECTION_STEP_DEGREES = 15;
+
+/**
+ * `start_year`'s read-time bounds, two constants of the decoder's own (ADR
+ * 0054's entry of 2026-11-01, the revision of 2026-11-01 on #1789). The
+ * profile writes no year past its build year, but that bound is in the
+ * build's record and in no tile, so it cannot be applied here.
+ */
+export const MIN_START_YEAR = 1600;
+export const MAX_START_YEAR = 2100;
+
+/**
+ * How one building field is read.
+ *
+ * - `enum`: an MVT string equal, byte for byte, to one of `values`; kept as
+ *   that list's constant. Anything else — another string, a number, a bool —
+ *   is `null`.
+ * - `clamped`: an MVT number, finite; at or below `min` it is `min`, at or
+ *   above `max` it is `max`, else rounded down (the profile's own rule). A
+ *   string, a bool, `NaN` or an infinity is `null`.
+ * - `index`: an MVT number that is a whole number in `[0, size)`; anything
+ *   else is `null`. Not clamped: the next index is another colour.
+ * - `direction`: an MVT number, finite, rounded to the nearest `step` and
+ *   wrapped into `[0, 360)`, as the profile quantises it.
+ */
+export type BuildingFieldRule =
+  | { readonly key: string; readonly kind: 'enum'; readonly values: readonly string[] }
+  | { readonly key: string; readonly kind: 'clamped'; readonly min: number; readonly max: number }
+  | { readonly key: string; readonly kind: 'index'; readonly size: number }
+  | { readonly key: string; readonly kind: 'direction'; readonly step: number };
+
+/**
+ * Every building field `BuildingFeature` carries beyond `kind`, `height` and
+ * `min_height`, by its name there, with the tile key it is read from and its
+ * rule. The one list: the decoder reads these, the corridor packs these, and
+ * the tests enumerate these, so a field added anywhere else is a red test.
+ */
+export const BUILDING_FIELD_RULES = {
+  buildingType: { key: 'building_type', kind: 'enum', values: BUILDING_TYPES },
+  levels: { key: 'levels', kind: 'clamped', min: 1, max: 100 },
+  roofLevels: { key: 'roof_levels', kind: 'clamped', min: 0, max: 5 },
+  roofShape: { key: 'roof_shape', kind: 'enum', values: ROOF_SHAPES },
+  roofOrientation: { key: 'roof_orientation', kind: 'enum', values: ROOF_ORIENTATIONS },
+  roofDirectionDegrees: {
+    key: 'roof_direction',
+    kind: 'direction',
+    step: ROOF_DIRECTION_STEP_DEGREES,
+  },
+  wallColour: { key: 'wall_colour', kind: 'index', size: BUILDING_PALETTE_SIZE },
+  roofColour: { key: 'roof_colour', kind: 'index', size: BUILDING_PALETTE_SIZE },
+  wallMaterial: { key: 'wall_material', kind: 'enum', values: WALL_MATERIALS },
+  roofMaterial: { key: 'roof_material', kind: 'enum', values: ROOF_MATERIALS },
+  startYear: { key: 'start_year', kind: 'clamped', min: MIN_START_YEAR, max: MAX_START_YEAR },
+  landmark: { key: 'landmark', kind: 'enum', values: LANDMARKS },
+} as const satisfies Readonly<Record<string, BuildingFieldRule>>;
+
+/** A building field's name in `BuildingFeature`. */
+export type BuildingFieldName = keyof typeof BUILDING_FIELD_RULES;
+
+/** {@link BUILDING_FIELD_RULES}' names, in its order: the order the decoder matches keys in. */
+export const BUILDING_FIELD_NAMES = Object.keys(
+  BUILDING_FIELD_RULES,
+) as readonly BuildingFieldName[];
+
+/** Every building field `null`: a footprint from a tile that carries none of them. */
+export const NO_BUILDING_FIELDS: BuildingFields = {
+  buildingType: null,
+  levels: null,
+  roofLevels: null,
+  roofShape: null,
+  roofOrientation: null,
+  roofDirectionDegrees: null,
+  wallColour: null,
+  roofColour: null,
+  wallMaterial: null,
+  roofMaterial: null,
+  startYear: null,
+  landmark: null,
+};

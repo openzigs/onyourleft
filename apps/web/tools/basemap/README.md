@@ -42,6 +42,48 @@ is built on the owner's Mac. It is uploaded under a separate name beside the
 live Protomaps file, and only on the owner's word. The ride map switches to it
 only after the owner's check on the tablet.
 
+**The default since 2026-11-02.** The ride map reads
+`https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles` (`src/map/basemap.ts`
+§`PUBLISHED_BASEMAP_URL`). It was built on 2026-11-01 from the 2026-10-31 US
+extract with `--polygon`, and is 17 092 694 930 bytes. The owner checked it on
+the tablet on 2026-11-02 and gave the word to switch. What was checked before
+the switch:
+
+- **Header.** Bounds -180..180 by 15.9..73.0 (the Aleutians cross the
+  antimeridian, so the outline's box is the world's width), addressing 56 901 486
+  tiles. That is against 368 848 915 unclipped and 21 635 078 in the Protomaps
+  file, which covered the contiguous US only. The count is higher than the old
+  file's because Alaska and Hawaii are in it, not because the clip failed.
+- **Coverage.** 6 000 random tiles inside the old file's box were sampled at
+  each of z10, z12 and z14 against the unclipped build: none was only in the new
+  file, and every tile the clip dropped lay outside the US, in Canada, Mexico,
+  the Bahamas or open water. Sample tiles at z10 and z15 in London, Toronto,
+  Mexico City and southern Ontario are absent, where the unclipped build held
+  `earth`. The world's read counts an absent tile as `outside-archive`, so a
+  ride there keeps its procedural world. Sample tiles in Seattle, Detroit,
+  El Paso, Anchorage and Honolulu are present.
+- **Upload.** The R2 object's length matches, and five 64 KiB ranges across the
+  file hash the same as the local file.
+- **Not run:** the full `basemap:compare` walk. It reads every tile of both
+  archives, and a bulk read of the published file trips the CDN's rate limit
+  (HTTP 429).
+
+What riders lose against the Protomaps file: the parts of Canada and Mexico
+that fell inside its box (southern Ontario, the Vancouver area, the border
+towns), which were never in scope (ADR 0062). Puerto Rico is not in Geofabrik's
+US extract and was not in the old box either.
+
+`map.browser.spec.ts`'s hosted block, which runs only when
+`OYL_HOSTED_BASEMAP_URL` is set and never in CI, centres its track on the
+middle of the header bounds. For this archive that is open sea, so pointed at
+it, the block would paint nothing until it centres on the header's own
+`center` instead.
+
+#1557's unclipped `basemap-us-oyl-20261030.pmtiles` and the Protomaps
+`basemap-us-20260914.pmtiles` stay published beside it. A published archive is
+moved to the same way each time: a new dated name, the constant moved to it,
+and the old file left in place.
+
 `--build-year` is the latest `start_year` written. Give the value from the
 build record to rebuild the same extract byte for byte.
 

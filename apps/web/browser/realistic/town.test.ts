@@ -12,7 +12,8 @@
  * the bungalows' wide eaves without it, and #1581's with it; and since #1783
  * `-commercial-archetypes`: the commercial street's archetypes without it,
  * and none with it — and since #1922, the pair's frames planted alike but on
- * the driveways a garden apartment gives up.
+ * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
+ * the tagged street's roofs as tagged without it, and every tag ignored with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +22,7 @@ import {
   FOOTPRINT_ROLES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
+  MAPPED_ROOFS,
   mappedTown,
   minimumAreaRectangle,
   type FootprintPlan,
@@ -28,8 +30,13 @@ import {
 import {
   commercialStreetFixture,
   houseStreetFixture,
+  mappedRoofStreetFixture,
   mixedTownFixture,
+  planFingerprint,
+  typedStreetFixture,
+  untaggedStreetFixture,
 } from '../../src/game/footprint-fixtures-testing';
+import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 import { BUILDING_ARCHETYPES } from '../../src/game/building-archetypes';
 import { HOUSE_ARCHETYPES, ROOF_VARIANTS } from '../../src/game/house-archetypes';
 import { mappedBuildingsOf, onMappedGround } from '../../src/game/mapped-buildings';
@@ -120,6 +127,43 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
       undefined,
       urban,
       { roofVariants: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    plans.forEach((plan, index) => {
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
+describe('the realistic page’s `mapped-roof-shape` lever — #1790', () => {
+  const street = mappedRoofStreetFixture();
+
+  it('draws every tagged roof as tagged on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=roofs').leversOff);
+    expect(plans).toHaveLength(street.corridor.buildings.length);
+    plans.forEach((plan, index) => {
+      const shape = street.corridor.buildings[index]?.roofShape ?? null;
+      if (shape !== null) expect(plan.roof).toBe(MAPPED_ROOFS[shape].roof);
+    });
+    expect(plans.some((plan) => plan.roofVariant === 'skillion')).toBe(true);
+  });
+
+  it('plans every house as the planner with them off does, with `levers=-mapped-roof-shape`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=roofs&levers=-mapped-roof-shape').leversOff,
+    );
+    expect(plans.some((plan) => plan.roofVariant === 'skillion')).toBe(false);
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { mappedRoofShape: false },
     ).plans;
     expect(plans.length).toBe(off.length);
     plans.forEach((plan, index) => {
@@ -315,4 +359,129 @@ describe('the realistic page’s `commercial-archetypes` lever — #1783', () =>
     expect(dropped.plans.length).toBeGreaterThan(0);
     expect(planted).toBeGreaterThan(0);
   }, 30_000);
+});
+
+describe('the realistic page’s `building-type` lever — #1791', () => {
+  const street = typedStreetFixture();
+
+  it('draws the typed street’s church as no house on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=typed').leversOff);
+    const churches = plans.filter((_, index) => street.rows[index] === 'church');
+    expect(churches.length).toBeGreaterThan(0);
+    expect(churches.every((plan) => plan.archetype === 'unknown' && plan.dormers === 0)).toBe(true);
+  });
+
+  it('plans the fully typed street, with `levers=-building-type`, as the same street untyped', () => {
+    const off = plannedTown(street, parseConfig('?town=typed&levers=-building-type').leversOff);
+    const untyped = plannedTown(
+      {
+        ...street,
+        corridor: {
+          ...street.corridor,
+          buildings: street.corridor.buildings.map((building): BuildingFeature => ({
+            ...building,
+            ...NO_BUILDING_FIELDS,
+          })),
+        },
+      },
+      // #2023: untyped, the shed's footprint is inferred a shed; that is its own lever's.
+      parseConfig('?town=typed&levers=-inferred-outbuildings').leversOff,
+    );
+    expect(planFingerprint(off.plans)).toBe(planFingerprint(untyped.plans));
+    // Not vacuous: the product's page plans the typed street otherwise.
+    expect(planFingerprint(plannedTown(street, []).plans)).not.toBe(planFingerprint(untyped.plans));
+  });
+});
+
+describe('the realistic page’s `steeples` lever — #2021', () => {
+  const street = typedStreetFixture();
+  const churchesOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
+    plans.filter((_, index) => street.rows[index] === 'church');
+
+  it('draws the typed street’s church with its steeple on the product’s page', () => {
+    const churches = churchesOf(plannedTown(street, parseConfig('?town=typed').leversOff).plans);
+    expect(churches).toHaveLength(2);
+    expect(churches.every((plan) => plan.steeple)).toBe(true);
+  });
+
+  it('plans the typed street, with `levers=-steeples`, with no steeple', () => {
+    const off = plannedTown(street, parseConfig('?town=typed&levers=-steeples').leversOff);
+    expect(off.plans.some((plan) => plan.steeple)).toBe(false);
+    // Not vacuous: on, the page plans the street otherwise.
+    expect(planFingerprint(off.plans)).not.toBe(planFingerprint(plannedTown(street, []).plans));
+  });
+});
+
+describe('the realistic page’s `inferred-outbuildings` lever — #2023', () => {
+  const street = untaggedStreetFixture();
+
+  it('draws the untagged street’s garages and sheds as inferred on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=untagged').leversOff);
+    const garages = plans.filter(
+      (_, index) => street.rows[index] === 'garage' && street.subjects[index] === true,
+    );
+    expect(garages).toHaveLength(2);
+    expect(garages.every((plan) => plan.family === 'garage' && plan.inferred)).toBe(true);
+  });
+
+  it('plans the untagged street, with `levers=-inferred-outbuildings`, inferring no garage or shed', () => {
+    const off = plannedTown(
+      street,
+      parseConfig('?town=untagged&levers=-inferred-outbuildings').leversOff,
+    );
+    // #2024: the barns are their own lever's.
+    expect(
+      off.plans.some(
+        (plan) => plan.inferred && (plan.family === 'garage' || plan.family === 'shed'),
+      ),
+    ).toBe(false);
+    // Not vacuous: on, the page plans the street otherwise.
+    expect(planFingerprint(off.plans)).not.toBe(planFingerprint(plannedTown(street, []).plans));
+  });
+});
+
+describe('the realistic page’s `inferred-barns` lever — #2024', () => {
+  const street = untaggedStreetFixture();
+  const barnsOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
+    plans.filter((_, index) => street.rows[index] === 'barn' && street.subjects[index] === true);
+
+  it('draws the untagged street’s rural barns as inferred on the product’s page', () => {
+    const barns = barnsOf(plannedTown(street, parseConfig('?town=untagged').leversOff).plans);
+    expect(barns).toHaveLength(2);
+    expect(barns.every((plan) => plan.family === 'barn' && plan.inferred)).toBe(true);
+  });
+
+  it('plans the untagged street, with `levers=-inferred-barns`, inferring no barn', () => {
+    const off = plannedTown(street, parseConfig('?town=untagged&levers=-inferred-barns').leversOff);
+    expect(
+      off.plans.some((plan) => plan.family === 'barn' || plan.family === 'pole-building'),
+    ).toBe(false);
+    // The garages stay: only the barn rule is off.
+    expect(off.plans.some((plan) => plan.family === 'garage')).toBe(true);
+  });
+});
+
+describe('the realistic page’s `inferred-commercial` lever — #2026', () => {
+  const street = untaggedStreetFixture();
+  const shopsOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
+    plans.filter(
+      (_, index) => street.rows[index] === 'commercial' && street.subjects[index] === true,
+    );
+
+  it('draws the untagged street’s big footprints on the main street as shops on the product’s page', () => {
+    const shops = shopsOf(plannedTown(street, parseConfig('?town=untagged').leversOff).plans);
+    expect(shops).toHaveLength(2);
+    expect(shops.every((plan) => plan.family === 'commercial' && plan.inferred)).toBe(true);
+  });
+
+  it('plans the untagged street, with `levers=-inferred-commercial`, inferring no shop', () => {
+    const off = plannedTown(
+      street,
+      parseConfig('?town=untagged&levers=-inferred-commercial').leversOff,
+    );
+    expect(off.plans.some((plan) => plan.family === 'commercial' && plan.inferred)).toBe(false);
+    // The garages and barns stay: only the shop rule is off.
+    expect(off.plans.some((plan) => plan.family === 'garage')).toBe(true);
+    expect(off.plans.some((plan) => plan.family === 'barn')).toBe(true);
+  });
 });

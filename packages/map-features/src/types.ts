@@ -11,6 +11,15 @@
  * holds the two equal.
  */
 
+import type {
+  BUILDING_TYPES,
+  LANDMARKS,
+  ROOF_MATERIALS,
+  ROOF_ORIENTATIONS,
+  ROOF_SHAPES,
+  WALL_MATERIALS,
+} from './schema';
+
 /** One z15 tile. z15 only: ADR 0054 D-2, the zoom at which buildings are individual. */
 export type TileId = { readonly z: 15; readonly x: number; readonly y: number };
 
@@ -31,8 +40,43 @@ export interface LandUseFeature extends PolygonFeature {
   readonly kind: LandUseKind;
 }
 
+export type BuildingType = (typeof BUILDING_TYPES)[number];
+export type RoofShape = (typeof ROOF_SHAPES)[number];
+export type RoofOrientation = (typeof ROOF_ORIENTATIONS)[number];
+export type WallMaterial = (typeof WALL_MATERIALS)[number];
+export type RoofMaterial = (typeof ROOF_MATERIALS)[number];
+export type Landmark = (typeof LANDMARKS)[number];
+
+/**
+ * The building fields #1557's archive adds (#1789, ADR 0054's entry of
+ * 2026-11-01), each read by its rule in `schema.ts` §`BUILDING_FIELD_RULES`.
+ * **Every one is `null`** when the tile carries none — as every tile of
+ * Protomaps' published build does — or a value the rule cannot bring within
+ * it. Nothing draws from them yet: the building plan's use of each is a
+ * sibling issue under #1656.
+ */
+export interface BuildingFields {
+  readonly buildingType: BuildingType | null;
+  /** A whole number of storeys, 1 to 100. */
+  readonly levels: number | null;
+  /** A whole number of storeys in the roof, 0 to 5. */
+  readonly roofLevels: number | null;
+  readonly roofShape: RoofShape | null;
+  readonly roofOrientation: RoofOrientation | null;
+  /** Degrees clockwise from north, 0 to 345 in steps of 15. */
+  readonly roofDirectionDegrees: number | null;
+  /** An index, 0 to 19, into the profile's palette: never a colour string. */
+  readonly wallColour: number | null;
+  readonly roofColour: number | null;
+  readonly wallMaterial: WallMaterial | null;
+  readonly roofMaterial: RoofMaterial | null;
+  /** A whole year, 1600 to 2100. */
+  readonly startYear: number | null;
+  readonly landmark: Landmark | null;
+}
+
 /** A footprint from `buildings`. Its `addr_housenumber`, name and id are never read. */
-export interface BuildingFeature extends PolygonFeature {
+export interface BuildingFeature extends PolygonFeature, BuildingFields {
   readonly kind: 'building' | 'building_part';
   /** Metres, `null` when the tile carries none — never `0` for "absent". */
   readonly heightMetres: number | null;

@@ -603,6 +603,7 @@ import {
   writeInterval,
   type TreeLevels,
 } from './tree-levels';
+import { nearTreeKeep, type NearTreeFade } from './near-tree-fade';
 import {
   directionalFogColour,
   drawnHorizonColour,
@@ -806,17 +807,25 @@ export const STYLISED_RIDER_SLOTS = 3 + MAXIMUM_DRAWN_SET;
  * of realistic riders stays blocked on the tablet's measurement.
  * `three-renderer.test.ts` §"#783" holds the split; the browser gate's
  * realistic load counts the triangles it leaves a frame.
+ *
+ * #1971: **a lap race's bots** ({@link RiderMarker.racer}) are split by the
+ * same rule, so a race in the realistic world draws at most the realistic
+ * bodies a room does, and none of its seven bots goes undrawn; the pacer, a
+ * `bot` too, keeps its own realistic place.
  */
 export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
   readonly realistic: readonly RiderMarker[];
   readonly stylised: readonly RiderMarker[];
 } {
   const own = markers.find((marker) => marker.kind === 'rider');
-  const local = markers.filter((marker) => marker.kind !== 'remote');
+  // #1971: a lap race's bots are split as a room's riders are. A race runs in
+  // no room (ADR 0060 D-7.3, D-8), so the two never share the split.
+  const other = (marker: RiderMarker): boolean => marker.kind === 'remote' || marker.racer === true;
+  const local = markers.filter((marker) => !other(marker));
   const far = (marker: RiderMarker): number =>
     own === undefined ? 0 : Math.hypot(marker.x - own.x, marker.y - own.y, marker.z - own.z);
   const remote = markers
-    .filter((marker) => marker.kind === 'remote')
+    .filter(other)
     .map((marker) => ({ marker, far: far(marker) }))
     .sort((a, b) => a.far - b.far)
     .map((each) => each.marker);
@@ -11577,6 +11586,10 @@ export class RealisticVegetationBelt {
   readonly #rankEntry: Int32Array;
   /** Which of this frame's items are trees the camera can see — grown, never per frame. */
   #seen = new Uint8Array(SCATTER_INSTANCE_CAPACITY);
+  /** Each of this frame's trees' share of its pixels, near the camera — #545. @see nearTreeKeep */
+  #keep = new Float32Array(SCATTER_INSTANCE_CAPACITY);
+  /** #545: how a tree near the camera is drawn. @see setNearTreeFade */
+  #nearFade: NearTreeFade = 'fade';
   #shown = true;
   /** #1523: each fir mesh's depth pre-pass, and the materials they wear. @see withDepthPrepass */
   readonly #prepasses: DepthPrepass[] = [];
@@ -11719,6 +11732,15 @@ export class RealisticVegetationBelt {
   setDepthPrepass(mode: DepthPrepassMode): void {
     this.#prepassMode = mode;
     for (const { prepass } of this.#prepasses) prepass.visible = mode === 'drawn';
+  }
+
+  /**
+   * How a tree near the camera is drawn — #545: faded out (the product), whole
+   * (the owner's page's `-near-tree-fade`, and the browser gate's control), or
+   * dropped whole in one frame (the gate's control for the pop). @see NearTreeFade
+   */
+  setNearTreeFade(fade: NearTreeFade): void {
+    this.#nearFade = fade;
   }
 
   /**
@@ -11885,13 +11907,24 @@ export class RealisticVegetationBelt {
     // Pass 1: the nearest of each ranking, by distance from the rider — a tree
     // only if the camera can see it (#617's review), unless the levels are the
     // control that ranks as before it.
-    if (this.#seen.length < end) this.#seen = new Uint8Array(end);
+    if (this.#seen.length < end) {
+      this.#seen = new Uint8Array(end);
+      this.#keep = new Float32Array(end);
+    }
     const visibleOnly = this.#levels.rankOnly === 'visible';
     for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
       this.#seen[index] = 0;
+      this.#keep[index] = 1;
       if (each === undefined || !inView(item, pose)) continue;
+      // #545: a tree near the camera fades out, and one faded to nothing is
+      // neither drawn nor ranked — it no more shows than one out of view.
+      if (each.tree) {
+        const keep = nearTreeKeep(item.x, item.z, pose, this.#nearFade);
+        this.#keep[index] = keep;
+        if (keep <= 0) continue;
+      }
       if (each.tree && each.shapes.length > 0 && visibleOnly) {
         const variant = variantOf(item.variant, each.shapes.length);
         const shape = each.shapes[variant] as RealisticShape;
@@ -11932,6 +11965,9 @@ export class RealisticVegetationBelt {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
       if (each === undefined || each.shapes.length === 0 || !inView(item, pose)) continue;
+      // #545: a tree faded to nothing near the camera is not drawn at all.
+      const keep = this.#keep[index] ?? 1;
+      if (keep <= 0) continue;
       const variant = variantOf(item.variant, each.shapes.length);
       const shape = each.shapes[variant] as RealisticShape;
       const rank = rankOf(each.ranking, index);
@@ -11964,18 +12000,20 @@ export class RealisticVegetationBelt {
         // The impostor keeps [0, low), the middle level [low, high) and the
         // full mesh [high, 1). A tree with no middle level — a fixture, or a
         // pack that shipped none — is drawn at its impostor where the middle
-        // level would be.
-        if (high < 1) drawn = this.#put(each.near[variant], high, 1);
+        // level would be. #545: near the camera every edge is scaled by the
+        // tree's keep, so its levels share [0, keep) and every level discards
+        // the rest of the hash — one tree fading, whatever it is drawn as.
+        if (high < 1) drawn = this.#put(each.near[variant], high * keep, keep);
         asMesh = drawn;
         if (middle === undefined) {
-          if (high > 0) drawn = this.#putOne(impostor, 0, high) || drawn;
+          if (high > 0) drawn = this.#putOne(impostor, 0, high * keep) || drawn;
         } else {
           if (high > low) {
-            const middleDrawn = this.#put(middle, low, high);
+            const middleDrawn = this.#put(middle, low * keep, high * keep);
             asMesh = asMesh || middleDrawn;
             drawn = middleDrawn || drawn;
           }
-          if (low > 0) drawn = this.#putOne(impostor, 0, low) || drawn;
+          if (low > 0) drawn = this.#putOne(impostor, 0, low * keep) || drawn;
         }
       }
       if (drawn) this.#drawn += 1;
@@ -11989,10 +12027,11 @@ export class RealisticVegetationBelt {
       // ranks, so no blob appears or vanishes in one frame. #617's hand-over
       // measured it: the blob popping on at that rank was a one-frame change
       // half as large again as the tree's own dithered one.
+      // #545: and a tree fading near the camera fades its blob with it.
       const strength =
-        each.tree && rank === this.#groundedTrees - 1
+        (each.tree && rank === this.#groundedTrees - 1
           ? 1 - bandFade(rank, order.distances, order.count)
-          : 1;
+          : 1) * keep;
       if (asMesh && grounded && strength > 0) {
         this.#ground(item, each.footprint[variant], size, strength);
       }
@@ -20595,6 +20634,20 @@ export function firDepthPrepassOf(view: GameView, mode: DepthPrepassMode): void 
 }
 
 /**
+ * Draws a view's realistic trees near the camera faded out (the product),
+ * whole, or dropped whole in one frame — #545. @see NearTreeFade
+ *
+ * @test-facing the owner's page's `-near-tree-fade` lever
+ * (`realistic-harness.ts`) and the browser gate's controls
+ * (`game-harness.ts`); the product always fades. The view builds its
+ * realistic belts when a rung first asks for them, so a caller applies it
+ * again after a rung change.
+ */
+export function nearTreeFadeOf(view: GameView, fade: NearTreeFade): void {
+  if (view instanceof ThreeGameView) view.nearTreeFade(fade);
+}
+
+/**
  * One draw of a frame, as {@link drawOrderOf} reports it.
  *
  * @unwired the shape of what `drawOrderOf` hands the browser gate's harness
@@ -21726,6 +21779,11 @@ class ThreeGameView implements GameView {
   /** @see firDepthPrepassOf */
   firDepthPrepass(mode: DepthPrepassMode): void {
     this.#realistic?.vegetation.setDepthPrepass(mode);
+  }
+
+  /** @see nearTreeFadeOf */
+  nearTreeFade(fade: NearTreeFade): void {
+    this.#realistic?.vegetation.setNearTreeFade(fade);
   }
 
   /**

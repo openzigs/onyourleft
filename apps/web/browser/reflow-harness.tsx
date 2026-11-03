@@ -236,6 +236,17 @@ export interface ReflowMeasurement {
     readonly mostReadingLines: number;
     readonly readingSpill: number;
   } | null;
+  /**
+   * The route planner's legs table and *Name* (#2006's owner review): each
+   * leg's "N to M" and routed distance, with the most lines any of them is
+   * laid out on — 1 unless one wraps — and the name field's width; `null` on
+   * any other route, or before the planner has legs.
+   */
+  readonly planner: {
+    readonly legCells: readonly string[];
+    readonly mostLegCellLines: number;
+    readonly nameWidth: number | null;
+  } | null;
   /** The height of the library's sort control, or `null` on any other route. */
   readonly sortControlHeight: number | null;
   /**
@@ -845,6 +856,38 @@ function readingFit(values: readonly Element[]): {
   return {
     mostReadingLines: lines.length === 0 ? 0 : Math.max(...lines),
     readingSpill: spills.length === 0 ? 0 : Math.max(...spills),
+  };
+}
+
+/** How many lines an element's text is laid out on: one per distinct line box. */
+function textLines(element: Element): number {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  const tops = new Set(
+    [...range.getClientRects()]
+      .filter((rect) => rect.width > 0)
+      .map((rect) => Math.round(rect.top)),
+  );
+  return tops.size;
+}
+
+/** The route planner's legs and name field, as {@link ReflowMeasurement.planner} says. */
+function plannerLegs(): ReflowMeasurement['planner'] {
+  const rows = [...document.querySelectorAll('.oyl-main tbody tr')].filter((row) =>
+    /^\d+ to \d+$/.test((row.querySelector('th[scope="row"]')?.textContent ?? '').trim()),
+  );
+  if (rows.length === 0) return null;
+  // The row's heading, and the State cell: the fourth, after Drawn and Surface.
+  const cells = rows.flatMap((row) =>
+    [row.querySelector('th[scope="row"]'), row.children[3]].filter(
+      (cell): cell is Element => cell !== null && cell !== undefined,
+    ),
+  );
+  const name = document.querySelector('.oyl-main form input[name="name"]');
+  return {
+    legCells: cells.map((cell) => (cell.textContent ?? '').trim()),
+    mostLegCellLines: Math.max(...cells.map(textLines)),
+    nameWidth: name === null ? null : name.getBoundingClientRect().width,
   };
 }
 
@@ -1478,6 +1521,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     scrollBoxes: scrollBoxes(),
     library: libraryCards(),
     homeFacts: homeFacts(),
+    planner: route.id === 'route-builder' ? plannerLegs() : null,
     sortControlHeight:
       document.querySelector('#oyl-library-sort')?.getBoundingClientRect().height ?? null,
     expectation,

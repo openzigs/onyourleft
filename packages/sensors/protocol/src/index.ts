@@ -215,3 +215,33 @@ export {
 export type { ErgSink, ErgWriteOutcome, ErgWriter } from './erg-writer';
 
 export { createErgWriter } from './erg-writer';
+
+// --- OpenBikeControl v1 (#1822) ---------------------------------------------
+//
+// A steering and button controller, not a sensor and not a trainer: its codec
+// turns a button-state notification into steer and button events and builds
+// the app-information message. Nothing in it can reach the trainer-command
+// seam above.
+
+export type {
+  ButtonEvent,
+  ButtonStateError,
+  ButtonStateResult,
+  OpenBikeControlEvent,
+  SteerEvent,
+  SteeringAngleEvent,
+  SteeringAngleUnavailableEvent,
+} from './open-bike-control';
+
+export {
+  encodeAppInformation,
+  MAX_BUTTON_STATE_OCTETS,
+  MAX_STEERING_ANGLE_DEGREES,
+  OPEN_BIKE_CONTROL_APP_ID,
+  OPEN_BIKE_CONTROL_APP_INFORMATION,
+  OPEN_BIKE_CONTROL_BUTTON,
+  OPEN_BIKE_CONTROL_BUTTON_STATE,
+  OPEN_BIKE_CONTROL_HAPTIC,
+  OPEN_BIKE_CONTROL_SERVICE,
+  parseButtonState,
+} from './open-bike-control';

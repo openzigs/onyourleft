@@ -20,6 +20,9 @@ import {
   REPORT_INTERVAL_MS,
   type ClientMessage,
   type FrameRider,
+  type HeldItem,
+  type ItemEvent,
+  type LapRaceConfig,
   type RoomMessage,
   type StandingsRider,
 } from '@onyourleft/protocol';
@@ -165,7 +168,12 @@ export class ScriptedRoom {
     this.socket.events.onText(encodeMessage(message));
   }
 
-  welcome(riderId: number, kind: 'ride' | 'race' = 'ride', drafting: 'on' | 'off' = 'on'): void {
+  welcome(
+    riderId: number,
+    kind: 'ride' | 'race' = 'ride',
+    drafting: 'on' | 'off' = 'on',
+    lapRace?: LapRaceConfig,
+  ): void {
     this.send({
       type: 'welcome',
       riderId,
@@ -176,12 +184,18 @@ export class ScriptedRoom {
         reportIntervalMs: REPORT_INTERVAL_MS,
         frameIntervalMs: FRAME_INTERVAL_MS,
         drafting,
+        ...(lapRace === undefined ? {} : { lapRace }),
       },
     });
   }
 
-  frame(tick: number, riders: readonly FrameRider[]): void {
-    this.send({ type: 'frame', tick, riders });
+  /** A frame; a lap race's carries `ackSequence` and the tick's item events too (#1911). */
+  frame(
+    tick: number,
+    riders: readonly FrameRider[],
+    extra: { readonly ackSequence?: number; readonly itemEvents?: readonly ItemEvent[] } = {},
+  ): void {
+    this.send({ type: 'frame', tick, riders, ...extra });
   }
 
   /** A race names a rider (#1347). */
@@ -216,6 +230,27 @@ export function frameRider(
     centimetresPerSecond: Math.round(metresPerSecond * 100),
     draftPercent,
     flags: 0,
+  };
+}
+
+/** A lap race's frame rider (#1911): {@link frameRider} with the room's four lap slots. */
+export function lapFrameRider(
+  riderId: number,
+  metres: number,
+  slots: {
+    readonly offsetMetres?: number;
+    readonly lane?: number;
+    readonly held?: HeldItem;
+    readonly lapsDone?: number;
+  } = {},
+  metresPerSecond = 10,
+): FrameRider {
+  return {
+    ...frameRider(riderId, metres, metresPerSecond),
+    raceOffsetCentimetres: Math.round((slots.offsetMetres ?? 0) * 100),
+    lane: slots.lane ?? 1,
+    held: slots.held ?? 'none',
+    lapsDone: slots.lapsDone ?? 0,
   };
 }
 

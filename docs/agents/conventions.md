@@ -32,9 +32,9 @@ found through the root's topic map.
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0062**: 0057 and 0058 are
-  claimed by the open issues #1748 and #1752, 0059 is ADR 0059 (#1804), 0060 is ADR 0060 (#1895), and
-  0061 is ADR 0061 (#1960).
+  **and which are claimed by open issues** before you pick one. **The next free number is 0063**: 0057 and 0058 are
+  claimed by the open issues #1748 and #1752, 0059 is ADR 0059 (#1804), 0060 is ADR 0060 (#1895),
+  0061 is ADR 0061 (#1960), and 0062 is ADR 0062 (#1557).
   Which numbers were taken, by which issue and when, and the reservations, are the record in
   [`docs/agents/adr-numbering.md`](adr-numbering.md); read it before picking one.
 - **Spikes**: `docs/spikes/NNNN-kebab-case.md`. A spike write-up is **not an ADR and does not

@@ -24,7 +24,7 @@
  * | `tow` | its 8 m, the same way, with a racer within `TOW_REACH_METRES` ahead; nothing without one |
  * | `puddle` | 6 m × `attack` for each rival in its lane **about to reach the next pick-up point** ({@link BOT_PUDDLE_REACH_METRES} short of it or nearer), where the puddle would lie |
  * | `crosswind-gust` | 8 m × `attack` for each rival in its lane within `GUST_REACH_METRES` ahead: what the gust hits |
- * | `rain-cape` | the hit it would absorb: 8 m with a rival **lining up** behind it, newly within gust reach behind in the lane it rides or the lane it moves to (a racer lined up behind can follow it across); 4 m for one that was lined up there last tick too, who may hold nothing; 6 m with a rival's puddle in that lane within its puddle look-ahead (`BOT_PUDDLE_LOOKAHEAD_METRES`, or this tick's travel when that is further), 4 m (half a gust) with a rival within `BOT_THREAT_METRES` behind in another lane, and nothing while one is already on |
+ * | `rain-cape` | the hit it would absorb: 8 m with a rival **lining up** behind it, newly within gust reach behind in the lane it rides or the lane it moves to (a racer lined up behind can follow it across), or sat there for {@link BOT_RELINE_MS} of race time or more; 4 m for one that was lined up there last tick too, for less time than that, who may hold nothing; 6 m with a rival's puddle in that lane within its puddle look-ahead (`BOT_PUDDLE_LOOKAHEAD_METRES`, or this tick's travel when that is further), 4 m (half a gust) with a rival within `BOT_THREAT_METRES` behind in another lane, and nothing while one is already on |
  *
  * It uses the item when that beats what it **holds the item for**, its
  * personality's `hold` for the item, in metres. So a `crosswind-gust` an
@@ -216,14 +216,22 @@ export interface BotStrategy {
   readonly skill: BotSkill;
 }
 
+/** A rival lined up behind a bot, and since when it has been, without a break. */
+export interface LinedUpRival {
+  readonly id: string;
+  /** The instant of the first tick it was seen lined up at in this stretch. */
+  readonly sinceMs: number;
+}
+
 /** What a bot remembers between ticks of one race, and nothing else. */
 export interface BotMemory {
   /**
-   * The ids of the rivals within gust reach behind it in its lane last tick:
-   * one not among them is lining up behind it, which is what a hit coming
-   * looks like to a rider, who cannot see what a rival holds.
+   * The rivals within gust reach behind it in its lane last tick, each with
+   * when it lined up: one not among them is lining up behind it, which is
+   * what a hit coming looks like to a rider, who cannot see what a rival
+   * holds; and so is one that has sat there for {@link BOT_RELINE_MS}.
    */
-  readonly linedUpIds: readonly string[];
+  readonly linedUp: readonly LinedUpRival[];
   /** The instant of the tick it last chose a new lane at, or `null` before its first change. */
   readonly laneSinceMs: number | null;
   /**
@@ -237,7 +245,7 @@ export interface BotMemory {
 export const BOT_MEMORY_AT_START: BotMemory = Object.freeze({
   laneSinceMs: null,
   itemSince: null,
-  linedUpIds: Object.freeze([]),
+  linedUp: Object.freeze([]),
 });
 
 /** A strategic decision: the inputs, and the memory to hand back next tick. */
@@ -247,6 +255,16 @@ export interface StrategicBotDecision extends BotDecision {
 
 /** How long a bot keeps a lane it has moved into before it may move again. */
 export const BOT_LANE_DWELL_MS = 2_000;
+
+/**
+ * How long a rival may sit in a bot's line, in race time, before it counts as
+ * lining up again: a proposal for the owner. Without it, a bot that draws a
+ * cape while a rival is already following never answers that rival, who can
+ * gust it whenever they like. Measured from the tick the rival lined up, so
+ * how often the bot is asked changes it by a tick at most, as the dwell; and
+ * a cape put on then still has `RAIN_CAPE_DURATION_MS` (15 s) to absorb the hit.
+ */
+export const BOT_RELINE_MS = 5_000;
 
 /** What riding on in its own lane is worth, in metres: a tie between lanes stays put. */
 export const BOT_LANE_STAY_METRES = 0.5;
@@ -352,8 +370,8 @@ interface View {
   readonly urgentMetres: number;
   /** How far ahead it counts puddles when it picks a lane. */
   readonly spanMetres: number;
-  /** Who was lined up behind it last tick: its memory's. */
-  readonly linedUpIds: readonly string[];
+  /** Who was lined up behind it last tick, and since when: its memory's. */
+  readonly linedUp: readonly LinedUpRival[];
 }
 
 /** How far `other` is ahead of the bot by drawn distance: below 0 behind. */
@@ -405,6 +423,20 @@ function aboutToReach(view: View, lane: number): number {
     const short = point - racePosition(other.racer);
     return other.lane === lane && short > 0 && short <= BOT_PUDDLE_REACH_METRES;
   }).length;
+}
+
+/** When `id` lined up behind the bot, by its memory, or `undefined` if it was not lined up last tick. */
+function linedUpSince(view: View, id: string): number | undefined {
+  return view.linedUp.find((entry) => entry.id === id)?.sinceMs;
+}
+
+/**
+ * Whether `id`, behind the bot in its line now, counts as lining up: new to
+ * the line since last tick, or sat in it for {@link BOT_RELINE_MS} or more.
+ */
+function liningUp(view: View, id: string): boolean {
+  const since = linedUpSince(view, id);
+  return since === undefined || view.race.atMs - since >= BOT_RELINE_MS;
 }
 
 /** Whether the bot holds or wears a cape, so a hit from behind is covered. */
@@ -501,7 +533,7 @@ function worthNow(view: View, kind: ItemKind, lane: number): number {
         ...behindOf(view, lane, GUST_REACH_METRES),
         ...behindOf(view, view.me.lane, GUST_REACH_METRES),
       ];
-      if (lined.some((other) => !view.linedUpIds.includes(other.racer.id))) {
+      if (lined.some((other) => liningUp(view, other.racer.id))) {
         return itemStrength('crosswind-gust');
       }
       if (puddlesIn(view, lane, view.urgentMetres) > 0) return itemStrength('puddle');
@@ -597,7 +629,7 @@ export function strategicBotDecision(
     urgentMetres,
     // A quarter lap: the spacing of `PICK_UP_FRACTIONS`' points.
     spanMetres: urgentMetres + (level * course.lapLengthMetres) / (PICK_UP_FRACTIONS.length + 1),
-    linedUpIds: memory.linedUpIds,
+    linedUp: memory.linedUp,
   };
 
   const lane = chooseLane(view, memory);
@@ -615,7 +647,10 @@ export function strategicBotDecision(
     memory: {
       laneSinceMs: lane === me.lane ? memory.laneSinceMs : race.atMs,
       itemSince: use ? null : itemSince,
-      linedUpIds: behindOf(view, lane, GUST_REACH_METRES).map((other) => other.racer.id),
+      linedUp: behindOf(view, lane, GUST_REACH_METRES).map((other) => ({
+        id: other.racer.id,
+        sinceMs: linedUpSince(view, other.racer.id) ?? race.atMs,
+      })),
     },
   };
 }
