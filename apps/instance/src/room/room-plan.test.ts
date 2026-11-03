@@ -48,6 +48,17 @@ describe('a stored room, as the room core’s settings — #780', () => {
     ).toBe('race');
   });
 
+  it('carries a lap race’s laps, items and seed to the room core, and none for any other room — #1909', () => {
+    const plan = planFor({ ...ROOM, kind: 'race' }, COURSE, 'any-seated-rider')!;
+    expect(settingsFromPlan(plan).lapRace).toBeUndefined();
+    const lapRace = { laps: 5, items: false, seed: 12_345 };
+    expect(settingsFromPlan({ ...plan, lapRace }).lapRace).toEqual(lapRace);
+    // And the core's own checks still hold over a plan's.
+    expect(() => settingsFromPlan({ ...plan, lapRace: { ...lapRace, laps: 0 } })).toThrow(
+      RoomSettingsError,
+    );
+  });
+
   it('carries who may start the race — the owner’s ruling of 2026-09-30', () => {
     expect(planFor(ROOM, COURSE, { creator: 'ann' })?.startedBy).toEqual({ creator: 'ann' });
     expect(planFor(ROOM, COURSE, 'any-seated-rider')?.startedBy).toBe('any-seated-rider');

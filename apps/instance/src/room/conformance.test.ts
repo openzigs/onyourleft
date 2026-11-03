@@ -17,10 +17,15 @@ import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
 import { decodeRoomMessage } from '@onyourleft/protocol';
 
-import { admitConformance, conformanceSettings } from './conformance-room.ts';
+import {
+  admitConformance,
+  conformanceSettings,
+  lapRaceConformanceSettings,
+} from './conformance-room.ts';
 import {
   CLOSED_BY_ROOM,
   coreRoom,
+  rideTheLapRace,
   rideTheScript,
   type RoomUnderTest,
   type Transcript,
@@ -183,6 +188,19 @@ describe.skipIf(!underWorkerd)(
       const room = workerdRoom(runtime, 'CONFORMANCE', `conformance-${String(Date.now())}`);
       try {
         expect(await rideTheScript(room)).toEqual(reference);
+      } finally {
+        await room.dispose();
+      }
+    });
+
+    it('the Durable Object adapter under workerd runs the lap race exactly as the reference does — #1909', async () => {
+      if (runtime === undefined) throw new Error('workerd did not start');
+      const lapReference = await rideTheLapRace(
+        coreRoom(lapRaceConformanceSettings(), admitConformance),
+      );
+      const room = workerdRoom(runtime, 'LAP_CONFORMANCE', `lap-${String(Date.now())}`);
+      try {
+        expect(await rideTheLapRace(room)).toEqual(lapReference);
       } finally {
         await room.dispose();
       }
