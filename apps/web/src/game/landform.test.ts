@@ -21,6 +21,7 @@ import {
   HORIZON_SEGMENTS,
   RELIEF_CLEAR_METRES,
   RELIEF_MAX_METRES,
+  REACH_TAPER_PER_METRE,
   TERRAIN_BANDS,
   TERRAIN_COLUMN_OFFSETS,
   VERGE_DROP_METRES,
@@ -35,6 +36,7 @@ import {
   hairpinRoute,
   hillRoute,
   northRoute,
+  plannerRoute,
   rollingRoute,
   steadyClimb,
 } from './route-fixtures-testing';
@@ -320,6 +322,171 @@ describe('the ground never rises into the carriageway — #458', () => {
     expect(reachOf(0)).toBeLessThanOrEqual(radius * BEND_FOLD_SHARE * 1.5);
     expect(reachOf(1)).toBeCloseTo(TERRAIN_COLUMN_OFFSETS[outermost] as number, 3);
   });
+});
+
+describe('a fold tapers back rather than standing up as a wall — #2096', () => {
+  // A planner's GPX, simplified, with a 90° bend of 60 m among its four
+  // (`route-fixtures-testing.ts` §`plannerRoute`), both ways round so each side
+  // is the inside of a bend. It is level, so every metre of height off the road
+  // here is the invented relief: the wall #2096 found was that relief, stood
+  // on end between a folded row and the full row two metres on.
+  const planners: readonly (readonly [string, RouteProfile])[] = [
+    ["a planner's route", plannerRoute()],
+    ["a planner's route, mirrored", plannerRoute({ mirrored: true })],
+  ];
+
+  /** How far a row's outermost column stands from its own centreline point. */
+  const reachOf = (
+    corridor: RoadCorridor,
+    ground: TerrainMesh,
+    row: number,
+    side: number,
+  ): number => {
+    const [x, , z] = groundVertex(ground, row, side, COLUMNS - 1);
+    const centre = corridor.centre[row];
+    return Math.hypot(x - (centre?.x ?? 0), z - (centre?.z ?? 0));
+  };
+
+  /** The plan distance from a point to the nearest stretch of the corridor's road. */
+  const fromRoad = (corridor: RoadCorridor, x: number, z: number): number => {
+    const centre = corridor.centre;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let segment = 0; segment + 1 < centre.length; segment += 1) {
+      const from = centre[segment] as (typeof centre)[number];
+      const to = centre[segment + 1] as (typeof centre)[number];
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const span = dx * dx + dz * dz;
+      const t =
+        span > 0 ? Math.min(1, Math.max(0, ((x - from.x) * dx + (z - from.z) * dz) / span)) : 0;
+      nearest = Math.min(nearest, Math.hypot(x - (from.x + dx * t), z - (from.z + dz * t)));
+    }
+    return nearest;
+  };
+
+  it.each(planners)(
+    'changes a side’s reach by at most the taper times the road between two rows, %s',
+    (_name, profile) => {
+      let folded = 0;
+      for (let at = 0; at < profile.totalDistance; at += 23) {
+        const { corridor, ground } = frameAt(profile, at);
+        for (let row = 0; row + 1 < ground.rows; row += 1) {
+          const from = corridor.centre[row];
+          const to = corridor.centre[row + 1];
+          const apart = Math.hypot((to?.x ?? 0) - (from?.x ?? 0), (to?.z ?? 0) - (from?.z ?? 0));
+          for (let side = 0; side < 2; side += 1) {
+            const here = reachOf(corridor, ground, row, side);
+            if (here < 100) folded += 1;
+            // A centimetre for Float32 vertices a kilometre from the origin.
+            expect(
+              Math.abs(reachOf(corridor, ground, row + 1, side) - here),
+              `row ${String(row)}, side ${String(side)}, at ${String(at)}`,
+            ).toBeLessThanOrEqual(REACH_TAPER_PER_METRE * apart + 1e-2);
+          }
+        }
+      }
+      // Non-vacuity: the sweep really does ride through folds, where the reach
+      // drops from 420 m to a fraction of a bend's radius.
+      expect(folded).toBeGreaterThan(100);
+    },
+  );
+
+  it.each([
+    ['hairpinRoute(25) at 133', hairpinRoute(25), 133],
+    ['hairpinRoute(40) at 400', hairpinRoute(40), 400],
+  ] as const)(
+    'never stands over the far leg of a hairpin once tapered, %s',
+    (_name, profile, at) => {
+      // ⚠️ The taper once ran AFTER `clearReach`, and lowered a row's reach to a
+      // lateral `clearReach` had never probed: with columns 32 m and 60 m both
+      // clear and the far leg between them, the outer columns collapsed onto
+      // that leg's tarmac, 8.6 m above it on this frame.
+      const { corridor, ground } = frameAt(profile, at);
+      const surface = {
+        vertices: corridor.vertices,
+        indices: corridor.indices.slice(0, (corridor.centre.length - 1) * 3 * 6),
+      };
+      let near = 0;
+      for (let vertex = 0; vertex < ground.vertices.length / 3; vertex += 1) {
+        if (vertex % COLUMNS < 2) continue;
+        const x = ground.vertices[vertex * 3] as number;
+        const z = ground.vertices[vertex * 3 + 2] as number;
+        const row = Math.floor(vertex / (COLUMNS * 2));
+        if (nearOtherRoad(corridor, row, x, z, 2 * ROAD_CLEARANCE_METRES)) near += 1;
+        const road = heightOver(surface, x, z, 1e-3);
+        if (road === undefined) continue;
+        expect(
+          ground.vertices[vertex * 3 + 1] as number,
+          `vertex ${String(vertex)}`,
+        ).toBeLessThanOrEqual(road + 1e-3);
+      }
+      // Non-vacuity: the frame really does bring ground up to the far leg.
+      expect(near).toBeGreaterThan(0);
+    },
+  );
+
+  it('never stands over ANY part of the road, sampled every 7 m on hairpins and a planner route', () => {
+    // The sweep of `never stands over ANY part` samples every 131 m, which
+    // missed the taper lowering a reach past a probe (#2097's review).
+    let worst = 0;
+    for (const profile of [hairpinRoute(20), hairpinRoute(25), hairpinRoute(40), plannerRoute()]) {
+      for (let at = 0; at < profile.totalDistance; at += 7) {
+        const { corridor, ground } = frameAt(profile, at);
+        const surface = {
+          vertices: corridor.vertices,
+          indices: corridor.indices.slice(0, (corridor.centre.length - 1) * 3 * 6),
+        };
+        for (let vertex = 0; vertex < ground.vertices.length / 3; vertex += 1) {
+          if (vertex % COLUMNS < 2) continue;
+          const road = heightOver(
+            surface,
+            ground.vertices[vertex * 3] as number,
+            ground.vertices[vertex * 3 + 2] as number,
+            1e-3,
+          );
+          if (road === undefined) continue;
+          worst = Math.max(worst, (ground.vertices[vertex * 3 + 1] as number) - road);
+        }
+      }
+    }
+    expect(worst).toBeLessThanOrEqual(1e-3);
+  }, 120_000);
+
+  it.each(planners)(
+    'stands no triangle within 60 m of the road on end, %s',
+    (_name, profile) => {
+      let judged = 0;
+      for (let at = 0; at < profile.totalDistance; at += 23) {
+        const { corridor, ground } = frameAt(profile, at);
+        const v = ground.vertices;
+        for (let index = 0; index + 2 < ground.indices.length; index += 3) {
+          const [a, b, c] = [
+            ground.indices[index],
+            ground.indices[index + 1],
+            ground.indices[index + 2],
+          ].map((each) => (each as number) * 3) as [number, number, number];
+          const e1 = [0, 1, 2].map((k) => (v[b + k] as number) - (v[a + k] as number));
+          const e2 = [0, 1, 2].map((k) => (v[c + k] as number) - (v[a + k] as number));
+          const nx = (e1[1] as number) * (e2[2] as number) - (e1[2] as number) * (e2[1] as number);
+          const ny = (e1[2] as number) * (e2[0] as number) - (e1[0] as number) * (e2[2] as number);
+          const nz = (e1[0] as number) * (e2[1] as number) - (e1[1] as number) * (e2[0] as number);
+          const length = Math.hypot(nx, ny, nz);
+          // A folded row's outer columns are one point, so the triangles
+          // between two of them have no area and no face to stand up.
+          if (length < 1e-3) continue;
+          const x = ((v[a] as number) + (v[b] as number) + (v[c] as number)) / 3;
+          const z = ((v[a + 2] as number) + (v[b + 2] as number) + (v[c + 2] as number)) / 3;
+          if (fromRoad(corridor, x, z) > 60) continue;
+          // Measured before #2096 at 0.066 here; 0.77 since. The steepest the
+          // relief makes on its own, 0.18 of a metre a metre, is 0.98.
+          expect(Math.abs(ny) / length, `at ${String(at)}`).toBeGreaterThanOrEqual(0.15);
+          judged += 1;
+        }
+      }
+      expect(judged).toBeGreaterThan(50_000);
+    },
+    30_000,
+  );
 });
 
 describe('the gradient shows beside the road — #458', () => {

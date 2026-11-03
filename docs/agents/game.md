@@ -1228,6 +1228,36 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and storey (the type keeps its walls, pitch, doors);
                         untyped planned as before
                         (`-building-type`, `town=typed`);
+                        since #2021 a mapped place of worship (`worship`
+                        landmark, church, chapel, cathedral) a steeple: a
+                        square tower and pyramidal spire at the long axis's
+                        end away from the front door, stepped onto the
+                        footprint, 12 triangles
+                        in `wall` and `roof`, left off before holes over a
+                        cap (`STEEPLE`, `-steeples`, `town=typed`);
+                        since #2023 an untagged footprint inferred a shed
+                        (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
+                        rectangularity ≥ 0.9, a house-sized footprint within
+                        40 m, one the planner keeps, standing nearer the
+                        nearest non-service street)
+                        by `footprintKindOf`, spike 0033's thresholds, and
+                        drawn as #1791's; a mapped type is never inferred
+                        over, and a mapped roof or storey count beats the
+                        inferred one's; the plan says so (`family`,
+                        `inferred`); only while the type is read
+                        (`-inferred-outbuildings`, `town=untagged`);
+                        since #2024 on a `rural` stretch one of ≥ 100 m²,
+                        rectangularity ≥ 0.9, ≥ 40 m back from the street,
+                        behind a house-sized footprint within 80 m, a plank
+                        barn (a gambrel on a seeded half, else a steep
+                        gable), and over 250 m² a pole building (corrugated,
+                        blind, a 20° gable in `slate` at any size)
+                        (`-inferred-barns`, `town=untagged` past 2 150 m);
+                        since #2026 on a `village` or `town` stretch one of
+                        ≥ 1 000 m² within 50 m of a primary, secondary or
+                        tertiary street commercial, drawn as a mapped shop;
+                        no parking half (`-inferred-commercial`,
+                        `town=untagged` at 400–700 m);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
