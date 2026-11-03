@@ -48,7 +48,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
     src/ble/            the Capacitor transport against #39's interface,
                         unchanged, the one file that names BleClient, and the
                         Android side of the FTMS control point — the write
-                        that is acknowledged, and the sibling that is not
+                        that is acknowledged, and the sibling that is not;
+                        since #1825 an OpenBikeControl steering controller's
+                        client, every plugin call bounded, beside the transport
     src/permission/     what a rider is told when Bluetooth will not work (#87)
     src/http/           the ONE native HTTP request the shell makes (#553): a
                         picture to the rider's own computer, outside the

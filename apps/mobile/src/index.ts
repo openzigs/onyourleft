@@ -32,6 +32,17 @@ export { readCapacitorFitnessMachine } from './ble/fitness-machine';
 export type { CapacitorFitnessMachine } from './ble/fitness-machine';
 export { readCapacitorResolvedUuids } from './ble/resolved-uuids';
 export { readCapacitorSignal } from './ble/signal';
+export {
+  CHOOSER_DEADLINE,
+  CONTROLLER_CALL_DEADLINE,
+  createCapacitorOpenBikeControlClient,
+} from './ble/open-bike-control-client';
+export type {
+  CapacitorControllerConnection,
+  CapacitorControllerStep,
+  CapacitorOpenBikeControlClient,
+  CapacitorOpenBikeControlOptions,
+} from './ble/open-bike-control-client';
 export type {
   CapacitorBlePort,
   PluginDevice,
