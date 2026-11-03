@@ -653,9 +653,10 @@ This is what you are shown, beside the box you tick, with the service's address 
   holds both your key and your agreement for, so that a ride's page can offer the write-up without
   asking your instance first. It is not in the account export, and *Disconnect* and *Erase
   everything* remove it.
-- **To stop it:** untick the box on the Instance screen, or press *Remove my key from my instance*.
-  Either stops your instance sending anything to the service; neither can recall what was already
-  sent.
+- **To stop it:** untick the box on the Instance screen. That withdraws your agreement and stops
+  your instance sending anything to the service. Pressing *Remove my key from my instance* also
+  stops it, unless the operator's command set a key for your account: then untick the box. Neither
+  can recall what was already sent.
 
 ## Block summaries sent to your instance during a ride
 
