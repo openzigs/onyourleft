@@ -259,6 +259,21 @@
  * pitch, an outbuilding's blind walls and garage door, a civic block's plain
  * door. Each lever switches its own half alone.
  *
+ * ## A place of worship's steeple (#2021, the owner's ruling of 2026-11-02)
+ *
+ * A mapped place of worship — the `worship` landmark, or a church, a chapel
+ * or a cathedral (`building-types.ts` §`isWorship`) — is #1791's civic block
+ * with a **steeple** ({@link STEEPLE}, {@link steepleSiteOf}): a square tower
+ * at the end of the footprint's long axis that faces the street (the end
+ * nearer the road; seeded where the two are as near), a touch proud of the end
+ * wall, stepped inward until it stands on the footprint, rising above the
+ * roof under a pyramidal spire. Its tower is `wall` in the walls' cladding and
+ * its spire `roof`, so it costs 12 triangles, on the far level too, and no
+ * draw call. Over a cap it is left off before a courtyard's holes are. A
+ * footprint too narrow or too short for a tower beside a nave has none, and so
+ * has every one with `?levers=-steeples` ({@link FootprintPlanOptions}'
+ * `steeples`).
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -304,6 +319,7 @@ import {
   BARN_FEATURES,
   buildingFamilyOf,
   CIVIC_FEATURES,
+  isWorship,
   OUTBUILDING_FEATURES,
   resolvedFamily,
   type BuildingFamily,
@@ -726,6 +742,11 @@ export interface FootprintPlan {
   /** Whether it has a front porch — #1589. */
   readonly porch: boolean;
   /**
+   * Whether it has a steeple — #2021: a mapped place of worship's square tower
+   * and spire, in its `wall` and `roof` triangles ({@link STEEPLE}).
+   */
+  readonly steeple: boolean;
+  /**
    * Where a parcel is left at its front door — #1808: a house's
    * {@link FrontStep}, at the foot of its front porch's steps where it has a
    * porch and on its doorstep where it has none. `undefined` for every plan
@@ -893,6 +914,29 @@ export const CHIMNEY_SHARE = 0.7;
 
 /** A chimney's breadth along the ridge, its depth across it, and its height above the ridge (#1581). */
 export const CHIMNEY = { along: 0.6, across: 0.9, above: 0.9 } as const;
+
+/**
+ * A place of worship's steeple — #2021, the owner's ruling of 2026-11-02
+ * ("Add a steeple"): a square tower `share` of the footprint's width a side,
+ * from `least` to `most` metres, standing `above` metres over the roof, under
+ * a pyramidal spire `spire` times its side high, on a footprint long enough
+ * for a nave of `nave` tower sides behind it. It stands at the end of the
+ * long axis that faces the street, `proud` metres out past the end wall so
+ * the two never share a plane, and steps `step` metres inward until it stands
+ * on the footprint; where the two ends' distances from the road differ by
+ * less than `tell` metres, the end is seeded.
+ */
+export const STEEPLE = {
+  share: 0.4,
+  least: 3,
+  most: 6,
+  above: 4,
+  spire: 2,
+  nave: 2,
+  proud: 0.15,
+  step: 1,
+  tell: 1,
+} as const;
 
 /** The share of houses whose front door has a canopy over it: **0.55** (#1581). */
 export const PORCH_SHARE = 0.55;
@@ -1237,6 +1281,8 @@ const STREAM_HOUSE_MODEL = 31;
 const STREAM_STOREYS = 32;
 /** #1785: whether an archetype's roof is its variant, and which end a side-hipped roof hips. */
 const STREAM_ROOF_VARIANT = 33;
+/** #2021: which end a steeple stands at, where the street cannot tell. */
+const STREAM_STEEPLE = 34;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -4193,6 +4239,101 @@ function chimney(
   );
 }
 
+/** Where a steeple stands — #2021: its tower's centre, its axis and half its side. */
+export interface SteepleSite {
+  readonly cx: number;
+  readonly cz: number;
+  readonly ux: number;
+  readonly uz: number;
+  readonly half: number;
+}
+
+/**
+ * A place of worship's steeple site — #2021: at the `end` (±1) of `rectangle`'s
+ * long axis, {@link STEEPLE}'s size, stepped inward until its tower stands on
+ * `ring`; `undefined` where it never does, or the footprint is too narrow or
+ * too short for a tower beside a nave.
+ */
+export function steepleSiteOf(
+  ring: Ring,
+  rectangle: Rectangle,
+  end: number,
+): SteepleSite | undefined {
+  const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
+  const half = Math.min(STEEPLE.most, Math.max(STEEPLE.least, STEEPLE.share * 2 * halfShort)) / 2;
+  // Narrower than the tower and a metre, or too short for a nave behind it: no room.
+  if (2 * halfShort < 2 * half + 1 || 2 * halfLong < (1 + STEEPLE.nave) * 2 * half) {
+    return undefined;
+  }
+  // The part of the tower that must stand on the footprint: all but its proud face.
+  const inner = half - 2 * STEEPLE.proud;
+  for (let back = 0; back <= halfLong - half; back += STEEPLE.step) {
+    const along = end * (halfLong - half + STEEPLE.proud - back);
+    const x = cx + ux * along;
+    const z = cz + uz * along;
+    const on = [
+      [inner, inner],
+      [inner, -inner],
+      [-inner, inner],
+      [-inner, -inner],
+    ].every(([e, n]) =>
+      insideRing(
+        ring,
+        x + ux * (e as number) + uz * (n as number),
+        z + uz * (e as number) - ux * (n as number),
+      ),
+    );
+    if (on) return { cx: x, cz: z, ux, uz, half };
+  }
+  return undefined;
+}
+
+/**
+ * A steeple — #2021: a square tower from `bottom` to `top`, plain and in the
+ * walls' cladding, into `wall`, and its pyramidal spire, in the roof's, into
+ * `roof`: 12 triangles, and none past the roles a plan already has.
+ */
+function steeple(
+  writing: Pick<Writing, 'wall' | 'roof'>,
+  site: SteepleSite,
+  heights: readonly [bottom: number, top: number, floor: number],
+  styles: { readonly wall: Style; readonly roof: Style },
+): void {
+  const { cx, cz, ux, uz, half } = site;
+  const [, top] = heights;
+  box(writing.wall, [cx, cz], [ux, uz], [half, half], heights, plainIn(styles.wall), {
+    top: false,
+    bottom: false,
+  });
+  const rise = 2 * half * STEEPLE.spire;
+  const apex: Vec = [cx, top + rise, cz];
+  const slant = Math.hypot(rise, half);
+  // Each face's outward axis `(dx, dz)`; its base runs along `(dz, −dx)`.
+  for (const [dx, dz] of [
+    [ux, uz],
+    [-ux, -uz],
+    [uz, -ux],
+    [-uz, ux],
+  ] as const) {
+    const corner = (side: number): Vec => [
+      cx + dx * half + dz * side * half,
+      top,
+      cz + dz * half - dx * side * half,
+    ];
+    triangle(
+      writing.roof,
+      [corner(-1), corner(1), apex],
+      [(dx * rise) / slant, half / slant, (dz * rise) / slant],
+      [
+        [-half / STOREY_METRES, 0],
+        [half / STOREY_METRES, 0],
+        [0, slant / STOREY_METRES],
+      ],
+      plainIn(styles.roof),
+    );
+  }
+}
+
 /** How many triangles a role's floats are. */
 function trianglesOf(floats: readonly number[]): number {
   return floats.length / (3 * FOOTPRINT_VERTEX_FLOATS);
@@ -4528,6 +4669,7 @@ export function footprintPlans(
           dormers: options.dormerVariants ?? true,
           porches: options.archetypePorches ?? true,
           buildings: options.commercialArchetypes ?? true,
+          steeples: options.steeples ?? true,
         },
       ),
     );
@@ -5424,6 +5566,14 @@ export interface FootprintPlanOptions {
    * is ignored and every plan is as before (`?levers=-mapped-roof-shape`).
    */
   readonly mappedRoofShape?: boolean;
+  /**
+   * #2021: a mapped place of worship — the `worship` landmark, or a church, a
+   * chapel or a cathedral — given a steeple ({@link STEEPLE}) at the end of
+   * its long axis facing the street; `true` by default, and only while
+   * `buildingTypes` is on. Off, every one is #1791's plain civic block, as
+   * before (`?levers=-steeples`).
+   */
+  readonly steeples?: boolean;
 }
 
 /**
@@ -5470,6 +5620,8 @@ interface ArchetypeChoice {
   readonly porches?: boolean;
   /** #1783: whether a commercial or multi-family footprint is given its archetype (`-commercial-archetypes` off). */
   readonly buildings?: boolean;
+  /** #2021: whether a mapped place of worship is given its steeple (`-steeples` off). */
+  readonly steeples?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -5969,13 +6121,45 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  /** What one build drew of #1588's extras, and #1590's cornice. */
+  // #2021: a mapped place of worship's steeple, at the end of its long axis that faces the
+  // street — the end nearer the road, where the two differ by `tell`, and seeded where not.
+  const endDistance = (end: number): number | undefined =>
+    nearestOnRoadSegments(
+      road,
+      segments,
+      rectangle.cx + rectangle.ux * end * rectangle.halfLong,
+      rectangle.cz + rectangle.uz * end * rectangle.halfLong,
+      beside,
+    )
+      ? beside.distance
+      : undefined;
+  const steepleAt = ((): SteepleSite | undefined => {
+    if (choice.steeples !== true || part || family !== 'civic') return undefined;
+    if (!isWorship(building.buildingType, building.landmark)) return undefined;
+    const ahead = endDistance(1);
+    const behind = endDistance(-1);
+    const end =
+      ahead !== undefined && behind !== undefined && Math.abs(ahead - behind) >= STEEPLE.tell
+        ? ahead < behind
+          ? 1
+          : -1
+        : share(STREAM_STEEPLE) < 0.5
+          ? 1
+          : -1;
+    return steepleSiteOf(drawn, rectangle, end);
+  })();
+  /** What one build drew of #1588's extras, #1590's cornice and #2021's steeple. */
   interface Extras {
     garage: boolean;
     dormers: number;
     cornice: boolean;
+    steeple: boolean;
   }
-  const build = (withHoles: boolean, withCornice: boolean): { writing: Writing; drew: Extras } => {
+  const build = (
+    withHoles: boolean,
+    withCornice: boolean,
+    withSteeple: boolean,
+  ): { writing: Writing; drew: Extras } => {
     const rings = withHoles ? [drawn, ...holes] : [drawn];
     const writing: Writing = {
       wall: [],
@@ -5993,7 +6177,9 @@ function planFootprint(
       'porch-roof': [],
       'porch-trim': [],
     };
-    const drew: Extras = { garage: false, dormers: 0, cornice: false };
+    const drew: Extras = { garage: false, dormers: 0, cornice: false, steeple: false };
+    // #2021: the top of the roof, which a steeple's tower stands above.
+    let roofTop = eaves + PARAPET_METRES;
     // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
     const corniced = withCornice && roof === 'flat' && (use === 'commercial' || terraced) && !part;
     // #1679: and the walls under it say so, as the parapet's face does.
@@ -6060,6 +6246,7 @@ function planFootprint(
         const its = roofOver(other, { roof: roofStyle, gable: wallStyle, overhang });
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
+      roofTop = stack.ridge.top;
       if (withChimney) {
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], chimneyEnd);
       }
@@ -6113,6 +6300,13 @@ function planFootprint(
           );
         }
       }
+    }
+    if (withSteeple && steepleAt !== undefined) {
+      steeple(writing, steepleAt, [base, roofTop + STEEPLE.above, floor], {
+        wall: wallStyle,
+        roof: roofStyle,
+      });
+      drew.steeple = true;
     }
     if (frontFrame !== undefined) {
       // #1791: a mapped garage's door is its garage door, and a civic block's and a shed's plain.
@@ -6183,9 +6377,12 @@ function planFootprint(
   // does without it before it does without its holes, and only a plan that
   // drew one is built again for it.
   const holed = holes.length > 0;
-  let built = build(holed, true);
-  if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
-  if (holed && !fits(built.writing)) built = build(false, false);
+  let built = build(holed, true, true);
+  if (!fits(built.writing) && built.drew.cornice) built = build(holed, false, true);
+  // #2021: a steeple that will not fit is left off before the holes are, and put back once
+  // they are: a civic block has no garage, porch or dormer, so without its holes there is room.
+  if (!fits(built.writing) && built.drew.steeple) built = build(holed, false, false);
+  if (holed && !fits(built.writing)) built = build(false, false, true);
   // #1785: a roof variant that will not fit falls back to the plain roof, then as before.
   if (variant !== 'plain' && !fits(built.writing)) {
     return planFootprint(
@@ -6316,6 +6513,7 @@ function planFootprint(
       cornice: drew.cornice,
     },
     porch: frontPorchSpec !== undefined,
+    steeple: drew.steeple,
     frontStep,
     urban: urbanClass,
     archetype,
