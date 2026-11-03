@@ -922,8 +922,9 @@ export const CHIMNEY = { along: 0.6, across: 0.9, above: 0.9 } as const;
  * a pyramidal spire `spire` times its side high, on a footprint long enough
  * for a nave of `nave` tower sides behind it. It stands at the end of the
  * long axis that faces the street, `proud` metres out past the end wall so
- * the two never share a plane, and steps `step` metres inward until it stands
- * on the footprint; where the two ends' distances from the road differ by
+ * the two never share a plane and the roof's eaves ({@link EAVES_OVERHANG_METRES})
+ * end inside the tower rather than through its face, and steps `step` metres inward until it stands
+ * on the footprint (its inner corners `seat` metres inside the wall); where the two ends' distances from the road differ by
  * less than `tell` metres, the end is seeded.
  */
 export const STEEPLE = {
@@ -933,7 +934,8 @@ export const STEEPLE = {
   above: 4,
   spire: 2,
   nave: 2,
-  proud: 0.15,
+  proud: EAVES_OVERHANG_METRES + 0.1,
+  seat: 0.15,
   step: 1,
   tell: 1,
 } as const;
@@ -4240,7 +4242,7 @@ function chimney(
 }
 
 /** Where a steeple stands — #2021: its tower's centre, its axis and half its side. */
-export interface SteepleSite {
+interface SteepleSite {
   readonly cx: number;
   readonly cz: number;
   readonly ux: number;
@@ -4254,11 +4256,7 @@ export interface SteepleSite {
  * `ring`; `undefined` where it never does, or the footprint is too narrow or
  * too short for a tower beside a nave.
  */
-export function steepleSiteOf(
-  ring: Ring,
-  rectangle: Rectangle,
-  end: number,
-): SteepleSite | undefined {
+function steepleSiteOf(ring: Ring, rectangle: Rectangle, end: number): SteepleSite | undefined {
   const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
   const half = Math.min(STEEPLE.most, Math.max(STEEPLE.least, STEEPLE.share * 2 * halfShort)) / 2;
   // Narrower than the tower and a metre, or too short for a nave behind it: no room.
@@ -4266,7 +4264,7 @@ export function steepleSiteOf(
     return undefined;
   }
   // The part of the tower that must stand on the footprint: all but its proud face.
-  const inner = half - 2 * STEEPLE.proud;
+  const inner = half - STEEPLE.proud - STEEPLE.seat;
   for (let back = 0; back <= halfLong - half; back += STEEPLE.step) {
     const along = end * (halfLong - half + STEEPLE.proud - back);
     const x = cx + ux * along;
@@ -6311,9 +6309,27 @@ function planFootprint(
     if (frontFrame !== undefined) {
       // #1791: a mapped garage's door is its garage door, and a civic block's and a shed's plain.
       if (doorKind !== 'none') {
+        // #2021: a steeple's tower standing across the door's wall carries the door on its face.
+        const onTower =
+          withSteeple &&
+          steepleAt !== undefined &&
+          Math.abs(
+            (frontFrame.mx + frontFrame.nx * STEEPLE.proud * 0.5 - steepleAt.cx) * steepleAt.ux +
+              (frontFrame.mz + frontFrame.nz * STEEPLE.proud * 0.5 - steepleAt.cz) * steepleAt.uz,
+          ) <= steepleAt.half &&
+          Math.abs(
+            (frontFrame.mx + frontFrame.nx * STEEPLE.proud * 0.5 - steepleAt.cx) * steepleAt.uz -
+              (frontFrame.mz + frontFrame.nz * STEEPLE.proud * 0.5 - steepleAt.cz) * steepleAt.ux,
+          ) <= steepleAt.half;
         door(
           writing.door,
-          frontFrame,
+          onTower
+            ? {
+                ...frontFrame,
+                mx: frontFrame.mx + frontFrame.nx * STEEPLE.proud,
+                mz: frontFrame.mz + frontFrame.nz * STEEPLE.proud,
+              }
+            : frontFrame,
           floor,
           shop === undefined ? NO_STYLE : [CLAD_PHOTOGRAPH, STYLE_COMMERCIAL, 0, -1],
           doorKind === 'plain',

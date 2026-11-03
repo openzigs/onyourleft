@@ -44,9 +44,10 @@ function planOne(
   mapped: { readonly type: BuildingType | null; readonly landmark: Landmark | null },
   options: FootprintPlanOptions = {},
   height = 6,
+  part?: { readonly minHeightMetres: number },
 ): FootprintPlan {
   const building: BuildingFeature = {
-    ...buildingBeside(profile, origin, rings, height),
+    ...buildingBeside(profile, origin, rings, height, part),
     buildingType: mapped.type,
     landmark: mapped.landmark,
   };
@@ -94,6 +95,16 @@ function lateralOf(x: number, z: number, along: number): number {
   const frame = drawnRoadFrame(profile, origin, along);
   if (frame === undefined) throw new Error('no road there');
   return (x - frame.x) * frame.normalX + (z - frame.z) * frame.normalZ;
+}
+
+/** The nearest any vertex of `role` comes to the road at `along`, metres out: the lowest lateral. */
+function nearestToRoad(plan: FootprintPlan, role: 'wall' | 'roof' | 'door'): number {
+  const floats = plan.triangles[role];
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    nearest = Math.min(nearest, lateralOf(floats[at] as number, floats[at + 2] as number, 1_000));
+  }
+  return nearest;
 }
 
 /** Whether `(x, z)` stands inside a plan's drawn footprint. */
@@ -219,6 +230,26 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
     expect(
       planOne([rectangleBeside(1_000, 30, 6, 5)], { type: 'chapel', landmark: null }).steeple,
     ).toBe(false);
+  });
+
+  it('shows the front door on the tower’s face, and ends the roof’s eaves inside the tower', () => {
+    const at = [rectangleBeside(1_000, 40, 10, 24)];
+    const plan = planOne(at, CHURCH);
+    const bare = planOne(at, CHURCH, { steeples: false });
+    // The tower's face stands `proud` out past the front wall, 28 m out from the road.
+    const face = nearestToRoad(plan, 'wall');
+    expect(face).toBeCloseTo(28 - STEEPLE.proud, 2);
+    // The door is on that face, not behind it — and still on the wall where there is no steeple.
+    expect(nearestToRoad(plan, 'door')).toBeLessThan(face);
+    expect(nearestToRoad(plan, 'door')).toBeGreaterThan(face - 0.1);
+    expect(nearestToRoad(bare, 'door')).toBeGreaterThan(27.9);
+    // No eave of the roof sticks out through the tower's face.
+    expect(nearestToRoad(plan, 'roof')).toBeGreaterThanOrEqual(face - 1e-6);
+  });
+
+  it('gives a building part no steeple', () => {
+    const at = [rectangleBeside(1_000, 40, 10, 24)];
+    expect(planOne(at, CHURCH, {}, 12, { minHeightMetres: 6 }).steeple).toBe(false);
   });
 
   it('reads a place of worship from its landmark or its type, and nothing else', () => {
