@@ -73,8 +73,18 @@ function plansDigest(
     undefined,
     options,
   );
-  const text = JSON.stringify({ plans, verdicts }, (_key, value: unknown) =>
-    ArrayBuffer.isView(value) ? Array.from(value as Float32Array) : value,
+  // #2023 added the `inferred` flag to every plan; no footprint here is inferred anything, so
+  // it is left out of the record, which predates it.
+  expect(plans.every((plan) => !plan.inferred)).toBe(true);
+  // #2021 added the `steeple` flag to every plan; no footprint here has one with the type
+  // unread, so it is left out of the record, which predates it.
+  if (options.buildingTypes === false) expect(plans.every((plan) => !plan.steeple)).toBe(true);
+  const text = JSON.stringify({ plans, verdicts }, (key, value: unknown) =>
+    key === 'inferred' || key === 'steeple'
+      ? undefined
+      : ArrayBuffer.isView(value)
+        ? Array.from(value as Float32Array)
+        : value,
   );
   return { plans: plans.length, digest: createHash('sha256').update(text).digest('hex') };
 }

@@ -17,6 +17,9 @@ import {
   commercialArchetypesWithLevers,
   dormerVariantsWithLevers,
   houseArchetypesWithLevers,
+  inferredBarnsWithLevers,
+  inferredCommercialWithLevers,
+  inferredOutbuildingsWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   LAYERS,
@@ -30,6 +33,7 @@ import {
   surfacesWithLevers,
   treesWithLevers,
   splitRoofsWithLevers,
+  steeplesWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
@@ -440,6 +444,69 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=typed&levers=-building-type'))).toBe(
       `?levers=${encodeURIComponent('-building-type')}&town=typed`,
     );
+  });
+
+  it('gives each mapped place of worship its steeple, as the product does, unless #2021’s lever takes it out', () => {
+    expect(LEVERS).toContain('steeples');
+    expect(steeplesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(steeplesWithLevers(LEVERS.filter((lever) => lever !== 'steeples'))).toBe(true);
+    expect(steeplesWithLevers(parseConfig('?levers=-steeples').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=typed&levers=-steeples'))).toBe(
+      `?levers=${encodeURIComponent('-steeples')}&town=typed`,
+    );
+  });
+
+  it('infers an untagged footprint a garage or a shed, as the product does, unless #2023’s lever takes it out', () => {
+    expect(LEVERS).toContain('inferred-outbuildings');
+    expect(inferredOutbuildingsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      inferredOutbuildingsWithLevers(LEVERS.filter((lever) => lever !== 'inferred-outbuildings')),
+    ).toBe(true);
+    expect(
+      inferredOutbuildingsWithLevers(parseConfig('?levers=-inferred-outbuildings').leversOff),
+    ).toBe(false);
+    expect(configQuery(parseConfig('?town=untagged&levers=-inferred-outbuildings'))).toBe(
+      `?levers=${encodeURIComponent('-inferred-outbuildings')}&town=untagged`,
+    );
+  });
+
+  it('infers an untagged rural footprint a barn, as the product does, unless #2024’s lever takes it out', () => {
+    expect(LEVERS).toContain('inferred-barns');
+    expect(inferredBarnsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(inferredBarnsWithLevers(LEVERS.filter((lever) => lever !== 'inferred-barns'))).toBe(
+      true,
+    );
+    expect(inferredBarnsWithLevers(parseConfig('?levers=-inferred-barns').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=untagged&levers=-inferred-barns'))).toBe(
+      `?levers=${encodeURIComponent('-inferred-barns')}&town=untagged`,
+    );
+  });
+
+  it('infers a big untagged footprint on a main street commercial, as the product does, unless #2026’s lever takes it out', () => {
+    expect(LEVERS).toContain('inferred-commercial');
+    expect(inferredCommercialWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      inferredCommercialWithLevers(LEVERS.filter((lever) => lever !== 'inferred-commercial')),
+    ).toBe(true);
+    expect(
+      inferredCommercialWithLevers(parseConfig('?levers=-inferred-commercial').leversOff),
+    ).toBe(false);
+    expect(configQuery(parseConfig('?town=untagged&levers=-inferred-commercial'))).toBe(
+      `?levers=${encodeURIComponent('-inferred-commercial')}&town=untagged`,
+    );
+  });
+
+  it('rides the untagged street through #2023’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=untagged').town).toBe('untagged');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'untagged'\s*\?\s*untaggedStreetFixture\(latitude\)/);
   });
 
   it('rides the typed street through #1791’s fixture, which is where it is wired', () => {
