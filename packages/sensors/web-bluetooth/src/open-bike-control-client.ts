@@ -54,7 +54,7 @@ import {
   parseButtonState,
   type OpenBikeControlEvent,
 } from '../../protocol/src/open-bike-control';
-import { SensorError } from '../../src/errors';
+import { ForgetUnconfirmedError, SensorError } from '../../src/errors';
 import type { Unsubscribe } from '../../src/subscription';
 
 import { discoveryError } from './errors';
@@ -72,6 +72,12 @@ export interface OpenBikeControlClientOptions {
   readonly timeout?: Seconds | undefined;
   /** As `GattQueueOptions.schedule`: injected so a test bounds in milliseconds. */
   readonly schedule?: ((callback: () => void, after: Seconds) => () => void) | undefined;
+  /**
+   * Whether the page is handling a user gesture, as `SensorTransportOptions`
+   * asks it. Defaults to `navigator.userActivation.isActive`, and to `true`
+   * where the browser reports none.
+   */
+  readonly userActivation?: (() => boolean) | undefined;
 }
 
 /** One controller, connected. */
@@ -97,7 +103,8 @@ export interface OpenBikeControlClient {
    * Ask the browser's chooser for a controller, then connect to it. Call from
    * a user gesture.
    *
-   * @throws {SensorError} `no-device-selected` when the chooser closes,
+   * @throws {SensorError} `user-gesture-required` when called outside a user
+   * gesture, `no-device-selected` when the chooser closes,
    * `not-permitted` when the browser refuses, `not-connected` when a step
    * fails or misses its deadline, `capability-unsupported` when the device
    * does not serve the button-state characteristic.
@@ -110,11 +117,21 @@ export function createOpenBikeControlClient(
 ): OpenBikeControlClient {
   const timeout = options.timeout ?? DEFAULT_GATT_OPERATION_TIMEOUT;
   const schedule = options.schedule ?? defaultSchedule;
+  const userActivation = options.userActivation ?? defaultUserActivation;
   // Copied into a fresh `ArrayBuffer`-backed array: `BufferSource` excludes a shared buffer.
   const appInformation = new Uint8Array(encodeAppInformation(options.buttons));
 
   return {
     async requestAndConnect() {
+      // Chrome reports a missing gesture as `SecurityError`, which
+      // `discoveryError` would call `not-permitted`: check first, as the
+      // transport does (`errors.ts`).
+      if (!userActivation()) {
+        throw new SensorError(
+          'user-gesture-required',
+          'requestDevice must be called from a user gesture',
+        );
+      }
       let device: BluetoothDevicePort;
       try {
         device = await options.bluetooth.requestDevice({
@@ -127,6 +144,12 @@ export function createOpenBikeControlClient(
       return connectTo(device, appInformation, timeout, schedule);
     },
   };
+}
+
+function defaultUserActivation(): boolean {
+  const activation = (globalThis as { navigator?: { userActivation?: { isActive?: boolean } } })
+    .navigator?.userActivation;
+  return activation?.isActive ?? true;
 }
 
 /** Whether a discovery failure means the device lacks the service, rather than the link failing. */
@@ -155,6 +178,7 @@ async function connectTo(
   const disconnectListeners: Array<() => void> = [];
 
   const onValue = (): void => {
+    // Narrowing for TypeScript only: the listener is attached after `buttonState` is assigned.
     if (buttonState === undefined) return;
     const value = buttonState.value;
     if (value === undefined) {
@@ -166,7 +190,14 @@ async function connectTo(
       malformed += 1;
       return;
     }
-    for (const listener of [...eventListeners]) listener(result.events);
+    for (const listener of [...eventListeners]) {
+      try {
+        listener(result.events);
+      } catch {
+        // A listener's fault is its own: it must not reach the browser's event dispatch
+        // or keep the next listener from its events.
+      }
+    }
   };
 
   /** Remove every listener and drop the link. Safe to call more than once. */
@@ -182,7 +213,13 @@ async function connectTo(
       // A shim that throws here has no link to drop.
     }
     if (wasUp) {
-      for (const listener of [...disconnectListeners]) listener();
+      for (const listener of [...disconnectListeners]) {
+        try {
+          listener();
+        } catch {
+          // A listener's fault is its own: the teardown, and a forget after it, go on.
+        }
+      }
     }
   };
 
@@ -240,7 +277,10 @@ async function connectTo(
     // Optional in the specification: a controller may not take app information.
     const information = await service
       .getCharacteristic(OPEN_BIKE_CONTROL_APP_INFORMATION)
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (isMissing(error)) return undefined;
+        throw error;
+      });
     return { notifying: found, appInformationCharacteristic: information };
   });
   buttonState = notifying;
@@ -276,17 +316,52 @@ async function connectTo(
     disconnect: tearDown,
     async forget() {
       tearDown();
-      // Bounded like every other call: a browser may never answer (#716). A
-      // grant that outlives a missed deadline is the browser's to keep.
-      let cancel: () => void = () => undefined;
-      const given = new Promise<void>((resolve) => {
-        cancel = schedule(resolve, timeout);
-      });
+      const revoke = device.forget;
+      if (typeof revoke !== 'function') return;
+      // Bounded like every other call: a browser may never answer (#716). As the
+      // transport does, a missed deadline is reported, not swallowed: the
+      // browser's call is still running, and when it lands it can drop a
+      // re-paired link (`ForgetUnconfirmedError.stillRunning`).
+      let revoking: Promise<void>;
       try {
-        await Promise.race([device.forget?.() ?? Promise.resolve(), given]);
-      } finally {
-        cancel();
+        revoking = revoke.call(device);
+      } catch (error) {
+        revoking = Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
+      await new Promise<void>((resolve, reject) => {
+        const cancel = schedule(() => {
+          reject(
+            new ForgetUnconfirmedError(
+              'forget-timed-out',
+              'the browser did not confirm the forget in time',
+              {
+                deviceId: device.id,
+                holding: 'permission',
+                stillRunning: revoking.then(
+                  () => undefined,
+                  () => undefined,
+                ),
+              },
+            ),
+          );
+        }, timeout);
+        revoking.then(
+          () => {
+            cancel();
+            resolve();
+          },
+          (error: unknown) => {
+            cancel();
+            reject(
+              new ForgetUnconfirmedError('forget-refused', 'the browser refused the forget', {
+                deviceId: device.id,
+                holding: 'permission',
+                cause: error,
+              }),
+            );
+          },
+        );
+      });
     },
   };
 }

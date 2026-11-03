@@ -65,6 +65,9 @@ function connection(
     own: () => own,
     standings: () => undefined,
     draftFactor: () => 1,
+    lapRace: () => undefined,
+    useItem: () => undefined,
+    changeLane: () => undefined,
     report: () => Promise.resolve({ kind: 'reported' }),
     leave: () => undefined,
   };
