@@ -427,36 +427,45 @@ describe('#2023: the neighbours the rule reads', () => {
 
   /**
    * The fixture's road and land, widened to 250 m, with only `placed` standing on it, on the
-   * road's `side` — the grid the rule searches is not symmetric about the road.
+   * road's `side` — the grid the rule searches is not symmetric about the road — and on
+   * each of `parks`' rectangles (`along`, `lateral`, `length`, `depth`) a park.
    */
-  function plannedOwn(placed: readonly Placed[], side = 1): readonly FootprintPlan[] {
+  function ownCorridor(
+    placed: readonly Placed[],
+    side = 1,
+    parks: readonly (readonly [number, number, number, number])[] = [],
+  ): WorldCorridor {
     const street = untaggedStreetFixture();
     const at = (
       ring: readonly (readonly [number, number])[],
     ): readonly (readonly [number, number])[] =>
       ring.map(([a, n]) => [1_100 + a, side * n] as const);
-    return plannedStreet(
-      {},
-      {
-        ...street.corridor,
-        landUse: [
-          landBeside(
-            street.profile,
-            street.origin,
-            'landuse',
-            'residential',
-            950,
-            2_020,
-            -250,
-            250,
-          ),
-        ],
-        buildings: placed.map(([ring, buildingType, part]) => ({
-          ...buildingBeside(street.profile, street.origin, [at(ring)], null, part),
-          buildingType: buildingType ?? null,
+    return {
+      ...street.corridor,
+      landUse: [
+        landBeside(street.profile, street.origin, 'landuse', 'residential', 950, 2_020, -250, 250),
+        ...parks.map(([along, lateral, length, depth]) => ({
+          layer: 'landuse' as const,
+          kind: 'park',
+          rings: [
+            ringBeside(
+              street.profile,
+              street.origin,
+              at(rectangleBeside(along, lateral, length, depth)),
+            ),
+          ],
         })),
-      },
-    );
+      ],
+      buildings: placed.map(([ring, buildingType, part]) => ({
+        ...buildingBeside(street.profile, street.origin, [at(ring)], null, part),
+        buildingType: buildingType ?? null,
+      })),
+    };
+  }
+
+  /** {@link ownCorridor}, planned: one plan a footprint, every footprint kept. */
+  function plannedOwn(placed: readonly Placed[], side = 1): readonly FootprintPlan[] {
+    return plannedStreet({}, ownCorridor(placed, side));
   }
 
   const FRONT = rectangleBeside(0, 22, 12, 9);
@@ -514,6 +523,40 @@ describe('#2023: the neighbours the rule reads', () => {
     expect(tower[1]?.family).toBeUndefined();
     expect(tower[1]?.inferred).toBe(false);
     expect(windowFaces(tower[1] as FootprintPlan)).toBeGreaterThan(0);
+  });
+
+  it('counts only a house the planner keeps as the one a garage stands behind (owner, 2026-11-03)', () => {
+    const street = untaggedStreetFixture();
+    // The planned footprints, in the corridor's order, and the corridor's verdicts.
+    const planned = (corridor: WorldCorridor) => {
+      const land = landClassMask(corridor);
+      return footprintPlans(
+        corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        urbanClassMap(corridor, land, street.profile),
+      );
+    };
+    // A park over the house in front: the planner drops the house, and the garage-sized
+    // footprint behind it, whose only house that was, stays untagged.
+    const beside = rectangleBeside(20, 22, 12, 9);
+    for (const side of [1, -1]) {
+      const dropped = planned(ownCorridor([[GARAGE], [FRONT]], side, [[0, 22, 8, 6]]));
+      expect(dropped.verdicts['on-excluded-land']).toBe(1);
+      expect(dropped.plans).toHaveLength(1);
+      expect(dropped.plans[0]?.family).toBeUndefined();
+      expect(dropped.plans[0]?.inferred).toBe(false);
+      expect(garageDoorVertices(dropped.plans[0] as FootprintPlan)).toBe(0);
+      // A kept house beside it, farther from the garage than the dropped one: that one counts.
+      const kept = planned(ownCorridor([[GARAGE], [FRONT], [beside]], side, [[0, 22, 8, 6]]));
+      expect(kept.verdicts['on-excluded-land']).toBe(1);
+      expect(kept.plans[0]?.family).toBe('garage');
+      expect(kept.plans[0]?.inferred).toBe(true);
+      // Control: with no park the house is kept and the same footprint is a garage.
+      expect(planned(ownCorridor([[GARAGE], [FRONT]], side)).plans[0]?.family).toBe('garage');
+    }
   });
 
   it('counts no part as the house a garage stands behind', () => {

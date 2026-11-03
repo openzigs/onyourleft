@@ -266,7 +266,9 @@
  * does — and **never over a mapped one**: a footprint of 12 to 20 m² is a
  * shed, and one of 20 to 75 m², roughly square and rectangular, with a
  * house-sized footprint within 40 m that stands nearer the street, is a
- * garage. The street is the nearest ground one that is neither a service road
+ * garage. That house must be one the planner keeps and draws (the owner's
+ * ruling of 2026-11-03): one it drops is no neighbour, so no garage stands
+ * alone in a field. The street is the nearest ground one that is neither a service road
  * nor a highway (spike 0033: the nearest road to a small footprint is mostly
  * its own drive). A mapped `roof:shape`, `building:levels` or height still
  * beats the inferred garage's roof and storey, as it beats a mapped one's.
@@ -1214,7 +1216,9 @@ export interface UntaggedCues {
   /**
    * The {@link setback} of the nearest house-sized footprint whose outline
    * comes within `metres` of this one's: untagged, or mapped as a home, of
-   * {@link HOUSE_SIZED_AREA}. `undefined` where there is none.
+   * {@link HOUSE_SIZED_AREA}, and kept by the planner — one it drops is not
+   * drawn, so it is no neighbour (the owner's ruling of 2026-11-03).
+   * `undefined` where there is none.
    */
   homeSetback(metres: number): number | undefined;
 }
@@ -2007,8 +2011,15 @@ class HomeNeighbours {
   /**
    * The setback of the house-sized footprint, not the `own`th, whose outline
    * comes nearest `ring`'s, if it comes within `metres`; else `undefined`.
+   * Only a footprint the planner `kept` counts (the owner's ruling of
+   * 2026-11-03), asked only of one that would be nearer than any so far.
    */
-  setbackNear(own: number, ring: Ring, metres: number): number | undefined {
+  setbackNear(
+    own: number,
+    ring: Ring,
+    metres: number,
+    kept: (index: number) => boolean,
+  ): number | undefined {
     let nearest: number | undefined;
     let least = metres * metres;
     const seen = new Set<number>();
@@ -2018,7 +2029,7 @@ class HomeNeighbours {
         seen.add(index);
         const other = this.#rings.get(index) as Ring;
         const gap = ringToRingSquared(ring, other);
-        if (gap <= least) {
+        if (gap <= least && kept(index)) {
           least = gap;
           nearest = index;
         }
@@ -2062,12 +2073,15 @@ function ringToRingSquared(a: Ring, b: Ring): number {
 class Untagged {
   readonly rules: InferenceRules;
   readonly #corridor: WorldCorridor;
+  readonly #kept: (index: number) => boolean;
   #homes: HomeNeighbours | undefined;
   #streets: StreetSetbacks | undefined;
 
-  constructor(corridor: WorldCorridor, rules: InferenceRules) {
+  /** `kept` says whether the planner keeps the corridor's `index`th footprint. */
+  constructor(corridor: WorldCorridor, rules: InferenceRules, kept: (index: number) => boolean) {
     this.#corridor = corridor;
     this.rules = rules;
+    this.#kept = kept;
   }
 
   /** The `own`th footprint's cues, its `outer` ring as mapped and its `area`. */
@@ -2084,7 +2098,7 @@ class Untagged {
       setback: () => streets().of(outer),
       homeSetback: (metres) => {
         this.#homes ??= new HomeNeighbours(this.#corridor.buildings, streets());
-        return this.#homes.setbackNear(own, outer, metres);
+        return this.#homes.setbackNear(own, outer, metres, this.#kept);
       },
     };
   }
@@ -4887,9 +4901,35 @@ export function footprintPlans(
   const measured: (Measured | undefined)[] = [];
   // #1791: each footprint's mapped building type, unless the lever is off.
   const typed = options.buildingTypes ?? true;
-  // #2023: and what an untagged one is inferred to be, while the type is read.
+  // #2023: and what an untagged one is inferred to be, while the type is read. Only a house
+  // the planner keeps is a garage's neighbour (owner, 2026-11-03), so whether a footprint is
+  // kept is measured the first time a garage asks — a verdict never depends on the type.
+  const keeps = new Map<number, boolean>();
+  const kept = (index: number): boolean => {
+    let keep = keeps.get(index);
+    if (keep === undefined) {
+      const building = corridor.buildings[index] as BuildingFeature;
+      keep =
+        typeof measureFootprint(
+          building,
+          corridor,
+          land,
+          urban,
+          profile,
+          origin,
+          seed,
+          maxVertices,
+          tagged,
+          mapped,
+          false,
+          typed,
+        ) !== 'string';
+      keeps.set(index, keep);
+    }
+    return keep;
+  };
   const untagged = typed
-    ? new Untagged(corridor, { outbuildings: options.inferredOutbuildings ?? true })
+    ? new Untagged(corridor, { outbuildings: options.inferredOutbuildings ?? true }, kept)
     : undefined;
   for (const [own, building] of corridor.buildings.entries()) {
     const each = measureFootprint(
@@ -4907,6 +4947,7 @@ export function footprintPlans(
       typed,
       untagged === undefined ? undefined : { untagged, own },
     );
+    keeps.set(own, typeof each !== 'string');
     if (typeof each === 'string') {
       counts[each] += 1;
       measured.push(undefined);
@@ -5697,6 +5738,9 @@ function measureFootprint(
   const span =
     building.heightMetres === null ? null : Math.max(0, building.heightMetres - minHeight);
   const landClass = land.classAt(centroid.x, centroid.z);
+  // #2023: taken before the type, because inferring it may measure whether a neighbour is
+  // kept, and that measure reuses `nearSegments`.
+  const segments = nearSegments.slice();
   // #1791: what its mapped type draws it as, which overrides the land's guess. #2023: or,
   // untagged, what it is inferred to be — never over a mapped type.
   const mappedFamily = typed
@@ -5751,7 +5795,7 @@ function measureFootprint(
     centroid,
     drawn,
     road,
-    segments: nearSegments.slice(),
+    segments,
     urbanClass,
     lowest,
     area,
