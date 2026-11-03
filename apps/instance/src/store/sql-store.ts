@@ -137,6 +137,14 @@ export interface Room {
   readonly physicsVersion: number;
 }
 
+/** A lap race's settings, as its course holds them (#1910): `room/core/settings.ts`'s shape. */
+export interface LapRaceCourse {
+  readonly laps: number;
+  readonly items: boolean;
+  /** The room's own seed, 0 to 2³² − 1. Never sent to a client. */
+  readonly seed: number;
+}
+
 /** A room's course, as the room core needs it (#780): never geometry. */
 export interface RoomCourse {
   readonly roomId: string;
@@ -153,6 +161,12 @@ export interface RoomCourse {
    * a write is `true`, the default the ruling chose; always present on a read.
    */
   readonly drafting?: boolean;
+  /**
+   * A lap race's laps, items and the room's own seed (#1910, migration 0037):
+   * chosen when the room is made and fixed for it. Absent for every room that
+   * is not a lap race, on a write and on a read.
+   */
+  readonly lapRace?: LapRaceCourse;
   /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
   readonly raceStartedAt: number | null;
   /**
@@ -2534,10 +2548,25 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   countdownMs: row.countdown_ms,
   rejoinWindowMs: row.rejoin_window_ms,
   drafting: row.drafting === 1,
+  // All three or none (0037's CHECK). Read by type, so a database rolled back
+  // past 0037 — no such columns — reads as the room it was.
+  ...(typeof row.lap_laps === 'number' &&
+  typeof row.lap_items === 'number' &&
+  typeof row.lap_seed === 'number'
+    ? { lapRace: { laps: row.lap_laps, items: row.lap_items === 1, seed: row.lap_seed } }
+    : {}),
   raceStartedAt: row.race_started_at,
   ...(row.finishers === null ? {} : { finishers: row.finishers }),
   ...(row.race_finished_at === null ? {} : { raceFinishedAt: row.race_finished_at }),
 });
+
+/** A lap race's three columns: all three set, or all three NULL for any other room (0037). */
+const lapRaceColumns = (
+  lapRace: LapRaceCourse | undefined,
+): { lap_laps: number | null; lap_items: number | null; lap_seed: number | null } =>
+  lapRace === undefined
+    ? { lap_laps: null, lap_items: null, lap_seed: null }
+    : { lap_laps: lapRace.laps, lap_items: lapRace.items ? 1 : 0, lap_seed: lapRace.seed };
 
 const resultFrom = (row: Selectable<ResultTable>): Result => ({
   roomId: row.room_id,
@@ -3947,6 +3976,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           countdown_ms: course.countdownMs,
           rejoin_window_ms: course.rejoinWindowMs,
           drafting: course.drafting === false ? 0 : 1,
+          ...lapRaceColumns(course.lapRace),
         };
         await db
           .insertInto('room_course')
@@ -4029,6 +4059,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               countdown_ms: course.countdownMs,
               rejoin_window_ms: course.rejoinWindowMs,
               drafting: course.drafting === false ? 0 : 1,
+              ...lapRaceColumns(course.lapRace),
               race_started_at: null,
             })
             .execute();

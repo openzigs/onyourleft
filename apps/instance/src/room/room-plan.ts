@@ -57,7 +57,7 @@ export interface RoomPlan {
   /**
    * A lap race's laps, items and seed (#1909): the room core runs the lap race
    * from them, on either adapter. Absent for every other room. Read from the
-   * store by #1910; until then only a caller that builds a plan sets it.
+   * room's course (migration 0037, #1910) by {@link planFor}.
    */
   readonly lapRace?: LapRaceSettings;
 }
@@ -85,6 +85,8 @@ export function planFor(
     rejoinWindowMs: course.rejoinWindowMs,
     drafting: course.drafting !== false,
     startedBy,
+    // #1910: a lap race's laps, items and seed, as the room was made with them.
+    ...(course.lapRace === undefined ? {} : { lapRace: course.lapRace }),
   };
 }
 
