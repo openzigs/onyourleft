@@ -7,8 +7,8 @@
  * `split-roofs`, since #1782 `house-archetypes`, since #1785
  * `roof-variants`, since #1786 `dormer-variants`, since #1784
  * `archetype-porches`, since #1783 `commercial-archetypes`, since #1790
- * `mapped-roof-shape`, since #1791 `building-type` and since #2023
- * `inferred-outbuildings`. Its own
+ * `mapped-roof-shape`, since #1791 `building-type`, since #2021 `steeples`
+ * and since #2023 `inferred-outbuildings`. Its own
  * module so that a test reads the plans the page draws, and a lever parsed
  * but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -34,6 +34,7 @@ import {
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
+  steeplesWithLevers,
   urbanClassWithLevers,
   type Lever,
 } from './config';
@@ -70,8 +71,9 @@ export function plannedTown(
     // #1660: the L-, T-, U- and Z-shaped houses' split roofs, #1782: the houses'
     // archetypes, #1785: their roof variants, #1786: their dormers, #1784: their porches
     // and eaves, #1783: the commercial and multi-family archetypes, #1790: the mapped roof
-    // and storey tags, #1791: the mapped building type, and #2023: an untagged footprint's
-    // inferred garage or shed, unless their lever is off.
+    // and storey tags, #1791: the mapped building type, #2021: a place of worship's
+    // steeple, and #2023: an untagged footprint's inferred garage or shed, unless their
+    // lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
@@ -81,6 +83,7 @@ export function plannedTown(
       commercialArchetypes: commercialArchetypesWithLevers(leversOff),
       mappedRoofShape: mappedRoofShapeWithLevers(leversOff),
       buildingTypes: buildingTypesWithLevers(leversOff),
+      steeples: steeplesWithLevers(leversOff),
       inferredOutbuildings: inferredOutbuildingsWithLevers(leversOff),
     },
   );

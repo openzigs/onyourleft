@@ -31,6 +31,7 @@ import {
   surfacesWithLevers,
   treesWithLevers,
   splitRoofsWithLevers,
+  steeplesWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
@@ -440,6 +441,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(buildingTypesWithLevers(parseConfig('?levers=-building-type').leversOff)).toBe(false);
     expect(configQuery(parseConfig('?town=typed&levers=-building-type'))).toBe(
       `?levers=${encodeURIComponent('-building-type')}&town=typed`,
+    );
+  });
+
+  it('gives each mapped place of worship its steeple, as the product does, unless #2021’s lever takes it out', () => {
+    expect(LEVERS).toContain('steeples');
+    expect(steeplesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(steeplesWithLevers(LEVERS.filter((lever) => lever !== 'steeples'))).toBe(true);
+    expect(steeplesWithLevers(parseConfig('?levers=-steeples').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=typed&levers=-steeples'))).toBe(
+      `?levers=${encodeURIComponent('-steeples')}&town=typed`,
     );
   });
 
