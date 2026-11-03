@@ -16,8 +16,10 @@ import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-featur
 
 import type { BuildingFamily } from './building-types';
 import {
+  FACADE_DOOR,
   FACADE_GARAGE,
   FACADE_OFFSET,
+  FACADE_PAINT,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_SURFACES,
@@ -33,6 +35,7 @@ import {
 } from './footprint-buildings';
 import {
   buildingBeside,
+  landBeside,
   planFingerprint,
   rectangleBeside,
   ringBeside,
@@ -367,6 +370,16 @@ function garageDoorVertices(plan: FootprintPlan): number {
   return doors;
 }
 
+/** Every vertex of `role` whose facade `top` is `top`. */
+function facadeVertices(plan: FootprintPlan, role: 'wall' | 'door', top: number): number {
+  const floats = plan.triangles[role];
+  let found = 0;
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    if (floats[at + FACADE_OFFSET + 2] === top) found += 1;
+  }
+  return found;
+}
+
 describe('#2023: the rule, read back through `footprintPlans`', () => {
   const plans = plannedStreet();
 
@@ -573,6 +586,20 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
       expect(pole.porch).toBe(false);
       expect(pole.garage).toBe(false);
       expect(pole.triangles.chimney.length).toBe(0);
+      // A plain, painted door as an outbuilding's: the wreath is drawn on a door's face (#1626).
+      expect(pole.triangles.door.length).toBeGreaterThan(0);
+      expect(facadeVertices(pole, 'door', FACADE_DOOR)).toBe(0);
+      expect(facadeVertices(pole, 'door', FACADE_PAINT)).toBeGreaterThan(0);
+    }
+  });
+
+  it('lets a mapped flat roof beat the pole building’s 20° gable and its grey sheet', () => {
+    const tagged = plannedStreet({}, withSubjects(['pole-building'], { roofShape: 'flat' }));
+    for (const pole of subjectsOf(tagged, 'pole-building')) {
+      // Still a pole building, but with the mapped roof, and not the belt's `slate`.
+      expect(pole.family).toBe('pole-building');
+      expect(pole.roof).toBe('flat');
+      expect(pole.surfaces.roof).not.toBe('slate');
     }
   });
 
@@ -743,5 +770,156 @@ describe('#2023: the lever', () => {
   it('infers nothing while the type is not read (`buildingTypes: false`)', () => {
     const plans = plannedStreet({ buildingTypes: false });
     expect(plans.some((plan) => plan.inferred)).toBe(false);
+  });
+});
+
+describe('#2023: the neighbours the rule reads', () => {
+  /** A footprint `along` the road, `lateral` out, mapped as `buildingType` (or untagged), a part if `part` is given. */
+  type Placed = readonly [
+    footprint: readonly (readonly [number, number])[],
+    buildingType?: BuildingFeature['buildingType'],
+    part?: { readonly minHeightMetres: number },
+  ];
+
+  /**
+   * The fixture's road and land, widened to 250 m, with only `placed` standing on it, on the
+   * road's `side` — the grid the rule searches is not symmetric about the road — and on
+   * each of `parks`' rectangles (`along`, `lateral`, `length`, `depth`) a park.
+   */
+  function ownCorridor(
+    placed: readonly Placed[],
+    side = 1,
+    parks: readonly (readonly [number, number, number, number])[] = [],
+  ): WorldCorridor {
+    const street = untaggedStreetFixture();
+    const at = (
+      ring: readonly (readonly [number, number])[],
+    ): readonly (readonly [number, number])[] =>
+      ring.map(([a, n]) => [1_100 + a, side * n] as const);
+    return {
+      ...street.corridor,
+      landUse: [
+        landBeside(street.profile, street.origin, 'landuse', 'residential', 950, 2_020, -250, 250),
+        ...parks.map(([along, lateral, length, depth]) => ({
+          layer: 'landuse' as const,
+          kind: 'park',
+          rings: [
+            ringBeside(
+              street.profile,
+              street.origin,
+              at(rectangleBeside(along, lateral, length, depth)),
+            ),
+          ],
+        })),
+      ],
+      buildings: placed.map(([ring, buildingType, part]) => ({
+        ...buildingBeside(street.profile, street.origin, [at(ring)], null, part),
+        buildingType: buildingType ?? null,
+      })),
+    };
+  }
+
+  /** {@link ownCorridor}, planned: one plan a footprint, every footprint kept. */
+  function plannedOwn(placed: readonly Placed[], side = 1): readonly FootprintPlan[] {
+    return plannedStreet({}, ownCorridor(placed, side));
+  }
+
+  const FRONT = rectangleBeside(0, 22, 12, 9);
+  const GARAGE = rectangleBeside(0, 40, 6, 6);
+
+  it('infers a garage behind a house that is mapped as one', () => {
+    expect(plannedOwn([[GARAGE], [FRONT, 'house']])[0]?.family).toBe('garage');
+    // Control: behind a footprint mapped as a shop, none.
+    expect(plannedOwn([[GARAGE], [FRONT, 'retail']])[0]?.family).toBeUndefined();
+  });
+
+  it('measures the house nearest the footprint, not any within 40 m', () => {
+    // The front house is nearer the garage and nearer the street than it; the back one is
+    // farther from the garage, but farther from the street than the garage is.
+    const back = rectangleBeside(0, 62, 12, 9);
+    for (const side of [1, -1]) {
+      for (const order of [
+        [[GARAGE], [FRONT], [back]],
+        [[GARAGE], [back], [FRONT]],
+      ] as const) {
+        expect(plannedOwn(order, side)[0]?.family).toBe('garage');
+      }
+    }
+    // Control: without the front house the back one is the garage's house, and it is set back farther.
+    expect(plannedOwn([[GARAGE], [back]])[0]?.family).toBeUndefined();
+  });
+
+  it('reads no street farther than 150 m: a footprint beyond it stands level with a house beyond it', () => {
+    for (const side of [1, -1]) {
+      expect(
+        plannedOwn([[rectangleBeside(0, 183, 6, 6)], [rectangleBeside(0, 165, 12, 9)]], side)[0]
+          ?.family,
+      ).toBeUndefined();
+      // Control: a house 140 m out, the garage 160 m: set back.
+      expect(
+        plannedOwn([[rectangleBeside(0, 163, 6, 6)], [rectangleBeside(0, 145, 12, 9)]], side)[0]
+          ?.family,
+      ).toBe('garage');
+    }
+  });
+
+  it('infers nothing of a part: it stands inside its building', () => {
+    // A 5 m square at ground level inside an untagged house, set back from its front like a garage.
+    const house = rectangleBeside(0, 22, 14, 12);
+    const inside = rectangleBeside(0, 24, 5, 5);
+    const ground = plannedOwn([[house], [inside, undefined, { minHeightMetres: 0 }]]);
+    expect(ground.map((plan) => plan.family)).toStrictEqual([undefined, undefined]);
+    expect(ground.map((plan) => plan.inferred)).toStrictEqual([false, false]);
+    expect(garageDoorVertices(ground[1] as FootprintPlan)).toBe(0);
+    // A raised 4 m square is no shed, and keeps its windows as the lever off draws it.
+    const tower = plannedOwn([
+      [house],
+      [rectangleBeside(0, 24, 4, 4), undefined, { minHeightMetres: 6 }],
+    ]);
+    expect(tower[1]?.family).toBeUndefined();
+    expect(tower[1]?.inferred).toBe(false);
+    expect(windowFaces(tower[1] as FootprintPlan)).toBeGreaterThan(0);
+  });
+
+  it('counts only a house the planner keeps as the one a garage stands behind (owner, 2026-11-03)', () => {
+    const street = untaggedStreetFixture();
+    // The planned footprints, in the corridor's order, and the corridor's verdicts.
+    const planned = (corridor: WorldCorridor) => {
+      const land = landClassMask(corridor);
+      return footprintPlans(
+        corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        urbanClassMap(corridor, land, street.profile),
+      );
+    };
+    // A park over the house in front: the planner drops the house, and the garage-sized
+    // footprint behind it, whose only house that was, stays untagged.
+    const beside = rectangleBeside(20, 22, 12, 9);
+    for (const side of [1, -1]) {
+      const dropped = planned(ownCorridor([[GARAGE], [FRONT]], side, [[0, 22, 8, 6]]));
+      expect(dropped.verdicts['on-excluded-land']).toBe(1);
+      expect(dropped.plans).toHaveLength(1);
+      expect(dropped.plans[0]?.family).toBeUndefined();
+      expect(dropped.plans[0]?.inferred).toBe(false);
+      expect(garageDoorVertices(dropped.plans[0] as FootprintPlan)).toBe(0);
+      // A kept house beside it, farther from the garage than the dropped one: that one counts.
+      const kept = planned(ownCorridor([[GARAGE], [FRONT], [beside]], side, [[0, 22, 8, 6]]));
+      expect(kept.verdicts['on-excluded-land']).toBe(1);
+      expect(kept.plans[0]?.family).toBe('garage');
+      expect(kept.plans[0]?.inferred).toBe(true);
+      // Control: with no park the house is kept and the same footprint is a garage.
+      expect(planned(ownCorridor([[GARAGE], [FRONT]], side)).plans[0]?.family).toBe('garage');
+    }
+  });
+
+  it('counts no part as the house a garage stands behind', () => {
+    // A house-sized part in front of the garage, and no building: no garage.
+    const plans = plannedOwn([[GARAGE], [FRONT, undefined, { minHeightMetres: 0 }]]);
+    expect(plans[0]?.family).toBeUndefined();
+    // Control: the same footprint as a building is the garage's house.
+    expect(plannedOwn([[GARAGE], [FRONT]])[0]?.family).toBe('garage');
   });
 });
