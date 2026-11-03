@@ -386,7 +386,12 @@ export function selectMappedBuildings(
     const plan = plans[index] as FootprintPlan;
     const apart = distances[index] as number;
     // #2094: a landmark taken ahead ranks no rival in, so it brings no hedge
-    // nearer than a house the walk has not reached yet.
+    // nearer than a house the walk has not reached yet. Two costs it does
+    // accept, by design (ADR 0054's 2026-11-03 amendment): its triangles come
+    // out of the shared budget before any rival is ranked, so a binding budget
+    // can drop a structure nearer the rider than the church; and it opens its
+    // wall and roof slots before the nearest houses, so the slot check below
+    // can pass over a near house that would need a 7th surface.
     if (at >= ahead && !rivalsWithin(apart)) {
       stopped = true;
       break;

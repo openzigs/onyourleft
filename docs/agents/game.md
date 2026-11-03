@@ -1285,8 +1285,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         landmarks in reach (a place of worship, a school, a
                         town hall: `MAPPED_LANDMARKS_AHEAD`, inside the same
                         count, budget and calls; `footprint-census-testing.ts`
-                        counts why each kind is not drawn) — ≤ 36 (ADR 0054 D-5.6's cap, the owner's
-                        ruling), ranked by distance with the frame's procedural
+                        counts why each kind is not drawn) — ≤ 36 (ADR 0054
+                        D-5.6's cap, the owner's ruling), ranked by distance
+                        with the frame's procedural
                         structures inside the 23 040-triangle term (#1586), the far
                         level past 150 m, in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
