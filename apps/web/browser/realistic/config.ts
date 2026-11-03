@@ -21,9 +21,9 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1786 the archetypes' dormers, for both, since #1784 the archetypes' porches and eaves, for both, since #1783 the commercial and multi-family archetypes, for both, since #1790 the mapped roof shapes, roof directions and storeys, for both, since #1791 the mapped building type, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, since #1626 the mapped doors' winter wreath, for a cost pair, since #1662 the rooms behind mapped glass, for both, since #1665 the village lots' weathering and rooms, for both, and since #545 the trees' fade near the camera, for a by-eye pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-dormer-variants`, `-archetype-porches`, `-commercial-archetypes`, `-mapped-roof-shape`, `-building-type`, `-weathering`, `-facade-trims`, `-facade-wreath`, `-window-rooms`, `-lot-realism`, `-near-tree-fade`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1786 the archetypes' dormers, for both, since #1784 the archetypes' porches and eaves, for both, since #1783 the commercial and multi-family archetypes, for both, since #1790 the mapped roof shapes, roof directions and storeys, for both, since #1791 the mapped building type, for both, since #2021 the mapped places of worship's steeples, for both, since #2023 the untagged footprints' inferred garages and sheds, for both, since #2024 their inferred barns and pole buildings, for both, since #2026 their inferred shops, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, since #1626 the mapped doors' winter wreath, for a cost pair, since #1662 the rooms behind mapped glass, for both, since #1665 the village lots' weathering and rooms, for both, and since #545 the trees' fade near the camera, for a by-eye pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-dormer-variants`, `-archetype-porches`, `-commercial-archetypes`, `-mapped-roof-shape`, `-building-type`, `-steeples`, `-inferred-outbuildings`, `-inferred-barns`, `-inferred-commercial`, `-weathering`, `-facade-trims`, `-facade-wreath`, `-window-rooms`, `-lot-realism`, `-near-tree-fade`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
- * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityStreetscapeFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class`; since #1782 `houses`, `footprint-fixtures-testing.ts` §`houseStreetFixture`'s street of each US house archetype in turn and its rural farmhouses, from 900 m to 2 100 m, whose before is `levers=-house-archetypes`; since #1783 `commercial`, `footprint-fixtures-testing.ts` §`commercialStreetFixture`'s main street of brick blocks and its strip of stores and garden apartments, from 900 m to 2 700 m, whose before is `levers=-commercial-archetypes`; since #1790 `roofs`, `footprint-fixtures-testing.ts` §`mappedRoofStreetFixture`'s street of houses each tagged with a `roof:shape`, a roof direction or `building:levels`, from 1 000 m to 1 500 m, whose before is `levers=-mapped-roof-shape`; since #1791 `typed`, `footprint-fixtures-testing.ts` §`typedStreetFixture`'s street of a footprint for each mapped building type — a house, a bungalow, a terrace, apartments, garages, a shed, a barn, a shop, a warehouse, a church and a school — from 900 m to 1 900 m, whose before is `levers=-building-type` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`, `houses`, `commercial`, `roofs`, `typed`; default none |
+ * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityStreetscapeFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class`; since #1782 `houses`, `footprint-fixtures-testing.ts` §`houseStreetFixture`'s street of each US house archetype in turn and its rural farmhouses, from 900 m to 2 100 m, whose before is `levers=-house-archetypes`; since #1783 `commercial`, `footprint-fixtures-testing.ts` §`commercialStreetFixture`'s main street of brick blocks and its strip of stores and garden apartments, from 900 m to 2 700 m, whose before is `levers=-commercial-archetypes`; since #1790 `roofs`, `footprint-fixtures-testing.ts` §`mappedRoofStreetFixture`'s street of houses each tagged with a `roof:shape`, a roof direction or `building:levels`, from 1 000 m to 1 500 m, whose before is `levers=-mapped-roof-shape`; since #1791 `typed`, `footprint-fixtures-testing.ts` §`typedStreetFixture`'s street of a footprint for each mapped building type — a house, a bungalow, a terrace, apartments, garages, a shed, a barn, a shop, a warehouse, a church and a school — from 900 m to 1 900 m, whose before is `levers=-building-type`; since #2023 `untagged`, `footprint-fixtures-testing.ts` §`untaggedStreetFixture`'s street of untagged footprints behind and beside houses — garages and sheds the rule infers, and the footprints it must not — from 1 000 m to 2 100 m, whose before is `levers=-inferred-outbuildings`, and since #2024 its rural stretch of barns, a pole building and the footprints that rule must not call, from 2 150 m to 2 950 m, whose before is `levers=-inferred-barns`, and since #2026 its main street of big untagged footprints, from 380 m to 720 m, whose before is `levers=-inferred-commercial` (the page rides from 900 m: hold `at` on them) | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`, `houses`, `commercial`, `roofs`, `typed`, `untagged`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
  * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`: since #1625 Halloween's pumpkins, and nothing yet for winter lights). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
@@ -219,6 +219,8 @@ export type Layer = (typeof LAYERS)[number];
  *   has a class; on `route.ts`' road the two are the same picture. The
  *   product always builds the class. Since #1637 off also takes a city
  *   centre's street and terraced blocks with it — `town=city-street`'s before.
+ *   Since #2024 off also takes every inferred barn and pole building with it:
+ *   their rule needs a `rural` stretch, and `NO_URBAN_CLASS` reads `unknown`.
  *
  * - `split-roofs` — #1660: L-, T-, U- and Z-shaped mapped houses pitched over
  *   their 2–3 rectangles (`rectilinear-roofs.ts`), and no roof over a notch.
@@ -287,6 +289,46 @@ export type Layer = (typeof LAYERS)[number];
  *   cost pair (plan-time only: no call, no byte, no shader term); pair it with
  *   `town=typed`, which has a footprint of every row. The product always
  *   reads the type.
+ * - `steeples` — #2021: a mapped place of worship (the `worship` landmark, or
+ *   a church, a chapel or a cathedral) given a square tower and a pyramidal
+ *   spire at the end of its long axis away from its front door
+ *   (`footprint-buildings.ts` §`STEEPLE`), 12 triangles in its walls and roof.
+ *   Off, every one is #1791's plain civic block, as before, byte for byte.
+ *   Read at load, as `building-type` is, and only while it is on. The owner's
+ *   BY-EYE pair and the tablet's cost pair (plan-time only: no call, no byte,
+ *   no shader term); pair it with `town=typed`, whose church has one. The
+ *   product always builds them.
+ * - `inferred-outbuildings` — #2023: an untagged footprint inferred a garage
+ *   (20 to 75 m², roughly square, a house within 40 m and set back behind it
+ *   from the street) or a shed (12 to 20 m²), spike 0033's thresholds, and
+ *   drawn as #1791's (`footprint-buildings.ts` §`footprintKindOf`). Off, every
+ *   untagged footprint is planned as before, byte for byte; a mapped type is
+ *   never inferred over either way. Read at load, as `building-type` is, and
+ *   only while it is on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=untagged`, or a ride's corridor. The product always infers them.
+ * - `inferred-commercial` — #2026: an untagged footprint of 1 000 m² or more
+ *   on a `village` or `town` stretch, within 50 m of a primary, secondary or
+ *   tertiary street, inferred commercial and drawn as a mapped shop
+ *   (`footprint-buildings.ts` §`footprintKindOf`). Off, every such footprint
+ *   is planned as before, byte for byte; a mapped type is never inferred over
+ *   either way. Read at load, as `inferred-outbuildings` is, and only while
+ *   `building-type` is on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=untagged` held at 400 m to 700 m, or a ride's corridor. The product
+ *   always infers them.
+ * - `inferred-barns` — #2024: an untagged footprint on a `rural` stretch
+ *   inferred a barn (100 m² or more, rectangular, at least 40 m back from the
+ *   street, a house within 80 m standing nearer it) — a gambrel or a steep
+ *   gable on planks, by a seeded share — or over 250 m² a metal pole building
+ *   (`footprint-buildings.ts` §`footprintKindOf`). Off, every such footprint
+ *   is planned as before, byte for byte; a mapped type is never inferred over
+ *   either way. Read at load, as `inferred-outbuildings` is, and only while
+ *   `building-type` is on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=untagged` past 2 150 m, or a ride's corridor. The product always
+ *   infers them. Needs `urban-class` on: a barn stands on a `rural` stretch, so
+ *   with `-urban-class` (every stretch `unknown`) none is inferred either.
  * - `mapped-roof-shape` — #1790: each mapped footprint's `roof:shape`,
  *   `roof:orientation`, `roof:direction`, `building:levels` and `roof:levels`,
  *   where #1789 carries them (`footprint-buildings.ts` §`MAPPED_ROOFS`,
@@ -377,6 +419,9 @@ export const LEVERS = [
   'ground-clutter',
   'hedge-breaks',
   'house-archetypes',
+  'inferred-barns',
+  'inferred-commercial',
+  'inferred-outbuildings',
   'land-boundaries',
   'land-planting',
   'lot-realism',
@@ -390,6 +435,7 @@ export const LEVERS = [
   'settlement-clearing',
   'small-stones',
   'split-roofs',
+  'steeples',
   'surface-bounds',
   'texture-bias',
   'urban-class',
@@ -435,6 +481,7 @@ export interface RealisticPageConfig {
     | 'commercial'
     | 'roofs'
     | 'typed'
+    | 'untagged'
     | undefined;
   /**
    * #1559: `route.ts` §`villageRoute` instead of its default road, for
@@ -759,6 +806,42 @@ export function buildingTypesWithLevers(leversOff: readonly Lever[]): boolean {
 }
 
 /**
+ * Whether this run gives the town's mapped places of worship their steeples —
+ * #2021: the product always does; `-steeples` plans every one as #1791's plain
+ * civic block. Read at load, as `building-type` is.
+ */
+export function steeplesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('steeples');
+}
+
+/**
+ * Whether this run infers an untagged rural footprint a barn or a pole
+ * building — #2024: the product always does; `-inferred-barns` plans every one
+ * as before. Read at load, as `inferred-outbuildings` is.
+ */
+export function inferredBarnsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('inferred-barns');
+}
+
+/**
+ * Whether this run infers a big untagged footprint on a main street
+ * commercial — #2026: the product always does; `-inferred-commercial` plans
+ * every one as before. Read at load, as `inferred-outbuildings` is.
+ */
+export function inferredCommercialWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('inferred-commercial');
+}
+
+/**
+ * Whether this run infers an untagged footprint a garage or a shed — #2023:
+ * the product always does; `-inferred-outbuildings` plans every untagged
+ * footprint as before. Read at load, as `building-type` is.
+ */
+export function inferredOutbuildingsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('inferred-outbuildings');
+}
+
+/**
  * Whether this run reads the town's mapped roof and storey tags — #1790: the
  * product always does; `-mapped-roof-shape` ignores every one, every plan as
  * before. Read at load, as `roof-variants` is.
@@ -818,6 +901,7 @@ export function parseConfig(search: string): RealisticPageConfig {
             'commercial',
             'roofs',
             'typed',
+            'untagged',
           ] as const,
           'mixed',
         )

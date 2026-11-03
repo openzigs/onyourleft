@@ -1033,7 +1033,16 @@ describe('a door canopy keeps the road’s clearance — #1581', () => {
       paths: [],
       streets: [],
     };
-    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    // #2023: a 2.4 m by 8 m footprint is under 20 m², which is inferred a shed; these are houses.
+    const { plans } = footprintPlans(
+      corridor,
+      landClassMask(corridor),
+      profile,
+      origin,
+      undefined,
+      undefined,
+      { inferredOutbuildings: false },
+    );
     expect(plans).toHaveLength(buildings.length);
     // A canopy is trim standing out over the door: anything nearer the road
     // than the wall by more than the eaves and, since #1588, their gutter.
