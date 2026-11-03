@@ -20,7 +20,7 @@ import type { SteeringControllerLink } from '../ride/steering-controller-port';
 import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { capacitorShellSupport } from '../support/shell-support';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
 import { DevicesView } from './DevicesView';
 
@@ -153,5 +153,34 @@ describe('the steering controller block', () => {
     expect(tabbableElements(document).map((each) => each.textContent?.trim())).toContain(
       PAIR_CONTROLLER,
     );
+  });
+});
+
+describe('the steering controller block, focus', () => {
+  const buttonNamed = (name: string): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll('button')].find((each) => each.textContent?.trim() === name);
+
+  it('keeps keyboard focus on the button that replaces the one pressed, both ways', async () => {
+    mounted = await mount(
+      <main>
+        <h1>Devices</h1>
+        <DevicesView
+          capabilities={CAPABLE}
+          controller={stubRideController(idleSnapshot()).controller}
+          steering={await inState('none')}
+        />
+      </main>,
+    );
+    await settle();
+    const pair = buttonNamed(PAIR_CONTROLLER);
+    expect(pair).toBeDefined();
+    await activateWithKeyboard(pair as HTMLButtonElement);
+    await settle();
+    const forget = buttonNamed('Forget Ctrl 1');
+    expect(forget).toBeDefined();
+    expect(document.activeElement).toBe(forget);
+    await activateWithKeyboard(forget as HTMLButtonElement);
+    await settle();
+    expect(document.activeElement).toBe(buttonNamed(PAIR_CONTROLLER));
   });
 });

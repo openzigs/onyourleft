@@ -14,7 +14,7 @@
  * needs no ADR 0009 R3 "works with" line.
  */
 
-import { useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
@@ -44,15 +44,29 @@ export const CONTROLLER_FAILURE_WORDS: Readonly<Record<SteeringPairingFailure, s
   refused: 'Pairing the controller was refused, so nothing was paired.',
 };
 
+/** Stable, so React does not unsubscribe and resubscribe on every render. */
+function subscribeTo(controller: SteeringController): (listener: () => void) => () => void {
+  return (listener) => controller.subscribe(listener);
+}
+
 export function ControllerPairing({
   controller,
 }: {
   readonly controller: SteeringController;
 }): JSX.Element {
-  const state = useSyncExternalStore(
-    (listener) => controller.subscribe(listener),
-    () => controller.state,
-  );
+  const subscribe = useMemo(() => subscribeTo(controller), [controller]);
+  const state = useSyncExternalStore(subscribe, () => controller.state);
+  const button = useRef<HTMLButtonElement>(null);
+  const wasConnected = useRef(state.kind === 'connected');
+  const connected = state.kind === 'connected';
+  // Pair and Forget are different buttons, so the one the rider pressed is
+  // unmounted and focus falls to <body>. Hand it to the button that replaced
+  // it, only when it fell (never taking it from somewhere the rider moved to).
+  useEffect(() => {
+    if (wasConnected.current === connected) return;
+    wasConnected.current = connected;
+    if (document.activeElement === document.body) button.current?.focus();
+  }, [connected]);
   return (
     <>
       <h2>{CONTROLLER_HEADING}</h2>
@@ -83,6 +97,7 @@ export function ControllerPairing({
                     {state.name}: {connectionWords('connected')}
                   </p>
                   <Button
+                    ref={button}
                     variant="secondary"
                     onClick={() => {
                       controller.forget();
@@ -98,6 +113,7 @@ export function ControllerPairing({
                 {/* Kept while pairing, so focus is not lost under the rider's
                     press; a second press while pairing does nothing. */}
                 <Button
+                  ref={button}
                   variant="secondary"
                   onClick={() => {
                     void controller.pair();

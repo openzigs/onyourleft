@@ -155,6 +155,41 @@ describe('the steering controller, by state', () => {
   });
 });
 
+describe('forgetting while a pairing is still running', () => {
+  it('ends with nothing listed and lets the late link go', async () => {
+    const hand = handLink();
+    let finish: (link: SteeringControllerLink) => void = () => undefined;
+    const steering = createSteeringController({
+      requestAndConnect: () =>
+        new Promise<SteeringControllerLink>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const pairing = steering.pair();
+    steering.forget();
+    finish(hand.link);
+    await pairing;
+    expect(steering.state).toEqual({ kind: 'none', dropped: false });
+    expect(hand.disconnects).toBe(1);
+    expect(hand.listening).toBe(0);
+  });
+
+  it('does not show the failure of a pairing that was forgotten', async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const steering = createSteeringController({
+      requestAndConnect: () =>
+        new Promise<SteeringControllerLink>((_, reject) => {
+          fail = reject;
+        }),
+    });
+    const pairing = steering.pair();
+    steering.forget();
+    fail(new SensorError('not-connected', 'x'));
+    await pairing;
+    expect(steering.state).toEqual({ kind: 'none', dropped: false });
+  });
+});
+
 describe('on one radio with a trainer and a strap', () => {
   async function rig() {
     const rigged = openSimulatedController({
