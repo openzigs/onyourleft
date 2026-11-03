@@ -1235,6 +1235,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         footprint, 12 triangles
                         in `wall` and `roof`, left off before holes over a
                         cap (`STEEPLE`, `-steeples`, `town=typed`);
+                        since #2023 an untagged footprint inferred a shed
+                        (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
+                        rectangularity ≥ 0.9, a house-sized footprint within
+                        40 m, one the planner keeps, standing nearer the
+                        nearest non-service street)
+                        by `footprintKindOf`, spike 0033's thresholds, and
+                        drawn as #1791's; a mapped type is never inferred
+                        over, and a mapped roof or storey count beats the
+                        inferred one's; the plan says so (`family`,
+                        `inferred`); only while the type is read
+                        (`-inferred-outbuildings`, `town=untagged`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

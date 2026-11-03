@@ -506,7 +506,8 @@ describe('#1791: untyped changes nothing, and the lever puts the type out', () =
 
   it('plans the fully typed street with `buildingTypes: false` as the same street untyped', () => {
     const off = plannedStreet({ buildingTypes: false });
-    const untyped = plannedStreet({}, untypedStreet());
+    // #2023: untyped, the shed's footprint is inferred a shed; that rule is #2023's lever's.
+    const untyped = plannedStreet({ inferredOutbuildings: false }, untypedStreet());
     expect(planFingerprint(off)).toBe(planFingerprint(untyped));
     // Not vacuous: with the types, the street plans otherwise.
     expect(planFingerprint(plannedStreet())).not.toBe(planFingerprint(untyped));
