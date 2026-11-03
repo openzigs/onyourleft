@@ -415,13 +415,13 @@ describe('a race’s standings, as the room sends them — #1347', () => {
     expect(s.standings()).toBeUndefined();
   });
 
-  it('says hello as version 2, the version that carries them', async () => {
+  it('says hello as version 3, the version that carries them and the lap race (#1908)', async () => {
     const room = new ScriptedRoom();
     const clock = new ManualClock();
     session(room, clock);
     await flush();
     room.accept();
-    expect(PROTOCOL_VERSION).toBe(2);
-    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 2 });
+    expect(PROTOCOL_VERSION).toBe(3);
+    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 3 });
   });
 });

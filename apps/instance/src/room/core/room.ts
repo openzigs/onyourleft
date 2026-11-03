@@ -667,6 +667,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       if (seat === undefined) {
         return [{ kind: 'close', connection }];
       }
+      if (message.type !== 'report') {
+        // A lap race's inputs, version 3 (#1908). No room is a lap race until
+        // #1909 makes the room authoritative for one, so here they change
+        // nothing — and close nobody, since a client on this build may send them.
+        return [];
+      }
       if (seat.state === 'connected') {
         report(seat, message, nowMs);
       }
