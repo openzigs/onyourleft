@@ -43,7 +43,7 @@ import {
   type CountrysideLever,
   type LandClassMask,
 } from './land-class';
-import { horizonRelief, terrainCorridor } from './landform';
+import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
 import { easedPlace, type EasedPlace } from './bend-easing';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RaceHitLook, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -422,6 +422,18 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     junctions,
   );
   const camera = cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral);
+  // #458. Built from the corridor just built, so the ground's innermost
+  // column is the road's outermost one — `landform.ts` says why that is the
+  // whole of the no-crack guarantee. Every band, whatever the rung: the
+  // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
+  // the rung moves no vertex and the scenery stands on the same ground.
+  const ground = terrainCorridor(
+    input.profile,
+    input.origin,
+    corridor,
+    seed,
+    input.landClass ?? NO_LAND_CLASS,
+  );
   return {
     // #1549: the ride's mapped buildings, and where the rider is among them.
     ...(input.mappedBuildings === undefined
@@ -437,7 +449,10 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
-    scatter: items,
+    // #2099: and only where this frame's ground is drawn. The scenery is
+    // placed from the route and the ground's reach is the frame's, which a
+    // sharp bend tapers in before and after it. @see standingOnGround
+    scatter: standingOnGround(items, ground),
     // #966: the billboards in view, out of the structures' budget.
     billboards,
     sideRoads,
@@ -446,19 +461,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
     people: people(input, streets, camera, seed, sideRoads),
-    // #458. Built from the corridor just built, so the ground's innermost
-    // column is the road's outermost one — `landform.ts` says why that is the
-    // whole of the no-crack guarantee. Every band, whatever the rung: the
-    // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
-    // the rung moves no vertex and the scenery stands on the same ground.
     terrain: {
-      mesh: terrainCorridor(
-        input.profile,
-        input.origin,
-        corridor,
-        seed,
-        input.landClass ?? NO_LAND_CLASS,
-      ),
+      mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
     },
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)
