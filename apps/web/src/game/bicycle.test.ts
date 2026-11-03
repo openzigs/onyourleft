@@ -57,6 +57,12 @@ import {
   RIDER_PALETTE,
   SIMULATED_DEVELOPMENT_METRES,
   simulatedCrankAngle,
+  emptyRiderStance,
+  HEAD_NOD_RADIANS,
+  stanceOf,
+  STANDING_BICYCLE_ROCK_RADIANS,
+  turningCadence,
+  type DrawnPosture,
   type LimbBone,
   type RiderPart,
 } from './bicycle';
@@ -1208,5 +1214,133 @@ describe('a rider who moves like a rider — #625', () => {
       // …and the cranks move on exactly those.
       expect(advanceCrank(1, reading, 0.1) !== 1, JSON.stringify(reading)).toBe(turns);
     }
+  });
+});
+
+describe('the rider in each position on the bicycle — #1999', () => {
+  const POSTURES: readonly DrawnPosture[] = ['upright', 'hoods', 'drops', 'standing'];
+  const apart = (
+    a: { readonly x: number; readonly y: number; readonly z: number },
+    b: { readonly x: number; readonly y: number; readonly z: number },
+  ): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+  it('puts the hands on the bar where each position holds it: the tops, the hoods, the drops', () => {
+    const where: Record<DrawnPosture, ReturnType<typeof handPosition>> = {
+      upright: handPosition('upright'),
+      hoods: handPosition('hoods'),
+      drops: handPosition('drops'),
+      // A standing rider is on the hoods.
+      standing: handPosition('hoods'),
+    };
+    for (const posture of POSTURES) {
+      const joints = riderJoints(0.4, emptyRiderJoints(), 0, stanceOf(posture, emptyRiderStance()));
+      for (const grip of joints.grip) {
+        expect(grip.y, posture).toBeCloseTo(where[posture].y, 12);
+        expect(grip.z, posture).toBeCloseTo(where[posture].z, 12);
+      }
+    }
+  });
+
+  it('is every joint exactly as before #1999 when no stance is given, which is the hoods', () => {
+    for (const angle of [0, 1.3, Math.PI, 5]) {
+      const before = riderJoints(angle, emptyRiderJoints(), 0.1);
+      const hoods = riderJoints(
+        angle,
+        emptyRiderJoints(),
+        0.1,
+        stanceOf('hoods', emptyRiderStance()),
+      );
+      expect(hoods).toEqual(before);
+    }
+  });
+
+  it('takes a standing rider out of the saddle and forward, with the knee still bent at the bottom of every stroke', () => {
+    const seated = riderJoints(0, emptyRiderJoints(), 0);
+    // The thigh and the shin, read where the seated leg reaches its pedal: the top.
+    const shin = apart(seated.knee[0], seated.foot[0]);
+    const thigh = apart({ ...seated.hips, x: seated.knee[0].x }, seated.knee[0]);
+    const stance = stanceOf('standing', emptyRiderStance());
+    for (let angle = 0; angle < 2 * Math.PI; angle += 0.05) {
+      const joints = riderJoints(angle, emptyRiderJoints(), 0, stance);
+      // The hips are forward of where the saddle holds them.
+      expect(joints.hips.z).toBeGreaterThan(seated.hips.z + 0.15);
+      for (const index of [0, 1] as const) {
+        // Each leg's two-bone solve reached its pedal: the shin is its own
+        // length, not stretched past it, and the leg is never straight.
+        const knee = joints.knee[index];
+        const foot = joints.foot[index];
+        expect(apart(knee, foot)).toBeCloseTo(shin, 9);
+        expect(apart({ ...joints.hips, x: knee.x }, foot)).toBeLessThan(thigh + shin - 0.01);
+      }
+    }
+  });
+
+  it('lowers the shoulders in the drops and raises them on the tops', () => {
+    const shoulders = (posture: DrawnPosture): number =>
+      riderJoints(0, emptyRiderJoints(), 0, stanceOf(posture, emptyRiderStance())).shoulders.y;
+    expect(shoulders('drops')).toBeLessThan(shoulders('hoods') - 0.05);
+    expect(shoulders('upright')).toBeGreaterThan(shoulders('hoods') + 0.02);
+  });
+});
+
+describe('the body’s motion grows with effort, and a standing rider rocks the bicycle — #1999', () => {
+  const HALF_PI = Math.PI / 2;
+
+  it('rocks the trunk half as much at the easiest and half as much again at the hardest', () => {
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0).trunkRoll).toBeCloseTo(
+      -TRUNK_ROCK_RADIANS / 2,
+      12,
+    );
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).trunkRoll).toBeCloseTo(
+      -1.5 * TRUNK_ROCK_RADIANS,
+      12,
+    );
+    // The default is #625's rock exactly.
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion()).trunkRoll).toBeCloseTo(
+      -TRUNK_ROCK_RADIANS,
+      12,
+    );
+  });
+
+  it('nods the head at a hard effort only, with each downstroke', () => {
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5).headNod).toBe(0);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.2).headNod).toBe(0);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).headNod).toBeCloseTo(
+      HEAD_NOD_RADIANS,
+      12,
+    );
+    expect(riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion(), 1).headNod).toBeCloseTo(
+      HEAD_NOD_RADIANS,
+      12,
+    );
+    // Between the downstrokes it is up again.
+    expect(riderMotion(0, 1, 0, emptyRiderMotion(), 1).headNod).toBeCloseTo(0, 12);
+  });
+
+  it('rocks the bicycle away from the downstroke when standing, and not seated', () => {
+    const standing = riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1);
+    // `+X`'s pedal going down tips the top toward `−X`: a positive roll.
+    expect(standing.bicycleRock).toBeCloseTo(STANDING_BICYCLE_ROCK_RADIANS, 12);
+    expect(riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).bicycleRock).toBeCloseTo(
+      -STANDING_BICYCLE_ROCK_RADIANS,
+      12,
+    );
+    // And the trunk rocks twice as far out of the saddle.
+    expect(standing.trunkRoll).toBeCloseTo(-2 * TRUNK_ROCK_RADIANS, 12);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0).bicycleRock).toBe(0);
+  });
+
+  it('rocks nothing with no cadence, standing or not — #349', () => {
+    const still = riderMotion(HALF_PI, 0, 0, emptyRiderMotion(), 1, 1);
+    expect(Math.abs(still.bicycleRock)).toBe(0);
+    expect(Math.abs(still.trunkRoll)).toBe(0);
+    expect(Math.abs(still.headNod)).toBe(0);
+  });
+
+  it('hands the scene the cadence exactly when the HUD shows one', () => {
+    expect(turningCadence({ value: 88, live: true, paired: true })).toBe(88);
+    // Stale, and never paired: the HUD shows a dash for both.
+    expect(turningCadence({ value: 88, live: false, paired: true })).toBeUndefined();
+    expect(turningCadence({ value: undefined, live: false, paired: false })).toBeUndefined();
   });
 });

@@ -238,6 +238,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         marker's `pedalling` says a reading turns the cranks,
                         and a breath on the RIDE's clock (`rideSeconds`), so a
                         held ride holds it. The stylised rider does not move
+                        ⚠️ **Since #1999 it is not always on the hoods**:
+                        `riderJoints` takes a `RiderStance` (hips, shoulders,
+                        hands) per `DrawnPosture` — the tops, the hoods, the
+                        drops, or out of the saddle — and `riderMotion` scales
+                        the rock by effort and rocks a standing rider's
+                        bicycle. Absent a stance, every joint is as before.
+    src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
+                        the owner's ruling of 2026-11-02): standing on a climb
+                        (under 65 rpm with 300 W, or over 7 %), the drops when
+                        fast, the tops when easy or coasting, else the hoods —
+                        each with a gentler threshold to keep it, a 0.75 s
+                        dwell before a change, and a 0.8 s eased move from
+                        wherever the body is. On the RIDE's clock, from
+                        `RiderMarker.riding` (`scene.ts` §`ridingOf`). ⚠️
+                        **Drawn only**: the drag area follows the rider's own
+                        `RidingPosition`, never this. The realistic belt holds
+                        one tracker per body slot; the stylised rider is one
+                        merged posture and does not change
     src/game/bend-easing.ts
                         the drawn rider eases off for a sharp bend (#1998, the
                         owner's ruling of 2026-11-02): each rider is DRAWN at

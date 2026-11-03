@@ -48,7 +48,7 @@ import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import { CAMERA_TARGET_AHEAD_METRES } from './camera';
-import type { GameView } from './port';
+import type { GameView, RidingInputs } from './port';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -929,6 +929,158 @@ describe('the realistic rider moves like a rider — #625', () => {
     } finally {
       vi.useRealTimers();
     }
+  }, 120_000);
+
+  /**
+   * #1999: the body posed after three seconds of riding with `riding` — past
+   * the dwell and the transition, so it is in the position those inputs ask
+   * for — at a crank angle, on a ride clock that only ever goes forward here.
+   */
+  let rideClock = 1_000;
+  function ridden(
+    riders: Riders,
+    riding: RidingInputs | undefined,
+    crankAngle: number,
+    pedalling = 1,
+  ): ReadonlyMap<string, Posed> {
+    const marker = {
+      kind: 'rider' as const,
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling,
+      crankAngle,
+      riding,
+    };
+    for (let frame = 0; frame < 90; frame += 1) {
+      rideClock += 1 / 30;
+      riders.place([{ ...marker, rideSeconds: rideClock }]);
+    }
+    // At a whole breath, so the breath moves nothing between two poses.
+    rideClock = Math.ceil(rideClock / 2) * 2;
+    riders.place([{ ...marker, rideSeconds: rideClock }]);
+    const body = riders.bodies[0];
+    if (body === undefined) throw new Error('no body');
+    const bones = new Map<string, Posed>();
+    for (const each of body.skeleton.bones) {
+      bones.set(each.name, {
+        name: each.name,
+        world: [...each.matrixWorld.elements],
+        local: each.quaternion.toArray(),
+      });
+    }
+    return bones;
+  }
+  const ORDINARY: RidingInputs = { cadence: 85, power: 200, grade: 0, speed: 9 };
+  const CLIMBING: RidingInputs = { cadence: 60, power: 380, grade: 9, speed: 4 };
+  const FAST: RidingInputs = { cadence: 95, power: 250, grade: 0, speed: 14 };
+  const EASY: RidingInputs = { cadence: 80, power: 60, grade: 0, speed: 7 };
+  const hips = (pose: ReadonlyMap<string, Posed>): readonly number[] => {
+    const left = at(pose, 'upperleg01L');
+    const right = at(pose, 'upperleg01R');
+    return [0, 1, 2].map((axis) => ((left[axis] ?? 0) + (right[axis] ?? 0)) / 2);
+  };
+  const wristY = (pose: ReadonlyMap<string, Posed>): number =>
+    ((at(pose, 'wristL')[1] ?? 0) + (at(pose, 'wristR')[1] ?? 0)) / 2;
+
+  it('#1999 — stands out of the saddle on a climb, hips forward, feet still on the pedals all round the stroke', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    let furthestFoot = 0;
+    let forward = Number.POSITIVE_INFINITY;
+    for (const crank of [0, HALF_PI, Math.PI, 3 * HALF_PI]) {
+      const seated = ridden(riders, ORDINARY, crank, 0);
+      const standing = ridden(riders, CLIMBING, crank, 0);
+      // The bicycle faces +Z: forward of the saddle is +Z.
+      forward = Math.min(forward, (hips(standing)[2] ?? 0) - (hips(seated)[2] ?? 0));
+      for (const name of ['footL', 'footR']) {
+        furthestFoot = Math.max(furthestFoot, distance(at(seated, name), at(standing, name)));
+      }
+    }
+    console.log(
+      `#1999: standing, the hips ${(forward * 100).toFixed(1)} cm forward; the feet ` +
+        `${(furthestFoot * 1000).toFixed(2)} mm off where they are seated`,
+    );
+    expect(forward).toBeGreaterThan(0.1);
+    // The feet are on the same pedals: the legs reach them from the new hips.
+    expect(furthestFoot).toBeLessThan(0.005);
+  }, 120_000);
+
+  it('#1999 — puts the hands in the drops when fast and on the tops when easy', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const hoods = wristY(ridden(riders, ORDINARY, 0, 0));
+    const drops = wristY(ridden(riders, FAST, 0, 0));
+    const tops = wristY(ridden(riders, EASY, 0, 0));
+    console.log(
+      `#1999: the wrists ${((hoods - drops) * 100).toFixed(1)} cm lower in the drops and ` +
+        `${((tops - hoods) * 100).toFixed(1)} cm higher on the tops than on the hoods`,
+    );
+    expect(hoods - drops).toBeGreaterThan(0.08);
+    expect(tops - hoods).toBeGreaterThan(0.005);
+    // Absent inputs are the hoods, as before #1999.
+    expect(wristY(ridden(riders, undefined, 0, 0))).toBeCloseTo(hoods, 9);
+  }, 120_000);
+
+  it('#1999 — rocks the shoulders further and nods the head at a hard effort, seated on the hoods both times', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    // Both on the flat below the drops' speed and above the tops' power: the hoods.
+    const easy: RidingInputs = { cadence: 70, power: 140, grade: 0, speed: 8 };
+    const hard: RidingInputs = { cadence: 105, power: 360, grade: 0, speed: 11 };
+    const rockOf = (riding: RidingInputs): number =>
+      shoulders(ridden(riders, riding, HALF_PI)) - shoulders(ridden(riders, riding, 3 * HALF_PI));
+    const easyRock = rockOf(easy);
+    const hardRock = rockOf(hard);
+    // The head: level at an easy effort whatever the rock (#625), nodding at a hard one.
+    const nod = turned(
+      bone(ridden(riders, hard, HALF_PI), 'head'),
+      bone(ridden(riders, easy, HALF_PI), 'head'),
+    );
+    const between = turned(
+      bone(ridden(riders, hard, 0), 'head'),
+      bone(ridden(riders, easy, 0), 'head'),
+    );
+    expect(hardRock).toBeGreaterThan(1.5 * easyRock);
+    expect(easyRock).toBeGreaterThan(0);
+    expect(nod).toBeGreaterThan(1);
+    expect(between).toBeLessThan(0.1);
+  }, 120_000);
+
+  it('#1999 — rocks the bicycle side to side under a standing rider, not a seated one, and not with no cadence', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const rock = (riding: RidingInputs, pedalling: number): number =>
+      turned(
+        bone(ridden(riders, riding, HALF_PI, pedalling), 'root'),
+        bone(ridden(riders, riding, 3 * HALF_PI, pedalling), 'root'),
+      );
+    const standing = rock(CLIMBING, 1);
+    const seated = rock(ORDINARY, 1);
+    const still = rock(CLIMBING, 0);
+    console.log(
+      `#1999: the bicycle half a stroke apart — ${standing.toFixed(2)}° standing, ` +
+        `${seated.toFixed(4)}° seated, ${still.toFixed(4)}° standing with no cadence`,
+    );
+    expect(standing).toBeGreaterThan(8);
+    expect(seated).toBeLessThan(1e-3);
+    expect(still).toBeLessThan(1e-3);
+    const a = ridden(riders, CLIMBING, HALF_PI);
+    const b = ridden(riders, CLIMBING, 3 * HALF_PI);
+    // The rider stays over the bicycle as it swings: the head moves across
+    // less than half as far as the hips the bicycle carries.
+    const head = Math.abs((at(a, 'head')[0] ?? 0) - (at(b, 'head')[0] ?? 0));
+    const carried = Math.abs((hips(a)[0] ?? 0) - (hips(b)[0] ?? 0));
+    expect(carried).toBeGreaterThan(0.1);
+    expect(head).toBeLessThan(0.5 * carried);
   }, 120_000);
 });
 

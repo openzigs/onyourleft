@@ -1178,20 +1178,35 @@ export function emptyRiderJoints(): RiderJoints {
  * sign (a roll of `+θ` takes `+Y` toward `−X`). It moves the shoulders and
  * nothing else: the hips are on the saddle, the feet on the pedals and the
  * hands on the bar are all the bicycle's. @see RIDER_UPPER_BODY_PARTS
+ *
+ * `stance` is where the hips, the shoulders and the hands are — #1999,
+ * {@link stanceOf}. Absent, it is the hoods, seated, which is every joint
+ * exactly where it was before #1999.
  */
-export function riderJoints(crankAngle: number, into: RiderJoints, bodyLean: number): RiderJoints {
-  set(into.hips, 0, HIP_Y, HIP_Z);
-  const back = SHOULDER_Y - HIP_Y;
-  set(into.shoulders, -back * Math.sin(bodyLean), HIP_Y + back * Math.cos(bodyLean), SHOULDER_Z);
+export function riderJoints(
+  crankAngle: number,
+  into: RiderJoints,
+  bodyLean: number,
+  stance: Readonly<RiderStance> = SEATED_ON_THE_HOODS,
+): RiderJoints {
+  const { hipY, hipZ } = stance;
+  set(into.hips, 0, hipY, hipZ);
+  const back = stance.shoulderY - hipY;
+  set(
+    into.shoulders,
+    -back * Math.sin(bodyLean),
+    hipY + back * Math.cos(bodyLean),
+    stance.shoulderZ,
+  );
   for (const index of [0, 1] as const) {
     const side = index === 0 ? 1 : -1;
     const pedalAngle = side === 1 ? crankAngle : crankAngle + Math.PI;
     const footY = CRANK_AXIS_Y + CRANK_LENGTH_METRES * Math.cos(pedalAngle);
     const footZ = CRANK_AXIS_Z + CRANK_LENGTH_METRES * Math.sin(pedalAngle);
-    const knee = kneeBetween(HIP_Y, HIP_Z, footY, footZ);
+    const knee = kneeBetween(hipY, hipZ, footY, footZ);
     set(into.foot[index], side * HIP_ACROSS, footY, footZ);
     set(into.knee[index], side * HIP_ACROSS, knee.y, knee.z);
-    set(into.grip[index], side * SHOULDER_ACROSS, GRIP_Y, GRIP_Z);
+    set(into.grip[index], side * SHOULDER_ACROSS, stance.gripY, stance.gripZ);
   }
   return into;
 }
@@ -1707,11 +1722,23 @@ export interface RiderMotion {
    * Index 0 is the rider's `+X` side, as in {@link RiderJoints}.
    */
   readonly ankle: [number, number];
+  /**
+   * The BICYCLE's rock under a standing rider — #1999: a roll about its own
+   * `+Z`, in `RiderMarker.bodyLean`'s sign, ADDED to `RiderMarker.lean`.
+   * Nought seated. @see STANDING_BICYCLE_ROCK_RADIANS
+   */
+  bicycleRock: number;
+  /**
+   * The head's nod about the bicycle's `+X`, forward positive — #1999's "head
+   * motion that grows with effort". Nought at an ordinary effort, where #625's
+   * level head holds. @see HEAD_NOD_RADIANS
+   */
+  headNod: number;
 }
 
 /** A motion to write into, made once. @see riderMotion */
 export function emptyRiderMotion(): RiderMotion {
-  return { pelvisRoll: 0, trunkRoll: 0, trunkPitch: 0, ankle: [0, 0] };
+  return { pelvisRoll: 0, trunkRoll: 0, trunkPitch: 0, ankle: [0, 0], bicycleRock: 0, headNod: 0 };
 }
 
 /**
@@ -1735,24 +1762,72 @@ export function emptyRiderMotion(): RiderMotion {
  * `+X`'s pedal is at `crankAngle` and is in its downstroke while
  * `sin(crankAngle) > 0` (@see riderJoints), so the pelvis and trunk roll
  * toward `+X` then, which is a NEGATIVE roll in this sign. Allocates nothing.
+ *
+ * #1999 adds two inputs, each defaulting to what was drawn before it:
+ *
+ * - `effort`, 0 to 1 (`posture.ts` §`ridingEffort`; 0.5 is the default): the
+ *   trunk's rock is {@link TRUNK_ROCK_RADIANS} times `0.5 + effort`, so half
+ *   of it at the easiest and half as much again at the hardest, and the head
+ *   nods with each downstroke above an effort of 0.5 ({@link HEAD_NOD_RADIANS}).
+ * - `standing`, 0 to 1 (`RiderStance.standing`): the trunk's rock doubles,
+ *   and the bicycle rocks away from the downstroke under the rider
+ *   ({@link STANDING_BICYCLE_ROCK_RADIANS}).
+ *
+ * Both are scaled by `pedalling` with everything else from the stroke, so with
+ * no cadence nothing rocks, standing or not (#349).
  */
 export function riderMotion(
   crankAngle: number,
   pedalling: number,
   rideSeconds: number,
   into: RiderMotion,
+  effort = ORDINARY_EFFORT,
+  standing = 0,
 ): RiderMotion {
   const drawn = Number.isFinite(pedalling) ? clamp(pedalling, 0, 1) : 0;
   const stroke = Number.isFinite(crankAngle) ? Math.sin(crankAngle) : 0;
+  const hard = Number.isFinite(effort) ? clamp(effort, 0, 1) : ORDINARY_EFFORT;
+  const stood = Number.isFinite(standing) ? clamp(standing, 0, 1) : 0;
   into.pelvisRoll = -drawn * PELVIS_ROLL_RADIANS * stroke;
-  into.trunkRoll = -drawn * TRUNK_ROCK_RADIANS * stroke;
+  into.trunkRoll = -drawn * TRUNK_ROCK_RADIANS * (0.5 + hard) * (1 + stood) * stroke;
   into.trunkPitch = Number.isFinite(rideSeconds)
     ? BREATH_PITCH_RADIANS * Math.sin((TAU * rideSeconds) / BREATH_SECONDS)
     : 0;
   into.ankle[0] = drawn * ANKLE_SWING_RADIANS * stroke;
   into.ankle[1] = -drawn * ANKLE_SWING_RADIANS * stroke;
+  // Away from the downstroke: `+X`'s pedal going down tips the bicycle's top
+  // toward `−X`, a POSITIVE roll in this sign.
+  into.bicycleRock = drawn * STANDING_BICYCLE_ROCK_RADIANS * stood * stroke;
+  // Forward at each downstroke, twice a turn: `sin²` peaks at both.
+  into.headNod = drawn * HEAD_NOD_RADIANS * Math.max(0, 2 * hard - 1) * stroke * stroke;
   return into;
 }
+
+/**
+ * The effort {@link riderMotion} draws when it is told none: **0.5**, which is
+ * the rock #625 drew before #1999 scaled it.
+ */
+export const ORDINARY_EFFORT = 0.5;
+
+/**
+ * How far the bicycle rocks from side to side, each way, under a rider
+ * standing on the pedals: **6°** — #1999.
+ *
+ * ⚠️ **Chosen, not measured**, and stated as a choice: a standing rider pulls
+ * on the bar against each downstroke and the bicycle swings under them once a
+ * turn. Six degrees each way reads as that from the chase camera and is well
+ * inside the 20° the bicycle already leans in an ordinary bend. The owner tunes
+ * it from frames.
+ */
+export const STANDING_BICYCLE_ROCK_RADIANS = (6 * Math.PI) / 180;
+
+/**
+ * How far the head nods forward at each downstroke at the hardest effort:
+ * **2°** — #1999. ⚠️ **Chosen**: the owner asked for head motion that grows
+ * with effort; nothing here measures it. Nought at {@link ORDINARY_EFFORT} and
+ * below, where #625 holds the head level up the road.
+ */
+export const HEAD_NOD_RADIANS = (2 * Math.PI) / 180;
 
 /**
  * How much of the pedal stroke's motion a rider leaning this far is drawn
@@ -1782,9 +1857,138 @@ export function cadenceTurns(cadence: SensorReading): boolean {
   return turningCadence(cadence) !== undefined;
 }
 
-/** The cadence the cranks turn at, or `undefined` when the HUD shows none. */
-function turningCadence(cadence: SensorReading): number | undefined {
+/**
+ * The cadence the cranks turn at, or `undefined` when the HUD shows none.
+ * Exported for #1999: `GameView` hands it to `scene.ts` as the cadence the
+ * rider's position is chosen from (`posture.ts`), so a position follows exactly
+ * the reading the legs do.
+ */
+export function turningCadence(cadence: SensorReading): number | undefined {
   return cadence.live && cadence.value !== undefined && Number.isFinite(cadence.value)
     ? cadence.value
     : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// #1999 — the rider's position on the bicycle
+// ---------------------------------------------------------------------------
+
+/**
+ * A position the rider is DRAWN in — #1999: one of `rider.ts`'s three seated
+ * {@link RidingPosition}s, whose hands are {@link handPosition}'s, or out of
+ * the saddle. Which one is `posture.ts`'s choice. Drawn only: physics' drag
+ * (`rider.ts` §`ridingPositionDragArea`) reads the rider's own choice, never
+ * this.
+ */
+export type DrawnPosture = RidingPosition | 'standing';
+
+/**
+ * Where a rider's hips, shoulders and hands are, in the bicycle's frame —
+ * #1999. Read by {@link riderJoints}; blended between two postures by
+ * {@link blendStance}, so a change of position is drawn as a movement.
+ */
+export interface RiderStance {
+  hipY: number;
+  hipZ: number;
+  shoulderY: number;
+  shoulderZ: number;
+  gripY: number;
+  gripZ: number;
+  /** How much of a standing rider's motion is drawn, 0 to 1. @see riderMotion */
+  standing: number;
+}
+
+/**
+ * Where the hips go out of the saddle: **forward over the bottom bracket**,
+ * 18 cm ahead of the seated hips and half a centimetre up — #1999.
+ *
+ * Li and Caldwell, *"Task specific coordination of leg muscles during
+ * cycling"*, International Society of Biomechanics in Sports conference
+ * proceedings, reporting Caldwell et al. (1998) at an 8 % grade and about
+ * 295 W: standing came with an *"upward and forward movement of the rider's
+ * center of mass as the pelvis came off the saddle"*. ⚠️ **The figures are
+ * chosen**, and bounded by the legs: the seated hip is already 0.728 m from
+ * the bottom bracket, so with the pedal at the bottom the leg is 3 mm short of
+ * it, straight; a standing hip can go forward far more than up. Here it is
+ * 0.705 m from the axle, which leaves the knee bent at the bottom of the
+ * stroke (`bicycle.test.ts` holds the reach).
+ */
+const STANDING_HIP_Y = HIP_Y + 0.005;
+const STANDING_HIP_Z = HIP_Z + 0.18;
+
+/** Each posture's stance. ⚠️ The hoods' is exactly the joints before #1999. */
+const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
+  // Sitting up, hands on the tops: the shoulders higher and back.
+  upright: {
+    hipY: HIP_Y,
+    hipZ: HIP_Z,
+    shoulderY: SHOULDER_Y + 0.04,
+    shoulderZ: SHOULDER_Z - 0.06,
+    gripY: handPosition('upright').y,
+    gripZ: handPosition('upright').z,
+    standing: 0,
+  },
+  hoods: {
+    hipY: HIP_Y,
+    hipZ: HIP_Z,
+    shoulderY: SHOULDER_Y,
+    shoulderZ: SHOULDER_Z,
+    gripY: GRIP_Y,
+    gripZ: GRIP_Z,
+    standing: 0,
+  },
+  // In the drops: the back lower and the shoulders forward, toward the bar.
+  drops: {
+    hipY: HIP_Y,
+    hipZ: HIP_Z,
+    shoulderY: SHOULDER_Y - 0.08,
+    shoulderZ: SHOULDER_Z + 0.06,
+    gripY: handPosition('drops').y,
+    gripZ: handPosition('drops').z,
+    standing: 0,
+  },
+  // Out of the saddle, hands on the hoods, the shoulders over the bar.
+  standing: {
+    hipY: STANDING_HIP_Y,
+    hipZ: STANDING_HIP_Z,
+    shoulderY: SHOULDER_Y + 0.06,
+    shoulderZ: SHOULDER_Z + 0.14,
+    gripY: GRIP_Y,
+    gripZ: GRIP_Z,
+    standing: 1,
+  },
+};
+
+/** {@link riderJoints}' default: seated on the hoods, as before #1999. */
+const SEATED_ON_THE_HOODS = STANCES.hoods;
+
+/** A stance to write into, made once: seated on the hoods. @see blendStance */
+export function emptyRiderStance(): RiderStance {
+  return { ...SEATED_ON_THE_HOODS };
+}
+
+/** A posture's stance, written into `into`. Allocates nothing. */
+export function stanceOf(posture: DrawnPosture, into: RiderStance): RiderStance {
+  return blendStance(STANCES[posture], STANCES[posture], 1, into);
+}
+
+/**
+ * The stance `share` of the way from `from` to `to` (0 to 1), written into
+ * `into` — #1999's transitions. `into` may be `from`. Allocates nothing.
+ */
+export function blendStance(
+  from: Readonly<RiderStance>,
+  to: Readonly<RiderStance>,
+  share: number,
+  into: RiderStance,
+): RiderStance {
+  const t = Number.isFinite(share) ? clamp(share, 0, 1) : 1;
+  into.hipY = from.hipY + (to.hipY - from.hipY) * t;
+  into.hipZ = from.hipZ + (to.hipZ - from.hipZ) * t;
+  into.shoulderY = from.shoulderY + (to.shoulderY - from.shoulderY) * t;
+  into.shoulderZ = from.shoulderZ + (to.shoulderZ - from.shoulderZ) * t;
+  into.gripY = from.gripY + (to.gripY - from.gripY) * t;
+  into.gripZ = from.gripZ + (to.gripZ - from.gripZ) * t;
+  into.standing = from.standing + (to.standing - from.standing) * t;
+  return into;
 }
