@@ -6,6 +6,8 @@
  * `socket`.
  */
 
+import type { ItemEvent } from '@onyourleft/protocol';
+
 import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { HostMetrics, RoomFlagRaised, RoomResult, RoomSeat } from './room-host.ts';
@@ -88,6 +90,14 @@ export type FromWorker =
       readonly roomId: string;
       readonly reason: string;
       readonly count: number;
+    }
+  /** A lap race's item event (#1909): a rider id, what happened, an item key. */
+  | {
+      readonly type: 'item-event';
+      readonly roomId: string;
+      readonly riderId: number;
+      readonly event: ItemEvent['event'];
+      readonly item: ItemEvent['item'];
     }
   | {
       readonly type: 'metrics';

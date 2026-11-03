@@ -36,6 +36,24 @@ export function conformanceSettings(drafting = true): RoomSettings {
   });
 }
 
+/** The lap race's seed (#1909): fixed, so every adapter draws the same items. */
+export const LAP_RACE_SEED = 2;
+
+/**
+ * The conformance lap race (#1909): three laps of the conformance course, one
+ * lap being its 450 m, items on, drafted, from {@link LAP_RACE_SEED}.
+ */
+export function lapRaceConformanceSettings(): RoomSettings {
+  return roomSettings({
+    kind: 'race',
+    ridingPosition: 'hoods',
+    course: CONFORMANCE_COURSE,
+    countdownMs: 2_000,
+    rejoinWindowMs: 10_000,
+    lapRace: { laps: 3, items: true, seed: LAP_RACE_SEED },
+  });
+}
+
 /** `ticket-ann` at 70 kg and `ticket-bea` at 62 kg; anything not `ticket-…` is refused. */
 export const admitConformance = admitByTable({ bea: 62 });
 

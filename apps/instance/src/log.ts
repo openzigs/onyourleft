@@ -109,6 +109,28 @@ export const LOGGED_CLOSE_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * A lap race's item keys and what can happen to one, as
+ * `@onyourleft/protocol` spells them (#1909). Written out, for the reason
+ * {@link LOGGED_CLOSE_REASONS} is; `log.test.ts` fails if they part.
+ */
+export const LOGGED_ITEM_KEYS: ReadonlySet<string> = new Set([
+  'tailwind',
+  'tow',
+  'puddle',
+  'crosswind-gust',
+  'rain-cape',
+]);
+export const LOGGED_ITEM_EVENTS: ReadonlySet<string> = new Set(['pick-up', 'use', 'hit']);
+
+/**
+ * A room's id as `rooms/rooms.ts` mints it: 16 random bytes, lowercase hex. It
+ * names no athlete and is not a credential.
+ */
+function isRoomId(value: unknown): boolean {
+  return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
+}
+
+/**
  * Keys one event may carry beyond {@link LOGGABLE_KEYS}, each with the only
  * value it may hold there. Not on the shared list, because `reason`, `room`
  * and `count` mean other things elsewhere — a moderator's reason is free
@@ -117,7 +139,7 @@ export const LOGGED_CLOSE_REASONS: ReadonlySet<string> = new Set([
 export const EVENT_KEYS: ReadonlyMap<
   string,
   Readonly<Record<string, (value: unknown) => boolean>>
-> = new Map([
+> = new Map<string, Readonly<Record<string, (value: unknown) => boolean>>>([
   // #1400 / #1402: why a room let a socket go. The room id is the opaque one
   // `rooms/rooms.ts` mints (16 random bytes, lowercase hex) — it names no
   // athlete and is not a credential: the route and the socket both still need
@@ -126,9 +148,22 @@ export const EVENT_KEYS: ReadonlyMap<
   [
     'room-socket-closed',
     {
-      room: (value) => typeof value === 'string' && /^[0-9a-f]{32}$/.test(value),
+      room: isRoomId,
       reason: (value) => typeof value === 'string' && LOGGED_CLOSE_REASONS.has(value),
       count: (value) => Number.isSafeInteger(value) && (value as number) >= 0,
+    },
+  ],
+  // #1909: a lap race's item event — the room, the rider's number in it (a
+  // seat, not an athlete), what happened and the item's key. Never a place, a
+  // name or an athlete id.
+  [
+    'room-item-event',
+    {
+      room: isRoomId,
+      riderId: (value) =>
+        Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 2_147_483_647,
+      itemEvent: (value) => typeof value === 'string' && LOGGED_ITEM_EVENTS.has(value),
+      item: (value) => typeof value === 'string' && LOGGED_ITEM_KEYS.has(value),
     },
   ],
 ]);

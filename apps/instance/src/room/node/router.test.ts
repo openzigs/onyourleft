@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
-import type { Frame } from '@onyourleft/protocol';
+import { encodeMessage, type Frame } from '@onyourleft/protocol';
 
 import { logEvent, REDACTED } from '../../log.ts';
 import { helloText } from '../core/room-testing.ts';
@@ -286,6 +286,72 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     // And the operator's metrics count it beside the refusals.
     const [worker] = await harness.router.metrics();
     expect(worker?.refusals).toMatchObject({ 'hello-expected': 2, 'ticket-refused': 1 });
+  }, 30_000);
+});
+
+describe('a lap race’s item events in the operator’s log — #1909', () => {
+  it('logs each item event a worker’s room sends, with the room, a rider number, the event and the item key only', async () => {
+    const lines: string[] = [];
+    const room = 'a0a1a2a3a4a5a6a7a8a9aaabacadaeaf';
+    harness = await startRouter({
+      workers: 1,
+      // A 40 m loop, so a pick-up is a couple of real seconds away.
+      lookup: (roomId) =>
+        Promise.resolve({
+          kind: 'open',
+          plan: ridePlan(roomId, {
+            kind: 'race',
+            lengthMetres: 40,
+            lapRace: { laps: 3, items: true, seed: 2 },
+          }),
+        }),
+      event: (event, detail) => {
+        logEvent((line) => lines.push(line), event, detail);
+      },
+    });
+    const ann = await join(room, 'ticket-ann');
+    const bea = await join(room, 'ticket-bea');
+    await until(() => ann.messages.length > 0 && bea.messages.length > 0, 'two welcomes');
+    expect(await harness.router.startRoom(room, 'ann')).toBe(true);
+    let sequence = 1;
+    const pedal = setInterval(() => {
+      for (const rider of [ann, bea]) {
+        rider.report(sequence, 300);
+        rider.socket.send(encodeMessage({ type: 'item-use', sequence, atMs: Date.now() }));
+      }
+      sequence += 1;
+    }, 250);
+    try {
+      await until(
+        () => lines.some((line) => line.includes('"room-item-event"')),
+        'an item event in the log',
+        20_000,
+      );
+    } finally {
+      clearInterval(pedal);
+    }
+    const logged = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'room-item-event');
+    for (const line of logged) {
+      expect(Object.keys(line).sort()).toEqual(
+        ['event', 'item', 'itemEvent', 'riderId', 'room', 'worker'].sort(),
+      );
+      expect(line).toMatchObject({ room, worker: 0 });
+      expect([0, 1]).toContain(line.riderId);
+    }
+    expect(lines.join('\n')).not.toContain(REDACTED);
+    // What the log says happened is what the riders' frames said. The line and
+    // the frame leave the worker by different paths, so wait for the frame.
+    const framedEvents = () =>
+      ann.messages.flatMap((m) => (m.type === 'frame' ? (m.itemEvents ?? []) : []));
+    await until(() => framedEvents().length > 0, 'a frame carrying an item event');
+    const framed = framedEvents();
+    expect(framed).toContainEqual({
+      riderId: logged[0]?.riderId,
+      event: logged[0]?.itemEvent,
+      item: logged[0]?.item,
+    });
   }, 30_000);
 });
 
