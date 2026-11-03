@@ -20,7 +20,7 @@
  * | `barn`, `farm_auxiliary`, `cowshed`, `stable` | `barn` | the farm building: planks, a gambrel (#1785) or else a steep gable |
  * | `commercial`, `retail`, `office`, `supermarket` | `commercial` | commercial: #1783's main-street block or strip front |
  * | `industrial`, `warehouse` | `industrial` | corrugated walls under a flat roof |
- * | `church`, `chapel`, `cathedral`, `school`, `civic`, `government`, `townhall`, or any `landmark` | `civic` | a plain civic block, brick or render, flat or a low hip, one central plain door |
+ * | `church`, `chapel`, `cathedral`, `school`, `civic`, `government`, `townhall`, or any `landmark` | `civic` | a plain civic block, brick or render, flat or a low hip, one central plain door; since #2021 a place of worship ({@link isWorship}) with a steeple at its street end (`footprint-buildings.ts` §`STEEPLE`) |
  * | none (`yes` and unknown values decode to none) | — | today's rule and #1782's archetypes |
  *
  * A civic block's door and a shed's are plain: the leaf alone in the door's
@@ -140,3 +140,15 @@ export const CIVIC_FEATURES: ArchetypeFeatures = {
   hip: 1,
   pitches: [25],
 };
+
+/** #2021: the mapped types that are a place of worship, besides the `worship` landmark. */
+export const WORSHIP_TYPES: ReadonlySet<BuildingType> = new Set(['church', 'chapel', 'cathedral']);
+
+/**
+ * Whether a footprint is a mapped place of worship — #2021: its landmark is
+ * `worship`, or its type is one of {@link WORSHIP_TYPES}. A school or a town
+ * hall is civic and no place of worship.
+ */
+export function isWorship(type: BuildingType | null, landmark: Landmark | null): boolean {
+  return landmark === 'worship' || (type !== null && WORSHIP_TYPES.has(type));
+}
