@@ -391,6 +391,67 @@ describe('a fold tapers back rather than standing up as a wall — #2096', () =>
     },
   );
 
+  it.each([
+    ['hairpinRoute(25) at 133', hairpinRoute(25), 133],
+    ['hairpinRoute(40) at 400', hairpinRoute(40), 400],
+  ] as const)(
+    'never stands over the far leg of a hairpin once tapered, %s',
+    (_name, profile, at) => {
+      // ⚠️ The taper once ran AFTER `clearReach`, and lowered a row's reach to a
+      // lateral `clearReach` had never probed: with columns 32 m and 60 m both
+      // clear and the far leg between them, the outer columns collapsed onto
+      // that leg's tarmac, 8.6 m above it on this frame.
+      const { corridor, ground } = frameAt(profile, at);
+      const surface = {
+        vertices: corridor.vertices,
+        indices: corridor.indices.slice(0, (corridor.centre.length - 1) * 3 * 6),
+      };
+      let near = 0;
+      for (let vertex = 0; vertex < ground.vertices.length / 3; vertex += 1) {
+        if (vertex % COLUMNS < 2) continue;
+        const x = ground.vertices[vertex * 3] as number;
+        const z = ground.vertices[vertex * 3 + 2] as number;
+        const row = Math.floor(vertex / (COLUMNS * 2));
+        if (nearOtherRoad(corridor, row, x, z, 2 * ROAD_CLEARANCE_METRES)) near += 1;
+        const road = heightOver(surface, x, z, 1e-3);
+        if (road === undefined) continue;
+        expect(
+          ground.vertices[vertex * 3 + 1] as number,
+          `vertex ${String(vertex)}`,
+        ).toBeLessThanOrEqual(road + 1e-3);
+      }
+      // Non-vacuity: the frame really does bring ground up to the far leg.
+      expect(near).toBeGreaterThan(0);
+    },
+  );
+
+  it('never stands over ANY part of the road, sampled every 7 m on hairpins and a planner route', () => {
+    // The sweep of `never stands over ANY part` samples every 131 m, which
+    // missed the taper lowering a reach past a probe (#2097's review).
+    let worst = 0;
+    for (const profile of [hairpinRoute(20), hairpinRoute(25), hairpinRoute(40), plannerRoute()]) {
+      for (let at = 0; at < profile.totalDistance; at += 7) {
+        const { corridor, ground } = frameAt(profile, at);
+        const surface = {
+          vertices: corridor.vertices,
+          indices: corridor.indices.slice(0, (corridor.centre.length - 1) * 3 * 6),
+        };
+        for (let vertex = 0; vertex < ground.vertices.length / 3; vertex += 1) {
+          if (vertex % COLUMNS < 2) continue;
+          const road = heightOver(
+            surface,
+            ground.vertices[vertex * 3] as number,
+            ground.vertices[vertex * 3 + 2] as number,
+            1e-3,
+          );
+          if (road === undefined) continue;
+          worst = Math.max(worst, (ground.vertices[vertex * 3 + 1] as number) - road);
+        }
+      }
+    }
+    expect(worst).toBeLessThanOrEqual(1e-3);
+  }, 120_000);
+
   it.each(planners)(
     'stands no triangle within 60 m of the road on end, %s',
     (_name, profile) => {

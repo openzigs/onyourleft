@@ -520,10 +520,16 @@ export function terrainCorridor(
   const rows = centre.length;
   const normals2d = ribbonNormals(centre);
   const lent = terrainScratchFor(rows);
-  const reach = steadied(
+  // ⚠️ **The erosion and the taper run BEFORE `clearReach`** (#2097's review).
+  // `clearReach` only vouches for the laterals it probes, and a taper after it
+  // lowered a row's reach to one it never did: ground stood 8.6 m over a
+  // hairpin's far leg. On the tapered reach it probes the very laterals the
+  // ground is built at. Its own cuts are not tapered: they are the clearance,
+  // and are what they were before #2096.
+  const reach = clearReach(
     centre,
-    clearReach(centre, normals2d, foldReach(centre, normals2d, lent.reach)),
-    lent.steadied,
+    normals2d,
+    tapered(centre, steadied(foldReach(centre, normals2d, lent.reach), lent.steadied)),
   );
   const perRow = COLUMNS * 2;
   const { vertices, colours, fields, normals } = lent;
@@ -974,8 +980,9 @@ const clearCells = new Map<number, number[]>();
 const clearListPool: number[][] = [];
 
 /**
- * {@link foldReach}, tightened so that no column of the ground stands within
- * {@link ROAD_CLEARANCE_METRES} of any other stretch of this corridor's road.
+ * {@link foldReach}'s answer, tightened IN PLACE so that no column of the
+ * ground stands within {@link ROAD_CLEARANCE_METRES} of any other stretch of
+ * this corridor's road.
  *
  * For each row and side, the columns are walked outward; the first that comes
  * too close to the road stops the side, at the furthest lateral offset between
@@ -1123,9 +1130,50 @@ function clearReach(
 export const REACH_TAPER_PER_METRE = 2;
 
 /**
+ * Each row's reach, no further than {@link REACH_TAPER_PER_METRE} times the
+ * road between it and ANY other row past that row's own, in place.
+ *
+ * ⚠️ **It runs BEFORE {@link clearReach}, and must.** Taking reach away moves
+ * a collapsed vertex to a lateral nobody probed, and the far leg of a hairpin
+ * can lie between two columns that are both clear: run after `clearReach`, the
+ * outer columns collapsed onto its tarmac, 8.6 m above it (#2097's review).
+ * `clearReach` probes `min(offset, limit)`, so on the tapered reach it vouches
+ * for the very laterals the ground is built at. Only the fold's bound survives
+ * a decrease on its own; the clearance is re-established by running after.
+ *
+ * One pass forward and one back is the whole of it: on a chain of rows the
+ * least of `reach[j] + k · (road from j to r)` over every `j` is what the two
+ * passes leave, because the road between two rows is the sum of the gaps
+ * between them.
+ */
+function tapered(centre: readonly CorridorPoint[], reach: Float64Array): Float64Array {
+  const rows = reach.length / 2;
+  // Each gap is asked by both passes, once per row: about 135 hypots, not worth a store.
+  const gap = (row: number): number => {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
+    return REACH_TAPER_PER_METRE * Math.hypot(to.x - from.x, to.z - from.z);
+  };
+  for (let row = 1; row < rows; row += 1) {
+    const most = gap(row - 1);
+    for (let side = 0; side < 2; side += 1) {
+      const at = row * 2 + side;
+      reach[at] = Math.min(reach[at] as number, (reach[at - 2] as number) + most);
+    }
+  }
+  for (let row = rows - 2; row >= 0; row -= 1) {
+    const most = gap(row);
+    for (let side = 0; side < 2; side += 1) {
+      const at = row * 2 + side;
+      reach[at] = Math.min(reach[at] as number, (reach[at + 2] as number) + most);
+    }
+  }
+  return reach;
+}
+
+/**
  * Each row's reach, no further than either neighbour's — an erosion over the
- * rows, per side — and then no further than {@link REACH_TAPER_PER_METRE} times
- * the road between it and ANY other row past that row's own.
+ * rows, per side.
  *
  * ⚠️ **The erosion is what stops a quad twisting where a reach changes.** A
  * row stopped short beside a row that was not makes a quad whose outer edge
@@ -1136,43 +1184,17 @@ export const REACH_TAPER_PER_METRE = 2;
  * of a bend. It is also what carries {@link foldReach}'s limit, written on a
  * pair's first row, to the pair's second.
  *
- * ⚠️ **The taper is #2096's, and only ever takes reach away**, so every bound
- * the erosion's answer kept — the fold, {@link clearReach}'s clearance, the
- * twist — still holds after it. One pass forward and one back is the whole of
- * it: on a chain of rows the least of `reach[j] + k · (road from j to r)` over
- * every `j` is what the two passes leave, because the road between two rows is
- * the sum of the gaps between them.
+ * It runs before {@link tapered}, which must see the reach it carries to a
+ * pair's second row, and both before {@link clearReach}, which then vouches
+ * for the laterals the ground is built at.
  */
-function steadied(
-  centre: readonly CorridorPoint[],
-  reach: Float64Array,
-  out: Float64Array,
-): Float64Array {
+function steadied(reach: Float64Array, out: Float64Array): Float64Array {
   const rows = reach.length / 2;
   for (let row = 0; row < rows; row += 1) {
     for (let side = 0; side < 2; side += 1) {
       const at = (index: number): number =>
         reach[Math.min(rows - 1, Math.max(0, index)) * 2 + side] as number;
       out[row * 2 + side] = Math.min(at(row - 1), at(row), at(row + 1));
-    }
-  }
-  const gap = (row: number): number => {
-    const from = centre[row] as CorridorPoint;
-    const to = centre[row + 1] as CorridorPoint;
-    return REACH_TAPER_PER_METRE * Math.hypot(to.x - from.x, to.z - from.z);
-  };
-  for (let row = 1; row < rows; row += 1) {
-    const most = gap(row - 1);
-    for (let side = 0; side < 2; side += 1) {
-      const at = row * 2 + side;
-      out[at] = Math.min(out[at] as number, (out[at - 2] as number) + most);
-    }
-  }
-  for (let row = rows - 2; row >= 0; row -= 1) {
-    const most = gap(row);
-    for (let side = 0; side < 2; side += 1) {
-      const at = row * 2 + side;
-      out[at] = Math.min(out[at] as number, (out[at + 2] as number) + most);
     }
   }
   return out;
