@@ -1,0 +1,145 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The paired steering controller (#1826): pairing it, forgetting it, what the
+ * Devices screen says about it, and the game's {@link ControllerPort} over it.
+ *
+ * ## Beside the ride controller, not inside it
+ *
+ * `controller.ts`' pairing is the transport's, by capability, and a
+ * controller has none: it measures nothing and controls no trainer. So it is
+ * paired through its own client ({@link SteeringControllerPort}) and held
+ * here. Pairing it touches no other link: the trainer and the strap stay
+ * connected and keep delivering, which `steering-controller.test.ts` holds on
+ * one simulated radio with all three on it.
+ *
+ * ## One at a time
+ *
+ * Pairing again while one is connected lets the first go. A link that drops
+ * is no longer listed; the screen says so once, and the rider pairs again.
+ *
+ * ## Nothing half-listed
+ *
+ * The state is `pairing` while the client works and becomes `connected` only
+ * when it resolved. A failure is said in words (`failed`, with a reason) and
+ * nothing is listed.
+ */
+
+import { OPEN_BIKE_CONTROL_BUTTON, type OpenBikeControlEvent } from '@onyourleft/sensors/protocol';
+
+import type { ControllerPort } from '../game/delivery/controller-port';
+
+import type { SteeringControllerLink, SteeringControllerPort } from './steering-controller-port';
+
+/**
+ * The buttons the app tells a controller it acts on: steer left, steer right
+ * and the handlebar angle. #1827 adds the two it throws with.
+ */
+export const STEERING_CONTROLLER_BUTTONS: readonly number[] = [
+  OPEN_BIKE_CONTROL_BUTTON.steerLeft,
+  OPEN_BIKE_CONTROL_BUTTON.steerRight,
+  OPEN_BIKE_CONTROL_BUTTON.steeringAngle,
+];
+
+/** Why a pairing ended with nothing paired. */
+export type SteeringPairingFailure = 'not-chosen' | 'not-a-controller' | 'no-answer' | 'refused';
+
+export type SteeringControllerState =
+  /** Nothing paired. `dropped` once a paired controller's link went. */
+  | { readonly kind: 'none'; readonly dropped: boolean }
+  | { readonly kind: 'pairing' }
+  | { readonly kind: 'connected'; readonly name: string }
+  | { readonly kind: 'failed'; readonly reason: SteeringPairingFailure };
+
+export interface SteeringController extends ControllerPort {
+  readonly state: SteeringControllerState;
+  /** Called after every change of {@link state}. */
+  subscribe(listener: () => void): () => void;
+  /** Ask for a controller and connect it. Never rejects: a failure is the state. */
+  pair(): Promise<void>;
+  /** Let the paired controller go. */
+  forget(): void;
+}
+
+/** The name shown for a controller that advertised none. */
+export const UNNAMED_CONTROLLER = 'Steering controller';
+
+function failureOf(error: unknown): SteeringPairingFailure {
+  const code: unknown =
+    typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  switch (code) {
+    case 'no-device-selected':
+      return 'not-chosen';
+    case 'capability-unsupported':
+      return 'not-a-controller';
+    case 'not-connected':
+      return 'no-answer';
+    default:
+      return 'refused';
+  }
+}
+
+export function createSteeringController(port: SteeringControllerPort): SteeringController {
+  let state: SteeringControllerState = { kind: 'none', dropped: false };
+  let link: SteeringControllerLink | undefined;
+  let detach: Array<() => void> = [];
+  const listeners = new Set<() => void>();
+  const eventListeners = new Set<(events: readonly OpenBikeControlEvent[]) => void>();
+
+  const set = (next: SteeringControllerState): void => {
+    state = next;
+    for (const listener of [...listeners]) listener();
+  };
+
+  /** Stop listening to the current link and let it go. */
+  const release = (): void => {
+    for (const each of detach) each();
+    detach = [];
+    link?.disconnect();
+    link = undefined;
+  };
+
+  return {
+    get state() {
+      return state;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onControllerEvents(listener) {
+      eventListeners.add(listener);
+      return () => eventListeners.delete(listener);
+    },
+    async pair() {
+      if (state.kind === 'pairing') return;
+      release();
+      set({ kind: 'pairing' });
+      let opened: SteeringControllerLink;
+      try {
+        opened = await port.requestAndConnect();
+      } catch (error) {
+        set({ kind: 'failed', reason: failureOf(error) });
+        return;
+      }
+      link = opened;
+      detach = [
+        opened.onEvents((events) => {
+          for (const listener of [...eventListeners]) listener(events);
+        }),
+        opened.onDisconnect(() => {
+          if (link !== opened) return;
+          for (const each of detach) each();
+          detach = [];
+          link = undefined;
+          set({ kind: 'none', dropped: true });
+        }),
+      ];
+      set({ kind: 'connected', name: opened.name ?? UNNAMED_CONTROLLER });
+    },
+    forget() {
+      release();
+      set({ kind: 'none', dropped: false });
+    },
+  };
+}
