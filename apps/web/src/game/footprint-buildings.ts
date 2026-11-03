@@ -259,6 +259,21 @@
  * pitch, an outbuilding's blind walls and garage door, a civic block's plain
  * door. Each lever switches its own half alone.
  *
+ * ## A place of worship's steeple (#2021, the owner's ruling of 2026-11-02)
+ *
+ * A mapped place of worship — the `worship` landmark, or a church, a chapel
+ * or a cathedral (`building-types.ts` §`isWorship`) — is #1791's civic block
+ * with a **steeple** ({@link STEEPLE}, {@link steepleSiteOf}): a square tower
+ * at the end of the footprint's long axis away from its front door (the
+ * owner's ruling of 2026-11-03; seeded where the door is midway), a touch
+ * proud of the end wall, stepped inward until it stands on the footprint,
+ * rising above the
+ * roof under a pyramidal spire. Its tower is `wall` in the walls' cladding and
+ * its spire `roof`, so it costs 12 triangles, on the far level too, and no
+ * draw call. Over a cap it is left off before a courtyard's holes are. A
+ * footprint too narrow or too short for a tower beside a nave has none, and so
+ * has every one with `?levers=-steeples` ({@link FootprintPlanOptions}'
+ * `steeples`).
  * ## Inferred types (#2023, spike 0033, the owner's ruling of 2026-11-02)
  *
  * A footprint with no mapped type or landmark may be **inferred** one
@@ -266,7 +281,9 @@
  * does — and **never over a mapped one**: a footprint of 12 to 20 m² is a
  * shed, and one of 20 to 75 m², roughly square and rectangular, with a
  * house-sized footprint within 40 m that stands nearer the street, is a
- * garage. The street is the nearest ground one that is neither a service road
+ * garage. That house must be one the planner keeps and draws (the owner's
+ * ruling of 2026-11-03): one it drops is no neighbour, so no garage stands
+ * alone in a field. The street is the nearest ground one that is neither a service road
  * nor a highway (spike 0033: the nearest road to a small footprint is mostly
  * its own drive). A mapped `roof:shape`, `building:levels` or height still
  * beats the inferred garage's roof and storey, as it beats a mapped one's.
@@ -328,6 +345,7 @@ import {
   buildingFamilyOf,
   CIVIC_FEATURES,
   INFERRED_BARN_FEATURES,
+  isWorship,
   OUTBUILDING_FEATURES,
   POLE_BUILDING_FEATURES,
   resolvedFamily,
@@ -752,6 +770,11 @@ export interface FootprintPlan {
   /** Whether it has a front porch — #1589. */
   readonly porch: boolean;
   /**
+   * Whether it has a steeple — #2021: a mapped place of worship's square tower
+   * and spire, in its `wall` and `roof` triangles ({@link STEEPLE}).
+   */
+  readonly steeple: boolean;
+  /**
    * Where a parcel is left at its front door — #1808: a house's
    * {@link FrontStep}, at the foot of its front porch's steps where it has a
    * porch and on its doorstep where it has none. `undefined` for every plan
@@ -928,6 +951,34 @@ export const CHIMNEY_SHARE = 0.7;
 
 /** A chimney's breadth along the ridge, its depth across it, and its height above the ridge (#1581). */
 export const CHIMNEY = { along: 0.6, across: 0.9, above: 0.9 } as const;
+
+/**
+ * A place of worship's steeple — #2021, the owner's ruling of 2026-11-02
+ * ("Add a steeple"): a square tower `share` of the footprint's width a side,
+ * from `least` to `most` metres, standing `above` metres over the roof, under
+ * a pyramidal spire `spire` times its side high, on a footprint long enough
+ * for a nave of `nave` tower sides behind it. It stands at the end of the
+ * long axis away from the front door (the owner's ruling of 2026-11-03), so
+ * the church's own door stays on its wall, `proud` metres out past the end
+ * wall so the two never share a plane and the roof's eaves
+ * ({@link EAVES_OVERHANG_METRES}) end inside the tower rather than through its
+ * face, and steps `step` metres inward until it stands on the footprint (its
+ * inner corners `seat` metres inside the wall); where the
+ * door's middle is within `tell` metres of the axis's middle, or there is no
+ * door, the end is seeded.
+ */
+export const STEEPLE = {
+  share: 0.4,
+  least: 3,
+  most: 6,
+  above: 4,
+  spire: 2,
+  nave: 2,
+  proud: EAVES_OVERHANG_METRES + 0.1,
+  seat: 0.15,
+  step: 1,
+  tell: 1,
+} as const;
 
 /** The share of houses whose front door has a canopy over it: **0.55** (#1581). */
 export const PORCH_SHARE = 0.55;
@@ -1246,7 +1297,9 @@ export interface UntaggedCues {
   /**
    * The {@link setback} of the nearest house-sized footprint whose outline
    * comes within `metres` of this one's: untagged, or mapped as a home, of
-   * {@link HOUSE_SIZED_AREA}. `undefined` where there is none.
+   * {@link HOUSE_SIZED_AREA}, and kept by the planner — one it drops is not
+   * drawn, so it is no neighbour (the owner's ruling of 2026-11-03).
+   * `undefined` where there is none.
    */
   homeSetback(metres: number): number | undefined;
 }
@@ -1421,6 +1474,8 @@ const STREAM_HOUSE_MODEL = 31;
 const STREAM_STOREYS = 32;
 /** #1785: whether an archetype's roof is its variant, and which end a side-hipped roof hips. */
 const STREAM_ROOF_VARIANT = 33;
+/** #2021: which end a steeple stands at, where the street cannot tell. */
+const STREAM_STEEPLE = 34;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -2043,6 +2098,8 @@ class HomeNeighbours {
   constructor(buildings: readonly BuildingFeature[], streets: StreetSetbacks) {
     this.#streets = streets;
     buildings.forEach((building, index) => {
+      // A part stands inside its building: it is not a neighbour.
+      if (building.kind !== 'building') return;
       const outer = building.rings[0];
       if (outer === undefined || outer.length < 6) return;
       const family = buildingFamilyOf(building.buildingType, building.landmark);
@@ -2061,8 +2118,15 @@ class HomeNeighbours {
   /**
    * The setback of the house-sized footprint, not the `own`th, whose outline
    * comes nearest `ring`'s, if it comes within `metres`; else `undefined`.
+   * Only a footprint the planner `kept` counts (the owner's ruling of
+   * 2026-11-03), asked only of one that would be nearer than any so far.
    */
-  setbackNear(own: number, ring: Ring, metres: number): number | undefined {
+  setbackNear(
+    own: number,
+    ring: Ring,
+    metres: number,
+    kept: (index: number) => boolean,
+  ): number | undefined {
     let nearest: number | undefined;
     let least = metres * metres;
     const seen = new Set<number>();
@@ -2072,7 +2136,7 @@ class HomeNeighbours {
         seen.add(index);
         const other = this.#rings.get(index) as Ring;
         const gap = ringToRingSquared(ring, other);
-        if (gap <= least) {
+        if (gap <= least && kept(index)) {
           least = gap;
           nearest = index;
         }
@@ -2116,12 +2180,15 @@ function ringToRingSquared(a: Ring, b: Ring): number {
 class Untagged {
   readonly rules: InferenceRules;
   readonly #corridor: WorldCorridor;
+  readonly #kept: (index: number) => boolean;
   #homes: HomeNeighbours | undefined;
   #streets: StreetSetbacks | undefined;
 
-  constructor(corridor: WorldCorridor, rules: InferenceRules) {
+  /** `kept` says whether the planner keeps the corridor's `index`th footprint. */
+  constructor(corridor: WorldCorridor, rules: InferenceRules, kept: (index: number) => boolean) {
     this.#corridor = corridor;
     this.rules = rules;
+    this.#kept = kept;
   }
 
   /** The `own`th footprint's cues, its `outer` ring as mapped, its `area` and its stretch's class. */
@@ -2139,7 +2206,7 @@ class Untagged {
       setback: () => streets().of(outer),
       homeSetback: (metres) => {
         this.#homes ??= new HomeNeighbours(this.#corridor.buildings, streets());
-        return this.#homes.setbackNear(own, outer, metres);
+        return this.#homes.setbackNear(own, outer, metres, this.#kept);
       },
     };
   }
@@ -4654,6 +4721,97 @@ function chimney(
   );
 }
 
+/** Where a steeple stands — #2021: its tower's centre, its axis and half its side. */
+interface SteepleSite {
+  readonly cx: number;
+  readonly cz: number;
+  readonly ux: number;
+  readonly uz: number;
+  readonly half: number;
+}
+
+/**
+ * A place of worship's steeple site — #2021: at the `end` (±1) of `rectangle`'s
+ * long axis, {@link STEEPLE}'s size, stepped inward until its tower stands on
+ * `ring`; `undefined` where it never does, or the footprint is too narrow or
+ * too short for a tower beside a nave.
+ */
+function steepleSiteOf(ring: Ring, rectangle: Rectangle, end: number): SteepleSite | undefined {
+  const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
+  const half = Math.min(STEEPLE.most, Math.max(STEEPLE.least, STEEPLE.share * 2 * halfShort)) / 2;
+  // Narrower than the tower and a metre, or too short for a nave behind it: no room.
+  if (2 * halfShort < 2 * half + 1 || 2 * halfLong < (1 + STEEPLE.nave) * 2 * half) {
+    return undefined;
+  }
+  // The part of the tower that must stand on the footprint: all but its proud face.
+  const inner = half - STEEPLE.proud - STEEPLE.seat;
+  for (let back = 0; back <= halfLong - half; back += STEEPLE.step) {
+    const along = end * (halfLong - half + STEEPLE.proud - back);
+    const x = cx + ux * along;
+    const z = cz + uz * along;
+    const on = [
+      [inner, inner],
+      [inner, -inner],
+      [-inner, inner],
+      [-inner, -inner],
+    ].every(([e, n]) =>
+      insideRing(
+        ring,
+        x + ux * (e as number) + uz * (n as number),
+        z + uz * (e as number) - ux * (n as number),
+      ),
+    );
+    if (on) return { cx: x, cz: z, ux, uz, half };
+  }
+  return undefined;
+}
+
+/**
+ * A steeple — #2021: a square tower from `bottom` to `top`, plain and in the
+ * walls' cladding, into `wall`, and its pyramidal spire, in the roof's, into
+ * `roof`: 12 triangles, and none past the roles a plan already has.
+ */
+function steeple(
+  writing: Pick<Writing, 'wall' | 'roof'>,
+  site: SteepleSite,
+  heights: readonly [bottom: number, top: number, floor: number],
+  styles: { readonly wall: Style; readonly roof: Style },
+): void {
+  const { cx, cz, ux, uz, half } = site;
+  const [, top] = heights;
+  box(writing.wall, [cx, cz], [ux, uz], [half, half], heights, plainIn(styles.wall), {
+    top: false,
+    bottom: false,
+  });
+  const rise = 2 * half * STEEPLE.spire;
+  const apex: Vec = [cx, top + rise, cz];
+  const slant = Math.hypot(rise, half);
+  // Each face's outward axis `(dx, dz)`; its base runs along `(dz, −dx)`.
+  for (const [dx, dz] of [
+    [ux, uz],
+    [-ux, -uz],
+    [uz, -ux],
+    [-uz, ux],
+  ] as const) {
+    const corner = (side: number): Vec => [
+      cx + dx * half + dz * side * half,
+      top,
+      cz + dz * half - dx * side * half,
+    ];
+    triangle(
+      writing.roof,
+      [corner(-1), corner(1), apex],
+      [(dx * rise) / slant, half / slant, (dz * rise) / slant],
+      [
+        [-half / STOREY_METRES, 0],
+        [half / STOREY_METRES, 0],
+        [0, slant / STOREY_METRES],
+      ],
+      plainIn(styles.roof),
+    );
+  }
+}
+
 /** How many triangles a role's floats are. */
 function trianglesOf(floats: readonly number[]): number {
   return floats.length / (3 * FOOTPRINT_VERTEX_FLOATS);
@@ -4942,12 +5100,42 @@ export function footprintPlans(
   const measured: (Measured | undefined)[] = [];
   // #1791: each footprint's mapped building type, unless the lever is off.
   const typed = options.buildingTypes ?? true;
-  // #2023: and what an untagged one is inferred to be, while the type is read.
+  // #2023: and what an untagged one is inferred to be, while the type is read. Only a house
+  // the planner keeps is a garage's neighbour (owner, 2026-11-03), so whether a footprint is
+  // kept is measured the first time a garage asks — a verdict never depends on the type.
+  const keeps = new Map<number, boolean>();
+  const kept = (index: number): boolean => {
+    let keep = keeps.get(index);
+    if (keep === undefined) {
+      const building = corridor.buildings[index] as BuildingFeature;
+      keep =
+        typeof measureFootprint(
+          building,
+          corridor,
+          land,
+          urban,
+          profile,
+          origin,
+          seed,
+          maxVertices,
+          tagged,
+          mapped,
+          false,
+          typed,
+        ) !== 'string';
+      keeps.set(index, keep);
+    }
+    return keep;
+  };
   const untagged = typed
-    ? new Untagged(corridor, {
-        outbuildings: options.inferredOutbuildings ?? true,
-        barns: options.inferredBarns ?? true,
-      })
+    ? new Untagged(
+        corridor,
+        {
+          outbuildings: options.inferredOutbuildings ?? true,
+          barns: options.inferredBarns ?? true,
+        },
+        kept,
+      )
     : undefined;
   for (const [own, building] of corridor.buildings.entries()) {
     const each = measureFootprint(
@@ -4965,6 +5153,7 @@ export function footprintPlans(
       typed,
       untagged === undefined ? undefined : { untagged, own },
     );
+    keeps.set(own, typeof each !== 'string');
     if (typeof each === 'string') {
       counts[each] += 1;
       measured.push(undefined);
@@ -4998,6 +5187,7 @@ export function footprintPlans(
           dormers: options.dormerVariants ?? true,
           porches: options.archetypePorches ?? true,
           buildings: options.commercialArchetypes ?? true,
+          steeples: options.steeples ?? true,
         },
       ),
     );
@@ -5756,6 +5946,9 @@ function measureFootprint(
   const span =
     building.heightMetres === null ? null : Math.max(0, building.heightMetres - minHeight);
   const landClass = land.classAt(centroid.x, centroid.z);
+  // #2023: taken before the type, because inferring it may measure whether a neighbour is
+  // kept, and that measure reuses `nearSegments`.
+  const segments = nearSegments.slice();
   // #1791: what its mapped type draws it as, which overrides the land's guess. #2023: or,
   // untagged, what it is inferred to be — never over a mapped type.
   const mappedFamily = typed
@@ -5766,7 +5959,8 @@ function measureFootprint(
       ? { family: mappedFamily, inferred: false }
       : footprintKindOf(
           mappedFamily,
-          mappedFamily === undefined
+          // A `building_part` stands inside its building and is never inferred a type of its own.
+          mappedFamily === undefined && building.kind === 'building'
             ? inference.untagged.cuesOf(inference.own, outer, area, urbanClass)
             : undefined,
           inference.untagged.rules,
@@ -5809,7 +6003,7 @@ function measureFootprint(
     centroid,
     drawn,
     road,
-    segments: nearSegments.slice(),
+    segments,
     urbanClass,
     lowest,
     area,
@@ -5913,6 +6107,14 @@ export interface FootprintPlanOptions {
    */
   readonly mappedRoofShape?: boolean;
   /**
+   * #2021: a mapped place of worship — the `worship` landmark, or a church, a
+   * chapel or a cathedral — given a steeple ({@link STEEPLE}) at the end of
+   * its long axis facing the street; `true` by default, and only while
+   * `buildingTypes` is on. Off, every one is #1791's plain civic block, as
+   * before (`?levers=-steeples`).
+   */
+  readonly steeples?: boolean;
+  /**
    * #2023: an untagged footprint inferred a garage or a shed from its size,
    * shape, a house beside it and its setback from the street
    * ({@link footprintKindOf}), and drawn as #1791's; `true` by default, and
@@ -5975,6 +6177,8 @@ interface ArchetypeChoice {
   readonly porches?: boolean;
   /** #1783: whether a commercial or multi-family footprint is given its archetype (`-commercial-archetypes` off). */
   readonly buildings?: boolean;
+  /** #2021: whether a mapped place of worship is given its steeple (`-steeples` off). */
+  readonly steeples?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -6482,13 +6686,39 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  /** What one build drew of #1588's extras, and #1590's cornice. */
+  // #2021: a mapped place of worship's steeple, at the end of its long axis away from its
+  // front door (the owner's ruling of 2026-11-03), and seeded where the door is within `tell`
+  // of the axis's middle, or there is none.
+  const steepleAt = ((): SteepleSite | undefined => {
+    if (choice.steeples !== true || part || family !== 'civic') return undefined;
+    if (!isWorship(building.buildingType, building.landmark)) return undefined;
+    const doorAlong =
+      frontFrame === undefined
+        ? 0
+        : (frontFrame.mx - rectangle.cx) * rectangle.ux +
+          (frontFrame.mz - rectangle.cz) * rectangle.uz;
+    const end =
+      Math.abs(doorAlong) >= STEEPLE.tell
+        ? doorAlong > 0
+          ? -1
+          : 1
+        : share(STREAM_STEEPLE) < 0.5
+          ? 1
+          : -1;
+    return steepleSiteOf(drawn, rectangle, end);
+  })();
+  /** What one build drew of #1588's extras, #1590's cornice and #2021's steeple. */
   interface Extras {
     garage: boolean;
     dormers: number;
     cornice: boolean;
+    steeple: boolean;
   }
-  const build = (withHoles: boolean, withCornice: boolean): { writing: Writing; drew: Extras } => {
+  const build = (
+    withHoles: boolean,
+    withCornice: boolean,
+    withSteeple: boolean,
+  ): { writing: Writing; drew: Extras } => {
     const rings = withHoles ? [drawn, ...holes] : [drawn];
     const writing: Writing = {
       wall: [],
@@ -6506,7 +6736,9 @@ function planFootprint(
       'porch-roof': [],
       'porch-trim': [],
     };
-    const drew: Extras = { garage: false, dormers: 0, cornice: false };
+    const drew: Extras = { garage: false, dormers: 0, cornice: false, steeple: false };
+    // #2021: the top of the roof, which a steeple's tower stands above.
+    let roofTop = eaves + PARAPET_METRES;
     // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
     const corniced = withCornice && roof === 'flat' && (use === 'commercial' || terraced) && !part;
     // #1679: and the walls under it say so, as the parapet's face does.
@@ -6573,6 +6805,7 @@ function planFootprint(
         const its = roofOver(other, { roof: roofStyle, gable: wallStyle, overhang });
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
+      roofTop = stack.ridge.top;
       if (withChimney) {
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], chimneyEnd);
       }
@@ -6626,6 +6859,13 @@ function planFootprint(
           );
         }
       }
+    }
+    if (withSteeple && steepleAt !== undefined) {
+      steeple(writing, steepleAt, [base, roofTop + STEEPLE.above, floor], {
+        wall: wallStyle,
+        roof: roofStyle,
+      });
+      drew.steeple = true;
     }
     if (frontFrame !== undefined) {
       // #1791: a mapped garage's door is its garage door, and a civic block's and a shed's plain.
@@ -6696,9 +6936,12 @@ function planFootprint(
   // does without it before it does without its holes, and only a plan that
   // drew one is built again for it.
   const holed = holes.length > 0;
-  let built = build(holed, true);
-  if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
-  if (holed && !fits(built.writing)) built = build(false, false);
+  let built = build(holed, true, true);
+  if (!fits(built.writing) && built.drew.cornice) built = build(holed, false, true);
+  // #2021: a steeple that will not fit is left off before the holes are, and put back once
+  // they are: a civic block has no garage, porch or dormer, so without its holes there is room.
+  if (!fits(built.writing) && built.drew.steeple) built = build(holed, false, false);
+  if (holed && !fits(built.writing)) built = build(false, false, true);
   // #1785: a roof variant that will not fit falls back to the plain roof, then as before.
   if (variant !== 'plain' && !fits(built.writing)) {
     return planFootprint(
@@ -6837,6 +7080,7 @@ function planFootprint(
       cornice: drew.cornice,
     },
     porch: frontPorchSpec !== undefined,
+    steeple: drew.steeple,
     frontStep,
     urban: urbanClass,
     family,
