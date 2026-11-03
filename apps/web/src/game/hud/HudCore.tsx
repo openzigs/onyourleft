@@ -49,6 +49,7 @@ import {
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
 import { isLapRaceReading, riderHolds } from './lap-race-hud';
+import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
 import { SteerKeys } from './SteerKeys';
@@ -289,6 +290,16 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         props.steering === undefined &&
         props.items === undefined ? null : (
           <GamepadIntents throwing={props.throwing} steering={props.steering} items={props.items} />
+        )}
+        {/* #1827: a paired steering controller's lane changes, lanes and throws, to a round's ports. Nothing drawn. */}
+        {props.controller === undefined ||
+        (props.throwing === undefined && props.steering === undefined) ? null : (
+          <ControllerIntents
+            controller={props.controller}
+            throwing={props.throwing}
+            steering={props.steering}
+            lanes={props.lanes}
+          />
         )}
         {props.moreActions}
       </div>

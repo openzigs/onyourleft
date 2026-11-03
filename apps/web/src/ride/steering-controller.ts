@@ -27,18 +27,21 @@
 
 import { OPEN_BIKE_CONTROL_BUTTON, type OpenBikeControlEvent } from '@onyourleft/sensors/protocol';
 
+import { CONTROLLER_THROW_BUTTONS } from '../game/delivery/controller-input';
 import type { ControllerPort } from '../game/delivery/controller-port';
 
 import type { SteeringControllerLink, SteeringControllerPort } from './steering-controller-port';
 
 /**
- * The buttons the app tells a controller it acts on: steer left, steer right
- * and the handlebar angle. #1827 adds the two it throws with.
+ * The buttons the app tells a controller it acts on: steer left, steer right,
+ * the handlebar angle, and the two Delivery throws with (#1827,
+ * `game/delivery/controller-input.ts` §`CONTROLLER_THROW_BUTTONS`).
  */
 export const STEERING_CONTROLLER_BUTTONS: readonly number[] = [
   OPEN_BIKE_CONTROL_BUTTON.steerLeft,
   OPEN_BIKE_CONTROL_BUTTON.steerRight,
   OPEN_BIKE_CONTROL_BUTTON.steeringAngle,
+  ...Object.keys(CONTROLLER_THROW_BUTTONS).map(Number),
 ];
 
 /** Why a pairing ended with nothing paired. */
