@@ -264,9 +264,10 @@
  * A mapped place of worship — the `worship` landmark, or a church, a chapel
  * or a cathedral (`building-types.ts` §`isWorship`) — is #1791's civic block
  * with a **steeple** ({@link STEEPLE}, {@link steepleSiteOf}): a square tower
- * at the end of the footprint's long axis that faces the street (the end
- * nearer the road; seeded where the two are as near), a touch proud of the end
- * wall, stepped inward until it stands on the footprint, rising above the
+ * at the end of the footprint's long axis away from its front door (the
+ * owner's ruling of 2026-11-03; seeded where the door is midway), a touch
+ * proud of the end wall, stepped inward until it stands on the footprint,
+ * rising above the
  * roof under a pyramidal spire. Its tower is `wall` in the walls' cladding and
  * its spire `roof`, so it costs 12 triangles, on the far level too, and no
  * draw call. Over a cap it is left off before a courtyard's holes are. A
@@ -921,11 +922,14 @@ export const CHIMNEY = { along: 0.6, across: 0.9, above: 0.9 } as const;
  * from `least` to `most` metres, standing `above` metres over the roof, under
  * a pyramidal spire `spire` times its side high, on a footprint long enough
  * for a nave of `nave` tower sides behind it. It stands at the end of the
- * long axis that faces the street, `proud` metres out past the end wall so
- * the two never share a plane and the roof's eaves ({@link EAVES_OVERHANG_METRES})
- * end inside the tower rather than through its face, and steps `step` metres inward until it stands
- * on the footprint (its inner corners `seat` metres inside the wall); where the two ends' distances from the road differ by
- * less than `tell` metres, the end is seeded.
+ * long axis away from the front door (the owner's ruling of 2026-11-03), so
+ * the church's own door stays on its wall, `proud` metres out past the end
+ * wall so the two never share a plane and the roof's eaves
+ * ({@link EAVES_OVERHANG_METRES}) end inside the tower rather than through its
+ * face, and steps `step` metres inward until it stands on the footprint (its
+ * inner corners `seat` metres inside the wall); where the
+ * door's middle is within `tell` metres of the axis's middle, or there is no
+ * door, the end is seeded.
  */
 export const STEEPLE = {
   share: 0.4,
@@ -6119,28 +6123,22 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  // #2021: a mapped place of worship's steeple, at the end of its long axis that faces the
-  // street — the end nearer the road, where the two differ by `tell`, and seeded where not.
-  const endDistance = (end: number): number | undefined =>
-    nearestOnRoadSegments(
-      road,
-      segments,
-      rectangle.cx + rectangle.ux * end * rectangle.halfLong,
-      rectangle.cz + rectangle.uz * end * rectangle.halfLong,
-      beside,
-    )
-      ? beside.distance
-      : undefined;
+  // #2021: a mapped place of worship's steeple, at the end of its long axis away from its
+  // front door (the owner's ruling of 2026-11-03), and seeded where the door is within `tell`
+  // of the axis's middle, or there is none.
   const steepleAt = ((): SteepleSite | undefined => {
     if (choice.steeples !== true || part || family !== 'civic') return undefined;
     if (!isWorship(building.buildingType, building.landmark)) return undefined;
-    const ahead = endDistance(1);
-    const behind = endDistance(-1);
+    const doorAlong =
+      frontFrame === undefined
+        ? 0
+        : (frontFrame.mx - rectangle.cx) * rectangle.ux +
+          (frontFrame.mz - rectangle.cz) * rectangle.uz;
     const end =
-      ahead !== undefined && behind !== undefined && Math.abs(ahead - behind) >= STEEPLE.tell
-        ? ahead < behind
-          ? 1
-          : -1
+      Math.abs(doorAlong) >= STEEPLE.tell
+        ? doorAlong > 0
+          ? -1
+          : 1
         : share(STREAM_STEEPLE) < 0.5
           ? 1
           : -1;
@@ -6309,27 +6307,9 @@ function planFootprint(
     if (frontFrame !== undefined) {
       // #1791: a mapped garage's door is its garage door, and a civic block's and a shed's plain.
       if (doorKind !== 'none') {
-        // #2021: a steeple's tower standing across the door's wall carries the door on its face.
-        const onTower =
-          withSteeple &&
-          steepleAt !== undefined &&
-          Math.abs(
-            (frontFrame.mx + frontFrame.nx * STEEPLE.proud * 0.5 - steepleAt.cx) * steepleAt.ux +
-              (frontFrame.mz + frontFrame.nz * STEEPLE.proud * 0.5 - steepleAt.cz) * steepleAt.uz,
-          ) <= steepleAt.half &&
-          Math.abs(
-            (frontFrame.mx + frontFrame.nx * STEEPLE.proud * 0.5 - steepleAt.cx) * steepleAt.uz -
-              (frontFrame.mz + frontFrame.nz * STEEPLE.proud * 0.5 - steepleAt.cz) * steepleAt.ux,
-          ) <= steepleAt.half;
         door(
           writing.door,
-          onTower
-            ? {
-                ...frontFrame,
-                mx: frontFrame.mx + frontFrame.nx * STEEPLE.proud,
-                mz: frontFrame.mz + frontFrame.nz * STEEPLE.proud,
-              }
-            : frontFrame,
+          frontFrame,
           floor,
           shop === undefined ? NO_STYLE : [CLAD_PHOTOGRAPH, STYLE_COMMERCIAL, 0, -1],
           doorKind === 'plain',

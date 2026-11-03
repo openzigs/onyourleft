@@ -2,8 +2,8 @@
 
 /**
  * #2021: a mapped place of worship gets a steeple — a square tower and a
- * pyramidal spire at the end of its long axis that faces the street — where
- * #1791 drew a plain civic block. Held where a rider sees it: the plans
+ * pyramidal spire at the end of its long axis away from its front door (the
+ * owner's ruling of 2026-11-03) — where #1791 drew a plain civic block. Held where a rider sees it: the plans
  * `footprintPlans` returns, their `steeple` flag and the `wall` and `roof`
  * vertex floats the belt uploads.
  */
@@ -97,14 +97,14 @@ function lateralOf(x: number, z: number, along: number): number {
   return (x - frame.x) * frame.normalX + (z - frame.z) * frame.normalZ;
 }
 
-/** The nearest any vertex of `role` comes to the road at `along`, metres out: the lowest lateral. */
-function nearestToRoad(plan: FootprintPlan, role: 'wall' | 'roof' | 'door'): number {
+/** The laterals of every vertex of `role` at `along` 1 000 m: how far out from the road each is. */
+function lateralsOf(plan: FootprintPlan, role: 'wall' | 'roof' | 'door'): number[] {
   const floats = plan.triangles[role];
-  let nearest = Number.POSITIVE_INFINITY;
+  const out: number[] = [];
   for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
-    nearest = Math.min(nearest, lateralOf(floats[at] as number, floats[at + 2] as number, 1_000));
+    out.push(lateralOf(floats[at] as number, floats[at + 2] as number, 1_000));
   }
-  return nearest;
+  return out;
 }
 
 /** Whether `(x, z)` stands inside a plan's drawn footprint. */
@@ -161,8 +161,9 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
     expect(churches).toBe(2);
   });
 
-  it('stands its spire above the roof, at the end of the long axis that faces the street', () => {
-    // 10 m along the road by 24 m deep: its long axis runs away from the road.
+  it('stands its spire above the roof, at the end of the long axis away from the door', () => {
+    // 10 m along the road by 24 m deep: its long axis runs away from the road, and its door
+    // is on the wall that faces the road.
     const plan = planOne([rectangleBeside(1_000, 40, 10, 24)], CHURCH);
     expect(plan.steeple).toBe(true);
     const [x, y, z] = apexOf(plan);
@@ -173,12 +174,12 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
     );
     expect(ridge[1]).toBeGreaterThan(plan.eaves + 1);
     expect(y).toBeCloseTo(ridge[1] + STEEPLE.above + STEEPLE.spire * side, 1);
-    // At the street's end: its front wall is 28 m out, the far wall 52 m.
-    expect(lateralOf(x, z, 1_000)).toBeCloseTo(28 + side / 2 - STEEPLE.proud, 1);
-    // And mirrored across the road, still the street's end.
+    // At the far end: its front wall, with the door, is 28 m out, the far wall 52 m.
+    expect(lateralOf(x, z, 1_000)).toBeCloseTo(52 - side / 2 + STEEPLE.proud, 1);
+    // And mirrored across the road, still the far end.
     const mirrored = planOne([rectangleBeside(1_000, -40, 10, 24)], CHURCH);
     const [mx, , mz] = apexOf(mirrored);
-    expect(lateralOf(mx, mz, 1_000)).toBeCloseTo(-(28 + side / 2 - STEEPLE.proud), 1);
+    expect(lateralOf(mx, mz, 1_000)).toBeCloseTo(-(52 - side / 2 + STEEPLE.proud), 1);
   });
 
   it('stands it at one end of the long axis where the street cannot tell the two apart', () => {
@@ -195,56 +196,63 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
   });
 
   it('steps a steeple inward to stand on a notched end, and leaves none off a footprint too small', () => {
-    // A cross: the nave 10 by 30 m, away from the road, with transepts, and before it a
-    // porch 4 m wide and 3 m deep, narrower than the 6 m tower.
+    // A cross: the nave 10 by 30 m, away from the road, its door on the front wall, with
+    // transepts, and behind it an apse 4 m wide and 3 m deep, narrower than the 6 m tower.
     const cross = planOne(
       [
         [
-          [998, 25],
-          [1_002, 25],
-          [1_002, 28],
-          [1_005, 28],
+          [995, 25],
+          [1_005, 25],
           [1_005, 40],
           [1_011, 40],
           [1_011, 46],
           [1_005, 46],
-          [1_005, 55],
-          [995, 55],
+          [1_005, 52],
+          [1_002, 52],
+          [1_002, 55],
+          [998, 55],
+          [998, 52],
+          [995, 52],
           [995, 46],
           [989, 46],
           [989, 40],
           [995, 40],
-          [995, 28],
-          [998, 28],
         ],
       ],
       CHURCH,
     );
     expect(cross.steeple).toBe(true);
     const [x, , z] = apexOf(cross);
-    // On the footprint, nearer the street than its middle: stepped back a metre at a time
-    // off the porch (its front at 25 m, the tower 6 m a side) onto the nave, 3 m in.
+    // On the footprint, farther from the door than its middle: stepped in a metre at a time
+    // off the apse (its back at 55 m, the tower 6 m a side) onto the nave, 3 m in.
     expect(insideFootprint(cross, x, z)).toBe(true);
-    expect(lateralOf(x, z, 1_000)).toBeCloseTo(25 + 3 - STEEPLE.proud + 3 * STEEPLE.step, 1);
+    expect(lateralOf(x, z, 1_000)).toBeCloseTo(55 - 3 + STEEPLE.proud - 3 * STEEPLE.step, 1);
     // A 6 by 5 m chapel has no room for a tower beside a nave.
     expect(
       planOne([rectangleBeside(1_000, 30, 6, 5)], { type: 'chapel', landmark: null }).steeple,
     ).toBe(false);
   });
 
-  it('shows the front door on the tower’s face, and ends the roof’s eaves inside the tower', () => {
+  it('keeps the church’s door on its own wall, clear of the tower, and ends the eaves inside the tower', () => {
     const at = [rectangleBeside(1_000, 40, 10, 24)];
     const plan = planOne(at, CHURCH);
     const bare = planOne(at, CHURCH, { steeples: false });
-    // The tower's face stands `proud` out past the front wall, 28 m out from the road.
-    const face = nearestToRoad(plan, 'wall');
-    expect(face).toBeCloseTo(28 - STEEPLE.proud, 2);
-    // The door is on that face, not behind it — and still on the wall where there is no steeple.
-    expect(nearestToRoad(plan, 'door')).toBeLessThan(face);
-    expect(nearestToRoad(plan, 'door')).toBeGreaterThan(face - 0.1);
-    expect(nearestToRoad(bare, 'door')).toBeGreaterThan(27.9);
-    // No eave of the roof sticks out through the tower's face.
-    expect(nearestToRoad(plan, 'roof')).toBeGreaterThanOrEqual(face - 1e-6);
+    const side = Math.min(STEEPLE.most, Math.max(STEEPLE.least, STEEPLE.share * 10));
+    // The door is on the wall facing the road, 28 m out, exactly where it is without a steeple.
+    const door = lateralsOf(plan, 'door');
+    expect(door.length).toBeGreaterThan(0);
+    expect(plan.triangles.door).toEqual(bare.triangles.door);
+    for (const lateral of door) expect(Math.abs(lateral - 28)).toBeLessThan(0.1);
+    // Nothing of the walls stands proud of the door's wall: no tower across it.
+    expect(Math.min(...lateralsOf(plan, 'wall'))).toBeCloseTo(28, 2);
+    // The tower's square stands at the far end, a nave clear of the door's wall.
+    const [x, , z] = apexOf(plan);
+    const near = lateralOf(x, z, 1_000) - side / 2;
+    expect(near).toBeGreaterThanOrEqual(28 + STEEPLE.nave * side - 1e-6);
+    // Its far face stands `proud` out past the far wall, and no eave sticks out through it.
+    const face = Math.max(...lateralsOf(plan, 'wall'));
+    expect(face).toBeCloseTo(52 + STEEPLE.proud, 2);
+    expect(Math.max(...lateralsOf(plan, 'roof'))).toBeLessThanOrEqual(face + 1e-6);
   });
 
   it('gives a building part no steeple', () => {

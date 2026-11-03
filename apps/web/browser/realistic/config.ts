@@ -289,7 +289,7 @@ export type Layer = (typeof LAYERS)[number];
  *   reads the type.
  * - `steeples` — #2021: a mapped place of worship (the `worship` landmark, or
  *   a church, a chapel or a cathedral) given a square tower and a pyramidal
- *   spire at the end of its long axis that faces the street
+ *   spire at the end of its long axis away from its front door
  *   (`footprint-buildings.ts` §`STEEPLE`), 12 triangles in its walls and roof.
  *   Off, every one is #1791's plain civic block, as before, byte for byte.
  *   Read at load, as `building-type` is, and only while it is on. The owner's
