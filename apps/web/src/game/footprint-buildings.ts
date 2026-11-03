@@ -1987,6 +1987,8 @@ class HomeNeighbours {
   constructor(buildings: readonly BuildingFeature[], streets: StreetSetbacks) {
     this.#streets = streets;
     buildings.forEach((building, index) => {
+      // A part stands inside its building: it is not a neighbour.
+      if (building.kind !== 'building') return;
       const outer = building.rings[0];
       if (outer === undefined || outer.length < 6) return;
       const family = buildingFamilyOf(building.buildingType, building.landmark);
@@ -5705,7 +5707,8 @@ function measureFootprint(
       ? { family: mappedFamily, inferred: false }
       : footprintKindOf(
           mappedFamily,
-          mappedFamily === undefined
+          // A `building_part` stands inside its building and is never inferred a type of its own.
+          mappedFamily === undefined && building.kind === 'building'
             ? inference.untagged.cuesOf(inference.own, outer, area)
             : undefined,
           inference.untagged.rules,

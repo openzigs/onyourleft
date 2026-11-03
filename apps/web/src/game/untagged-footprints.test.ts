@@ -29,7 +29,14 @@ import {
   type InferenceRules,
   type UntaggedCues,
 } from './footprint-buildings';
-import { planFingerprint, ringBeside, untaggedStreetFixture } from './footprint-fixtures-testing';
+import {
+  buildingBeside,
+  landBeside,
+  planFingerprint,
+  rectangleBeside,
+  ringBeside,
+  untaggedStreetFixture,
+} from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import { urbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
@@ -407,5 +414,113 @@ describe('#2023: the lever', () => {
   it('infers nothing while the type is not read (`buildingTypes: false`)', () => {
     const plans = plannedStreet({ buildingTypes: false });
     expect(plans.some((plan) => plan.inferred)).toBe(false);
+  });
+});
+
+describe('#2023: the neighbours the rule reads', () => {
+  /** A footprint `along` the road, `lateral` out, mapped as `buildingType` (or untagged), a part if `part` is given. */
+  type Placed = readonly [
+    footprint: readonly (readonly [number, number])[],
+    buildingType?: BuildingFeature['buildingType'],
+    part?: { readonly minHeightMetres: number },
+  ];
+
+  /**
+   * The fixture's road and land, widened to 250 m, with only `placed` standing on it, on the
+   * road's `side` — the grid the rule searches is not symmetric about the road.
+   */
+  function plannedOwn(placed: readonly Placed[], side = 1): readonly FootprintPlan[] {
+    const street = untaggedStreetFixture();
+    const at = (
+      ring: readonly (readonly [number, number])[],
+    ): readonly (readonly [number, number])[] =>
+      ring.map(([a, n]) => [1_100 + a, side * n] as const);
+    return plannedStreet(
+      {},
+      {
+        ...street.corridor,
+        landUse: [
+          landBeside(
+            street.profile,
+            street.origin,
+            'landuse',
+            'residential',
+            950,
+            2_020,
+            -250,
+            250,
+          ),
+        ],
+        buildings: placed.map(([ring, buildingType, part]) => ({
+          ...buildingBeside(street.profile, street.origin, [at(ring)], null, part),
+          buildingType: buildingType ?? null,
+        })),
+      },
+    );
+  }
+
+  const FRONT = rectangleBeside(0, 22, 12, 9);
+  const GARAGE = rectangleBeside(0, 40, 6, 6);
+
+  it('infers a garage behind a house that is mapped as one', () => {
+    expect(plannedOwn([[GARAGE], [FRONT, 'house']])[0]?.family).toBe('garage');
+    // Control: behind a footprint mapped as a shop, none.
+    expect(plannedOwn([[GARAGE], [FRONT, 'retail']])[0]?.family).toBeUndefined();
+  });
+
+  it('measures the house nearest the footprint, not any within 40 m', () => {
+    // The front house is nearer the garage and nearer the street than it; the back one is
+    // farther from the garage, but farther from the street than the garage is.
+    const back = rectangleBeside(0, 62, 12, 9);
+    for (const side of [1, -1]) {
+      for (const order of [
+        [[GARAGE], [FRONT], [back]],
+        [[GARAGE], [back], [FRONT]],
+      ] as const) {
+        expect(plannedOwn(order, side)[0]?.family).toBe('garage');
+      }
+    }
+    // Control: without the front house the back one is the garage's house, and it is set back farther.
+    expect(plannedOwn([[GARAGE], [back]])[0]?.family).toBeUndefined();
+  });
+
+  it('reads no street farther than 150 m: a footprint beyond it stands level with a house beyond it', () => {
+    for (const side of [1, -1]) {
+      expect(
+        plannedOwn([[rectangleBeside(0, 183, 6, 6)], [rectangleBeside(0, 165, 12, 9)]], side)[0]
+          ?.family,
+      ).toBeUndefined();
+      // Control: a house 140 m out, the garage 160 m: set back.
+      expect(
+        plannedOwn([[rectangleBeside(0, 163, 6, 6)], [rectangleBeside(0, 145, 12, 9)]], side)[0]
+          ?.family,
+      ).toBe('garage');
+    }
+  });
+
+  it('infers nothing of a part: it stands inside its building', () => {
+    // A 5 m square at ground level inside an untagged house, set back from its front like a garage.
+    const house = rectangleBeside(0, 22, 14, 12);
+    const inside = rectangleBeside(0, 24, 5, 5);
+    const ground = plannedOwn([[house], [inside, undefined, { minHeightMetres: 0 }]]);
+    expect(ground.map((plan) => plan.family)).toStrictEqual([undefined, undefined]);
+    expect(ground.map((plan) => plan.inferred)).toStrictEqual([false, false]);
+    expect(garageDoorVertices(ground[1] as FootprintPlan)).toBe(0);
+    // A raised 4 m square is no shed, and keeps its windows as the lever off draws it.
+    const tower = plannedOwn([
+      [house],
+      [rectangleBeside(0, 24, 4, 4), undefined, { minHeightMetres: 6 }],
+    ]);
+    expect(tower[1]?.family).toBeUndefined();
+    expect(tower[1]?.inferred).toBe(false);
+    expect(windowFaces(tower[1] as FootprintPlan)).toBeGreaterThan(0);
+  });
+
+  it('counts no part as the house a garage stands behind', () => {
+    // A house-sized part in front of the garage, and no building: no garage.
+    const plans = plannedOwn([[GARAGE], [FRONT, undefined, { minHeightMetres: 0 }]]);
+    expect(plans[0]?.family).toBeUndefined();
+    // Control: the same footprint as a building is the garage's house.
+    expect(plannedOwn([[GARAGE], [FRONT]])[0]?.family).toBe('garage');
   });
 });
