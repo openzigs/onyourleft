@@ -69,6 +69,16 @@ export function reportText(sequence: number, atMs: number, powerWatts: number): 
   return encodeMessage({ type: 'report', sequence, atMs, powerWatts });
 }
 
+/** A lap race's item use (#1909). */
+export function useText(sequence: number, atMs: number): string {
+  return encodeMessage({ type: 'item-use', sequence, atMs });
+}
+
+/** A lap race's lane change (#1909). */
+export function laneText(sequence: number, atMs: number, lane: number): string {
+  return encodeMessage({ type: 'lane', sequence, atMs, lane });
+}
+
 /** Every message sent to one connection, in order. */
 export function sentTo(out: readonly Outbound[], connection: ConnectionId): RoomMessage[] {
   return out.flatMap((o) => (o.kind === 'send' && o.connection === connection ? [o.message] : []));

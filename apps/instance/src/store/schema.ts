@@ -132,6 +132,12 @@ export interface RoomCourseTable {
   readonly race_finished_at: Generated<number | null>;
   /** `1` when the room drafts its riders, `0` when its maker turned drafting off (#787, 0024). */
   readonly drafting: Generated<number>;
+  /** A lap race's laps, 1–100; `null` for any other room. Set with the next two or not at all (#1910, 0037). */
+  readonly lap_laps: Generated<number | null>;
+  /** A lap race's items: `1` on, `0` off; `null` for any other room (#1910, 0037). */
+  readonly lap_items: Generated<number | null>;
+  /** A lap race's own seed, 0 to 2³² − 1; `null` for any other room. Never sent to a client (#1910, 0037). */
+  readonly lap_seed: Generated<number | null>;
 }
 
 /** One athlete's result in one room. */

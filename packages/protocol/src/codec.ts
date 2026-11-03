@@ -17,10 +17,11 @@
  * | 5 | `unknown-type` | no `type`, or one this direction does not receive |
  * | 6 | `protocol-mismatch` | a hello from another {@link PROTOCOL_VERSION} — read before any other field, because a newer build's hello may carry fields this one does not know |
  * | 7 | `physics-mismatch` | a hello from another physics version (ADR 0028 D-2 rule 5) |
- * | 8 | `unknown-key` | a key the format does not have, at any depth (ADR 0017 D-4's choice) |
- * | 9 | `missing-key` | a required key absent |
- * | 10 | `too-long` | an array over its stated bound |
- * | 11 | `bad-value` | a value of the wrong type, out of range, not matching its pattern, or repeated where it must be distinct |
+ * | 8 | `outcome-from-client` | a client message carrying a key in {@link CLIENT_OUTCOME_FIELDS} — a hit, an offset, a position: the room's to decide, never a client's to claim (#1908, ADR 0060 D-5.4) |
+ * | 9 | `unknown-key` | a key the format does not have, at any depth (ADR 0017 D-4's choice) |
+ * | 10 | `missing-key` | a required key absent |
+ * | 11 | `too-long` | an array over its stated bound |
+ * | 12 | `bad-value` | a value of the wrong type, out of range, not matching its pattern, or repeated where it must be distinct |
  *
  * ⚠️ **The decoder never throws.** Malformed input from a stranger is the
  * normal case for a room, and a throw is a code path the caller has to
@@ -36,6 +37,7 @@ import type { ClientMessage, ProtocolMessage, RoomMessage } from './messages';
 import { PROTOCOL_VERSION } from './messages';
 import {
   CLIENT_MESSAGE_TYPES,
+  CLIENT_OUTCOME_FIELDS,
   MAXIMUM_MESSAGE_BYTES,
   MAXIMUM_NESTING_DEPTH,
   MESSAGE_FIELDS,
@@ -53,6 +55,7 @@ export type RefusalReason =
   | 'unknown-type'
   | 'protocol-mismatch'
   | 'physics-mismatch'
+  | 'outcome-from-client'
   | 'unknown-key'
   | 'missing-key'
   | 'too-long'
@@ -67,6 +70,7 @@ export const REFUSAL_REASONS: readonly RefusalReason[] = [
   'unknown-type',
   'protocol-mismatch',
   'physics-mismatch',
+  'outcome-from-client',
   'unknown-key',
   'missing-key',
   'too-long',
@@ -263,11 +267,22 @@ function readValue(value: unknown, shape: Shape, path: string): unknown {
       return items;
     }
     case 'tuple': {
-      if (!Array.isArray(value) || value.length !== shape.slots.length) {
-        return refuse('bad-value', `${path} must be ${String(shape.slots.length)} values`);
+      const tail = shape.tail ?? [];
+      const whole = shape.slots.length + tail.length;
+      if (
+        !Array.isArray(value) ||
+        (value.length !== shape.slots.length && (tail.length === 0 || value.length !== whole))
+      ) {
+        return refuse(
+          'bad-value',
+          tail.length === 0
+            ? `${path} must be ${String(shape.slots.length)} values`
+            : `${path} must be ${String(shape.slots.length)} or ${String(whole)} values`,
+        );
       }
+      const slots = value.length === shape.slots.length ? shape.slots : [...shape.slots, ...tail];
       const out: Record<string, unknown> = {};
-      shape.slots.forEach((slot, index) => {
+      slots.forEach((slot, index) => {
         out[slot.name] = readValue(value[index], slot.shape, `${path}[${String(index)}]`);
       });
       return out;
@@ -328,6 +343,16 @@ function decodeWith<M extends ProtocolMessage>(
     if (messageType === 'hello') {
       readHandshake(parsed, expectations);
     }
+    if ((CLIENT_MESSAGE_TYPES as readonly string[]).includes(messageType)) {
+      for (const key of Object.keys(parsed)) {
+        if (CLIENT_OUTCOME_FIELDS.includes(key)) {
+          refuse(
+            'outcome-from-client',
+            `${messageType} carries ${named(key)}, an outcome the room decides`,
+          );
+        }
+      }
+    }
     const fields = readFields(parsed, MESSAGE_FIELDS[messageType], messageType, ['type']);
     return { ok: true, message: { type: messageType, ...fields } as M };
   } catch (error) {
@@ -356,7 +381,7 @@ function readHandshake(
 }
 
 /**
- * Decode what a **room** receives: a `hello` or a `report`, and nothing else.
+ * Decode what a **room** receives: a `hello`, a `report`, and in a lap race an `item-use` or a `lane` (#1908); nothing else.
  *
  * @param expectations the room's own physics version, which a hello must share.
  */
@@ -378,10 +403,16 @@ function toWire(value: unknown, shape: Shape): unknown {
       return fieldsToWire(value as Record<string, unknown>, shape.fields);
     case 'array':
       return (value as readonly unknown[]).map((item) => toWire(item, shape.items));
-    case 'tuple':
-      return shape.slots.map((slot) =>
-        toWire((value as Record<string, unknown>)[slot.name], slot.shape),
-      );
+    case 'tuple': {
+      const record = value as Record<string, unknown>;
+      const tail = shape.tail ?? [];
+      // The tail goes on the wire if any of it is set; a part-set tail then
+      // writes a `null` the decoder refuses, so encodeMessage throws on it.
+      const slots = tail.some((slot) => record[slot.name] !== undefined)
+        ? [...shape.slots, ...tail]
+        : shape.slots;
+      return slots.map((slot) => toWire(record[slot.name], slot.shape));
+    }
     case 'rows':
       return (value as readonly unknown[]).map((row) => toWire(row, shape.row));
     default:
@@ -421,14 +452,13 @@ export function encodeMessage(message: ProtocolMessage): string {
     type: message.type,
     ...fieldsToWire(message as unknown as Record<string, unknown>, fields),
   });
-  const decoded =
-    message.type === 'hello' || message.type === 'report'
-      ? decodeWith<ClientMessage>(
-          text,
-          CLIENT_MESSAGE_TYPES,
-          message.type === 'hello' ? { physicsVersion: message.physicsVersion } : undefined,
-        )
-      : decodeWith<RoomMessage>(text, ROOM_MESSAGE_TYPES, undefined);
+  const decoded = (CLIENT_MESSAGE_TYPES as readonly string[]).includes(message.type)
+    ? decodeWith<ClientMessage>(
+        text,
+        CLIENT_MESSAGE_TYPES,
+        message.type === 'hello' ? { physicsVersion: message.physicsVersion } : undefined,
+      )
+    : decodeWith<RoomMessage>(text, ROOM_MESSAGE_TYPES, undefined);
   if (!decoded.ok) {
     throw new ProtocolEncodeError(decoded.refusal);
   }
