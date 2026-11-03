@@ -7287,7 +7287,7 @@
     "/v1/rooms": {
       "post": {
         "operationId": "createRoom",
-        "summary": "Make a room — a group ride or a race — on the caller’s own route (#784). PRIVATE unless `visibility` is `public`: a private room answers its code, to share; a public one (#788) has a `startsAt` within the next 12 hours, no code, and is listed for eligible athletes — only where the operator turned public rooms on, by an eligible athlete, at most 3 a day. The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over.",
+        "summary": "Make a room — a group ride or a race — on the caller’s own route (#784). PRIVATE unless `visibility` is `public`: a private room answers its code, to share; a public one (#788) has a `startsAt` within the next 12 hours, no code, and is listed for eligible athletes — only where the operator turned public rooms on, by an eligible athlete, at most 3 a day. The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over. A `lapRace: { laps, items }` makes a private race a lap race on the creator’s loop, `lengthMetres` being one lap (#1910): refused for a group ride, a route that is not a loop, or a public room.",
         "security": [
           {
             "session": []
@@ -7346,6 +7346,22 @@
                   },
                   "startsAt": {
                     "type": "integer"
+                  },
+                  "lapRace": {
+                    "type": "object",
+                    "properties": {
+                      "laps": {
+                        "type": "integer"
+                      },
+                      "items": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "laps",
+                      "items"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [

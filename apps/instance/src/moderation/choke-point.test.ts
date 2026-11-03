@@ -237,6 +237,7 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   gpx: 'the creator’s own route for a room',
   visibility: 'whether a room a rider makes is private or public (#788)',
   startsAt: 'when a public room’s creator says it starts (#788)',
+  lapRace: 'a room’s lap-race setting: its laps and whether items are on (#1910)',
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
   riderId:
     'a SEAT in a room the caller is in (#789); the room itself says who sits there, and the report or removal goes through the moderators’ log',

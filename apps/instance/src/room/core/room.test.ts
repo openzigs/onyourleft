@@ -265,6 +265,23 @@ describe('what a seated rider sends that is not a report', () => {
     expect(lastFrame(out, 1).riders[0]?.flags).toBe(FLAG_COASTING);
   });
 
+  it('takes a lap race’s inputs from a seated rider and changes nothing: no lap race yet — #1908', () => {
+    // #1909 makes a room authoritative for a lap race. Until then a lane or an
+    // item use is a version-3 message a room admits and ignores, byte for byte.
+    const plain = runningRace(['ann', 'bob']);
+    const inputs = runningRace(['ann', 'bob']);
+    for (let t = 0; t < 3; t += 1) {
+      const lane = encodeMessage({ type: 'lane', sequence: t, atMs: t * SECOND + 200, lane: 2 });
+      const use = encodeMessage({ type: 'item-use', sequence: t, atMs: t * SECOND + 300 });
+      expect(inputs.receive(1, lane, t * SECOND + 200)).toEqual([]);
+      expect(inputs.receive(2, use, t * SECOND + 300)).toEqual([]);
+      expect(JSON.stringify(second(inputs, t, { 1: 250, 2: 200 }))).toBe(
+        JSON.stringify(second(plain, t, { 1: 250, 2: 200 })),
+      );
+    }
+    expect(inputs.view()).toEqual(plain.view());
+  });
+
   it('ignores a second hello on a connection that already has a seat', () => {
     const room = runningRace(['ann']);
     expect(room.receive(1, helloText('ticket-bob'), 100)).toEqual([]);
