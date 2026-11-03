@@ -75,6 +75,20 @@ export function canCloseLoop(draft: RouteDraft): boolean {
 }
 
 /**
+ * Whether the last waypoint sits back on the first, within
+ * `LOOP_CLOSURE_METRES`: the planner's map then shows the two as one
+ * start-and-finish marker (`map-edit.ts` §`mapWaypoints`). The waypoints'
+ * positions, not the line's, because a marker is drawn at a waypoint.
+ */
+export function endsAtStart(draft: RouteDraft): boolean {
+  const first = draft.waypoints[0];
+  const last = draft.waypoints.at(-1);
+  if (first === undefined || last === undefined) return false;
+  if (draft.waypoints.length < LOOP_LEAST_WAYPOINTS) return false;
+  return distanceBetween(first.position, last.position) <= LOOP_CLOSURE_METRES;
+}
+
+/**
  * Join the last waypoint back to the first: a new last waypoint where the first
  * one is, so the line ends where it starts.
  *
@@ -127,6 +141,24 @@ export function loopFit(length: Metres, targetKm: LoopTargetKm): LoopFit {
   return difference < 0
     ? { kind: 'under', by: metres(-difference) }
     : { kind: 'over', by: metres(difference) };
+}
+
+/**
+ * The next target in the direction that would help — shorter for a loop under
+ * its target, longer for one over — and only when the loop's length is
+ * nearer that target than the chosen one. `undefined` when there is none, or
+ * when it would be further off: a rider is not told to choose a target that
+ * fits the loop worse.
+ */
+export function nearerTarget(
+  length: Metres,
+  targetKm: LoopTargetKm,
+  kind: 'under' | 'over',
+): LoopTargetKm | undefined {
+  const index = LOOP_TARGETS_KM.indexOf(targetKm);
+  const next = LOOP_TARGETS_KM[kind === 'under' ? index - 1 : index + 1];
+  if (next === undefined) return undefined;
+  return Math.abs(length - next * 1000) < Math.abs(length - targetKm * 1000) ? next : undefined;
 }
 
 /** A target as the chooser names it, in the rider's units. */
@@ -200,15 +232,28 @@ export function loopReadout(
   const fit = loopFit(length, targetKm);
   const by = measurementText(formatDistance(fit.by, units));
   const percent = String(Math.round(LOOP_TARGET_TOLERANCE * 100));
+  if (fit.kind === 'near') {
+    return {
+      state,
+      length: `Loop length ${lengthText}, against a target of ${target}.`,
+      note: `It is within ${percent}% of the target.`,
+      fit,
+    };
+  }
+  // The first and the last waypoint are the loop's join, so the advice names
+  // the middle ones: moving either end opens the loop again.
+  const other = nearerTarget(length, targetKm, fit.kind);
+  const choose =
+    other === undefined
+      ? ''
+      : ` Or choose the ${loopTargetText(other, units)} target, which is nearer this length.`;
   return {
     state,
     length: `Loop length ${lengthText}, against a target of ${target}.`,
     note:
-      fit.kind === 'near'
-        ? `It is within ${percent}% of the target.`
-        : fit.kind === 'under'
-          ? `It is ${by} under the target, more than ${percent}% short. Move a waypoint further out, or choose a shorter target.`
-          : `It is ${by} over the target, more than ${percent}% long. Bring a waypoint in, or choose a longer target.`,
+      fit.kind === 'under'
+        ? `It is ${by} under the target, more than ${percent}% short. Move one of the middle waypoints further out: moving the first or the last opens the loop again.${choose}`
+        : `It is ${by} over the target, more than ${percent}% long. Bring one of the middle waypoints in: moving the first or the last opens the loop again.${choose}`,
     fit,
   };
 }

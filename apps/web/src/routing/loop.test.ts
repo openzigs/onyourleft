@@ -29,6 +29,7 @@ import {
   loopFit,
   loopReadout,
   loopTargetText,
+  nearerTarget,
   NOT_YET_A_LOOP_TEXT,
 } from './loop';
 import { RIDING_DEFAULTS } from './preferences';
@@ -136,6 +137,44 @@ describe('the length against a target', () => {
     expect(near.note).toBe('It is within 15% of the target.');
     expect(loopReadout(closed, 1, 'metric').note).toMatch(/^It is 0\.9 km over the target/);
     expect(loopReadout(closed, 3, 'metric').note).toMatch(/^It is 1\.1 km under the target/);
+  });
+
+  it('advises moving a middle waypoint, and no other target when none is nearer', () => {
+    // A smaller triangle, about 1.6 km round: 0.4 km under 2 km, and the 1 km
+    // target would be 0.6 km off, so it is not offered.
+    const small = closeLoop(
+      drawn([at(40, -105), at(40.00504, -105), at(40.00252, -104.99496)], 'freehand'),
+      'freehand',
+    ).draft;
+    expect(draftDistance(small)).toBeGreaterThan(1_550);
+    expect(draftDistance(small)).toBeLessThan(1_650);
+    expect(loopReadout(small, 2, 'metric').note).toBe(
+      'It is 0.4 km under the target, more than 15% short. Move one of the middle waypoints further out: moving the first or the last opens the loop again.',
+    );
+  });
+
+  it('offers the next target only when the loop is nearer it than the chosen one', () => {
+    // 1.6 km against 2 km: the 1 km target would be 0.6 km off, worse than 0.4 km.
+    expect(nearerTarget(metres(1_600), 2, 'under')).toBeUndefined();
+    // 2.2 km against 3 km: the 2 km target is 0.2 km off, better than 0.8 km.
+    expect(nearerTarget(metres(2_200), 3, 'under')).toBe(2);
+    // 2.6 km against 2 km: 3 km is 0.4 km off, better than 0.6 km.
+    expect(nearerTarget(metres(2_600), 2, 'over')).toBe(3);
+    // 1.2 km against 1 km: 2 km would be 0.8 km off, worse than 0.2 km.
+    expect(nearerTarget(metres(1_200), 1, 'over')).toBeUndefined();
+    // Nothing shorter than the shortest, nothing longer than the longest.
+    expect(nearerTarget(metres(100), 1, 'under')).toBeUndefined();
+    expect(nearerTarget(metres(20_000), 8, 'over')).toBeUndefined();
+  });
+
+  it('names the nearer target in the note, and the middle waypoints either way', () => {
+    const closed = closeLoop(drawn(TRIANGLE, 'freehand'), 'freehand').draft; // about 1.9 km
+    expect(loopReadout(closed, 3, 'metric').note).toBe(
+      'It is 1.1 km under the target, more than 15% short. Move one of the middle waypoints further out: moving the first or the last opens the loop again. Or choose the 2 km target, which is nearer this length.',
+    );
+    expect(loopReadout(closed, 1, 'metric').note).toBe(
+      'It is 0.9 km over the target, more than 15% long. Bring one of the middle waypoints in: moving the first or the last opens the loop again. Or choose the 2 km target, which is nearer this length.',
+    );
   });
 
   it('says a line still being routed becomes a loop once every leg has one', () => {

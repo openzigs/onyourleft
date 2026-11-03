@@ -14,7 +14,14 @@ import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
 import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  chooseOption,
+  mount,
+  queryAll,
+  settle,
+  type Mounted,
+} from '../testing/mount';
 import { NUDGE_DEGREES, RouteBuilderView } from './RouteBuilderView';
 
 let mounted: Mounted | undefined;
@@ -530,5 +537,58 @@ describe('the profile', () => {
     await place(3);
     await settle();
     expect(view.container.textContent).toContain('Steep climb');
+  });
+});
+
+describe('closing the loop, from the keyboard and to a screen reader (#2102)', () => {
+  /** The loop section's live region: the one `role="status"` that holds the loop's state. */
+  function loopStatus(): HTMLElement | undefined {
+    if (mounted === undefined) throw new Error('nothing is mounted');
+    return queryAll(mounted.container, '[role="status"]').find((region) =>
+      region.textContent?.includes('loop'),
+    );
+  }
+
+  it('moves focus to the loop section, not the page, once Close the loop has gone', async () => {
+    await open();
+    await place(3);
+    await press('Close the loop');
+    expect(present('Close the loop')).toBe(false);
+    // WCAG 2.4.3: the pressed button is gone, so focus is put somewhere that
+    // says what happened, rather than falling to the body.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement?.tagName).toBe('H2');
+    expect(document.activeElement?.textContent).toBe('A short loop for a lap race');
+  });
+
+  it('announces the loop closing, and a new target, from a live region on the page from the start', async () => {
+    await open();
+    await place(3);
+    const region = loopStatus();
+    // On the page before anything changes, or a change inside it is not announced.
+    expect(region).toBeDefined();
+    expect(region?.getAttribute('role')).toBe('status');
+    expect(region?.textContent).not.toContain('Loop length');
+
+    await press('Close the loop');
+    expect(loopStatus()).toBe(region);
+    expect(region?.textContent).toContain('It ends where it starts');
+    expect(region?.textContent).toContain('Loop length');
+
+    const target = mounted?.container.querySelector<HTMLSelectElement>(
+      'select:not(#surface-tolerance)',
+    );
+    if (target === null || target === undefined) throw new Error('no target select');
+    await chooseOption(target, '8');
+    expect(loopStatus()).toBe(region);
+    expect(region?.textContent).toContain('against a target of 8 km');
+    expect(region?.textContent).toContain('under the target');
+  });
+
+  it('styles the target select as the page’s other select: no class of its own', async () => {
+    await open();
+    const selects = queryAll<HTMLSelectElement>(mounted!.container, 'select');
+    expect(selects).toHaveLength(2);
+    expect(selects.map((select) => select.className)).toEqual(['', '']);
   });
 });

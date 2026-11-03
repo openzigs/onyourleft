@@ -290,6 +290,12 @@ export function RouteBuilderView({
   const targetId = useId();
   /** The short loop's target (#2102). This screen's alone: nothing is saved with it. */
   const [loopTarget, setLoopTarget] = useState<LoopTargetKm>(DEFAULT_LOOP_TARGET_KM);
+  /**
+   * The loop section's heading, where focus goes once *Close the loop* has
+   * acted and left (WCAG 2.4.3): the button is absent once the loop is closed,
+   * and focus would otherwise fall to the page.
+   */
+  const loopHeading = useRef<HTMLHeadingElement>(null);
   /** The live map, for its centre (#2006). */
   const mapView = useRef<MapView | undefined>(undefined);
   const units = useUnits();
@@ -558,6 +564,7 @@ export function RouteBuilderView({
             variant="secondary"
             onClick={() => {
               apply(closeLoop(draft, newLegMode));
+              loopHeading.current?.focus();
             }}
           >
             Close the loop
@@ -865,40 +872,49 @@ export function RouteBuilderView({
       )}
 
       {/* #2102: a short loop for a lap race, its length against a target. */}
-      <h2>A short loop for a lap race</h2>
+      <h2 ref={loopHeading} tabIndex={-1}>
+        A short loop for a lap race
+      </h2>
+      {/* The same bare native select, label above, as "What you will ride on". */}
       <p>
-        <label htmlFor={targetId}>Target length</label>{' '}
-        <select
-          id={targetId}
-          className="oyl-input"
-          value={String(loopTarget)}
-          onChange={(event) => {
-            setLoopTarget(Number(event.target.value) as LoopTargetKm);
-          }}
-        >
-          {LOOP_TARGETS_KM.map((target) => (
-            <option key={target} value={String(target)}>
-              {loopTargetText(target, units)}
-            </option>
-          ))}
-        </select>
+        <label htmlFor={targetId}>Target length</label>
       </p>
-      <p>{loop.state}</p>
-      {loop.length === undefined ? null : <p>{loop.length}</p>}
-      {loop.note === undefined ? null : (
-        <StatusMessage
-          tone={loop.fit?.kind === 'near' ? 'success' : 'warning'}
-          label={
-            loop.fit?.kind === 'under'
-              ? 'Under the target'
-              : loop.fit?.kind === 'over'
-                ? 'Over the target'
-                : 'Near the target'
-          }
-        >
-          {loop.note}
-        </StatusMessage>
-      )}
+      <select
+        id={targetId}
+        value={String(loopTarget)}
+        onChange={(event) => {
+          setLoopTarget(Number(event.target.value) as LoopTargetKm);
+        }}
+      >
+        {LOOP_TARGETS_KM.map((target) => (
+          <option key={target} value={String(target)}>
+            {loopTargetText(target, units)}
+          </option>
+        ))}
+      </select>
+      {/*
+        A polite live region, on the page from the start so a change inside it
+        is announced: closing the loop, a new target, and the length as it
+        changes. Its note is not `live` of its own, or it would be said twice.
+      */}
+      <div role="status">
+        <p>{loop.state}</p>
+        {loop.length === undefined ? null : <p>{loop.length}</p>}
+        {loop.note === undefined ? null : (
+          <StatusMessage
+            tone={loop.fit?.kind === 'near' ? 'success' : 'warning'}
+            label={
+              loop.fit?.kind === 'under'
+                ? 'Under the target'
+                : loop.fit?.kind === 'over'
+                  ? 'Over the target'
+                  : 'Near the target'
+            }
+          >
+            {loop.note}
+          </StatusMessage>
+        )}
+      </div>
 
       {/* #2006: the drawn route, into the same library as an imported one. */}
       {routes === undefined ? null : (
