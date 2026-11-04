@@ -50,6 +50,7 @@ import {
   routeProfile,
   seconds,
   unixSeconds,
+  watts,
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
@@ -152,6 +153,19 @@ describe('the bot goes through the same physics as the rider', () => {
     expect(step?.grade).toBeCloseTo(5, 4);
     expect(step?.power).toBe(pacedPowerWatts(PLAN, gradeAt(CLIMB, 1000)));
     expect(conditions?.totalMass).toBe(75);
+  });
+
+  it('rides a lap-race plan’s power through that same tick, on the grade it reads (#1960)', () => {
+    vi.mocked(advance).mockClear();
+
+    const tick = advanceBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321));
+
+    expect(vi.mocked(advance)).toHaveBeenCalledTimes(1);
+    const [, step, conditions] = vi.mocked(advance).mock.calls[0] ?? [];
+    expect(step?.power).toBe(321);
+    expect(step?.grade).toBeCloseTo(5, 4);
+    expect(conditions?.totalMass).toBe(75);
+    expect(tick.power).toBe(321);
   });
 
   it('rides on whatever that tick returns, so it cannot be on separate maths', () => {

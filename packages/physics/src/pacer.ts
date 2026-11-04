@@ -57,6 +57,10 @@
  * property of the signatures rather than of the tests: there is no parameter
  * through which rider state could arrive. `pacer.test.ts` rides a whole route
  * with nothing else constructed, which is the criterion's own wording.
+ * {@link advanceBot}'s one optional scalar, `power`, is a lap-race bot plan's
+ * (#1960); `lap-race-bot.ts` is its one caller, and `lap-race-bot.test.ts`
+ * holds that caller's inputs to a tier, the course, the race's seed and the
+ * bot's own ride.
  *
  * ⚠️ **And no recorded ride, which is the patent-posture criterion.** ADR 0007
  * D4 and `pacer/pacing.ts`'s header carry the argument in full; the part that
@@ -120,7 +124,7 @@ export interface BotTick {
   readonly distanceOnRoute: Metres;
   /** The gradient the bot is on, interpolated from the profile. Signed. */
   readonly grade: GradePercent;
-  /** What the pacing rule asked for there. */
+  /** What the bot rode there: the pacing rule's power, or the lap-race plan's (#1960). */
   readonly power: Watts;
 }
 
@@ -187,24 +191,36 @@ export function botDemand(
  * arguments gives the same answer, which is what makes a bot testable at all.
  *
  * @param elapsed - how much time this tick covers. Supplied, never read.
+ * @param power - the power a lap-race bot's plan chose for this tick
+ *   (`@onyourleft/domain` §`botPlanStep`, #1960, ADR 0061), from the grade
+ *   {@link botDemand} reads here. Left out, the bot rides #92's grade pacing.
+ *   Either way it is ridden through {@link advance}: a plan changes how hard a
+ *   bot pedals, never the physics it pedals through. `lap-race-bot.ts` is the
+ *   one caller that passes it, and its tests hold what that caller may read.
  * @throws {PhysicsError} through {@link advance} if the integration step is not
  * strictly positive, and directly if `elapsed` is not a finite duration — a
  * `NaN` here would put a `NaN` into the odometer and the bot would silently
  * stop reporting a position for the rest of the ride.
  */
-export function advanceBot(state: RideState, elapsed: Seconds, course: BotCourse): BotTick {
+export function advanceBot(
+  state: RideState,
+  elapsed: Seconds,
+  course: BotCourse,
+  power?: Watts,
+): BotTick {
   if (!Number.isFinite(elapsed)) {
     throw new PhysicsError(
       `a bot tick must cover a finite number of seconds, received ${String(elapsed)}`,
     );
   }
   const demand = botDemand(state, course);
+  const ridden = power ?? demand.power;
   const next = advance(
     state,
-    { power: demand.power, grade: demand.grade, duration: elapsed },
+    { power: ridden, grade: demand.grade, duration: elapsed },
     conditionsFor(course),
   );
-  return { state: next, ...demand };
+  return { state: next, ...demand, power: ridden };
 }
 
 /**

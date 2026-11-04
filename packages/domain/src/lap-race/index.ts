@@ -103,3 +103,18 @@ export {
   botFieldPersonalities,
   strategicBotDecision,
 } from './strategy';
+
+// The bots' race plan (#1960, ADR 0061): a course-only energy budget that
+// sets a bot's power from its tier, the road, the effort distance it has left
+// and its own reserve, and never from any other racer.
+export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
+export {
+  BOT_PLAN_BANKING,
+  BOT_PLAN_MEAN_TOLERANCE,
+  BOT_PLAN_SURGE_CEILING,
+  BOT_SPRINT_LONGEST_METRES,
+  BOT_SPRINT_SHORTEST_METRES,
+  BOT_TIER_BUDGET_JOULES,
+  botPlanStep,
+  botRacePlan,
+} from './plan';

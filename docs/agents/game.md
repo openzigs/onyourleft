@@ -766,7 +766,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         tick a simulation step that ran (bots through
                         `@onyourleft/physics` §`stepBotRace`: a field of
                         mixed personalities from the seed, at the `canny`
-                        skill, #1959), the rider
+                        skill, #1959; each on its tier's course-only race
+                        plan, domain `lap-race/plan.ts`, #1960, ADR 0061),
+                        the rider
                         DRAWN at effort distance plus race offset (D-3.3)
                         and the bots in their lanes, the HUD's place, item
                         and standings, its sentences owed. Nothing kept at
