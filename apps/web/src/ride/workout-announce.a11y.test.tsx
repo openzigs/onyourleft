@@ -211,6 +211,10 @@ describe('no production path pre-empts with an alert — #394', () => {
    * picker, raised by the rider's own press on *Ride* when no other rider's
    * ghost came, associated with the switch that caused it. The ride did not
    * start, so there is no ride-state message for it to interrupt.
+   *
+   * The fifth is PR #2113's, #255's shape again: *Preview without a trainer*
+   * refusing a power it cannot ride, associated with its box and its button,
+   * on the picker before any ride.
    */
   const SOURCE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
   const sources = (directory: string): string[] =>
@@ -220,7 +224,7 @@ describe('no production path pre-empts with an alert — #394', () => {
       return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
     });
 
-  it('has exactly the two form refusals #255 placed, #959’s failed confirmation, #331’s refusal, and nothing assertive', () => {
+  it('has exactly the two form refusals #255 placed, #959’s failed confirmation, #331’s refusal, the preview’s refusal, and nothing assertive', () => {
     const found: string[] = [];
     for (const file of sources(SOURCE_ROOT)) {
       const text = readFileSync(file, 'utf8');
@@ -235,6 +239,7 @@ describe('no production path pre-empts with an alert — #394', () => {
     // #940 moved both, with the picker, into the chooser's own module.
     expect(found.sort()).toEqual([
       'design/ConfirmDialog.tsx',
+      'game/StageChooser.tsx',
       'game/StageChooser.tsx',
       'game/StageChooser.tsx',
       'game/StageChooser.tsx',

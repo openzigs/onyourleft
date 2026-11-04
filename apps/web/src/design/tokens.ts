@@ -24,7 +24,10 @@
  * cycling clothing (the background-material class of EN ISO 20471, a public
  * safety standard, not a brand), pushed toward green so it reads as lime and
  * not as any product's yellow. In light a lime cannot carry text on white, so
- * `accent` is a deep olive there and the lime survives as `selected`. There
+ * the accent's text is a deep olive there and the lime survives as `selected`.
+ * Since #2118 the accent is two tokens (ADR 0063 D-1): `accent` is a FILL and
+ * `accentText` is text and thin lines, so in light a button's fill is a
+ * brighter lime-olive than the label beside it. There
  * are no brand oranges, no brand blues, and no imported icon set — the status
  * glyphs in `StatusMessage.tsx` are three characters of text. Until #2037 the
  * hues were a desaturated teal on grey-green neutrals.
@@ -109,10 +112,24 @@ export const COLOUR_TOKENS = {
   /** Secondary text: captions, helper text, the "nothing here yet" line. */
   inkMuted: '#515355',
   /**
-   * The one accent: primary buttons, the active navigation item. A link in
-   * running text is `link` since #661, a separate value since #2037 (ADR 0063).
+   * The one accent, as a FILL (#2118, ADR 0063 D-1): a primary button, the
+   * navigation's active pill, the current sub-page, a checked box's
+   * `accent-color`. Text and thin lines in the accent are {@link accentText},
+   * so the fill only owes the pairs a fill makes: `accentInk` on it, and 3:1
+   * against what it is drawn on. Which is why, in light, it can be a brighter
+   * lime-olive than the text — the owner's ruling of 2026-11-04 on #2118
+   * (*"Split it, brighter buttons"*). A link in running text is `link`.
    */
-  accent: '#405e00',
+  accent: '#517d00',
+  /**
+   * The accent as TEXT and as a thin line (#2118, ADR 0063 D-1): a secondary
+   * or tertiary button's label, a navigation link, a segment's or a toggle's
+   * edge, a chosen item's ring, a chart's accent line, and the edge of a
+   * primary button. It owes 4.5:1 on every surface it is drawn on as text,
+   * which is what kept it a deep olive in light. Its own token so that
+   * `accent`, the fill, can move without moving one label.
+   */
+  accentText: '#3e6100',
   /** The accent under a pointer or a press. */
   accentHover: '#2c4300',
   /** Text and glyphs drawn on `accent` or `accentHover`. */
@@ -282,13 +299,13 @@ export const COLOUR_TOKENS = {
    * bright panel over a bright scene is what a rider reads at arm's length in
    * sunlight with a bloom around it.
    */
-  hudSurface: '#10161c',
+  hudSurface: '#101215',
   /** The numbers a rider is pacing to. Large, and the highest contrast here. */
-  hudInk: '#f5f8fa',
+  hudInk: '#f4f7f9',
   /** Field labels, which are read once and then found by position. */
-  hudInkMuted: '#a8b6c2',
+  hudInkMuted: '#9da3a8',
   /** The edge of a HUD control, per WCAG 2.2 SC 1.4.11. */
-  hudBorder: '#7b8b99',
+  hudBorder: '#787c82',
   /**
    * A reading that is **stale**, not zero.
    *
@@ -297,7 +314,7 @@ export const COLOUR_TOKENS = {
    * other half is that the value is replaced by a dash rather than tinted, so
    * the distinction survives for a rider who cannot see the tint at all.
    */
-  hudStaleInk: '#f0b45f',
+  hudStaleInk: '#f1af48',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -348,10 +365,11 @@ export type ThemedColourToken = Exclude<ColourToken, HudColourToken>;
  *   than what it rests on, the other way from the light palette — so
  *   {@link ELEVATION_DIRECTION} states the direction per palette and
  *   `tokens.test.ts` holds each ramp to its own, with both step bounds.
- * - **Its own accent.** The light palette's olive `#405e00` is 2.5:1 on this
- *   canvas, so `accent` and `accentHover` are the fluorescent lime here with a
- *   dark `accentInk` on them (ADR 0063 D-1), and a hover is LIGHTER, as
- *   elevation is. The links follow, as #661 left
+ * - **Its own accent.** The light palette's olive `#3e6100` is 2.6:1 on this
+ *   canvas, so `accent`, `accentText` and `accentHover` are the fluorescent
+ *   lime here with a dark `accentInk` on them (ADR 0063 D-1) — the fill and
+ *   the text one value, since the lime clears every text pair — and a hover
+ *   is LIGHTER, as elevation is. The links follow, as #661 left
  *   room for.
  * - **The status messages are dark tints with light ink**, each the hue of its
  *   light counterpart.
@@ -369,6 +387,7 @@ export const DARK_COLOUR_TOKENS = {
   ink: '#edeef1',
   inkMuted: '#b3b7ba',
   accent: '#aff13c',
+  accentText: '#aff13c',
   accentHover: '#c7fd7b',
   accentInk: '#121809',
   selected: '#304216',
@@ -418,10 +437,10 @@ export function paletteColours(theme: Theme): Readonly<Record<ColourToken, strin
  * `theme-color` metas in `index.html`, which `offline/manifest.test.ts` holds
  * to these (#672).
  *
- * Light takes its accent (the olive since #2037), which is also the manifest's single
- * `theme_color`. Dark takes the header's surface rather than the dark accent:
- * a bright lime band over a dark page is the flash of light this theme exists
- * to take away.
+ * Light takes its accent FILL (a brighter lime-olive than its text since
+ * #2118), which is also the manifest's single `theme_color`. Dark takes the
+ * header's surface rather than the dark accent: a bright lime band over a dark
+ * page is the flash of light this theme exists to take away.
  */
 export const THEME_COLOUR_TOKEN: Readonly<Record<Theme, ThemedColourToken>> = {
   light: 'accent',
@@ -832,7 +851,7 @@ export interface ContrastRequirement {
 export const PLATFORM_CHECK_MARK: Readonly<
   Record<Theme, { readonly colour: string; readonly measured: number }>
 > = {
-  light: { colour: '#ffffff', measured: 7.45 },
+  light: { colour: '#ffffff', measured: 4.9 },
   dark: { colour: '#3b3b3b', measured: 8.25 },
 };
 
@@ -1137,7 +1156,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 4.9, dark: 13.33 },
     where: 'the label of a primary button',
   },
   {
@@ -1155,7 +1174,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
    * 1.40:1, because nobody had meant to draw it and so nobody declared it.
    *
    * Some of these pairs are ALSO declared above for another use (link text is
-   * `accent` on `canvas`, a disabled label is `inkMuted` on `surface`). They
+   * `accentText` on `canvas`, a disabled label is `inkMuted` on `surface`). They
    * are repeated here, named for the button state, so that the list of a
    * button's states is complete in one place and a change to either use has
    * to face both.
@@ -1164,7 +1183,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 4.9, dark: 13.33 },
     where: 'a primary button at rest (#668)',
   },
   {
@@ -1175,18 +1194,18 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'a primary button under a pointer or a press (#668)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'the label of a secondary button, an off toggle and an unchecked segment (#668)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
-    where: 'the border of a secondary button, a toggle and a segment, on the page (#668)',
+    measured: { light: 7.2, dark: 13.82 },
+    where: 'the border of a primary button, a toggle and a segment, on the page (#668, #2118)',
   },
   {
     foreground: 'accentHover',
@@ -1217,12 +1236,20 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'the label of an on toggle and of the checked segment (#668)',
   },
   {
+    foreground: 'accentText',
+    background: 'selected',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 5.8, dark: 8.07 },
+    where:
+      'the doubled border of an on toggle and a checked segment, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
+  },
+  {
     foreground: 'accent',
     background: 'selected',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.99, dark: 8.07 },
+    measured: { light: 3.94, dark: 8.07 },
     where:
-      'the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
+      "a checked segment's radio, its `accent-color` fill on the `selected` fill (SC 1.4.11, #668, #2118)",
   },
   {
     foreground: 'accentHover',
@@ -1254,8 +1281,8 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
   },
   /*
    * #667: `accent-color` paints checkboxes, radios, a range and a progress bar
-   * in `accent`, so two non-text pairs (WCAG 2.2 SC 1.4.11, 3:1) are new even
-   * though both colours already meet here as text. The fill against the page
+   * in `accent`, the FILL (#2118), so two non-text pairs (WCAG 2.2 SC 1.4.11,
+   * 3:1) are its own. The fill against the page
    * is what says "on"; the mark against the fill is the check itself. The
    * platform picks the mark's colour — a light or a dark glyph by the accent's
    * luminance — so the mark is NOT a token and is not a pair here: it is
@@ -1267,35 +1294,35 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 4.9, dark: 13.82 },
     where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where: 'a metric on the ride HUD, over its own opaque panel (#94)',
   },
   {
     foreground: 'hudInkMuted',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 8.79, dark: 8.79 },
+    measured: { light: 7.36, dark: 7.36 },
     where: 'a field label on the ride HUD (#94)',
   },
   {
     foreground: 'hudBorder',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.2, dark: 5.2 },
+    measured: { light: 4.47, dark: 4.47 },
     where: 'the edge of a HUD control (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where:
       'the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)',
   },
@@ -1303,21 +1330,21 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'hudStaleInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 9.88, dark: 9.88 },
+    measured: { light: 9.8, dark: 9.8 },
     where: 'the mark on a HUD reading whose sensor has dropped (#94)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'link text',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 6.39, dark: 11.07 },
+    measured: { light: 6.18, dark: 11.07 },
     where: 'link text and the active navigation item in the header',
   },
   {
@@ -1368,10 +1395,10 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'surfaceRaised',
     minimum: AA_TEXT,
-    measured: { light: 5.47, dark: 8.96 },
+    measured: { light: 5.29, dark: 8.96 },
     where: 'link text on a raised card',
   },
   {
@@ -1410,10 +1437,10 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 4.68, dark: 7.22 },
+    measured: { light: 4.52, dark: 7.22 },
     where: 'a navigation link on the app header',
   },
   /*
@@ -1421,22 +1448,23 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
    * destination's icon and label, on the bar and the rail (both painted in
    * `surfaceOverlay`). The label and icon drawn on the pill are text, 4.5:1;
    * the pill against the bar is the shape that says where you are, so it is a
-   * non-text boundary, 3:1 (SC 1.4.11). Both colours already meet elsewhere —
-   * a primary button, a navigation link — and are repeated here, named for the
-   * indicator, so a change to either use has to face this one too.
+   * non-text boundary, 3:1 (SC 1.4.11). The pill is a FILL, so it is `accent`
+   * (#2118), and its label `accentInk` as on a primary button; the pair is
+   * repeated here, named for the indicator, so a change to either use has to
+   * face this one too.
    */
   {
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 4.9, dark: 13.33 },
     where: "the current destination's label and icon, on the navigation's active indicator (#944)",
   },
   {
     foreground: 'accent',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 4.68, dark: 7.22 },
+    measured: { light: 3.08, dark: 7.22 },
     where: "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
   },
   {
@@ -1597,11 +1625,12 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'a card title where it overlaps the far hills',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'illoHillNear',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.26, dark: 6.79 },
-    where: 'the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)',
+    measured: { light: 3.16, dark: 6.79 },
+    where:
+      'the edge of a primary button standing on the near hill, drawn in `accentText` (WCAG 2.2 SC 1.4.11, #2118)',
   },
   ...ILLUSTRATION_TOKENS.map((token): ContrastRequirement => ({
     foreground: 'focus',

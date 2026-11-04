@@ -127,6 +127,13 @@ describe('the lifecycle events the shell sends a page — #480', () => {
         'src',
         'main',
       ),
+      // #2050: the launch splash plugin, installed beside it.
+      join(
+        dirname(require.resolve('@capacitor/splash-screen/package.json')),
+        'android',
+        'src',
+        'main',
+      ),
       join(REPOSITORY, 'apps/mobile/android/app/src/main/java'),
     ].flatMap((root) => filesUnder(root, (name) => /\.(java|kt)$/.test(name)));
     expect(others.length).toBeGreaterThan(3);

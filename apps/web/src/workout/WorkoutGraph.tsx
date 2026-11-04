@@ -53,7 +53,7 @@ export const WORKOUT_GRAPH_PAINTS: readonly {
   { className: 'oyl-workout-graph__heart-rate', token: 'ink', property: 'stroke' },
   { className: 'oyl-workout-graph__target', token: 'surfaceRaised', property: 'fill' },
   { className: 'oyl-workout-graph__target-edge', token: 'ink', property: 'stroke' },
-  { className: 'oyl-workout-graph__power', token: 'accent', property: 'stroke' },
+  { className: 'oyl-workout-graph__power', token: 'accentText', property: 'stroke' },
 ];
 
 /**

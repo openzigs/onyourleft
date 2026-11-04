@@ -219,8 +219,23 @@ describe('GroundBlobBelt.update — #1674', () => {
         }
       }
     }
+    // ⚠️ Re-taken for #2101, which moves the ground under some of these
+    // blobs on purpose: `hairpinRoute(30)`'s legs now meet on the line between
+    // them and each sinks past it under the other's (`landform.ts`
+    // §`seamReach`), so a blob there lies on ground at another height. The
+    // count of blobs drawn did not move. `ee765c15…a951e1` before it.
+    // Re-taken again for the owner's ruling of 2026-11-03, which lets the
+    // seam's line out along the road — the hold, and the columns drawn in to
+    // it — rather than dropping it where a row's seam ends (`landform.ts`
+    // §`meetingRises`): only the ground moved, and the count did not.
+    // `f4cf2584…7191cd` before it. Letting the meeting height out as well
+    // (#2117's review) moved none of these blobs' ground: the digest held.
+    // Re-taken for the owner's ruling of 2026-11-04, which holds the relief
+    // beside a seam from rising and lets it fall past the line (`landform.ts`
+    // §`SEAM_CREST_FADE_METRES`): only the ground moved, and the count did
+    // not. `0886e568…7e6b53` before it.
     expect(`${drawn} ${hash.digest('hex')}`).toBe(
-      '2622 ee765c1568ed59830db525349f375b18ac43d5230de43830bbc852a6dca951e1',
+      '2622 1d9fb5d10f8a68be7d4be4ea6bf964612a6ef013a7916aa98dc7f52e2f70c7ac',
     );
   });
 });
