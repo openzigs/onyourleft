@@ -660,7 +660,10 @@ describe('which ground a blob lies on — #620, #686’s review', () => {
     let judged = 0;
     let firstFoundWrong = 0;
     const world = worldStyle(profile).sun;
-    for (const sun of [world, sunAt(55, 0), sunAt(55, 90), sunAt(55, 180), sunAt(55, 270)]) {
+    for (const sun of [
+      world,
+      ...[0, 45, 90, 135, 180, 225, 270, 315].map((azimuth) => sunAt(55, azimuth)),
+    ]) {
       for (const item of items) {
         const caster = aTree(item.x, item.z, 3 * item.scale, 9 * item.scale, item.y);
         const placed = blob();
@@ -718,10 +721,14 @@ describe('which ground a blob lies on — #620, #686’s review', () => {
     // triangle found is the wrong sheet for some of them — the defect #686's
     // review measured, one blob in 29 under the visible ground.
     expect(overlapping).toBeGreaterThan(20);
-    // 10 of the 30, measured: the rest stand at the line or sink with it.
-    // It was 15 until the owner's ruling of 2026-11-03 moved the ground
-    // between a hairpin's legs (`landform.ts` §`meetingRises`).
-    expect(judged).toBeGreaterThanOrEqual(10);
+    // 18 of the 56, measured: the rest stand at the line or sink with it.
+    // It was 15 of 5 suns' worth until the owner's ruling of 2026-11-03 moved
+    // the ground between a hairpin's legs (`landform.ts` §`meetingRises`),
+    // and 10 after it, which left no margin (#2117's review): so the sun goes
+    // round at eight bearings, not four, at the same height. A lower sun, at
+    // 35°, threw one blob onto ground 4 m from the sheet this test expects:
+    // measured, and left to a question of its own.
+    expect(judged).toBeGreaterThan(12);
     expect(firstFoundWrong).toBeGreaterThan(0);
   }, 60_000);
 });

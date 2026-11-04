@@ -1107,8 +1107,17 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       const steepest = Math.abs(grade) <= 0.03 ? GENTLE_STEEPEST : 0.15;
       // Every triangle of the ground in the chase camera's frame within
       // 150 m, drawn on top — no other ground over it — must lie no steeper
-      // than #2096's |ny| 0.15. Measured before this fix: up to 22 such a
+      // than {@link GENTLE_STEEPEST}, |ny| 0.5, on a level road or at 3 %, and
+      // #2096's |ny| 0.15 at 6 %. Measured before this fix: up to 22 such a
       // frame sweep (143° descending at 6 %), at |ny| 0.036 (147°).
+      //
+      // ⚠️ This is what holds `landform.ts` §`SEAM_DEEPEN_PER_METRE` at 1.5:
+      // 1.75 and 2 stand triangles up at 147° and 150° at 3 % where a deep
+      // side meets a shallow one, and 0.75 stands them up at 140° at 6 %
+      // (|ny| 0.141), measured. 1 and 1.25 pass here and everywhere else, so
+      // nothing here tells them from 1.5. It is kept because, of the values
+      // that pass, it sinks a side furthest under the other leg's ground; that
+      // margin is not measured, and the owner's frames were taken at 1.5.
       let judged = 0;
       const steep: string[] = [];
       for (let at = bend - 120; at <= bend + 60; at += 10) {
@@ -1159,7 +1168,11 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       // road in its frame — the centreline, 10 cm up — must pass over the
       // ground drawn under it, every metre, except the far leg's own ground
       // within 40 m of road of that point: on a climb a road above the eye
-      // is hidden by its own verge, which is true, and not this bank.
+      // is hidden by its own verge, which is true, and not this bank. Only
+      // its own leg's, past the bend (#2117's review): exempting any row
+      // within 40 m also exempted the approach's last rows before the apex,
+      // where the bank stood. Measured, with a bank 1.5 m high planted on the
+      // approach's last 23 m: red on 8 corners, and on only 4 before.
       // Measured before this fix: hidden by up to 1.8 m on a 147° bend
       // descending at 6 %, and by 0.37 m on a 143° bend descending at 3 %.
       let rays = 0;
@@ -1182,9 +1195,10 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
             const share = step / span;
             const x = rig.eye.x + dx * share;
             const z = rig.eye.z + dz * share;
-            const others = heightsOver(ground, x, z, -1e-6).filter(
-              (hit) => Math.abs((centre[hit.row] as { along: number }).along - point.along) >= 40,
-            );
+            const others = heightsOver(ground, x, z, -1e-6).filter((hit) => {
+              const row = centre[hit.row] as { along: number; distance: number };
+              return row.distance <= bend || Math.abs(row.along - point.along) >= 40;
+            });
             if (others.length === 0) continue;
             const over = Math.max(...others.map((hit) => hit.height)) - (rig.eye.y + dy * share);
             if (over > 0.05) {
@@ -1199,6 +1213,107 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       expect(hidden).toEqual([]);
       // Non-vacuity: the far leg really is in the frame, many times.
       expect(rays).toBeGreaterThan(500);
+    },
+    120_000,
+  );
+
+  /**
+   * How steep the ground may step from one row to the next at one column,
+   * in metres of height over the road beside it a metre between the two:
+   * **1** — #2117's review. @see creases
+   */
+  const CREASE_STEEPEST = 1;
+
+  /**
+   * Every pair of neighbouring rows' vertices at one column out to
+   * `lastColumn`, both in the frame within 200 m and drawn on top, that
+   * differ in height over the road beside them by more than
+   * {@link CREASE_STEEPEST} a metre between them, on the frames from `first`
+   * to `last` — and how many pairs were judged.
+   */
+  const creases = (
+    profile: RouteProfile,
+    first: number,
+    last: number,
+    lastColumn: number,
+  ): { readonly steep: string[]; readonly judged: number } => {
+    const steep: string[] = [];
+    let judged = 0;
+    for (let at = first; at <= last; at += 10) {
+      const frame = sceneAt(profile, at);
+      const rig = cameraRig(frame.camera);
+      const ground = frame.terrain.mesh;
+      const v = ground.vertices;
+      const centre = frame.corridor.centre;
+      const perRow = COLUMNS * 2;
+      const vertex = (row: number, side: number, column: number): number =>
+        (row * perRow + side * COLUMNS + column) * 3;
+      const lift = (row: number, side: number, column: number): number =>
+        (v[vertex(row, side, column) + 1] as number) - (centre[row] as { y: number }).y;
+      const seen = (row: number, side: number, column: number): boolean => {
+        const at3 = vertex(row, side, column);
+        const point = { x: v[at3] as number, y: v[at3 + 1] as number, z: v[at3 + 2] as number };
+        const depth = framed(rig, point);
+        if (depth === undefined || depth > 200) return false;
+        // Under another leg's ground it is not on the screen.
+        return (topHeightAt(ground, point.x, point.z) ?? point.y) <= point.y + 0.05;
+      };
+      for (let row = 0; row + 1 < ground.rows; row += 1) {
+        for (let side = 0; side < 2; side += 1) {
+          // The road's edge and the verge's foot are the road's own height.
+          for (let column = 2; column <= lastColumn; column += 1) {
+            if (!seen(row, side, column) || !seen(row + 1, side, column)) continue;
+            judged += 1;
+            const step = Math.abs(lift(row + 1, side, column) - lift(row, side, column));
+            const here = vertex(row, side, column);
+            const next = vertex(row + 1, side, column);
+            const apart = Math.hypot(
+              (v[next] as number) - (v[here] as number),
+              (v[next + 2] as number) - (v[here + 2] as number),
+            );
+            if (step <= CREASE_STEEPEST * Math.max(apart, 1)) continue;
+            steep.push(
+              `${step.toFixed(2)} m over ${apart.toFixed(1)} m at ${String(at)}, row ${String(row)}, column ${String(column)}`,
+            );
+          }
+        }
+      }
+    }
+    return { steep, judged };
+  };
+
+  it.each(corners.filter(([, , grade]) => grade !== 0))(
+    'steps the ground no more than a metre a metre from one row to the next where a seam ends, %s',
+    (_name, profile) => {
+      // #2117's review: the height a side moves to meet the other leg's road
+      // fell to nought on the first row past the last one with a seam, while
+      // the line it moves to was let out along the road, so every column
+      // past the line stepped by up to half the two roads' difference
+      // between two rows: a crease across the leaving leg's ground, 62 to
+      // 165 m ahead, where the owner saw a smaller hump leaving the bend.
+      // Measured before this fix: 4.81 m over 2 m (147° to the right at 6 %),
+      // 4.66 m (143°), 2.77 m at 3 %. After it, no more than 1.76 m over
+      // 2.1 m, as steep as the relief stands at a far column on a row that
+      // never had a seam.
+      const { steep, judged } = creases(profile, bend - 120, bend + 60, COLUMNS - 1);
+      expect(steep).toEqual([]);
+      // Non-vacuity: the frames really do hold both legs' ground, near and far.
+      expect(judged).toBeGreaterThan(10_000);
+    },
+    120_000,
+  );
+
+  it.each(corners.filter(([, , grade]) => grade !== 0))(
+    'steps the ground no more than a metre a metre from one row to the next where a seam starts, %s',
+    (_name, profile) => {
+      // And the same where the approaching leg's seam starts, which the
+      // meeting height is let out back along the road from: measured without
+      // that, 2.30 m over 2 m 116 m ahead, 330 m before a 143° bend at 6 %.
+      // Out to the 90 m column only: this far back the relief past it steps
+      // by 3.1 m over 2 m of road with or without the seam, measured.
+      const { steep, judged } = creases(profile, bend - 340, bend - 160, 8);
+      expect(steep).toEqual([]);
+      expect(judged).toBeGreaterThan(5_000);
     },
     120_000,
   );

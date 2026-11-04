@@ -576,7 +576,7 @@ export function terrainCorridor(
       // raised from the clear band's edge, each its share of the difference
       // by the width it has, so the two meet on the line at one slope.
       // Nothing far from any seam, where `line` is `Infinity` and `rise`
-      // nought. @see meetingRises
+      // nought, and `rise` fades along the road past it. @see meetingRises
       const rise = rises[row * 2 + side] as number;
       const from = rise < 0 ? ROAD_CLEARANCE_METRES : RELIEF_CLEAR_METRES;
       const ramp = Math.max(
@@ -728,6 +728,11 @@ function columnLaterals(limit: number, seam: number): void {
  *    band, so a side lowered now starts from the verge's foot, a side raised
  *    from the clear band's edge, and each takes the share of the difference
  *    its width gives: the two meet on the line at one slope.
+ * 3. **And the height each moves by stopped dead** where the hold no longer
+ *    did (#2117's review): nought on the first row past the last seam, beside
+ *    a row moved by up to half the roads' difference — a crease across the
+ *    leaving leg's ground. So it too is let out along the road, fading at
+ *    {@link MEET_TAPER_PER_METRE}, a row with a seam keeping its own.
  */
 function meetingRises(
   centre: readonly CorridorPoint[],
@@ -735,13 +740,54 @@ function meetingRises(
   meets: Float64Array,
   out: Float64Array,
 ): Float64Array {
-  for (let index = 0; index < centre.length * 2; index += 1) {
+  const rows = centre.length;
+  for (let index = 0; index < rows * 2; index += 1) {
     out[index] = Number.isFinite(shallow[index])
       ? (meets[index] as number) - (centre[index >> 1] as CorridorPoint).y
       : 0;
   }
+  // Let out along the road from the rows that have a seam, as the line is,
+  // rather than dropped to nought on the first row without one: one pass
+  // forward and one back, as `tapered`'s, a row with a seam keeping its own.
+  const gap = (row: number): number => {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
+    return MEET_TAPER_PER_METRE * Math.hypot(to.x - from.x, to.z - from.z);
+  };
+  const carried = (at: number, from: number, fade: number): void => {
+    if (Number.isFinite(shallow[at])) return;
+    const near = out[from] as number;
+    const left = Math.max(0, Math.abs(near) - fade);
+    if (left > Math.abs(out[at] as number)) out[at] = Math.sign(near) * left;
+  };
+  for (let row = 1; row < rows; row += 1) {
+    const fade = gap(row - 1);
+    for (let side = 0; side < 2; side += 1) carried(row * 2 + side, row * 2 + side - 2, fade);
+  }
+  for (let row = rows - 2; row >= 0; row -= 1) {
+    const fade = gap(row);
+    for (let side = 0; side < 2; side += 1) carried(row * 2 + side, row * 2 + side + 2, fade);
+  }
   return out;
 }
+
+/**
+ * How fast the height a side moves to meet the other leg fades along the
+ * road from the last row with a seam, in metres of it per metre of road:
+ * **0.25** — #2117's review. @see meetingRises
+ *
+ * ⚠️ **What stops a crease across the leaving leg.** Until the review it fell
+ * to nought on the first row without a seam, while the line it moves the
+ * ground to was let out along the road, so every column past the line
+ * stepped by up to half the two roads' difference between two rows: up to
+ * 4.8 m over 2 m of road, 62 to 165 m ahead, on a 147° bend at 6 % — where
+ * the owner saw a smaller hump leaving the bend. A side moves about half of
+ * it by the line, so at 0.25 its ground there fades no faster than 0.125 m a
+ * metre along the road, under {@link RELIEF_SLOPE}. Measured: 1 passes too,
+ * and without the fade 18 of the 28 graded corners step by more than a metre
+ * a metre.
+ */
+const MEET_TAPER_PER_METRE = 0.25;
 
 /**
  * The road from each side of each row to the nearest row whose side has no
@@ -794,9 +840,11 @@ function roadToNone(
  *
  * ⚠️ **1.5, not the taper's 2, since the owner's ruling of 2026-11-03**: where
  * a deep side met a shallow one, two metres of road apart, 2 stood the
- * ground between them at |ny| 0.44 in view, on a 147° bend at 3 %. 0.5 left
- * sunk ground uncovered, measured, on every corner of 140° to 150° on a
- * grade.
+ * ground between them at |ny| 0.44 in view, on a 147° bend at 3 %, and
+ * 1.75 still did. 0.75 and 0.5 stood triangles on end on the graded corners
+ * too (|ny| 0.141 at 140° and 6 %), measured. 1 and 1.25 pass every test:
+ * 1.5 is kept for the deeper sinking under the other leg's ground, which is
+ * not measured (#2117's review; `landform.test.ts` says so where it holds it).
  */
 const SEAM_DEEPEN_PER_METRE = 1.5;
 
