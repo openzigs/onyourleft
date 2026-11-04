@@ -1378,36 +1378,55 @@ function pedalling(atDistance: number): number {
 const GHOST_SPEED_HALF_WINDOW_SECONDS = 0.5;
 
 /**
- * The angle, off the road's heading `road`, from where a rider's rear wheel is
- * drawn to where its front wheel is — #1995. Each wheel is half of
- * {@link BICYCLE_LENGTH_METRES} along the road from `atDistance`, at the
- * rider's place across the road moved on by `across.rate` over that half, and
- * on the road's own normal there, as {@link markerAt} places a rider. Nought
- * where the two coincide, at a clamped end of the corridor.
+ * Which way a rider faces at `atDistance` — #1995, #2017: the road's own
+ * direction under its bicycle, turned by {@link facingTurn} of the angle its
+ * place across the road moves at off that direction.
+ *
+ * The road's direction is the centreline's chord from half of
+ * {@link BICYCLE_LENGTH_METRES} behind `atDistance` to half of it ahead — where
+ * the rear and front wheels are along the road. The angle is `atan(rate)`: the
+ * rear wheel to the front moves `rate` across the road per metre along it
+ * (`racing-line.ts` §`lineSlopeAt`, the line's chord over the same bicycle).
+ *
+ * ⚠️ **The chord is continuous in distance, and the corridor segment's heading
+ * is not.** The corridor is rebuilt around the rider every frame
+ * (`terrain.ts` §`roadCorridor`), and a segment's heading turns by a whole
+ * segment's worth at each of its points — 14° in a radius-8 hairpin. The rider
+ * sits on a point by construction and never crosses one, but a bot or a ghost a
+ * metre or more away does. Until #2017 the hold was taken off that heading, so
+ * near the hold, where the hold's own turn no longer cancels the step, such a
+ * marker turned by up to 7° in a single 2 cm step. A chord between two places
+ * interpolated along the corridor slides past a point without a step.
+ *
+ * ⚠️ One normal for both wheels, the chord's — #2001's review left open whether
+ * each wheel should sit on its own segment's normal. Only where a corridor
+ * point falls between the wheels do the two differ, and there a per-segment
+ * normal is exactly what steps.
+ *
+ * Where the chord has no length — a one-point corridor, or both wheels clamped
+ * past its far end — it is `fallback`, the segment's heading, unturned.
  */
-function wheelToWheel(
+function facingAt(
   corridor: RoadCorridor,
   atDistance: number,
   across: Across,
-  road: { readonly headingX: number; readonly headingZ: number },
-): number {
+  fallback: { readonly headingX: number; readonly headingZ: number },
+): { readonly headingX: number; readonly headingZ: number } {
   const half = BICYCLE_LENGTH_METRES / 2;
-  const wheel = (offset: number): { x: number; z: number } => {
-    const at = placeOnCorridor(corridor, atDistance + offset);
-    const heading = headingAt(corridor, at.index);
-    const lateral = across.metres + across.rate * offset;
-    return { x: at.x - heading.headingZ * lateral, z: at.z + heading.headingX * lateral };
-  };
-  const rear = wheel(-half);
-  const front = wheel(half);
+  const rear = placeOnCorridor(corridor, atDistance - half);
+  const front = placeOnCorridor(corridor, atDistance + half);
   const dx = front.x - rear.x;
   const dz = front.z - rear.z;
-  if (Math.hypot(dx, dz) < 1e-9) return 0;
-  // The signed angle from the road's heading to the wheels', positive toward
-  // the road's normal `(−headingZ, headingX)`.
-  const along = dx * road.headingX + dz * road.headingZ;
-  const normal = -dx * road.headingZ + dz * road.headingX;
-  return Math.atan2(normal, along);
+  const chord = Math.hypot(dx, dz);
+  if (chord < 1e-9) return fallback;
+  const roadX = dx / chord;
+  const roadZ = dz / chord;
+  // ⚠️ The turn is positive toward the road's normal `(−headingZ, headingX)`,
+  // the side `across.metres` and `across.rate` count positive on.
+  const turn = facingTurn(Math.atan(across.rate));
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
+  return { headingX: roadX * cos - roadZ * sin, headingZ: roadZ * cos + roadX * sin };
 }
 
 /**
@@ -1433,21 +1452,19 @@ function markerAt(
   const road = headingAt(corridor, at.index);
   const lateral = across.metres;
   // ⚠️ #1995: the marker FACES the way its bicycle points, from where its
-  // rear wheel is drawn to where its front wheel is, half a bicycle behind and
+  // rear wheel is to where its front wheel is, half a bicycle behind and
   // ahead on the road, each across the road by the line's chord rate
   // (`racing-line.ts` §`lineSlopeAt`) — not the road's heading, which slid a
-  // rider crossing the road sideways. Both wheels are placed as this marker
-  // is, so the facing moves continuously with the drawn position: no step
-  // where the line reaches the road's edge, and none at a corridor point.
+  // rider crossing the road sideways. No step where the line reaches the
+  // road's edge, and since #2017 none where a marker crosses a corridor
+  // point: `facingAt` says why that needs the road's chord, not `road`.
   // ⚠️ But turned at most FACING_TURN_LIMIT_RADIANS off the road, by a smooth
   // saturation: where a hairpin's line swings across the road within a few
   // metres that direction is 40°+ off the road, and was drawn side-on to it
   // (#1995's review on the owner's course). A pure function of distance, so
   // frame-rate independent, and every rider's marker is placed here, bots
   // included.
-  const turn = facingTurn(wheelToWheel(corridor, atDistance, across, road));
-  const cos = Math.cos(turn);
-  const sin = Math.sin(turn);
+  const facing = facingAt(corridor, atDistance, across, road);
   // #499: across the road along its own normal, `(−headingZ, headingX)` —
   // the rider's right, on the screen and since #583 on the map (it was called
   // the left until then) — and at the road's
@@ -1457,8 +1474,8 @@ function markerAt(
     x: at.x - road.headingZ * lateral,
     y: at.y,
     z: at.z + road.headingX * lateral,
-    headingX: road.headingX * cos - road.headingZ * sin,
-    headingZ: road.headingZ * cos + road.headingX * sin,
+    headingX: facing.headingX,
+    headingZ: facing.headingZ,
     lean: roll.bicycle,
     bodyLean: roll.body,
     pedalling: motion.pedalling,
