@@ -298,10 +298,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
                         its digests to the digit. ⚠️ **Since #1995 a rider
                         FACES the line, not the road**: `RiderMarker.headingX`
-                        points from the drawn rear wheel to the front wheel
-                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
-                        off the road (`facingTurn`), so a rider crossing it no
-                        longer slides sideways and never turns in a step. Measure across the road
+                        points from the rear wheel to the front wheel
+                        (`facingAt`, `lineSlopeAt`'s chord), held to 12° off
+                        the road under the bicycle (`facingTurn`), so a rider
+                        crossing it no longer slides sideways. No step at the
+                        edge hold, nor since #2017 where a bot or ghost crosses
+                        a corridor point (the rider never does): held off the
+                        corridor SEGMENT's heading, which steps there, it
+                        turned up to 7° in 2 cm. Measure across the road
                         with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
