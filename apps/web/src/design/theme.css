@@ -98,11 +98,11 @@
   /* The ride HUD (#94). Opaque, so its contrast does not depend on the 3D
      scene behind it — `tokens.ts` records why that is the only way #94's
      contrast criterion is checkable. */
-  --oyl-color-hud-surface: #10161c;
-  --oyl-color-hud-ink: #f5f8fa;
-  --oyl-color-hud-ink-muted: #a8b6c2;
-  --oyl-color-hud-border: #7b8b99;
-  --oyl-color-hud-stale-ink: #f0b45f;
+  --oyl-color-hud-surface: #101215;
+  --oyl-color-hud-ink: #f4f7f9;
+  --oyl-color-hud-ink-muted: #9da3a8;
+  --oyl-color-hud-border: #787c82;
+  --oyl-color-hud-stale-ink: #f1af48;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -6355,59 +6355,62 @@ select.oyl-input {
  * The two overlay layouts are the media queries at the end of this block.
  */
 .oyl-hud {
-  /* ⚠️ #672 (the review of #744): the HUD KEEPS THE LIGHT PALETTE, whatever
-     the page is in — the owner's ruling that the in-ride HUD is left alone.
-     Its panels paint with the theme-independent `--oyl-color-hud-*` tokens,
-     but what sits inside them — the mute toggle and the volume (#400), the
-     side camera's Stop (#551), a notice's status tones — paints with PAGE
-     tokens, and on a dark page those followed it. So every page colour token
-     is restated here with its LIGHT value, and `color-scheme` pins what the
-     platform draws itself (a range's track, a check mark). `theme.a11y.test.ts`
-     holds this list to `tokens.ts` §`COLOUR_TOKENS`, key for key, and
+  /* ⚠️ #2042, ADR 0063 D-2 (the owner's ruling of 2026-11-03, "Dark screens"):
+     the HUD is DARK, whatever the page is in. Until #2042 it kept the LIGHT
+     palette here (#672, the review of #744); a reviewer who remembers that pin
+     is reading the old file. Its panels paint with the theme-independent
+     `--oyl-color-hud-*` tokens, but what sits inside them — the mute toggle
+     and the volume (#400), the side camera's Stop (#551), a notice's status
+     tones, a zone drawn on the plan — paints with PAGE tokens, which on a light
+     page would follow it. So every page colour token is restated here with its
+     DARK value, and `color-scheme` pins what the platform draws itself (a
+     range's track, a check mark) to the dark platform's. A rider who chose
+     light for the menus still rides on dark. `theme.a11y.test.ts` holds this
+     list to `tokens.ts` §`DARK_COLOUR_TOKENS`, key for key, and
      `theme.browser.spec.ts` reads every descendant in both palettes. */
-  color-scheme: light;
-  --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #ebeef0;
-  --oyl-color-surface-raised: #dbdde0;
-  --oyl-color-surface-overlay: #cbcdd0;
-  --oyl-color-border: #6a6c6e;
-  --oyl-color-ink: #131415;
-  --oyl-color-ink-muted: #515355;
-  --oyl-color-accent: #405e00;
-  --oyl-color-accent-hover: #2c4300;
-  --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #cdf39c;
-  --oyl-color-link: #3d5b00;
-  --oyl-color-link-visited: #5e3a91;
-  --oyl-color-link-hover: #2c4300;
-  --oyl-color-link-active: #1b2b00;
-  --oyl-color-focus: #131415;
-  --oyl-color-info-surface: #dceeff;
-  --oyl-color-info-ink: #004876;
-  --oyl-color-info-border: #328bcd;
-  --oyl-color-success-surface: #dbf2df;
-  --oyl-color-success-ink: #005122;
-  --oyl-color-success-border: #3b9655;
-  --oyl-color-warning-surface: #f9ebd3;
-  --oyl-color-warning-ink: #5d4000;
-  --oyl-color-warning-border: #ae7c00;
-  --oyl-color-danger-surface: #ffe7e4;
-  --oyl-color-danger-ink: #792b29;
-  --oyl-color-danger-border: #cc6660;
-  --oyl-color-danger-action: #a21a21;
-  --oyl-color-danger-action-ink: #ffffff;
-  --oyl-color-illo-sky: #c6d9f2;
-  --oyl-color-illo-sun: #e0c24b;
-  --oyl-color-illo-hill-far: #adcca7;
-  --oyl-color-illo-hill-near: #8fb686;
-  --oyl-color-illo-road: #91969c;
-  --oyl-color-band-recovery: #6c7278;
-  --oyl-color-band-endurance: #00468c;
-  --oyl-color-band-tempo: #007d30;
-  --oyl-color-band-threshold: #968200;
-  --oyl-color-band-vo2: #8f4c00;
-  --oyl-color-band-anaerobic: #820b0f;
-  --oyl-color-band-sprint: #7e439f;
+  color-scheme: dark;
+  --oyl-color-canvas: #101215;
+  --oyl-color-surface: #242729;
+  --oyl-color-surface-raised: #333639;
+  --oyl-color-surface-overlay: #414447;
+  --oyl-color-border: #93969a;
+  --oyl-color-ink: #edeef1;
+  --oyl-color-ink-muted: #b3b7ba;
+  --oyl-color-accent: #aff13c;
+  --oyl-color-accent-hover: #c7fd7b;
+  --oyl-color-accent-ink: #121809;
+  --oyl-color-selected: #304216;
+  --oyl-color-link: #aade5b;
+  --oyl-color-link-visited: #c5acf2;
+  --oyl-color-link-hover: #cdf39c;
+  --oyl-color-link-active: #e6fad0;
+  --oyl-color-focus: #aff13c;
+  --oyl-color-info-surface: #142b3d;
+  --oyl-color-info-ink: #93cbfc;
+  --oyl-color-info-border: #1e72ac;
+  --oyl-color-success-surface: #162e1b;
+  --oyl-color-success-ink: #99d3a4;
+  --oyl-color-success-border: #287b42;
+  --oyl-color-warning-surface: #35260d;
+  --oyl-color-warning-ink: #e5c182;
+  --oyl-color-warning-border: #906500;
+  --oyl-color-danger-surface: #3e211e;
+  --oyl-color-danger-ink: #ffb2ac;
+  --oyl-color-danger-border: #ac514c;
+  --oyl-color-danger-action: #fb8981;
+  --oyl-color-danger-action-ink: #321312;
+  --oyl-color-illo-sky: #102239;
+  --oyl-color-illo-sun: #897626;
+  --oyl-color-illo-hill-far: #263a22;
+  --oyl-color-illo-hill-near: #304f2a;
+  --oyl-color-illo-road: #53595e;
+  --oyl-color-band-recovery: #949aa1;
+  --oyl-color-band-endurance: #2d74ca;
+  --oyl-color-band-tempo: #5fc372;
+  --oyl-color-band-threshold: #f9df5d;
+  --oyl-color-band-vo2: #f59441;
+  --oyl-color-band-anaerobic: #cb574d;
+  --oyl-color-band-sprint: #cf91f3;
 
   color: var(--oyl-color-hud-ink);
   display: flex;
@@ -7319,11 +7322,14 @@ select.oyl-input {
 /* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
    the `.oyl-hud__control`s'. The mute toggle, the volume and the side
    camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
-   `--oyl-color-focus` to its light value, #131415 — drawn 2 px outside the
-   control onto `hudSurface`, #10161c: 1.01:1, a ring nobody could see (WCAG
-   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
-   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
-   its own light surface, which is where its ring lands. Read back off the
+   `--oyl-color-focus` to its light value (#141b1a then; #131415 now) — drawn
+   2 px outside the control onto `hudSurface`: 1.01:1, a ring nobody
+   could see (WCAG 2.2 SC 2.4.7, 2.4.13). Since #2042 `.oyl-hud` restates the
+   DARK palette, so the pinned focus is the lime, #aff13c, and a ring that
+   fell back to it would show; the rule still holds the ring to the HUD's
+   own pair, `hudInk` on `hudSurface` (17.44:1, declared in `tokens.ts`). A
+   notice keeps the page's ring: its surface is dark too (the warning's is
+   #35260d), which is where its ring lands, in the pinned lime. Read back off the
    engine, with this rule deleted as the control, by
    `browser/hud-focus.browser.spec.ts`. */
 .oyl-hud :focus-visible {

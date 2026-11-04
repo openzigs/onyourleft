@@ -56,7 +56,7 @@ test.afterEach(async () => {
 });
 
 /** `tokens.ts` §`hudInkMuted`, as the engine reports it. */
-const HUD_INK_MUTED = 'rgb(168, 182, 194)';
+const HUD_INK_MUTED = 'rgb(157, 163, 168)';
 
 /** The credit as an assistive technology finds it: text in the HUD's region. */
 const credit = (page: Page) =>
@@ -218,7 +218,7 @@ test.describe('#1552 attribution on a mapped ride', () => {
     }
   }
 
-  test('the HUD keeps its light palette on a dark page, so the pair is the same AA pair', async ({
+  test('the HUD keeps its own palette on a dark page, so the pair is the same AA pair', async ({
     page,
   }) => {
     const viewport = OVERLAY_VIEWPORTS[0];
