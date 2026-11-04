@@ -611,6 +611,18 @@ copies the snapshot to a second place — the off-box copy. The home deployment 
 schedule (the `backup` service: every six hours, fourteen kept, into `OYL_BACKUP_DIR` with a copy in
 `OYL_OFFBOX_DIR`).
 
+⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
+the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
+account that was erased. The privacy policy tells riders and notifiers that the project's own
+instance keeps no backup for longer than 30 days, so that is the limit. The home deployment's
+defaults keep the newest fourteen of one every six hours, which is 3.5 days, and are well inside it.
+If you change `OYL_BACKUP_KEEP` or `OYL_BACKUP_INTERVAL_SECONDS`, keep their product under 30 days
+(`OYL_BACKUP_KEEP` × `OYL_BACKUP_INTERVAL_SECONDS` ≤ 2 592 000 seconds). Nothing enforces that: it is
+yours to check. Count the other places a snapshot lands too: `OYL_OFFBOX_DIR` keeps the same number,
+the `pre-deploy` folder keeps the last three deploys' snapshots however old they are, and a copy you
+make by hand or with `rclone` is yours to delete. Restoring one needs no extra step for notifier
+details: the instance erases whatever is due again when it starts.
+
 ⚠️ **A backup kept only on the box it backs up is not a backup** of the box. `OYL_OFFBOX_DIR` is a
 drive or a share that survives the machine: a USB drive that is unplugged and kept elsewhere, or a
 network share. An S3-compatible bucket is not built into the backup yet; `rclone` pointed at the
