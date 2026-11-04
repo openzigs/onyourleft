@@ -244,6 +244,8 @@ describe('what a device stores, read field by field', () => {
       const { store, values } = disk();
       values.set(AUDIO_MIX_STORAGE_KEY, junk);
       expect(readAudioMix(store, legacy), junk).toEqual(fresh);
+      // And what replaced it is the mix and nothing of the junk.
+      expect(JSON.parse(values.get(AUDIO_MIX_STORAGE_KEY) ?? 'null'), junk).toEqual(fresh);
     }
   });
 
