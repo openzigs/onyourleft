@@ -61,7 +61,7 @@ import {
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
 import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
-import { advanceCrank, cadenceTurns } from './bicycle';
+import { advanceCrank, cadenceTurns, turningCadence } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
 import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
@@ -1291,6 +1291,12 @@ function GameScreen({
   const crankRef = useRef<number>(0);
   /** Whether a cadence reading turned {@link crankRef} on the last frame — #625. */
   const pedallingRef = useRef<boolean>(false);
+  /**
+   * The cadence that turned {@link crankRef} on the last frame, or `undefined`
+   * when the HUD shows none — #1999, what the rider's drawn position is chosen
+   * from (`posture.ts`).
+   */
+  const cadenceRef = useRef<number | undefined>(undefined);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
   /**
    * Whether a press on *Ride* is still on its way to a ride — #509.
@@ -2373,6 +2379,7 @@ function GameScreen({
       const sinceLastFrame = at - lastFrameAt;
       crankRef.current = advanceCrank(crankRef.current, sensors.cadence, sinceLastFrame / 1000);
       pedallingRef.current = cadenceTurns(sensors.cadence);
+      cadenceRef.current = turningCadence(sensors.cadence);
       // ⚠️ Before `setState`, so the render it schedules already has the answer.
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
@@ -2820,6 +2827,9 @@ function GameScreen({
           // #625: whether that angle is being turned by a reading — the body
           // rocks exactly while the HUD shows a cadence. @see cadenceTurns
           pedalling: pedallingRef.current,
+          // #1999: the cadence the rider's position on the bicycle is chosen
+          // from, beside their power, grade and speed. @see turningCadence
+          cadence: cadenceRef.current,
           // #783: the room's drawn riders — where they are, and nothing else.
           // #1911: in a lap race, each at their effort distance plus the
           // room's race offset for them.
