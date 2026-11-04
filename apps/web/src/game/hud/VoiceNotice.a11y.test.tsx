@@ -25,7 +25,7 @@ import { auditAccessibility, formatViolations } from '../../a11y/audit';
 import { mount, type Mounted } from '../../testing/mount';
 import { atStartLine } from '../simulation';
 import { HudPanel } from './HudPanel';
-import { VoiceNotice } from './VoiceNotice';
+import { VoiceButton, VoiceNotice } from './VoiceNotice';
 
 let mounted: Mounted | undefined;
 
@@ -50,7 +50,7 @@ function route(): ReturnType<typeof routeProfile> {
 
 const INVITE = 'https://discord.gg/inv1abc';
 
-async function hud(withVoice: boolean): Promise<void> {
+async function hud(withVoice: boolean | 'race'): Promise<void> {
   const profile = route();
   mounted = await mount(
     <main>
@@ -66,7 +66,19 @@ async function hud(withVoice: boolean): Promise<void> {
         announcement=""
         room={{ nearby: 2 }}
         onFollowNext={() => undefined}
-        notices={withVoice ? [<VoiceNotice key="voice" invite={INVITE} />] : []}
+        notices={
+          withVoice === 'race'
+            ? [
+                <div key="race" className="oyl-hud__race">
+                  <div className="oyl-hud__race-actions">
+                    <VoiceButton invite={INVITE} />
+                  </div>
+                </div>,
+              ]
+            : withVoice
+              ? [<VoiceNotice key="voice" invite={INVITE} />]
+              : []
+        }
       />
     </main>,
   );
@@ -114,5 +126,26 @@ describe('Join voice on Discord on the HUD — #875', () => {
     expect(link?.tabIndex).toBe(0);
     link?.focus();
     expect(document.activeElement).toBe(link);
+  });
+
+  it('on a race’s line, a link drawn as a button: it audits clean, adds no live region, and its whole text is its name', async () => {
+    await hud(false);
+    const regions = liveRegions().length;
+    mounted?.unmount();
+    await hud('race');
+    const button = [...document.querySelectorAll<HTMLAnchorElement>('.oyl-hud__voice a')];
+    expect(button).toHaveLength(1);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    expect(liveRegions()).toHaveLength(regions);
+    // A link, not a `<button>`: it goes somewhere (`design/Button.tsx` §`ButtonLink`).
+    expect(button[0]?.tagName).toBe('A');
+    expect(button[0]?.hasAttribute('role')).toBe(false);
+    expect(button[0]?.hasAttribute('aria-label')).toBe(false);
+    expect(button[0]?.textContent).toBe('Join voice on Discord (opens Discord)');
+    expect(button[0]?.getAttribute('href')).toBe(INVITE);
+    expect(button[0]?.getAttribute('target')).toBe('_blank');
+    expect(button[0]?.getAttribute('rel')).toBe('noreferrer');
+    button[0]?.focus();
+    expect(document.activeElement).toBe(button[0]);
   });
 });

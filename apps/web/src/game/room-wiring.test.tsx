@@ -673,8 +673,8 @@ describe('the room’s voice link on the HUD — #875', () => {
   }
 
   const voiceLinks = (): HTMLAnchorElement[] =>
-    queryAll<HTMLAnchorElement>(mounted?.container ?? document.body, 'a').filter(
-      (link) => link.textContent === 'Join voice on Discord',
+    queryAll<HTMLAnchorElement>(mounted?.container ?? document.body, 'a').filter((link) =>
+      (link.textContent ?? '').startsWith('Join voice on Discord'),
     );
 
   it('shows the link the welcome carried, opening Discord in the system’s hands, and says it opens Discord', async () => {
@@ -741,6 +741,17 @@ describe('the room’s voice link on the HUD — #875', () => {
     await pump(120);
     expect(voiceLinks()).toHaveLength(1);
     expect(voiceLinks()[0]?.closest('.oyl-hud__race')).not.toBeNull();
+    // The owner's ruling of 2026-11-04: a secondary button at the ride-time
+    // size, still a link that opens Discord, named by the approved words.
+    const [button] = voiceLinks();
+    expect(button?.textContent).toBe('Join voice on Discord (opens Discord)');
+    expect(button?.className.split(' ')).toEqual(
+      expect.arrayContaining(['oyl-button', 'oyl-button--secondary', 'oyl-button--ride']),
+    );
+    expect(button?.getAttribute('href')).toBe(INVITE);
+    expect(button?.getAttribute('target')).toBe('_blank');
+    expect(button?.getAttribute('rel')).toBe('noreferrer');
+    expect(button?.closest('.oyl-hud__voice')).not.toBeNull();
     // No notice of its own beside the race's.
     expect(
       queryAll(mounted?.container ?? document.body, '.oyl-hud__notices > .oyl-status').some(

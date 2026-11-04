@@ -110,7 +110,7 @@ import {
   voiceNoticeAfter,
   type VoiceNotice as RoomVoiceNotice,
 } from './room-voice';
-import { VoiceLine, VoiceNotice } from './hud/VoiceNotice';
+import { VoiceButton, VoiceNotice } from './hud/VoiceNotice';
 import {
   acrossTheRoomsLine,
   heldOnTheLine,
@@ -3218,6 +3218,28 @@ function GameScreen({
     state?.elapsed ?? 0,
     STANDING_NOTICE_SECONDS,
   );
+  // #785: *Start the race*, offered to the rider who made the room and to
+  // nobody else (the owner's ruling of 2026-09-30), while the race waits.
+  const startRace =
+    race?.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
+      <Button
+        size="ride"
+        unavailable={starting === 'asking'}
+        onClick={() => {
+          const rooms = props.rooms;
+          const roomId = roomIdRef.current;
+          if (starting === 'asking' || rooms === undefined || roomId === undefined) {
+            return;
+          }
+          setStarting('asking');
+          void rooms.start(roomId).then((answer) => {
+            setStarting(answer.kind === 'started' ? undefined : 'refused');
+          });
+        }}
+      >
+        Start the race
+      </Button>
+    ) : undefined;
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
@@ -3626,27 +3648,18 @@ function GameScreen({
                   ? ' The race could not be started from here: it may have been started already.'
                   : ''}
               </StatusMessage>
-              {race.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
-                <Button
-                  size="ride"
-                  unavailable={starting === 'asking'}
-                  onClick={() => {
-                    const rooms = props.rooms;
-                    const roomId = roomIdRef.current;
-                    if (starting === 'asking' || rooms === undefined || roomId === undefined) {
-                      return;
-                    }
-                    setStarting('asking');
-                    void rooms.start(roomId).then((answer) => {
-                      setStarting(answer.kind === 'started' ? undefined : 'refused');
-                    });
-                  }}
-                >
-                  Start the race
-                </Button>
-              ) : undefined}
-              {/* #875: the room's voice link, while the race waits on its line. */}
-              {voiceLink?.place === 'race' ? <VoiceLine invite={voiceLink.invite} /> : undefined}
+              {/* #875: the room's voice link, while the race waits on its line, is a
+                  button beside *Start the race*, the two on a row of their own
+                  (`theme.css` §"A RACE'S VOICE BUTTON, ON ITS LINE"). Without it
+                  the race's notice is exactly what it was. */}
+              {voiceLink?.place === 'race' ? (
+                <div className="oyl-hud__race-actions">
+                  {startRace}
+                  <VoiceButton invite={voiceLink.invite} />
+                </div>
+              ) : (
+                startRace
+              )}
             </div>
           ),
           // #875: the room's Discord voice link, only after the room let the

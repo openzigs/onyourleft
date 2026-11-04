@@ -7633,28 +7633,72 @@ select.oyl-input {
 }
 
 /*
- * A RACE'S VOICE LINK, ON ITS LINE — #875.
+ * A RACE'S VOICE BUTTON, ON ITS LINE — #875, the owner's ruling of
+ * 2026-11-04: *"Make it a button first."*
  *
- * *Join voice on Discord*, as the last line of a race's notice while the race
- * waits on its line (`game/room-voice.ts`), is shown only on a TABLET — the
- * corners layout at 47 rem tall or more, the standings' query below — and is
- * `display: none` everywhere else, so on a phone it is neither drawn nor in
- * the keyboard's order. ⚠️ **What that costs, recorded as #419 asks: in a race
- * a phone offers no voice link.** One more line in the race's notice ran the
- * notice cell below a 736×360 stage and put the lifted sound row over the
- * primary readings there, and put the cell over the leaning rider at 360×752
- * (measured in the browser gate, #875); the race's notice alone already ends
- * 41 px above the rider at 360×752. A group ride's link is a notice of its own
- * and is shown on a phone too. `ride-room.browser.spec.ts` §"#1407" holds the
- * race with the link at every overlay viewport, both ways: drawn and pressable
- * on a tablet, laid out at no size on a phone.
+ * *Join voice on Discord (opens Discord)*, while a race waits on its line
+ * (`game/room-voice.ts`), is a secondary button at the ride-time 48 px
+ * (`.oyl-button--ride`), still a link, beside *Start the race* on a row of
+ * their own, so it costs the race's notice no line of its own. It stands on a
+ * PANEL of the HUD's own opaque surface and edge, never bare on the stage, so
+ * it reads over a bright sky: `hudSurface` is 10.4:1 against the world's
+ * brightest sky, its horizon haze (`game/world.ts` §`HORIZON_HAZE`). Its two
+ * halves are flex items, so where it is narrow it breaks between them, and
+ * its padding and leading are the HUD's tighter ones, so two lines make a
+ * 50 px button beside *Start the race*'s 48 rather than 68: the row is what
+ * an upright phone's rider clearance pays for.
+ *
+ * ⚠️ **Where it is shown, and what that costs, recorded as #419 asks.** Shown
+ * on a tablet and on an upright phone: the column layout and the tablets, at
+ * 47 rem tall or more. **Not on a phone on its side** (the short corners
+ * layout, 736×360 to 844×390 and up to 30 rem tall): there the race's notice
+ * cell is the 16 rem one and already ends a few pixels above a 736×360
+ * stage's bottom, with no room beside *Start the race* for the button and no
+ * line below it — measured in the browser gate. There it is `display: none`,
+ * neither drawn nor in the keyboard's order, and a racer on a phone on its
+ * side is offered no voice link until the race is over. A group ride's link
+ * is a notice of its own and is shown at every size.
+ * `ride-room.browser.spec.ts` §"#875" holds the button's size, its panel's
+ * contrast and its place at every overlay viewport, both ways.
  */
-.oyl-hud__voice {
-  display: none;
-  margin: 0;
+.oyl-hud__race-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
 }
 
-@media (min-width: 46rem) and (min-height: 47rem) {
+/* *Start the race* keeps its one line and its width: the voice button is
+   what gives up width, by breaking its words. */
+.oyl-hud__race-actions > .oyl-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.oyl-hud__voice {
+  display: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.125rem;
+  border: 1px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__voice > .oyl-button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0.25em;
+  box-sizing: border-box;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  line-height: 1.2;
+  text-align: center;
+}
+
+@media (min-width: 22.5rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud__voice {
     display: block;
   }
