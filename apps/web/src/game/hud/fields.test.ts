@@ -12,8 +12,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CLOCK_KEY,
   DELIVERY_HOUSES_KEY,
   DELIVERY_SCORE_KEY,
+  ELAPSED_TIME_KEY,
   MOVING_TIME_KEY,
   NO_READING,
   gapAgainst,
@@ -960,6 +962,8 @@ describe('which readings are drawn large (#423)', () => {
       'remaining',
       // #1111: secondary, beside the distance to go. @see ReadingTier
       'movingTime',
+      // #2072: and the elapsed time beside it (this ride has no clock).
+      'elapsedTime',
       'gap-bot',
       'gap-ghost',
       'wind',
@@ -1159,6 +1163,71 @@ describe('the ride’s moving time — #1111', () => {
   });
 });
 
+/**
+ * #2072: the elapsed time and the time of day beside the moving time.
+ * `HudPanel.test.tsx` reads them off the rendered HUD and
+ * `trainer-wiring.test.tsx` over the real recorder; this is the model.
+ */
+describe('the ride’s elapsed time and the time of day — #2072', () => {
+  const field = (input: HudInput, key: string) =>
+    hudReadings(input).find((reading) => reading.key === key);
+
+  it('shows the recorder’s elapsed time as h:mm:ss, labelled Elapsed, beside Moving', () => {
+    expect(field({ ...baseInput(), elapsedSeconds: 125 }, ELAPSED_TIME_KEY)).toEqual({
+      key: ELAPSED_TIME_KEY,
+      label: 'Elapsed',
+      value: '0:02:05',
+      unit: '',
+      stale: false,
+    });
+    const keys = hudReadings(baseInput()).map((reading) => reading.key);
+    expect(keys.indexOf(ELAPSED_TIME_KEY)).toBe(keys.indexOf(MOVING_TIME_KEY) + 1);
+  });
+
+  it('is its own figure, never the moving time, nor anything the simulation counted', () => {
+    // A minute paused: the recorder says 65 s moving and 125 s elapsed, and
+    // the simulation has been running for ten minutes.
+    const base = baseInput();
+    const input: HudInput = {
+      ...base,
+      state: { ...base.state, elapsed: seconds(600) },
+      movingSeconds: 65,
+      elapsedSeconds: 125,
+    };
+    expect(field(input, MOVING_TIME_KEY)?.value).toBe('0:01:05');
+    expect(field(input, ELAPSED_TIME_KEY)?.value).toBe('0:02:05');
+  });
+
+  it('shows a dash with nothing recorded, and the word size past ten hours', () => {
+    for (const elapsedSeconds of [undefined, Number.NaN]) {
+      expect(field({ ...baseInput(), elapsedSeconds }, ELAPSED_TIME_KEY)?.value).toBe(NO_READING);
+    }
+    expect(field({ ...baseInput(), elapsedSeconds: 35_999 }, ELAPSED_TIME_KEY)?.word).toBe(
+      undefined,
+    );
+    expect(field({ ...baseInput(), elapsedSeconds: 36_000 }, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  it('shows the time of day it is handed as HH:MM, labelled Clock, after the elapsed time', () => {
+    const input: HudInput = { ...baseInput(), timeOfDay: new Date(2026, 10, 4, 7, 5, 59) };
+    expect(field(input, CLOCK_KEY)).toEqual({
+      key: CLOCK_KEY,
+      label: 'Clock',
+      value: '07:05',
+      unit: '',
+      stale: false,
+    });
+    const keys = hudReadings(input).map((reading) => reading.key);
+    expect(keys.indexOf(CLOCK_KEY)).toBe(keys.indexOf(ELAPSED_TIME_KEY) + 1);
+    const clock = field(input, CLOCK_KEY);
+    expect(clock === undefined ? undefined : readingTier(clock)).toBe('secondary');
+  });
+
+  it('has no clock field at all when no time is handed in — the demo', () => {
+    expect(field(baseInput(), CLOCK_KEY)).toBeUndefined();
+  });
+});
+
 describe('the lap in progress — #1312', () => {
   const onLap = (lap: number): HudInput => {
     const input = loopInput();
@@ -1200,6 +1269,18 @@ describe('the lap in progress — #1312', () => {
   });
 });
 
+/**
+ * What a phone draws OUTSIDE the secondary grid: the moving time beside the
+ * controls upright, or in the primary panel's clock row on its side (#1111),
+ * and the elapsed time and the clock in that row (#2072, `theme.css`
+ * §"THE CLOCK ROW").
+ */
+const LIFTED_ON_A_PHONE: ReadonlySet<string> = new Set([
+  MOVING_TIME_KEY,
+  ELAPSED_TIME_KEY,
+  CLOCK_KEY,
+]);
+
 describe('what gives way to a room’s readings on a phone — #1356', () => {
   const gap = pacerGap({
     botDistance: metres(200),
@@ -1236,7 +1317,7 @@ describe('what gives way to a room’s readings on a phone — #1356', () => {
     // all the height there is (`theme.css` §"A ROOM RIDE ON A PHONE").
     const shown = hudReadings(widestRoomRide)
       .filter((each) => readingTier(each) === 'secondary')
-      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .filter((each) => !givesWayToTheRoom(each) && !LIFTED_ON_A_PHONE.has(each.key))
       .map((each) => each.key);
     expect(shown).toEqual([
       'speed',
@@ -1342,7 +1423,7 @@ describe('a Delivery round on the HUD — #1812', () => {
     // `theme.css` §"A ROOM RIDE ON A PHONE": the pacer's dashed field gives way.
     const shown = hudReadings({ ...base, delivery })
       .filter((each) => readingTier(each) === 'secondary')
-      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .filter((each) => !givesWayToTheRoom(each) && !LIFTED_ON_A_PHONE.has(each.key))
       .map((each) => each.key);
     expect(shown).toEqual([
       'speed',

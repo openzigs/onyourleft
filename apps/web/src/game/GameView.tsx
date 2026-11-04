@@ -672,6 +672,22 @@ function useRideMovingSeconds(trainer: GameTrainerPort | undefined): number | un
 }
 
 /**
+ * The recorder's ELAPSED time, kept current — #2072. Subscribed for
+ * {@link useRideMovingSeconds}'s reason: a paused game does not re-render, and
+ * the elapsed time goes on counting through every pause, the game's and the
+ * recording's alike. Still the recorder's figure: never the simulation's
+ * `elapsed`.
+ */
+function useRideElapsedSeconds(trainer: GameTrainerPort | undefined): number | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideElapsedSeconds?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * The moving time of the lap in progress, kept current — #1312. The
  * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason: a
  * paused GAME does not pause the recording, and the lap's clock is the
@@ -1188,6 +1204,8 @@ function GameScreen({
   const sideCamera = useSideCamera(props.sidePairing);
   /** @see useRideMovingSeconds */
   const movingSeconds = useRideMovingSeconds(props.trainer);
+  /** @see useRideElapsedSeconds */
+  const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
   /** @see useRecordingPaused */
@@ -3310,6 +3328,8 @@ function GameScreen({
         // `elapsed`, which is a second clock that does not know about the
         // recorder's auto-pause. @see useRideMovingSeconds
         movingSeconds={movingSeconds}
+        // #2072: and the elapsed time, the recorder's again — pauses included.
+        elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}

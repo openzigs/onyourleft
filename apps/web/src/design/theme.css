@@ -3118,7 +3118,9 @@ a.oyl-button {
   margin: 0;
 }
 
-.oyl-ride__time--recorded {
+/* The seconds recorded and, since #2072, the time of day: small type, each on
+   a row of its own under the two readings. */
+.oyl-ride__time--small {
   grid-column: 1 / -1;
   display: flex;
   gap: var(--oyl-space-sm);
@@ -3128,8 +3130,10 @@ a.oyl-button {
 }
 
 @container oyl-live (min-width: 40rem) {
+  /* #2072: the time of day a column of its own, beside the seconds
+     recorded, so the Live group is no taller for it. */
   .oyl-ride__clock {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
   }
 
   .oyl-ride__clock .oyl-reading__value {
@@ -3138,7 +3142,7 @@ a.oyl-button {
     line-height: 1.1;
   }
 
-  .oyl-ride__time--recorded {
+  .oyl-ride__time--small {
     grid-column: auto;
     display: block;
     align-self: end;
@@ -8961,13 +8965,197 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE CLOCK ROW — #2072.
+ *
+ * The elapsed time and the time of day, at the bottom of the PRIMARY panel
+ * on every overlay layout: the clock (`fields.ts` §`clockReading`) at its
+ * start edge and *Elapsed* at its end, each a label and its value on one
+ * line, as the moving time is drawn there on a short corners phone (#1111,
+ * above). Both stay in the secondary list in the document, after *Moving*,
+ * where a screen reader and #94's order meet them; only where they are DRAWN
+ * moves, as the moving time's does.
+ *
+ * ⚠️ **Why not two more secondary readings — measured, and #419 asks for it
+ * to be written down.** The secondary tier has no row to give on the
+ * layouts that bind: upright, a third row is over the leaning rider's helmet
+ * at 360×752 (§"THE MOVING TIME ON AN UPRIGHT PHONE"); on its side, at
+ * 736×360 (#1120); and on its side from 51 rem a ninth reading on the widest
+ * ride is a third row there too. The primary panel's three tracks leave a
+ * line under them that costs one row's height, once, and holds both:
+ * `CLOCK 14:32` and `ELAPSED 9:59:59` are about 300 px on the CI runner's
+ * fonts, inside the 326 px a 360 px phone's panel has.
+ *
+ * ⚠️ **What it costs, written down:** upright, the top stack is one line
+ * taller, and that line is what is left between it and the rider's helmet
+ * at 360×752 (`ride.browser.spec.ts` publishes the margin). And on a short
+ * corners phone narrower than 51 rem the row already holds the moving time,
+ * and three figures do not fit 24 rem — so there the CLOCK is not drawn: it
+ * is hidden by clip, as a race's standings are on a phone (#1347), and a
+ * screen reader still reads it. Every other overlay layout draws it.
+ *
+ * With anchor positioning the two hang from the primary panel's own corners;
+ * without it (#1120's engines) they are placed in the HUD's `primary` grid
+ * area, and on the corners layout the panel is stretched to its row so that
+ * area's bottom is the panel's. Every rule that lifts them is inside one of
+ * the two `@supports` blocks, so an engine — or #1120's control — with
+ * neither lays them out as the secondary readings they are in the document. Stacked, they are secondary readings like
+ * any other: the stacked layout scrolls, and its tracks' floor is already the
+ * moving time's width (#1158).
+ */
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem),
+    (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      /* One line of the secondary value size (1.5 rem at line-height 1.05),
+         and half a gap above it — the moving time's reservation, above. */
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed,
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      position: absolute;
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary {
+      anchor-name: --oyl-hud-primary;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed {
+      position-anchor: --oyl-hud-primary;
+      right: calc(anchor(right) + var(--oyl-space-sm));
+      bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      position-anchor: --oyl-hud-primary;
+      left: calc(anchor(left) + var(--oyl-space-sm));
+      bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+    }
+  }
+}
+
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      align-self: stretch;
+    }
+  }
+
+  @media (min-width: 46rem) and (min-height: 22.5rem),
+    (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      /* One line of the secondary value size (1.5 rem at line-height 1.05),
+         and half a gap above it — the moving time's reservation, above. */
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed,
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      position: absolute;
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+
+    /* The panel's padding and border in from its grid area's outer edge, as
+       the moving time is placed without anchors (#1120, above). */
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed {
+      grid-area: primary;
+      right: calc(var(--oyl-space-sm) + 1px);
+      bottom: calc(var(--oyl-space-sm) + 1px);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      grid-area: primary;
+      left: calc(var(--oyl-space-sm) + 1px);
+      bottom: calc(var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+/* A short corners phone under 51 rem: the row holds the moving time at its
+   start edge already, so the clock is hidden there by clip (above), and the
+   moving time's field is as wide as what it holds rather than the row, so it
+   ends before *Elapsed* begins. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+    right: auto;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
+ * #2072 — AN UPRIGHT PHONE UNDER 24 REM: the clock row costs no height.
+ *
+ * Under 24 rem a primary unit goes UNDER its number (above), a line of its
+ * own, and upright there is no other height to spend: a Delivery ride's map
+ * credit ends about a pixel above the leaning rider at 360×752, and a standing
+ * notice beside *Keep the screen on* 19 px over #647's 50 px floor. Drawn at
+ * the size it has on every other layout, the clock row put the credit over
+ * the rider and the notice 11 px under its floor
+ * (`ride-delivery.browser.spec.ts`, `ride-notices.browser.spec.ts`).
+ *
+ * So here the row TRADES places with the units' line, exactly: the units go
+ * back BESIDE their numbers at the secondary units' size (`1000 W` and
+ * `168 bpm` fit a 103 px track in Barlow's tabular figures —
+ * `hud.browser.spec.ts` measures every value inside its track at 360 px),
+ * and the row is set at that line's own height, 1.05 × 1 rem, with the
+ * panel's ordinary padding under it. Every line box here is a multiple of its
+ * font size, so the trade is the same on any face. ⚠️ **What it costs: on
+ * these phones the elapsed time and the clock are 1 rem figures**, the size
+ * of a unit, where every other layout draws them at the secondary readings'
+ * 1.5 rem.
+ */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) and (max-width: 24rem) {
+  .oyl-game--riding .oyl-hud__fields--primary {
+    padding-block-end: calc(var(--oyl-space-sm) + 1.05rem);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+    display: inline;
+    font-size: var(--oyl-font-size-sm);
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--elapsed, .oyl-hud__field--clock)
+    .oyl-hud__value {
+    font-size: var(--oyl-font-size-md);
+    line-height: 1.05;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--elapsed, .oyl-hud__field--clock)
+    .oyl-hud__label {
+    line-height: 1.05;
+  }
+}
+
 /* #1111. A time is one token: `9:59:59` broken at a colon reads as two
    numbers, and the second line makes its row taller on a HUD with no height to
    spare. So it is never broken, and what holds it inside its field instead is
    a measurement: `ride.browser.spec.ts` §"#1111" and `hud.browser.spec.ts`'s
    no-overflow check, on the CI runner's fonts. Past ten hours it is set at the
    word size (`fields.ts` §`movingTimeReading`), for #259's reason. */
-.oyl-hud__field--moving .oyl-hud__value {
+/* #2072: and the elapsed time and the clock, for the same reason. */
+.oyl-hud__field--moving .oyl-hud__value,
+.oyl-hud__field--elapsed .oyl-hud__value,
+.oyl-hud__field--clock .oyl-hud__value {
   white-space: nowrap;
 }
 
