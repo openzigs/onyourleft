@@ -1435,11 +1435,13 @@ job of its own with no concurrent step and no browser, that the accessibility ga
 one of them, that `rules` needs both, and — from the table below — that each job's stop is five
 minutes clear of its slowest measured run.
 
-**Measured** on this change's own pull request, run
-[41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6.
+**Measured** on this change's own pull request: run
+[41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6, and
+run [41934894471](https://github.com/openzigs/onyourleft/actions/runs/41934894471), the first with
+every shard green.
 Columns as in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**:
 a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
-with no column fails it too. ⚠️ The `tests-1` column is from runs whose `tests-1` shard was red on
+with no column fails it too. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
 the one case that reads this table, before it had their columns; every other case passed.
 
 <!-- shard-measurements:start -->
@@ -1448,11 +1450,13 @@ the one case that reads this table, before it had their columns; every other cas
 | 41920250892 attempt 4 | 553 | EPYC 9V45 | 314 | Xeon 8573C | 536 | EPYC 9V74 | 389 | EPYC 9V74 | 433 | EPYC 9V74 | 415 | EPYC 9V74 | 415 | 41 | 394 | 371 | 374 |
 | attempt 5 | 843 | Xeon 6975P-C | 258 | **EPYC 7763** | 567 | Xeon 8370C | 384 | EPYC 9V45 | 334 | EPYC 9V45 | 387 | EPYC 9V74 | 825 | 430 | 300 | 344 | 392 |
 | attempt 6 | 716 | **EPYC 7763** | 379 | EPYC 9V74 | 547 | EPYC 9V45 | 279 | EPYC 9V74 | 563 | **EPYC 7763** | 481 | EPYC 9V45 | 346 | 236 | 323 | 439 | 315 |
+| 41934894471 attempt 1 | 769 | **EPYC 7763** | 373 | Xeon 8370C | 586 | **EPYC 7763** | 411 | EPYC 9V45 | 283 | Xeon 6975P-C | 384 | **EPYC 7763** | 508 | 48 | 250 | 332 | 466 |
 <!-- shard-measurements:end -->
 
-- **`tests-1` took 536 to 567 s, 393 s inside its 960 s stop at the slowest (the EPYC 7763), and
-  `tests-2` 279 to 389 s**, against the one job's 887 to 954 s on the 7763. On all six attempts
-  `tests-1` took 438 to 567 s and `tests-2` 275 to 397 s. `tests-1` is now the longest shard on
+- **`tests-1` took 536 to 586 s, 374 s inside its 960 s stop at the slowest (a Xeon 8370C; 567 s
+  on the EPYC 7763), and `tests-2` 279 to 411 s (the slowest on the 7763)**, against the one job's
+  887 to 954 s on the 7763. Over all seven readings `tests-1` took 438 to 586 s and `tests-2` 275
+  to 411 s. `tests-1` is now the longest shard on
   some runs, so it is what bounds `Wall` when the browser shards land on fast CPUs.
 - ⚠️ **Attempts 1 to 3 are not in the table, as #1720 left out its slow-mirror attempt.** Each
   waited for runners — the longest wait between a job being created and starting was 428 s, 468 s
@@ -1460,7 +1464,7 @@ the one case that reads this table, before it had their columns; every other cas
   attempt 3 — so `Wall` was 1 305, 1 291 and 1 019 s and the
   `Wall` bound (under 900 s) would be red on a queue this repository does not control. Their shards
   themselves: `tests-1` 438 s (Xeon 6973P-C), 466 s (Xeon 8573C) and 443 s (EPYC 9V74), `tests-2`
-  275, 309 and 397 s. Attempts 4 to 6 waited 3 to 123 s.
+  275, 309 and 397 s. Attempts 4 to 6 waited 3 to 123 s, and run 41934894471 up to 294 s (its `Wall` 769 s).
 - ⚠️ **In attempt 5 `browser-3`'s `Install the pinned Chromium` took 412 s**, and in attempt 1
   `browser-2`'s about 340 s: the Ubuntu mirror again, inside the step's ten-minute stop. That is
   the 430 s `Gate starts`, still 226 s inside the three minutes `nightly-split.test.ts` holds.
