@@ -68,6 +68,7 @@ describe('the launch splash is held until the page is ready or a timeout passes 
     expect(config.plugins.SplashScreen).toEqual({
       launchAutoHide: true,
       launchShowDuration: 3000,
+      launchFadeOutDuration: 150,
     });
   });
 
