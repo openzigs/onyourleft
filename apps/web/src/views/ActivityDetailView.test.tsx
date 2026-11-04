@@ -46,6 +46,7 @@ import {
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { stubAnalysis, type StubAnalysis } from '../analysis/testing';
 import { trimRadius } from '../detail/privacy';
 import {
   installFakeIntersectionObserver,
@@ -368,6 +369,100 @@ describe('criterion 2 — a gap renders as a visible discontinuity', () => {
     expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(3);
     expect(queryAll(document, 'svg.oyl-trace path')).toHaveLength(3 * 1);
     expect(document.body.textContent).not.toContain('no reading');
+  });
+});
+
+describe('#2069 — the ride’s time in zone, on its own page', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  /** The same ride to both ports: 300 s at 100 W (zone 1) and 300 s at 200 W (zone 4). */
+  function bothPorts(): { readonly detail: StubDetail; readonly analysis: StubAnalysis } {
+    const power = [
+      ...Array.from({ length: 300 }, () => watts(100)),
+      ...Array.from({ length: 300 }, () => watts(200)),
+    ];
+    const activity = stubActivity({ hasPosition: false });
+    return {
+      detail: stubDetail(ATHLETE, { activity, channels: { power }, laps: [] }),
+      analysis: stubAnalysis(ATHLETE, [{ activity, power }]),
+    };
+  }
+
+  async function openWithZones(
+    detail: StubDetail,
+    analysis: StubAnalysis | undefined,
+  ): Promise<Mounted> {
+    await import('../detail/TraceChart');
+    const result = await mount(
+      <ActivityDetailView port={detail} activityId={RIDE} analysis={analysis} />,
+    );
+    await settle();
+    await settle();
+    return result;
+  }
+
+  it('reads nothing for it until the section scrolls into view, then draws the chart and its table', async () => {
+    observers = installFakeIntersectionObserver();
+    const { detail, analysis } = bothPorts();
+    mounted = await openWithZones(detail, analysis);
+
+    const slot = document.querySelector('[data-oyl-zones-slot]');
+    expect(slot?.querySelector('h3')?.textContent).toBe('Time in zone');
+    expect(slot?.textContent).toContain('Reading time in zone…');
+    expect(analysis.channelReads).toEqual([]);
+
+    await observers.reveal([slot as Element]);
+    await settle();
+    await settle();
+
+    expect(analysis.channelReads).toEqual(['ride-1:power']);
+    const shares = queryAll(slot as Element, '.oyl-zone-chart__share').map(
+      (share) => share.textContent,
+    );
+    expect(shares).toEqual(['50%', '0%', '0%', '50%', '0%', '0%', '0%']);
+    const table = queryAll(slot as Element, 'table').find((each) =>
+      (each.querySelector('caption')?.textContent ?? '').startsWith('Power zones'),
+    );
+    expect(
+      queryAll(table as Element, 'tbody tr').map((row) => row.lastElementChild?.textContent),
+    ).toEqual(shares);
+    expect(slot?.querySelector('h4')?.textContent).toBe('Power zones');
+  });
+
+  it('has no such section with no analysis port, nor for a ride with no power or heart rate', async () => {
+    const { detail } = bothPorts();
+    mounted = await openWithZones(detail, undefined);
+    expect(document.querySelector('[data-oyl-zones-slot]')).toBeNull();
+    mounted.unmount();
+
+    const cadenceOnly = stubDetail(ATHLETE, {
+      activity: stubActivity({ hasPosition: false }),
+      channels: { cadence: Array.from({ length: 60 }, () => revolutionsPerMinute(90)) },
+      laps: [],
+    });
+    mounted = await openWithZones(cadenceOnly, bothPorts().analysis);
+    expect(document.querySelector('[data-oyl-zones-slot]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Time in zone');
+  });
+
+  it('says so when the read fails, rather than drawing nothing', async () => {
+    const { detail, analysis } = bothPorts();
+    const broken: StubAnalysis = {
+      ...analysis,
+      store: {
+        ...analysis.store,
+        getAthlete: () => Promise.reject(new Error('the database is closed')),
+      },
+    };
+    mounted = await openWithZones(detail, broken);
+    expect(document.querySelector('[data-oyl-zones-slot]')?.textContent).toContain(
+      'Could not read this ride’s time in zone. the database is closed',
+    );
   });
 });
 
