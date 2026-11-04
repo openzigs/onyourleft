@@ -85,10 +85,10 @@ describe('the steering controller, by state', () => {
     expect(steering.state).toEqual({ kind: 'connected', name: 'Ctrl 1' });
   });
 
-  it('names a controller that advertised no name', async () => {
+  it('gives no name for a controller that advertised none, so the screen repeats nothing', async () => {
     const steering = createSteeringController(opens({ ...handLink().link, name: undefined }));
     await steering.pair();
-    expect(steering.state).toEqual({ kind: 'connected', name: 'Steering controller' });
+    expect(steering.state).toStrictEqual({ kind: 'connected', name: undefined });
   });
 
   it('says why a pairing failed, by the client error, and lists nothing', async () => {
@@ -152,6 +152,41 @@ describe('the steering controller, by state', () => {
     const second = steering.pair();
     await Promise.all([first, second]);
     expect(calls).toBe(1);
+  });
+});
+
+describe('forgetting while a pairing is still running', () => {
+  it('ends with nothing listed and lets the late link go', async () => {
+    const hand = handLink();
+    let finish: (link: SteeringControllerLink) => void = () => undefined;
+    const steering = createSteeringController({
+      requestAndConnect: () =>
+        new Promise<SteeringControllerLink>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const pairing = steering.pair();
+    steering.forget();
+    finish(hand.link);
+    await pairing;
+    expect(steering.state).toEqual({ kind: 'none', dropped: false });
+    expect(hand.disconnects).toBe(1);
+    expect(hand.listening).toBe(0);
+  });
+
+  it('does not show the failure of a pairing that was forgotten', async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const steering = createSteeringController({
+      requestAndConnect: () =>
+        new Promise<SteeringControllerLink>((_, reject) => {
+          fail = reject;
+        }),
+    });
+    const pairing = steering.pair();
+    steering.forget();
+    fail(new SensorError('not-connected', 'x'));
+    await pairing;
+    expect(steering.state).toEqual({ kind: 'none', dropped: false });
   });
 });
 

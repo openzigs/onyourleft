@@ -14,7 +14,8 @@
  * needs no ADR 0009 R3 "works with" line.
  */
 
-import { useSyncExternalStore, type JSX } from 'react';
+import { Gamepad2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
@@ -28,6 +29,19 @@ export const CONTROLLER_WHAT_IT_DOES =
   'Optional. A handlebar controller steers and throws in Delivery. It never changes the trainer’s resistance.';
 
 export const PAIR_CONTROLLER = 'Pair a steering controller';
+
+/** The Forget button's words for a controller that advertised no name. */
+export const FORGET_UNNAMED_CONTROLLER = 'Forget controller';
+
+/**
+ * The row's state while connected: `<name>: Connected` as a sensor's row says
+ * it, and only `Connected` where the controller advertised no name, so the
+ * row never repeats its own heading (owner ruling on #2091, 2026-11-03).
+ */
+export function connectedWords(name: string | undefined): string {
+  const words = connectionWords('connected');
+  return name === undefined ? words : `${name}: ${words}`;
+}
 
 export const CONTROLLER_LOOKING =
   'Looking for a controller. Choose it in the list that opens, and press one of its buttons if it is asleep.';
@@ -44,15 +58,30 @@ export const CONTROLLER_FAILURE_WORDS: Readonly<Record<SteeringPairingFailure, s
   refused: 'Pairing the controller was refused, so nothing was paired.',
 };
 
+/** Stable, so React does not unsubscribe and resubscribe on every render. */
+function subscribeTo(controller: SteeringController): (listener: () => void) => () => void {
+  return (listener) => controller.subscribe(listener);
+}
+
 export function ControllerPairing({
   controller,
 }: {
   readonly controller: SteeringController;
 }): JSX.Element {
-  const state = useSyncExternalStore(
-    (listener) => controller.subscribe(listener),
-    () => controller.state,
-  );
+  const subscribe = useMemo(() => subscribeTo(controller), [controller]);
+  const state = useSyncExternalStore(subscribe, () => controller.state);
+  const button = useRef<HTMLButtonElement>(null);
+  const wasConnected = useRef(state.kind === 'connected');
+  const connected = state.kind === 'connected';
+  const pairing = state.kind === 'pairing';
+  // Pair and Forget are different buttons, so the one the rider pressed is
+  // unmounted and focus falls to <body>. Hand it to the button that replaced
+  // it, only when it fell (never taking it from somewhere the rider moved to).
+  useEffect(() => {
+    if (wasConnected.current === connected) return;
+    wasConnected.current = connected;
+    if (document.activeElement === document.body) button.current?.focus();
+  }, [connected]);
   return (
     <>
       <h2>{CONTROLLER_HEADING}</h2>
@@ -67,38 +96,51 @@ export function ControllerPairing({
           {CONTROLLER_DROPPED}
         </StatusMessage>
       ) : null}
-      {state.kind === 'pairing' ? (
+      {pairing ? (
         <StatusMessage tone="info" label="Pairing" live>
           {CONTROLLER_LOOKING}
         </StatusMessage>
       ) : null}
       <ul className="oyl-pairing tw:mt-0">
         <li className="oyl-pairing__row tw:bg-surface-raised tw:rounded-card">
+          {/* Lucide's artwork, not ours (ADR 0034 D-3), and decoration beside
+              the row's heading, which names it (D-4). */}
+          <Gamepad2
+            className="oyl-pairing__glyph oyl-pairing__icon"
+            color="currentColor"
+            strokeWidth={1.8}
+            aria-hidden="true"
+            focusable="false"
+          />
           <div className="oyl-pairing__body">
             <h3 className="oyl-pairing__kind">Controller</h3>
             {state.kind === 'connected' ? (
               <ul className="oyl-sensor-list">
                 <li>
-                  <p className="oyl-pairing__state">
-                    {state.name}: {connectionWords('connected')}
-                  </p>
+                  <p className="oyl-pairing__state">{connectedWords(state.name)}</p>
                   <Button
+                    ref={button}
                     variant="secondary"
                     onClick={() => {
                       controller.forget();
                     }}
                   >
-                    Forget {state.name}
+                    {state.name === undefined ? FORGET_UNNAMED_CONTROLLER : `Forget ${state.name}`}
                   </Button>
                 </li>
               </ul>
             ) : (
               <>
-                <p className="oyl-pairing__state">{NOT_PAIRED}</p>
+                <p className="oyl-pairing__state">
+                  {pairing ? connectionWords('connecting') : NOT_PAIRED}
+                </p>
                 {/* Kept while pairing, so focus is not lost under the rider's
-                    press; a second press while pairing does nothing. */}
+                    press, and busy then: a second press does nothing. */}
                 <Button
+                  ref={button}
                   variant="secondary"
+                  busy={pairing}
+                  unavailable={pairing}
                   onClick={() => {
                     void controller.pair();
                   }}

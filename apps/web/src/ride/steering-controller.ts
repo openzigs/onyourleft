@@ -51,21 +51,19 @@ export type SteeringControllerState =
   /** Nothing paired. `dropped` once a paired controller's link went. */
   | { readonly kind: 'none'; readonly dropped: boolean }
   | { readonly kind: 'pairing' }
-  | { readonly kind: 'connected'; readonly name: string }
+  /** `name` is what the controller advertised, `undefined` where it advertised none. */
+  | { readonly kind: 'connected'; readonly name: string | undefined }
   | { readonly kind: 'failed'; readonly reason: SteeringPairingFailure };
 
 export interface SteeringController extends ControllerPort {
   readonly state: SteeringControllerState;
-  /** Called after every change of {@link state}. */
+  /** Called after every change of {@link state}. Listeners must not throw. */
   subscribe(listener: () => void): () => void;
   /** Ask for a controller and connect it. Never rejects: a failure is the state. */
   pair(): Promise<void>;
   /** Let the paired controller go. */
   forget(): void;
 }
-
-/** The name shown for a controller that advertised none. */
-export const UNNAMED_CONTROLLER = 'Steering controller';
 
 function failureOf(error: unknown): SteeringPairingFailure {
   const code: unknown =
@@ -86,6 +84,8 @@ export function createSteeringController(port: SteeringControllerPort): Steering
   let state: SteeringControllerState = { kind: 'none', dropped: false };
   let link: SteeringControllerLink | undefined;
   let detach: Array<() => void> = [];
+  /** Bumped by every pair and forget, so a pairing that was forgotten mid-way is told apart. */
+  let generation = 0;
   const listeners = new Set<() => void>();
   const eventListeners = new Set<(events: readonly OpenBikeControlEvent[]) => void>();
 
@@ -117,12 +117,19 @@ export function createSteeringController(port: SteeringControllerPort): Steering
     async pair() {
       if (state.kind === 'pairing') return;
       release();
+      generation += 1;
+      const mine = generation;
       set({ kind: 'pairing' });
       let opened: SteeringControllerLink;
       try {
         opened = await port.requestAndConnect();
       } catch (error) {
-        set({ kind: 'failed', reason: failureOf(error) });
+        if (generation === mine) set({ kind: 'failed', reason: failureOf(error) });
+        return;
+      }
+      if (generation !== mine) {
+        // Forgotten while the client worked: do not list it, and let it go.
+        opened.disconnect();
         return;
       }
       link = opened;
@@ -138,9 +145,10 @@ export function createSteeringController(port: SteeringControllerPort): Steering
           set({ kind: 'none', dropped: true });
         }),
       ];
-      set({ kind: 'connected', name: opened.name ?? UNNAMED_CONTROLLER });
+      set({ kind: 'connected', name: opened.name });
     },
     forget() {
+      generation += 1;
       release();
       set({ kind: 'none', dropped: false });
     },
