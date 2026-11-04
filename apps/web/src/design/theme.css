@@ -1865,6 +1865,22 @@ html {
  * of times does not jitter, and `xxl` because a reading is the thing a fact
  * line exists to say. The unit sits on the numerals' baseline in `inkMuted`.
  */
+/*
+ * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
+ * in a summary, in one face (Barlow, the display family), at 700, with
+ * tabular figures so a changing number does not jitter. One rule over every
+ * number class; `tokens.ts` §`METRIC_TYPE` is the same declarations, and
+ * `design/metric-type.test.ts` holds the two equal. Sizes stay with each
+ * class below.
+ */
+.oyl-reading__value,
+.oyl-metric__value,
+.oyl-hud__value {
+  font-family: var(--oyl-font-family-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .oyl-reading__value {
   font-size: var(--oyl-font-size-xxl);
   font-weight: 700;
