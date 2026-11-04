@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   simulatedClock,
+  previewPower,
+  previewRider,
   simulatedRideText,
   simulatedRiderFromHash,
   simulatedRiderKey,
@@ -118,10 +120,26 @@ describe('simulatedStartMetres', () => {
 describe('simulatedRideText', () => {
   it('says the ride is simulated, at what power and pace, and that it is kept nowhere', () => {
     expect(simulatedRideText({ watts: 200, speedup: 1, startMetres: undefined })).toBe(
-      'Simulated ride at 200 W. Not recorded or shared.',
+      'Simulated ride at 200 W. Not recorded or shared, so Moving shows no time.',
     );
     expect(simulatedRideText({ watts: 200, speedup: 8, startMetres: 5 })).toBe(
-      'Simulated ride at 200 W, 8× real time. Not recorded or shared.',
+      'Simulated ride at 200 W, 8× real time. Not recorded or shared, so Moving shows no time.',
     );
+  });
+});
+
+describe('previewPower — the picker’s power box (PR #2113)', () => {
+  it('takes whole watts from 50 to 1000, and refuses anything else with one sentence', () => {
+    expect(previewPower('200')).toEqual({ watts: 200 });
+    expect(previewPower('50')).toEqual({ watts: 50 });
+    expect(previewPower('1000')).toEqual({ watts: 1000 });
+    const refusal = { problem: 'Enter a whole number of watts from 50 to 1000.' };
+    for (const text of ['49', '1001', '205.5', '', '  ', 'fast', '-200']) {
+      expect(previewPower(text), text).toEqual(refusal);
+    }
+  });
+
+  it('rides a preview from the start line at the speed-up chosen', () => {
+    expect(previewRider(250, 4)).toEqual({ watts: 250, speedup: 4, startMetres: undefined });
   });
 });

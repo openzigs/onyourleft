@@ -2656,6 +2656,7 @@ a.oyl-button {
 .oyl-settings-card,
 .oyl-pairing__row,
 .oyl-chooser__loadout,
+.oyl-chooser__preview,
 .oyl-ride-card__body {
   padding: var(--oyl-space-lg);
 }
@@ -2665,6 +2666,7 @@ a.oyl-button {
   .oyl-settings-card,
   .oyl-pairing__row,
   .oyl-chooser__loadout,
+  .oyl-chooser__preview,
   .oyl-ride-card__body {
     padding: var(--oyl-space-md);
   }
@@ -5274,6 +5276,37 @@ select.oyl-input {
 }
 
 /*
+ * #1992, PR #2113's ruling: *Preview without a trainer*, its own tile after
+ * the loadout (`StageChooser.tsx` §`PreviewControl`). Every control in it is a
+ * 48 px target, the ride-time size (#669), declared here for the stepper's two
+ * buttons, the power box and the four speed-ups; the button wears
+ * `oyl-button--ride` and is on `RIDE_TIME_CONTROLS`. The button is the tile's
+ * width, as *Ride* is the lead's, so a long route name ends in an ellipsis
+ * rather than widening the page at 320 px.
+ */
+.oyl-chooser__preview .oyl-stepper__step,
+.oyl-chooser__preview .oyl-stepper > input {
+  min-block-size: 3rem;
+}
+
+.oyl-chooser__preview .oyl-stepper__step {
+  min-inline-size: 3rem;
+}
+
+.oyl-chooser__preview .oyl-segmented__options > label {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 3rem;
+  min-inline-size: 3rem;
+  box-sizing: border-box;
+}
+
+.oyl-chooser__preview > .oyl-button {
+  inline-size: 100%;
+  max-width: 100%;
+}
+
+/*
  * A SHORT screen — a phone held sideways. What the shell puts above the
  * chooser (its header, the route's title and summary) is about 220 px of a
  * 390 px screen, so the notices are set tighter here — half their padding and
@@ -5305,8 +5338,9 @@ select.oyl-input {
     grid-template-areas:
       'lead lead'
       'heading loadout'
-      'cards loadout';
-    grid-template-rows: auto auto 1fr;
+      'cards loadout'
+      'cards preview';
+    grid-template-rows: auto auto auto 1fr;
     column-gap: var(--oyl-space-lg);
     align-items: start;
   }
@@ -5325,6 +5359,10 @@ select.oyl-input {
 
   .oyl-chooser > .oyl-chooser__loadout {
     grid-area: loadout;
+  }
+
+  .oyl-chooser > .oyl-chooser__preview {
+    grid-area: preview;
   }
 
   /*
@@ -6691,6 +6729,13 @@ select.oyl-input {
   color: var(--oyl-color-hud-ink);
   font-size: var(--oyl-font-size-md);
   font-weight: 700;
+}
+
+/* Each sentence one inline box (PR #2113's review): where the two do not fit
+   one line, the break falls BETWEEN them rather than mid-sentence; a sentence
+   wider than the panel on its own still wraps inside its box. */
+.oyl-hud__simulated > span {
+  display: inline-block;
 }
 
 /* #1810: A DELIVERY ROUND'S THROWS, a row of three ride-time controls under
@@ -9000,7 +9045,8 @@ select.oyl-input {
   .oyl-ride-card,
   .oyl-next-up,
   .oyl-pairing__row,
-  .oyl-chooser__loadout {
+  .oyl-chooser__loadout,
+  .oyl-chooser__preview {
     border: 1px solid;
   }
 

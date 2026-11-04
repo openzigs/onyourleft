@@ -225,6 +225,7 @@ describe('#669 — the ride-time size is on the controls the ruling names', () =
         onPosition={() => undefined}
         worldChosen={false}
         onStart={() => Promise.resolve()}
+        onPreview={() => undefined}
       />,
     );
     await settle();

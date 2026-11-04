@@ -62,7 +62,10 @@ function route(): ReturnType<typeof routeProfile> {
   return routeProfile(points);
 }
 
-const MARK = 'Simulated ride at 200 W, 8× real time. Not recorded or shared.';
+const MARK = [
+  'Simulated ride at 200 W, 8× real time.',
+  'Not recorded or shared, so Moving shows no time.',
+] as const;
 
 let mounted: Mounted | undefined;
 
@@ -92,12 +95,15 @@ describe('the simulated-ride mark on the HUD — #1992', () => {
     );
     const mark = document.querySelector('.oyl-hud__simulated');
     expect(mark?.tagName).toBe('P');
-    expect(mark?.textContent).toBe(MARK);
+    expect(mark?.textContent).toBe(MARK.join(' '));
+    // One box a sentence, so the line breaks between them (PR #2113's review).
+    expect([...(mark?.children ?? [])].map((each) => each.textContent)).toEqual([...MARK]);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
   it('is set in the HUD’s full ink on the panel’s opaque surface, AA in every theme', () => {
     expect(declared('.oyl-hud__simulated', 'color')).toEqual(['var(--oyl-color-hud-ink)']);
+    expect(declared('.oyl-hud__simulated > span', 'display')).toEqual(['inline-block']);
     expect(declared('.oyl-hud__panel', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
     const pair = CONTRAST_REQUIREMENTS.find(
       (each) => each.foreground === 'hudInk' && each.background === 'hudSurface',

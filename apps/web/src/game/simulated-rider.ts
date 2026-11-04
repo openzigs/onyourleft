@@ -18,6 +18,12 @@
  * The rider still chooses the route and presses *Ride* on the picker; nothing
  * starts a ride from a link.
  *
+ * Since the owner's ruling on PR #2113 the picker also offers it — the tablet
+ * app has no address bar — as *Preview without a trainer* (`StageChooser.tsx`
+ * §`PreviewControl`), with a power ({@link previewPower}) and a speed-up of
+ * 1×, 2×, 4× or 8×, always from the start line. `GameView` mounts a preview
+ * as a NEW screen built the same way, and ending it mounts an ordinary one.
+ *
  * ## What it refuses, and where that is enforced
  *
  * `GameView.tsx` §`simulatedRideProps` builds the ride with **no trainer port,
@@ -145,8 +151,72 @@ export function simulatedStartMetres(
 /**
  * The HUD's mark — #1992's "clearly marked": a screenshot of a simulated ride
  * says so on the stage. Worded for the owner's approval.
+ *
+ * Two sentences, kept apart so the HUD can break the line BETWEEN them on a
+ * phone rather than inside one (the owner's review of PR #2113). The second
+ * also says why *Moving* shows a dash: its figure is the recorder's
+ * (`hud/fields.ts` §`movingTimeReading`), and nothing is recorded.
+ */
+export function simulatedRideSentences(rider: SimulatedRider): readonly [string, string] {
+  const pace = rider.speedup === 1 ? '' : `, ${String(rider.speedup)}× real time`;
+  return [
+    `Simulated ride at ${String(rider.watts)} W${pace}.`,
+    'Not recorded or shared, so Moving shows no time.',
+  ];
+}
+
+/**
+ * {@link simulatedRideSentences} as one line, as the HUD's text reads.
+ *
+ * @test-facing held by `simulated-rider.test.ts` and the wiring test, which
+ * read the HUD's note back against it; the HUD itself takes the sentences.
  */
 export function simulatedRideText(rider: SimulatedRider): string {
-  const pace = rider.speedup === 1 ? '' : `, ${String(rider.speedup)}× real time`;
-  return `Simulated ride at ${String(rider.watts)} W${pace}. Not recorded or shared.`;
+  return simulatedRideSentences(rider).join(' ');
+}
+
+/**
+ * The picker's *Preview without a trainer* — the owner's ruling on PR #2113:
+ * the address switch cannot be typed in the tablet app, so the same simulated
+ * ride is offered on the route picker, with a power and a speed-up.
+ */
+export const PREVIEW_DEFAULT_WATTS = 200;
+/** The lowest power the preview takes: below it a ride barely leaves the line. */
+export const PREVIEW_MINIMUM_WATTS = 50;
+/** The highest: a sprint, held. The address switch keeps its own wider range. */
+export const PREVIEW_MAXIMUM_WATTS = 1000;
+/** The preview's speed-ups, each of them inside {@link SIMULATED_RIDER_MAX_SPEEDUP}. */
+export const PREVIEW_SPEEDUPS = [1, 2, 4, 8] as const;
+export type PreviewSpeedup = (typeof PREVIEW_SPEEDUPS)[number];
+
+/** What the preview's power box holds: a power, or why it is not one. */
+export type PreviewPower =
+  | { readonly watts: number; readonly problem?: undefined }
+  | { readonly watts?: undefined; readonly problem: string };
+
+/**
+ * The preview's power box, read. Whole watts from
+ * {@link PREVIEW_MINIMUM_WATTS} to {@link PREVIEW_MAXIMUM_WATTS}; anything
+ * else is refused with the sentence the picker shows, and the preview does
+ * not start — as the pacer's box refuses (#237), rather than riding a power
+ * the rider did not ask for.
+ */
+export function previewPower(text: string): PreviewPower {
+  const parsed = numberOf(text.replace(',', '.'));
+  if (
+    parsed === undefined ||
+    !Number.isInteger(parsed) ||
+    parsed < PREVIEW_MINIMUM_WATTS ||
+    parsed > PREVIEW_MAXIMUM_WATTS
+  ) {
+    return {
+      problem: `Enter a whole number of watts from ${String(PREVIEW_MINIMUM_WATTS)} to ${String(PREVIEW_MAXIMUM_WATTS)}.`,
+    };
+  }
+  return { watts: parsed };
+}
+
+/** The simulated rider a preview asks for: from the start line, always. */
+export function previewRider(power: number, speedup: PreviewSpeedup): SimulatedRider {
+  return { watts: power, speedup, startMetres: undefined };
 }

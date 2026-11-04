@@ -55,7 +55,7 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { Fragment, type JSX, type ReactNode } from 'react';
 
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
@@ -175,8 +175,11 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * The simulated rider's mark — #1992: the sentence that says this ride is
    * simulated, in the actions panel (after Pause and End ride) for every frame of the ride, so a
    * screenshot of it cannot pass for a real effort. Absent on every real ride.
+   * One string a sentence: each is set as one unbreakable-at-the-seam box
+   * (`theme.css` §`.oyl-hud__simulated`), so a phone breaks the line between
+   * the sentences rather than inside the first.
    */
-  readonly simulated?: string | undefined;
+  readonly simulated?: readonly string[] | undefined;
   /**
    * Another rider's ghost — #331: whose it is, and *Stop ghost*, which takes
    * it off the road and the HUD for the rest of the ride. `undefined` for the
@@ -360,7 +363,16 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       }
       moreActions={
         <>
-          {simulated === undefined ? null : <p className="oyl-hud__simulated">{simulated}</p>}
+          {simulated === undefined ? null : (
+            <p className="oyl-hud__simulated">
+              {simulated.map((sentence, index) => (
+                <Fragment key={sentence}>
+                  {index === 0 ? null : ' '}
+                  <span>{sentence}</span>
+                </Fragment>
+              ))}
+            </p>
+          )}
           {/*
               #1244: *Keep the plan*, on a row of its own under Pause and End ride
               and only while a re-plan waits. ⚠️ **Not a third control in the row

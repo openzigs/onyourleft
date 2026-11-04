@@ -42,7 +42,7 @@ import type { RoomsPort } from '../net/rooms-port';
 import { ManualClock, ScriptedRoom } from '../net/testing';
 import { createRideController } from '../ride/controller';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { HOUSES_NOT_READY_TEXT } from './hud/delivery-announce';
@@ -50,7 +50,7 @@ import type { GameRenderer, SceneFrame } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { GameSimulation } from './simulation';
-import { simulatedRideText } from './simulated-rider';
+import { simulatedRideText, type PreviewSpeedup } from './simulated-rider';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 
 /**
@@ -243,6 +243,45 @@ async function ride(
 }
 
 /**
+ * On the picker the game opens on, with NO address switch: set the preview's
+ * power and speed-up, and press *Preview* — PR #2113's ruling, the way a rider
+ * in the tablet app asks for the simulated ride.
+ */
+async function preview(power: string, speedup: PreviewSpeedup): Promise<void> {
+  const container = mounted?.container ?? document.body;
+  const box = container.querySelector<HTMLInputElement>('.oyl-chooser__preview input[type=number]');
+  expect(box).not.toBeNull();
+  if (box !== null) await typeInto(box, power);
+  const choice = queryAll<HTMLLabelElement>(container, '.oyl-chooser__preview label').find(
+    (label) => label.textContent === `${String(speedup)}×`,
+  );
+  await clickThrough(choice);
+  await clickThrough(buttonStarting('Preview '));
+  for (let index = 0; index < 5; index += 1) await settle();
+}
+
+/** Open the game with no switch at all, and ride a preview from its picker. */
+async function ridePreview(
+  power: string,
+  speedup: PreviewSpeedup,
+  options: { readonly trainer?: GameTrainerPort; readonly frames?: number } = {},
+): Promise<void> {
+  globalThis.location.hash = '#/game';
+  mounted = await mount(
+    <GameView
+      port={gamePort()}
+      {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
+      renderer={() => Promise.resolve(capturingRenderer([]))}
+      now={() => nowMs}
+    />,
+  );
+  await settle();
+  await preview(power, speedup);
+  await pump(options.frames ?? 20);
+  await settle();
+}
+
+/**
  * Where a real ride at {@link POWER} is after `frames` frames of the test's
  * clock, run `speedup` times faster from the mount — `GameView`'s simulation,
  * built as it builds one and advanced on the same instants.
@@ -345,6 +384,86 @@ describe('a simulated rider rides the rider’s own route with nothing paired �
     await ride('#/game', { port: gamePort(PEDALLING), frames: 4 });
     expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
     expect(screen()?.textContent).not.toContain('Simulated ride');
+  });
+});
+
+describe('the picker’s Preview without a trainer — PR #2113’s ruling', () => {
+  it('rides the chosen route at the power and speed-up set on the picker, with no switch in the address', async () => {
+    await ridePreview(String(POWER), 8);
+
+    expect(globalThis.location.hash).toBe('#/game');
+    const along = lastOdometer() ?? 0;
+    expect(along).toBeCloseTo(shadowDistance(20, 8), 6);
+    expect(along).toBeGreaterThan(shadowDistance(20, 1) * 6);
+  });
+
+  it('rides in real time at 1×, so the speed-up is the one chosen', async () => {
+    await ridePreview(String(POWER), 1);
+
+    expect(lastOdometer() ?? 0).toBeCloseTo(shadowDistance(20, 1), 6);
+  });
+
+  it('carries the HUD’s note, worded for the power and speed-up chosen', async () => {
+    await ridePreview(String(POWER), 4, { frames: 4 });
+
+    expect(screen()?.querySelector('.oyl-hud__simulated')?.textContent).toBe(
+      simulatedRideText({ watts: POWER, speedup: 4, startMetres: undefined }),
+    );
+  });
+
+  it('refuses a power it cannot ride, and says why — nothing starts', async () => {
+    globalThis.location.hash = '#/game';
+    mounted = await mount(
+      <GameView
+        port={gamePort()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await preview('20', 8);
+    await pump(10);
+
+    expect(buttonStarting('Preview ')?.getAttribute('aria-disabled')).toBe('true');
+    expect(screen()?.querySelector('.oyl-chooser__preview [role=alert]')?.textContent).toBe(
+      'Enter a whole number of watts from 50 to 1000.',
+    );
+    expect(built).toEqual([]);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+  });
+
+  it('rides the card the rider chose, and hands back the picker on that card', async () => {
+    const other: RidableRoute = { ...ROUTE, id: 'route-other', name: 'My other route' };
+    globalThis.location.hash = '#/game';
+    mounted = await mount(
+      <GameView
+        port={{ ...gamePort(), listRoutes: () => Promise.resolve([ROUTE, other]) }}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    const card = queryAll<HTMLInputElement>(screen() ?? document, 'input[type=radio]').find(
+      (radio) => radio.labels?.[0]?.textContent?.includes(other.name) === true,
+    );
+    await clickThrough(card);
+    expect(buttonStarting('Preview ')?.textContent).toBe(`Preview ${other.name}`);
+    await preview(String(POWER), 8);
+    await pump(4);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
+    await clickThrough(buttonStarting('End ride'));
+
+    expect(buttonStarting('Ride ')?.textContent).toBe(`Ride ${other.name}`);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+  });
+
+  it('asks a ready trainer for nothing, writes nothing to it and releases nothing', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ridePreview(String(POWER), 8, { trainer: readyTrainer(commands), frames: 40 });
+    expect(lastOdometer() ?? 0).toBeGreaterThan(100);
+    await clickThrough(buttonStarting('End ride'));
+
+    expect(commands).toEqual({ written: [], releases: [], requests: [] });
   });
 });
 
@@ -590,6 +709,38 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     expect(rig.savedIds).toEqual([]);
     expect(rig.room.tickets).toEqual([]);
     expect(rig.room.sockets).toEqual([]);
+    await rig.done();
+  });
+
+  it('from the picker’s Preview: writes nothing, records nothing, saves nothing and joins no room — then rides for real after', async () => {
+    const rig = await onTheBench();
+    await openTheGame(rig, '#/game');
+    await preview(String(POWER), 8);
+    await rideFor(rig, 30);
+    expect(lastOdometer() ?? 0).toBeGreaterThan(100);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
+    await clickThrough(buttonStarting('End ride'));
+    for (let index = 0; index < 10; index += 1) await settle();
+
+    expect(rig.written).toEqual([]);
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    expect(rig.savedIds).toEqual([]);
+    expect(rig.room.tickets).toEqual([]);
+    expect(rig.room.sockets).toEqual([]);
+
+    // The control, on the same bench: the preview handed back an ORDINARY
+    // picker, on the route it rode, whose Ride takes the machine and records.
+    expect(buttonStarting('Ride ')?.textContent).toBe(`Ride ${ROUTE.name}`);
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 10; index += 1) await settle();
+    rig.room.accept();
+    rig.room.welcome(0);
+    await rideFor(rig, 30);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+    expect(rig.written.length).toBeGreaterThan(0);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect((await rig.sessions()).length).toBeGreaterThan(0);
     await rig.done();
   });
 

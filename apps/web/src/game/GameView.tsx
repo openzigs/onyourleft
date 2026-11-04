@@ -130,7 +130,7 @@ import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import {
   simulatedClock,
-  simulatedRideText,
+  simulatedRideSentences,
   simulatedRiderFromHash,
   simulatedRiderKey,
   simulatedSensors,
@@ -741,8 +741,47 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
  * in progress is never switched between a real rider and a simulated one.
  */
 export function GameView(props: GameViewProps): JSX.Element {
-  const simulated = simulatedRiderFromHash(globalThis.location.hash);
-  return <GameScreen key={simulatedRiderKey(simulated)} given={props} asked={simulated} />;
+  // PR #2113's ruling: the picker's *Preview without a trainer*, which asks
+  // for the same simulated ride as the address switch, for one route.
+  const [preview, setPreview] = useState<PreviewAsked | undefined>(undefined);
+  // The route a preview rode, chosen again on the picker it returns to.
+  const [returnTo, setReturnTo] = useState<string | undefined>(undefined);
+  const fromHash = simulatedRiderFromHash(globalThis.location.hash);
+  const simulated = preview?.rider ?? fromHash;
+  const onPreview = useCallback((asked: PreviewAsked) => {
+    setReturnTo(asked.routeId);
+    setPreview(asked);
+  }, []);
+  const onPreviewEnd = useCallback(() => {
+    setPreview(undefined);
+  }, []);
+  return (
+    <GameScreen
+      // ⚠️ A preview is a NEW screen, mounted with no trainer port, room or
+      // rooms from its first render (`useSimulatedRide`), and ending it mounts
+      // a new ordinary one: the screen that held the trainer never rides it.
+      key={
+        preview === undefined
+          ? simulatedRiderKey(simulated)
+          : `preview:${simulatedRiderKey(preview.rider)}:${preview.routeId}`
+      }
+      given={props}
+      asked={simulated}
+      preview={preview}
+      returnTo={returnTo}
+      // Offered only on an ordinary screen: the address switch already
+      // rides every press of *Ride* simulated.
+      onPreview={simulated === undefined ? onPreview : undefined}
+      onPreviewEnd={onPreviewEnd}
+    />
+  );
+}
+
+/** What the picker's *Preview without a trainer* asked for — PR #2113. */
+interface PreviewAsked {
+  readonly rider: SimulatedRider;
+  readonly routeId: string;
+  readonly position: RidingPosition;
 }
 
 /**
@@ -793,9 +832,18 @@ function useSimulatedRide(
 function GameScreen({
   given,
   asked,
+  preview,
+  returnTo,
+  onPreview,
+  onPreviewEnd,
 }: {
   readonly given: GameViewProps;
   readonly asked: SimulatedRider | undefined;
+  /** A preview to ride on mount, then hand back with {@link onPreviewEnd}. */
+  readonly preview: PreviewAsked | undefined;
+  readonly returnTo: string | undefined;
+  readonly onPreview: ((asked: PreviewAsked) => void) | undefined;
+  readonly onPreviewEnd: () => void;
 }): JSX.Element {
   // #1992: held for this screen's life — the key above makes a new screen of a new choice.
   const [simulated] = useState(asked);
@@ -809,8 +857,8 @@ function GameScreen({
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
   // (`shell/routes.ts` §`hrefForGameRoute`); read once, on mount.
-  const [picked, setPicked] = useState<string | undefined>(() =>
-    gameRouteFromHash(globalThis.location.hash),
+  const [picked, setPicked] = useState<string | undefined>(
+    () => returnTo ?? gameRouteFromHash(globalThis.location.hash),
   );
   const [withGhost, setWithGhost] = useState(false);
   // #331: another rider's ghost, which REPLACES the rider's own — one ghost at
@@ -2047,6 +2095,22 @@ function GameScreen({
     [begin],
   );
 
+  // PR #2113: a preview starts itself once the routes are read, on the route
+  // the picker had chosen — with no ghost, pacer, wind, round or race, and the
+  // riding position the picker had. A route gone since is no preview: the
+  // ordinary picker comes back.
+  const previewStartedRef = useRef(false);
+  useEffect(() => {
+    if (preview === undefined || routes === undefined || previewStartedRef.current) return;
+    previewStartedRef.current = true;
+    const route = routes.find((each) => each.id === preview.routeId);
+    if (route === undefined) {
+      onPreviewEnd();
+      return;
+    }
+    void start(route, false, undefined, undefined, preview.position);
+  }, [preview, routes, start, onPreviewEnd]);
+
   // #423. Whether the ride has the screen — @see GameViewProps.onImmersive.
   //
   // ⚠️ The same predicate the render below branches on, written once: a shell
@@ -2957,6 +3021,11 @@ function GameScreen({
     };
   }, [props.camera]);
 
+  if (!onTheStage && preview !== undefined) {
+    // PR #2113: the preview's own screen, between the press and its first
+    // frame — never a picker, whose Ride this screen has no trainer for.
+    return <p role="status">Starting the preview…</p>;
+  }
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.
     const trainerNow = props.trainer?.readTrainer();
@@ -3031,6 +3100,14 @@ function GameScreen({
             assisted: lapRaceAssisted(deviceStorage()),
           }}
           onStart={start}
+          // PR #2113: *Preview without a trainer*, on an ordinary screen only.
+          onPreview={
+            onPreview === undefined
+              ? undefined
+              : (route, rider, sitting) => {
+                  onPreview({ rider, routeId: route.id, position: sitting });
+                }
+          }
           // #1221: whether this ride will be saved, said under Ride. The
           // recorder's moving time is subscribed (`useRideMovingSeconds`), so
           // a recording started here or on the Ride screen is seen at once.
@@ -3342,7 +3419,7 @@ function GameScreen({
         // §`sideCameraLostNotice`.
         sideCamera={sideCameraOnHud(sideCamera)}
         // #1992: a simulated ride says so on the stage, for every frame of it.
-        simulated={simulated === undefined ? undefined : simulatedRideText(simulated)}
+        simulated={simulated === undefined ? undefined : simulatedRideSentences(simulated)}
         // #1552, ADR 0054 D-3.6: the OpenStreetMap credit, for the WHOLE ride
         // whose world was given a corridor at the start — never per frame,
         // because the notice is for the work, not for what is in view. Keyed
@@ -3375,6 +3452,8 @@ function GameScreen({
           teardown();
           setPhase('choosing');
           setChosen(undefined);
+          // PR #2113: a preview ends back on an ordinary picker, a new screen.
+          if (preview !== undefined) onPreviewEnd();
         }}
         // #423: inside the HUD's own grid rather than after it, so a notice
         // gets a cell no panel can occupy. @see HudPanelProps.notices

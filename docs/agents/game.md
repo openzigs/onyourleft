@@ -1558,7 +1558,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         builds the ride with NO trainer port, room or rooms and
                         no Delivery round, so nothing is written to a machine,
                         recorded, saved or posted; the HUD's `oyl-hud__simulated`
-                        line marks it. `simulated-rider-wiring.test.tsx` holds it
+                        line marks it. `simulated-rider-wiring.test.tsx` holds it.
+                        The picker offers the same ride as *Preview without a
+                        trainer* (PR #2113's ruling; `StageChooser.tsx`
+                        §`PreviewControl`): a power and a 1–8× speed-up, ridden
+                        on a NEW screen `GameView` mounts with none of those
+                        ports; ending it mounts an ordinary picker again.
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists
