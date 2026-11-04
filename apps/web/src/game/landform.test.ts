@@ -1427,8 +1427,9 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       // the road faces the eye — passes over every triangle of the ground
       // that faces the eye, as three draws it, sampled every metre. Nothing
       // exempt: a road that faces the eye is hidden by no verge of its own.
-      // Climbs are not asked: there the far leg is above the eye and faces
-      // away from it, with or without any ground.
+      // Climbs are not asked here: there the far leg is above the eye and its
+      // road faces away from it, with or without any ground. The next test
+      // asks what an eye below the far leg can see of it.
       //
       // Measured before this fix: hidden by up to 2.09 m on the level (140°
       // to the right), and 2.03 m descending at 3 %. At 3 % a ray to a road
@@ -1480,6 +1481,85 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       }
       expect(hidden).toEqual([]);
       // Non-vacuity: the far leg's road really is in the frame, facing the eye.
+      expect(rays).toBeGreaterThan(300);
+    },
+    120_000,
+  );
+
+  /**
+   * A planner's corner reached on a climb that levels off at the bend — the
+   * shape of the owner's 143° bend of #2117's ruling of 2026-11-04, a 9–10 %
+   * climb to a far leg that runs level — from 140° to 150°, both hands, at
+   * 6 %, 8 % and 10 %.
+   */
+  const climbs: readonly (readonly [string, RouteProfile])[] = [140, 143, 147, 150].flatMap(
+    (degrees) =>
+      (['right', 'left'] as const).flatMap((hand) =>
+        [0.06, 0.08, 0.1].map(
+          (grade) =>
+            [
+              `${String(degrees)}° to the ${hand}, climbing at ${String(Math.round(grade * 100))} % to a level far leg`,
+              plannerCornerRoute(degrees, hand, grade, 0),
+            ] as const,
+        ),
+      ),
+  );
+
+  it.each(climbs)(
+    'stands no ground over the far leg from a climb to the bend, %s',
+    (_name, profile) => {
+      // #2117's ruling of 2026-11-04: coming up a 9–10 % climb to the 143°
+      // bend, the owner saw a grass rise where main showed the far leg's
+      // road. On such a climb the far leg runs at the bend's height, above
+      // the eye — 1.4 m above it 20 m short of the owner's bend and 3.4 m
+      // 40 m short, measured — so the top of its road faces away from the
+      // eye, and no ground at all lets the eye see it. What main drew there
+      // was its own ground culled: rising all the way out from the far
+      // leg, that ground's face looked away from the rider, and the road
+      // showed through ground standing over it (up to 19 m here, at 150° to
+      // the left). And #2117's first approach fix stood a ridge beside the
+      // far leg (the owner's frames at c9136f63).
+      //
+      // What the rider can see of a road above the eye is what stands on
+      // it. So from the chase camera's eye on the approach, a ray to a point
+      // a metre over every point of the far leg's centreline in the frame
+      // passes over every triangle of the ground that faces the eye, as
+      // three draws it, sampled every metre: no ground stands between the
+      // rider and the far leg. Measured on this change's head: at least
+      // 0.32 m clear (150° to the left at 10 %). At c9136f63, standing up to
+      // 2.02 m over it (140° to the right at 10 %); on main, up to 19.25 m.
+      let rays = 0;
+      const hidden: string[] = [];
+      for (let at = bend - 300; at <= bend - 20; at += 10) {
+        const frame = sceneAt(profile, at);
+        const rig = cameraRig(frame.camera);
+        const ground = frame.terrain.mesh;
+        const cells = facingGround(ground, rig.eye);
+        for (const point of frame.corridor.centre) {
+          if (!(point.distance > bend + 15)) continue;
+          const target = { x: point.x, y: point.y + 1, z: point.z };
+          if (framed(rig, target) === undefined) continue;
+          rays += 1;
+          const dx = target.x - rig.eye.x;
+          const dy = target.y - rig.eye.y;
+          const dz = target.z - rig.eye.z;
+          const span = Math.hypot(dx, dz);
+          for (let step = 3; step < span - 2; step += 1) {
+            const share = step / span;
+            const over =
+              facingTop(ground, cells, rig.eye.x + dx * share, rig.eye.z + dz * share) -
+              (rig.eye.y + dy * share);
+            if (over > 0) {
+              hidden.push(
+                `${over.toFixed(2)} m at ${String(at)}, road ${point.distance.toFixed(0)}`,
+              );
+              break;
+            }
+          }
+        }
+      }
+      expect(hidden).toEqual([]);
+      // Non-vacuity: the far leg really is in the frame.
       expect(rays).toBeGreaterThan(300);
     },
     120_000,
