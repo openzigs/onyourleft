@@ -25,11 +25,13 @@
  *
  * ## Units this program does not have yet
  *
- * Three fields were left out rather than typed as a bare `number`, and each is a
- * gap in #25 rather than a decision here:
+ * Three fields were left out rather than typed as a bare `number`, and each was
+ * a gap in #25 rather than a decision here (the first has its unit now):
  *
- * - **Battery level** — needs a `Percent`. Every BLE sensor exposes it and the
- *   UI will want it.
+ * - **Battery level** — the `Percent` it needed exists since #2046, and
+ *   `protocol/battery.ts` decodes the Battery Level characteristic into one.
+ *   It is still not a measurement here: carrying it across this boundary is
+ *   the job of its first consumer, #2047.
  * - **FTMS resistance level and inclination** — need a `Percent` and a signed
  *   grade type.
  * - **FTMS total energy** — needs a `Kilojoules` (the characteristic reports
