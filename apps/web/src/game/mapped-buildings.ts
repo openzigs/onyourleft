@@ -10,7 +10,8 @@
  *
  * - {@link mappedBuildingsOf}: the plans, indexed once, at the press, by
  *   `GameView` — never per frame.
- * - {@link selectMappedBuildings}: the set a refill draws — nearest first,
+ * - {@link selectMappedBuildings}: the set a refill draws — since #2094 the
+ *   nearest {@link MAPPED_LANDMARKS_AHEAD} landmarks first, then nearest first,
  *   within {@link MAPPED_BUILDING_REACH_METRES}, at most
  *   {@link MAPPED_BUILDING_MAX}, ranked by distance with the frame's
  *   procedural structures (#1586) inside `realistic-budget.ts`
@@ -187,7 +188,7 @@ export function roleTriangles(plan: FootprintPlan, role: FootprintRole): number 
 export class MappedSelection {
   /** How many buildings are drawn, at most {@link MAPPED_BUILDING_MAX}. */
   count = 0;
-  /** The drawn plans' indices, nearest first. */
+  /** The drawn plans' indices, the landmarks taken ahead first (#2094), then nearest first. */
   readonly plans = new Int32Array(MAPPED_BUILDING_MAX);
   /** 1 where the drawn building at that place is at its far level. */
   readonly far = new Uint8Array(MAPPED_BUILDING_MAX);
@@ -255,13 +256,52 @@ export const NO_RIVALS: RivalStructures = {
 };
 
 /**
+ * How many landmarks in reach a refill takes before every other building —
+ * #2094: **4**, a village's church or two, its school and its town hall. A
+ * landmark is a plan whose mapped type or landmark draws it as a civic
+ * building (`building-types.ts`: a place of worship, a school, a town hall);
+ * an inferred family is never civic. Beyond this many, a landmark is ranked by
+ * its distance like any other, so a city centre's civic blocks cannot take
+ * more than 4 of {@link MAPPED_BUILDING_MAX}'s places from the street nearest
+ * the rider.
+ */
+export const MAPPED_LANDMARKS_AHEAD = 4;
+
+/** Whether a plan is a landmark — {@link MAPPED_LANDMARKS_AHEAD}. */
+function isLandmark(plan: FootprintPlan): boolean {
+  return plan.family === 'civic';
+}
+
+/**
+ * Moves the nearest {@link MAPPED_LANDMARKS_AHEAD} landmarks of `order`'s
+ * first `count` (nearest first) to its front, each keeping its order, and
+ * returns how many moved. In place, so a refill allocates nothing.
+ */
+function landmarksAhead(
+  plans: readonly FootprintPlan[],
+  order: Uint32Array,
+  count: number,
+): number {
+  let ahead = 0;
+  for (let at = 0; at < count && ahead < MAPPED_LANDMARKS_AHEAD; at += 1) {
+    const index = order[at] as number;
+    if (!isLandmark(plans[index] as FootprintPlan)) continue;
+    order.copyWithin(ahead + 1, ahead, at);
+    order[ahead] = index;
+    ahead += 1;
+  }
+  return ahead;
+}
+
+/**
  * The mapped buildings one refill draws, written into `into` — #1549.
  *
  * Every plan within {@link MAPPED_BUILDING_REACH_METRES} of `(x, z)` by its
  * centroid, **nearest first**; each beyond {@link MAPPED_BUILDING_NEAR_METRES}
  * at its far level. Taken in that order until the next would pass
  * `triangleBudget` or {@link MAPPED_BUILDING_MAX} are taken — so the drawn set
- * is the nearest, and a far building never takes a near one's place.
+ * is the nearest, and a far building never takes a near one's place but for
+ * the landmarks below.
  *
  * **Ranked with the procedural structures, under the one budget** — #1586.
  * Each of `rivals` nearer than (or as near as) the next building is taken
@@ -278,10 +318,17 @@ export const NO_RIVALS: RivalStructures = {
  * 300 to 400 m ahead, not at 400 m. Inside #1549's rule, and one for #1553's
  * by-eye pass.
  *
- * ⚠️ **One exception to "the nearest", and it is the draw-call bound.** A
+ * ⚠️ **Two exceptions to "the nearest".** The first is the draw-call bound. A
  * building whose wall or roof surface would open a surface past `surfaceSlots`
  * is passed over, counted in `passed`, and the next is tried: a seventh
  * surface would be a seventh draw call. A refill nearer it draws it.
+ *
+ * The second is the landmarks — #2094: the nearest
+ * {@link MAPPED_LANDMARKS_AHEAD} in reach are taken before every other
+ * building, so a church 300 m off the road is not lost behind the
+ * {@link MAPPED_BUILDING_MAX} houses nearer the rider. They rank no rival in,
+ * a landmark that does not fit the budget is skipped rather than ending the
+ * walk, and they are inside the same count, budget and draw calls.
  *
  * **House models** — #1585. With `models` (each model's triangles, by its
  * place in `house-models.ts` §`HOUSE_MODELS`), a near plan that has one
@@ -331,13 +378,21 @@ export function selectMappedBuildings(
   order
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
+  const ahead = landmarksAhead(plans, order, inReach);
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   let stopped = false;
   for (let at = 0; at < inReach && into.count < MAPPED_BUILDING_MAX; at += 1) {
     const index = order[at] as number;
     const plan = plans[index] as FootprintPlan;
     const apart = distances[index] as number;
-    if (!rivalsWithin(apart)) {
+    // #2094: a landmark taken ahead ranks no rival in, so it brings no hedge
+    // nearer than a house the walk has not reached yet. Two costs it does
+    // accept, by design (ADR 0054's 2026-11-03 amendment): its triangles come
+    // out of the shared budget before any rival is ranked, so a binding budget
+    // can drop a structure nearer the rider than the church; and it opens its
+    // wall and roof slots before the nearest houses, so the slot check below
+    // can pass over a near house that would need a 7th surface.
+    if (at >= ahead && !rivalsWithin(apart)) {
       stopped = true;
       break;
     }
@@ -354,6 +409,8 @@ export function selectMappedBuildings(
         : models[plan.model.model];
     const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
     if (into.triangles + rivalTriangles + triangles > triangleBudget) {
+      // A landmark taken ahead that does not fit leaves the nearest to their own walk.
+      if (at < ahead) continue;
       stopped = true;
       break;
     }

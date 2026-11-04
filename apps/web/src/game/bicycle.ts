@@ -230,16 +230,16 @@ const TAU = Math.PI * 2;
  * palette (ADR 0063 D-1), whose light `accent` is an olive within a few
  * degrees of {@link KIT_PALETTE}'s Lime, so the two values are written here,
  * unchanged, and the house kit's colour under Hi-Vis is the owner's to choose
- * (#2123). The realistic rider's jersey is drawn
- * from the same kit (`three-renderer.ts` §`RIDER_KITS`, the `rider` entry), so
- * both worlds wear one colour. Since #623's second half the rider may choose
- * another from {@link KIT_PALETTE}, whose first entry is this one; what the
- * rider wears is {@link riderKitFor}'s answer, handed to the view with
- * `GameView.setRiderKit`, and it replaces the `rider` entry and nothing else. `limb` is the teal's darker
- * shade, so the legs and helmet stay darker than the jersey and the
- * pedalling still reads as motion. #93's third criterion is unchanged and is
- * still what the three tints are measured against (`game.browser.spec.ts`
- * §"the pacer and the ghost are bicycles").
+ * (#2123). The realistic rider's jersey is drawn from the same kit
+ * (`three-renderer.ts` §`RIDER_KITS`, the `rider` entry), so both worlds wear
+ * one colour. Since #623's second half the rider may choose another from
+ * {@link KIT_PALETTE}, whose first entry is this one; what the rider wears is
+ * {@link riderKitFor}'s answer, handed to the view with `GameView.setRiderKit`,
+ * and it replaces the `rider` entry and nothing else.
+ * `limb` is the kit's darker shade, so the legs and helmet stay darker than
+ * the jersey and the pedalling still reads as motion. #93's third criterion is
+ * unchanged and is still what the three tints are measured against
+ * (`game.browser.spec.ts` §"the pacer and the ghost are bicycles").
  *
  * ⚠️ **No skin tone appears here, and that is a decision rather than an
  * oversight.** At eight metres behind, on a phone, it conveys nothing, and it
