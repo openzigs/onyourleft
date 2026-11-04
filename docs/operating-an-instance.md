@@ -575,6 +575,39 @@ address, and a mailed code is refused `address_unbound` at redemption if its add
 cleared. Clearing an established address (`POST /v1/auth/recovery-email/clear`) and the full reset
 (`POST /v1/auth/recovery/reset`) each need a recovery code or a code mailed to an established address.
 
+## Voice on Discord
+
+With `OYL_INSTANCE_DISCORD_BOT_TOKEN` and `OYL_INSTANCE_DISCORD_GUILD_ID` set, the instance's bot
+makes a temporary voice channel in your Discord server for a private room, and deletes it when the
+room is over (#874; [spike 0017](spikes/0017-voice-chat-for-rooms.md),
+[spike 0018](spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md)). It is REST only, through
+Node's own `fetch`, with no gateway connection and no dependency. Leave both empty and there is no
+voice: nothing else changes.
+
+- **You are the developer under Discord's terms.** Register your own Application in the Discord
+  Developer Portal, add its bot to a server of its own, and give it **Manage Channels** and **Create
+  Instant Invite**. Turn **Membership Screening off** in that server: with it on, riders would join
+  unable to speak, so the instance turns voice off.
+- **What reaches Discord.** A channel named `oyl-ride-` and the first twelve hex digits of the
+  room's random id; a temporary, single-room invite for at most the room's riders, for a day. No
+  topic, no category, no audit-log reason, no ride data and nothing a rider typed.
+- **What the instance keeps.** Which channel is which room's is held in memory only: nothing about
+  Discord is in the database or a backup. After a restart, or when Discord refused a delete, the
+  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel no open room
+  holds. That is why the bot needs a server of its own.
+- **The token** is sent only to `discord.com`, in the `Authorization` header, and is never logged:
+  an error is logged by its name alone. Rate limits are honoured from Discord's headers, as its
+  terms require; a `401` turns voice off until the next start, so a dead token never loops.
+
+| You see | It means |
+|---|---|
+| `"event":"voice","state":"on"` at start | the bot's token and server answered; rooms may have voice |
+| `"event":"voice","state":"off","code":"token-refused"` | Discord refused the token, at start or later. Nothing more is sent. Reset the token in the Developer Portal, set it, and restart |
+| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it. A `voice-failed` line before it has the status |
+| `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
+| `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
+| `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),

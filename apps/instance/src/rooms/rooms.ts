@@ -117,6 +117,9 @@
  *   read the room as open before it closed is refused `room-closed`, not
  *   seated in a room whose route is being deleted.
  *
+ * A room's Discord voice channel, where the operator configured one (#874),
+ * is deleted by the same close (`voice/room-voice.ts`).
+ *
  * ## A private lap race — #1910, ADR 0060
  *
  * A body's `lapRace: { laps, items }` makes the room a **lap race** on the
@@ -147,6 +150,7 @@ import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type { RoomPhase } from '../room/core/room.ts';
 import type { SqlStore } from '../store/sql-store.ts';
+import type { RoomVoice } from '../voice/room-voice.ts';
 import { displayRoomCode, newRoomCode, normaliseRoomCode, roomCodeDigest } from './code.ts';
 import { publishedOrder, publishRace, type PublishedResult } from './publication.ts';
 
@@ -356,6 +360,12 @@ export interface RoomsOptions {
    * the identity's own account read. Absent is nobody.
    */
   readonly eligible?: (caller: Caller) => Promise<boolean>;
+  /**
+   * The rooms' Discord voice channels (#874), when the operator configured a
+   * bot: a room that is over has its channel deleted by the ONE close. Absent
+   * is no voice, and a room works exactly as it did.
+   */
+  readonly voice?: RoomVoice;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -515,12 +525,17 @@ export function createRooms(options: RoomsOptions): Rooms {
     const room = await store.getRoom(roomId);
     const made = await store.getPrivateRoom(roomId);
     if (room === undefined || made === undefined || made.closedAt !== null) return false;
-    return onRoute(room.routeSha256, async () => {
+    const closed = await onRoute(room.routeSha256, async () => {
       if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
         await routes.delete(room.routeSha256);
       }
       return store.closePrivateRoom(roomId, seconds());
     });
+    // #874: its voice channel goes with it, once the close has committed. It
+    // never throws, and a channel Discord would not delete is the voice
+    // sweep's to find (`voice/room-voice.ts`).
+    if (closed) await options.voice?.close(roomId);
+    return closed;
   }
 
   /** `caller` joins `roomId` — by its code, or from the listing — and is told what it is. */

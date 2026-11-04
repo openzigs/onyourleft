@@ -321,5 +321,16 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         are NOT signed by the instance (no ADR gives it a key);
                         `docs/architecture.md` §"A rider's room" says why.
                         Migration 0013 holds it, after #926's 0012
+    src/voice/          a Discord voice channel per private room (#874,
+                        spike 0017 option A): `discord.ts` the ONE module
+                        that talks to Discord — REST over the platform's
+                        `fetch`, no dependency, rate limits from the headers,
+                        a `401` turns it off for good, an error kept by NAME
+                        only — and `room-voice.ts` the channel, invite,
+                        rotation and close, held in MEMORY only (no Discord
+                        data at rest). Off unless the operator set
+                        `OYL_INSTANCE_DISCORD_BOT_TOKEN` and `…_GUILD_ID`;
+                        `rooms.ts` §`over` deletes a room's channel, and the
+                        room sweep deletes leftovers
 
 ```
