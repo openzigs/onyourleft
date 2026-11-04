@@ -519,11 +519,17 @@ export const MINIMUM_ILLUSTRATION_STEP = 1.2;
  *
  * WCAG states no requirement for surface-against-surface, because neither is
  * text and neither is a control boundary — so this is a legibility floor of
- * this design system's own. 1.05 is roughly where the boundary between two
- * large flat areas stops being visible on an uncalibrated phone screen in
- * daylight, which is the device #307 was reported from.
+ * this design system's own.
+ *
+ * ⚠️ **1.15 since #2038** ([ADR 0063](../../../../docs/adr/0063-the-design-system-direction-hi-vis.md)
+ * D-3); it was 1.05, roughly where the boundary between two large flat areas
+ * stops being visible at all. Visible was not enough: the 2026-11-03 audit of
+ * #2030 measured the teal palette's steps at about 1.1:1 (a raised card on the
+ * dark canvas 1.23:1), and the owner called the cards flat slabs. A card has
+ * to read as a card, so the floor is 1.15, and `a11y/elevation.a11y.test.ts`
+ * holds it inside the a11y gate as well as `tokens.test.ts`.
  */
-export const MINIMUM_ELEVATION_STEP = 1.05;
+export const MINIMUM_ELEVATION_STEP = 1.15;
 
 /**
  * The largest, for the opposite reason: past this the ramp stops reading as
