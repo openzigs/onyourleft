@@ -131,3 +131,22 @@ describe('what is refused, and nothing is saved — #2006', () => {
     expect(outcome.refusal.message).not.toMatch(/40|105/);
   });
 });
+
+describe('saving a drawn loop — #2102', () => {
+  it('saves a line that ends where it starts as a loop the lap race accepts', () => {
+    const outcome = routeFromDraft(drawn('freehand', A, B, C, A), options());
+    if (outcome.status !== 'saved') throw new Error(outcome.refusal.message);
+    const { profile } = outcome.record;
+    expect(profile.loop).toBe(true);
+    expect(profile.totalDistance).toBeCloseTo(
+      distanceBetween(A, B) + distanceBetween(B, C) + distanceBetween(C, A),
+      3,
+    );
+  });
+
+  it('saves a line that does not close as a line, as before', () => {
+    const outcome = routeFromDraft(drawn('freehand', A, B, C), options());
+    if (outcome.status !== 'saved') throw new Error(outcome.refusal.message);
+    expect(outcome.record.profile.loop).toBe(false);
+  });
+});
