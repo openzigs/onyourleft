@@ -13,7 +13,8 @@ It has the same authority as the root file. Where the text below says "this file
 ### 4c. What CI runs, and what it deliberately does not
 
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
-shards side by side — `checks`, `tests` and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
+shards side by side — `checks`, the Vitest suite in two parts, `tests-1` and `tests-2` (§"Two Vitest
+shards — #2154"; one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
 the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
@@ -26,7 +27,7 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:required` (since [#1280](https://github.com/openzigs/onyourleft/issues/1280); `test:coverage` until then — §"Coverage out of the required job — #1280" below), `check:test-split` and its suite
+`typecheck`, `test:required` (as its two parts `test:required:shard-1` and `-2` since [#2154](https://github.com/openzigs/onyourleft/issues/2154); since [#1280](https://github.com/openzigs/onyourleft/issues/1280); `test:coverage` until then — §"Coverage out of the required job — #1280" below), `check:test-split` and its suite
 `bash scripts/check-test-split.test.sh` (both since [#852](https://github.com/openzigs/onyourleft/issues/852); #852's
 `test:uninstrumented` runs nightly since [#866](https://github.com/openzigs/onyourleft/issues/866) — below), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
@@ -1337,19 +1338,17 @@ that the game spec is in no list and the `game` run in exactly one script, and t
 [40223475813](https://github.com/openzigs/onyourleft/actions/runs/40223475813), attempts 2 to 4.
 Columns as in §"Shards — #1285" (job seconds, `started_at` to `completed_at`; `Wall` is the attempt
 starting to `Repository rules` completing); `Gate starts` is the latest of the three shards'
-`Browser gate` step starts, and each `step` column that shard's `Browser gate` step. **This is the
-table `nightly-split.test.ts` reads**: a row added here moves every bound, a cell that is not a
-whole number fails the test, and a shard with no column fails it too. ⚠️ The `tests` column is from
-runs whose `tests` shard was red on the one case that reads this table, before it existed; every
-other case passed.
+`Browser gate` step starts, and each `step` column that shard's `Browser gate` step. This was the
+table `nightly-split.test.ts` reads until #2154 divided the `tests` shard in two: the table it reads
+is §"Two Vitest shards — #2154"'s now, in the same shape, and this one is the record. ⚠️ The `tests`
+column is from runs whose `tests` shard was red on the one case that reads this table, before it
+existed; every other case passed.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests` on | tests | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
 | 40223475813 attempt 2 | 491 | EPYC 9V45 | 223 | EPYC 9V74 | 476 | **EPYC 7763** | 424 | EPYC 9V45 | 295 | EPYC 9V74 | 388 | 34 | 389 | 258 | 352 |
 | attempt 3 | 525 | EPYC 7763 | 315 | EPYC 9V74 | 509 | Xeon 8573C | 413 | **EPYC 7763** | 435 | EPYC 9V45 | 260 | 36 | 377 | 397 | 229 |
 | attempt 4 | 653 | EPYC 9V74 | 320 | EPYC 7763 | 636 | **EPYC 7763** | 514 | **EPYC 7763** | 401 | Xeon 8573C | 389 | 51 | 459 | 360 | 344 |
-<!-- shard-measurements:end -->
 
 **Each part's `chromium` run against its 720 s stop** (Playwright's own `passed (…)` figure; the
 `game` run after `browser-3`'s part against its 85 s):
@@ -1392,6 +1391,86 @@ was shortest, in the same pull request; `nightly-split.test.ts` is red until it 
 row of the table brings any part within 1.4 times of its 720 s stop, re-read the per-file times
 from that run's log and re-divide the files, or add a fourth script and job (in `needs:`, with a
 column here). Not a longer stop, and not a check moved to nightly without the owner's ruling.
+
+#### Two Vitest shards — #2154
+
+⚠️ **The Vitest suite is two jobs since [#2154](https://github.com/openzigs/onyourleft/issues/2154),
+`tests-1` and `tests-2`, and a reviewer who remembers one `tests` shard is reading the old file.**
+The one job took 739 to 954 s of its 960 s stop on `main` on 2026-11-04 (887, 901 and 954 s on the
+EPYC 7763; 739 and 821 s on a 9V74), and on run
+[41911049968](https://github.com/openzigs/onyourleft/actions/runs/41911049968) it was cancelled at
+the stop with every one of its 20 113 tests green, which turned `Repository rules` red on two pull
+requests at once. **Its stop did not move**: both jobs keep `timeout-minutes: 16`, because a stop is
+a bound on a hang and not a budget (§"Shards — #1285").
+
+**How the suite was divided.** From the log of `main` run
+[41886972871](https://github.com/openzigs/onyourleft/actions/runs/41886972871) (the 954 s one, on
+the EPYC 7763), each file's case time as the reporter prints it, summed by Vitest project: of
+1 940 s in 983 files, the `web` project held **1 170 s in 606 files** and every other project **770 s
+in 377** (`instance` 608 s, `store` 75 s, `physics` 39 s, the rest under 21 s each). The two
+heaviest files are `web`'s — `landform.test.ts` 273 s and `near-tree-fade.test.ts` 140 s — and each
+runs in one worker whichever job it is in. So:
+
+| Script | Job | What it adds to `test:required` | Files |
+|---|---|---|--:|
+| `test:required:shard-1` | `tests-1` | `--project web` | 606 |
+| `test:required:shard-2` | `tests-2`, after the `Accessibility` step | `--project '!web'` | 377 |
+
+The accessibility gate (`check:a11y-suite` and `test:a11y`, 87 files of the `web` project, 64 to
+88 s on those `main` runs) went beside the smaller part. **Divided by project, not with Vitest's
+`--shard`**: `--shard` sorts the files by a hash of their path and cuts the list into equal COUNTS,
+so it cannot be balanced by time, and `vitest list` does not apply it, so `check:test-split` could
+not see what each part selects. A project filter is a selection `vitest list` reports, and `!web`
+(Vitest's negated project filter) puts a NEW project in `tests-2` without an edit anywhere.
+`pnpm run test:required` is unchanged and is still the whole run locally; each part is `pnpm run
+test:required --project …`, so a part cannot keep an exclude the whole run does not.
+
+**What holds it.** `check:test-split` (rule 5 in its header) fails a part that is not `pnpm run
+test:required` followed only by `--project <pattern>` pairs, fewer than two parts, a gap in their
+numbering, a part that selects no file, and a file the required run selects that is in no part or
+in two; on this change it printed `the required run's 983 are 606 in test:required:shard-1, 377 in
+test:required:shard-2`, and each job's own run reported 606 (`tests-1`) and 377 (`tests-2`) test
+files, beside the Accessibility step's 87. `nightly-split.test.ts` holds that each part runs in a
+job of its own with no concurrent step and no browser, that the accessibility gate is in exactly
+one of them, that `rules` needs both, and — from the table below — that each job's stop is five
+minutes clear of its slowest measured run.
+
+**Measured** on this change's own pull request, run
+[41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6.
+Columns as in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**:
+a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
+with no column fails it too. ⚠️ The `tests-1` column is from runs whose `tests-1` shard was red on
+the one case that reads this table, before it had their columns; every other case passed.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
+| 41920250892 attempt 4 | 553 | EPYC 9V45 | 314 | Xeon 8573C | 536 | EPYC 9V74 | 389 | EPYC 9V74 | 433 | EPYC 9V74 | 415 | EPYC 9V74 | 415 | 41 | 394 | 371 | 374 |
+| attempt 5 | 843 | Xeon 6975P-C | 258 | **EPYC 7763** | 567 | Xeon 8370C | 384 | EPYC 9V45 | 334 | EPYC 9V45 | 387 | EPYC 9V74 | 825 | 430 | 300 | 344 | 392 |
+| attempt 6 | 716 | **EPYC 7763** | 379 | EPYC 9V74 | 547 | EPYC 9V45 | 279 | EPYC 9V74 | 563 | **EPYC 7763** | 481 | EPYC 9V45 | 346 | 236 | 323 | 439 | 315 |
+<!-- shard-measurements:end -->
+
+- **`tests-1` took 536 to 567 s, 393 s inside its 960 s stop at the slowest (the EPYC 7763), and
+  `tests-2` 279 to 389 s**, against the one job's 887 to 954 s on the 7763. On all six attempts
+  `tests-1` took 438 to 567 s and `tests-2` 275 to 397 s. `tests-1` is now the longest shard on
+  some runs, so it is what bounds `Wall` when the browser shards land on fast CPUs.
+- ⚠️ **Attempts 1 to 3 are not in the table, as #1720 left out its slow-mirror attempt.** Each
+  waited for runners — the longest wait between a job being created and starting was 428 s, 468 s
+  and 564 s, and ten workflow runs were queued across the repository when it was read during
+  attempt 3 — so `Wall` was 1 305, 1 291 and 1 019 s and the
+  `Wall` bound (under 900 s) would be red on a queue this repository does not control. Their shards
+  themselves: `tests-1` 438 s (Xeon 6973P-C), 466 s (Xeon 8573C) and 443 s (EPYC 9V74), `tests-2`
+  275, 309 and 397 s. Attempts 4 to 6 waited 3 to 123 s.
+- ⚠️ **In attempt 5 `browser-3`'s `Install the pinned Chromium` took 412 s**, and in attempt 1
+  `browser-2`'s about 340 s: the Ubuntu mirror again, inside the step's ten-minute stop. That is
+  the 430 s `Gate starts`, still 226 s inside the three minutes `nightly-split.test.ts` holds.
+- **No stop moved and nothing left the required check**: every test file runs in exactly one of
+  `tests-1`, `tests-2` and the Accessibility step on every pull request, as before in one job.
+
+⚠️ **When a row of this table brings either Vitest shard within five minutes of its stop**, re-read
+the per-project times from that run's log and move a project between the parts (a part may name
+several, `--project a --project b`), or add a third part and job (in `needs:`, with a column
+here). Not a longer stop.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run

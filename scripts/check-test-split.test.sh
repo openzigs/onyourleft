@@ -382,6 +382,12 @@ run_check
 assert_red 'a dangling --project fails'
 
 new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  'pnpm run test:required --project web --bail 1' "${SHARD_2}"
+run_check
+assert_red 'any other flag in a part of the required run fails'
+assert_says 'and names the part' '`test:required:shard-1` is'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
   "${SHARD_1}" 'pnpm run test:required --project !web'
 run_check
 assert_red 'an unquoted ! fails: the check reads only plain words and whole single-quoted ones'
