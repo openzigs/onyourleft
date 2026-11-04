@@ -42,15 +42,16 @@
 2. **The room costs under 2 % of one core.** The room worker process used **59.65 s of CPU over
    3 598 s, 1.66 % of one core** (5-second peak 4.0 %). The main process, which serves HTTP, used
    **0.35 s**. Most of the instance's memory belongs to the **eleven idle room workers**, not to the
-   room: the room worker held **~145–175 MiB** while the whole process tree read **~850 MiB**
+   room: the room worker held **122–175 MiB** (median 148) while the whole process tree read **~850 MiB**
    (§4).
-3. ⚠️ **It sends twice the upload ADR 0037 plans for.** Application payload out was **333.4 MB per
-   room-hour, about 0.74 Mbit/s** for one 50-rider room, before WebSocket, TCP or tunnel framing.
-   [ADR 0037](../adr/0037-instance-runtime-hosting-and-transport.md) D-8 item 3 plans upload as
-   **≈ 0.36 Mbit/s** per room, from spike 0013's frame-only room. The room that ships sends **two
-   messages per rider per tick**, a `frame` and a `standings`
+3. ⚠️ **It sends about twice the upload ADR 0037 plans for.** Application payload out was
+   **333.4 MB per room-hour, about 0.74 Mbit/s** for one 50-rider room, before WebSocket, TCP or
+   tunnel framing. [ADR 0037](../adr/0037-instance-runtime-hosting-and-transport.md) D-8 item 3
+   plans upload as **≈ 0.36 Mbit/s** per room, from spike 0013's wire bytes. The room that ships
+   sends **two messages per rider per tick**, a `frame` and a `standings`
    ([ADR 0051](../adr/0051-live-race-standings.md)), **1 857 bytes per rider per tick** together
-   (§3).
+   (§3). The gap is **not all `standings`**: the shipped `frame` alone is larger than the figure
+   ADR 0037 planned (§3, last warning).
 4. ⚠️ **On Durable Objects the same room would bill about 20 % more requests than ADR 0037 D-4's
    arithmetic.** D-4 counts the 2 Hz reports (18 000 billed requests per room-hour at 20:1) and
    omits the **tick alarm**: the Durable Object adapter sets one alarm per tick
@@ -101,7 +102,7 @@ That defect is the shape `CLAUDE.md` §5 names: a figure read from a layer the w
 |---|--:|--:|
 | Host load average, one minute, median / max | 15.9 / 41.9 (other agents' work on the machine) | **2.7 / 22.6** |
 | Seating, first sign-in to last rider seated | < 0.5 s | < 0.5 s |
-| Time racing | 3 593 s, race over | **3 593 s, race over** |
+| Time racing (includes the default 10 s countdown, which sends no frames) | 3 593 s, race over | **3 593 s, race over** |
 | Finishers | 50 | **50** |
 | Frames reaching riders | 179 200 (3 584 to every rider) | **179 200** (3 584 to every rider) |
 | Missing ticks | 0 | **0** |
@@ -129,6 +130,14 @@ bytes by under 0.05 %. Only lateness moved, and it moved with the host's load (�
 messages by type and bytes in total. ADR 0051's standings carry every racer's figures every tick,
 so they are a large share, but this run cannot say how large.
 
+⚠️ **The gap from ADR 0037 D-8.3's 0.36 Mbit/s is not all `standings`.** The repository already
+carries a measure of the frame alone: `packages/protocol/src/frame-size.test.ts` encodes a realistic
+50-rider mid-race frame at **1 132 bytes**, about **0.45 Mbit/s** of payload, up from spike 0007's
+709 bytes. D-8.3's 0.36 is spike 0013's wire bytes, about 894 bytes per rider per tick, so the
+`frame` that ships had already outgrown it. Subtracting, 1 857 − 1 132 leaves an *estimated* ~725
+bytes for `standings`, about 1.6 times a group-ride frame, which fits ADR 0051's own bound of at most
+about 1.8 times. That split is an inference from a test fixture, not a measurement of this run.
+
 ---
 
 ## 4. CPU and memory
@@ -153,7 +162,9 @@ max 4.76 %; resident set 70–139 MiB, median 129 MiB.
   the race; resident set 176–197 MiB early, **64–81 MiB** after minute 17.
 - **Eleven idle room workers**: 0.28–0.31 s of CPU each over the whole of run 2, and the same in run 1. Their resident sets fell
   **from ~120 MiB to 57 MiB each** over the first ~15 minutes with no work to do, and then held.
-  That is macOS reclaiming pages, not the instance freeing anything.
+  Probably the OS reclaiming pages rather than the instance freeing anything, but a `ps` resident
+  set cannot tell that apart from V8 shrinking its heap or pages being compressed or swapped, and
+  this run did not separate them.
 - **The whole tree** (13 processes) read **1 618 MiB** at the start, fell to **~835 MiB** by
   minute 17, and ended at **861 MiB**. ⚠️ **Summed resident sets overstate memory.** Every Node
   process maps the same runtime pages, and `ps` counts them once per process. The tree's figure is
@@ -262,7 +273,7 @@ and 3.6 % of its rows written. **Requests bind first: about four one-hour races 
 ⚠️ **Every figure in this section is rate-card arithmetic over measured counts. It is not an
 invoice.** It cannot say whether the meter applies 20:1 to messages arriving on hibernatable
 sockets the way the page reads, whether alarm invocations count as the page says, or whether a
-50-rider room fits in the 128 MB it is billed against. The room worker here held 145–175 MiB as a
+50-rider room fits in the 128 MB it is billed against. The room worker here held 122–175 MiB (race median 148) as a
 whole Node process, which is not an isolate's heap. [ADR 0002](../adr/0002-local-first-architecture.md)
 decision H's *"one room, one known message count, one bill"* still needs that bill, and §3 now
 supplies the known message count.
@@ -300,9 +311,10 @@ supplies the known message count.
   statements remain true: the bill is still owed, and duration still accrues for a ticking room.
 - ⚠️ **[ADR 0037](../adr/0037-instance-runtime-hosting-and-transport.md) carries two figures this
   run contradicts.** D-4's billed requests per room-hour omit the tick alarms (§6, item 2). D-8
-  item 3's upload per 50-rider room, ≈ 0.36 Mbit/s and *"at 10 Mbit/s that is ~27 rooms"*, predates
-  `standings`: the payload alone is **≈ 0.74 Mbit/s**, so about **13 rooms** at 10 Mbit/s before
-  framing. **This spike does not amend the ADR.** An ADR's body is never edited, and an appended
+  item 3's upload per 50-rider room, ≈ 0.36 Mbit/s and *"at 10 Mbit/s that is ~27 rooms"*, is
+  exceeded: the payload alone is **≈ 0.74 Mbit/s**, so about **13 rooms** at 10 Mbit/s before
+  framing. Part of that is `standings`, which spike 0013 did not have, and part is the `frame`
+  itself, which `frame-size.test.ts` puts at about 0.45 Mbit/s (§3). **This spike does not amend the ADR.** An ADR's body is never edited, and an appended
   amendment is the owner's call (ADR 0013). It is recorded here so that the amendment, if it is
   made, has a measurement to cite.
 
