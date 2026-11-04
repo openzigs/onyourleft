@@ -635,6 +635,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       {props.onPreview === undefined ? null : (
         <PreviewControl
           route={chosen}
+          asking={props.asking}
           onPreview={(rider) => {
             props.onPreview?.(chosen, rider, props.position);
           }}
@@ -657,11 +658,21 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
  * recording and sharing — before the press, as #503's promise does for *Ride*.
  *
  * Every control in it is a 48 px target (`theme.css` §`.oyl-chooser__preview`;
- * the button is on `RIDE_TIME_CONTROLS`), held by `ride-targets.browser.spec.ts`.
- * A power the box cannot make refuses the press, as the pacer's box does (#237).
+ * the button is on `RIDE_TIME_CONTROLS`), held by `ride-targets.browser.spec.ts`:
+ * the button by the list, and the stepper, the power box and the speed-ups by
+ * its *Preview without a trainer* case. A power the box cannot make refuses the
+ * press, as the pacer's box does (#237).
+ *
+ * ⚠️ **Unavailable while the trainer is being asked for control**, as *Ride*
+ * is (#509, PR #2113's review). A preview mounts a new screen, and a control
+ * granted to the old one in that window would be kept with nothing to release
+ * it (#372). As with *Ride*, `aria-disabled` is what the rider is told; the
+ * refusal is `GameView` §`startingRef`, which holds for a press that lands
+ * before this re-renders.
  */
 function PreviewControl(props: {
   readonly route: RidableRoute;
+  readonly asking: boolean;
   readonly onPreview: (rider: SimulatedRider) => void;
   readonly idPrefix: string;
 }): JSX.Element {
@@ -733,7 +744,7 @@ function PreviewControl(props: {
       <Button
         variant="secondary"
         size="ride"
-        unavailable={read.problem !== undefined}
+        unavailable={read.problem !== undefined || props.asking}
         describedBy={read.problem === undefined ? undefined : problemId}
         onClick={() => {
           if (read.watts === undefined) return;

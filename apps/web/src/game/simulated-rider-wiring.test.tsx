@@ -44,7 +44,10 @@ import { createRideController } from '../ride/controller';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 
+import type { CueOutput } from './audio-port';
+import { CUES_STORAGE_KEY, writeCuePreference } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { deviceStorage } from './hud/announce-preference';
 import { HOUSES_NOT_READY_TEXT } from './hud/delivery-announce';
 import type { GameRenderer, SceneFrame } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -138,7 +141,7 @@ interface Commands {
  * real `gameTrainerPortOver`, as `trainer-wiring.test.tsx` builds one — that
  * has NOT yet been given control, so a ride that reached it would ask.
  */
-function readyTrainer(commands: Commands): GameTrainerPort {
+function readyTrainer(commands: Commands, answered?: Promise<void>): GameTrainerPort {
   const facts = { paired: true, controllable: true, canSimulate: true, hasControl: false };
   const control: GradientTrainer = {
     setSimulationParameters: async (parameters) => {
@@ -155,8 +158,9 @@ function readyTrainer(commands: Commands): GameTrainerPort {
     simulationControl: () => control,
     requestTrainerControl: async () => {
       commands.requests.push(commands.written.length);
+      // PR #2113's review: a trainer that has not answered yet, when asked.
+      await answered;
       facts.hasControl = true;
-      return Promise.resolve();
     },
     noteGameRideEnded: () => undefined,
     subscribe: () => () => undefined,
@@ -184,6 +188,7 @@ afterEach(() => {
   mounted = undefined;
   vi.unstubAllGlobals();
   globalThis.location.hash = '';
+  globalThis.localStorage.removeItem(CUES_STORAGE_KEY);
 });
 
 async function clickThrough(element: HTMLElement | undefined): Promise<void> {
@@ -464,6 +469,81 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
     await clickThrough(buttonStarting('End ride'));
 
     expect(commands).toEqual({ written: [], releases: [], requests: [] });
+  });
+
+  // PR #2113's review: Ride's press asks the trainer for control, and a
+  // preview mounts a new screen — so a control granted while it rode would be
+  // kept by a screen that is gone, with nothing to release it (#372).
+  it('is unavailable while Ride is asking the trainer for control, and a press then starts nothing', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    globalThis.location.hash = '#/game';
+    mounted = await mount(
+      <GameView
+        port={gamePort()}
+        trainer={readyTrainer(commands, answered)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    expect(screen()?.textContent).toContain('Asking your trainer for control.');
+    expect(buttonStarting('Preview ')?.getAttribute('aria-disabled')).toBe('true');
+
+    await preview(String(POWER), 8);
+    await pump(10);
+
+    expect(screen()?.textContent).not.toContain('Starting the preview…');
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+    expect(screen()?.textContent).toContain('Asking your trainer for control.');
+    expect(commands.requests).toEqual([0]);
+
+    // The ask answered: the ride the rider pressed Ride for is the one that rides.
+    await act(async () => {
+      answer();
+      await Promise.resolve();
+    });
+    for (let index = 0; index < 5; index += 1) await settle();
+    await pump(10);
+    expect(buttonStarting('End ride')).toBeDefined();
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+  });
+
+  it('hands back the picker when the preview cannot start, rather than leaving it starting', async () => {
+    // A start that throws before the ride is on the stage: the sounds are on,
+    // and the platform's audio refuses to resume inside the press.
+    writeCuePreference(deviceStorage(), { enabled: true, volume: 0.5, muted: false });
+    const sounds: CueOutput = {
+      resume: () => {
+        throw new Error('the audio would not resume');
+      },
+      isRunning: () => false,
+      suspend: () => undefined,
+      startTone: () => undefined,
+      setTone: () => undefined,
+      stopTone: () => undefined,
+      playCue: () => undefined,
+    };
+    globalThis.location.hash = '#/game';
+    mounted = await mount(
+      <GameView
+        port={gamePort()}
+        sounds={sounds}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await preview(String(POWER), 8);
+    for (let index = 0; index < 5; index += 1) await settle();
+
+    expect(screen()?.textContent).not.toContain('Starting the preview…');
+    expect(buttonStarting('Ride ')?.textContent).toBe(`Ride ${ROUTE.name}`);
+    expect(buttonStarting('Preview ')?.textContent).toBe(`Preview ${ROUTE.name}`);
   });
 });
 

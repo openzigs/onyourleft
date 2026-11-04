@@ -26,7 +26,7 @@
  *
  * ## What it refuses, and where that is enforced
  *
- * `GameView.tsx` §`simulatedRideProps` builds the ride with **no trainer port,
+ * `GameView.tsx` §`useSimulatedRide` builds the ride with **no trainer port,
  * no room and no rooms**, and with no Delivery round. The trainer port is also
  * the only way a game ride reaches the recording (`trainer-port.ts`
  * §`GameTrainerPort.recordGameRide`, §`gameRideEnded`, §`courseLine`), so a

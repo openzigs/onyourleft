@@ -2119,7 +2119,11 @@ function GameScreen({
       onPreviewEnd();
       return;
     }
-    void start(route, false, undefined, undefined, preview.position);
+    // PR #2113's review: a start that throws hands back the picker, rather
+    // than leaving *Starting the preview…* with no way off it.
+    start(route, false, undefined, undefined, preview.position).catch(() => {
+      onPreviewEnd();
+    });
   }, [preview, routes, start, onPreviewEnd]);
 
   // #423. Whether the ride has the screen — @see GameViewProps.onImmersive.
@@ -3116,6 +3120,11 @@ function GameScreen({
             onPreview === undefined
               ? undefined
               : (route, rider, sitting) => {
+                  // PR #2113's review: never while a press of *Ride* is
+                  // still starting — the trainer may be being asked for
+                  // control, and the preview's new screen would leave a
+                  // control granted to this one with nothing to release it.
+                  if (startingRef.current) return;
                   onPreview({ rider, routeId: route.id, position: sitting });
                 }
           }
