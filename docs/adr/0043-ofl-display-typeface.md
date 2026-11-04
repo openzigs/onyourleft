@@ -233,3 +233,11 @@ are untouched (#935's "What does NOT change").
   Project Authors (https://github.com/jpt/barlow)"*, licence description and URL records present.
 - `ofl/barlow/METADATA.pb` at the same commit: designer Jeremy Tribby, licence OFL; the static
   weights last changed there in commit `89f5431ff0db41bd2fe3f7ba21a723a01622428b`, 2018-12-05.
+
+## Amendments
+
+- **2026-11-03** — D-6's weights, *"Barlow, at 700 and 800"*, are extended by one, **600**, in
+  [ADR 0063](0063-the-design-system-direction-hi-vis.md) D-5, on the owner's choice of direction A on
+  [#2035](https://github.com/openzigs/onyourleft/issues/2035#issuecomment-6619125271). It is added
+  through the same `fonts:subset` pipeline and served from the same origin (D-4, D-5). This entry is a
+  pointer and changes nothing else here. ([#2036](https://github.com/openzigs/onyourleft/issues/2036))
