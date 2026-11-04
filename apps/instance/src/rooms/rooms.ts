@@ -255,6 +255,11 @@ export interface JoinedRoom {
   readonly loop: boolean;
   readonly routeSha256: string;
   /**
+   * A lap race's laps and items — #1912: a joiner is told before the start,
+   * as the welcome tells them again. Never its seed. Absent for any other room.
+   */
+  readonly lapRace?: { readonly laps: number; readonly items: boolean };
+  /**
    * Whether the joiner made the room (#948, #929's N1): the rider who made it
    * may join it again by its code — after a reload, or on another device —
    * and is still the one offered *Start the race*.
@@ -538,6 +543,9 @@ export function createRooms(options: RoomsOptions): Rooms {
         loop,
         routeSha256: room.routeSha256,
         creator: (await store.getRoomCreator(roomId)) === caller.athleteId,
+        ...(course.lapRace === undefined
+          ? {}
+          : { lapRace: { laps: course.lapRace.laps, items: course.lapRace.items } }),
       },
     };
   }

@@ -7507,6 +7507,22 @@
                     },
                     "creator": {
                       "type": "boolean"
+                    },
+                    "lapRace": {
+                      "type": "object",
+                      "properties": {
+                        "laps": {
+                          "type": "integer"
+                        },
+                        "items": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "laps",
+                        "items"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -7795,6 +7811,22 @@
                     },
                     "creator": {
                       "type": "boolean"
+                    },
+                    "lapRace": {
+                      "type": "object",
+                      "properties": {
+                        "laps": {
+                          "type": "integer"
+                        },
+                        "items": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "laps",
+                        "items"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [

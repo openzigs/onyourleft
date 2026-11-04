@@ -20,7 +20,8 @@ import {
   type IdentityInstance,
 } from '../auth/identity-testing.ts';
 import { createRoom } from '../room/core/room.ts';
-import { admitByTable, helloText, sentTo } from '../room/core/room-testing.ts';
+import { admitByTable, helloText, reportText, sentTo, useText } from '../room/core/room-testing.ts';
+import { finalResults } from '../room/node/room-host.ts';
 import { planFor, settingsFromPlan, type RoomPlan } from '../room/room-plan.ts';
 import { MAXIMUM_COURSE_METRES, MAXIMUM_ROOM_LAPS } from './rooms.ts';
 import { madeRoom, riderIn, roomBody } from './rooms-testing.ts';
@@ -95,10 +96,17 @@ describe('a private lap race on a rider’s own loop — #1910', () => {
     );
   });
 
-  it('opens a room made without one as the race it always was', async () => {
+  it('opens a room made without one as the race it always was, and tells a joiner of no lap race', async () => {
     const w = await open();
     const anna = await rider(w);
     const room = await madeRoom(w, anna.token, { loop: true });
+    const bea = await rider(w);
+    const joined = await w.call('POST', '/v1/rooms/join', {
+      token: bea.token,
+      body: { code: room.code },
+    });
+    expect(joined.status).toBe(200);
+    expect(joined.body).not.toHaveProperty('lapRace');
     const plan = await planOf(w, room.roomId);
     expect(plan).toBeDefined();
     expect(plan?.lapRace).toBeUndefined();
@@ -118,6 +126,8 @@ describe('a private lap race on a rider’s own loop — #1910', () => {
     const seed = String((await planOf(w, roomId))?.lapRace?.seed);
     const joined = await w.call('POST', '/v1/rooms/join', { token: bea.token, body: { code } });
     expect(joined.status).toBe(200);
+    // #1912: the joiner is told the laps and the items before the start, and nothing more.
+    expect((joined.body as { lapRace?: unknown }).lapRace).toEqual({ laps: 2, items: true });
     for (const answer of [made, joined]) {
       expect(JSON.stringify(answer.body)).not.toMatch(/seed/i);
       expect(JSON.stringify(answer.body)).not.toContain(seed);
@@ -213,3 +223,92 @@ describe('one athlete’s private lap race is never another’s — #1910', () =
     expect((await planOf(w, beas.roomId))?.lapRace).toMatchObject({ laps: 7, items: false });
   });
 });
+
+/**
+ * #1912: a private lap race ridden to its finish — made through the route, its
+ * plan read as the room is opened, raced through the room core with items on
+ * and one rider over a ceiling, its results stored as the Node adapter stores
+ * them and read through the results route as each rider reads them.
+ */
+describe('a lap race’s result — #1912', () => {
+  it('publishes the room’s finish order with the flag a rider raised, and nothing of the items, offsets or lanes', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const bea = await rider(w);
+    const made = await madeRoom(w, anna.token, lapBody({ laps: 3, items: true }));
+    await w.call('POST', '/v1/rooms/join', { token: bea.token, body: { code: made.code } });
+    const plan = await planOf(w, made.roomId);
+    if (plan === undefined) throw new Error('the lap race has no plan');
+    const tickets = new Map([
+      ['ticket-anna', anna.athleteId],
+      ['ticket-bea', bea.athleteId],
+    ]);
+    const room = createRoom(settingsFromPlan({ ...plan, countdownMs: 0 }), (ticket) => {
+      const athleteId = tickets.get(ticket);
+      return athleteId === undefined
+        ? undefined
+        : { athleteId, declaredMassKilograms: 70, displayName: athleteId };
+    });
+    room.receive(1, helloText('ticket-anna'), 0);
+    room.receive(2, helloText('ticket-bea'), 0);
+    room.start(0);
+    const events: string[] = [];
+    for (let t = 0; room.view().phase !== 'finished'; t += 1) {
+      const at = t * 1000 + 500;
+      // Anna sprints at 1 300 W — 18.6 W/kg, over the 5-second ceiling — for
+      // eight seconds, then rides at 260 W; Bea uses every item she holds.
+      room.receive(1, reportText(t, at, t < 8 ? 1_300 : 260), at);
+      room.receive(2, reportText(t, at, 250), at);
+      room.receive(2, useText(t + 1, at + 10), at + 10);
+      const out = room.tick((t + 1) * 1000);
+      for (const message of sentTo(out, 1)) {
+        if (message.type === 'frame')
+          events.push(...(message.itemEvents ?? []).map((e) => e.event));
+      }
+      if (t > 600) throw new Error('the lap race never finished');
+    }
+    // Items were in play: picked up and used.
+    expect(events).toContain('pick-up');
+    expect(events).toContain('use');
+    const order = room.view().finishOrder;
+    await w.freshRead(async (store) => {
+      for (const result of finalResults(room.view(), 1000)) {
+        await store.putResult({ roomId: made.roomId, ...result });
+      }
+      await store.markRaceFinished(made.roomId, 1_790_000_100);
+    });
+
+    const athleteOf = new Map(room.view().seats.map((seat) => [seat.riderId, seat.athleteId]));
+    const LAP_WORDS = /item|offset|lane|held|hit|pick|lap|puddle|gust|tow|tailwind|cape/iu;
+    for (const viewer of [anna, bea]) {
+      const got = await w.call('GET', `/v1/rooms/${made.roomId}/results`, { token: viewer.token });
+      expect(got.status).toBe(200);
+      const rows = (got.body as { rows: { place: number; you: boolean; flags: unknown[] }[] }).rows;
+      // The room's own finish order, read back through the route.
+      expect(rows.map((row) => row.place)).toEqual([1, 2]);
+      const annaPlace = order.findIndex((riderId) => athleteOf.get(riderId) === anna.athleteId);
+      expect(rows[annaPlace]?.flags).toEqual([{ durationSeconds: 5, overWattsPerKilogram: 18 }]);
+      expect(rows[1 - annaPlace]?.flags).toEqual([]);
+      // Nothing of the race's items, offsets or lanes, in any key.
+      expect(keysOf(got.body).filter((key) => LAP_WORDS.test(key))).toEqual([]);
+    }
+    // Nor in what is stored.
+    await w.freshRead(async (store) => {
+      const stored = await store.listRoomResults(made.roomId);
+      expect(stored).toHaveLength(2);
+      expect(keysOf(stored).filter((key) => LAP_WORDS.test(key))).toEqual([]);
+    });
+  }, 30_000);
+});
+
+/** Every key anywhere in a value. */
+function keysOf(value: unknown, into: string[] = []): string[] {
+  if (Array.isArray(value)) for (const item of value) keysOf(item, into);
+  else if (typeof value === 'object' && value !== null) {
+    for (const [key, inner] of Object.entries(value)) {
+      into.push(key);
+      keysOf(inner, into);
+    }
+  }
+  return into;
+}
