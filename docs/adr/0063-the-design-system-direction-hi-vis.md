@@ -55,7 +55,7 @@ The rulings this ADR rests on, in the order they were made:
 6. **2026-11-03, the choice on
    [#2035](https://github.com/openzigs/onyourleft/issues/2035#issuecomment-6619125271)** — *"A:
    Hi-Vis."* Direction A, graphite with a fluorescent lime accent, chosen after the owner saw the Home
-   tablet screen, the ride HUD and the colour and type sheets of all three directions in spike 0034
+   tablet screen, the ride HUD and the colour and type sheets of all three directions in spike 0036
    (pull request [#2105](https://github.com/openzigs/onyourleft/pull/2105)). The same comment carries
    the spike's proposals into the build: the 1.25 type scale with Barlow 600 added; an adjacent-surface
    floor of 1.15:1 with `MAXIMUM_ELEVATION_STEP` at 1.3; an adjacent-zone floor of 1.20:1 under each
@@ -124,7 +124,7 @@ The zone colours are D-4's.
 **Contrast.** Every pair `CONTRAST_REQUIREMENTS` declared on 2026-11-03 (99 distinct foreground,
 background and minimum triples) passes in both themes, computed with `apps/web/src/design/contrast.ts`
 itself; the full table is in the [option A comment on
-#2035](https://github.com/openzigs/onyourleft/issues/2035) and in spike 0034 (#2105). The pairs that
+#2035](https://github.com/openzigs/onyourleft/issues/2035#issuecomment-6619125271) and in spike 0036 (#2105). The pairs that
 matter most, re-computed for this ADR with the same `contrastRatio`:
 
 | Pair | Minimum | Dark | Light |
@@ -143,7 +143,7 @@ and `contrast.a11y.test.ts` re-measures every declared pair and records each `me
 value here that the gate cannot pass is changed in a dated amendment, never by lowering a minimum.
 
 **`accent` is split into a fill token and a text token** (the owner's ruling of 2026-11-03 on #2035,
-carrying spike 0034's proposal). Today one token is both a primary button's fill and text on all four
+carrying spike 0036's proposal). Today one token is both a primary button's fill and text on all four
 surfaces, which is what forced the old teal to be a pastel. With direction A's values the two are
 equal in each theme (`#aff13c` dark, `#405e00` light), so the split moves no pixel. **Author's
 reading:** the split is therefore its own follow-up rather than part of #2037's value swap, so that the
@@ -218,7 +218,7 @@ pull request that changes every colour does not also rename every accent rule.
   0.700 em. On a 10.1-inch 1280×800 tablet one CSS px is taken as 0.1700 mm — an **assumption**, since
   the owner's tablet was not measured — so **a primary ride numeral's rendered cap height is at least
   27.4 CSS px at 1280×800**. 3.815rem gives 42.7 px (7.26 mm). The HUD secondary numeral's 2.45rem
-  gives 4.66 mm; the old `display` step, 2.441rem, misses by 0.008 mm, which is why the floor is
+  gives 4.66 mm; the old `display` step, 2.441rem, misses by 0.0066 mm, which is why the floor is
   2.45rem.
 
 ### D-6 — No new runtime UI dependency; the splash is the one native plugin
@@ -233,7 +233,8 @@ pull request that changes every colour does not also rename every accent rule.
 - **The splash is `@capacitor/splash-screen` 8.0.2** (ruling 5), a native plugin in `apps/mobile`,
   admitted through the gates every dependency passes: licence and notices, the 24-hour release age,
   `native-closure.json`. It holds the Android splash until first paint and is not a runtime UI
-  dependency of `apps/web`.
+  dependency of `apps/web`. #2030 recommended a native `installSplashScreen` change with no
+  dependency; the explicit #2032 ruling governs and supersedes it.
 
 ### D-7 — Motion: the 200 ms cap stays, and the intro fits inside it
 
@@ -254,7 +255,7 @@ A visual pull request in the redesign epics:
 
 1. **States where every new colour came from**, as D-1 does for the accent, and none is another
    product's identity colour. The identity colours looked up only to be avoided are recorded in spike
-   0034 (Strava's oranges `#FC5200` and `#CC4200`, Rouvy's yellow `#FCCD00`, and the oranges, reds and
+   0036 (Strava's oranges `#FC5200` and `#CC4200`, Rouvy's yellow `#FCCD00`, and the oranges, reds and
    blues of other trainer and cycling apps).
 2. **Copies no other product's screen layout, colour palette and icon set as a set.** Concepts are
    free — a dark background, large tabular numerals, a bottom bar and a side rail, the grey-to-red
@@ -276,7 +277,7 @@ A visual pull request in the redesign epics:
 ### What this costs, stated plainly
 
 - **The two themes look like two brands in their accent.** Lime cannot carry text on white, so light
-  uses an olive; the lime survives only as `selected`. That is spike 0034's named risk for A, and the
+  uses an olive; the lime survives only as `selected`. That is spike 0036's named risk for A, and the
   owner chose it knowing so.
 - **A zone ramp that is not monotone** loses the greyscale reading the old ramp had; the labels carry
   it instead.
