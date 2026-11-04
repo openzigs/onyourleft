@@ -1983,6 +1983,37 @@ describe('a rider’s private room says its voice link in the welcome, and only 
     expect(later.voiceInvite).toBe(`https://discord.gg/${String([...discord.invites.keys()][0])}`);
   });
 
+  it('a room the operator opened is offered no voice: no link, no channel Discord holds', async () => {
+    // A room id of the shape the voice module accepts, or it would refuse for that reason.
+    const OPERATOR_ROOM = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    expect(
+      cli(
+        path,
+        'room-open',
+        OPERATOR_ROOM,
+        '--kind',
+        'ride',
+        '--length',
+        '10000',
+        '--countdown',
+        '0',
+      ).status,
+    ).toBe(0);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const welcome = await welcomeOf(instance.url, ann.sessionToken, OPERATOR_ROOM);
+    expect(welcome).not.toHaveProperty('voiceInvite');
+    // Nothing would ever close such a channel, so none may be made.
+    expect(discord.ourChannels()).toEqual([]);
+    expect(discord.invites.size).toBe(0);
+  });
+
   it('an instance with no bot says no link, and asks Discord nothing', async () => {
     const discord = fakeDiscord();
     const path = join(await freshDirectory(), 'instance.sqlite');
