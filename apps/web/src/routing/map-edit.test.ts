@@ -86,6 +86,23 @@ describe('the line the planner draws — #2006', () => {
   });
 });
 
+describe('the start-and-finish marker of a loop — #2102', () => {
+  it('labels a last waypoint tapped back near the start, within the tolerance, "1"', () => {
+    // About 10 m north of A: inside LOOP_CLOSURE_METRES, but not on it.
+    const nearA = at(40.00009, -105);
+    expect(mapWaypoints(drawn(A, B, C, nearA)).map(({ label }) => label)).toEqual([
+      '1',
+      '2',
+      '3',
+      '1',
+    ]);
+  });
+
+  it('numbers two waypoints on one spot "1" and "2": two are not a loop', () => {
+    expect(mapWaypoints(drawn(A, A)).map(({ label }) => label)).toEqual(['1', '2']);
+  });
+});
+
 describe('which leg a pull on the line was — #2006', () => {
   const draft = drawn(A, B, C, D);
 

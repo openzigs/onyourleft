@@ -178,6 +178,9 @@ export interface MapWaypoint {
    * the list name a waypoint alike (#2006's owner review). It changes when a
    * waypoint is inserted or deleted before this one, so the marker is told
    * again rather than keeping the number it was created with.
+   *
+   * The one exception is a closed loop's last waypoint, which sits on the
+   * first: it shows "1" too, so start and finish read as one marker (#2102).
    */
   readonly label: string;
 }
