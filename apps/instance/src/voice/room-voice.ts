@@ -95,6 +95,16 @@ export const MAXIMUM_VOICE_ROOMS = 400;
 /** Why voice is off, as the log says it. */
 export type VoiceOffCode = 'token-refused' | 'guild-unreachable' | 'membership-screening';
 
+/**
+ * What a rotation did (#876): whether Discord deleted the old channel — and
+ * with it disconnected everybody in it — and the new link, or `undefined`
+ * when no new channel could be made and the room has no voice now.
+ */
+export interface Rotation {
+  readonly oldDeleted: boolean;
+  readonly invite: string | undefined;
+}
+
 export interface RoomVoice {
   /**
    * The room's invite link, its channel made on the first ask and the same
@@ -107,9 +117,11 @@ export interface RoomVoice {
    * The room's channel and invite replaced by new ones — #876's remedy for a
    * rider removed from a room they joined by a link (0017 §3.3): everybody in
    * the old channel is disconnected, and only riders still in the room get the
-   * new link. `undefined` when the room had no voice, or the new one failed.
+   * new link. `undefined` when the room had no voice; otherwise what was done.
    */
-  rotate(roomId: string): Promise<string | undefined>;
+  rotate(roomId: string): Promise<Rotation | undefined>;
+  /** The rooms that have voice now (#876): what a ban rotates, among the banned rider's. */
+  rooms(): readonly string[];
   /** The room is over: its invite and channel deleted. Never throws. */
   close(roomId: string): Promise<void>;
   /** Asks Discord about the server once, and logs whether voice is on. Never throws; every other call waits for it. */
@@ -278,12 +290,12 @@ export function createRoomVoice(options: RoomVoiceOptions): RoomVoice {
         if (old === undefined) return undefined;
         held.delete(roomId);
         // A channel Discord would not delete is the sweep's to find.
-        await deleteChannel(old.channelId, old.inviteCode);
-        if (!(await usable())) return undefined;
+        const oldDeleted = await deleteChannel(old.channelId, old.inviteCode);
+        if (!(await usable())) return { oldDeleted, invite: undefined };
         const made = await open(roomId, old.riders);
-        if (made === undefined) return undefined;
+        if (made === undefined) return { oldDeleted, invite: undefined };
         held.set(roomId, made);
-        return link(made);
+        return { oldDeleted, invite: link(made) };
       });
     },
 
@@ -366,6 +378,8 @@ export function createRoomVoice(options: RoomVoiceOptions): RoomVoice {
       if (deleted > 0) logEvent(log, 'voice-swept', { deleted });
       return deleted;
     },
+
+    rooms: () => [...held.keys()],
 
     get offCode() {
       return offCode();

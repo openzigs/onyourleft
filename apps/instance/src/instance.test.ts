@@ -57,6 +57,7 @@ import { sealedAt } from './sealed/sealed-testing.ts';
 import { openDatabase } from './store/node-sqlite.ts';
 import { corpusFile, uploadBody } from './sync/sync-testing.ts';
 import { fakeDiscord, TEST_BOT_TOKEN, TEST_GUILD_ID } from './voice/discord-testing.ts';
+import { TEST_STATEMENT } from './moderation/moderation-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -1999,5 +2000,179 @@ describe('a rider’s private room says its voice link in the welcome, and only 
     const welcome = await welcomeOf(instance.url, ann.sessionToken, made.body.roomId as string);
     expect(welcome).not.toHaveProperty('voiceInvite');
     expect(discord.requests).toEqual([]);
+  });
+});
+
+describe('a removal and a ban reach the room’s Discord voice (#876)', () => {
+  const VOICE_SERVER = { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } };
+
+  async function post(url: string, path: string, token: string, body: unknown) {
+    const response = await fetch(`${url}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    return {
+      status: response.status,
+      body: (text === '' ? {} : JSON.parse(text)) as Record<string, unknown>,
+    };
+  }
+
+  /** A rider signed in with `device`: the owner's, where the operator named its key. */
+  async function signInWith(url: string, device: Awaited<ReturnType<typeof testDevice>>) {
+    const challenge = (await (
+      await fetch(`${url}/v1/auth/challenge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ publicKey: device.publicKey }),
+      })
+    ).json()) as { nonce: string };
+    return (await (
+      await fetch(`${url}/v1/auth/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...(await device.statement(challenge.nonce)),
+          displayName: 'Owner',
+        }),
+      })
+    ).json()) as { sessionToken: string; athleteId: string };
+  }
+
+  async function seated(url: string, token: string, roomId: string): Promise<RoomClient> {
+    const client = await joinRoom(wsUrl(url), roomId, await ticket(url, token, roomId));
+    clients.push(client);
+    await until(() => client.messages.some((m) => m.type === 'welcome'), 'a welcome');
+    return client;
+  }
+
+  const welcomeOf = (client: RoomClient) => {
+    const welcome = client.messages.find((m) => m.type === 'welcome');
+    if (welcome?.type !== 'welcome') throw new Error('no welcome');
+    return welcome;
+  };
+
+  const voiceMessages = (client: RoomClient) => client.messages.filter((m) => m.type === 'voice');
+
+  async function logOf(path: string) {
+    const store = await openSqlStore(path);
+    try {
+      return await store.listModerationLogPage(undefined, 100);
+    } finally {
+      await store.close();
+    }
+  }
+
+  it('a host removes a rider: the channel is replaced, the riders who stay are told the new link, the removed rider is not, and the log says so', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const bob = await signIn(instance.url, 'Bob');
+    const cat = await signIn(instance.url, 'Cat');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    for (const rider of [bob, cat]) {
+      expect(
+        (await post(instance.url, '/v1/rooms/join', rider.sessionToken, { code: made.body.code }))
+          .status,
+      ).toBe(200);
+    }
+    const annSocket = await seated(instance.url, ann.sessionToken, roomId);
+    const bobSocket = await seated(instance.url, bob.sessionToken, roomId);
+    const catSocket = await seated(instance.url, cat.sessionToken, roomId);
+    const first = welcomeOf(annSocket).voiceInvite;
+    const firstChannel = discord.ourChannels()[0]?.id;
+    expect(first).toBeDefined();
+
+    const removed = await post(instance.url, `/v1/rooms/${roomId}/remove`, ann.sessionToken, {
+      riderId: welcomeOf(bobSocket).riderId,
+      reason: 'Abusive in the room',
+    });
+    expect(removed.status).toBe(200);
+    await until(
+      () => voiceMessages(annSocket).length > 0 && voiceMessages(catSocket).length > 0,
+      'the new link',
+    );
+
+    // Discord: the channel Bob may be in is gone; one new one.
+    expect(discord.channels.has(firstChannel ?? '')).toBe(false);
+    expect(discord.ourChannels()).toHaveLength(1);
+    const newer = `https://discord.gg/${String([...discord.invites.keys()][0])}`;
+    expect(newer).not.toBe(first);
+    expect(voiceMessages(annSocket)).toEqual([{ type: 'voice', voiceInvite: newer }]);
+    expect(voiceMessages(catSocket)).toEqual([{ type: 'voice', voiceInvite: newer }]);
+    // Bob is out of the room, and was told nothing.
+    await bobSocket.closed;
+    expect(voiceMessages(bobSocket)).toEqual([]);
+    // The log: the removal, then what was done to voice, naming it.
+    const log = await logOf(path);
+    const removal = log.find((entry) => entry.action === 'host_remove_from_room');
+    const voice = log.find((entry) => entry.action === 'rotate_voice');
+    expect(removal?.id).toBe(removed.body.logId);
+    expect(voice).toMatchObject({
+      actorAthleteId: ann.athleteId,
+      targetAthleteId: bob.athleteId,
+      reason: expect.stringContaining(`after log entry ${String(removed.body.logId)}`) as unknown,
+    });
+    expect((voice?.id ?? 0) > (removal?.id ?? 0)).toBe(true);
+  });
+
+  it('a moderator suspends a rider who is still connected: the channel is replaced and she is not told the new link', async () => {
+    const discord = fakeDiscord();
+    const ownerDevice = await testDevice();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+      config: { moderators: { owner: ownerDevice.publicKey } },
+    });
+    await instance.voiceReady;
+    const owner = await signInWith(instance.url, ownerDevice);
+    const ann = await signIn(instance.url, 'Ann');
+    const cat = await signIn(instance.url, 'Cat');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    expect(
+      (await post(instance.url, '/v1/rooms/join', cat.sessionToken, { code: made.body.code }))
+        .status,
+    ).toBe(200);
+    const annSocket = await seated(instance.url, ann.sessionToken, roomId);
+    const catSocket = await seated(instance.url, cat.sessionToken, roomId);
+
+    const suspended = await post(
+      instance.url,
+      `/v1/moderation/athletes/${cat.athleteId}/suspend`,
+      owner.sessionToken,
+      { reason: 'Repeated abuse', statement: TEST_STATEMENT },
+    );
+    expect(suspended.status).toBe(200);
+    await until(() => voiceMessages(annSocket).length > 0, 'the new link');
+    const newer = `https://discord.gg/${String([...discord.invites.keys()][0])}`;
+    expect(voiceMessages(annSocket)).toEqual([{ type: 'voice', voiceInvite: newer }]);
+    expect(newer).not.toBe(welcomeOf(catSocket).voiceInvite);
+    // A ban closes no socket: Cat is still connected, and is not told.
+    expect(voiceMessages(catSocket)).toEqual([]);
+    const voice = (await logOf(path)).find((entry) => entry.action === 'rotate_voice');
+    expect(voice).toMatchObject({
+      actorAthleteId: owner.athleteId,
+      targetAthleteId: cat.athleteId,
+      reason: expect.stringContaining(`after log entry ${String(suspended.body.logId)}`) as unknown,
+    });
   });
 });

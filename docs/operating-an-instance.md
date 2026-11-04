@@ -612,6 +612,10 @@ voice: nothing else changes.
 | `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
 | `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
 | `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
+| `"event":"voice-failed","code":"log"` (or `"member"`) | after a removal or a suspension, writing the `rotate_voice` log entry (or reading who is in a room) failed. The removal or suspension itself was applied |
+
+**A removal or a ban replaces the room's channel** (#876): see `docs/moderation.md`, "Moderation
+in a room". What was done is a `rotate_voice` entry in the moderation log, not a line here.
 
 ## Room close codes
 

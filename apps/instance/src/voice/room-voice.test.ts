@@ -185,7 +185,9 @@ describe('rotating a room’s channel (#874, for #876)', () => {
     const { voice } = voiceOver(discord);
     const first = await voice.inviteFor(ROOM, 8);
     const before = discord.ourChannels()[0]?.id;
-    const rotated = await voice.rotate(ROOM);
+    const rotation = await voice.rotate(ROOM);
+    const rotated = rotation?.invite;
+    expect(rotation?.oldDeleted).toBe(true);
     expect(rotated).toBeDefined();
     expect(rotated).not.toBe(first);
     expect(discord.ourChannels()).toHaveLength(1);
@@ -202,6 +204,39 @@ describe('rotating a room’s channel (#874, for #876)', () => {
     const { voice } = voiceOver(discord);
     expect(await voice.rotate(ROOM)).toBeUndefined();
     expect(discord.requests).toEqual([]);
+  });
+
+  it('says when Discord would not delete the old channel, and still gives the room a new one — #876', async () => {
+    const discord = fakeDiscord();
+    const { voice } = voiceOver(discord);
+    await voice.inviteFor(ROOM, 8);
+    discord.failNext(/^DELETE \/channels\//, { status: 500 });
+    const rotation = await voice.rotate(ROOM);
+    expect(rotation?.oldDeleted).toBe(false);
+    expect(rotation?.invite).toBeDefined();
+    // The old one is the sweep's: it is no room's any more.
+    expect(await voice.sweep()).toBe(1);
+    expect(discord.ourChannels()).toHaveLength(1);
+  });
+
+  it('says when no new channel could be made: the room has no voice now — #876', async () => {
+    const discord = fakeDiscord();
+    const { voice } = voiceOver(discord);
+    await voice.inviteFor(ROOM, 8);
+    discord.failNext(/^POST \/guilds\//, { status: 403 });
+    expect(await voice.rotate(ROOM)).toEqual({ oldDeleted: true, invite: undefined });
+    expect(discord.ourChannels()).toEqual([]);
+    expect(voice.rooms()).toEqual([]);
+  });
+
+  it('lists the rooms that have voice — #876', async () => {
+    const discord = fakeDiscord();
+    const { voice } = voiceOver(discord);
+    await voice.inviteFor(ROOM, 8);
+    await voice.inviteFor(OTHER_ROOM, 8);
+    expect([...voice.rooms()].sort()).toEqual([OTHER_ROOM, ROOM].sort());
+    await voice.close(ROOM);
+    expect(voice.rooms()).toEqual([OTHER_ROOM]);
   });
 });
 

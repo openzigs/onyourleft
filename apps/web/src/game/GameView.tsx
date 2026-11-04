@@ -1303,10 +1303,14 @@ export function GameView(props: GameViewProps): JSX.Element {
   /** What the room frame remembers between frames. @see room-ride.ts */
   const roomStateRef = useRef<RoomRideState>(roomRideState());
   /**
-   * The room's Discord voice link and when it came (#875), read during the
-   * render the tick schedules, as {@link roomRef}'s status is. `room-voice.ts`.
+   * The room's Discord voice link and when it came (#875), as the tick last
+   * read it. ⚠️ **Mirrored in {@link voiceNotice}, state**, because a race
+   * holding its rider on the line renders nothing new from the tick (the
+   * simulation's state does not change), so a link the room replaced there
+   * (#876) would never be drawn from a ref alone. `room-voice.ts`.
    */
   const voiceNoticeRef = useRef<RoomVoiceNotice | undefined>(undefined);
+  const [voiceNotice, setVoiceNotice] = useState<RoomVoiceNotice | undefined>(undefined);
   /** The last room frame, for the render the tick schedules. */
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
@@ -1797,6 +1801,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
         voiceNoticeRef.current = undefined;
+        setVoiceNotice(undefined);
         roomRef.current = props.room.join({
           roomId,
           // #784: the room's `welcome.routeRef` must be the route this device
@@ -2172,12 +2177,17 @@ export function GameView(props: GameViewProps): JSX.Element {
         roomRecordAskedRef.current = true;
         void trainerPortRef.current?.recordRoomRide?.();
       }
-      // #875: the room's voice link, from its welcome, and when it came.
-      voiceNoticeRef.current = voiceNoticeAfter(
+      // #875: the room's voice link, from its welcome, and when it came — a
+      // render scheduled whenever it changes (#876), held on the line or not.
+      const voiceNow = voiceNoticeAfter(
         voiceNoticeRef.current,
         room?.status(),
         simulation.state.elapsed,
       );
+      if (voiceNow !== voiceNoticeRef.current) {
+        voiceNoticeRef.current = voiceNow;
+        setVoiceNotice(voiceNow);
+      }
       const roomNow =
         room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
       roomFrameRef.current = roomNow;
@@ -3007,12 +3017,7 @@ export function GameView(props: GameViewProps): JSX.Element {
   // `setState` is what schedules this render.
   const race = roomRef.current?.race();
   // #875: the room's voice link, while it is shown (`room-voice.ts`).
-  const voiceLink = voiceLinkShown(
-    voiceNoticeRef.current,
-    race,
-    state?.elapsed ?? 0,
-    STANDING_NOTICE_SECONDS,
-  );
+  const voiceLink = voiceLinkShown(voiceNotice, race, state?.elapsed ?? 0, STANDING_NOTICE_SECONDS);
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.

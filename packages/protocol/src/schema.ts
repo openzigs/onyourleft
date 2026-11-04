@@ -344,6 +344,13 @@ export const MESSAGE_FIELDS = {
       shape: { kind: 'array', items: RIDER_ID, maximumLength: MAXIMUM_RIDERS, distinct: true },
     },
   },
+  // #876: the room's voice link changed under riders already welcomed.
+  voice: {
+    voiceInvite: {
+      shape: { kind: 'string', pattern: VOICE_INVITE_PATTERN, maximumLength: 51 },
+      optional: true,
+    },
+  },
 } as const satisfies Record<ProtocolMessage['type'], Readonly<Record<string, Field>>>;
 
 /** The types a room may receive. A room refuses a `frame` from a client as an unknown type. */
@@ -395,4 +402,5 @@ export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
   'name',
   'standings',
   'finish',
+  'voice',
 ];

@@ -90,3 +90,43 @@ describe('the voice link in a welcome — #875', () => {
     }
   });
 });
+
+describe('a changed voice link, told to the riders already welcomed — #876', () => {
+  it('tells every connected rider the new link but the one it was changed about, and sends nothing when it is the same', () => {
+    const room = testRoom({ kind: 'ride' });
+    room.setVoiceInvite(INVITE);
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bea'), 0);
+    room.receive(3, helloText('ticket-cai'), 0);
+    const out = room.setVoiceInvite(NEWER, 'bea');
+    expect(sentTo(out, 1)).toEqual([{ type: 'voice', voiceInvite: NEWER }]);
+    expect(sentTo(out, 2)).toEqual([]);
+    expect(sentTo(out, 3)).toEqual([{ type: 'voice', voiceInvite: NEWER }]);
+    expect(room.setVoiceInvite(NEWER)).toEqual([]);
+    // And the next welcome says the new one.
+    expect(sentTo(room.receive(4, helloText('ticket-dee'), 0), 4)[0]).toMatchObject({
+      voiceInvite: NEWER,
+    });
+  });
+
+  it('tells them there is no voice any more, and tells nobody who is not connected', () => {
+    const room = testRoom({ kind: 'ride' });
+    room.setVoiceInvite(INVITE);
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bea'), 0);
+    room.disconnect(2, 100);
+    const out = room.setVoiceInvite(undefined);
+    expect(out).toEqual([{ kind: 'send', connection: 1, message: { type: 'voice' } }]);
+  });
+
+  it('tells a rider the room removed nothing: they are gone before the link changes', () => {
+    const room = testRoom({ kind: 'ride' });
+    room.setVoiceInvite(INVITE);
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bea'), 0);
+    room.remove('bea', 100);
+    const out = room.setVoiceInvite(NEWER, 'bea');
+    expect(sentTo(out, 2)).toEqual([]);
+    expect(sentTo(out, 1)).toEqual([{ type: 'voice', voiceInvite: NEWER }]);
+  });
+});

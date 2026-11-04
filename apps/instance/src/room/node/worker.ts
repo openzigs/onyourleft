@@ -129,6 +129,9 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
     case 'remove':
       send({ type: 'removed', id: message.id, ok: host.remove(message.roomId, message.athleteId) });
       return;
+    case 'voice':
+      host.setVoiceInvite(message.roomId, message.invite, message.withheldFrom);
+      return;
     case 'seat':
       send({
         type: 'seated',
