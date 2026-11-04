@@ -458,19 +458,19 @@ test.describe('#1010 — the pictures are the cards, and every word is on a soli
 const LANDSCAPE_TABLET = FOLD_VIEWPORTS[3];
 
 /**
- * ⚠️ **Since #2043 Next up no longer runs down to the fold**: a reviewer who
- * remembers this describe holding it at half the fold or more, with This week
- * and the Trainer card stacked beside it, is reading the old file. Next up is
- * a compact row in the first two columns, the Trainer card under it, and This
- * week in the third beside both.
- */
-/**
  * The most space allowed between Next up and the Trainer card under it: the
  * grid's 16 px gap and the share of This week's height the two rows split
  * (29 px measured), and well under a card — This week is 300 px and more.
  */
 const HOLE_PIXELS = 48;
 
+/**
+ * ⚠️ **Since #2043 Next up no longer runs down to the fold**: a reviewer who
+ * remembers this describe holding it at half the fold or more, with This week
+ * and the Trainer card stacked beside it, is reading the old file. Next up is
+ * a compact row in the first two columns, the Trainer card under it, and This
+ * week in the third beside both.
+ */
 test.describe('#1010 — a landscape tablet is a dashboard', () => {
   test('Next up and the Trainer card under it, This week beside both; the ride cards after', async ({
     page,

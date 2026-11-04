@@ -389,7 +389,7 @@ function deleteDashboardRule(): void {
 const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
   // #1010's fold control: a picture a screen tall above Next up's words.
   ['hero=tall', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 90vh; }"],
-  // #2043's: #1010's picture back above the words, at its 12rem floor.
+  // #2043's: an approximation of the card #2043 replaced, a 12rem picture back above the words (main's card was taller).
   ['picture=back', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 12rem; }"],
   // Words over the picture on a clear band: "text on art".
   [
