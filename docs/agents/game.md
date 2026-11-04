@@ -259,6 +259,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the hips. Each elbow bends down and back
                         (`elbowOut`, `elbowBack`), never out to the side. The
                         minimums are held by tests on the real body.
+                        ⚠️ **PR #2116's second pass** ("Fix again first"):
+                        the bar is 7 cm lower (`HEAD_TUBE_TOP_Y` 0.89 m), so
+                        every grip is under the hips, and the brake hood the
+                        hoods' hand holds is drawn (`bar hood ±1`, a box).
+                        The wrist bends the hand down round the drop
+                        (`wristDown`), the head lifts to look up the road in
+                        the drops and the tuck so the helmet faces the camera
+                        (half of `headPitch` at `neck01`), and a standing
+                        rider's elbows do not swing out.
     src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
                         the owner's ruling of 2026-11-02): standing on a climb
                         (under 65 rpm with 300 W, or over 7 %), the aero tuck

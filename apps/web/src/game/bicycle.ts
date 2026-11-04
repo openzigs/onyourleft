@@ -581,8 +581,22 @@ const BAR_TUBE_RADIUS = 0.012;
  * which is where it used to be and where its `_FOOT_` siblings still are,
  * because {@link BAR_Y} and {@link BAR_Z} are derived from it and a module-scope
  * `const` is in its temporal dead zone until its own line runs.
+ *
+ * ⚠️ **0.89 m since PR #2116's second pass (Refs #1999), and 0.96 m until
+ * then.** The owner's ruling of 2026-11-04, *"Fix again first"*: from the
+ * three-quarter camera the realistic rider's near hand read as on the hip.
+ * The cause was this bicycle's cockpit. At 0.96 m the bar sat at the hips'
+ * own height, level with the saddle's top, which is a town bike's. The
+ * realistic body is scaled to this bicycle's legs, so it has a real rider's
+ * torso and arms. Those arms are 0.66 m from the shoulder to the middle of
+ * the hand, and they reached a bar 0.49 m away by folding about 80° at the
+ * elbow. The upper arm hung straight down and the elbow sat at the waist, so
+ * the hand, at the hips' height, drew as a hand on the hip. A road bicycle's
+ * bar sits below its saddle: 7 cm lower puts it 8 cm under the saddle's top,
+ * a 17 cm head tube, and the stylised rider's arm (`bicycle.test.ts`, "reaches
+ * the bar with an arm") still inside its 0.53 m.
  */
-const HEAD_TUBE_TOP_Y = 0.96;
+const HEAD_TUBE_TOP_Y = 0.89;
 const HEAD_TUBE_TOP_Z = 0.34;
 
 /** How far a road stem lifts the bar above the top of the head tube. */
@@ -616,6 +630,35 @@ const BAR_HALF_WIDTH = HANDLEBAR_LENGTH_METRES / 2;
  * enough to foul the knee at the top of the stroke.
  */
 const DROP_TAIL_METRES = 0.07;
+
+/**
+ * The brake hood on the front of each bend: the lever body a hand "on the
+ * hoods" holds — PR #2116's second pass (Refs #1999).
+ *
+ * ⚠️ **Drawn since then, and only described until then.** {@link
+ * HAND_POSITIONS}' hoods have always been at the bar's height, a bend's reach
+ * ahead of the tops, because *"a lever body then carries the hand back up"*.
+ * Nothing drew that lever body, so the realistic hand sat on air, ahead of the
+ * bend and level with the tops, with its fingers open: the owner's ruling of
+ * 2026-11-04 (*"Fix again first"*) saw it float. It leaves the bend 30° above
+ * its forward-most point and rises forward to just above the tops' height,
+ * so the hoods' hand is on its top. A box, 2.5 cm by 3 cm, because a lever
+ * body is square-shouldered and because a box is 12 triangles where a tube is
+ * 48 (`realistic-renderer.test.ts` holds the bicycle's count). ⚠️ Chosen: a
+ * hood's shape, not a model's.
+ */
+const HOOD_FOOT = {
+  y: BAR_Y - BAR_BEND_RADIUS * (1 - Math.sin(Math.PI / 6)),
+  z: BAR_Z + BAR_BEND_RADIUS * Math.cos(Math.PI / 6),
+};
+const HOOD_TIP = { y: BAR_Y + 0.005, z: BAR_Z + BAR_BEND_RADIUS + 0.035 };
+const HOOD = {
+  y: (HOOD_FOOT.y + HOOD_TIP.y) / 2,
+  z: (HOOD_FOOT.z + HOOD_TIP.z) / 2,
+  length: Math.hypot(HOOD_TIP.y - HOOD_FOOT.y, HOOD_TIP.z - HOOD_FOOT.z),
+  // A turn about `+X` takes `+Z` toward `−Y`, so a nose that rises is negative.
+  pitch: -Math.atan2(HOOD_TIP.y - HOOD_FOOT.y, HOOD_TIP.z - HOOD_FOOT.z),
+};
 
 /**
  * Where each hand goes, per {@link RidingPosition} — #369, and the answer to
@@ -920,6 +963,15 @@ export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
       BAR_TUBE_RADIUS,
       { x: side * BAR_HALF_WIDTH, y: BAR_Y - 2 * BAR_BEND_RADIUS, z: BAR_Z },
       { y: BAR_Y - 2 * BAR_BEND_RADIUS, z: BAR_Z - DROP_TAIL_METRES },
+    ),
+    // …and the brake hood on the front of the bend, which a hand on the hoods
+    // holds. @see HOOD
+    part(
+      `bar hood ${side}`,
+      { shape: 'box', width: 0.025, height: 0.03, depth: HOOD.length },
+      RIDER_PALETTE.tyre,
+      { x: side * BAR_HALF_WIDTH, y: HOOD.y, z: HOOD.z },
+      { pitch: HOOD.pitch },
     ),
   ]),
   part('saddle', { shape: 'box', width: 0.1, height: 0.035, depth: 0.24 }, RIDER_PALETTE.tyre, {
@@ -1794,8 +1846,10 @@ export function emptyRiderMotion(): RiderMotion {
  *   ({@link STANDING_BICYCLE_ROCK_RADIANS}).
  *
  * Each elbow swings out with its own side's downstroke, as the rider pulls on
- * the bar against it ({@link ELBOW_SWING_RADIANS}), scaled by the effort and
- * the standing exactly as the trunk's rock is.
+ * the bar against it ({@link ELBOW_SWING_RADIANS}), scaled by the effort as
+ * the trunk's rock is. ⚠️ Seated only since PR #2116's second pass: a standing
+ * rider's elbow swing goes to nought, because the doubled trunk rock carries
+ * the shoulder out and the elbow with it.
  *
  * Both are scaled by `pedalling` with everything else from the stroke, so with
  * no cadence nothing rocks, standing or not (#349).
@@ -1824,8 +1878,11 @@ export function riderMotion(
   into.bicycleRock = drawn * STANDING_BICYCLE_ROCK_RADIANS * stood * stroke;
   // Forward at each downstroke, twice a turn: `sin²` peaks at both.
   into.headNod = drawn * HEAD_NOD_RADIANS * Math.max(0, 2 * hard - 1) * stroke * stroke;
-  // `+X`'s elbow out on `+X`'s downstroke, `−X`'s on its own.
-  const swing = drawn * ELBOW_SWING_RADIANS * (0.5 + hard) * (1 + stood) * stroke;
+  // `+X`'s elbow out on `+X`'s downstroke, `−X`'s on its own. ⚠️ Not out of
+  // the saddle (PR #2116's second pass): there the trunk's doubled rock
+  // already carries each shoulder 12 cm out over its downstroke, and the
+  // elbow swung out on top of it kicked 15 cm past the shoulder.
+  const swing = drawn * ELBOW_SWING_RADIANS * (0.5 + hard) * (1 - stood) * stroke;
   into.elbow[0] = swing;
   into.elbow[1] = -swing;
   return into;
@@ -1958,11 +2015,24 @@ export interface RiderStance {
    * in the aero tuck, whose forearms are in.
    */
   elbowBack: number;
+  /**
+   * How far the wrist bends the hand DOWN from the forearm's line, in radians
+   * — PR #2116's second pass (Refs #1999). Nought on the hoods, where the
+   * hand lies along the hood; most in the tuck, whose forearm is level and
+   * whose hand turns down round the drop rather than carrying on past it.
+   */
+  wristDown: number;
   /** How much of a standing rider's motion is drawn, 0 to 1. @see riderMotion */
   standing: number;
   /**
    * The head's turn about the bicycle's `+X` on top of the back's, forward and
-   * down positive, in radians — #1999: down in the drops, up on the tops.
+   * down positive, in radians — #1999: up on the tops. ⚠️ Since PR #2116's
+   * second pass, also UP (negative) in the drops and the tuck, where it was
+   * down: the back there is near level, so the back alone already turns the
+   * face to the road under the front wheel, and a further turn down showed
+   * the chase camera the back of the skull over the helmet's rim. A rider in
+   * the drops lifts the head to look up the road. Half of it is drawn at the
+   * neck and half at the head (`three-renderer.ts` §`RealisticRiderBelt`).
    */
   headPitch: number;
 }
@@ -2042,6 +2112,14 @@ function backAt(degrees: number): { readonly y: number; readonly z: number } {
  * figure is chosen to read, not measured, and is the owner's to tune; the
  * back's length from the hips is kept, so only its angle changes.
  * `bicycle.test.ts` and `realistic-textures.test.ts` hold the minimums apart.
+ *
+ * ⚠️ **PR #2116's second pass**, the owner's ruling of 2026-11-04 (*"Fix
+ * again first"*): the bar is 7 cm lower ({@link HEAD_TUBE_TOP_Y}), so every
+ * grip is under the hips and the arms reach rather than fold. The drops'
+ * elbows come in from 30° out to 12° (they drew 14 cm past the shoulder,
+ * "chicken wings"); in the drops and the tuck the head is lifted to look up
+ * the road (`headPitch`), and the wrist turns the hand down round the drop
+ * (`wristDown`).
  */
 const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
   // Sitting up, hands on the tops just inside the bends: the torso upright,
@@ -2056,6 +2134,7 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripZ: handPosition('upright').z,
     elbowOut: 15 * DEGREES,
     elbowBack: 20 * DEGREES,
+    wristDown: 20 * DEGREES,
     standing: 0,
     headPitch: -8 * DEGREES,
   },
@@ -2069,11 +2148,13 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripZ: GRIP_Z,
     elbowOut: 25 * DEGREES,
     elbowBack: 30 * DEGREES,
+    wristDown: 0,
     standing: 0,
     headPitch: 0,
   },
   // In the drops: the back low and flat, the shoulders forward toward the
-  // bar, which bends the elbows, and the head down.
+  // bar, which bends the elbows, kept in; the head lifted to look up the road
+  // and the hand turned down round the drop.
   drops: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
@@ -2082,14 +2163,16 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripX: BAR_HALF_WIDTH,
     gripY: handPosition('drops').y,
     gripZ: handPosition('drops').z,
-    elbowOut: 30 * DEGREES,
-    elbowBack: 30 * DEGREES,
+    elbowOut: 12 * DEGREES,
+    elbowBack: 35 * DEGREES,
+    wristDown: 25 * DEGREES,
     standing: 0,
-    headPitch: 8 * DEGREES,
+    headPitch: -30 * DEGREES,
   },
   // The aero tuck — the owner's ruling of 2026-11-04: in the drops with the
-  // back flatter still and the head low, the elbows in and back so the
-  // forearms are level and tucked. @see AERO_BACK_DEGREES
+  // back flatter still and the head low but lifted to look up the road, the
+  // elbows in and back so the forearms are level and tucked, and the hand
+  // turned well down round the drop. @see AERO_BACK_DEGREES
   aero: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
@@ -2100,8 +2183,9 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripZ: handPosition('drops').z,
     elbowOut: 5 * DEGREES,
     elbowBack: 60 * DEGREES,
+    wristDown: 45 * DEGREES,
     standing: 0,
-    headPitch: 4 * DEGREES,
+    headPitch: -40 * DEGREES,
   },
   // Out of the saddle, hands on the hoods, the shoulders over the bar.
   standing: {
@@ -2114,6 +2198,7 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripZ: GRIP_Z,
     elbowOut: 15 * DEGREES,
     elbowBack: 25 * DEGREES,
+    wristDown: 0,
     standing: 1,
     headPitch: 0,
   },
@@ -2152,6 +2237,7 @@ export function blendStance(
   into.gripZ = from.gripZ + (to.gripZ - from.gripZ) * t;
   into.elbowOut = from.elbowOut + (to.elbowOut - from.elbowOut) * t;
   into.elbowBack = from.elbowBack + (to.elbowBack - from.elbowBack) * t;
+  into.wristDown = from.wristDown + (to.wristDown - from.wristDown) * t;
   into.standing = from.standing + (to.standing - from.standing) * t;
   into.headPitch = from.headPitch + (to.headPitch - from.headPitch) * t;
   return into;

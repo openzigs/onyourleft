@@ -443,6 +443,30 @@ describe('the rider sits on the bicycle — #369', () => {
     }
   });
 
+  it('draws the brake hood a hand on the hoods holds — PR #2116', () => {
+    // The owner's ruling of 2026-11-04, "Fix again first": the hoods' hand
+    // floated over the bar. The hood it holds was described and never drawn.
+    const hoods = handPosition('hoods');
+    for (const side of [1, -1] as const) {
+      const hood = BAR_PARTS.find((part) => part.name === `bar hood ${side}`);
+      expect(hood, `hood ${side}`).toBeDefined();
+      const at = hood as RiderPart;
+      expect(Math.sign(at.x)).toBe(side);
+      // The hand rests on it: within a hood's own half-height and a hand's.
+      expect(Math.hypot(at.y - hoods.y, at.z - hoods.z)).toBeLessThan(0.025);
+    }
+  });
+
+  it('sets the bar below the saddle, as a road bicycle’s is — PR #2116', () => {
+    // The owner's ruling of 2026-11-04, "Fix again first": the bar was level
+    // with the saddle's top, at the realistic hips' height, and from the
+    // three-quarter camera a hand on it read as a hand on the hip.
+    const saddle = RIDER_BODY_PARTS.find((each) => each.name === 'saddle') as RiderPart;
+    const top = saddle.y + (saddle.solid as { readonly height: number }).height / 2;
+    const tops = BAR_PARTS.find((each) => each.name === 'bar tops') as RiderPart;
+    expect(top - tops.y).toBeGreaterThan(0.06);
+  });
+
   it('gets lower with every position the drag table charges less air for', () => {
     // `rider.ts` orders the three most-air-pushed first and charges 0.42, 0.36
     // and 0.31 m² for them. A bar whose drops were ABOVE its tops would make
@@ -1327,13 +1351,17 @@ describe('the rider in each position on the bicycle — #1999', () => {
     }
   });
 
-  it('turns the head down in the drops and up on the tops, and leaves it on the hoods', () => {
+  it('lifts the head on the tops, and further in the drops and the tuck to look up the road, and leaves it on the hoods', () => {
+    // PR #2116's second pass: the drops and the tuck used to turn the head
+    // DOWN from a back near level, which put the face at the road under the
+    // front wheel and the back of the skull over the helmet's rim.
     const pitch = (posture: DrawnPosture): number =>
       (stanceOf(posture, emptyRiderStance()).headPitch * 180) / Math.PI;
     expect(pitch('hoods')).toBe(0);
     expect(pitch('standing')).toBe(0);
-    expect(pitch('drops')).toBeGreaterThan(5);
     expect(pitch('upright')).toBeLessThan(-5);
+    expect(pitch('drops')).toBeLessThan(-20);
+    expect(pitch('aero')).toBeLessThan(pitch('drops'));
     // Blended with the rest: half-way from the hoods is half the drops' turn.
     const half = blendStance(
       stanceOf('hoods', emptyRiderStance()),
@@ -1342,6 +1370,23 @@ describe('the rider in each position on the bicycle — #1999', () => {
       emptyRiderStance(),
     );
     expect(half.headPitch).toBeCloseTo(stanceOf('drops', emptyRiderStance()).headPitch / 2, 12);
+  });
+
+  it('turns the tuck’s elbows furthest back and bends its wrists furthest down, and blends both — #2148', () => {
+    // Refs #2148: dropping `elbowBack` from `blendStance`, or the tuck's
+    // `elbowBack` set to nought, passed every test. PR #2116's second pass adds
+    // `wristDown`, which the same two mutations would pass by too.
+    const of = (posture: DrawnPosture) => stanceOf(posture, emptyRiderStance());
+    for (const posture of ['upright', 'hoods', 'drops', 'standing'] as const) {
+      expect(of('aero').elbowBack, posture).toBeGreaterThan(of(posture).elbowBack);
+      expect(of('aero').wristDown, posture).toBeGreaterThan(of(posture).wristDown);
+    }
+    // Drops' elbows in, not out to the side: the owner's "chicken wings".
+    expect(of('drops').elbowOut).toBeLessThan(of('hoods').elbowOut);
+    // Blended as every other figure is: half-way is half of each.
+    const half = blendStance(of('hoods'), of('aero'), 0.5, emptyRiderStance());
+    expect(half.elbowBack).toBeCloseTo((of('hoods').elbowBack + of('aero').elbowBack) / 2, 12);
+    expect(half.wristDown).toBeCloseTo((of('hoods').wristDown + of('aero').wristDown) / 2, 12);
   });
 });
 
@@ -1392,7 +1437,7 @@ describe('the body’s motion grows with effort, and a standing rider rocks the 
     expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0).bicycleRock).toBe(0);
   });
 
-  it('swings each elbow out with its own downstroke, further with effort and standing', () => {
+  it('swings each elbow out with its own downstroke, further with effort, and not out of the saddle', () => {
     const down = riderMotion(HALF_PI, 1, 0, emptyRiderMotion());
     // `+X`'s downstroke: `+X`'s elbow out, `−X`'s in by as much.
     expect(down.elbow[0]).toBeCloseTo(ELBOW_SWING_RADIANS, 12);
@@ -1403,8 +1448,11 @@ describe('the body’s motion grows with effort, and a standing rider rocks the 
       1.5 * ELBOW_SWING_RADIANS,
       12,
     );
-    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).elbow[0]).toBeCloseTo(
-      2 * ELBOW_SWING_RADIANS,
+    // PR #2116's second pass: standing, the doubled trunk rock carries the
+    // shoulder out, and an elbow swung out on top of it kicked out past it.
+    expect(Math.abs(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).elbow[0])).toBe(0);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0.5).elbow[0]).toBeCloseTo(
+      0.5 * ELBOW_SWING_RADIANS,
       12,
     );
     expect(Math.abs(riderMotion(HALF_PI, 0, 0, emptyRiderMotion()).elbow[0])).toBe(0);

@@ -1269,6 +1269,35 @@ describe('what each rider is doing, for the position it is drawn in — #1999', 
     expect(ridingAt(frame, 'remote')?.speed).toBe(own);
   });
 
+  it('gives the ghost its own replayed speed too — #2148', () => {
+    // Refs #2148: the ghost's `ownSpeed` set back to its drawn speed passed
+    // every test. A ghost that rode `own` m/s throughout, `ridden` seconds in,
+    // is at the first place past the hairpin where the drawn one hurries.
+    const own = 15;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const span = (2 * past) / own;
+    const ghost = buildGhostTrack({
+      elapsedSeconds: [0, span],
+      distanceMetres: [0, own * span],
+    });
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        ridden: seconds(past / own),
+      },
+      ghost,
+    });
+    expect(ridingAt(frame, 'ghost')?.speed).toBeCloseTo(own, 9);
+  });
+
   it('gives a lap race’s bots their speed and grade', () => {
     const frame = sceneFrame({
       profile: climb,

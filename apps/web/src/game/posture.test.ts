@@ -158,6 +158,8 @@ describe('the aero tuck for a hard seated effort — #1999', () => {
     expect(wantedPosture(hard({ grade: 9 }), 'aero')).toBe('standing');
     // A fast descent at an easy effort is the drops; a hard effort fast on the flat is the tuck.
     expect(wantedPosture(hard({ power: 150, grade: -5, speed: 14 }), 'hoods')).toBe('drops');
+    // Refs #2148: the second half of that sentence, which went unchecked.
+    expect(wantedPosture(hard({ speed: 14 }), 'hoods')).toBe('aero');
   });
 
   it('keeps the tuck until the power, the cadence or the grade is past its gentler threshold', () => {
