@@ -38,6 +38,11 @@
  * nothing but one press to open it again. Either way focus returns to
  * *Report* once the reasons are gone, not before.
  *
+ * In a room's LAP RACE (#1912, the owner's ruling on PR #2098) a tablet lays
+ * them in place of the two as well (`theme.css` §"#1912 on a TABLET"), and a
+ * phone shows neither *Follow* nor *Report* while the race runs (§"#1912: a
+ * LAP RACE in a ROOM, on a phone"): reporting is on the finish order then.
+ *
  * ⚠️ **Not a live region.** The HUD has one (`announce.ts`); the answer is
  * said by moving focus to it, from the reason button the press took away.
  * Opening moves focus to the first reason, so a keyboard is in the group.

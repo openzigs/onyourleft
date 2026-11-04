@@ -487,3 +487,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   leaves the device (D-3.5); and D-5.7, since the landmark flag is a kind of building and never a
   name. The demo bundle publishes the same fields:
   [ADR 0056](0056-the-demos-shipped-map-under-odbl.md)'s entry of this date.
+- **2026-11-03** — **D-5.6's "the nearest come first" has one exception: the nearest four landmarks
+  in reach come before it**
+  ([#2094](https://github.com/openzigs/onyourleft/issues/2094), PR
+  [#2108](https://github.com/openzigs/onyourleft/pull/2108)). Under the cap, `selectMappedBuildings`
+  (`apps/web/src/game/mapped-buildings.ts`) takes the nearest `MAPPED_LANDMARKS_AHEAD` (**4**) plans
+  of the `civic` family in reach (a place of worship, a school, a town hall; an inferred family is
+  never civic) before the nearest-first walk, so a village's church 300 m out is no longer lost
+  behind 36 nearer houses. From this date D-5.6's sentence reads: *the nearest come first, within
+  the cap, after the nearest four landmarks in reach*. A landmark taken ahead ranks no procedural
+  rival in, and it draws from the same budget before any rival is ranked, so on a frame where the
+  triangle budget binds it can displace a structure nearer the rider; it opens its surfaces ahead of
+  the nearest houses, inside the same 6, so the draw calls do not rise. Beyond four, a landmark
+  ranks by distance like any building. **Status: proposed, in force only when the owner approves
+  the before/after frames on the owner's course** (#2094's fourth criterion); the PR is not to be
+  merged before that, and this entry is to be corrected or struck there if the ruling differs. What
+  still holds, unchanged: the cap does not rise (D-5.6's second and third sentences), D-5.7, and
+  D-3.1 to D-3.6.
