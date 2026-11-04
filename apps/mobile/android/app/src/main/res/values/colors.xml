@@ -15,9 +15,10 @@
 <resources>
     <color name="oyl_canvas">#121816</color>
     <!--
-      The launch window's background on Android 7 to 11, where the system splash
-      screen does not exist: the canvas itself rather than Capacitor's splash
-      picture, which is white (#999).
+      The launch window's canvas: the canvas itself rather than Capacitor's
+      splash picture, which is white (#999). Since #2127 it is the first layer
+      of drawable/oyl_launch_window.xml, the launch theme's window background
+      on every Android version.
     -->
     <drawable name="oyl_launch_background">@color/oyl_canvas</drawable>
 </resources>

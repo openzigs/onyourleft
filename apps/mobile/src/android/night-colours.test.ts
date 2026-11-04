@@ -36,6 +36,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_THEME_CHOICE, resolveTheme } from '../../../web/src/design/theme-selection';
 import { DARK_COLOUR_TOKENS, paletteColours } from '../../../web/src/design/tokens';
 
+import { withoutComments } from './manifest';
 import { styleItems, valueResources } from './resources';
 
 const MAIN = join(import.meta.dirname, '../../android/app/src/main');
@@ -74,12 +75,21 @@ describe('the shell before the page paints is the page’s canvas — #672', () 
     ).toBe('@color/oyl_canvas');
   });
 
-  it('paints the launch window with the canvas in either mode (Android 7 to 11) — #999', () => {
+  it('paints the launch window with the canvas in either mode — #999, #2127', () => {
     // Not Capacitor's splash picture in light mode: it is white, which is the
-    // flash before a page that starts dark.
-    expect(styleItems(styles, 'AppTheme.NoActionBarLaunch')?.get('android:background')).toBe(
-      '@drawable/oyl_launch_background',
+    // flash before a page that starts dark. Since #2127 it is the WINDOW
+    // background (`android:background` is a view's, and painted no window),
+    // and its first layer is the per-palette canvas below, on every API level.
+    expect(styleItems(styles, 'AppTheme.NoActionBarLaunch')?.get('android:windowBackground')).toBe(
+      '@drawable/oyl_launch_window',
     );
+    for (const file of [
+      'res/drawable/oyl_launch_window.xml',
+      'res/drawable-v31/oyl_launch_window.xml',
+    ]) {
+      const first = /<item\b([^>]*)>/.exec(withoutComments(read(file)))?.[1] ?? '';
+      expect(first, file).toMatch(/android:drawable="@drawable\/oyl_launch_background"/);
+    }
     expect(nightDrawables.get('oyl_launch_background')).toBe('@color/oyl_canvas');
     expect(lightDrawables.get('oyl_launch_background')).toBe('@color/oyl_canvas');
   });
@@ -130,5 +140,11 @@ describe('the values reader', () => {
     expect(styleItems(xml, 'A.B')).toEqual(new Map([['k', '1']]));
     expect(styleItems(xml, 'A')).toEqual(new Map([['k', '2']]));
     expect(styleItems(xml, 'C')).toBeUndefined();
+  });
+
+  it('reads an item that carries another attribute after its name — #2127', () => {
+    const xml =
+      '<resources><style name="A"><item name="k" tools:targetApi="33">v</item></style></resources>';
+    expect(styleItems(xml, 'A')).toEqual(new Map([['k', 'v']]));
   });
 });

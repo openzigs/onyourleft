@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  The splash's logo below Android 12 (#2127). The compat splash library draws
+  its icon in a 288 dp box and masks it to a 192 dp circle; the launcher icon
+  drawn at 288 dp would have its art cut by that circle, so it is inset to
+  the circle, the size drawable/oyl_launch_window.xml draws it.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher"
+    android:inset="48dp" />
