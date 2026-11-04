@@ -559,11 +559,32 @@ test.describe('#2044 — Home is a grid of modules', () => {
     expect(lastRide?.top ?? 0).toBeGreaterThanOrEqual(
       Math.max(next?.card.bottom ?? Infinity, trainer?.bottom ?? Infinity) - 1,
     );
+    // The last ride takes columns 1–2, as wide as Next up above it, so column
+    // 2 is not left empty beside the week.
+    expect(Math.abs((lastRide?.left ?? 0) - (next?.card.left ?? -1))).toBeLessThanOrEqual(1);
+    expect(Math.abs((lastRide?.right ?? 0) - (next?.card.right ?? -1))).toBeLessThanOrEqual(1);
     // The ride cards after all four, three across the whole width.
     expect(start?.top ?? 0).toBeGreaterThanOrEqual(
       Math.max(week?.bottom ?? Infinity, lastRide?.bottom ?? Infinity) - 1,
     );
     expect(new Set(seen.rideCards.map((card) => Math.round(card.card.top))).size).toBe(1);
+  });
+
+  test('a first open on a landscape tablet: the other ways to start take the last ride’s columns 1–2', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?rides=none');
+    const empty = await page.locator('.oyl-home__empty').boundingBox();
+    expect(empty, 'the first-open state was not drawn').not.toBeNull();
+    const next = seen.nextUp?.card;
+    console.log(
+      `#2044 first open: empty ${(empty?.x ?? NaN).toFixed(0)}–${((empty?.x ?? 0) + (empty?.width ?? 0)).toFixed(0)}, ` +
+        `Next up ${(next?.left ?? NaN).toFixed(0)}–${(next?.right ?? NaN).toFixed(0)}`,
+    );
+    expect(Math.abs((empty?.x ?? 0) - (next?.left ?? -1))).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs((empty?.x ?? 0) + (empty?.width ?? 0) - (next?.right ?? -1)),
+    ).toBeLessThanOrEqual(1);
   });
 
   test('the control — one column puts a module under the landscape tablet’s fold', async ({

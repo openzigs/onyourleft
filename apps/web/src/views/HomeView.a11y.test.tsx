@@ -666,7 +666,7 @@ describe('the module grid — #2044', () => {
     expect(modules()).toEqual(['Your first ride', 'Trainer', 'Nothing recorded yet']);
   });
 
-  it('makes each module slot a section named by its own h2, and no other landmark', async () => {
+  it('makes each module slot a section named by its own h2, each a named region (not landmark-free: an unnamed section beside another fails the audit)', async () => {
     await openHome([ride('only', 2)]);
     for (const slot of ['.oyl-home__trainer', '.oyl-home__last', '.oyl-home__week']) {
       const section = document.querySelector(slot);
