@@ -1869,6 +1869,38 @@ test.describe('#2068 — a stacked chart is read when it scrolls into view', () 
       .evaluateAll((axes) => axes.map((axis) => axis.lastElementChild?.textContent ?? ''));
     expect(new Set(ends).size, `the charts end at ${ends.join(', ')}`).toBe(1);
   });
+
+  // ⚠️ A layout claim, so measured here: one time axis means every drawing in
+  // the stack starts and ends at the same x. The value column used to be
+  // sized to each chart's own labels, so "151 bpm" pushed heart rate's 0:00
+  // right of power's.
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, every chart’s drawing spans the same x`, async ({ page }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const slots = page.locator('[data-oyl-trace-slot]');
+      await expect(slots.first()).toBeVisible();
+      const count = await slots.count();
+      for (let index = 0; index < count; index += 1) {
+        await slots.nth(index).scrollIntoViewIfNeeded();
+        await expect(slots.nth(index).locator('svg.oyl-trace')).toHaveCount(1);
+      }
+      const spans = await page.locator('svg.oyl-trace').evaluateAll((drawings) =>
+        drawings.map((drawing) => {
+          const box = drawing.getBoundingClientRect();
+          return { left: box.left, right: box.right };
+        }),
+      );
+      expect(spans).toHaveLength(count);
+      const [first] = spans;
+      for (const span of spans) {
+        expect(Math.abs(span.left - (first?.left ?? 0)), JSON.stringify(spans)).toBeLessThan(0.5);
+        expect(Math.abs(span.right - (first?.right ?? 0)), JSON.stringify(spans)).toBeLessThan(0.5);
+      }
+    });
+  }
 });
 
 test.describe('#1312 — the lap table keeps its Lap column when it is scrolled', () => {

@@ -4874,7 +4874,10 @@ select.oyl-input {
     'values trace'
     '. times'
     '. time-title';
-  grid-template-columns: auto minmax(0, 1fr);
+  /* #2068: a fixed value column, so every chart in the stack starts and ends
+     at the same x and a minute is at one place down the page. `auto` sized it
+     to each chart's own labels ("151 bpm" is wider than "88 rpm"). */
+  grid-template-columns: 10ch minmax(0, 1fr);
   margin-top: var(--oyl-space-sm);
 }
 
