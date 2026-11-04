@@ -186,13 +186,21 @@ export interface RiderMarker {
    *
    * ⚠️ **Since #1995 it is the LINE's direction, not the road's**, and a
    * reviewer who remembers it equal to the road's heading is reading the old
-   * contract: it is the direction from where the rider's rear wheel is drawn
-   * to where its front wheel is (`scene.ts` §`wheelToWheel`, across the road
-   * by `racing-line.ts` §`lineSlopeAt`'s chord), held to at most 12° off the
-   * road by a smooth saturation (`scene.ts` §`facingTurn`), because a
-   * hairpin's line can cross the road far faster than a bicycle turns. It
-   * changes continuously as the rider rides on, with no step where the line
-   * reaches the road's edge. Facing the road while the
+   * contract: it is the direction from where the rider's rear wheel is to
+   * where its front wheel is (`scene.ts` §`facingAt`, across the road by
+   * `racing-line.ts` §`lineSlopeAt`'s chord — a turn per metre of CENTRELINE,
+   * which in a tight bend is only approximately the turn per metre of the
+   * offset path the bicycle travels, a simplification kept on purpose: it
+   * matters only below the hold and is no step), held to at most 12° off the
+   * road under the bicycle by a smooth saturation (`scene.ts` §`facingTurn`),
+   * because a hairpin's line can cross the road far faster than a bicycle
+   * turns. It has no step where the line reaches the road's edge, and since
+   * #2017 none where a marker crosses a corridor point: until then a bot or a
+   * ghost a metre or more off the rider, which unlike the rider does cross
+   * one, turned by up to 7° in a 2 cm step of a tight hairpin. Measured, not
+   * proved: `line-on-the-road.test.ts` walks the rider, a bot and a ghost
+   * through hairpins of radius 8 to 20 m, 2 cm at a time, and holds each step
+   * under 0.5°. Facing the road while the
    * line crossed it drew every rider sliding sideways. A position across the
    * road is still measured along the ROAD's normal, the corridor's — never
    * this one's, and since #1994 never the camera's, which in a bend is turned

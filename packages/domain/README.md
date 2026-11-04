@@ -32,6 +32,7 @@ already speak SI; the rest are conversions *out*.
 | Instant | second since the Unix epoch | `UnixSeconds` | `unixSeconds()` | non-finite |
 | Gradient | percent of grade, **signed** | `GradePercent` | `gradePercent()` | non-finite |
 | Resistance | unitless brake level | `ResistanceLevel` | `resistanceLevel()` | non-finite, negative |
+| Share of a full scale (a battery level, #2046) | whole percent | `Percent` | `percent()` | non-finite, not a whole number, outside 0 to 100 |
 
 Presentation-only, never stored or transmitted: `KilometresPerHour` (`kilometresPerHour()`) and
 `MilesPerHour` (`milesPerHour()`).

@@ -3,6 +3,7 @@
 import { useMemo, type JSX } from 'react';
 
 import { BAND_TOKENS, type ColourToken } from '../design/tokens';
+import { ZoneKey, zonesPainted } from '../design/ZoneKey';
 import { blockChartPaths, CHART_HEIGHT, CHART_WIDTH, type BlockChartSegment } from './block-chart';
 
 /**
@@ -40,6 +41,10 @@ function bandClass(token: string): string {
  * — every block's share in the builder's list, the shape sentence on a saved
  * workout — and the chart repeats them; it does not replace them
  * (`library.ts` §`WorkoutRow.shape`). An empty timeline draws nothing at all.
+ *
+ * ⚠️ **Every zone it paints is named beside it** (#2039): a {@link ZoneKey}
+ * follows the drawing, listing each zone present by its number and name, so
+ * no zone is told by its colour alone (SC 1.4.1).
  */
 export function BlockChart({
   segments,
@@ -51,24 +56,27 @@ export function BlockChart({
     return null;
   }
   return (
-    <svg
-      aria-hidden="true"
-      className="oyl-block-chart"
-      data-oyl-block-chart=""
-      focusable="false"
-      preserveAspectRatio="none"
-      viewBox={`0 0 ${String(CHART_WIDTH)} ${String(CHART_HEIGHT)}`}
-    >
-      {paths.bands.map((d, band) =>
-        d === '' ? null : (
-          // A band's index is its identity: there are exactly seven.
-          <path key={band} className={bandClass(BAND_TOKENS[band] ?? 'bandRecovery')} d={d} />
-        ),
-      )}
-      {paths.freeRide === '' ? null : (
-        <path className="oyl-block-chart__free-ride" d={paths.freeRide} />
-      )}
-      <path className="oyl-block-chart__rule" d={paths.rule} />
-    </svg>
+    <>
+      <svg
+        aria-hidden="true"
+        className="oyl-block-chart"
+        data-oyl-block-chart=""
+        focusable="false"
+        preserveAspectRatio="none"
+        viewBox={`0 0 ${String(CHART_WIDTH)} ${String(CHART_HEIGHT)}`}
+      >
+        {paths.bands.map((d, band) =>
+          d === '' ? null : (
+            // A band's index is its identity: there are exactly seven.
+            <path key={band} className={bandClass(BAND_TOKENS[band] ?? 'bandRecovery')} d={d} />
+          ),
+        )}
+        {paths.freeRide === '' ? null : (
+          <path className="oyl-block-chart__free-ride" d={paths.freeRide} />
+        )}
+        <path className="oyl-block-chart__rule" d={paths.rule} />
+      </svg>
+      <ZoneKey zones={zonesPainted(paths.bands)} />
+    </>
   );
 }

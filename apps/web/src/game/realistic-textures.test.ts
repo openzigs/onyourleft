@@ -648,7 +648,7 @@ describe('the dressed rider — #623', () => {
       expect(material['vertexColors']).toBe(false);
     }
     // Each body has its own kit colour (#623 keeping #368), the rider's the
-    // app's accent until a frame says otherwise.
+    // teal house kit until a frame says otherwise.
     expect(new Set(riders.kitColours).size).toBe(riders.bodies.length);
     for (const kit of riders.kitColours) expect(kit.getHexString()).toBe('0b5c55');
     // The helmet and glasses are coloured per vertex, and tinted per instance.

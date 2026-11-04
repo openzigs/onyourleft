@@ -336,10 +336,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
                         its digests to the digit. ⚠️ **Since #1995 a rider
                         FACES the line, not the road**: `RiderMarker.headingX`
-                        points from the drawn rear wheel to the front wheel
-                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
-                        off the road (`facingTurn`), so a rider crossing it no
-                        longer slides sideways and never turns in a step. Measure across the road
+                        points from the rear wheel to the front wheel
+                        (`facingAt`, `lineSlopeAt`'s chord), held to 12° off
+                        the road under the bicycle (`facingTurn`), so a rider
+                        crossing it no longer slides sideways. No step at the
+                        edge hold, nor since #2017 where a bot or ghost crosses
+                        a corridor point (the rider never does): held off the
+                        corridor SEGMENT's heading, which steps there, it
+                        turned up to 7° in 2 cm. Measure across the road
                         with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
@@ -992,6 +996,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         one press is one intent; an axis outside −1..1 or not
                         finite asks for nothing. ⚠️ Whether the Android
                         shell delivers pads is spike 0027 (#1819), unmeasured
+    src/game/delivery/controller-port.ts
+                        a paired steering controller's events (#1826), as
+                        #1822's codec reads them. `ride/steering-controller.ts`
+                        implements it; the game is handed the port, never the
+                        client, because the clients write to the controller
+                        and so may not be imported under `game/delivery/`
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -1319,8 +1329,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in
-                        400 m first, ≤ 36 (ADR 0054 D-5.6's cap, the owner's
-                        ruling), ranked by distance with the frame's procedural
+                        400 m first — since #2094 after the nearest 4
+                        landmarks in reach (a place of worship, a school, a
+                        town hall: `MAPPED_LANDMARKS_AHEAD`, inside the same
+                        count, budget and calls; `footprint-census-testing.ts`
+                        counts why each kind is not drawn) — ≤ 36 (ADR 0054
+                        D-5.6's cap, the owner's ruling), ranked by distance
+                        with the frame's procedural
                         structures inside the 23 040-triangle term (#1586), the far
                         level past 150 m, in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
