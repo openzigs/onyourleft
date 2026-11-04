@@ -25,9 +25,9 @@ import { EmptyState } from '../design/EmptyState';
 import { FileDrop } from '../design/FileDrop';
 import { SectionHeading } from '../design/SectionHelp';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
-import { WorkoutShape } from '../design/illustration/WorkoutShape';
 import { StatusMessage } from '../design/StatusMessage';
 import { Stepper } from '../design/Stepper';
+import { ZoneKey, zonesPainted } from '../design/ZoneKey';
 import type { DownloadableFile } from '../transfer/store-port';
 import {
   blockFromDraft,
@@ -36,7 +36,8 @@ import {
   type BlockDraft,
   type BuildRefusal,
 } from '../workouts/build';
-import { BlockChart } from '../workouts/BlockChart';
+import { blockChartPaths, type BlockChartPaths } from '../workouts/block-chart';
+import { BlockChart, BlockChartDrawing } from '../workouts/BlockChart';
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
@@ -140,34 +141,47 @@ interface WorkoutEntry {
 /** A workout in the list: its entry, and what its card draws. */
 interface ListedWorkout extends WorkoutEntry {
   /**
-   * The workout expanded, for the card's drawn shape — #941. From the record
-   * already in hand: drawing it costs no read. It is expanded once per load
-   * and handed to `workoutRow`, which would otherwise expand it again.
+   * The card's block chart — #941, and since the owner's ruling of 2026-11-04
+   * on #2125 the block chart's own drawing, in zone colours. From the record
+   * already in hand: drawing it costs no read. The workout is expanded once per
+   * load, handed to `workoutRow` (which would otherwise expand it again) and
+   * drawn here once, so the list's zone key reads the same paths the cards draw.
    */
-  readonly timeline: WorkoutTimeline;
+  readonly chart: BlockChartPaths;
 }
 
 /**
- * A card's drawing — #941: the blocks as bars of relative height, from the
- * timeline the list already expanded. Decoration: no number reaches it, and
- * the card's words carry the workout.
+ * A card's drawing — #941: the workout as the builder's block chart draws it
+ * (`workouts/BlockChart.tsx`), each block in its zone's colour, at the card's
+ * size. Decoration: no number reaches it, and the card's words carry the
+ * workout. Its zones are named once, by the list's key, not on each card.
  *
- * `memo`, because the timeline is the one the list read set into state, and
+ * `memo`, because the paths are the ones the list read set into state, and
  * the builder beside the list re-renders this view on every keystroke: without
- * it every card's outline (up to `WORKOUT_LIST_LIMIT` of them) is drawn again
+ * it every card's chart (up to `WORKOUT_LIST_LIMIT` of them) is drawn again
  * for a character typed into a name.
  */
 const WorkoutCardArt = memo(function WorkoutCardArt({
-  timeline,
+  chart,
 }: {
-  readonly timeline: WorkoutTimeline;
+  readonly chart: BlockChartPaths;
 }): JSX.Element {
   return (
     <div className="oyl-shape-card__art tw:h-(--oyl-shape-card-art-height)">
-      <WorkoutShape workout={timeline} className="tw:block tw:size-full" />
+      <BlockChartDrawing paths={chart} className="oyl-block-chart--card" />
     </div>
   );
 });
+
+/**
+ * The zones any card in the list paints, lowest first — what the list's one
+ * {@link ZoneKey} names (#2039, SC 1.4.1).
+ */
+function zonesOnCards(entries: readonly ListedWorkout[]): readonly number[] {
+  return [...new Set(entries.flatMap(({ chart }) => zonesPainted(chart.bands)))].sort(
+    (a, b) => a - b,
+  );
+}
 
 /**
  * A workout's block chart — #1043 — or nothing, for one that cannot be expanded.
@@ -208,6 +222,8 @@ const newWorkoutId = (): WorkoutId => `workout-${globalThis.crypto.randomUUID()}
 
 export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
+  // Not on every keystroke the builder causes: only when the list is read again.
+  const cardZones = useMemo(() => zonesOnCards(entries ?? []), [entries]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<BuildRefusal | undefined>(undefined);
   /**
@@ -251,7 +267,11 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       setEntries(
         list.map((record) => {
           const timeline = expandWorkout(record.workout);
-          return { row: workoutRow(record, timeline), record, timeline };
+          return {
+            row: workoutRow(record, timeline),
+            record,
+            chart: blockChartPaths(timeline.segments),
+          };
         }),
       );
       setLoadFault(undefined);
@@ -518,8 +538,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             <p className="oyl-muted" id={listCaptionId}>
               Workouts saved on this device, newest first.
             </p>
+            {/* The cards' zones, each by number and name, once for the list. */}
+            <ZoneKey zones={cardZones} />
             <ul className="oyl-pane-list" aria-labelledby={listCaptionId}>
-              {entries.map(({ row, timeline }) => (
+              {entries.map(({ row, chart }) => (
                 <li
                   key={row.id}
                   className="oyl-pane-list__item oyl-shape-card tw:grid tw:grid-cols-1"
@@ -535,7 +557,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   <p className="oyl-muted tw:mb-0">
                     {row.duration} · hardest: {hardestText(row)}
                   </p>
-                  <WorkoutCardArt timeline={timeline} />
+                  <WorkoutCardArt chart={chart} />
                 </li>
               ))}
             </ul>
@@ -659,8 +681,9 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       detail={
         chosen ?? (
           // #1014: building one and importing one sit side by side where the
-          // pane is wide enough (`theme.css` §"A screen of sections").
-          <div className="oyl-sections">
+          // pane is wide enough (`theme.css` §"A screen of sections"); pinned,
+          // so the short import stays whole while the builder scrolls (#2125).
+          <div className="oyl-sections oyl-sections--pinned">
             <div>
               <h2 id={CREATE_HEADING_ID} tabIndex={-1}>
                 Build a workout

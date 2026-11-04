@@ -4,6 +4,7 @@ import { useMemo, type JSX } from 'react';
 
 import { RenderBoundary } from '../design/ChartSlot';
 import { BAND_TOKENS, type ColourToken } from '../design/tokens';
+import { ZoneKey, zonesPainted } from '../design/ZoneKey';
 import { CHART_WIDTH } from '../workouts/block-chart';
 
 import {
@@ -253,7 +254,12 @@ function Drawn(props: WorkoutGraphProps): JSX.Element {
           </div>
         </div>
       </div>
-      {key === '' ? null : <p className="oyl-muted oyl-workout-graph__key">{key}</p>}
+      {/* Beside the frame on a landscape tablet, under it elsewhere (`theme.css`). */}
+      <div className="oyl-workout-graph__notes">
+        {key === '' ? null : <p className="oyl-muted oyl-workout-graph__key">{key}</p>}
+        {/* #2039: every zone the plan paints, by its number and name (SC 1.4.1). */}
+        <ZoneKey zones={zonesPainted(plan.toCome.bands)} />
+      </div>
     </div>
   );
 }

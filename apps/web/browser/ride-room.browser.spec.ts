@@ -660,8 +660,12 @@ test.describe('a room ride with sounds on — #1398', () => {
   // control may find nothing and fail. Measured only on the runner's fonts,
   // as are the other two: 7 px off the stage at 736×360 and 24 px into the
   // rider at 360×752.
+  // ⚠️ #2041 closed that 7 px: the HUD's numbers are Barlow with tabular
+  // figures (ADR 0063 D-5), narrower than the system face, and on CI's fonts
+  // the 1024×768 control then found nothing. So 1024×768 is no longer a
+  // control here; the case above still holds it.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
-    ['736×360', '1024×768', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
+    ['736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
   )) {
     test(`the control — with the block undone, the same measurement fails — ${viewport.name}`, async ({
       page,
@@ -1089,4 +1093,163 @@ test.describe('a room ride with sounds on, a side camera paired or a notice stan
       expect(failures).not.toEqual([]);
     });
   }
+});
+
+/**
+ * #1912 — a LAP RACE in a room on the HUD, `ride-harness.tsx` §`LAP_RACE`:
+ * the running race of §"#1347" a lap race, so beside the room's readings,
+ * row and standings the HUD carries the race's *Place* and *Item* — this
+ * rider holding the widest item name, *Tailwind*. Three states: the race
+ * as it runs, with *Follow* pressed, and with *Report* open too — the
+ * owner's ruling on PR #2098 (2026-11-03) asked for the last two, which in
+ * the review's screenshots ran the actions panel 19 px below a 736×360
+ * stage and over the rider by 50 to 97 px.
+ *
+ * ## What is held, at every overlay viewport, both ways
+ *
+ * - Every panel a rider can see is whole on the stage and over no other
+ *   panel; none is over the leaning rider's box; and *Place* and *Item* are
+ *   laid out, on the stage and uncovered — 736×360 among them, the #1356
+ *   class.
+ * - **On a phone the room's row gives way** (`theme.css` §"#1912: a LAP RACE
+ *   in a ROOM, on a phone"): *Follow*, *Report* and the reasons are laid out
+ *   at no size. On a tablet each is on the stage and uncovered, but for
+ *   *Follow* and *Report* while the reasons are open, which take their place
+ *   (§"#1912 on a TABLET").
+ * - On a phone *Use item* is the actions panel's own 8 px gap under *Pause*.
+ * - **Upright without anchor positioning the moving time is in the
+ *   secondary panel** (`theme.css` §"#1912, the owner's ruling"), in the
+ *   cell the room's readings left, and not beside *Pause*.
+ *
+ * ## The control
+ *
+ * The same page with the *Item* field forced to the full width of the stage
+ * and tall is over another panel or the rider at 736×360, so "whole and over
+ * nothing" can fail here.
+ */
+const LAP_RACE_ROOM = '?room=lap-race';
+const LAP_RACE_STATES = [
+  { query: LAP_RACE_ROOM, state: 'as it runs', followed: false },
+  { query: '?room=lap-race-following', state: 'Follow pressed', followed: true },
+  { query: '?room=lap-race-report', state: 'Report open', followed: true },
+] as const;
+const LAP_RACE_READINGS = ['reading: Place', 'reading: Item'] as const;
+
+/** Upright, where the moving time is lifted beside *Pause* (`theme.css` §"#1111"). */
+function upright(viewport: Viewport): boolean {
+  return viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
+}
+
+test.describe('a lap race in a room on the HUD — #1912', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    for (const { query, state, followed } of LAP_RACE_STATES) {
+      test.describe(`${viewport.name}, ${state}`, () => {
+        test(`every panel is whole, over no other panel and clear of the rider; Place and Item on the stage; the room’s row ${tablet ? 'on the stage' : 'gives way'}`, async ({
+          browser,
+        }) => {
+          const page = await sharedRide(browser, viewport, query);
+          const rider = riderBox(viewport);
+          for (const [how, seen] of await bothWays(page)) {
+            const panels = seenPanels(seen);
+            expect(panels.length, how).toBeGreaterThanOrEqual(4);
+            expect(
+              panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+              how,
+            ).toEqual([]);
+            const collisions: string[] = [];
+            panels.forEach((a, index) => {
+              for (const b of panels.slice(index + 1)) {
+                if (overlap(a.box, b.box))
+                  collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+              }
+            });
+            expect(collisions, how).toEqual([]);
+            expect(
+              panels.filter((each) => overlap(each.box, rider)).map(describeItem),
+              how,
+            ).toEqual([]);
+            for (const name of LAP_RACE_READINGS) {
+              const reading = named(seen.items, name);
+              expect(
+                reading.box.width * reading.box.height,
+                `${how}: ${name} laid out`,
+              ).toBeGreaterThan(1);
+              expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
+              expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
+            }
+            const roomRow = seen.items.filter((each) => each.name.startsWith('room: '));
+            if (followed) {
+              // Follow and Report, and with Report open its reasons as well.
+              expect(roomRow.length, `${how}: the room's row`).toBeGreaterThanOrEqual(
+                state === 'Report open' ? 3 : 2,
+              );
+            }
+            for (const each of roomRow) {
+              // On a tablet the open reasons take the row in place of Follow
+              // and Report (`theme.css` §"#1912 on a TABLET").
+              const inPlace =
+                state === 'Report open' &&
+                (each.name.startsWith('room: Follow') || each.name.startsWith('room: Report'));
+              if (tablet && !inPlace) {
+                expect(inside(each.box, viewport), `${how}: ${describeItem(each)}`).toBe(true);
+                expect(each.onTop, `${how}: ${describeItem(each)}`).toBe(true);
+              } else {
+                expect(
+                  each.box.width * each.box.height,
+                  `${how}: ${describeItem(each)} gives way`,
+                ).toBeLessThanOrEqual(1);
+              }
+            }
+            if (!tablet) {
+              // *Use item* the panel's own gap under *Pause*, and no margin
+              // besides (`theme.css` §"#1912: a LAP RACE in a ROOM, on a phone").
+              const pause = named(seen.items, 'control: Pause');
+              const item = named(seen.items, 'control: Use item');
+              expect(
+                item.box.top - pause.box.bottom,
+                `${how}: Use item under Pause`,
+              ).toBeLessThanOrEqual(8 + SUBPIXEL_TOLERANCE);
+            }
+            if (how === UNANCHORED && upright(viewport)) {
+              const moving = named(seen.items, 'reading: Moving');
+              const secondary = panels.find((each) =>
+                each.name.includes('oyl-hud__fields--secondary'),
+              );
+              expect(secondary, `${how}: the secondary panel`).toBeDefined();
+              if (secondary !== undefined) {
+                expect(
+                  moving.box.left >= secondary.box.left - SUBPIXEL_TOLERANCE &&
+                    moving.box.right <= secondary.box.right + SUBPIXEL_TOLERANCE &&
+                    moving.box.top >= secondary.box.top - SUBPIXEL_TOLERANCE &&
+                    moving.box.bottom <= secondary.box.bottom + SUBPIXEL_TOLERANCE,
+                  `${how}: ${describeItem(moving)} in ${describeItem(secondary)}`,
+                ).toBe(true);
+              }
+            }
+          }
+        });
+      });
+    }
+  }
+
+  test('the control — the Item field forced wide and tall is over another panel or the rider — 736×360', async ({
+    page,
+  }) => {
+    const viewport = OVERLAY_VIEWPORTS.find((each) => each.width === 736 && each.height === 360);
+    if (viewport === undefined) throw new Error('no 736×360 viewport');
+    await openRide(page, viewport, LAP_RACE_ROOM);
+    await page.addStyleTag({
+      content:
+        '.oyl-game--riding .oyl-hud .oyl-hud__field--lap-race { min-width: 100vw !important; min-height: 60vh !important; }',
+    });
+    const seen = await measure(page);
+    const panels = seenPanels(seen);
+    const rider = riderBox(viewport);
+    const crossed =
+      panels.some((a, index) => panels.slice(index + 1).some((b) => overlap(a.box, b.box))) ||
+      panels.some((each) => overlap(each.box, rider)) ||
+      panels.some((each) => !inside(each.box, viewport));
+    expect(crossed).toBe(true);
+  });
 });

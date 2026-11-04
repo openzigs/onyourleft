@@ -10,6 +10,6 @@
   draws this colour with the app's icon on it instead.
 -->
 <resources>
-    <color name="oyl_canvas">#121816</color>
+    <color name="oyl_canvas">#101215</color>
     <drawable name="oyl_launch_background">@color/oyl_canvas</drawable>
 </resources>

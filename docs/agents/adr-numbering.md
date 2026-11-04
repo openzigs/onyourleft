@@ -12,14 +12,23 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0063 is [ADR 0063](../adr/0063-the-design-system-direction-hi-vis.md)**, taken by
+  [#2036](https://github.com/openzigs/onyourleft/issues/2036) on 2026-11-03 for the design system's
+  direction (Hi-Vis: the palette, the zones, dark first, type, motion, sound and no new runtime UI
+  dependency), on the owner's
+  [choice of direction A](https://github.com/openzigs/onyourleft/issues/2035#issuecomment-6619125271)
+  on #2035 and the rulings of that day on #2030 and #2032. It is **Proposed** until the owner accepts
+  it. It took the next free number after 0062, which #2036 named by its title when it was filed;
+  **0057 and 0058 stay claimed** by #1748 and #1752. **The next free number is 0064.** A reviewer who
+  remembers this file offering 0063 is reading the old file.
   ⚠️ **0062 is [ADR 0062](../adr/0062-we-build-our-own-basemap-archive-from-openstreetmap.md)**,
   taken by [#1557](https://github.com/openzigs/onyourleft/issues/1557) on 2026-11-01, in pull request
   [#1991](https://github.com/openzigs/onyourleft/pull/1991), for building the project's own basemap
   archive from OpenStreetMap, and **accepted on the owner's
   [ruling of the same day](https://github.com/openzigs/onyourleft/pull/1991#issuecomment-6562146716)**
   that ADR 0010 D-1's *"We do not generate"* be superseded by a new ADR rather than amended. It took
-  the next free number after 0061; **0057 and 0058 stay claimed** by #1748 and #1752. **The next free
-  number is 0063.** A reviewer who remembers this file offering 0062 is reading the old file.
+  the next free number after 0061; **0057 and 0058 stay claimed** by #1748 and #1752. The next free
+  number was then 0063. A reviewer who remembers this file offering 0062 is reading the old file.
   ⚠️ **0061 is [ADR 0061](../adr/0061-lap-race-bots-a-course-only-energy-plan-never-another-racer.md)**,
   taken by [#1960](https://github.com/openzigs/onyourleft/issues/1960) on 2026-11-01 for the lap-race
   bots' course-only energy plan, and **accepted on the owner's

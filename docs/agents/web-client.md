@@ -326,9 +326,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`playwright.config.ts` §`FOLLOW_THE_DEVICE`). A colour
                         drawn over the world or a camera picture (the stage, the
                         pairing code) uses a HUD token so it does not flip, and
-                        the HUD keeps the LIGHT palette whatever the page is in:
-                        `theme.css` §`.oyl-hud` restates every page colour token
-                        at its light value, for the controls and notices inside it.
+                        the HUD keeps the DARK palette whatever the page is in
+                        (#2042, ADR 0063 D-2; it kept the LIGHT one from #672
+                        until then): `theme.css` §`.oyl-hud` restates every page
+                        colour token at its dark value, for the controls and
+                        notices inside it, so a ride is dark on a light page.
                         Since #936 the menus' house style is tokens: five `illo*`
                         colours (decoration: what is drawn OVER one declares a
                         pair, and the focus ring is paired with each), a
@@ -677,7 +679,10 @@ apps/                 AGPL-3.0-or-later, without exception
     src/routing/        planning a route (#70, #71, #72) — the draft and the
                         legs an edit makes stale, undo over whole drafts, what
                         a half-drawn route keeps across a reload, the elevation
-                        profile and where its numbers came from. ⚠️ The
+                        profile and where its numbers came from; since #2102
+                        `loop.ts`, a short loop for a lap race: Close the loop,
+                        a target length, and a drawn line that ends where it
+                        starts saved as a loop. ⚠️ The
                         RoutingProvider INTERFACE is in packages/domain; there
                         is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),
