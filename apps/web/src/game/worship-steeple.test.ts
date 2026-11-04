@@ -447,6 +447,8 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
     // it blended into an overcast one. Steeper than every roof the town builds, so it takes less
     // sky than any of them, and yet not the true faces' 76°, where the far face was in deep shade.
     expect(STEEPLE.lit).toBeGreaterThan(Math.max(...ROOF_PITCHES_DEGREES));
+    // The owner's ruling set it at 60°: a later retune has to be a deliberate one.
+    expect(Math.abs(STEEPLE.lit - 60)).toBeLessThanOrEqual(1);
     const lit = (STEEPLE.lit * Math.PI) / 180;
     for (const at of [flatAt, hipAt]) {
       const { plan, spire } = spireOf(at);
@@ -554,6 +556,9 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
       expect(each.top).toBe(FACADE_PAINT);
     }
     expect(STEEPLE.band.height).toBe(0.8);
+    // Proud of the tower, so its sides never lie in the tower's own planes: at 0 the two fight
+    // in depth, and the band reads as the broken, aliased line the ruling asked to be rid of.
+    expect(STEEPLE.band.proud).toBe(0.2);
     // From the spire's foot, the tower's top, down its height.
     const top = Math.max(...above.map((each) => each.y));
     const heights = band.map((each) => each.y);
