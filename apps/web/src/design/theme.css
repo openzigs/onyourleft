@@ -7152,8 +7152,8 @@ select.oyl-input {
 /* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
    the `.oyl-hud__control`s'. The mute toggle, the volume and the side
    camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
-   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
-   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
+   `--oyl-color-focus` to its light value, #131415 — drawn 2 px outside the
+   control onto `hudSurface`, #10161c: 1.01:1, a ring nobody could see (WCAG
    2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
    `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
    its own light surface, which is where its ring lands. Read back off the
