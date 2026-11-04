@@ -84,7 +84,7 @@
   --oyl-color-border: #6a6c6e;
   --oyl-color-ink: #131415;
   --oyl-color-ink-muted: #515355;
-  --oyl-color-accent: #405e00;
+  --oyl-color-accent: #3e6100;
   --oyl-color-accent-hover: #2c4300;
   --oyl-color-accent-ink: #ffffff;
   --oyl-color-selected: #cdf39c;
@@ -823,9 +823,9 @@ html {
  * The current destination is marked four ways and only one of them is colour:
  * `aria-current` for assistive technology, a heavier label, a larger icon, and
  * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
- * #48's sixth, and #944's third. The fill is `accent`, at 4.68 (light) and
+ * #48's sixth, and #944's third. The fill is `accent`, at 4.52 (light) and
  * 7.22 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
- * label and icon on it are `accentInk`, at 7.45 and 13.33 — both declared pairs
+ * label and icon on it are `accentInk`, at 7.2 and 13.33 — both declared pairs
  * in `tokens.ts` §CONTRAST_REQUIREMENTS.
  *
  * ⚠️ The fill is its OWN rule, `.oyl-nav-link[aria-current] .oyl-nav-indicator`,
@@ -1457,6 +1457,31 @@ html {
      */
     padding: var(--oyl-space-sm);
     margin: calc(-1 * var(--oyl-space-sm));
+  }
+
+  /*
+   * A short section beside a long one stays whole — the owner's ruling of
+   * 2026-11-04 on #2125, item 3. Workouts' detail pane holds *Build a workout*
+   * and *Import a workout* side by side in ONE scroll container, so scrolling
+   * the builder to its *Add block* form (or its chart's zone key) carried the
+   * short import column with it, and its heading went under the pane's top
+   * edge half cut: at 1280 × 800 a 34 px scroll left "Import a workout" sliced
+   * through its letters. Sticky at the pane's content edge, the short column
+   * stays put while the long one scrolls beside it. The grid's own height is
+   * the long column's, so the long column cannot stick, and the short one
+   * comes off the top only where the grid itself ends.
+   *
+   * Opt-in (`oyl-sections--pinned`), and only where the pane scrolls on its
+   * own and the sections are columns: below 40rem tall the page scrolls under
+   * a sticky header, and a pinned section would go under it.
+   * `list-detail.browser.spec.ts` §"#2125" scrolls the pane and reads the
+   * heading back, with this rule deleted as the control.
+   */
+  @container oyl-pane (min-width: 40rem) {
+    .oyl-list-detail--two > .oyl-list-detail__detail .oyl-sections--pinned > * {
+      position: sticky;
+      top: 0;
+    }
   }
 }
 
@@ -5925,6 +5950,22 @@ select.oyl-input {
   height: 6rem;
   margin-top: var(--oyl-space-sm);
   width: 100%;
+}
+
+/*
+ * On a saved workout's card (the owner's ruling of 2026-11-04 on #2125): the
+ * same drawing at the card's own height, `.oyl-shape-card`'s 3rem, which its
+ * wrapper sets. The well stays `surface`, the background every band colour is
+ * declared against, and the list names the zones once above the cards.
+ */
+.oyl-block-chart--card {
+  height: 100%;
+  margin-top: 0;
+}
+
+/* The Workouts list's one key, over its cards: the cards' own gap below it. */
+.oyl-zone-key + .oyl-pane-list {
+  margin-top: var(--oyl-space-sm);
 }
 
 .oyl-block-chart__band-recovery {

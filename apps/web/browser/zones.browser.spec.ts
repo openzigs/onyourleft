@@ -12,6 +12,9 @@
  * - the workout builder's block chart (`workouts/BlockChart.tsx`), in
  *   `reflow.html?builder=blocks` on Workouts, which adds one block of each
  *   kind through the builder's own form;
+ * - a saved workout's card on Workouts, which draws the same chart at the
+ *   card's size (the owner's ruling of 2026-11-04 on #2125), with the list's
+ *   one key over the cards;
  * - the Ride screen's running-workout graph (`workout/WorkoutGraph.tsx`), in
  *   `rideview.html?workout=stepped`.
  *
@@ -124,10 +127,33 @@ for (const theme of THEMES) {
       // The harness's own walk to Workouts, which adds the blocks once the builder is on the page.
       await page.evaluate(async () => window.__oylReflow?.visit('#/workouts'));
       expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
-      const seen = await zonesIn(page, 'svg.oyl-block-chart', '.oyl-main');
+      // The builder's chart, in the detail pane: the list's cards draw one too.
+      const seen = await zonesIn(
+        page,
+        '[data-oyl-pane="detail"] svg.oyl-block-chart',
+        '[data-oyl-pane="detail"]',
+      );
       console.log(`#2039 ${theme} block chart: ${JSON.stringify(seen)}`);
       // One block of each kind paints several zones; a walk over one proves little.
       expect(new Set(seen.bands.map((band) => band.zone)).size).toBeGreaterThanOrEqual(3);
+      expect(zoneFaults(theme, seen)).toEqual([]);
+    });
+
+    // The owner's ruling of 2026-11-04 on #2125: a saved workout's card is
+    // drawn in the zone colours, and the list names them once over its cards.
+    test('a saved workout’s card on Workouts', async ({ page }) => {
+      await page.goto('/reflow.html?data=populated');
+      await page.waitForFunction(() => window.__oylReflow?.ready === true);
+      await page.evaluate(async () => window.__oylReflow?.visit('#/workouts'));
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      const seen = await zonesIn(
+        page,
+        '[data-oyl-pane="list"] .oyl-shape-card svg.oyl-block-chart',
+        '[data-oyl-pane="list"]',
+      );
+      console.log(`#2125 ${theme} saved workout card: ${JSON.stringify(seen)}`);
+      // The populated workout is 60 % and 90 % of threshold: zones 2 and 3.
+      expect(seen.bands.map((band) => band.zone).sort()).toEqual([2, 3]);
       expect(zoneFaults(theme, seen)).toEqual([]);
     });
 

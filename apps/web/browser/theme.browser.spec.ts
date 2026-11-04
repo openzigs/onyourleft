@@ -293,7 +293,7 @@ const HI_VIS: Readonly<
     canvas: 'rgb(255, 255, 255)',
     ink: 'rgb(19, 20, 21)',
     surfaceOverlay: 'rgb(203, 205, 208)',
-    accent: 'rgb(64, 94, 0)',
+    accent: 'rgb(62, 97, 0)',
   },
 };
 
