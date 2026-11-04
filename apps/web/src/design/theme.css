@@ -7301,11 +7301,14 @@ select.oyl-input {
 /* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
    the `.oyl-hud__control`s'. The mute toggle, the volume and the side
    camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
-   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
-   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
-   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
-   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
-   its own light surface, which is where its ring lands. Read back off the
+   `--oyl-color-focus` to its light value (#141b1a then; #131415 now) — drawn
+   2 px outside the control onto `hudSurface`: about 1.04:1, a ring nobody
+   could see (WCAG 2.2 SC 2.4.7, 2.4.13). Since #2042 `.oyl-hud` restates the
+   DARK palette, so the pinned focus is the lime, #aff13c, and a ring that
+   fell back to it would show; the rule still holds the ring to the HUD's
+   own pair, `hudInk` on `hudSurface` (17.44:1, declared in `tokens.ts`). A
+   notice keeps the page's ring: its surface is dark too (the warning's is
+   #35260d), which is where its ring lands, in the pinned lime. Read back off the
    engine, with this rule deleted as the control, by
    `browser/hud-focus.browser.spec.ts`. */
 .oyl-hud :focus-visible {

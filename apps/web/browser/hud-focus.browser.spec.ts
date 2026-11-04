@@ -30,6 +30,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { paletteColours } from '../src/design/tokens';
 
 const QUERY = '?sounds=on&side=lost';
 
@@ -156,26 +157,30 @@ test('#748 control — without the rule, and the page focus the light one, the t
   page,
 }) => {
   await openRide(page);
-  const deleted = await page.evaluate((selector) => {
-    // ⚠️ Since #2042 the HUD restates the DARK palette, whose focus token is
-    // the lime, so a ring that fell back to the page's focus would still show.
-    // #748's failure was the LIGHT focus (what the HUD carried until #2042)
-    // landing on hudSurface, so the control puts that back too.
-    document
-      .querySelector<HTMLElement>('.oyl-hud')
-      ?.style.setProperty('--oyl-color-focus', '#131415');
-    let removed = 0;
-    for (const sheet of document.styleSheets) {
-      for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
-        const rule = sheet.cssRules[index];
-        if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
-          sheet.deleteRule(index);
-          removed += 1;
+  const lightFocus = paletteColours('light').focus;
+  const deleted = await page.evaluate(
+    ({ selector, lightFocus }) => {
+      // ⚠️ Since #2042 the HUD restates the DARK palette, whose focus token is
+      // the lime, so a ring that fell back to the page's focus would still show.
+      // #748's failure was the LIGHT focus (what the HUD carried until #2042)
+      // landing on hudSurface, so the control puts that back too.
+      document
+        .querySelector<HTMLElement>('.oyl-hud')
+        ?.style.setProperty('--oyl-color-focus', lightFocus);
+      let removed = 0;
+      for (const sheet of document.styleSheets) {
+        for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
+          const rule = sheet.cssRules[index];
+          if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
+            sheet.deleteRule(index);
+            removed += 1;
+          }
         }
       }
-    }
-    return removed;
-  }, RULE);
+      return removed;
+    },
+    { selector: RULE, lightFocus },
+  );
   expect(deleted, `${RULE} was not found to delete`).toBe(1);
   const named = (await tabThroughTheHud(page)).filter((ring) => NAMED.includes(ring.name));
   expect(named.map((ring) => ring.name).sort()).toEqual([...NAMED].sort());

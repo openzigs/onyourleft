@@ -704,9 +704,7 @@ async function lightPinRestored(page: Page): Promise<void> {
       hud.style.setProperty('color-scheme', 'light');
       for (const [token, value] of Object.entries(light)) {
         if (token.startsWith('hud')) continue;
-        const kebab = token
-          .replaceAll(/([A-Z])/g, (letter) => `-${letter.toLowerCase()}`)
-          .replaceAll(/([a-z])(\d)/g, '$1$2');
+        const kebab = token.replaceAll(/([A-Z])/g, (letter) => `-${letter.toLowerCase()}`);
         hud.style.setProperty(`--oyl-color-${kebab}`, value);
       }
     }
@@ -741,6 +739,7 @@ test.describe('#2042 — a light page, and the ride and HUD stay dark', () => {
     const onDark = await backgroundOf(page, lock);
     // The page changed and the control did not: it is the dark palette's.
     expect(onLight).toBe(onDark);
+    expect(onDark).toBe(rgb('dark', 'surfaceOverlay'));
     await deviceBecomes(page, 'light');
     await lightPinRestored(page);
     expect(
