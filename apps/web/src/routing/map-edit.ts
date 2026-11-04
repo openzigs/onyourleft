@@ -20,6 +20,7 @@ import {
 import type { MapWaypoint } from '../map/port';
 import type { TrackBounds, TrackGeometry } from '../map/track';
 import type { DraftLeg, RouteDraft } from './draft';
+import { endsAtStart } from './loop';
 
 /**
  * Where the planner's map looks before there is a waypoint: the contiguous
@@ -63,10 +64,15 @@ export function draftGeometry(draft: RouteDraft): TrackGeometry | undefined {
 
 /** The waypoints, as the map draws them. */
 export function mapWaypoints(draft: RouteDraft): readonly MapWaypoint[] {
+  // #2102: a closed loop's last waypoint sits on the first and is drawn over
+  // it, so it shows "1" too — start and finish, one marker — rather than
+  // hiding the start under its own number. It is numbered again once it moves.
+  const closed = endsAtStart(draft);
+  const last = draft.waypoints.length - 1;
   return draft.waypoints.map(({ id, position }, index) => ({
     id,
     position,
-    label: String(index + 1),
+    label: closed && index === last ? '1' : String(index + 1),
   }));
 }
 

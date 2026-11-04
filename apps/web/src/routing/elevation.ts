@@ -64,6 +64,7 @@ import {
 } from '@onyourleft/domain';
 
 import type { RouteDraft } from './draft';
+import { draftIsLoop } from './loop';
 
 /**
  * The distance between elevation samples: **30 metres**.
@@ -181,7 +182,8 @@ export async function planElevation(
     return undefined;
   }
   const heights = await provider.heights({ shape: grid, interval });
-  return elevationFrom(grid, heights, interval, { resampled: true });
+  // #2102: a line that ends where it starts is a loop, as `routes/save.ts` saves it.
+  return elevationFrom(grid, heights, interval, { resampled: true, loop: draftIsLoop(draft) });
 }
 
 /**
@@ -194,7 +196,7 @@ export function elevationFrom(
   shape: readonly GeographicPosition[],
   heights: HeightProfile,
   interval: Metres,
-  options: { readonly resampled?: boolean } = {},
+  options: { readonly resampled?: boolean; readonly loop?: boolean } = {},
 ): PlannedElevation | undefined {
   const positions = options.resampled === true ? shape : resampleShape(shape, interval);
   if (positions.length < 2) {
@@ -222,7 +224,7 @@ export function elevationFrom(
   return {
     dataset: heights.source,
     interval,
-    profile: routeProfile(points),
+    profile: routeProfile(points, { loop: options.loop === true }),
     coverage: coverageOf(points, interval),
   };
 }
