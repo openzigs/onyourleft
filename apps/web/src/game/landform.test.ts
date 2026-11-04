@@ -1229,7 +1229,7 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
    * `lastColumn`, both in the frame within 200 m and drawn on top, that
    * differ in height over the road beside them by more than
    * {@link CREASE_STEEPEST} a metre between them, on the frames from `first`
-   * to `last` — and how many pairs were judged.
+   * to `last` — and how many pairs in the frame were judged.
    */
   const creases = (
     profile: RouteProfile,
@@ -1250,19 +1250,29 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
         (row * perRow + side * COLUMNS + column) * 3;
       const lift = (row: number, side: number, column: number): number =>
         (v[vertex(row, side, column) + 1] as number) - (centre[row] as { y: number }).y;
-      const seen = (row: number, side: number, column: number): boolean => {
+      const point = (
+        row: number,
+        side: number,
+        column: number,
+      ): { readonly x: number; readonly y: number; readonly z: number } => {
         const at3 = vertex(row, side, column);
-        const point = { x: v[at3] as number, y: v[at3 + 1] as number, z: v[at3 + 2] as number };
-        const depth = framed(rig, point);
-        if (depth === undefined || depth > 200) return false;
-        // Under another leg's ground it is not on the screen.
-        return (topHeightAt(ground, point.x, point.z) ?? point.y) <= point.y + 0.05;
+        return { x: v[at3] as number, y: v[at3 + 1] as number, z: v[at3 + 2] as number };
+      };
+      const inFrame = (row: number, side: number, column: number): boolean => {
+        const depth = framed(rig, point(row, side, column));
+        return depth !== undefined && depth <= 200;
+      };
+      // Under another leg's ground it is not on the screen. Asked last, of a
+      // step already too steep: it walks every triangle.
+      const onTop = (row: number, side: number, column: number): boolean => {
+        const { x, y, z } = point(row, side, column);
+        return (topHeightAt(ground, x, z) ?? y) <= y + 0.05;
       };
       for (let row = 0; row + 1 < ground.rows; row += 1) {
         for (let side = 0; side < 2; side += 1) {
           // The road's edge and the verge's foot are the road's own height.
           for (let column = 2; column <= lastColumn; column += 1) {
-            if (!seen(row, side, column) || !seen(row + 1, side, column)) continue;
+            if (!inFrame(row, side, column) || !inFrame(row + 1, side, column)) continue;
             judged += 1;
             const step = Math.abs(lift(row + 1, side, column) - lift(row, side, column));
             const here = vertex(row, side, column);
@@ -1272,6 +1282,7 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
               (v[next + 2] as number) - (v[here + 2] as number),
             );
             if (step <= CREASE_STEEPEST * Math.max(apart, 1)) continue;
+            if (!onTop(row, side, column) || !onTop(row + 1, side, column)) continue;
             steep.push(
               `${step.toFixed(2)} m over ${apart.toFixed(1)} m at ${String(at)}, row ${String(row)}, column ${String(column)}`,
             );
