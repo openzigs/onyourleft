@@ -10,7 +10,10 @@ import {
   heartRateProfile,
   type GattProfile,
 } from '@onyourleft/sensors/protocol';
-import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
+import {
+  createOpenBikeControlClient,
+  createWebBluetoothTransport,
+} from '@onyourleft/sensors/web-bluetooth';
 import { metres, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
@@ -35,6 +38,11 @@ import {
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
+import {
+  createSteeringController,
+  STEERING_CONTROLLER_BUTTONS,
+  type SteeringController,
+} from './ride/steering-controller';
 import {
   createTrainerTargetMemory,
   trainerTargetStorage,
@@ -289,6 +297,12 @@ interface ClientPlatform {
    * painted. {@link NO_LAUNCH} in a browser, which holds no splash.
    */
   readonly launch: LaunchPort;
+  /**
+   * The steering controller paired on Devices — #1826. Its own client beside
+   * the transport, on the same platform choice: the shell's on the same
+   * `plugin`, a browser's on the same `navigator.bluetooth`.
+   */
+  readonly steering: SteeringController | undefined;
 }
 
 /**
@@ -431,6 +445,11 @@ async function buildPlatform(
     const launch: LaunchPort = {
       releaseSplash: async () => mobile.hideCapacitorSplashScreen(splashScreen),
     };
+    // #1826. The same `plugin`, so the controller's link is one of the
+    // links this object holds, against the same connection budget.
+    const steering = createSteeringController(
+      mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
+    );
     return {
       rideController,
       shell,
@@ -439,6 +458,7 @@ async function buildPlatform(
       bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
       systemSettings,
       launch,
+      steering,
     };
   }
 
@@ -451,6 +471,7 @@ async function buildPlatform(
       bluetoothAsk: undefined,
       systemSettings: undefined,
       launch: NO_LAUNCH,
+      steering: undefined,
     };
   }
   const browserTransport = createWebBluetoothTransport({
@@ -472,6 +493,14 @@ async function buildPlatform(
     bluetoothAsk: undefined,
     systemSettings: undefined,
     launch: NO_LAUNCH,
+    // #1826. Its own client on the same `navigator.bluetooth`: each pairing
+    // is the rider's press, as every device's is in a browser.
+    steering: createSteeringController(
+      createOpenBikeControlClient({
+        bluetooth: probe.bluetooth,
+        buttons: STEERING_CONTROLLER_BUTTONS,
+      }),
+    ),
   };
 }
 
@@ -1575,6 +1604,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(platform.systemSettings === undefined
             ? {}
             : { systemSettings: platform.systemSettings })}
+          {...(platform.steering === undefined ? {} : { steering: platform.steering })}
           nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}

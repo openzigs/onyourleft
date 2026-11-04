@@ -28,6 +28,9 @@ export type {
 
 export { createFakeBluetooth, domError } from './fake-bluetooth';
 
+// #1826: the simulated OpenBikeControl controller under the real client.
+export { bluetoothOverSimulatedController } from './simulated-controller';
+
 export {
   heartRateFrame,
   multiFrame,

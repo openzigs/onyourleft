@@ -200,11 +200,8 @@ export interface CapacitorBlePort {
    *
    * ⚠️ Sends nothing to the device's attributes: it is a link-layer parameter
    * request, and it may be asked of a controller only. Nothing here asks it of
-   * a trainer.
-   *
-   * @unwired #1826 pairs a controller on the Devices screen. Until it lands,
-   * the one caller is `open-bike-control-client.ts`, which nothing in
-   * production opens yet.
+   * a trainer. Its caller is `open-bike-control-client.ts`, which
+   * `apps/web/src/main.tsx` builds for the Devices screen (#1826).
    */
   requestConnectionPriority(
     deviceId: string,

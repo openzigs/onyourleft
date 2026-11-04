@@ -324,8 +324,9 @@ it in Notes if you try it; it changes no resistance beyond A7's.
 ## Before Part B — what has to be true, and what to re-read
 
 #1243 and #1244 are merged (#1309, #1317, #1332), and Part B below was **re-read against `main` at
-`49ba5469` on 2026-10-14** (#1344): every control name, sentence, condition and number in it is
-quoted from the merged code, and the file each comes from is named beside it. This is a reading of
+`49ba5469` on 2026-10-14** (#1344), and **again at `aff787f3` on 2026-11-03** (#1329), after
+#1315, #1324, #1328 and the rest of #1329 had merged: every control name, sentence, condition and
+number in it is quoted from the merged code, and the file each comes from is named beside it. This is a reading of
 the code, not a run: nothing below has been ridden. If `main` has moved on by the day of the
 session, re-read the files named in [What the code does](#what-the-code-does-and-where-it-says-so)
 before riding.
@@ -392,7 +393,11 @@ before riding.
   range, or the goals' range), *"because your cadence was falling"* (5 rpm or more between the
   last two blocks), or *"to fit the duration you chose"* (a length goal was sent). Otherwise the
   move is said alone, ending in a full stop, and the ride's record says the reason was not shown.
-  The model's other three reasons are never said. Example: *"Next block shortened by 2 minutes,
+  The model's other three reasons are never said, and since #1329 the instance offers them only
+  where the request carries what they are about, which this device's never does: `on-plan` never,
+  `goal-time-in-range` only with a time-in-range goal, `effort-check-in` only with an effort
+  (`apps/instance` §`replan-template.ts` §`offeredReasons`). A model that names one anyway still
+  gives a move, said alone. Example: *"Next block shortened by 2 minutes,
   because your heart rate stayed above the range you chose. It starts with the next block."*
 - ***Keep the plan***, pressed before the boundary, drops the move and shows *"The plan stays as it
   was."* (`replan-text.ts` §`PLAN_KEPT`). The press writes nothing to the trainer. In the Trainer
@@ -420,11 +425,13 @@ before riding.
   §`PERMANENT_REFUSALS`). ⚠️ **An instance that is down is not in that class.** Every request first
   opens a session, which reads the instance's keys; an unreachable instance closes the session with
   `why: 'keys'`, and that ends the asking for the workout, the same as a refusal. This is a defect
-  (an outage treated as permanent), filed from B3.2, not the intended behaviour.
+  (an outage treated as permanent), filed from B3.2 as
+  [#2104](https://github.com/openzigs/onyourleft/issues/2104), not the intended behaviour.
 - **A proposal the validator refuses, or an answer of "keep the workout"**, shows nothing.
-- **The record of every decision (P9)** is kept with the ride on the device. It is **not on any
-  screen** and not synced ([#1315](https://github.com/openzigs/onyourleft/issues/1315), open).
-  Read it in the account export: *Files → Take everything with you → Export everything*, then in
+- **The record of every decision (P9)** is kept with the ride on the device, and through a
+  recovery ([#1328](https://github.com/openzigs/onyourleft/issues/1328)). It is **not on any
+  screen**. Since [#1315](https://github.com/openzigs/onyourleft/issues/1315) it is synced with the
+  ride, sealed, as one item of kind `replan-record` (`instance/sync.ts`). Read it in the account export: *Files → Take everything with you → Export everything*, then in
   `on-your-left-account.json` the ride's entry under `activities`, at `rideFacts.replans`. Each
   record is `accepted` (the move, the reason, the revision, `at`), `refused` (the `rule`, P1 to
   P7, and the move and reason if they decoded), or `not-applied` (`why`: `kept`, `paused`,
@@ -565,7 +572,7 @@ produce none, record that as the finding, with what the job table's `status`, `f
 |---|---|---|---|
 | B4.1 | As B1.1, until a move is shown | As B1.1 | as B1.1 |
 | B4.2 | Press ***Keep the plan*** before the boundary. Ride through it | The sentence and the button go, and *"The plan stays as it was."* shows with the **Plan change** label. The next block is the **loaded** one: its `0x05` is the plan's own watts, and it runs its own length. The press itself writes nothing | the next block is the changed one |
-| B4.3 | *Optional, in the Trainer game.* With a workout started on the Ride screen and re-plans on, open the Trainer game. When a move waits, press ***Keep the plan*** on the HUD | The button is on a row of its own under *Pause* and *End ride*, with **no sentence beside it** (#1324). The move is spoken only with announcements on. After the press, as B4.2 | as B4.2 |
+| B4.3 | *Optional, in the Trainer game.* With a workout started on the Ride screen and re-plans on, open the Trainer game. When a move waits, press ***Keep the plan*** on the HUD | The button is on a row of its own under *Pause* and *End ride*, with **the move's sentence on the line above it** on the tablet (#1324; on a phone the line gives way). The move is spoken only with announcements on. After the press, as B4.2 | as B4.2 |
 
 **Fails D-7 if:** the boundary `0x05`, or the block's length, is the proposed one and not the
 loaded one; or the press produced a write. In the P9 record, a kept move is followed by
@@ -612,7 +619,7 @@ most) **and ADR 0036 D-3(a)** (nothing that works with no instance starts to nee
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
 | B3.1 | Riding block 2 with the hold running, have the instance **stopped** (`docker compose stop instance`). Ride through the 11:00 and 17:00 boundaries | The ride carries on. **The hold keeps working** in block 2. Each boundary's `0x05` is the loaded plan's. From 11:00 the panel shows, and keeps showing, with no label and not spoken, *"No re-plan could be asked for just now. The workout carries on as planned."*, one line and no more. **No write is caused by the failure**: no `0x05` at the moment the instance went, no `0x08`, no `0x00` | the target changes at the moment the instance stops, or the workout pauses or ends |
-| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | **By the code, no request leaves at 23:00.** The 11:00 key read found the instance unreachable, which closed the session (`why: 'keys'`) and ended the asking for this workout, so the job table shows **no row** at 17:00 or 23:00 and no burst at the restart. This is a **known defect, not a pass**: an outage is treated as permanent, against the module header. Record what you saw. If a request did leave at 23:00, record that too, as the code was then not as read | |
+| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | **By the code, no request leaves at 23:00.** The 11:00 key read found the instance unreachable, which closed the session (`why: 'keys'`) and ended the asking for this workout, so the job table shows **no row** at 17:00 or 23:00 and no burst at the restart. This is a **known defect, not a pass**: an outage is treated as permanent, against the module header ([#2104](https://github.com/openzigs/onyourleft/issues/2104)). Record what you saw. If a request did leave at 23:00, record that too, as the code was then not as read | |
 
 **Fails P8 if:** any write in the log coincides with the instance stopping; the workout paused or
 ended; more than one line was shown; or more than one job was made at the restart. B3.2 is
@@ -712,6 +719,6 @@ ______________
   check what was *sent*.
 - **Anything about a model's judgement.** B1 checks that a proposal stayed inside its bounds, not
   that it was a good idea (ADR 0048 D-5 says the same of the validator).
-- **That Part B's reading of the code is right.** It was re-read against `main` on 2026-10-14,
-  not run: its control names, sentences and job-table query are quoted from code nobody had yet
+- **That Part B's reading of the code is right.** It was re-read against `main` on 2026-10-14
+  and 2026-11-03, not run: its control names, sentences and job-table query are quoted from code nobody had yet
   ridden.
