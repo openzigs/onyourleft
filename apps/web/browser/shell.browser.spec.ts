@@ -2699,7 +2699,8 @@ for (const theme of THEMES) {
       });
       expect(read, 'the file input, its label or a secondary button is missing').toBeDefined();
       expect(read?.file).toEqual(read?.secondary);
-      expect(read?.file.color).toBe(rgbOf('accent', theme));
+      // #2118: a label is the accent's TEXT token.
+      expect(read?.file.color).toBe(rgbOf('accentText', theme));
       // #992: tonal, so a filled surface step and not the page.
       expect(read?.file.backgroundColor).toBe(rgbOf('surfaceOverlay', theme));
       // `--oyl-space-sm`, 8 px: "GPX fileChoose File" is the defect.

@@ -955,3 +955,103 @@ describe('a kept-visible sentence stays in the reading measure on a sections rou
     expect(rule?.[2]).toContain('max-width: var(--oyl-measure)');
   });
 });
+
+/**
+ * #2118, ADR 0063 D-1: the accent is two tokens. `accent` is a FILL and
+ * `accentText` is text and thin lines, and each owes only its own pairs —
+ * which is what lets the light fill be brighter than the light label. A rule
+ * that paints a label with `accent`, or fills a shape with `accentText`, draws
+ * a pair `tokens.ts` §CONTRAST_REQUIREMENTS never declared for it, and in dark,
+ * where the two hold one value, nothing else would notice.
+ */
+describe('#2118 — a fill reads `accent`, and text and lines read `accentText`', () => {
+  /** The properties that paint an area rather than a glyph or a line. */
+  const FILL_PROPERTIES = new Set(['background', 'background-color', 'fill', 'accent-color']);
+
+  /**
+   * A thin line drawn as a fill, so it reads `accentText` through a fill
+   * property: the target band's 3 s power, a 4 px wide bar (`theme.css`
+   * §`.oyl-target-band__power`).
+   */
+  const LINES_DRAWN_AS_FILLS = new Set(['.oyl-target-band__power']);
+
+  const FILL_TOKEN = /var\(\s*--oyl-color-accent\s*\)/;
+  const TEXT_TOKEN = /var\(\s*--oyl-color-accent-text\s*\)/;
+
+  /** Every declaration that reads either token, with its rule's selector. */
+  function accentReads(css: string): { selector: string; property: string; token: string }[] {
+    const reads: { selector: string; property: string; token: string }[] = [];
+    const bare = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, selector = '', body = ''] of bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const declaration of body.split(';')) {
+        const colon = declaration.indexOf(':');
+        if (colon < 0) continue;
+        const property = declaration.slice(0, colon).trim();
+        const value = declaration.slice(colon + 1);
+        if (property.startsWith('--')) continue;
+        for (const [token, pattern] of [
+          ['accent', FILL_TOKEN],
+          ['accentText', TEXT_TOKEN],
+        ] as const) {
+          if (pattern.test(value)) reads.push({ selector: selector.trim(), property, token });
+        }
+      }
+    }
+    return reads;
+  }
+
+  /** A sentence for each read on the wrong token. Empty is a pass. */
+  function misreads(css: string): string[] {
+    return accentReads(css)
+      .filter(({ selector, property, token }) =>
+        token === 'accent'
+          ? !FILL_PROPERTIES.has(property)
+          : FILL_PROPERTIES.has(property) && !LINES_DRAWN_AS_FILLS.has(selector),
+      )
+      .map(
+        ({ selector, property, token }) =>
+          `${selector} { ${property} } reads ${token}: ` +
+          (token === 'accent'
+            ? 'text and lines are `accentText`'
+            : 'a fill is `accent`, unless it is a line listed in LINES_DRAWN_AS_FILLS'),
+      );
+  }
+
+  it('holds every rule in theme.css to its token, and reads both', () => {
+    expect(misreads(themeCss)).toEqual([]);
+    const reads = accentReads(themeCss);
+    // Not vacuous: the primary's fill and the secondary's label are both read.
+    expect(reads).toContainEqual({
+      selector: '.oyl-button',
+      property: 'background',
+      token: 'accent',
+    });
+    expect(reads).toContainEqual({
+      selector: '.oyl-button--secondary',
+      property: 'color',
+      token: 'accentText',
+    });
+  });
+
+  it('holds every utility the product ships to its token', async () => {
+    const { css } = await shippedUtilities();
+    expect(misreads(css)).toEqual([]);
+    expect(accentReads(css).map((read) => read.token)).toContain('accentText');
+  });
+
+  it('finds a label on the fill and a fill in the text token — the check can fail', () => {
+    expect(
+      misreads(
+        '\n.a {\n  color: var(--oyl-color-accent);\n}\n.b {\n  background: var(--oyl-color-accent-text);\n}\n' +
+          '@media (min-width: 1px) {\n  .c {\n    border: 2px solid var(--oyl-color-accent);\n  }\n}\n',
+      ),
+    ).toHaveLength(3);
+    expect(
+      misreads(
+        '\n.a {\n  background: var(--oyl-color-accent);\n  color: var(--oyl-color-accent-ink);\n}\n' +
+          '.b {\n  border-color: var(--oyl-color-accent-text);\n  color: var(--oyl-color-accent-hover);\n}\n' +
+          '.oyl-target-band__power {\n  background-color: var(--oyl-color-accent-text);\n}\n',
+      ),
+    ).toEqual([]);
+  });
+});

@@ -293,7 +293,9 @@ const HI_VIS: Readonly<
     canvas: 'rgb(255, 255, 255)',
     ink: 'rgb(19, 20, 21)',
     surfaceOverlay: 'rgb(203, 205, 208)',
-    accent: 'rgb(62, 97, 0)',
+    // The FILL since #2118 (ADR 0063 D-1, amended 2026-11-04): a brighter
+    // lime-olive than the label, `#3e6100`, which is `accentText`.
+    accent: 'rgb(81, 125, 0)',
   },
 };
 
