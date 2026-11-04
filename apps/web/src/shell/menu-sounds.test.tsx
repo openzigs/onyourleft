@@ -14,10 +14,10 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { RIDE_CUE_LEVEL, RideCues } from '../game/audio-cues';
-import { recordingOutput, type RecordingOutput } from '../game/audio-testing';
+import { busOf, EVERY_BUS_ON, fakeAudioContext, recordingOutput } from '../game/audio-testing';
 import { CUES_STORAGE_KEY, readCuePreference, writeCuePreference } from '../game/cue-preference';
 import type { PreferenceStorage } from '../game/hud/announce-preference';
-import { webAudioOutput, type AudioContextLike } from '../game/web-audio';
+import { deviceAudioMix, webAudioOutput, type AudioContextLike } from '../game/web-audio';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -118,7 +118,7 @@ describe('the menus’ sounds — #946', () => {
     const output = webAudioOutput(() => {
       made += 1;
       return fakeContext().context;
-    });
+    }, EVERY_BUS_ON);
     const { store } = disk();
     expect(readMenuSoundPreference(store)).toEqual(DEFAULT_MENU_SOUNDS);
     mounted = await mount(
@@ -166,7 +166,8 @@ describe('the menus’ sounds — #946', () => {
     expect(output.calls.at(-1)).toEqual({
       kind: 'playCue',
       cue: 'select',
-      gain: MENU_CUE_LEVEL * 0.5,
+      // At the full level: the volume is the effects bus's (#2055), below.
+      gain: MENU_CUE_LEVEL,
     });
   });
 
@@ -220,30 +221,32 @@ describe('the menus’ sounds — #946', () => {
     expect(readCuePreference(store)).toEqual({ enabled: true, volume: 0.8, muted: false });
     expect(values.has(MENU_SOUNDS_STORAGE_KEY)).toBe(true);
 
-    // And the gains: each is set by its own volume and nothing else.
-    const output: RecordingOutput = recordingOutput();
+    // And the gains: each is heard through its own bus, at its own volume and
+    // nothing else's. Since #2055 the volume is the bus's gain in the graph,
+    // read here from the graph the app builds over this store.
+    writeMenuSoundPreference(store, { enabled: true, volume: 0.3 });
+    const fake = fakeAudioContext();
+    const output = webAudioOutput(
+      () => fake.context,
+      deviceAudioMix(() => store),
+    );
     const ride = new RideCues(output, readCuePreference(store));
     ride.begin();
     ride.cue('interval');
-    writeMenuSoundPreference(store, { enabled: true, volume: 0.3 });
     createMenuSounds(output, () => readMenuSoundPreference(store)).press(
       document.createElement('button'),
       { immersive: false, routeId: 'home', ridePhase: 'idle' },
     );
-    ride.cue('interval');
-    const gains = output.calls.flatMap((call) =>
-      call.kind === 'playCue' ? [{ cue: call.cue, gain: call.gain }] : [],
-    );
-    expect(gains).toEqual([
-      { cue: 'interval', gain: RIDE_CUE_LEVEL * 0.8 },
-      { cue: 'select', gain: MENU_CUE_LEVEL * 0.3 },
-      { cue: 'interval', gain: RIDE_CUE_LEVEL * 0.8 },
-    ]);
+    const effects = busOf(fake, output, 'select');
+    const cues = busOf(fake, output, 'interval');
+    expect(effects).not.toBe(cues);
+    expect(effects.gain.value).toBe(0.3);
+    expect(cues.gain.value).toBe(0.8);
   });
 
   it('are short and soft: ≤ 150 ms, an attack of at least 5 ms, under the ride’s peak', () => {
     const fake = fakeContext();
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     for (const cue of ['select', 'confirm', 'back'] as const) {
       fake.events.length = 0;

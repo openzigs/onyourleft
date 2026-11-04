@@ -25,6 +25,7 @@
  * storage port: a blocked or junk store renders the defaults, field by field.
  */
 
+import { writeAudioBus, type BusSetting } from './audio-mix';
 import type { PreferenceStorage } from './hud/announce-preference';
 
 export interface CuePreference {
@@ -66,7 +67,19 @@ export function readCuePreference(storage: PreferenceStorage | undefined): CuePr
   };
 }
 
-/** Keep it. `false` when the device refused, so a screen can say so. */
+/**
+ * The cue bus a choice stands for — #2055: muted unless the sounds are on and
+ * not muted, at the chosen volume. `audio-mix.ts` takes the bus from here the
+ * first time, and {@link writeCuePreference} keeps it in step after that.
+ */
+export function cueBus(preference: CuePreference): BusSetting {
+  return { volume: preference.volume, muted: !preference.enabled || preference.muted };
+}
+
+/**
+ * Keep it, and its bus in `audio-mix.ts` (#2055) — the graph reads the volume
+ * and the mute from there. `false` when the device refused, so a screen can say so.
+ */
 export function writeCuePreference(
   storage: PreferenceStorage | undefined,
   preference: CuePreference,
@@ -74,8 +87,8 @@ export function writeCuePreference(
   if (storage === undefined) return false;
   try {
     storage.setItem(CUES_STORAGE_KEY, JSON.stringify(preference));
-    return true;
   } catch {
     return false;
   }
+  return writeAudioBus(storage, 'cues', cueBus(preference));
 }
