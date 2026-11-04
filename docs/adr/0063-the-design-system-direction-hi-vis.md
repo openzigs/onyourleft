@@ -288,3 +288,17 @@ A visual pull request in the redesign epics:
   recorded here. The remedy is a dated amendment to the value, never a lowered minimum.
 - The owner's tablet measuring well off 0.1700 mm per CSS px: D-5's 27.4 px floor scales with it.
 - An accent that turns out to be another product's identity colour: D-9 then fails and D-1 changes.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-04** — D-1's light `accent` is **`#3e6100`**, not `#405e00`, on the owner's ruling of
+  2026-11-04 on [#2125](https://github.com/openzigs/onyourleft/pull/2125#issuecomment-6628092171)
+  (*"Approve, fix the 3 items"*; item 1: brighten the light-theme olive a little, within the contrast
+  rules). The tightest accent pair, `accent` on `surfaceOverlay`, moves from 4.68 to 4.52 against its
+  4.5, and every other light `accent` pair keeps its minimum; `contrast.a11y.test.ts` records each.
+  The fill/text split D-1 names is not made yet, so the one `accent` token is both a primary
+  button's fill and accent text, and both move. Every other value in D-1's table is unchanged.

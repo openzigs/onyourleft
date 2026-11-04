@@ -64,9 +64,9 @@ const LIGHT_BLOCK = ':root';
 /** The dark palette's block (#672). */
 const DARK_BLOCK = ":root[data-theme='dark']";
 /**
- * The ride HUD's rule, which restates the LIGHT value of every page colour
- * token so nothing inside the HUD follows the page's palette (#672, #744's
- * review).
+ * The ride HUD's rule, which restates the DARK value of every page colour
+ * token so nothing inside the HUD follows the page's palette — #2042, ADR 0063
+ * D-2. It restated the LIGHT values from #672 (#744's review) until then.
  */
 const HUD_BLOCK = '.oyl-hud';
 
@@ -126,24 +126,21 @@ describe('theme.css and tokens.ts cannot drift', () => {
     ]).toEqual([]);
   });
 
-  it('pins the HUD to the light palette: every page colour token, at its light value (#672)', () => {
-    // The owner's ruling: the in-ride HUD is left alone. Its panels paint with
-    // the HUD's own tokens, but the mute toggle, the volume, the side camera's
-    // Stop and a notice's status tones paint with PAGE tokens — so this rule
-    // restates every one of them, and nothing else. A token missing here
-    // follows the page inside the HUD; a HUD token here is a second value for
-    // a theme-independent one; a value that is not the light one is a colour
-    // no contrast pair measured.
+  it('pins the HUD to the dark palette: every page colour token, at its dark value (#2042)', () => {
+    // ADR 0063 D-2, the owner's ruling of 2026-11-03: ride and HUD screens are
+    // dark, whatever the page. Its panels paint with the HUD's own tokens, but
+    // the mute toggle, the volume, the side camera's Stop and a notice's
+    // status tones paint with PAGE tokens — so this rule restates every one of
+    // them, and nothing else. A token missing here follows a light page inside
+    // the HUD; a HUD token here is a second value for a theme-independent one;
+    // a value that is not the dark one is a colour no contrast pair measured.
     const declared = declarationsWithPrefix('color', blockOf(HUD_BLOCK));
-    const expected = Object.fromEntries(
-      Object.keys(DARK_COLOUR_TOKENS)
-        .sort()
-        .map((token) => [token, COLOUR_TOKENS[token as keyof typeof DARK_COLOUR_TOKENS]]),
+    expect(Object.fromEntries([...declared].sort())).toEqual(
+      Object.fromEntries(Object.entries(DARK_COLOUR_TOKENS).sort()),
     );
-    expect(Object.fromEntries([...declared].sort())).toEqual(expected);
     // And what the platform draws itself inside it — a range's track, a check
-    // mark — is the light platform's.
-    expect(blockOf(HUD_BLOCK)).toMatch(/\n\s*color-scheme: light;/);
+    // mark — is the dark platform's.
+    expect(blockOf(HUD_BLOCK)).toMatch(/\n\s*color-scheme: dark;/);
   });
 
   it('tells the platform which palette each block is (#672)', () => {

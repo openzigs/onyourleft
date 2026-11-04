@@ -46,7 +46,7 @@ import { workoutRow } from '../workouts/library';
 import { workoutStub } from '../workouts/testing';
 import { RoutesView } from './RoutesView';
 import { WorkoutsView } from './WorkoutsView';
-import { WorkoutShape } from '../design/illustration/WorkoutShape';
+import { BlockChartDrawing } from '../workouts/BlockChart';
 
 /*
  * Counted, not replaced: the real expansion and the real drawing run, and each
@@ -61,9 +61,9 @@ vi.mock('../workouts/library', async (actual) => {
   const library = await actual<typeof import('../workouts/library')>();
   return { ...library, workoutRow: vi.fn(library.workoutRow) };
 });
-vi.mock('../design/illustration/WorkoutShape', async (actual) => {
-  const shape = await actual<typeof import('../design/illustration/WorkoutShape')>();
-  return { ...shape, WorkoutShape: vi.fn(shape.WorkoutShape) };
+vi.mock('../workouts/BlockChart', async (actual) => {
+  const chart = await actual<typeof import('../workouts/BlockChart')>();
+  return { ...chart, BlockChartDrawing: vi.fn(chart.BlockChartDrawing) };
 });
 
 const ATHLETE = toAthleteId('athlete-a');
@@ -75,7 +75,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.mocked(expandWorkout).mockClear();
-  vi.mocked(WorkoutShape).mockClear();
+  vi.mocked(BlockChartDrawing).mockClear();
   vi.mocked(workoutRow).mockClear();
 });
 
@@ -319,7 +319,7 @@ describe('#941 — the Workouts list', () => {
     expect(cards(mounted.container)).toHaveLength(WORKOUTS.length);
     // One expansion a workout: the card's drawing and its row share it.
     expect(vi.mocked(expandWorkout)).toHaveBeenCalledTimes(WORKOUTS.length);
-    const drawn = vi.mocked(WorkoutShape).mock.calls.length;
+    const drawn = vi.mocked(BlockChartDrawing).mock.calls.length;
     expect(drawn).toBeGreaterThanOrEqual(WORKOUTS.length);
 
     const name = mounted.container.querySelector<HTMLInputElement>('#workout-name');
@@ -330,7 +330,88 @@ describe('#941 — the Workouts list', () => {
     expect(name.value).toBe('Sun');
     // The builder re-rendered the view three times; no card was drawn again
     // and no workout expanded again.
-    expect(vi.mocked(WorkoutShape).mock.calls.length).toBe(drawn);
+    expect(vi.mocked(BlockChartDrawing).mock.calls.length).toBe(drawn);
     expect(vi.mocked(expandWorkout)).toHaveBeenCalledTimes(WORKOUTS.length);
+  });
+});
+
+/*
+ * The owner's ruling of 2026-11-04 on #2125: a saved workout's card is drawn
+ * in the zone colours, as the builder's block chart is, and not all in one
+ * accent. ADR 0063 D-4 (#2039) then asks that every zone painted is named by
+ * its number and name, so the list carries ONE key above its cards, naming
+ * every zone any card paints, and the cards' own words stay what #941 held.
+ */
+describe('the Workouts list draws its cards in zone colours, and names them once', () => {
+  /** The band classes a card's drawing paints, sorted. */
+  const bandsOn = (card: Element): string[] =>
+    [...card.querySelectorAll('svg path')]
+      .map((path) => path.getAttribute('class') ?? '')
+      .filter((name) => name.startsWith('oyl-block-chart__band-'))
+      .sort();
+
+  it('paints each card’s blocks by the zone their share falls in', async () => {
+    mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
+    await settle();
+    const byName = new Map(
+      cards(mounted.container).map((card) => [card.querySelector('a')?.textContent ?? '', card]),
+    );
+    expect(byName.size).toBe(WORKOUTS.length);
+    const sweet = byName.get('Sweet spot over-unders with a very long name for a small screen');
+    const ramp = byName.get('Ramp and intervals');
+    const free = byName.get('Free ride');
+    if (sweet === undefined || ramp === undefined || free === undefined) {
+      throw new Error('a fixture workout has no card');
+    }
+    // 60 % and 90 % of threshold: zones 2 and 3.
+    expect(bandsOn(sweet)).toEqual([
+      'oyl-block-chart__band-endurance',
+      'oyl-block-chart__band-tempo',
+    ]);
+    // A ramp from 50 % to 75 % crosses from zone 1 into 2; the hard intervals
+    // at 130 % are zone 6, and their recoveries at 50 % zone 1.
+    expect(bandsOn(ramp)).toEqual([
+      'oyl-block-chart__band-anaerobic',
+      'oyl-block-chart__band-endurance',
+      'oyl-block-chart__band-recovery',
+    ]);
+    // A free ride has no target, so no zone: an outline, and the rule.
+    expect(bandsOn(free)).toEqual([]);
+    expect(free.querySelector('svg .oyl-block-chart__free-ride')).not.toBeNull();
+    // The block chart's own drawing at the card's size, never the kit's
+    // one-colour illustration.
+    for (const card of byName.values()) {
+      const svg = card.querySelector('svg');
+      expect(svg?.classList.contains('oyl-block-chart')).toBe(true);
+      expect(svg?.classList.contains('oyl-block-chart--card')).toBe(true);
+    }
+  });
+
+  it('names every zone any card paints, once, outside the cards', async () => {
+    mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
+    await settle();
+    const keys = queryAll(mounted.container, '[data-oyl-zone-key]');
+    expect(keys).toHaveLength(1);
+    const [key] = keys;
+    if (key === undefined) throw new Error('no zone key');
+    expect(key.closest('.oyl-pane-list__item'), 'the key is on a card').toBeNull();
+    // Above the cards, so a rider reads it before the colours it names.
+    const list = mounted.container.querySelector('.oyl-pane-list');
+    expect(list).not.toBeNull();
+    expect(
+      key.compareDocumentPosition(list as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Zones 2 and 3 from one card, 1, 2 and 6 from another: each named once.
+    expect(
+      queryAll(key, '[data-oyl-zone]').map((entry) => entry.textContent?.trim() ?? ''),
+    ).toEqual(['1 Recovery', '2 Endurance', '3 Tempo', '6 Anaerobic']);
+  });
+
+  it('draws no key when no card paints a zone', async () => {
+    const free = WORKOUTS.filter((record) => record.name === 'Free ride');
+    mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, free)} />);
+    await settle();
+    expect(cards(mounted.container)).toHaveLength(1);
+    expect(queryAll(mounted.container, '[data-oyl-zone-key]')).toEqual([]);
   });
 });
