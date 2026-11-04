@@ -1662,8 +1662,13 @@ export const PELVIS_ROLL_RADIANS = (2 * Math.PI) / 180;
  * seconds, and because this is the rock of a rider on the hoods rather than of
  * a rider giving up. ⚠️ **The phase is chosen**: the shoulders rock toward the
  * downstroke with the pelvis. The study gives the size, not when in the stroke.
+ *
+ * ⚠️ **Drawn at 6° since #1999**, on the owner's ruling of 2026-11-03 that the
+ * positions do not read from the chase camera and want *"more elbow and
+ * shoulder movement"*. Six degrees is still inside the study's 3.4° to 7.2°,
+ * at its upper end rather than its lower: chosen to read, not measured.
  */
-export const TRUNK_ROCK_RADIANS = (3 * Math.PI) / 180;
+export const TRUNK_ROCK_RADIANS = (6 * Math.PI) / 180;
 
 /**
  * How far the ankle turns through a pedal stroke, each way about where the
@@ -1734,11 +1739,26 @@ export interface RiderMotion {
    * level head holds. @see HEAD_NOD_RADIANS
    */
   headNod: number;
+  /**
+   * How far each elbow swings OUT from its out-and-down 45°, about the line
+   * from its shoulder to its grip —
+   * #1999, the owner's *"more elbow movement"*. Index 0 is the rider's `+X`
+   * side, as in {@link RiderJoints}. @see ELBOW_SWING_RADIANS
+   */
+  readonly elbow: [number, number];
 }
 
 /** A motion to write into, made once. @see riderMotion */
 export function emptyRiderMotion(): RiderMotion {
-  return { pelvisRoll: 0, trunkRoll: 0, trunkPitch: 0, ankle: [0, 0], bicycleRock: 0, headNod: 0 };
+  return {
+    pelvisRoll: 0,
+    trunkRoll: 0,
+    trunkPitch: 0,
+    ankle: [0, 0],
+    bicycleRock: 0,
+    headNod: 0,
+    elbow: [0, 0],
+  };
 }
 
 /**
@@ -1773,6 +1793,10 @@ export function emptyRiderMotion(): RiderMotion {
  *   and the bicycle rocks away from the downstroke under the rider
  *   ({@link STANDING_BICYCLE_ROCK_RADIANS}).
  *
+ * Each elbow swings out with its own side's downstroke, as the rider pulls on
+ * the bar against it ({@link ELBOW_SWING_RADIANS}), scaled by the effort and
+ * the standing exactly as the trunk's rock is.
+ *
  * Both are scaled by `pedalling` with everything else from the stroke, so with
  * no cadence nothing rocks, standing or not (#349).
  */
@@ -1800,6 +1824,10 @@ export function riderMotion(
   into.bicycleRock = drawn * STANDING_BICYCLE_ROCK_RADIANS * stood * stroke;
   // Forward at each downstroke, twice a turn: `sin²` peaks at both.
   into.headNod = drawn * HEAD_NOD_RADIANS * Math.max(0, 2 * hard - 1) * stroke * stroke;
+  // `+X`'s elbow out on `+X`'s downstroke, `−X`'s on its own.
+  const swing = drawn * ELBOW_SWING_RADIANS * (0.5 + hard) * (1 + stood) * stroke;
+  into.elbow[0] = swing;
+  into.elbow[1] = -swing;
   return into;
 }
 
@@ -1828,6 +1856,16 @@ export const STANDING_BICYCLE_ROCK_RADIANS = (6 * Math.PI) / 180;
  * below, where #625 holds the head level up the road.
  */
 export const HEAD_NOD_RADIANS = (2 * Math.PI) / 180;
+
+/**
+ * How far each elbow swings out at its own downstroke, at an ordinary effort
+ * seated: **12°** — #1999, on the owner's ruling of 2026-11-03 (*"more elbow
+ * and shoulder movement"*), so the arms are seen working from the chase camera
+ * behind. ⚠️ **Chosen, not measured**: nothing here measures a rider's elbow.
+ * The hands stay on the bar whatever it is, because only the plane the arm
+ * bends in turns.
+ */
+export const ELBOW_SWING_RADIANS = (12 * Math.PI) / 180;
 
 /**
  * How much of the pedal stroke's motion a rider leaning this far is drawn
@@ -1896,6 +1934,11 @@ export interface RiderStance {
   gripZ: number;
   /** How much of a standing rider's motion is drawn, 0 to 1. @see riderMotion */
   standing: number;
+  /**
+   * The head's turn about the bicycle's `+X` on top of the back's, forward and
+   * down positive, in radians — #1999: down in the drops, up on the tops.
+   */
+  headPitch: number;
 }
 
 /**
@@ -1916,17 +1959,34 @@ export interface RiderStance {
 const STANDING_HIP_Y = HIP_Y + 0.005;
 const STANDING_HIP_Z = HIP_Z + 0.18;
 
-/** Each posture's stance. ⚠️ The hoods' is exactly the joints before #1999. */
+/** Degrees, in radians. */
+const DEGREES = Math.PI / 180;
+
+/**
+ * Each posture's stance. ⚠️ The hoods' is exactly the joints before #1999.
+ *
+ * ⚠️ **Exaggerated on purpose**, on the owner's ruling of 2026-11-03: from the
+ * chase camera behind, the first figures (the back 33° in the drops and 55° on
+ * the tops, against 46° on the hoods) all looked like the hoods, and the hands
+ * are hidden. So the drops take the back down to about 22° and the head down
+ * with it, and the tops sit the torso up to about 60° with the head up, which
+ * is as far back as the realistic body's arms still reach the bar. Every
+ * figure is chosen to read, not measured; the back's length from the hips is
+ * kept within a centimetre of the hoods', so only its angle changes.
+ * `bicycle.test.ts` and `realistic-textures.test.ts` hold the minimums apart.
+ */
 const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
-  // Sitting up, hands on the tops: the shoulders higher and back.
+  // Sitting up, hands on the tops: the torso upright, the head up, the arms
+  // nearly straight (as far back as the arms reach the bar).
   upright: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
-    shoulderY: SHOULDER_Y + 0.04,
-    shoulderZ: SHOULDER_Z - 0.06,
+    shoulderY: SHOULDER_Y + 0.065,
+    shoulderZ: SHOULDER_Z - 0.09,
     gripY: handPosition('upright').y,
     gripZ: handPosition('upright').z,
     standing: 0,
+    headPitch: -8 * DEGREES,
   },
   hoods: {
     hipY: HIP_Y,
@@ -1936,16 +1996,19 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripY: GRIP_Y,
     gripZ: GRIP_Z,
     standing: 0,
+    headPitch: 0,
   },
-  // In the drops: the back lower and the shoulders forward, toward the bar.
+  // In the drops: the back low and flat, the shoulders forward toward the
+  // bar, which bends the elbows, and the head down.
   drops: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
-    shoulderY: SHOULDER_Y - 0.08,
-    shoulderZ: SHOULDER_Z + 0.06,
+    shoulderY: SHOULDER_Y - 0.16,
+    shoulderZ: SHOULDER_Z + 0.1,
     gripY: handPosition('drops').y,
     gripZ: handPosition('drops').z,
     standing: 0,
+    headPitch: 8 * DEGREES,
   },
   // Out of the saddle, hands on the hoods, the shoulders over the bar.
   standing: {
@@ -1956,6 +2019,7 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     gripY: GRIP_Y,
     gripZ: GRIP_Z,
     standing: 1,
+    headPitch: 0,
   },
 };
 
@@ -1990,5 +2054,6 @@ export function blendStance(
   into.gripY = from.gripY + (to.gripY - from.gripY) * t;
   into.gripZ = from.gripZ + (to.gripZ - from.gripZ) * t;
   into.standing = from.standing + (to.standing - from.standing) * t;
+  into.headPitch = from.headPitch + (to.headPitch - from.headPitch) * t;
   return into;
 }

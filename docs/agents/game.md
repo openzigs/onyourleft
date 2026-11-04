@@ -244,6 +244,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         drops, or out of the saddle — and `riderMotion` scales
                         the rock by effort and rocks a standing rider's
                         bicycle. Absent a stance, every joint is as before.
+                        Exaggerated on the owner's ruling of 2026-11-03 so
+                        they read from the chase camera: the back about 22°
+                        in the drops and 60° on the tops (46° on the hoods),
+                        the head turned down or up (`headPitch`), a 6° trunk
+                        rock and the elbows swinging out with each downstroke
+                        (`RiderMotion.elbow`). The minimums are held by tests.
     src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
                         the owner's ruling of 2026-11-02): standing on a climb
                         (under 65 rpm with 300 W, or over 7 %), the drops when

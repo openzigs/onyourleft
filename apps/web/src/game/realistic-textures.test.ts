@@ -39,7 +39,7 @@ import { KIT_COLOURS } from '@onyourleft/store';
 
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
-import { KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
+import { handPosition, KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
 import { WOOD_SWAY_SHARE } from './foliage-light';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
@@ -1081,6 +1081,125 @@ describe('the realistic rider moves like a rider — #625', () => {
     const carried = Math.abs((hips(a)[0] ?? 0) - (hips(b)[0] ?? 0));
     expect(carried).toBeGreaterThan(0.1);
     expect(head).toBeLessThan(0.5 * carried);
+  }, 120_000);
+
+  /**
+   * #1999, the owner's ruling of 2026-11-03: the back's angle above the
+   * horizontal, in degrees, from the hips' middle to the shoulders' middle —
+   * what the chase camera sees of the back from behind and above.
+   */
+  const backAngle = (pose: ReadonlyMap<string, Posed>): number => {
+    const from = hips(pose);
+    const to = [0, 1, 2].map(
+      (axis) => ((at(pose, 'upperarm01L')[axis] ?? 0) + (at(pose, 'upperarm01R')[axis] ?? 0)) / 2,
+    );
+    // The bicycle faces +Z: along it is Z, up is Y.
+    return (
+      (Math.atan2((to[1] ?? 0) - (from[1] ?? 0), (to[2] ?? 0) - (from[2] ?? 0)) * 180) / Math.PI
+    );
+  };
+  /**
+   * The drawn helmet's middle, in world space: its geometry's bounding-sphere
+   * centre through this rider's own instance matrix and the mesh's — the head
+   * as the chase camera sees it, so a head turned down is a head lower.
+   */
+  const helmetY = (riders: Riders): number => {
+    const helmets = riders.helmets;
+    helmets.geometry.computeBoundingSphere();
+    const centre = helmets.geometry.boundingSphere?.center;
+    if (centre === undefined) throw new Error('no helmet');
+    const m = helmets.instanceMatrix.array;
+    const local = [0, 1, 2].map(
+      (row) =>
+        (m[row] ?? 0) * centre.x +
+        (m[4 + row] ?? 0) * centre.y +
+        (m[8 + row] ?? 0) * centre.z +
+        (m[12 + row] ?? 0),
+    );
+    helmets.updateMatrixWorld(true);
+    const w = helmets.matrixWorld.elements;
+    return (
+      (w[1] ?? 0) * (local[0] ?? 0) +
+      (w[5] ?? 0) * (local[1] ?? 0) +
+      (w[9] ?? 0) * (local[2] ?? 0) +
+      (w[13] ?? 0)
+    );
+  };
+
+  it('#1999 — reads from behind: a flatter back and a lower head in the drops, an upright torso on the tops', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const measured = (riding: RidingInputs): { back: number; head: number; down: number } => {
+      const pose = ridden(riders, riding, 0, 0);
+      const back = backAngle(pose);
+      // How far the head is turned down from the back: the back's angle less
+      // the head's own up axis's angle above the horizontal.
+      const up = bone(pose, 'head').world.slice(4, 7);
+      const headUp = (Math.atan2(up[1] ?? 0, up[2] ?? 0) * 180) / Math.PI;
+      return { back, head: helmetY(riders), down: back - headUp };
+    };
+    const tops = measured(EASY);
+    const hoods = measured(ORDINARY);
+    const drops = measured(FAST);
+    const standing = measured(CLIMBING);
+    const line = (name: string, each: { back: number; head: number; down: number }): string =>
+      `${name} back ${each.back.toFixed(1)}°, helmet ${each.head.toFixed(3)} m, ` +
+      `head ${each.down.toFixed(1)}° down from the back`;
+    console.log(
+      `#1999: ${line('tops', tops)}; ${line('hoods', hoods)}; ${line('drops', drops)}; ` +
+        line('standing', standing),
+    );
+    // The minimums the positions are held apart by. ⚠️ Chosen to read from
+    // the chase camera, on the owner's ruling; the first figures (back 32°,
+    // 44° and 53°) did not.
+    expect(hoods.back - drops.back).toBeGreaterThan(18);
+    expect(tops.back - hoods.back).toBeGreaterThan(10);
+    expect(drops.back).toBeLessThan(25);
+    expect(hoods.head - drops.head).toBeGreaterThan(0.2);
+    expect(tops.head - hoods.head).toBeGreaterThan(0.08);
+    // And the head itself: further down in the drops, further up on the tops.
+    expect(drops.down - hoods.down).toBeGreaterThan(5);
+    expect(hoods.down - tops.down).toBeGreaterThan(5);
+  }, 120_000);
+
+  it('#1999 — reads from behind: the shoulders rock and the elbows swing across, with the hands kept on the bar', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const across = (pose: ReadonlyMap<string, Posed>, name: string): number =>
+      at(pose, name)[0] ?? 0;
+    const down = ridden(riders, ORDINARY, HALF_PI);
+    const up = ridden(riders, ORDINARY, 3 * HALF_PI);
+    const rock = shoulders(down) - shoulders(up);
+    const elbow = across(down, 'lowerarm01L') - across(up, 'lowerarm01L');
+    console.log(
+      `#1999: on the hoods, half a stroke apart, the shoulders ${(rock * 100).toFixed(1)} cm ` +
+        `and the +X elbow ${(elbow * 100).toFixed(1)} cm across`,
+    );
+    expect(rock).toBeGreaterThan(0.06);
+    // Out (+X) on +X's own downstroke.
+    expect(elbow).toBeGreaterThan(0.05);
+    // Every seated position, all round the stroke: each wrist on its grip.
+    const grips: readonly [RidingInputs, { y: number; z: number }][] = [
+      [EASY, handPosition('upright')],
+      [ORDINARY, handPosition('hoods')],
+      [FAST, handPosition('drops')],
+    ];
+    let furthest = 0;
+    for (const [riding, grip] of grips) {
+      for (const crank of [0, HALF_PI, Math.PI, 3 * HALF_PI]) {
+        const pose = ridden(riders, riding, crank);
+        for (const name of ['wristL', 'wristR']) {
+          const wrist = at(pose, name);
+          furthest = Math.max(
+            furthest,
+            Math.hypot((wrist[1] ?? 0) - grip.y, (wrist[2] ?? 0) - grip.z),
+          );
+        }
+      }
+    }
+    expect(furthest).toBeLessThan(0.001);
   }, 120_000);
 });
 

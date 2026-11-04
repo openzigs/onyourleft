@@ -13273,7 +13273,10 @@ export class RealisticRiderBelt {
    * #1999: every joint is read from `stance` — where the rider's position on
    * the bicycle puts the hips, the shoulders and the hands — so the same four
    * steps pose a rider out of the saddle, in the drops or on the tops, and
-   * the head nods last, on top of being held level.
+   * the head nods last, on top of being held level. Since the owner's ruling
+   * of 2026-11-03 the head is also turned down or up by the position
+   * (`RiderStance.headPitch`) and each elbow swings out with its downstroke
+   * (`RiderMotion.elbow`), so the positions read from behind.
    */
   #pose(
     rider: RealisticRiderSlot,
@@ -13329,18 +13332,21 @@ export class RealisticRiderBelt {
       head.quaternion.copy(this.#parent.invert().multiply(this.#headHeld));
       head.updateMatrixWorld(true);
     }
-    // #1999: at a hard effort the head nods forward with each downstroke.
-    this.#turnInWorld(head, across, motion.headNod);
+    // #1999: the head down in the drops and up on the tops, and at a hard
+    // effort nodding forward with each downstroke.
+    this.#turnInWorld(head, across, stance.headPitch + motion.headNod);
     const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
     for (const index of [0, 1] as const) {
       const suffix = index === 0 ? 'L' : 'R';
-      // The arm: shoulder to the grip, the elbow out and down.
+      // The arm: shoulder to the grip, the elbow out and down, 45° — #1999:
+      // swinging further out with its own downstroke.
       const shoulder = boneOf(rider.bones, `upperarm01.${suffix}`).getWorldPosition(this.#a);
       const grip = toWorld(joints.grip[index], this.#b);
       const upper = this.#length(rider, `upperarm01.${suffix}`, `lowerarm01.${suffix}`);
       const fore = this.#length(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`);
+      const out = Math.PI / 4 + motion.elbow[index];
       const pole = this.#c
-        .set(index === 0 ? 1 : -1, -1, 0)
+        .set((index === 0 ? 1 : -1) * Math.sin(out), -Math.cos(out), 0)
         .transformDirection(rider.root.matrixWorld);
       const elbow = twoBoneJoint(shoulder, grip, upper, fore, pole, this.#d);
       this.#aim(

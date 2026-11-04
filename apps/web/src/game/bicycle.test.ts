@@ -57,7 +57,9 @@ import {
   RIDER_PALETTE,
   SIMULATED_DEVELOPMENT_METRES,
   simulatedCrankAngle,
+  blendStance,
   emptyRiderStance,
+  ELBOW_SWING_RADIANS,
   HEAD_NOD_RADIANS,
   stanceOf,
   STANDING_BICYCLE_ROCK_RADIANS,
@@ -1128,10 +1130,11 @@ describe('a rider who moves like a rider — #625', () => {
     expect(up.trunkRoll).toBeCloseTo(TRUNK_ROCK_RADIANS, 12);
     expect(up.ankle[0]).toBeCloseTo(-ANKLE_SWING_RADIANS, 12);
     expect(up.ankle[1]).toBeCloseTo(ANKLE_SWING_RADIANS, 12);
-    // The sources' figures, as radians: 2°, 3° (the small end of 3.4–7.2°),
-    // and half of a 24° ankle range.
+    // The sources' figures, as radians: 2°, 6° (the upper end of 3.4–7.2°,
+    // since #1999's ruling that 3° did not read from behind), and half of a
+    // 24° ankle range.
     expect((PELVIS_ROLL_RADIANS * 180) / Math.PI).toBeCloseTo(2, 9);
-    expect((TRUNK_ROCK_RADIANS * 180) / Math.PI).toBeCloseTo(3, 9);
+    expect((TRUNK_ROCK_RADIANS * 180) / Math.PI).toBeCloseTo(6, 9);
     expect((ANKLE_SWING_RADIANS * 180) / Math.PI).toBeCloseTo(12, 9);
   });
 
@@ -1281,6 +1284,48 @@ describe('the rider in each position on the bicycle — #1999', () => {
     expect(shoulders('drops')).toBeLessThan(shoulders('hoods') - 0.05);
     expect(shoulders('upright')).toBeGreaterThan(shoulders('hoods') + 0.02);
   });
+
+  // The owner's ruling of 2026-11-03: from the chase camera behind, the drops
+  // and the tops looked like the hoods. These are the minimums they are held
+  // apart by; `realistic-textures.test.ts` measures the same on the drawn body.
+  const backOf = (posture: DrawnPosture): { angle: number; length: number } => {
+    const { hips, shoulders } = riderJoints(
+      0,
+      emptyRiderJoints(),
+      0,
+      stanceOf(posture, emptyRiderStance()),
+    );
+    const up = shoulders.y - hips.y;
+    const along = shoulders.z - hips.z;
+    return { angle: (Math.atan2(up, along) * 180) / Math.PI, length: Math.hypot(up, along) };
+  };
+
+  it('reads from behind: the back at least 20° flatter in the drops and 12° more upright on the tops than on the hoods', () => {
+    const hoods = backOf('hoods');
+    expect(hoods.angle - backOf('drops').angle).toBeGreaterThan(20);
+    expect(backOf('upright').angle - hoods.angle).toBeGreaterThan(12);
+    // Only the angle changes: the back is its own length within a centimetre.
+    for (const posture of ['upright', 'drops'] as const) {
+      expect(Math.abs(backOf(posture).length - hoods.length), posture).toBeLessThan(0.01);
+    }
+  });
+
+  it('turns the head down in the drops and up on the tops, and leaves it on the hoods', () => {
+    const pitch = (posture: DrawnPosture): number =>
+      (stanceOf(posture, emptyRiderStance()).headPitch * 180) / Math.PI;
+    expect(pitch('hoods')).toBe(0);
+    expect(pitch('standing')).toBe(0);
+    expect(pitch('drops')).toBeGreaterThan(5);
+    expect(pitch('upright')).toBeLessThan(-5);
+    // Blended with the rest: half-way from the hoods is half the drops' turn.
+    const half = blendStance(
+      stanceOf('hoods', emptyRiderStance()),
+      stanceOf('drops', emptyRiderStance()),
+      0.5,
+      emptyRiderStance(),
+    );
+    expect(half.headPitch).toBeCloseTo(stanceOf('drops', emptyRiderStance()).headPitch / 2, 12);
+  });
 });
 
 describe('the body’s motion grows with effort, and a standing rider rocks the bicycle — #1999', () => {
@@ -1328,6 +1373,24 @@ describe('the body’s motion grows with effort, and a standing rider rocks the 
     // And the trunk rocks twice as far out of the saddle.
     expect(standing.trunkRoll).toBeCloseTo(-2 * TRUNK_ROCK_RADIANS, 12);
     expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0).bicycleRock).toBe(0);
+  });
+
+  it('swings each elbow out with its own downstroke, further with effort and standing', () => {
+    const down = riderMotion(HALF_PI, 1, 0, emptyRiderMotion());
+    // `+X`'s downstroke: `+X`'s elbow out, `−X`'s in by as much.
+    expect(down.elbow[0]).toBeCloseTo(ELBOW_SWING_RADIANS, 12);
+    expect(down.elbow[1]).toBeCloseTo(-ELBOW_SWING_RADIANS, 12);
+    const other = riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion());
+    expect(other.elbow[0]).toBeCloseTo(-ELBOW_SWING_RADIANS, 12);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).elbow[0]).toBeCloseTo(
+      1.5 * ELBOW_SWING_RADIANS,
+      12,
+    );
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).elbow[0]).toBeCloseTo(
+      2 * ELBOW_SWING_RADIANS,
+      12,
+    );
+    expect(Math.abs(riderMotion(HALF_PI, 0, 0, emptyRiderMotion()).elbow[0])).toBe(0);
   });
 
   it('rocks nothing with no cadence, standing or not — #349', () => {
