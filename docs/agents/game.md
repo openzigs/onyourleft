@@ -954,6 +954,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         one press is one intent; an axis outside −1..1 or not
                         finite asks for nothing. ⚠️ Whether the Android
                         shell delivers pads is spike 0027 (#1819), unmeasured
+    src/game/delivery/controller-port.ts
+                        a paired steering controller's events (#1826), as
+                        #1822's codec reads them. `ride/steering-controller.ts`
+                        implements it; the game is handed the port, never the
+                        client, because the clients write to the controller
+                        and so may not be imported under `game/delivery/`
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
