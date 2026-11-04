@@ -103,6 +103,7 @@ import {
   CHART_POINTS,
   downsample,
   TABLE_ROWS,
+  pointAt,
   traceSeries,
   type TraceChannel,
   type TraceSeriesDefinition,
@@ -240,6 +241,8 @@ export function ActivityDetailView({
   const [seen, setSeen] = useState<ReadonlySet<TraceChannel>>(new Set());
   const slots = useRef(new Map<TraceChannel, Element>());
   const [traces, setTraces] = useState<ReadonlyMap<TraceChannel, Trace>>(new Map());
+  // #2068: the shared cursor, in seconds into the ride.
+  const [cursor, setCursor] = useState(0);
   // The channels a read has been started for, and which units' reads count.
   const requested = useRef(new Set<TraceChannel>());
   const generation = useRef(0);
@@ -544,7 +547,17 @@ export function ActivityDetailView({
             <StatusMessage tone="info">
               This ride stored a track and no sensor channels, so there is nothing to chart.
             </StatusMessage>
-          ) : undefined}
+          ) : (
+            <TraceCursor
+              seconds={cursor}
+              rideSeconds={rideSeconds}
+              onChange={setCursor}
+              readings={chartable.flatMap((series) => {
+                const trace = traces.get(series.channel);
+                return trace === undefined ? [] : [{ series, trace }];
+              })}
+            />
+          )}
 
           {/*
             #2068: every recorded channel, stacked, on one time axis — no
@@ -569,7 +582,12 @@ export function ActivityDetailView({
                 {trace === undefined ? (
                   <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
                 ) : (
-                  <TraceSlot series={series} trace={trace} rideSeconds={rideSeconds} />
+                  <TraceSlot
+                    series={series}
+                    trace={trace}
+                    rideSeconds={rideSeconds}
+                    cursor={cursor}
+                  />
                 )}
               </div>
             );
@@ -682,16 +700,73 @@ export function ActivityDetailView({
   );
 }
 
+/** The shared cursor's control: its `id`, for the label (#2068). */
+const TRACE_CURSOR_ID = 'oyl-trace-cursor';
+
+/**
+ * The shared cursor — #2068. A native range input, so it is keyboard-operable
+ * by the platform (arrows, Page Up and Down, Home and End), moving one line
+ * across every chart in the stack; what each drawn chart reads at that moment
+ * is said in words beside it, in an `<output>`, so the reading is text and
+ * not only a position on a picture.
+ *
+ * One step is one drawn point (the ride over {@link CHART_POINTS}), at least a
+ * second, so the arrow keys move the line by a point and no further.
+ */
+function TraceCursor({
+  seconds,
+  rideSeconds,
+  onChange,
+  readings,
+}: {
+  readonly seconds: number;
+  readonly rideSeconds: number;
+  readonly onChange: (seconds: number) => void;
+  /** The charts drawn so far, in stack order. A chart still to be read says nothing yet. */
+  readonly readings: readonly { readonly series: TraceSeriesDefinition; readonly trace: Trace }[];
+}): JSX.Element {
+  const step = Math.max(1, Math.ceil(rideSeconds / CHART_POINTS));
+  const at = formatDuration(seconds);
+  const said = readings.map(({ series, trace }) => {
+    const value = pointAt(trace.points, trace.secondsPerPoint, seconds);
+    return `${series.label} ${value === undefined ? 'no reading' : `${series.format(value)} ${series.unit}`}`;
+  });
+  return (
+    <div className="oyl-trace-cursor">
+      <label htmlFor={TRACE_CURSOR_ID}>Read every chart at</label>
+      <input
+        id={TRACE_CURSOR_ID}
+        type="range"
+        min={0}
+        max={rideSeconds}
+        step={step}
+        value={seconds}
+        aria-valuetext={at}
+        onChange={(event) => {
+          onChange(Number(event.currentTarget.value));
+        }}
+      />
+      <output htmlFor={TRACE_CURSOR_ID} className="oyl-trace-cursor__reading">
+        {at}
+        {said.length === 0 ? '' : `: ${said.join(', ')}`}
+      </output>
+    </div>
+  );
+}
+
 /** One channel's chart and its table, once its trace has been read. */
 function TraceSlot({
   series,
   trace,
   rideSeconds,
+  cursor,
 }: {
   readonly series: TraceSeriesDefinition;
   readonly trace: Trace;
   /** The shared time axis' span, in seconds (#2068). */
   readonly rideSeconds: number;
+  /** The shared cursor, in seconds (#2068). */
+  readonly cursor: number;
 }): JSX.Element {
   // The table is the same trace at reading resolution rather than at drawing
   // resolution — `series.ts` records why six hundred rows is not an equivalent
@@ -726,6 +801,7 @@ function TraceSlot({
             format={series.format}
             missingSamples={trace.missingSamples}
             timeSpan={rideSeconds}
+            cursor={cursor}
           />
         </Suspense>
       }

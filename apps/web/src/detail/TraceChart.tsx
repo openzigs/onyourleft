@@ -74,6 +74,13 @@ export interface TraceChartProps {
    * stretched to all of it. Without it the axis spans the trace itself.
    */
   readonly timeSpan?: number | undefined;
+  /**
+   * The shared cursor, in seconds into the ride — #2068. Drawn as one
+   * vertical line at that time on every chart in the stack; the values it
+   * crosses are read out in words by the slider that moves it
+   * (`views/ActivityDetailView.tsx` §`TraceCursor`). None, no line.
+   */
+  readonly cursor?: number | undefined;
 }
 
 /** The seconds the time axis covers: the shared span when one is given, else the trace's own. */
@@ -203,13 +210,17 @@ export function traceAxes(props: TraceChartProps): TraceAxes {
  * nine bare numbers between them.
  */
 export default function TraceChart(props: TraceChartProps): JSX.Element {
-  const { points, secondsPerPoint } = props;
+  const { points, secondsPerPoint, cursor } = props;
   const extent = traceExtent(points);
   const segments = traceSegments(points);
   const description = describeTrace(props);
   const axes = traceAxes(props);
   const span = spanOf(props);
   const covered = span <= 0 ? 1 : Math.min(1, (points.length * secondsPerPoint) / span);
+  const cursorX =
+    cursor === undefined || span <= 0
+      ? undefined
+      : (Math.min(Math.max(cursor, 0), span) / span) * CHART_WIDTH;
 
   return (
     <div className="oyl-trace-chart">
@@ -250,6 +261,15 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
               )}
             />
           ))}
+          {cursorX === undefined ? null : (
+            <line
+              className="oyl-trace__cursor"
+              x1={cursorX.toFixed(2)}
+              x2={cursorX.toFixed(2)}
+              y1="0"
+              y2={String(CHART_HEIGHT)}
+            />
+          )}
         </g>
       </svg>
       <div className="oyl-trace-chart__times" aria-hidden="true">

@@ -71,7 +71,14 @@ import {
   stubMapPort,
   type StubMapPort,
 } from '../map/testing';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 import { UnitsProvider } from '../units/context';
 
 import { ActivityDetailView, READING_RIDE_TEXT } from './ActivityDetailView';
@@ -458,6 +465,43 @@ describe('#2068 — every recorded channel is a chart, read when it scrolls into
     const [power, heartRate] = queryAll(document, 'svg.oyl-trace path');
     expect(Math.max(...xsOf(power as Element))).toBeCloseTo(600, 0);
     expect(Math.max(...xsOf(heartRate as Element))).toBeCloseTo(300, 0);
+  });
+
+  it('moves one cursor across every chart, and reads each chart at that time in words', async () => {
+    mounted = await open(indoorRide());
+    const slider = document.querySelector<HTMLInputElement>('input[type="range"]#oyl-trace-cursor');
+    expect(slider).not.toBeNull();
+    expect(document.querySelector('label[for="oyl-trace-cursor"]')?.textContent).toBe(
+      'Read every chart at',
+    );
+    // A 1 200 s ride drawn at 600 points: a step is one point, two seconds.
+    expect(slider?.max).toBe('1200');
+    expect(slider?.step).toBe('2');
+
+    await typeInto(slider as HTMLInputElement, '600');
+    await settle();
+
+    expect(slider?.getAttribute('aria-valuetext')).toBe('10:00');
+    // Power's point 300 is samples 600 and 601 averaged: 150 W and 151 W.
+    expect(document.querySelector('output[for="oyl-trace-cursor"]')?.textContent).toBe(
+      '10:00: Power 151 W, Heart rate 142 bpm, Cadence 88 rpm',
+    );
+    // Halfway along the ride, on every chart: x = 300 of the 600-unit drawing.
+    const lines = queryAll(document, 'svg.oyl-trace line.oyl-trace__cursor');
+    expect(lines).toHaveLength(3);
+    expect(lines.map((line) => line.getAttribute('x1'))).toEqual(['300.00', '300.00', '300.00']);
+  });
+
+  it('says "no reading" at the cursor in a gap, never a zero', async () => {
+    mounted = await open(indoorRide(powerSeries(1200, 400, 300)));
+    await typeInto(
+      document.querySelector<HTMLInputElement>('#oyl-trace-cursor') as HTMLInputElement,
+      '500',
+    );
+    await settle();
+    expect(document.querySelector('output[for="oyl-trace-cursor"]')?.textContent).toBe(
+      '8:20: Power no reading, Heart rate 142 bpm, Cadence 88 rpm',
+    );
   });
 
   it('labels a speed chart and its table in km/h once converted, not twice', async () => {
