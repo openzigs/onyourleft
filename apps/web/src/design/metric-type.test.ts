@@ -63,28 +63,27 @@ describe('the metric type — #2041, ADR 0063 D-5', () => {
     expect(METRIC_TYPE['font-variant-numeric']).toBe('tabular-nums');
   });
 
-  it('is undone by no later rule that sets a number class in another face or proportional figures', () => {
-    // A rule naming one of the classes and a different family or figures
-    // would quietly take that class back out of the metric type.
+  it('is undone by no later rule that sets a number class in another face, weight or figures', () => {
+    // A rule naming one of the classes (as the last compound of any selector,
+    // so `.x:not(.y)` and `.a .x:hover` count) with a different family, weight,
+    // figures or a `font` shorthand would quietly take that class back out of
+    // the metric type.
+    const names = (selector: string): boolean =>
+      METRIC_TYPE_SELECTORS.some((number) => {
+        const compound = selector.split(/[\s>+~]+/).filter((part) => part !== '');
+        return (compound[compound.length - 1] ?? '').includes(number);
+      });
     const conflicts = rules(THEME)
-      .filter((rule) =>
-        rule.selectors.some((selector) =>
-          METRIC_TYPE_SELECTORS.some((number) => selector.endsWith(number)),
-        ),
-      )
+      .filter((rule) => rule.selectors.some(names))
       .flatMap((rule) => {
         const declared = declarations(rule.body);
+        const label = rule.selectors.join(', ');
         return [
-          ...(declared['font-family'] !== undefined &&
-          declared['font-family'] !== METRIC_TYPE['font-family']
-            ? [`${rule.selectors.join(', ')}: font-family ${declared['font-family']}`]
-            : []),
-          ...(declared['font-variant-numeric'] !== undefined &&
-          declared['font-variant-numeric'] !== METRIC_TYPE['font-variant-numeric']
-            ? [
-                `${rule.selectors.join(', ')}: font-variant-numeric ${declared['font-variant-numeric']}`,
-              ]
-            : []),
+          ...(['font-family', 'font-weight', 'font-variant-numeric'] as const)
+            .filter((property) => declared[property] !== undefined)
+            .filter((property) => declared[property] !== METRIC_TYPE[property])
+            .map((property) => `${label}: ${property} ${declared[property] ?? ''}`),
+          ...(declared['font'] !== undefined ? [`${label}: font ${declared['font']}`] : []),
         ];
       });
     expect(conflicts).toEqual([]);
@@ -95,7 +94,9 @@ describe('the metric type — #2041, ADR 0063 D-5', () => {
     ['game/hud/HudCore.tsx', '.oyl-hud__value'],
     ['views/AnalysisView.tsx', '.oyl-metric__value'],
   ])('%s sets its numbers in %s', (path, selector) => {
-    expect(SOURCE(path)).toContain(selector.slice(1));
+    // The class as a whole token, in code: not in a comment, not a prefix of another class.
+    const code = SOURCE(path).replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+    expect(code).toMatch(new RegExp(`(?<![\\w-])${selector.slice(1)}(?![\\w-])`));
     expect(METRIC_TYPE_SELECTORS).toContain(selector);
   });
 });

@@ -1860,12 +1860,6 @@ html {
 }
 
 /*
- * A READING — #992 (`design/Reading.tsx`): large tabular numerals and a small
- * unit label, the one size every menu's facts are set at. Tabular so a column
- * of times does not jitter, and `xxl` because a reading is the thing a fact
- * line exists to say. The unit sits on the numerals' baseline in `inkMuted`.
- */
-/*
  * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
  * in a summary, in one face (Barlow, the display family), at 700, with
  * tabular figures so a changing number does not jitter. One rule over every
@@ -1881,6 +1875,12 @@ html {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * A READING — #992 (`design/Reading.tsx`): large tabular numerals and a small
+ * unit label, the one size every menu's facts are set at. Tabular so a column
+ * of times does not jitter, and `xxl` because a reading is the thing a fact
+ * line exists to say. The unit sits on the numerals' baseline in `inkMuted`.
+ */
 .oyl-reading__value {
   font-size: var(--oyl-font-size-xxl);
   font-weight: 700;

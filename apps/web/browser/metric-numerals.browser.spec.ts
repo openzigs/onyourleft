@@ -29,7 +29,8 @@ interface NumeralRead {
   readonly family: string;
   readonly weight: string;
   readonly size: string;
-  readonly barlow: boolean;
+  /** The status of the Barlow `@font-face` at the element's weight, or 'absent' when there is none. */
+  readonly status: string;
 }
 
 /** The computed face of the first element matching `selector`, and whether Barlow is what draws it. */
@@ -44,7 +45,14 @@ async function numeral(page: Page, selector: string): Promise<NumeralRead> {
       family: style.fontFamily,
       weight: style.fontWeight,
       size: style.fontSize,
-      barlow: document.fonts.check(`${style.fontWeight} ${style.fontSize} Barlow`),
+      // `document.fonts.check` is true with no Barlow face at all and with only
+      // the 600 face (the figure is then faux-bolded), so the face itself is read.
+      status:
+        [...document.fonts].find(
+          (candidate) =>
+            candidate.family.replaceAll(/['"]/g, '') === 'Barlow' &&
+            candidate.weight === style.fontWeight,
+        )?.status ?? 'absent',
     };
   }, selector);
 }
@@ -89,7 +97,7 @@ test.describe('#2041 — the metric numerals', () => {
     console.log(`#2041 Home figure: ${JSON.stringify(read)}`);
     expect(read.family.startsWith('Barlow')).toBe(true);
     expect(read.weight).toBe('700');
-    expect(read.barlow, 'Barlow did not resolve: the figure is drawn in the fallback').toBe(true);
+    expect(read.status, 'the Barlow 700 face did not load').toBe('loaded');
     const [ones, eights] = await digitWidths(page, figure, 'own');
     expect(ones).toBeGreaterThan(0);
     expect(
@@ -114,7 +122,8 @@ test.describe('#2041 — the metric numerals', () => {
     const metric = '.oyl-reading--metric .oyl-reading__value';
     const read = await numeral(page, metric);
     expect(read.family.startsWith('Barlow')).toBe(true);
-    expect(read.barlow, 'Barlow did not resolve on the Ride screen').toBe(true);
+    expect(read.weight).toBe('700');
+    expect(read.status, 'the Barlow 700 face did not load on the Ride screen').toBe('loaded');
     const cap = await page.evaluate((target) => {
       const element = document.querySelector(target);
       if (element === null) throw new Error(`no ${target}`);
@@ -134,6 +143,16 @@ test.describe('#2041 — the metric numerals', () => {
     const read = await numeral(page, '.oyl-hud__fields--primary .oyl-hud__value');
     console.log(`#2041 HUD value: ${JSON.stringify(read)}`);
     expect(read.family.startsWith('Barlow')).toBe(true);
-    expect(read.barlow, 'Barlow did not resolve on the HUD').toBe(true);
+    expect(read.weight).toBe('700');
+    expect(read.status, 'the Barlow 700 face did not load on the HUD').toBe('loaded');
+  });
+
+  test('the control — with every .woff2 refused, the 700 face does not load', async ({ page }) => {
+    await page.route('**/*.woff2', (route) => route.abort());
+    await page.goto('/reflow.html?data=populated');
+    await page.waitForFunction(() => window.__oylReflow?.ready === true);
+    await page.evaluate(async () => window.__oylReflow?.visit('#/'));
+    const read = await numeral(page, 'main .oyl-reading__value');
+    expect(read.status).not.toBe('loaded');
   });
 });
