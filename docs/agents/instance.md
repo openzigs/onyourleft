@@ -329,7 +329,8 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         only — and `room-voice.ts` the channel, invite,
                         rotation and close, held in MEMORY only (no Discord
                         data at rest). Off unless the operator set
-                        `OYL_INSTANCE_DISCORD_BOT_TOKEN` and `…_GUILD_ID`;
+                        `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` (a file, never
+                        the token in the environment, #2146) and `…_GUILD_ID`;
                         `rooms.ts` §`over` deletes a room's channel, and the
                         room sweep deletes leftovers
 

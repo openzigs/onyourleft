@@ -577,7 +577,7 @@ cleared. Clearing an established address (`POST /v1/auth/recovery-email/clear`) 
 
 ## Voice on Discord
 
-With `OYL_INSTANCE_DISCORD_BOT_TOKEN` and `OYL_INSTANCE_DISCORD_GUILD_ID` set, the instance's bot
+With `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` and `OYL_INSTANCE_DISCORD_GUILD_ID` set, the instance's bot
 makes a temporary voice channel in your Discord server for a private room, and deletes it when the
 room is over (#874; [spike 0017](spikes/0017-voice-chat-for-rooms.md),
 [spike 0018](spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md)). It is REST only, through
@@ -595,11 +595,34 @@ voice: nothing else changes.
   Discord is in the database or a backup. After a restart, or when Discord refused a delete, the
   room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel this instance
   process does not hold. That is why the bot needs a server of its own.
+- **The token is a file, never an environment variable** (#2146). Put the token, and nothing else,
+  in a file your deployment's secret store holds, and name its path in
+  `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE`. The instance reads it once at start and never writes it
+  anywhere: not to the database, a backup, a blob or a log. A file that is named but cannot be read
+  refuses to start, naming the variable and nothing the file holds. The environment is not used
+  because every child process inherits it and `docker inspect` prints it.
+  - **The home deploy** (`apps/instance/deploy/home/compose.yaml`) mounts `secrets/` beside the
+    compose file, read-only, at `/run/secrets/onyourleft/`, on the instance only (the `backup`
+    service does not mount it). Git ignores the directory. On the box, beside the compose file
+    (the token is typed at a prompt that does not echo it, so it is in no shell history, and the
+    file is made readable by you alone before anything is written to it):
+
+    ```
+    mkdir -p secrets
+    (umask 077; read -rs -p 'Bot token: ' t && printf '%s\n' "$t" > secrets/discord-bot-token)
+    sudo chown 1000 secrets/discord-bot-token   # Linux only: the image runs as uid 1000
+    ```
+
+    Then set `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE=/run/secrets/onyourleft/discord-bot-token` and
+    `OYL_INSTANCE_DISCORD_GUILD_ID` in `.env`, and deploy. Docker Desktop (macOS, Windows) maps
+    the file's owner itself, so skip the `chown` there.
+  - **Elsewhere**, mount the file from your platform's secret store (a Compose or Kubernetes secret,
+    or a file readable only by the user the instance runs as) and name the path it is mounted at.
 - **Keep the token encrypted at rest.** Discord's terms treat the bot token as API Data that must be
-  encrypted at rest (Developer Terms §5(c), §13). The instance reads it from
-  `OYL_INSTANCE_DISCORD_BOT_TOKEN` and does not encrypt it itself, so the duty is yours: keep the
-  `.env` that holds it on an encrypted disk or volume, or supply it from a Docker secret or your
-  operating system's secret store, and keep it out of backups that are not encrypted.
+  encrypted at rest (Developer Terms §5(c), §13). The instance does not encrypt the token itself:
+  doing that would put it in the database and in every backup, and nothing about Discord is in
+  either. So the duty is yours. Keep the token file on an encrypted disk or volume (FileVault,
+  BitLocker, LUKS), and keep it out of copies that are not encrypted.
 - **The token** is sent only to `discord.com`, in the `Authorization` header, and is never logged:
   an error is logged by its name alone. Rate limits are honoured from Discord's headers, as its
   terms require; a `401` turns voice off until the next start, so a dead token never loops.

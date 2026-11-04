@@ -11,8 +11,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ import type { SweepTimers } from './node-listener.ts';
 import { freeLoopbackPort, testConfig } from './instance-testing.ts';
 import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
-import { readServerConfig, type ServerConfig } from './server-config.ts';
+import { readDiscordTokenFile, readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
 import type { SyncItemWrite } from './store/sql-store.ts';
 import { deviceKeyFixture, migrateAllBut, registrationFixture } from './store/testing/index.ts';
@@ -1872,4 +1872,62 @@ describe('voice on Discord, as the running instance starts it (#874)', () => {
     expect(link).toMatch(/^https:\/\/discord\.gg\//);
     expect(discord.ourChannels()).toHaveLength(1);
   });
+
+  it('takes the token from the file it is named by, and puts it in no log line, no error and no stored byte — #2146', async () => {
+    const discord = fakeDiscord();
+    const directory = await freshDirectory();
+    const path = join(directory, 'instance.sqlite');
+    await migrateForDeploy(path);
+    // Where the deployment's secret store mounts it: beside the data, not in it.
+    const secrets = await mkdtemp(join(tmpdir(), 'oyl-2146-secrets-'));
+    const tokenPath = join(secrets, 'discord-bot-token');
+    await writeFile(tokenPath, `${TEST_BOT_TOKEN}\n`, { mode: 0o600 });
+    const read = readServerConfig(
+      {
+        discordBotTokenFile: readDiscordTokenFile(tokenPath, (named) =>
+          readFileSync(named, 'utf8'),
+        ),
+        discordGuildId: TEST_GUILD_ID,
+      },
+      1,
+    );
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    const { instance, lines } = await start(
+      path,
+      { discord: read.config.discord },
+      { voice: { discordFetch: discord.fetch } },
+    );
+    await instance.opened;
+    await instance.voiceReady;
+    expect(discord.requests[0]?.headers.authorization).toBe(`Bot ${TEST_BOT_TOKEN}`);
+    // A request that fails with the token in its error, then one that works.
+    discord.failNext(/^POST .*\/channels$/, {
+      throws: new TypeError(`fetch failed for Bot ${TEST_BOT_TOKEN}`),
+    });
+    expect(
+      await instance.voice()?.inviteFor('a1b2c3d4e5f60718293a4b5c6d7e8f90', 4),
+    ).toBeUndefined();
+    expect(await instance.voice()?.inviteFor('b1b2c3d4e5f60718293a4b5c6d7e8f90', 4)).toMatch(
+      /^https:\/\/discord\.gg\//,
+    );
+    await running?.stop();
+    running = undefined;
+
+    expect(lines.some((line) => line.includes('"voice-failed"'))).toBe(true);
+    for (const line of lines) expect(line).not.toContain(TEST_BOT_TOKEN);
+    // Every byte the instance stored — the database, its WAL, the blobs.
+    const stored = await filesUnder(directory);
+    expect(stored.map((file) => file.slice(directory.length))).toContain('/instance.sqlite');
+    for (const file of stored) {
+      expect(readFileSync(file).includes(TEST_BOT_TOKEN), file).toBe(false);
+    }
+  });
 });
+
+/** Every file under `root`, at any depth. */
+async function filesUnder(root: string): Promise<string[]> {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name));
+}
