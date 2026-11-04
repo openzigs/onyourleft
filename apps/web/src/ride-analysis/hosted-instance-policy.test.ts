@@ -53,8 +53,15 @@ describe('the hosted consent in the privacy policy (#1251, #1104 B1)', () => {
       'If you store a key for a different service, your instance withdraws it',
       'If it cannot be sent, no analysis is asked for.',
       // The owner's ruling of 2026-10-26 (#1104 B1-a, C-9), which the instance carries out.
-      'Your instance keeps it with your account and in its export, and deletes it when you withdraw your agreement or remove your key.',
-      'removed when you withdraw your agreement or remove your key, and erased with your account on the instance',
+      'Your instance keeps it with your account and in its export, and deletes it when you withdraw your agreement.',
+      // #1935, the owner's ruling of 2026-11-03: the operator's command may also set a key that serves the account.
+      "It also deletes it when you remove your key, unless the operator's command set a key for your account: then it stays until you withdraw.",
+      "removed when you withdraw your agreement, or when you remove your key unless the operator's command set a key for your account, and erased with your account on the instance",
+      // #1935, the owner's ruling of 2026-11-03: removing the key does not stop the sending while
+      // the operator's command still holds a key for the account (hosted-settings.ts `clearKey`);
+      // withdrawing always does (`withdrawConsent`, and `source.ts` refuses a job with no consent).
+      'untick the box on the Instance screen. That withdraws your agreement and stops your instance sending anything to the service.',
+      "also stops it, unless the operator's command set a key for your account: then untick the box. Neither can recall what was already sent.",
       'Your instance tells the app only whether the service answered, never what it said.',
       'What this device keeps: not the key.',
       `press ${HOSTED_REMOVE_BUTTON}`,
@@ -70,6 +77,10 @@ describe('the hosted consent in the privacy policy (#1251, #1104 B1)', () => {
     ].map((each) => each.replaceAll('’', "'")),
   )('says %s', (fact) => {
     expect(POLICY.replaceAll('’', "'")).toContain(fact);
+  });
+
+  it('does not say removing the key always stops the sending: an operator-set key still serves (#1935)', () => {
+    expect(POLICY).not.toContain('Either stops your instance sending anything to the service');
   });
 
   it('does not say a record of what was sent is kept: none is', () => {
