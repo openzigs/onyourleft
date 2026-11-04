@@ -33,7 +33,7 @@ export const TARGET_BAND_PAINTS: readonly {
   { className: 'oyl-target-band__gauge', token: 'border', property: 'border-color' },
   { className: 'oyl-target-band__band', token: 'surfaceRaised', property: 'background-color' },
   { className: 'oyl-target-band__band', token: 'ink', property: 'border-color' },
-  { className: 'oyl-target-band__power', token: 'accent', property: 'background-color' },
+  { className: 'oyl-target-band__power', token: 'accentText', property: 'background-color' },
   { className: 'oyl-target-band__average', token: 'ink', property: 'border-color' },
 ];
 

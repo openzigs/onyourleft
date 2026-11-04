@@ -45,6 +45,7 @@
   --color-ink: var(--oyl-color-ink);
   --color-ink-muted: var(--oyl-color-ink-muted);
   --color-accent: var(--oyl-color-accent);
+  --color-accent-text: var(--oyl-color-accent-text);
   --color-accent-hover: var(--oyl-color-accent-hover);
   --color-accent-ink: var(--oyl-color-accent-ink);
   --color-selected: var(--oyl-color-selected);
