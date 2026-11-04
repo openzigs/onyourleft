@@ -12,7 +12,13 @@
  * `no trainer reachable from the instance` is `agent-safety.test.ts`'s walk.
  */
 
-import { encodeWorkoutFile, seconds, thresholdShare, type Proposal } from '@onyourleft/domain';
+import {
+  encodeWorkoutFile,
+  REASON_CODES,
+  seconds,
+  thresholdShare,
+  type Proposal,
+} from '@onyourleft/domain';
 import { HISTORY_FENCE_BEGIN } from '@onyourleft/analysis';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
@@ -48,8 +54,8 @@ import {
   type ReplanOptions,
   type ReplanOutcome,
 } from './replan-agent.ts';
-import { REPLAN_TEMPLATE } from './replan-template.ts';
-import { replanInput } from './replan-testing.ts';
+import { offeredReasons, REPLAN_TEMPLATE } from './replan-template.ts';
+import { REPLAN_INPUT_JSON, replanInput } from './replan-testing.ts';
 import type { AnalysisReads } from './tools/reads.ts';
 
 const ATHLETES = ['athlete-a', 'athlete-b', 'athlete-c'] as const;
@@ -550,7 +556,7 @@ describe('scoped to the job’s athlete (three-athlete fixture)', () => {
 });
 
 describe('the template', () => {
-  it('offers exactly the moves and reasons the device’s decoder reads', () => {
+  it('offers exactly the moves the device’s decoder reads, and leaves the reasons to each request', () => {
     for (const word of [
       'extend-block',
       'shorten-block',
@@ -561,10 +567,71 @@ describe('the template', () => {
       '1, 2, 5',
       '-10, -5, 5',
       '-5, -3, 3, 5',
-      'heart-rate-high, heart-rate-low, cadence-falling, goal-time-in-range, goal-duration, effort-check-in, on-plan',
     ]) {
       expect(REPLAN_TEMPLATE.system).toContain(word);
     }
+    for (const reason of REASON_CODES) {
+      expect(REPLAN_TEMPLATE.system).not.toContain(reason);
+    }
     expect(REPLAN_TEMPLATE.version).toBe('re-plan-1');
+  });
+});
+
+/**
+ * #1329: the device says `on-plan`, `goal-time-in-range` and
+ * `effort-check-in` never, so the instance stops offering them where the
+ * figures cannot show them (`replan-template.ts` §`offeredReasons`). Read
+ * from what the model was SENT, as a run sends it.
+ */
+describe('the reasons a request offers (#1329)', () => {
+  /** `value` as a device would send it with `key` left out. */
+  const without = (value: object, key: string): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(value).filter(([name]) => name !== key));
+
+  /** The reasons line of the first message the model was sent. */
+  async function reasonsSent(input: ReturnType<typeof replanInput>): Promise<string | undefined> {
+    const model = scriptedModel(text(ANSWER));
+    await run(model, { job: { athleteId: A, input } });
+    const first = model.requests[0]?.messages[0];
+    const said = first?.role === 'user' ? first.text : '';
+    return /^The reasons you may give: (.*)\.$/mu.exec(said)?.[1];
+  }
+
+  it('offers the four a device can say for a request as a device sends it: no time-in-range goal, no effort', async () => {
+    const goals = without(REPLAN_INPUT_JSON.goals, 'timeInRangeMinutes');
+    const summaries = REPLAN_INPUT_JSON.summaries.map((summary) => without(summary, 'effort'));
+    const input = replanInput({ goals, summaries });
+    expect(offeredReasons(input)).toStrictEqual([
+      'heart-rate-high',
+      'heart-rate-low',
+      'cadence-falling',
+      'goal-duration',
+    ]);
+    expect(await reasonsSent(input)).toBe(
+      'heart-rate-high, heart-rate-low, cadence-falling, goal-duration',
+    );
+  });
+
+  it('offers goal-time-in-range and effort-check-in only when the figures carry them, and on-plan never', async () => {
+    // REPLAN_INPUT_JSON holds a time-in-range goal and an effort in its last summary.
+    expect(await reasonsSent(INPUT)).toBe(
+      'heart-rate-high, heart-rate-low, cadence-falling, goal-time-in-range, goal-duration, effort-check-in',
+    );
+    const goals = without(REPLAN_INPUT_JSON.goals, 'timeInRangeMinutes');
+    expect(offeredReasons(replanInput({ goals }))).not.toContain('goal-time-in-range');
+    expect(offeredReasons(replanInput({ goals }))).toContain('effort-check-in');
+    const summaries = REPLAN_INPUT_JSON.summaries.slice(0, 1);
+    expect(offeredReasons(replanInput({ summaries }))).not.toContain('effort-check-in');
+    expect(offeredReasons(replanInput({ summaries }))).toContain('goal-time-in-range');
+  });
+
+  it('still reads a reason it did not offer as a proposal: the device decodes it and says the move alone', async () => {
+    const { outcome } = await run(
+      scriptedModel(text(JSON.stringify({ move: MOVE, reason: 'on-plan' }))),
+    );
+    expect(outcome).toStrictEqual({
+      kind: 'proposed',
+      proposal: { ...PROPOSAL, reason: 'on-plan' },
+    });
   });
 });

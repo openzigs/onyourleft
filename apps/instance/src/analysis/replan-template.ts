@@ -15,8 +15,30 @@
  * holds regardless is that an answer off the lists is no proposal, and that
  * the rider's device validates every proposal again and computes every watt.
  *
+ * ## The reasons are offered per request — #1329
+ *
+ * The moves are the same for every request, and the system message spells
+ * them. The reasons are not: {@link offeredReasons} offers only those a
+ * device could say in its own voice, in the first message beside the figures.
+ * The rider's device says a reason only when it can see for itself that it
+ * is so (`apps/web` §`workout/replan-reason.ts`), and three it never says:
+ * `goal-time-in-range` (the device withholds that goal), `effort-check-in`
+ * (it sends no effort) and `on-plan` (whose premise spike 0022's rule R1
+ * keeps the device from computing). Offered anyway, a model chose them and
+ * the rider was told the move alone. So the first two are offered only when
+ * the figures carry what they are about, and `on-plan` never.
+ *
+ * ⚠️ **Not offered is not refused.** A model that names one of
+ * `REASON_CODES` it was not offered still gives a proposal: the reason is on
+ * the list the device decodes (ADR 0048 D-4's P1), and the device then says
+ * the move alone. Refusing it would end the job `not-a-proposal`, which the
+ * rider reads as *"No re-plan could be asked for just now."*, for a move the
+ * device would have checked and could have applied.
+ *
  * The job's type is told apart by {@link REPLAN_TEMPLATE}'s `version`, in the
- * job row's `template_version`: a write-up's is `1`.
+ * job row's `template_version`: a write-up's is `1`. It is unchanged by
+ * #1329: it names the request a device sends, which is unchanged, and a
+ * device that sent the old one would be refused.
  */
 
 import { HISTORY_FENCE_BEGIN, HISTORY_FENCE_END } from '@onyourleft/analysis';
@@ -25,6 +47,7 @@ import {
   REPLAN_BLOCK_MINUTES,
   REPLAN_HOLD_RANGE_BPM,
   REPLAN_SCALE_PERCENTS,
+  type ReasonCode,
 } from '@onyourleft/domain';
 
 import type { ReplanInput } from './replan-input.ts';
@@ -57,7 +80,7 @@ const MOVES = [
   `{"kind":"move-hold-range","block":N,"bpm":B}, where B is one of ${oneOf(REPLAN_HOLD_RANGE_BPM)};`,
   '{"kind":"swap-next-block","workoutId":"an id from saved_workouts","blockIndex":N};',
   '{"kind":"end-main-set"}, which goes straight to the last block.',
-  `The reasons are: ${oneOf(REASON_CODES)}.`,
+  'The reasons you may give are listed with the workout.',
 ].join(' ');
 
 const ASK = [
@@ -66,12 +89,30 @@ const ASK = [
   'Any other answer is thrown away.',
 ].join(' ');
 
+/**
+ * The reasons offered for `input`, in `REASON_CODES`' order: every one but
+ * `on-plan`, less `goal-time-in-range` when the goals hold no time in range
+ * and `effort-check-in` when no summary holds an effort. See the module
+ * header for why.
+ */
+export function offeredReasons(input: ReplanInput): readonly ReasonCode[] {
+  const timeInRange = input.goals.timeInRangeMinutes !== undefined;
+  const effort = input.summaries.some((summary) => summary.effort !== undefined);
+  return REASON_CODES.filter(
+    (reason) =>
+      reason !== 'on-plan' &&
+      (reason !== 'goal-time-in-range' || timeInRange) &&
+      (reason !== 'effort-check-in' || effort),
+  );
+}
+
 /** The first user message: the plan, the goals and the newest summary, each picked by name. */
 function firstMessage(input: ReplanInput): string {
   return [
     `The workout: ${JSON.stringify({ currentBlock: input.currentBlock, blocks: input.blocks })}`,
     `The cyclist’s goals: ${JSON.stringify(input.goals)}`,
     `The newest summary: ${JSON.stringify(input.summaries.at(-1))}`,
+    `The reasons you may give: ${oneOf(offeredReasons(input))}.`,
     'Choose one move, or keep the workout as it is.',
   ].join('\n');
 }
