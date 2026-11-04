@@ -1,13 +1,16 @@
-# Spike 0034: Design direction — three original palette, type and Home options for the owner to choose
+# Spike 0036: Design direction — three original palette, type and Home options for the owner to choose
 
 - **Date**: 2026-11-03
 - **Issue**: [#2035](https://github.com/openzigs/onyourleft/issues/2035), under the design-system epic
   [#2030](https://github.com/openzigs/onyourleft/issues/2030) and [#429](https://github.com/openzigs/onyourleft/issues/429).
   Every build issue in the redesign epics #2030–#2034, and ADR 0063 ([#2036](https://github.com/openzigs/onyourleft/issues/2036)),
   waits for the owner's choice among these options.
-- **Number**: **0034.** `docs/spikes/` holds up to 0033 on `origin/main`; 0021 is claimed by
-  [#1057](https://github.com/openzigs/onyourleft/issues/1057) and 0032 by the open pull request
-  [#1989](https://github.com/openzigs/onyourleft/pull/1989). This file takes 0034 so that none collides (`SPIKE001`).
+- **Number**: **0036.** `docs/spikes/` holds up to 0033 on `origin/main`; 0021 is claimed by
+  [#1057](https://github.com/openzigs/onyourleft/issues/1057), 0034 by the open pull request
+  [#2106](https://github.com/openzigs/onyourleft/pull/2106) and 0035 by the open pull request
+  [#2114](https://github.com/openzigs/onyourleft/pull/2114). This file takes 0036 so that none collides (`SPIKE001`).
+- **Owner's choice**: **A: Hi-Vis, 2026-11-03**, in the
+  [owner's ruling on #2035](https://github.com/openzigs/onyourleft/issues/2035#issuecomment-6619125271).
 
 A spike is a dated measurement that decides nothing (`docs/agents/conventions.md` §7). **The owner chooses**, on
 #2035, in a dated comment; ADR 0063 cites that comment, not this file. No product code changes here.
@@ -344,7 +347,7 @@ plainly sit above the page. Corners are large and soft. Numerals are Barlow Medi
 is lighter and calmer on the ride. **Accent source:** the indigo of the sky in the half hour after sunset (the blue
 hour of an evening ride), pushed toward violet (OKLCH hue 285) so that it is no product's blue. In dark it has to
 be a light periwinkle to clear 4.5:1 as text on `surfaceOverlay` (see "The accent token does two jobs" in spike
-0034), and in light it is a saturated indigo with white text. Zone 7's purple sits at hue 312, apart from the
+0036), and in light it is a saturated indigo with white text. Zone 7's purple sits at hue 312, apart from the
 accent, and is always labelled.
 
 #### 1. Palette, both themes
