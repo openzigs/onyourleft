@@ -28,7 +28,22 @@
  * §LATIN_RANGES, so a character outside it is drawn in the system face rather
  * than as a missing glyph; `font-display: swap` draws the system face until
  * the file has loaded, rather than nothing.
+ *
+ * Three weights since #2040 (ADR 0063 D-5): 600 for the third heading and the
+ * labels, 700 for the numerals, 800 for the display step. A browser fetches a
+ * weight only when a rule asks for it.
  */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/barlow-latin-600.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @font-face {
   font-family: 'Barlow';
   font-style: normal;
@@ -117,13 +132,13 @@
 
   /* The workout block chart's intensity bands (#1043), easiest first. Each
      is a pair against `surface` in `tokens.ts` §CONTRAST_REQUIREMENTS. */
-  --oyl-color-band-recovery: #5e8f88;
-  --oyl-color-band-endurance: #467f75;
-  --oyl-color-band-tempo: #336d61;
-  --oyl-color-band-threshold: #2e5878;
-  --oyl-color-band-vo2: #7a3622;
-  --oyl-color-band-anaerobic: #5e2537;
-  --oyl-color-band-sprint: #3d1d3a;
+  --oyl-color-band-recovery: #6c7278;
+  --oyl-color-band-endurance: #00468c;
+  --oyl-color-band-tempo: #007d30;
+  --oyl-color-band-threshold: #968200;
+  --oyl-color-band-vo2: #8f4c00;
+  --oyl-color-band-anaerobic: #820b0f;
+  --oyl-color-band-sprint: #7e439f;
 
   --oyl-space-xs: 0.25rem;
   --oyl-space-sm: 0.5rem;
@@ -286,13 +301,13 @@
   --oyl-color-illo-hill-far: #263a22;
   --oyl-color-illo-hill-near: #304f2a;
   --oyl-color-illo-road: #53595e;
-  --oyl-color-band-recovery: #467a73;
-  --oyl-color-band-endurance: #529085;
-  --oyl-color-band-tempo: #62a596;
-  --oyl-color-band-threshold: #7fb0d6;
-  --oyl-color-band-vo2: #f2b391;
-  --oyl-color-band-anaerobic: #f5c9d3;
-  --oyl-color-band-sprint: #f8e7f3;
+  --oyl-color-band-recovery: #949aa1;
+  --oyl-color-band-endurance: #2d74ca;
+  --oyl-color-band-tempo: #5fc372;
+  --oyl-color-band-threshold: #f9df5d;
+  --oyl-color-band-vo2: #f59441;
+  --oyl-color-band-anaerobic: #cb574d;
+  --oyl-color-band-sprint: #cf91f3;
 }
 
 *,
@@ -1842,6 +1857,22 @@ html {
   flex: none;
   width: 3rem;
   height: 3rem;
+}
+
+/*
+ * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
+ * in a summary, in one face (Barlow, the display family), at 700, with
+ * tabular figures so a changing number does not jitter. One rule over every
+ * number class; `tokens.ts` §`METRIC_TYPE` is the same declarations, and
+ * `design/metric-type.test.ts` holds the two equal. Sizes stay with each
+ * class below.
+ */
+.oyl-reading__value,
+.oyl-metric__value,
+.oyl-hud__value {
+  font-family: var(--oyl-font-family-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -3437,8 +3468,58 @@ a.oyl-button {
     min-width: 0;
   }
 
-  .oyl-ride__group--graph .oyl-workout-graph__key {
+  /*
+   * The notes column: the zone key (#2039) and the sentence. The key is a
+   * column of its own here, one zone a line, so it adds nothing to the
+   * group's height either.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph__notes {
+    display: flex;
+    flex: 0 0 auto;
+    max-width: 13rem;
+    flex-direction: column;
+    gap: var(--oyl-space-xs);
+  }
+
+  /* With a sentence the column is the sentence's 13rem; with only the key, the key's own width. */
+  .oyl-ride__group--graph .oyl-workout-graph__notes:has(.oyl-workout-graph__key) {
+    flex-basis: 13rem;
+  }
+
+  .oyl-ride__group--graph .oyl-zone-key {
+    flex-direction: column;
+    margin: 0;
+  }
+
+  /*
+   * In a hold there are three lanes and their captions are the longest there
+   * are: a column beside them would wrap a caption. There is room UNDER them
+   * instead (a hold's group ends about 70 px clear of the fold, measured), so
+   * there the key is a row of its own under the frame and the sentence, if
+   * any, keeps its column.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph:has([data-oyl-lane='heart-rate']) {
+    flex-wrap: wrap;
+  }
+
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has([data-oyl-lane='heart-rate'])
+    .oyl-workout-graph__notes {
+    display: contents;
+  }
+
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has([data-oyl-lane='heart-rate'])
+    .oyl-workout-graph__key {
     flex: 0 0 13rem;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph:has([data-oyl-lane='heart-rate']) .oyl-zone-key {
+    flex: 1 0 100%;
+    flex-direction: row;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__key {
     margin: 0;
   }
 
@@ -5874,6 +5955,71 @@ select.oyl-input {
   fill: var(--oyl-color-band-sprint);
 }
 
+/*
+ * THE ZONE KEY (#2039, ADR 0063 D-4) — `design/ZoneKey.tsx`.
+ *
+ * Every drawing that paints a zone colour lists the zones it paints, each by
+ * its number and name beside a swatch of its colour, so no zone is told by
+ * colour alone (WCAG 2.2 SC 1.4.1). The key sits on `surface`, the well the
+ * zone colours declare their 3:1 against, and each swatch carries the
+ * `border` edge as well, which is what survives `forced-colors`.
+ */
+.oyl-zone-key {
+  background: var(--oyl-color-surface);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-ink);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs) var(--oyl-space-md);
+  list-style: none;
+  margin: var(--oyl-space-xs) 0 0;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+}
+
+.oyl-zone-key__zone {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-zone-key__swatch {
+  border: 1px solid var(--oyl-color-border);
+  border-radius: 2px;
+  display: inline-block;
+  flex: none;
+  height: 0.875rem;
+  width: 0.875rem;
+}
+
+.oyl-zone-key__swatch--band-recovery {
+  background: var(--oyl-color-band-recovery);
+}
+
+.oyl-zone-key__swatch--band-endurance {
+  background: var(--oyl-color-band-endurance);
+}
+
+.oyl-zone-key__swatch--band-tempo {
+  background: var(--oyl-color-band-tempo);
+}
+
+.oyl-zone-key__swatch--band-threshold {
+  background: var(--oyl-color-band-threshold);
+}
+
+.oyl-zone-key__swatch--band-vo2 {
+  background: var(--oyl-color-band-vo2);
+}
+
+.oyl-zone-key__swatch--band-anaerobic {
+  background: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-zone-key__swatch--band-sprint {
+  background: var(--oyl-color-band-sprint);
+}
+
 .oyl-block-chart__free-ride {
   fill: none;
   stroke: var(--oyl-color-ink-muted);
@@ -6255,13 +6401,13 @@ select.oyl-input {
   --oyl-color-illo-hill-far: #adcca7;
   --oyl-color-illo-hill-near: #8fb686;
   --oyl-color-illo-road: #91969c;
-  --oyl-color-band-recovery: #5e8f88;
-  --oyl-color-band-endurance: #467f75;
-  --oyl-color-band-tempo: #336d61;
-  --oyl-color-band-threshold: #2e5878;
-  --oyl-color-band-vo2: #7a3622;
-  --oyl-color-band-anaerobic: #5e2537;
-  --oyl-color-band-sprint: #3d1d3a;
+  --oyl-color-band-recovery: #6c7278;
+  --oyl-color-band-endurance: #00468c;
+  --oyl-color-band-tempo: #007d30;
+  --oyl-color-band-threshold: #968200;
+  --oyl-color-band-vo2: #8f4c00;
+  --oyl-color-band-anaerobic: #820b0f;
+  --oyl-color-band-sprint: #7e439f;
 
   color: var(--oyl-color-hud-ink);
   display: flex;

@@ -1059,7 +1059,7 @@ declare global {
       readonly crammedReadings: () => void;
       /** #1042's control: the card after the clock. @see cardAfterTheReadings */
       readonly cardAfterTheReadings: () => void;
-      /** #1083's control: the card's facts on 7rem tracks. @see narrowResultFacts */
+      /** #1083's control: the card's facts on fixed 5.5rem tracks. @see narrowResultFacts */
       readonly narrowResultFacts: () => void;
     };
   }
@@ -1225,17 +1225,22 @@ function cardAfterTheReadings(): void {
 }
 
 /**
- * #1083's control: the result card's facts on 7rem tracks, narrower than a
- * `10:23:45` in the reading's `xxl` on any font measured — which the spec
- * requires to wrap or spill. Without it, "the card's readings fit" is as true
- * of a card whose facts were never measured at a ten-hour ride.
+ * #1083's control: the result card's facts on fixed 5.5rem tracks, narrower
+ * than a `10:23:45` in the reading's `xxl` on any font measured — which the
+ * spec requires to wrap or spill. Without it, "the card's readings fit" is as
+ * true of a card whose facts were never measured at a ten-hour ride.
+ *
+ * ⚠️ Fixed, and 5.5rem, since #2041. It was `minmax(7rem, 1fr)`, whose tracks
+ * grew to about 123 px on the 4:3 tablet; set in system-ui a `10:23:45` did
+ * not fit that, but the metric type is Barlow (ADR 0063 D-5), whose figures
+ * are narrower, and it did. A track that grows is no floor for a control.
  */
 function narrowResultFacts(): void {
   const facts = document.querySelector<HTMLElement>('[data-oyl-result-card] .oyl-result__facts');
   if (facts === null) {
     throw new Error('rideview harness: ?ride=saved did not render its result card’s facts');
   }
-  facts.style.gridTemplateColumns = 'repeat(auto-fit, minmax(7rem, 1fr))';
+  facts.style.gridTemplateColumns = 'repeat(auto-fit, 5.5rem)';
 }
 
 /** @see RideViewMeasurement.readings */
