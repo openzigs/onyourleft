@@ -13,8 +13,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
+import { IS_A_LOOP_TEXT, NOT_YET_A_LOOP_TEXT } from '../routing/loop';
 import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  chooseOption,
+  mount,
+  queryAll,
+  settle,
+  type Mounted,
+} from '../testing/mount';
 import { NUDGE_DEGREES, RouteBuilderView } from './RouteBuilderView';
 
 let mounted: Mounted | undefined;
@@ -129,6 +137,16 @@ describe('every control works from the keyboard', () => {
     expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['true', 'false']);
     await press('Waypoint 1');
     expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['false', 'false']);
+  });
+
+  it('closes the loop with a routed leg when a routing service is configured (#2102)', async () => {
+    const provider = scriptedProvider();
+    await open({ provider });
+    await place(3);
+    provider.routeCalls.length = 0;
+    await press('Close the loop');
+    // The leg back is snapped like any other: it asks the routing service.
+    expect(provider.routeCalls).toHaveLength(1);
   });
 
   it('moves one in each of the four directions', async () => {
@@ -520,5 +538,93 @@ describe('the profile', () => {
     await place(3);
     await settle();
     expect(view.container.textContent).toContain('Steep climb');
+  });
+});
+
+describe('closing the loop, from the keyboard and to a screen reader (#2102)', () => {
+  /** The loop section's live region: the one `role="status"` that holds the loop's state. */
+  function loopStatus(): HTMLElement | undefined {
+    if (mounted === undefined) throw new Error('nothing is mounted');
+    return queryAll(mounted.container, '[role="status"]').find((region) =>
+      region.textContent?.includes('loop'),
+    );
+  }
+
+  it('moves focus to the loop section, not the page, once Close the loop has gone', async () => {
+    await open();
+    await place(3);
+    await press('Close the loop');
+    expect(present('Close the loop')).toBe(false);
+    // WCAG 2.4.3: the pressed button is gone, so focus is put somewhere that
+    // says what happened, rather than falling to the body.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement?.tagName).toBe('H2');
+    expect(document.activeElement?.textContent).toBe('A short loop for a lap race');
+  });
+
+  it('announces the loop closing, and its fit to a new target, from a live region on the page from the start', async () => {
+    await open();
+    await place(3);
+    const region = loopStatus();
+    // On the page before anything changes, or a change inside it is not announced.
+    expect(region).toBeDefined();
+    expect(region?.getAttribute('role')).toBe('status');
+    expect(region?.textContent).toContain(NOT_YET_A_LOOP_TEXT);
+
+    await press('Close the loop');
+    expect(loopStatus()).toBe(region);
+    expect(region?.textContent).toContain(IS_A_LOOP_TEXT);
+
+    const target = mounted?.container.querySelector<HTMLSelectElement>(
+      'select:not(#surface-tolerance)',
+    );
+    if (target === null || target === undefined) throw new Error('no target select');
+    await chooseOption(target, '8');
+    expect(loopStatus()).toBe(region);
+    // The fit, as a word: the loop is now under its target.
+    expect(region?.textContent).toContain('Under the target.');
+  });
+
+  /** The loop's length line, outside the live region. */
+  function lengthLine(): string | undefined {
+    if (mounted === undefined) throw new Error('nothing is mounted');
+    return (
+      queryAll(mounted.container, 'p').find((line) =>
+        line.textContent?.includes('against a target of'),
+      )?.textContent ?? undefined
+    );
+  }
+
+  it('keeps the running length and the note out of the live region, so a tap is not announced', async () => {
+    await open();
+    await place(3);
+    const region = loopStatus();
+    if (region === undefined) throw new Error('no loop live region');
+    // The length is on the page, but outside the region.
+    expect(mounted?.container.textContent).toContain('so far, against a target of');
+    expect(region.textContent).not.toContain('so far');
+    expect(region.textContent).not.toContain('against a target');
+
+    // Another waypoint changes the length and not the state, so the region's
+    // words are the same and nothing is announced.
+    const before = region.textContent;
+    const lengthBefore = lengthLine();
+    await place(1);
+    expect(lengthLine()).not.toBe(lengthBefore);
+    expect(loopStatus()).toBe(region);
+    expect(region.textContent).toBe(before);
+
+    // A closed loop: its length and its note, with their numbers, stay outside too.
+    await press('Close the loop');
+    expect(mounted?.container.textContent).toContain('Loop length');
+    expect(region.textContent).not.toContain('Loop length');
+    expect(region.textContent).not.toMatch(/\d/);
+  });
+
+  it('styles the target select as the page’s other select: no class of its own', async () => {
+    await open();
+    const selects = queryAll<HTMLSelectElement>(mounted!.container, 'select');
+    expect(selects).toHaveLength(2);
+    expect(selects.map((select) => select.className)).toEqual(['', '']);
   });
 });

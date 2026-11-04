@@ -57,7 +57,7 @@
     "Ride with others",
     "Help with Ride with others",
     "A private group ride or race is held on an instance.",
-    "Connect this device to one in Settings to make a room or join one by its code."
+    "Connect this device to one in Settings to make a room or a lap race, or join one by its code."
   ],
   "workouts empty": [
     "Workouts",
@@ -991,6 +991,14 @@
     "0.0 km over 0 legs.",
     "Paved 0.0 km, unpaved 0.0 km, unknown 0.0 km.",
     "No elevation profile yet.",
+    "A short loop for a lap race",
+    "Target length",
+    "1 km",
+    "2 km",
+    "3 km",
+    "5 km",
+    "8 km",
+    "Place your start and at least two more waypoints round from it, then close the loop.",
     "Save this route",
     "A route needs two waypoints before it can be saved."
   ],
@@ -1152,7 +1160,7 @@
     "Ride with others",
     "Help with Ride with others",
     "A private group ride or race is held on an instance.",
-    "Connect this device to one in Settings to make a room or join one by its code."
+    "Connect this device to one in Settings to make a room or a lap race, or join one by its code."
   ],
   "workouts populated": [
     "Workouts",
@@ -2702,6 +2710,7 @@
     "Select a waypoint to move it north, south, east or west, about 56 m at a time.",
     "Add a waypoint",
     "Reverse",
+    "Close the loop",
     "Clear",
     "Waypoint 1",
     "Delete waypoint 1",
@@ -2737,6 +2746,16 @@
     "At least 1.5 km over 3 legs.",
     "Paved 0.0 km, unpaved 0.0 km, unknown 1.5 km. 3 freehand legs are counted as unknown, because nothing was asked about them.",
     "No elevation profile yet.",
+    "A short loop for a lap race",
+    "Target length",
+    "1 km",
+    "2 km",
+    "3 km",
+    "5 km",
+    "8 km",
+    "It does not end where it starts yet.",
+    "Close the loop to join the last waypoint back to the first.",
+    "1.5 km so far, against a target of 2 km.",
     "Save this route",
     "Name",
     "Save to your routes"
