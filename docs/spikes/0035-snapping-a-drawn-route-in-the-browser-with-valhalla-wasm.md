@@ -1,4 +1,4 @@
-# Spike 0034: Snapping a drawn route in the browser, with no instance, using Valhalla compiled to WebAssembly
+# Spike 0035: Snapping a drawn route in the browser, with no instance, using Valhalla compiled to WebAssembly
 
 - **Date**: 2026-11-03
 - **Issue**: [#2009](https://github.com/openzigs/onyourleft/issues/2009), under the epic
@@ -8,9 +8,11 @@
   not route on the basemap's `roads` layer**; elevation is [#2013](https://github.com/openzigs/onyourleft/issues/2013)'s,
   not this spike's. Informs [#2007](https://github.com/openzigs/onyourleft/issues/2007) (editing a route) and
   [#2008](https://github.com/openzigs/onyourleft/issues/2008) (Valhalla on a home instance).
-- **Number**: **0034.** `docs/spikes/` holds 0001 to 0008, 0010 to 0020 and 0022 to 0033 on `origin/main` at
-  `0e54f15c`; 0021 is claimed by [#1057](https://github.com/openzigs/onyourleft/issues/1057). No open pull request
-  adds a spike.
+- **Number**: **0035.** `docs/spikes/` holds 0001 to 0008, 0010 to 0020 and 0022 to 0033 on `origin/main` at
+  `c20cc7a0`; 0021 is claimed by [#1057](https://github.com/openzigs/onyourleft/issues/1057), and 0034 by the open pull
+  request [#2106](https://github.com/openzigs/onyourleft/pull/2106) (controls for the rider's own music player), which
+  merges first. [#2105](https://github.com/openzigs/onyourleft/pull/2105), also open, adds a spike and takes a later
+  number.
 
 A spike is a dated measurement that decides nothing (`docs/agents/conventions.md` §7). No product code changes here.
 
