@@ -1,9 +1,6 @@
 # ADR 0063: The design system direction — Hi-Vis: palette, zones, dark first, type, motion, sound, and no new runtime dependency
 
-- **Status**: **Proposed**, 2026-11-03. It becomes Accepted when the owner accepts it in a comment on
-  [#2036](https://github.com/openzigs/onyourleft/issues/2036) or on the pull request that writes it, and
-  that comment is then cited here by an appended `## Amendments` entry (ADR 0013). Until then a build
-  issue may rely on what it records only where the owner's own rulings, quoted below, already say it
+- **Status**: **Accepted, 2026-11-04**, by the owner's [ruling on the pull request that writes it](https://github.com/openzigs/onyourleft/pull/2119#issuecomment-6628072998).
 - **Date**: 2026-11-03
 - **Deciders**: **the owner**. Every decision below rests on an owner ruling, each quoted with its date
   in Context. Where a line goes beyond a ruling it says **author's reading**
