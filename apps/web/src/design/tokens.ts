@@ -112,7 +112,7 @@ export const COLOUR_TOKENS = {
    * The one accent: primary buttons, the active navigation item. A link in
    * running text is `link` since #661, a separate value since #2037 (ADR 0063).
    */
-  accent: '#405e00',
+  accent: '#3e6100',
   /** The accent under a pointer or a press. */
   accentHover: '#2c4300',
   /** Text and glyphs drawn on `accent` or `accentHover`. */
@@ -282,13 +282,13 @@ export const COLOUR_TOKENS = {
    * bright panel over a bright scene is what a rider reads at arm's length in
    * sunlight with a bloom around it.
    */
-  hudSurface: '#10161c',
+  hudSurface: '#101215',
   /** The numbers a rider is pacing to. Large, and the highest contrast here. */
-  hudInk: '#f5f8fa',
+  hudInk: '#f4f7f9',
   /** Field labels, which are read once and then found by position. */
-  hudInkMuted: '#a8b6c2',
+  hudInkMuted: '#9da3a8',
   /** The edge of a HUD control, per WCAG 2.2 SC 1.4.11. */
-  hudBorder: '#7b8b99',
+  hudBorder: '#787c82',
   /**
    * A reading that is **stale**, not zero.
    *
@@ -297,7 +297,7 @@ export const COLOUR_TOKENS = {
    * other half is that the value is replaced by a dash rather than tinted, so
    * the distinction survives for a rider who cannot see the tint at all.
    */
-  hudStaleInk: '#f0b45f',
+  hudStaleInk: '#f1af48',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -348,7 +348,7 @@ export type ThemedColourToken = Exclude<ColourToken, HudColourToken>;
  *   than what it rests on, the other way from the light palette — so
  *   {@link ELEVATION_DIRECTION} states the direction per palette and
  *   `tokens.test.ts` holds each ramp to its own, with both step bounds.
- * - **Its own accent.** The light palette's olive `#405e00` is 2.5:1 on this
+ * - **Its own accent.** The light palette's olive `#3e6100` is 2.6:1 on this
  *   canvas, so `accent` and `accentHover` are the fluorescent lime here with a
  *   dark `accentInk` on them (ADR 0063 D-1), and a hover is LIGHTER, as
  *   elevation is. The links follow, as #661 left
@@ -832,7 +832,7 @@ export interface ContrastRequirement {
 export const PLATFORM_CHECK_MARK: Readonly<
   Record<Theme, { readonly colour: string; readonly measured: number }>
 > = {
-  light: { colour: '#ffffff', measured: 7.45 },
+  light: { colour: '#ffffff', measured: 7.2 },
   dark: { colour: '#3b3b3b', measured: 8.25 },
 };
 
@@ -1137,7 +1137,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 7.2, dark: 13.33 },
     where: 'the label of a primary button',
   },
   {
@@ -1164,7 +1164,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 7.2, dark: 13.33 },
     where: 'a primary button at rest (#668)',
   },
   {
@@ -1178,14 +1178,14 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'the label of a secondary button, an off toggle and an unchecked segment (#668)',
   },
   {
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'the border of a secondary button, a toggle and a segment, on the page (#668)',
   },
   {
@@ -1220,7 +1220,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'selected',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.99, dark: 8.07 },
+    measured: { light: 5.8, dark: 8.07 },
     where:
       'the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
   },
@@ -1267,35 +1267,35 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where: 'a metric on the ride HUD, over its own opaque panel (#94)',
   },
   {
     foreground: 'hudInkMuted',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 8.79, dark: 8.79 },
+    measured: { light: 7.36, dark: 7.36 },
     where: 'a field label on the ride HUD (#94)',
   },
   {
     foreground: 'hudBorder',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.2, dark: 5.2 },
+    measured: { light: 4.47, dark: 4.47 },
     where: 'the edge of a HUD control (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where:
       'the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)',
   },
@@ -1303,21 +1303,21 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'hudStaleInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 9.88, dark: 9.88 },
+    measured: { light: 9.8, dark: 9.8 },
     where: 'the mark on a HUD reading whose sensor has dropped (#94)',
   },
   {
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'link text',
   },
   {
     foreground: 'accent',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 6.39, dark: 11.07 },
+    measured: { light: 6.18, dark: 11.07 },
     where: 'link text and the active navigation item in the header',
   },
   {
@@ -1371,7 +1371,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'surfaceRaised',
     minimum: AA_TEXT,
-    measured: { light: 5.47, dark: 8.96 },
+    measured: { light: 5.29, dark: 8.96 },
     where: 'link text on a raised card',
   },
   {
@@ -1413,7 +1413,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 4.68, dark: 7.22 },
+    measured: { light: 4.52, dark: 7.22 },
     where: 'a navigation link on the app header',
   },
   /*
@@ -1429,14 +1429,14 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 7.2, dark: 13.33 },
     where: "the current destination's label and icon, on the navigation's active indicator (#944)",
   },
   {
     foreground: 'accent',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 4.68, dark: 7.22 },
+    measured: { light: 4.52, dark: 7.22 },
     where: "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
   },
   {
@@ -1600,7 +1600,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'illoHillNear',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.26, dark: 6.79 },
+    measured: { light: 3.16, dark: 6.79 },
     where: 'the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)',
   },
   ...ILLUSTRATION_TOKENS.map((token): ContrastRequirement => ({

@@ -166,6 +166,12 @@
  * network.", because there is no document to open any more, only the
  * notices on the screen. Nothing is dropped.
  *
+ * ⚠️ **Re-recorded by PR #2113 (#1992), awaiting the owner's approval with
+ * that pull request's wording**, for added lines and nothing else: the game's
+ * picker gains *Preview without a trainer*, its sentence, "Power, watts",
+ * "Speed-up" and its four choices, and the button "Preview " and the route's
+ * name. No sentence is dropped or reworded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`
