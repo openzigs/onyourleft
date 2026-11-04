@@ -1163,6 +1163,8 @@
     "Saved workouts",
     "Build a workout",
     "Workouts saved on this device, newest first.",
+    "2 Endurance",
+    "3 Tempo",
     "Sweet spot over-unders with a very long name for a small screen",
     "30 min · hardest: 90% of threshold",
     "Name",
@@ -1201,9 +1203,7 @@
     "Shape",
     "10 min at 60%, 20 min at 90%",
     "Export Sweet spot over-unders with a very long name for a small screen",
-    "Delete Sweet spot over-unders with a very long name for a small screen",
-    "2 Endurance",
-    "3 Tempo"
+    "Delete Sweet spot over-unders with a very long name for a small screen"
   ],
   "activities populated": [
     "Activities",

@@ -4,7 +4,13 @@ import { useMemo, type JSX } from 'react';
 
 import { BAND_TOKENS, type ColourToken } from '../design/tokens';
 import { ZoneKey, zonesPainted } from '../design/ZoneKey';
-import { blockChartPaths, CHART_HEIGHT, CHART_WIDTH, type BlockChartSegment } from './block-chart';
+import {
+  blockChartPaths,
+  CHART_HEIGHT,
+  CHART_WIDTH,
+  type BlockChartPaths,
+  type BlockChartSegment,
+} from './block-chart';
 
 /**
  * The class each part of the block chart is painted by, and the token that
@@ -57,26 +63,52 @@ export function BlockChart({
   }
   return (
     <>
-      <svg
-        aria-hidden="true"
-        className="oyl-block-chart"
-        data-oyl-block-chart=""
-        focusable="false"
-        preserveAspectRatio="none"
-        viewBox={`0 0 ${String(CHART_WIDTH)} ${String(CHART_HEIGHT)}`}
-      >
-        {paths.bands.map((d, band) =>
-          d === '' ? null : (
-            // A band's index is its identity: there are exactly seven.
-            <path key={band} className={bandClass(BAND_TOKENS[band] ?? 'bandRecovery')} d={d} />
-          ),
-        )}
-        {paths.freeRide === '' ? null : (
-          <path className="oyl-block-chart__free-ride" d={paths.freeRide} />
-        )}
-        <path className="oyl-block-chart__rule" d={paths.rule} />
-      </svg>
+      <BlockChartDrawing paths={paths} />
       <ZoneKey zones={zonesPainted(paths.bands)} />
     </>
+  );
+}
+
+/**
+ * The block chart's drawing alone, from paths already computed — the saved
+ * workout cards on Workouts draw it at their own size (the owner's ruling of
+ * 2026-11-04 on #2125: zone colours on the card, not one accent).
+ *
+ * ⚠️ **It names no zone, so whatever renders it must.** {@link BlockChart} puts
+ * a {@link ZoneKey} after it; the Workouts list puts ONE key over its cards,
+ * naming every zone any card paints (`views/WorkoutsView.tsx`), and
+ * `views/shape-cards.test.tsx` holds that.
+ */
+export function BlockChartDrawing({
+  paths,
+  className,
+}: {
+  readonly paths: BlockChartPaths;
+  /** A modifier beside `oyl-block-chart`, such as the card's size. */
+  readonly className?: string;
+}): JSX.Element | null {
+  if (paths.rule === '') {
+    return null;
+  }
+  return (
+    <svg
+      aria-hidden="true"
+      className={className === undefined ? 'oyl-block-chart' : `oyl-block-chart ${className}`}
+      data-oyl-block-chart=""
+      focusable="false"
+      preserveAspectRatio="none"
+      viewBox={`0 0 ${String(CHART_WIDTH)} ${String(CHART_HEIGHT)}`}
+    >
+      {paths.bands.map((d, band) =>
+        d === '' ? null : (
+          // A band's index is its identity: there are exactly seven.
+          <path key={band} className={bandClass(BAND_TOKENS[band] ?? 'bandRecovery')} d={d} />
+        ),
+      )}
+      {paths.freeRide === '' ? null : (
+        <path className="oyl-block-chart__free-ride" d={paths.freeRide} />
+      )}
+      <path className="oyl-block-chart__rule" d={paths.rule} />
+    </svg>
   );
 }
