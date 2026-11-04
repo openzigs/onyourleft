@@ -277,8 +277,8 @@ export interface Moderation {
    * room (`route:`) or one row of a race's result (`result:<room>:<row>`),
    * by the identifier a notice names it by — with a reason and a statement of
    * reasons its owner is shown, all in one transaction with the log entry.
-   * A display name (`rider:`) is hidden by `hide-display-name`. An item of
-   * a moderator's is refused, and the attempt logged, as `act` refuses.
+   * A display name has no identifier (#1381): it is hidden by
+   * `hide-display-name`. An item of a moderator's is refused, and the attempt logged, as `act` refuses.
    */
   hideItem(
     moderatorId: string,
@@ -781,11 +781,6 @@ export function createModeration(options: ModerationOptions): Moderation {
       if (parsed === undefined) {
         return refuse('validation_failed', [
           { field: 'item', problem: 'must be an item’s identifier, as the app shows it' },
-        ]);
-      }
-      if (parsed.kind === 'rider') {
-        return refuse('validation_failed', [
-          { field: 'item', problem: 'a display name is hidden with hide-display-name' },
         ]);
       }
       const checked = checkReason(fields.reason);

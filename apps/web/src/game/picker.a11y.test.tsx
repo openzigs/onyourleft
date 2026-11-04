@@ -110,9 +110,10 @@ describe('the route picker', () => {
     mounted = await mountPicker();
 
     // Every control the rule above audits is present — if one disappeared the
-    // rule would have nothing to audit and would pass. Three number boxes: the
-    // pacer's intensity, and #326's wind speed and direction.
-    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(3);
+    // rule would have nothing to audit and would pass. Four number boxes: the
+    // pacer's intensity, #326's wind speed and direction, and the power of
+    // PR #2113's *Preview without a trainer*.
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(4);
     for (const words of ['pacer', 'wind']) {
       expect(
         queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>

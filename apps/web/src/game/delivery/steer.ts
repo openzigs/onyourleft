@@ -54,10 +54,14 @@
  */
 
 import {
+  LANE_OFFSETS_METRES as LANES,
   startSteer as startLaneSteer,
   stepSteer as stepLaneSteer,
   type SteerState,
 } from '../lanes';
+
+/** How many lanes there are: three (`lanes.ts`). */
+const LANE_COUNT = LANES.length;
 
 export {
   LANE_CHANGE_SECONDS,
@@ -96,4 +100,20 @@ export function stepSteer(state: SteerState, seconds: number): SteerState {
     refuse('a step is a finite number of seconds not below zero');
   }
   return stepLaneSteer(state, seconds);
+}
+
+/**
+ * Steering straight to lane `lane`, an index into `LANE_OFFSETS_METRES` —
+ * #1827, for a steering controller's handlebar angle, which says which lane
+ * the bars point at rather than one lane further (`controller-input.ts`
+ * §`laneForAngle`). The lanes stay discrete (ADR 0060 D-6.3): the rider moves
+ * to the lane at `lanes.ts`' steady pace, never to a point between two.
+ *
+ * Refuses nothing, so #1817's count of Delivery's throw sites is unchanged: a
+ * lane that is not one of the three is not taken, and the rider stays where
+ * they were.
+ */
+export function steerToLane(state: SteerState, lane: number): SteerState {
+  if (!Number.isInteger(lane) || lane < 0 || lane >= LANE_COUNT) return state;
+  return lane === state.lane ? state : { ...state, lane };
 }

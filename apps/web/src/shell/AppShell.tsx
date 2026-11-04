@@ -690,6 +690,9 @@ function viewFor(
           {...(props.camera === undefined ? {} : { camera: props.camera })}
           // #247. The forecast half of the ladder; only the shell supplies one.
           {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
+          // #1827. The steering controller paired on Devices; a Delivery
+          // round's HUD reads it, through the game's controller port.
+          {...(props.steering === undefined ? {} : { controller: props.steering })}
           // #551. The side camera's line on the HUD, its Stop, and its link
           // going said through the HUD's one region.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
