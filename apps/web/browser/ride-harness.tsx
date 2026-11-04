@@ -94,7 +94,7 @@ import {
 
 import { scriptedSidePairing } from '../src/camera/testing';
 import { roomPortOver } from '../src/net/room-port';
-import { frameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
+import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
@@ -586,9 +586,23 @@ const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
  * tallest. `?room=following` is the same with *Report* not pressed: the
  * state the reasons open from, and `ride-room.browser.spec.ts` §"#789"'s control.
  */
-const REPORT_OPEN = ROOM_QUERY === 'report';
-const FOLLOWING = ROOM_QUERY === 'following' || REPORT_OPEN;
-const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING;
+const REPORT_OPEN = ROOM_QUERY === 'report' || ROOM_QUERY === 'lap-race-report';
+const FOLLOWING = ROOM_QUERY === 'following' || ROOM_QUERY === 'lap-race-following' || REPORT_OPEN;
+/**
+ * `ride.html?room=lap-race` — #1912: that running race a LAP RACE, its
+ * welcome saying three laps with items, its frame giving every rider their
+ * lap slots and this rider the widest item name (*Tailwind*), so the HUD
+ * carries the race's *Place* and *Item* beside the room's readings, row and
+ * standings. `ride-room.browser.spec.ts` §"#1912" measures it.
+ * `?room=lap-race-following` is the same with *Follow* pressed, and
+ * `?room=lap-race-report` with *Report* open too, as `following` and `report`
+ * are above: the owner's ruling on PR #2098 asked for both.
+ */
+const LAP_RACE =
+  ROOM_QUERY === 'lap-race' ||
+  ROOM_QUERY === 'lap-race-following' ||
+  ROOM_QUERY === 'lap-race-report';
+const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING || LAP_RACE;
 const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
 /**
  * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
@@ -1265,7 +1279,12 @@ async function run(): Promise<void> {
       RACE_ROOM.sockets.length > 0 ? RACE_ROOM : undefined,
     );
     RACE_ROOM.accept();
-    RACE_ROOM.welcome(0, IN_A_RACE ? 'race' : 'ride');
+    RACE_ROOM.welcome(
+      0,
+      IN_A_RACE ? 'race' : 'ride',
+      'on',
+      LAP_RACE ? { laps: 3, items: 'on' } : undefined,
+    );
     if (ROOM_NOTICE !== undefined) {
       if (ROOM_NOTICE === 'lost') {
         // Lost, and kept lost: no ticket comes back for the rejoin.
@@ -1299,7 +1318,14 @@ async function run(): Promise<void> {
       const order = [1, 2, 3, 4, 0, 5, 6, 7, 8];
       RACE_ROOM.frame(
         1,
-        order.map((riderId, index) => frameRider(riderId, 400 - index * 15)),
+        order.map((riderId, index) =>
+          LAP_RACE
+            ? lapFrameRider(riderId, 400 - index * 15, {
+                held: riderId === 0 ? 'tailwind' : 'none',
+                lapsDone: 1,
+              })
+            : frameRider(riderId, 400 - index * 15),
+        ),
       );
       RACE_ROOM.standings(
         1,
@@ -1313,6 +1339,14 @@ async function run(): Promise<void> {
         ),
       );
       await until('the race standings', () => document.querySelector('.oyl-hud__standings'));
+      if (LAP_RACE) {
+        // #1912: the race's *Place* and *Item*, from the room's frame.
+        await until('the lap race’s item', () =>
+          [...document.querySelectorAll('.oyl-hud__field--lap-race')].find((field) =>
+            (field.textContent ?? '').includes('Tailwind'),
+          ),
+        );
+      }
       if (FOLLOWING) {
         // #789: Follow, on the first rider it reaches — the longest name the
         // room admits — and, for `report`, the press that opens the reasons.
