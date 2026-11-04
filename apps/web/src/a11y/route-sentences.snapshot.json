@@ -57,7 +57,7 @@
     "Ride with others",
     "Help with Ride with others",
     "A private group ride or race is held on an instance.",
-    "Connect this device to one in Settings to make a room or join one by its code."
+    "Connect this device to one in Settings to make a room or a lap race, or join one by its code."
   ],
   "workouts empty": [
     "Workouts",
@@ -1162,7 +1162,7 @@
     "Ride with others",
     "Help with Ride with others",
     "A private group ride or race is held on an instance.",
-    "Connect this device to one in Settings to make a room or join one by its code."
+    "Connect this device to one in Settings to make a room or a lap race, or join one by its code."
   ],
   "workouts populated": [
     "Workouts",
