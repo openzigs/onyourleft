@@ -28,6 +28,8 @@ import { metres, unixSeconds, type UnixSeconds } from '@onyourleft/domain';
 
 import type { SensorMeasurement } from '../../src/measurement';
 import {
+  BATTERY_LEVEL,
+  BATTERY_SERVICE,
   BODY_SENSOR_LOCATION,
   createCyclingPowerProfile,
   createCyclingSpeedCadenceProfile,
@@ -93,6 +95,9 @@ describe('the assigned numbers this program hard-codes', () => {
     ['Supported Power Range', 0x2ad8, SUPPORTED_POWER_RANGE],
     ['Fitness Machine Control Point', 0x2ad9, FITNESS_MACHINE_CONTROL_POINT],
     ['Fitness Machine Status', 0x2ada, FITNESS_MACHINE_STATUS],
+    // #2046, read on 2026-11-03 from the same two files.
+    ['Battery', 0x180f, BATTERY_SERVICE],
+    ['Battery Level', 0x2a19, BATTERY_LEVEL],
   ];
 
   for (const [name, number, literal] of assigned) {

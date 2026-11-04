@@ -25,6 +25,7 @@
  * | instant | second since the Unix epoch | `UnixSeconds` | signed |
  * | gradient | percent | `GradePercent` | **signed** |
  * | resistance | unitless level | `ResistanceLevel` | non-negative |
+ * | share of a full scale | whole percent | `Percent` | 0 to 100 |
  *
  * **Validation is definitional only.** A guard here rejects values that are not
  * the quantity at all — `NaN`, a negative distance, a temperature below
@@ -36,7 +37,13 @@
  */
 
 import type { Quantity } from './quantity';
-import { assertFinite, assertInRange, assertNotNegative, UnitError } from './unit-error';
+import {
+  assertFinite,
+  assertInRange,
+  assertIntegerInRange,
+  assertNotNegative,
+  UnitError,
+} from './unit-error';
 
 // --- Distance ---------------------------------------------------------------
 
@@ -294,6 +301,36 @@ export type ResistanceLevel = Quantity<'resistance level'>;
 export function resistanceLevel(value: number): ResistanceLevel {
   assertNotNegative(value, 'resistance level');
   return value as ResistanceLevel;
+}
+
+// --- Percent ----------------------------------------------------------------
+
+/**
+ * A whole percentage of a full scale, from 0 to 100 inclusive (#2046).
+ *
+ * The first consumer is a sensor's battery level: the Battery Level
+ * characteristic carries a `uint8` percentage, and `packages/sensors`
+ * recorded it as a gap until a unit existed rather than put a bare `number`
+ * on its boundary.
+ *
+ * **Not a {@link GradePercent}.** A gradient is signed and unbounded, because
+ * an overhang is more than 100 %; this is a share of something full, so 100 is
+ * the end of the scale and 101 is not a reading at all. The two brands differ
+ * so that a battery level can never be written to a trainer as a slope.
+ *
+ * **Bounded and whole**, unlike the rest of this file, because both bounds are
+ * definitional rather than plausible: nothing is more than full or less than
+ * empty, and the wire format that motivated this type has no fraction to
+ * carry. A non-integer means a caller has already scaled or averaged the value.
+ * Out-of-range input is rejected, never clamped: a clamped 255 reads as a full
+ * battery from a device that sent nonsense.
+ */
+export type Percent = Quantity<'percent'>;
+
+/** @throws {UnitError} if not a whole number from 0 to 100 inclusive. */
+export function percent(value: number): Percent {
+  assertIntegerInRange(value, 0, 100, 'percentage');
+  return value as Percent;
 }
 
 // --- Bearing ----------------------------------------------------------------
