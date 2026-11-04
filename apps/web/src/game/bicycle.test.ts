@@ -51,6 +51,7 @@ import {
   LEG_BONE_COUNT,
   legBones,
   riderJoints,
+  RIDER_HALF_WIDTH_METRES,
   MAXIMUM_CRANK_STEP_SECONDS,
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
@@ -1221,7 +1222,7 @@ describe('a rider who moves like a rider — #625', () => {
 });
 
 describe('the rider in each position on the bicycle — #1999', () => {
-  const POSTURES: readonly DrawnPosture[] = ['upright', 'hoods', 'drops', 'standing'];
+  const POSTURES: readonly DrawnPosture[] = ['upright', 'hoods', 'drops', 'aero', 'standing'];
   const apart = (
     a: { readonly x: number; readonly y: number; readonly z: number },
     b: { readonly x: number; readonly y: number; readonly z: number },
@@ -1232,7 +1233,8 @@ describe('the rider in each position on the bicycle — #1999', () => {
       upright: handPosition('upright'),
       hoods: handPosition('hoods'),
       drops: handPosition('drops'),
-      // A standing rider is on the hoods.
+      // The aero tuck is in the drops, and a standing rider on the hoods.
+      aero: handPosition('drops'),
       standing: handPosition('hoods'),
     };
     for (const posture of POSTURES) {
@@ -1241,10 +1243,21 @@ describe('the rider in each position on the bicycle — #1999', () => {
         expect(grip.y, posture).toBeCloseTo(where[posture].y, 12);
         expect(grip.z, posture).toBeCloseTo(where[posture].z, 12);
       }
+      // The owner's ruling of 2026-11-04: across the bar too. The hoods and
+      // the drops are on the bends, the bar's own ends; the tops inside them,
+      // but out past the hips, so the chase camera sees the hands.
+      const [plus, minus] = joints.grip;
+      expect(minus.x, posture).toBe(-plus.x);
+      if (posture === 'upright') {
+        expect(plus.x).toBeGreaterThan(0.15);
+        expect(plus.x).toBeLessThan(RIDER_HALF_WIDTH_METRES);
+      } else {
+        expect(plus.x, posture).toBeCloseTo(RIDER_HALF_WIDTH_METRES, 12);
+      }
     }
   });
 
-  it('is every joint exactly as before #1999 when no stance is given, which is the hoods', () => {
+  it('is the hoods, seated, when no stance is given', () => {
     for (const angle of [0, 1.3, Math.PI, 5]) {
       const before = riderJoints(angle, emptyRiderJoints(), 0.1);
       const hoods = riderJoints(
@@ -1304,8 +1317,12 @@ describe('the rider in each position on the bicycle — #1999', () => {
     const hoods = backOf('hoods');
     expect(hoods.angle - backOf('drops').angle).toBeGreaterThan(20);
     expect(backOf('upright').angle - hoods.angle).toBeGreaterThan(12);
+    // The owner's ruling of 2026-11-04: the aero tuck's back is flat — 30°
+    // flatter than the hoods and 8° flatter than the drops, at the least.
+    expect(hoods.angle - backOf('aero').angle).toBeGreaterThan(30);
+    expect(backOf('drops').angle - backOf('aero').angle).toBeGreaterThan(8);
     // Only the angle changes: the back is its own length within a centimetre.
-    for (const posture of ['upright', 'drops'] as const) {
+    for (const posture of ['upright', 'drops', 'aero'] as const) {
       expect(Math.abs(backOf(posture).length - hoods.length), posture).toBeLessThan(0.01);
     }
   });

@@ -5,17 +5,22 @@
  * doing — #1999, on the owner's ruling of 2026-11-02: *"the rider should take
  * different positions on the bike based on cadence"*.
  *
- * Four rules, in this order of precedence:
+ * Five rules, in this order of precedence:
  *
  * 1. **Standing on a climb** — out of the saddle at a low cadence with high
  *    power ({@link STAND_BELOW_RPM}, {@link STAND_ABOVE_WATTS}), or on a steep
  *    grade ({@link STAND_ABOVE_GRADE_PERCENT}), while moving and pedalling.
- * 2. **The drops when fast** — at a high speed ({@link DROPS_ABOVE_METRES_PER_SECOND}),
+ * 2. **The aero tuck for a hard seated effort** — the owner's ruling of
+ *    2026-11-04, *"Yes, add aero"*: on flat or rolling ground
+ *    ({@link AERO_WITHIN_GRADE_PERCENT}) at a high power
+ *    ({@link AERO_ABOVE_WATTS}) and a high cadence ({@link AERO_ABOVE_RPM}),
+ *    whatever the speed — even below the drops' 45 km/h.
+ * 3. **The drops when fast** — at a high speed ({@link DROPS_ABOVE_METRES_PER_SECOND}),
  *    or descending fast ({@link DROPS_DESCENT_GRADE_PERCENT},
  *    {@link DROPS_DESCENT_METRES_PER_SECOND}).
- * 3. **The tops when easy** — sitting up, hands on the tops, at a low power
+ * 4. **The tops when easy** — sitting up, hands on the tops, at a low power
  *    ({@link TOPS_BELOW_WATTS}) or coasting.
- * 4. Otherwise **the hoods**, which is how every rider was drawn before.
+ * 5. Otherwise **the hoods**, which is how every rider was drawn before.
  *
  * The fourth of the owner's rules, body motion that grows with effort and
  * cadence, is {@link ridingEffort} here and `bicycle.ts` §`riderMotion` there.
@@ -75,6 +80,32 @@ export const STAND_ABOVE_GRADE_PERCENT = 7;
 /** The grade a rider standing for the grade sits back down below: **5.5 %**. */
 export const STAND_LEAVE_BELOW_GRADE_PERCENT = 5.5;
 
+/**
+ * The power a rider tucks into the aero position above: **280 W**, with
+ * {@link AERO_ABOVE_RPM}, on ground within {@link AERO_WITHIN_GRADE_PERCENT}.
+ * ⚠️ **Chosen, for the owner to tune**: a hard seated effort for an ordinary
+ * rider, absolute for {@link STAND_ABOVE_WATTS}'s reason. Kept until the
+ * power falls below {@link AERO_LEAVE_BELOW_WATTS}.
+ */
+export const AERO_ABOVE_WATTS = 280;
+/** The power a tucked rider sits back up below: **240 W**. ⚠️ Chosen. */
+export const AERO_LEAVE_BELOW_WATTS = 240;
+/**
+ * The cadence a rider tucks above, with {@link AERO_ABOVE_WATTS}: **90 rpm**.
+ * ⚠️ Chosen: a high seated cadence, well clear of standing's 65.
+ */
+export const AERO_ABOVE_RPM = 90;
+/** The cadence a tucked rider sits back up below: **84 rpm**. ⚠️ Chosen. */
+export const AERO_LEAVE_BELOW_RPM = 84;
+/**
+ * Flat or rolling ground, for the tuck: a grade within **±3 %**. ⚠️ Chosen:
+ * steeper uphill a hard effort is a climb, steeper downhill it is a descent,
+ * whose drops rule is its own. Kept within {@link AERO_LEAVE_BEYOND_GRADE_PERCENT}.
+ */
+export const AERO_WITHIN_GRADE_PERCENT = 3;
+/** The grade either way a tucked rider sits back up beyond: **±4.5 %**. ⚠️ Chosen. */
+export const AERO_LEAVE_BEYOND_GRADE_PERCENT = 4.5;
+
 /** The speed a rider goes to the drops at: **12.5 m/s, 45 km/h**. ⚠️ Chosen. */
 export const DROPS_ABOVE_METRES_PER_SECOND = 12.5;
 /** The speed a rider in the drops comes back up below: **11.1 m/s, 40 km/h**. */
@@ -113,7 +144,7 @@ export const POSTURE_TRANSITION_SECONDS = 0.8;
 
 /**
  * The position {@link RidingInputs} ask for, given the one being drawn — the
- * four rules with their hysteresis. A pure function.
+ * five rules with their hysteresis. A pure function.
  */
 export function wantedPosture(
   inputs: RidingInputs | undefined,
@@ -134,6 +165,16 @@ export function wantedPosture(
     cadence < (stood ? STAND_LEAVE_ABOVE_RPM : STAND_BELOW_RPM) &&
     power > (stood ? STAND_LEAVE_BELOW_WATTS : STAND_ABOVE_WATTS);
   if (moving && !coasting && (steep || grinding)) return 'standing';
+  const tucked = current === 'aero';
+  const rolling =
+    Number.isFinite(grade) &&
+    Math.abs(grade) <= (tucked ? AERO_LEAVE_BEYOND_GRADE_PERCENT : AERO_WITHIN_GRADE_PERCENT);
+  const hard =
+    cadence !== undefined &&
+    power !== undefined &&
+    cadence > (tucked ? AERO_LEAVE_BELOW_RPM : AERO_ABOVE_RPM) &&
+    power > (tucked ? AERO_LEAVE_BELOW_WATTS : AERO_ABOVE_WATTS);
+  if (moving && rolling && hard) return 'aero';
   const inDrops = current === 'drops';
   const fast =
     Number.isFinite(speed) &&

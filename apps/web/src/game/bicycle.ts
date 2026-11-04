@@ -1180,8 +1180,10 @@ export function emptyRiderJoints(): RiderJoints {
  * hands on the bar are all the bicycle's. @see RIDER_UPPER_BODY_PARTS
  *
  * `stance` is where the hips, the shoulders and the hands are — #1999,
- * {@link stanceOf}. Absent, it is the hoods, seated, which is every joint
- * exactly where it was before #1999.
+ * {@link stanceOf}. Absent, it is the hoods, seated. ⚠️ Since the owner's
+ * ruling of 2026-11-04 the hoods' grip is the hood itself, out at the bend,
+ * and its back is 48° rather than 44°: the legs are where they were before
+ * #1999, the hands and the shoulders are not.
  */
 export function riderJoints(
   crankAngle: number,
@@ -1206,7 +1208,7 @@ export function riderJoints(
     const knee = kneeBetween(hipY, hipZ, footY, footZ);
     set(into.foot[index], side * HIP_ACROSS, footY, footZ);
     set(into.knee[index], side * HIP_ACROSS, knee.y, knee.z);
-    set(into.grip[index], side * SHOULDER_ACROSS, stance.gripY, stance.gripZ);
+    set(into.grip[index], side * stance.gripX, stance.gripY, stance.gripZ);
   }
   return into;
 }
@@ -1913,12 +1915,15 @@ export function turningCadence(cadence: SensorReading): number | undefined {
 
 /**
  * A position the rider is DRAWN in — #1999: one of `rider.ts`'s three seated
- * {@link RidingPosition}s, whose hands are {@link handPosition}'s, or out of
- * the saddle. Which one is `posture.ts`'s choice. Drawn only: physics' drag
+ * {@link RidingPosition}s, whose hands are {@link handPosition}'s, out of
+ * the saddle, or — the owner's ruling of 2026-11-04, *"Yes, add aero"* — a
+ * low aero tuck in the drops for a hard seated effort. Which one is
+ * `posture.ts`'s choice. ⚠️ `'aero'` is a DRAWN posture only and never a
+ * {@link RidingPosition}: nothing charges it a drag area. Drawn only: physics' drag
  * (`rider.ts` §`ridingPositionDragArea`) reads the rider's own choice, never
  * this.
  */
-export type DrawnPosture = RidingPosition | 'standing';
+export type DrawnPosture = RidingPosition | 'standing' | 'aero';
 
 /**
  * Where a rider's hips, shoulders and hands are, in the bicycle's frame —
@@ -1930,8 +1935,31 @@ export interface RiderStance {
   hipZ: number;
   shoulderY: number;
   shoulderZ: number;
+  /**
+   * Where on the bar the HAND holds, the rider's `+X` side (the `−X` hand is
+   * its mirror) — the point the drawn hand's middle is put on, never the
+   * wrist. ⚠️ Since the owner's ruling of 2026-11-04 (*"Fix hands on bars
+   * first"*): the wrist used to be put here, 4 cm inside the bend, and the
+   * hand then hung 12 cm past it, inward and low, at the hips' width and
+   * height — which from the chase camera looked like hands on the hips.
+   */
+  gripX: number;
   gripY: number;
   gripZ: number;
+  /**
+   * How far the elbow's bend is turned out from straight down, in radians, at
+   * rest (`RiderMotion.elbow` swings it further) — #1999. 45° was every
+   * position's until 2026-11-04.
+   */
+  elbowOut: number;
+  /**
+   * How far the elbow's bend is turned back from straight down toward the
+   * saddle, in radians — #1999, the owner's ruling of 2026-11-04: a bent arm
+   * whose elbow points down and back reads from behind as reaching for the
+   * bar, where one pointing out to the side read as a hand on the hip. Most
+   * in the aero tuck, whose forearms are in.
+   */
+  elbowBack: number;
   /** How much of a standing rider's motion is drawn, 0 to 1. @see riderMotion */
   standing: number;
   /**
@@ -1963,38 +1991,86 @@ const STANDING_HIP_Z = HIP_Z + 0.18;
 const DEGREES = Math.PI / 180;
 
 /**
- * Each posture's stance. ⚠️ The hoods' is exactly the joints before #1999.
+ * Where a hand on the tops holds the bar: **0.17 m** out, just inside where
+ * each bend leaves the tops (0.2 m) — #1999. ⚠️ Chosen: any further in and
+ * the chase camera loses the hands behind the hips.
+ */
+const TOPS_GRIP_ACROSS = 0.17;
+
+/** The back's length from the hips' middle to the shoulders' middle, seated on the hoods. */
+const BACK_LENGTH = Math.hypot(SHOULDER_Y - HIP_Y, SHOULDER_Z - HIP_Z);
+
+/**
+ * Each seated position's back above the horizontal, from the hips' middle to
+ * the shoulders' middle — #1999. ⚠️ **Chosen to read from the chase camera**,
+ * on the owner's rulings of 2026-11-03 and 2026-11-04, and for the owner to
+ * tune: the tops 64°, the hoods 48°, the drops 22° and the aero tuck 12°
+ * (*"a flat back"*). The hoods' were 44° until 2026-11-04, the realistic
+ * body's arms bent nearly square to reach the hoods from there; at 48° they
+ * are a little straighter, and the positions are further apart. Every
+ * position keeps the back's length.
+ */
+const TOPS_BACK_DEGREES = 64;
+const HOODS_BACK_DEGREES = 48;
+const DROPS_BACK_DEGREES = 22;
+const AERO_BACK_DEGREES = 12;
+
+/** The shoulders' middle for a back at `degrees` above the horizontal, from the seated hips. */
+function backAt(degrees: number): { readonly y: number; readonly z: number } {
+  return {
+    y: HIP_Y + BACK_LENGTH * Math.sin(degrees * DEGREES),
+    z: HIP_Z + BACK_LENGTH * Math.cos(degrees * DEGREES),
+  };
+}
+
+/**
+ * Each posture's stance. ⚠️ The hoods' was exactly the joints before #1999
+ * until the owner's ruling of 2026-11-04 put the hands on the bar: its hips
+ * still are, its back is 48° rather than 44°, and its grip is the hood
+ * itself, out at the bend ({@link BAR_HALF_WIDTH}), where a wrist 4 cm inside
+ * it used to be.
  *
- * ⚠️ **Exaggerated on purpose**, on the owner's ruling of 2026-11-03: from the
- * chase camera behind, the first figures (the back 33° in the drops and 55° on
- * the tops, against 46° on the hoods) all looked like the hoods, and the hands
- * are hidden. So the drops take the back down to about 22° and the head down
- * with it, and the tops sit the torso up to about 60° with the head up, which
- * is as far back as the realistic body's arms still reach the bar. Every
- * figure is chosen to read, not measured; the back's length from the hips is
- * kept within a centimetre of the hoods', so only its angle changes.
+ * ⚠️ **Exaggerated on purpose**, on the owner's rulings of 2026-11-03 and
+ * 2026-11-04: from the chase camera behind, the first figures (the back 33° in
+ * the drops and 55° on the tops, against 46° on the hoods) all looked like the
+ * hoods. So the drops take the back down to 22° and the head down with it,
+ * the tops sit the torso up to 64° with the head up, and the aero tuck is
+ * flatter than the drops at 12° ({@link TOPS_BACK_DEGREES} and its
+ * neighbours). The realistic body's arms are long for this bicycle's
+ * cockpit, so they bend in every position; each elbow is turned down and
+ * BACK rather than out to the side, because a bent arm whose elbow pointed
+ * out (45° in every position until 2026-11-04) drew hands-on-hips from
+ * behind. The tuck's elbows are in and furthest back, its forearms in. Every
+ * figure is chosen to read, not measured, and is the owner's to tune; the
+ * back's length from the hips is kept, so only its angle changes.
  * `bicycle.test.ts` and `realistic-textures.test.ts` hold the minimums apart.
  */
 const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
-  // Sitting up, hands on the tops: the torso upright, the head up, the arms
-  // nearly straight (as far back as the arms reach the bar).
+  // Sitting up, hands on the tops just inside the bends: the torso upright,
+  // the head up, the elbows in and down.
   upright: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
-    shoulderY: SHOULDER_Y + 0.065,
-    shoulderZ: SHOULDER_Z - 0.09,
+    shoulderY: backAt(TOPS_BACK_DEGREES).y,
+    shoulderZ: backAt(TOPS_BACK_DEGREES).z,
+    gripX: TOPS_GRIP_ACROSS,
     gripY: handPosition('upright').y,
     gripZ: handPosition('upright').z,
+    elbowOut: 15 * DEGREES,
+    elbowBack: 20 * DEGREES,
     standing: 0,
     headPitch: -8 * DEGREES,
   },
   hoods: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
-    shoulderY: SHOULDER_Y,
-    shoulderZ: SHOULDER_Z,
+    shoulderY: backAt(HOODS_BACK_DEGREES).y,
+    shoulderZ: backAt(HOODS_BACK_DEGREES).z,
+    gripX: BAR_HALF_WIDTH,
     gripY: GRIP_Y,
     gripZ: GRIP_Z,
+    elbowOut: 25 * DEGREES,
+    elbowBack: 30 * DEGREES,
     standing: 0,
     headPitch: 0,
   },
@@ -2003,12 +2079,31 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
   drops: {
     hipY: HIP_Y,
     hipZ: HIP_Z,
-    shoulderY: SHOULDER_Y - 0.16,
-    shoulderZ: SHOULDER_Z + 0.1,
+    shoulderY: backAt(DROPS_BACK_DEGREES).y,
+    shoulderZ: backAt(DROPS_BACK_DEGREES).z,
+    gripX: BAR_HALF_WIDTH,
     gripY: handPosition('drops').y,
     gripZ: handPosition('drops').z,
+    elbowOut: 30 * DEGREES,
+    elbowBack: 30 * DEGREES,
     standing: 0,
     headPitch: 8 * DEGREES,
+  },
+  // The aero tuck — the owner's ruling of 2026-11-04: in the drops with the
+  // back flatter still and the head low, the elbows in and back so the
+  // forearms are level and tucked. @see AERO_BACK_DEGREES
+  aero: {
+    hipY: HIP_Y,
+    hipZ: HIP_Z,
+    shoulderY: backAt(AERO_BACK_DEGREES).y,
+    shoulderZ: backAt(AERO_BACK_DEGREES).z,
+    gripX: BAR_HALF_WIDTH,
+    gripY: handPosition('drops').y,
+    gripZ: handPosition('drops').z,
+    elbowOut: 5 * DEGREES,
+    elbowBack: 60 * DEGREES,
+    standing: 0,
+    headPitch: 4 * DEGREES,
   },
   // Out of the saddle, hands on the hoods, the shoulders over the bar.
   standing: {
@@ -2016,8 +2111,11 @@ const STANCES: Readonly<Record<DrawnPosture, Readonly<RiderStance>>> = {
     hipZ: STANDING_HIP_Z,
     shoulderY: SHOULDER_Y + 0.06,
     shoulderZ: SHOULDER_Z + 0.14,
+    gripX: BAR_HALF_WIDTH,
     gripY: GRIP_Y,
     gripZ: GRIP_Z,
+    elbowOut: 15 * DEGREES,
+    elbowBack: 25 * DEGREES,
     standing: 1,
     headPitch: 0,
   },
@@ -2051,8 +2149,11 @@ export function blendStance(
   into.hipZ = from.hipZ + (to.hipZ - from.hipZ) * t;
   into.shoulderY = from.shoulderY + (to.shoulderY - from.shoulderY) * t;
   into.shoulderZ = from.shoulderZ + (to.shoulderZ - from.shoulderZ) * t;
+  into.gripX = from.gripX + (to.gripX - from.gripX) * t;
   into.gripY = from.gripY + (to.gripY - from.gripY) * t;
   into.gripZ = from.gripZ + (to.gripZ - from.gripZ) * t;
+  into.elbowOut = from.elbowOut + (to.elbowOut - from.elbowOut) * t;
+  into.elbowBack = from.elbowBack + (to.elbowBack - from.elbowBack) * t;
   into.standing = from.standing + (to.standing - from.standing) * t;
   into.headPitch = from.headPitch + (to.headPitch - from.headPitch) * t;
   return into;

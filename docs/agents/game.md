@@ -240,24 +240,38 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         held ride holds it. The stylised rider does not move
                         ⚠️ **Since #1999 it is not always on the hoods**:
                         `riderJoints` takes a `RiderStance` (hips, shoulders,
-                        hands) per `DrawnPosture` — the tops, the hoods, the
-                        drops, or out of the saddle — and `riderMotion` scales
-                        the rock by effort and rocks a standing rider's
-                        bicycle. Absent a stance, every joint is as before.
-                        Exaggerated on the owner's ruling of 2026-11-03 so
-                        they read from the chase camera: the back about 22°
-                        in the drops and 60° on the tops (46° on the hoods),
-                        the head turned down or up (`headPitch`), a 6° trunk
-                        rock and the elbows swinging out with each downstroke
-                        (`RiderMotion.elbow`). The minimums are held by tests.
+                        hands, elbows) per `DrawnPosture` — the tops, the
+                        hoods, the drops, the aero tuck, or out of the saddle
+                        — and `riderMotion` scales the rock by effort and
+                        rocks a standing rider's bicycle. Absent a stance it
+                        is the hoods. Exaggerated on the owner's rulings of
+                        2026-11-03 and 2026-11-04 so they read from the chase
+                        camera: the back 64° on the tops, 48° on the hoods,
+                        22° in the drops and 12° tucked, the head turned down
+                        or up (`headPitch`), a 6° trunk rock and the elbows
+                        swinging out with each downstroke (`RiderMotion.elbow`).
+                        ⚠️ **The grip is where the drawn HAND's middle goes,
+                        not the wrist** (2026-11-04, "Fix hands on bars
+                        first"): `RealisticRiderBelt` measures each hand off
+                        the body's rest pose and solves the forearm and hand
+                        as one segment to the grip, across the bar as well as
+                        along it. The wrist on the grip had left the hand on
+                        the hips. Each elbow bends down and back
+                        (`elbowOut`, `elbowBack`), never out to the side. The
+                        minimums are held by tests on the real body.
     src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
                         the owner's ruling of 2026-11-02): standing on a climb
-                        (under 65 rpm with 300 W, or over 7 %), the drops when
+                        (under 65 rpm with 300 W, or over 7 %), the aero tuck
+                        for a hard seated effort on flat or rolling ground
+                        (over 280 W and 90 rpm within ±3 %, at any speed — the
+                        ruling of 2026-11-04, chosen figures), the drops when
                         fast, the tops when easy or coasting, else the hoods —
                         each with a gentler threshold to keep it, a 0.75 s
                         dwell before a change, and a 0.8 s eased move from
                         wherever the body is. On the RIDE's clock, from
-                        `RiderMarker.riding` (`scene.ts` §`ridingOf`). ⚠️
+                        `RiderMarker.riding` (`scene.ts` §`ridingOf`), whose
+                        speed is each rider's OWN — never the drawn speed,
+                        which runs 15 % over it giving a bend's lag back. ⚠️
                         **Drawn only**: the drag area follows the rider's own
                         `RidingPosition`, never this. The realistic belt holds
                         one tracker per body slot; the stylised rider is one

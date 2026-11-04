@@ -1055,7 +1055,16 @@ export interface PlacedRider {
 interface Rider {
   readonly kind: RiderMarker['kind'];
   readonly distance: number;
+  /** How fast it is DRAWN — eased for a bend, and above its own speed while it gives the lag back (#1998). */
   readonly speed: number;
+  /**
+   * How fast it is actually going — its own odometer's speed, never the drawn
+   * one — #1999: what its position on the bicycle is chosen from. ⚠️ The
+   * owner fed 55 km/h in and the marker said about 63: that was the drawn
+   * speed giving back a bend's lag, `bend-easing.ts` §`GIVE_BACK_SHARE`'s
+   * 15 % over the rider's own.
+   */
+  readonly ownSpeed: number;
   readonly crankAngle: number | undefined;
   /** Whether a reading turns this rider's cranks, before a bend parks them. @see RiderMarker.pedalling */
   readonly pedalling: boolean;
@@ -1106,6 +1115,7 @@ function ridersOnTheRoad(
       kind: 'rider',
       distance: drawn.distance,
       speed: drawn.speed,
+      ownSpeed: input.state.ride.speed,
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
       steered: input.steeredLateral,
@@ -1124,6 +1134,7 @@ function ridersOnTheRoad(
       kind: 'bot',
       distance: place.distance,
       speed: place.speed,
+      ownSpeed: bot?.state.speed ?? 0,
       crankAngle: pedalling(input.botDistance),
       // #625: a simulated rider pedals while it moves — its cranks turn from
       // its odometer, so a stopped one's are still.
@@ -1152,6 +1163,7 @@ function ridersOnTheRoad(
       kind: 'ghost',
       distance: place.distance,
       speed: place.speed,
+      ownSpeed: speed,
       crankAngle: pedalling(at),
       pedalling: speed > 0,
     });
@@ -1175,6 +1187,7 @@ function ridersOnTheRoad(
       kind: 'remote',
       distance: place.distance,
       speed: place.speed,
+      ownSpeed: remote.speedMetresPerSecond,
       // ⚠️ From their own odometer at a fixed gear, never an invented rate: a
       // frame carries no cadence (`@onyourleft/protocol` §`FrameRider`), and
       // `bicycle.ts` §`simulatedCrankAngle` is the rule for a rider with none.
@@ -1194,6 +1207,7 @@ function ridersOnTheRoad(
       kind: 'bot',
       distance: bot.distanceMetres,
       speed: bot.speedMetresPerSecond,
+      ownSpeed: bot.speedMetresPerSecond,
       crankAngle: pedalling(bot.distanceMetres),
       pedalling: bot.speedMetresPerSecond > 0,
       laned: bot.lateralMetres,
@@ -1243,14 +1257,15 @@ function ridersOnTheRoad(
 /**
  * What a rider is doing, for `posture.ts` — #1999: what it has of a cadence
  * and a power, the grade under it (the simulation's for the rider and the
- * pacer, the route's at its drawn distance for everyone else), and its speed.
+ * pacer, the route's at its drawn distance for everyone else), and its own
+ * speed — never the drawn one, which a bend eases and its exit hurries.
  */
 function ridingOf(rider: Rider, profile: RouteProfile): RidingInputs {
   return {
     cadence: rider.cadence,
     power: rider.power,
     grade: rider.grade ?? gradeAt(profile, metres(rider.distance)),
-    speed: rider.speed,
+    speed: rider.ownSpeed,
   };
 }
 

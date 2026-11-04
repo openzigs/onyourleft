@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The rider's drawn position on the bicycle — #1999: each of the owner's four
+ * The rider's drawn position on the bicycle — #1999: each of the owner's five
  * rules, the hysteresis and the dwell that keep it from flickering, and the
  * transition that draws a change as a movement.
  */
@@ -11,6 +11,12 @@ import { describe, expect, it } from 'vitest';
 import { emptyRiderStance, stanceOf, type DrawnPosture, type RiderStance } from './bicycle';
 import type { RidingInputs } from './port';
 import {
+  AERO_ABOVE_RPM,
+  AERO_ABOVE_WATTS,
+  AERO_LEAVE_BELOW_RPM,
+  AERO_LEAVE_BELOW_WATTS,
+  AERO_LEAVE_BEYOND_GRADE_PERCENT,
+  AERO_WITHIN_GRADE_PERCENT,
   DROPS_ABOVE_METRES_PER_SECOND,
   DROPS_DESCENT_GRADE_PERCENT,
   DROPS_DESCENT_METRES_PER_SECOND,
@@ -103,6 +109,86 @@ describe('the four rules — #1999', () => {
       wantedPosture(riding({ grade: 9, speed: DROPS_ABOVE_METRES_PER_SECOND + 1 }), 'hoods'),
     ).toBe('standing');
     expect(wantedPosture(riding({ power: 50, speed: 14 }), 'hoods')).toBe('drops');
+  });
+});
+
+/**
+ * The fifth position — the owner's ruling of 2026-11-04, *"Yes, add aero"*: a
+ * low aero tuck for a hard seated effort, on flat or rolling ground at a high
+ * power and a high cadence, even below the drops' 45 km/h.
+ */
+describe('the aero tuck for a hard seated effort — #1999', () => {
+  /** Hard, fast-spinning, on the flat at 32 km/h: under the drops' speed, on the flat or a descent. */
+  const HARD: RidingInputs = {
+    cadence: AERO_ABOVE_RPM + 5,
+    power: AERO_ABOVE_WATTS + 40,
+    grade: 0,
+    speed: 9,
+  };
+  const hard = (change: Partial<RidingInputs>): RidingInputs => ({ ...HARD, ...change });
+
+  it('tucks at a high power and a high cadence on flat or rolling ground, below the drops’ speed', () => {
+    expect(HARD.speed).toBeLessThan(DROPS_DESCENT_METRES_PER_SECOND);
+    expect(wantedPosture(HARD, 'hoods')).toBe('aero');
+    // Rolling, either way, up to the limit.
+    expect(wantedPosture(hard({ grade: AERO_WITHIN_GRADE_PERCENT }), 'hoods')).toBe('aero');
+    expect(wantedPosture(hard({ grade: -AERO_WITHIN_GRADE_PERCENT }), 'hoods')).toBe('aero');
+    // And above the drops' speed, a hard effort is still the tuck.
+    expect(wantedPosture(hard({ speed: 14 }), 'hoods')).toBe('aero');
+  });
+
+  it('takes it on each threshold and not below it', () => {
+    expect(wantedPosture(hard({ power: AERO_ABOVE_WATTS }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ power: AERO_ABOVE_WATTS + 1 }), 'hoods')).toBe('aero');
+    expect(wantedPosture(hard({ cadence: AERO_ABOVE_RPM }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ cadence: AERO_ABOVE_RPM + 1 }), 'hoods')).toBe('aero');
+    expect(wantedPosture(hard({ grade: AERO_WITHIN_GRADE_PERCENT + 0.5 }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ grade: -AERO_WITHIN_GRADE_PERCENT - 0.5 }), 'hoods')).toBe('hoods');
+  });
+
+  it('needs both readings, and a rider moving', () => {
+    // The pacer has a power and no cadence; a rule whose reading is missing is not met.
+    expect(wantedPosture(hard({ cadence: undefined }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ power: undefined }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ speed: 0 }), 'hoods')).toBe('hoods');
+  });
+
+  it('puts standing before the tuck, and the tuck before the drops', () => {
+    // A climb steep enough to stand on is a climb, however hard the effort.
+    expect(wantedPosture(hard({ grade: 9 }), 'aero')).toBe('standing');
+    // A fast descent at an easy effort is the drops; a hard effort fast on the flat is the tuck.
+    expect(wantedPosture(hard({ power: 150, grade: -5, speed: 14 }), 'hoods')).toBe('drops');
+  });
+
+  it('keeps the tuck until the power, the cadence or the grade is past its gentler threshold', () => {
+    const power = (AERO_ABOVE_WATTS + AERO_LEAVE_BELOW_WATTS) / 2;
+    expect(wantedPosture(hard({ power }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ power }), 'aero')).toBe('aero');
+    expect(wantedPosture(hard({ power: AERO_LEAVE_BELOW_WATTS - 1 }), 'aero')).toBe('hoods');
+    const cadence = (AERO_ABOVE_RPM + AERO_LEAVE_BELOW_RPM) / 2;
+    expect(wantedPosture(hard({ cadence }), 'hoods')).toBe('hoods');
+    expect(wantedPosture(hard({ cadence }), 'aero')).toBe('aero');
+    expect(wantedPosture(hard({ cadence: AERO_LEAVE_BELOW_RPM - 1 }), 'aero')).toBe('hoods');
+    const grade = (AERO_WITHIN_GRADE_PERCENT + AERO_LEAVE_BEYOND_GRADE_PERCENT) / 2;
+    for (const sign of [1, -1]) {
+      expect(wantedPosture(hard({ grade: sign * grade }), 'hoods')).toBe('hoods');
+      expect(wantedPosture(hard({ grade: sign * grade }), 'aero')).toBe('aero');
+      expect(
+        wantedPosture(hard({ grade: sign * (AERO_LEAVE_BEYOND_GRADE_PERCENT + 0.5) }), 'aero'),
+      ).toBe('hoods');
+    }
+  });
+
+  it('is taken only once it has been wanted for the dwell, like every other position', () => {
+    const tracker = emptyPostureTracker();
+    trackPosture(tracker, ORDINARY, 10);
+    // First asked for at 11 s of riding, then every frame.
+    for (let at = 11; at < 11 + POSTURE_DWELL_SECONDS - 0.01; at += 1 / 60) {
+      trackPosture(tracker, HARD, at);
+      expect(tracker.posture).toBe('hoods');
+    }
+    trackPosture(tracker, HARD, 11 + POSTURE_DWELL_SECONDS);
+    expect(tracker.posture).toBe('aero');
   });
 });
 

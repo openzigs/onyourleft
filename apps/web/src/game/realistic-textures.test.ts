@@ -39,7 +39,13 @@ import { KIT_COLOURS } from '@onyourleft/store';
 
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
-import { handPosition, KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
+import {
+  handPosition,
+  KIT_PALETTE,
+  PACER_KIT,
+  RIDER_HALF_WIDTH_METRES,
+  type RiderKit,
+} from './bicycle';
 import { WOOD_SWAY_SHARE } from './foliage-light';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
@@ -887,8 +893,19 @@ describe('the realistic rider moves like a rider — #625', () => {
       for (const breath of [0.5, 1.5]) {
         const still = posed(riders, crank, 0, 0);
         const moving = posed(riders, crank, 1, breath);
-        for (const name of ['wristL', 'wristR']) {
-          furthestHand = Math.max(furthestHand, distance(at(still, name), at(moving, name)));
+        // ⚠️ The drawn hand, not the wrist bone, since the owner's ruling of
+        // 2026-11-04: the wrist is behind the hand on the forearm's line, so it
+        // moves with the elbow while the hand stays on the grip.
+        const stillHands = (['wristL', 'wristR'] as const).map((name) => {
+          posed(riders, crank, 0, 0);
+          return handOf(riders, name);
+        });
+        posed(riders, crank, 1, breath);
+        for (const [index, name] of (['wristL', 'wristR'] as const).entries()) {
+          furthestHand = Math.max(
+            furthestHand,
+            distance(stillHands[index] ?? [], handOf(riders, name)),
+          );
         }
         for (const name of ['footL', 'footR']) {
           furthestFoot = Math.max(furthestFoot, distance(at(still, name), at(moving, name)));
@@ -1032,9 +1049,11 @@ describe('the realistic rider moves like a rider — #625', () => {
     const renderer = await loadedOn(TABLET);
     const riders = renderer.realisticRidersOfLoadedWorld();
     if (riders === undefined) throw new Error('no world');
-    // Both on the flat below the drops' speed and above the tops' power: the hoods.
+    // Both on the flat below the drops' speed and above the tops' power: the
+    // hoods. ⚠️ The hard effort's cadence is under the aero tuck's (since the
+    // owner's ruling of 2026-11-04, a hard effort spun faster is the tuck).
     const easy: RidingInputs = { cadence: 70, power: 140, grade: 0, speed: 8 };
-    const hard: RidingInputs = { cadence: 105, power: 360, grade: 0, speed: 11 };
+    const hard: RidingInputs = { cadence: 88, power: 375, grade: 0, speed: 11 };
     const rockOf = (riding: RidingInputs): number =>
       shoulders(ridden(riders, riding, HALF_PI)) - shoulders(ridden(riders, riding, 3 * HALF_PI));
     const easyRock = rockOf(easy);
@@ -1163,7 +1182,7 @@ describe('the realistic rider moves like a rider — #625', () => {
     expect(hoods.down - tops.down).toBeGreaterThan(5);
   }, 120_000);
 
-  it('#1999 — reads from behind: the shoulders rock and the elbows swing across, with the hands kept on the bar', async () => {
+  it('#1999 — reads from behind: the shoulders rock and the elbows swing across', async () => {
     const renderer = await loadedOn(TABLET);
     const riders = renderer.realisticRidersOfLoadedWorld();
     if (riders === undefined) throw new Error('no world');
@@ -1180,26 +1199,186 @@ describe('the realistic rider moves like a rider — #625', () => {
     expect(rock).toBeGreaterThan(0.06);
     // Out (+X) on +X's own downstroke.
     expect(elbow).toBeGreaterThan(0.05);
-    // Every seated position, all round the stroke: each wrist on its grip.
-    const grips: readonly [RidingInputs, { y: number; z: number }][] = [
-      [EASY, handPosition('upright')],
-      [ORDINARY, handPosition('hoods')],
-      [FAST, handPosition('drops')],
+  }, 120_000);
+
+  /** #1999's fifth position: hard and spinning fast on the flat, below the drops' speed. */
+  const AERO: RidingInputs = { cadence: 100, power: 330, grade: 0, speed: 9 };
+
+  /**
+   * The middle of one drawn hand — every vertex of the body whose heaviest
+   * weight is on that wrist, skinned by three as the GPU skins them — in the
+   * bicycle's frame (this rider is placed at the origin facing `+Z`). The
+   * hand as the chase camera sees it, not a bone.
+   */
+  const handOf = (riders: Riders, wrist: 'wristL' | 'wristR'): readonly number[] => {
+    const body = riders.bodies[0];
+    if (body === undefined) throw new Error('no body');
+    const wristAt = body.skeleton.bones.findIndex((each) => each.name === wrist);
+    const carried = body.geometry.getAttribute('skinIndex');
+    const weights = body.geometry.getAttribute('skinWeight');
+    // A three vector without importing three here (`three-seam.test.ts`).
+    const vertex = body.position.clone();
+    body.updateMatrixWorld(true);
+    const sum = [0, 0, 0];
+    let count = 0;
+    for (let at = 0; at < carried.count; at += 1) {
+      let most = 0;
+      let heaviest = -1;
+      for (let slot = 0; slot < 4; slot += 1) {
+        if (weights.getComponent(at, slot) > most) {
+          most = weights.getComponent(at, slot);
+          heaviest = carried.getComponent(at, slot);
+        }
+      }
+      if (heaviest !== wristAt) continue;
+      body.getVertexPosition(at, vertex).applyMatrix4(body.matrixWorld);
+      sum[0] = (sum[0] ?? 0) + vertex.x;
+      sum[1] = (sum[1] ?? 0) + vertex.y;
+      sum[2] = (sum[2] ?? 0) + vertex.z;
+      count += 1;
+    }
+    expect(count).toBeGreaterThan(100);
+    return sum.map((each) => each / count);
+  };
+
+  /**
+   * A world point in the first rider's bicycle's own frame — through the
+   * frame mesh's own instance matrix, a turn and a move, so its inverse is
+   * the turn's transpose. A standing rider's bicycle rocks under them.
+   */
+  const inBicycle = (riders: Riders, point: readonly number[]): readonly number[] => {
+    const frame = riders.group.children[0];
+    if (frame === undefined || !('instanceMatrix' in frame)) throw new Error('no frame');
+    const m = (frame as { instanceMatrix: { array: ArrayLike<number> } }).instanceMatrix.array;
+    const d = [0, 1, 2].map((row) => (point[row] ?? 0) - (m[12 + row] ?? 0));
+    return [0, 1, 2].map(
+      (column) =>
+        (m[column * 4] ?? 0) * (d[0] ?? 0) +
+        (m[column * 4 + 1] ?? 0) * (d[1] ?? 0) +
+        (m[column * 4 + 2] ?? 0) * (d[2] ?? 0),
+    );
+  };
+
+  it('#1999 — puts each drawn hand on its grip in every position, across the bar as well as along it, all round the stroke', async () => {
+    // The owner's ruling of 2026-11-04, "Fix hands on bars first": the frames
+    // showed the hands on the hips. The WRIST was on the grip — 4 cm inside
+    // the bend — and the hand hung 12 cm past it, inward and low, at the hips.
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const bend = RIDER_HALF_WIDTH_METRES;
+    const grips: readonly [string, RidingInputs, { y: number; z: number }, number | undefined][] = [
+      // The tops: inside the bends, and out past the hips.
+      ['tops', EASY, handPosition('upright'), undefined],
+      ['hoods', ORDINARY, handPosition('hoods'), bend],
+      ['drops', FAST, handPosition('drops'), bend],
+      ['aero', AERO, handPosition('drops'), bend],
+      ['standing', CLIMBING, handPosition('hoods'), bend],
     ];
-    let furthest = 0;
-    for (const [riding, grip] of grips) {
+    const off = { x: 0, y: 0, z: 0 };
+    let wristBehind = Number.POSITIVE_INFINITY;
+    for (const [name, riding, grip, across] of grips) {
       for (const crank of [0, HALF_PI, Math.PI, 3 * HALF_PI]) {
         const pose = ridden(riders, riding, crank);
-        for (const name of ['wristL', 'wristR']) {
-          const wrist = at(pose, name);
-          furthest = Math.max(
-            furthest,
-            Math.hypot((wrist[1] ?? 0) - grip.y, (wrist[2] ?? 0) - grip.z),
-          );
+        for (const [wrist, side] of [
+          ['wristL', 1],
+          ['wristR', -1],
+        ] as const) {
+          // In the bicycle's own frame, which a standing rider's rocks.
+          const hand = inBicycle(riders, handOf(riders, wrist));
+          const x = side * (hand[0] ?? 0);
+          if (across === undefined) {
+            expect(x, name).toBeGreaterThan(0.15);
+            expect(x, name).toBeLessThan(bend);
+          } else {
+            off.x = Math.max(off.x, Math.abs(x - across));
+          }
+          off.y = Math.max(off.y, Math.abs((hand[1] ?? 0) - grip.y));
+          off.z = Math.max(off.z, Math.abs((hand[2] ?? 0) - grip.z));
+          // The wrist is behind the hand it carries, never on the bar's far side.
+          const held = inBicycle(riders, at(pose, wrist));
+          wristBehind = Math.min(wristBehind, (hand[2] ?? 0) - (held[2] ?? 0));
         }
       }
     }
-    expect(furthest).toBeLessThan(0.001);
+    console.log(
+      `#1999: each drawn hand's middle at most ${(off.x * 1000).toFixed(1)} mm across, ` +
+        `${(off.y * 1000).toFixed(1)} mm up and ${(off.z * 1000).toFixed(1)} mm along off its grip; ` +
+        `the wrist at least ${(wristBehind * 100).toFixed(1)} cm behind it`,
+    );
+    expect(off.x).toBeLessThan(0.01);
+    expect(off.y).toBeLessThan(0.01);
+    expect(off.z).toBeLessThan(0.01);
+    expect(wristBehind).toBeGreaterThan(0.03);
+  }, 120_000);
+
+  it('#1999 — bends each elbow down and back rather than out to the side, so no position draws hands on the hips', async () => {
+    // The owner's ruling of 2026-11-04. The realistic body's arms are long for
+    // this bicycle, so they bend in every position; an elbow turned 45° out
+    // (every position's until then) drew the arms akimbo from behind.
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    // How far the elbow is out beyond the wider of its shoulder and its hand,
+    // at rest — the most each position allows. ⚠️ Chosen: the drops' elbows
+    // are allowed out, as a rider's in the drops are.
+    const allowed: readonly [string, RidingInputs, number][] = [
+      ['tops', EASY, 0.1],
+      ['hoods', ORDINARY, 0.1],
+      ['standing', CLIMBING, 0.1],
+      ['aero', AERO, 0.05],
+      ['drops', FAST, 0.16],
+    ];
+    const lines: string[] = [];
+    for (const [name, riding, most] of allowed) {
+      const pose = ridden(riders, riding, 0, 0);
+      const elbow = inBicycle(riders, at(pose, 'lowerarm01L'));
+      const shoulder = inBicycle(riders, at(pose, 'upperarm01L'));
+      const hand = inBicycle(riders, handOf(riders, 'wristL'));
+      const out = (elbow[0] ?? 0) - Math.max(shoulder[0] ?? 0, hand[0] ?? 0);
+      lines.push(`${name} ${(out * 100).toFixed(1)} cm`);
+      expect(out, name).toBeLessThan(most);
+      if (name === 'aero') {
+        // "Forearms in", and level: the tuck's forearm under 25° from level.
+        const wrist = inBicycle(riders, at(pose, 'wristL'));
+        const down = Math.atan2(
+          (elbow[1] ?? 0) - (wrist[1] ?? 0),
+          (wrist[2] ?? 0) - (elbow[2] ?? 0),
+        );
+        expect((down * 180) / Math.PI).toBeLessThan(25);
+      }
+    }
+    console.log(`#1999: each elbow out beyond its shoulder and its hand — ${lines.join(', ')}`);
+  }, 120_000);
+
+  it('#1999 — tucks into the aero position: a flatter back and a lower head than the hoods and the drops, and the forearms in', async () => {
+    // The owner's ruling of 2026-11-04, "Yes, add aero".
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const measured = (riding: RidingInputs): { back: number; head: number; elbows: number } => {
+      const pose = ridden(riders, riding, 0, 0);
+      const elbows = Math.abs(
+        (at(pose, 'lowerarm01L')[0] ?? 0) - (at(pose, 'lowerarm01R')[0] ?? 0),
+      );
+      return { back: backAngle(pose), head: helmetY(riders), elbows };
+    };
+    const hoods = measured(ORDINARY);
+    const drops = measured(FAST);
+    const aero = measured(AERO);
+    console.log(
+      `#1999: aero back ${aero.back.toFixed(1)}°, helmet ${aero.head.toFixed(3)} m, elbows ` +
+        `${(aero.elbows * 100).toFixed(1)} cm apart; drops ${drops.back.toFixed(1)}°, ` +
+        `${drops.head.toFixed(3)} m, ${(drops.elbows * 100).toFixed(1)} cm; hoods ` +
+        `${hoods.back.toFixed(1)}°, ${hoods.head.toFixed(3)} m, ${(hoods.elbows * 100).toFixed(1)} cm`,
+    );
+    // The stated minimums. ⚠️ Chosen to read from the chase camera.
+    expect(hoods.back - aero.back).toBeGreaterThan(28);
+    expect(drops.back - aero.back).toBeGreaterThan(6);
+    expect(hoods.head - aero.head).toBeGreaterThan(0.3);
+    expect(drops.head - aero.head).toBeGreaterThan(0.08);
+    // "Forearms in": the elbows closer together than in the drops.
+    expect(drops.elbows - aero.elbows).toBeGreaterThan(0.15);
   }, 120_000);
 });
 

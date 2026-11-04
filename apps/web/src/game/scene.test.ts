@@ -17,8 +17,17 @@ import type { RiderMarker, SceneFrame } from './port';
 import { qualitySettings } from './quality';
 import { SCATTER_KINDS, SCATTER_MAX_ITEMS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
+import { easedPlace, GIVE_BACK_SHARE } from './bend-easing';
+import { racingLine } from './racing-line';
 import { hairpinRoute, northRoute } from './route-fixtures-testing';
-import { cameraPose, ghostFinished, placedRiders, sceneFrame, type SceneInput } from './scene';
+import {
+  cameraPose,
+  drawnRiderDistance,
+  ghostFinished,
+  placedRiders,
+  sceneFrame,
+  type SceneInput,
+} from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
 import {
   GameSimulation,
@@ -1205,6 +1214,59 @@ describe('what each rider is doing, for the position it is drawn in — #1999', 
     const frame = sceneFrame({ profile: climb, origin, state });
     expect(ridingAt(frame, 'rider')?.power).toBeUndefined();
     expect(ridingAt(frame, 'rider')?.cadence).toBeUndefined();
+  });
+
+  it('gives the rider their own speed, not the drawn one hurrying out of a bend', () => {
+    // The owner fed 55 km/h in and the marker said about 63: 55 × 1.15, the
+    // drawn rider giving a hairpin's lag back (`bend-easing.ts`). Found here
+    // rather than typed: the first place past the hairpin where it does.
+    const own = 55 / 3.6;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const input: SceneInput = {
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        grade: gradePercent(-5),
+      },
+    };
+    // Non-vacuity: the rider IS drawn behind their odometer, catching up.
+    expect(drawnRiderDistance(input)).toBeLessThan(past);
+    expect(ridingAt(sceneFrame(input), 'rider')?.speed).toBe(own);
+  });
+
+  it('gives the pacer and a room’s rider their own speeds too', () => {
+    const own = 15;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        bot: {
+          state: { speed: metresPerSecond(own), distance: metres(past) },
+          distanceOnRoute: metres(past),
+          grade: gradePercent(-5),
+          power: watts(180),
+        },
+      },
+      botDistance: past,
+      remoteRiders: [{ riderId: 3, distanceMetres: past, speedMetresPerSecond: own }],
+    });
+    expect(ridingAt(frame, 'bot')?.speed).toBe(own);
+    expect(ridingAt(frame, 'remote')?.speed).toBe(own);
   });
 
   it('gives a lap race’s bots their speed and grade', () => {

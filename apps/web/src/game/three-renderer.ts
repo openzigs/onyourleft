@@ -12946,6 +12946,18 @@ export class RealisticRiderBelt {
   readonly #spin = new Quaternion();
   readonly #alongWorld = new Vector3();
   readonly #acrossWorld = new Vector3();
+  /**
+   * The owner's ruling of 2026-11-04, *"Fix hands on bars first"*: each hand,
+   * as the body's own mesh draws it — the middle of the vertices its wrist
+   * bone carries — measured once off the file's rest pose. `#handReach` is
+   * how far that middle is from the wrist, in metres at the body's scale, and
+   * `#handAlong` which way, in the wrist bone's own frame. Index 0 is `+X`.
+   */
+  readonly #handReach: [number, number] = [0, 0];
+  readonly #handAlong: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  readonly #handWanted = new Vector3();
+  readonly #wristAt = new Vector3();
+  readonly #handNow = new Vector3();
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -13012,6 +13024,15 @@ export class RealisticRiderBelt {
           .copy(boneOf(bones, 'head').matrixWorld)
           .invert()
           .multiply(ownHelmet.matrixWorld);
+        // And where each hand is from its wrist, off the same rest pose.
+        for (const index of [0, 1] as const) {
+          const wrist = boneOf(bones, `wrist.${index === 0 ? 'L' : 'R'}`);
+          const middle = handMiddle(skinned, skinned.skeleton.bones.indexOf(wrist), this.#a);
+          const offset = middle.sub(wrist.getWorldPosition(this.#b));
+          this.#handReach[index] = offset.length();
+          wrist.getWorldQuaternion(this.#world);
+          this.#handAlong[index].copy(offset).normalize().applyQuaternion(this.#world.invert());
+        }
       }
       ownHelmet.removeFromParent();
       root.visible = false;
@@ -13338,24 +13359,46 @@ export class RealisticRiderBelt {
     const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
     for (const index of [0, 1] as const) {
       const suffix = index === 0 ? 'L' : 'R';
-      // The arm: shoulder to the grip, the elbow out and down, 45° — #1999:
-      // swinging further out with its own downstroke.
+      // The arm: shoulder to the grip. ⚠️ The owner's ruling of 2026-11-04:
+      // the HAND goes on the grip. It is solved as the end of the forearm —
+      // the forearm and the hand one segment, the wrist held straight — so the
+      // middle of the drawn hand is on the grip and the wrist is behind it by
+      // the hand's own length. Putting the WRIST on the grip left the hand
+      // hanging 12 cm past the bar, inward and low, at the hips.
       const shoulder = boneOf(rider.bones, `upperarm01.${suffix}`).getWorldPosition(this.#a);
       const grip = toWorld(joints.grip[index], this.#b);
       const upper = this.#length(rider, `upperarm01.${suffix}`, `lowerarm01.${suffix}`);
       const fore = this.#length(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`);
-      const out = Math.PI / 4 + motion.elbow[index];
+      const reach = this.#handReach[index];
+      // The elbow's bend: out from straight down by the position's own angle,
+      // swung further with its downstroke, and turned back toward the saddle
+      // by the position's own angle.
+      const out = stance.elbowOut + motion.elbow[index];
       const pole = this.#c
-        .set((index === 0 ? 1 : -1) * Math.sin(out), -Math.cos(out), 0)
+        .set(
+          (index === 0 ? 1 : -1) * Math.sin(out),
+          -Math.cos(out) * Math.cos(stance.elbowBack),
+          -Math.cos(out) * Math.sin(stance.elbowBack),
+        )
         .transformDirection(rider.root.matrixWorld);
-      const elbow = twoBoneJoint(shoulder, grip, upper, fore, pole, this.#d);
+      const elbow = twoBoneJoint(shoulder, grip, upper, fore + reach, pole, this.#d);
+      const hand = this.#handWanted.copy(grip).sub(elbow).normalize();
+      const wrist = this.#wristAt.copy(elbow).addScaledVector(hand, fore);
       this.#aim(
         rider,
         `upperarm01.${suffix}`,
         `lowerarm01.${suffix}`,
         this.#c.copy(elbow).sub(shoulder),
       );
-      this.#aim(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`, this.#c.copy(grip).sub(elbow));
+      this.#aim(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`, this.#c.copy(wrist).sub(elbow));
+      // The hand itself, turned at the wrist to carry on the forearm's line.
+      const wristBone = boneOf(rider.bones, `wrist.${suffix}`);
+      wristBone.getWorldQuaternion(this.#world);
+      this.#turnBoneTo(
+        wristBone,
+        this.#handNow.copy(this.#handAlong[index]).applyQuaternion(this.#world),
+        hand,
+      );
       // The leg: hip to the pedal, the knee forward — `bicycle.ts`'s own rule.
       const hip = boneOf(rider.bones, `upperleg01.${suffix}`).getWorldPosition(this.#a);
       const foot = toWorld(joints.foot[index], this.#b);
@@ -13400,9 +13443,19 @@ export class RealisticRiderBelt {
     const bone = boneOf(rider.bones, boneName);
     const child = boneOf(rider.bones, childName);
     bone.getWorldPosition(this.#aimHead);
-    child.getWorldPosition(this.#aimCurrent).sub(this.#aimHead).normalize();
-    this.#aimWanted.copy(direction).normalize();
-    this.#turn.setFromUnitVectors(this.#aimCurrent, this.#aimWanted);
+    child.getWorldPosition(this.#aimCurrent).sub(this.#aimHead);
+    this.#turnBoneTo(bone, this.#aimCurrent, direction);
+  }
+
+  /**
+   * Turns `bone` by the least turn that takes the world direction `from` to
+   * `to`, and updates it and everything under it. Neither need be a unit
+   * vector; `from` is normalised in place. Allocates nothing.
+   */
+  #turnBoneTo(bone: Bone, from: Vector3, to: Vector3): void {
+    from.normalize();
+    this.#aimWanted.copy(to).normalize();
+    this.#turn.setFromUnitVectors(from, this.#aimWanted);
     bone.getWorldQuaternion(this.#world);
     this.#parent.identity();
     bone.parent?.getWorldQuaternion(this.#parent);
@@ -13425,6 +13478,36 @@ interface RealisticRiderSlot {
   angle: number;
   /** Which position this body is drawn in, over time — #1999. @see trackPosture */
   readonly posture: PostureTracker;
+}
+
+/**
+ * The middle of the vertices whose heaviest weight is on `bone` — for a wrist,
+ * the hand — in world space, where the skinned mesh draws them now: three's
+ * own CPU skinning, which is the GPU's. Written into `into`. #1999, the
+ * owner's ruling of 2026-11-04; run once, when a belt is built.
+ */
+function handMiddle(mesh: SkinnedMesh, bone: number, into: Vector3): Vector3 {
+  const carried = mesh.geometry.getAttribute('skinIndex');
+  const weights = mesh.geometry.getAttribute('skinWeight');
+  const vertex = new Vector3();
+  into.set(0, 0, 0);
+  let count = 0;
+  for (let at = 0; at < carried.count; at += 1) {
+    let most = 0;
+    let heaviest = -1;
+    for (let slot = 0; slot < 4; slot += 1) {
+      const weight = weights.getComponent(at, slot);
+      if (weight > most) {
+        most = weight;
+        heaviest = carried.getComponent(at, slot);
+      }
+    }
+    if (heaviest !== bone) continue;
+    into.add(mesh.getVertexPosition(at, vertex).applyMatrix4(mesh.matrixWorld));
+    count += 1;
+  }
+  if (count === 0) throw new Error('the rider model carries no hand on its wrist');
+  return into.divideScalar(count);
 }
 
 /**
