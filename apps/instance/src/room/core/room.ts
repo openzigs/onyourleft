@@ -1051,8 +1051,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     },
 
     setVoiceInvite(invite) {
-      voiceInvite =
-        invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
+      voiceInvite = invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
     },
 
     view() {

@@ -588,6 +588,11 @@ voice: nothing else changes.
   Developer Portal, add its bot to a server of its own, and give it **Manage Channels** and **Create
   Instant Invite**. Turn **Membership Screening off** in that server: with it on, riders would join
   unable to speak, so the instance turns voice off.
+- **Who is given the link.** A rider a **private** room admits, in the room's welcome (#875), and
+  nobody else: a rider the room refuses is never told it. A public room has no voice until account
+  linking exists (#877), because a link alone cannot remove a banned rider from a channel they are
+  already in. The app shows it while a race waits on its line (on a tablet) and for the first
+  seconds of a group ride.
 - **What reaches Discord.** A channel named `oyl-ride-` and the first twelve hex digits of the
   room's random id; a temporary, single-room invite for at most the room's riders, for a day. No
   topic, no category, no audit-log reason, no ride data and nothing a rider typed.

@@ -202,7 +202,6 @@ export interface Welcome {
   readonly voiceInvite?: string;
 }
 
-
 /**
  * Why a room refused a hello. Settled by #779, where the room that sends them
  * was built (they were placeholders in #768):

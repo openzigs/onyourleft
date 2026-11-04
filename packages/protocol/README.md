@@ -24,7 +24,7 @@ position**.
 | Direction | `type` | Fields |
 |---|---|---|
 | client → room | `hello` | `protocol`, `physicsVersion`, `ticket` |
-| room → client | `welcome` | `riderId`, `routeRef: { sha256 }`, `roomConfig: { kind, ridingPosition, reportIntervalMs, frameIntervalMs, drafting, lapRace? }` — `lapRace: { laps, items }` in a lap race only |
+| room → client | `welcome` | `riderId`, `routeRef: { sha256 }`, `roomConfig: { kind, ridingPosition, reportIntervalMs, frameIntervalMs, drafting, lapRace? }`, `voiceInvite?` — `lapRace: { laps, items }` in a lap race only; `voiceInvite`, the room's Discord voice link on `https://discord.gg/` and nothing else (`VOICE_INVITE_PATTERN`), only where the instance offers voice ([#875](https://github.com/openzigs/onyourleft/issues/875)) |
 | room → client | `refuse` | `reason` |
 | client → room | `report` | `sequence`, `atMs`, `powerWatts`, `cadenceRpm?` |
 | client → room | `item-use` | `sequence`, `atMs` — a lap race only; names no item ([#1908](https://github.com/openzigs/onyourleft/issues/1908)) |
@@ -35,9 +35,11 @@ position**.
 | room → client | `standings` | `tick`, `riders: [[riderId, gapDeciseconds, wattsPerKilogramTenths, flags]]` — a race only, after every frame, gaps to the recipient ([ADR 0051](../../docs/adr/0051-live-race-standings.md)) |
 | room → client | `finish` | `order: [riderId, …]` |
 
-`PROTOCOL_VERSION` is **3** since #1908 added the lap race (epic
+`PROTOCOL_VERSION` is **4** since #875 added the welcome's `voiceInvite`: the decoder refuses a key it
+does not know, so a version-3 build would refuse every welcome from a room with voice. It was **3** from
+#1908, which added the lap race (epic
 [#1894](https://github.com/openzigs/onyourleft/issues/1894),
-[ADR 0060](../../docs/adr/0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)); it was **2**
+[ADR 0060](../../docs/adr/0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)), and **2**
 from #1347, which added `name` and `standings`. A hello from any other version is refused
 `protocol-mismatch`.
 
