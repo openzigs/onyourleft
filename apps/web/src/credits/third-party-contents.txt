@@ -15,10 +15,11 @@ is the fonts this app's source repository commits and the app serves.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-Part 1 — in the app (73 packages)
+Part 1 — in the app (74 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
   @capacitor/core 8.5.3 — MIT
+  @capacitor/splash-screen 8.0.2 — MIT
   @mapbox/jsonlint-lines-primitives 2.0.3 — MIT
   @mapbox/point-geometry 1.1.0 — ISC
   @mapbox/tiny-sdf 2.2.0 — BSD-2-Clause
@@ -146,6 +147,7 @@ Part 2 — in the Android app only (50 libraries)
   :capacitor-android — built from @capacitor/android, noticed in part 1
   :capacitor-community-bluetooth-le — built from @capacitor-community/bluetooth-le, noticed in part 1
   :capacitor-cordova-android-plugins — Written by `cap sync` and holding no Cordova plugin, because this app uses none. It contributes no third-party code of its own; the Cordova framework it depends on is listed above.
+  :capacitor-splash-screen — built from @capacitor/splash-screen, noticed in part 1
 
 Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.1.1 (apps/web/tools/pose/pose-runtime-plugin.ts)

@@ -128,6 +128,7 @@ rather than after.
 | `src/android/merged-manifest.ts` | **which** document — the Gradle merge's own output, and the reviewed list of what the app is allowed to ship. The three permissions no file in this repository declares are on it, with their provenance. See §6 |
 | `android/app/src/main/java/…/RecordingService.java` | the `connectedDevice` foreground service |
 | `android/app/src/main/java/…/RecordingServicePlugin.java` | two methods, start and stop, bridging it to the web client |
+| `capacitor.config.ts` §`plugins.SplashScreen` | since [#2050](https://github.com/openzigs/onyourleft/issues/2050), the launch splash held by `@capacitor/splash-screen` 8.0.2 until the page calls `hide()` or 3 s pass; `src/android/launch-splash.test.ts` reads the config, the launch theme's `postSplashScreenTheme` and the installed plugin's Java. Whether a cold start on a device shows it until Home has painted is an owner device check |
 
 ⚠️ **Java, not Kotlin, and that is a deviation from #87's revision block** — it budgets the service
 as "hand-written Kotlin". Kotlin would mean adding the Kotlin Gradle plugin and the stdlib to a build
