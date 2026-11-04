@@ -112,6 +112,75 @@ async function painted(locator: Locator): Promise<Painted> {
   });
 }
 
+/** The three kinds of button #2063 holds apart. */
+type HierarchyKind = 'primary' | 'secondary' | 'tertiary';
+
+/** One button as Chromium paints it, and the colour behind it. */
+interface KindRead {
+  readonly fill: string;
+  readonly edge: string;
+  readonly label: string;
+  readonly underline: string;
+  readonly backdrop: string;
+}
+
+const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+
+/** A computed `rgb(r, g, b)` as the six-digit hex `contrastRatio` reads. */
+function hexOf(rgb: string): string {
+  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(rgb);
+  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
+  return `#${channels
+    .slice(1)
+    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/**
+ * What ADR 0063 D-1 and `design/Button.tsx` §ButtonVariant say tells the three
+ * kinds apart, as sentences. Empty is a pass.
+ *
+ * - The primary is FILLED, and its fill stands further from what is behind it
+ *   than any other kind's does: the strongest element on the screen.
+ * - The secondary is TONAL: a fill of its own, a step off what is behind it,
+ *   and its edge drawn in that fill, so it has no outline.
+ * - The tertiary is TEXT: no fill, no edge, and an underlined label.
+ * - No two kinds are drawn alike in fill, edge and label.
+ */
+function hierarchyFaults(kinds: Readonly<Record<HierarchyKind, KindRead>>): string[] {
+  const faults: string[] = [];
+  const { primary, secondary, tertiary } = kinds;
+  const lift = (read: KindRead): number =>
+    read.fill === TRANSPARENT ? 1 : contrastRatio(hexOf(read.fill), hexOf(read.backdrop));
+  const drawn = (read: KindRead): string => `${read.fill} ${read.edge} ${read.label}`;
+  if (primary.fill === TRANSPARENT || primary.fill === primary.backdrop) {
+    faults.push('the primary is not filled');
+  }
+  if (lift(primary) <= lift(secondary)) {
+    faults.push(
+      `the primary's fill stands ${lift(primary).toFixed(2)}:1 off what is behind it, ` +
+        `no more than the secondary's ${lift(secondary).toFixed(2)}:1`,
+    );
+  }
+  if (secondary.fill === TRANSPARENT || secondary.fill === secondary.backdrop) {
+    faults.push('the secondary has no tonal fill of its own');
+  }
+  if (secondary.edge !== secondary.fill) faults.push('the secondary has an outline');
+  if (tertiary.fill !== TRANSPARENT || tertiary.edge !== TRANSPARENT) {
+    faults.push('the tertiary has a fill or an edge');
+  }
+  if (tertiary.underline !== 'underline') faults.push('the tertiary is not underlined');
+  if (drawn(primary) === drawn(secondary)) {
+    faults.push('the primary and the secondary are drawn alike');
+  }
+  if (drawn(secondary) === drawn(tertiary)) {
+    faults.push('the secondary and the tertiary are drawn alike');
+  }
+  if (drawn(primary) === drawn(tertiary))
+    faults.push('the primary and the tertiary are drawn alike');
+  return faults;
+}
+
 /**
  * The colour checks, in one palette (#672). Every colour this spec reads back
  * is compared with THAT palette's token, so the same assertions run under a
@@ -285,6 +354,97 @@ for (const theme of THEMES) {
         const label = (await painted(kind(page, 'secondary'))).color;
         expect(label).toBe(STRANGER_RGB);
         expect(label).not.toBe(rgbOf('accentText'));
+      });
+    });
+
+    /*
+     * #2063, ADR 0063 D-1: the three kinds on a REAL route, not the specimen
+     * page — Activities over the populated fixture, the one route that draws
+     * all three at once: *Start a ride* (primary), *Import or export files*
+     * (secondary) and each row's *Delete* (tertiary). Each is read back as
+     * Chromium paints it, against the colour actually behind it.
+     */
+    test.describe('#2063 — the three kinds on a real route', () => {
+      test.use({ viewport: { width: 1280, height: 800 } });
+
+      const PRIMARY = '.oyl-library__actions > a.oyl-button:not([class*="oyl-button--"])';
+      const SECONDARY = '.oyl-library__actions > a.oyl-button--secondary';
+      const TERTIARY = 'button.oyl-button--tertiary';
+
+      async function openActivities(page: Page): Promise<void> {
+        await page.goto('/reflow.html?data=populated');
+        await page.waitForFunction(() => window.__oylReflow?.ready === true);
+        expect(await page.evaluate(() => window.__oylReflow?.errors)).toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+        const seen = await page.evaluate(async () => window.__oylReflow?.visit('#/activities'));
+        expect(seen?.h1).toBe('Activities');
+        for (const selector of [PRIMARY, SECONDARY, TERTIARY]) {
+          expect(await page.locator(selector).count(), `${selector} on Activities`).toBeGreaterThan(
+            0,
+          );
+        }
+      }
+
+      async function readKinds(page: Page): Promise<Record<HierarchyKind, KindRead>> {
+        const read = (selector: string): Promise<KindRead> =>
+          page
+            .locator(selector)
+            .first()
+            .evaluate((element) => {
+              const style = getComputedStyle(element);
+              // The colour behind the button: the nearest ancestor with a fill.
+              let backdrop = 'rgba(0, 0, 0, 0)';
+              for (let at = element.parentElement; at !== null; at = at.parentElement) {
+                const fill = getComputedStyle(at).backgroundColor;
+                if (fill !== 'rgba(0, 0, 0, 0)') {
+                  backdrop = fill;
+                  break;
+                }
+              }
+              return {
+                fill: style.backgroundColor,
+                edge: style.borderTopColor,
+                label: style.color,
+                underline: style.textDecorationLine,
+                backdrop,
+              };
+            });
+        return {
+          primary: await read(PRIMARY),
+          secondary: await read(SECONDARY),
+          tertiary: await read(TERTIARY),
+        };
+      }
+
+      test('primary, secondary and tertiary are drawn as ADR 0063 states, and differ', async ({
+        page,
+      }) => {
+        await openActivities(page);
+        const kinds = await readKinds(page);
+        expect(hierarchyFaults(kinds)).toEqual([]);
+        // And each is the tokens its rule names (#2118's fill and text split).
+        expectToken(kinds.primary.fill, 'accent', 'the primary, its fill');
+        expectToken(kinds.primary.label, 'accentInk', 'the primary, its label');
+        expectToken(kinds.primary.edge, 'accentText', 'the primary, its edge');
+        expectToken(kinds.secondary.fill, 'surfaceOverlay', 'the secondary, its fill');
+        expectToken(kinds.secondary.label, 'accentText', 'the secondary, its label');
+        expectToken(kinds.tertiary.label, 'accentText', 'the tertiary, its label');
+        expectToken(kinds.primary.backdrop, 'canvas', 'behind the primary');
+      });
+
+      test('the control — a primary styled like the secondary fails the read', async ({ page }) => {
+        await openActivities(page);
+        await page.addStyleTag({
+          content: `${PRIMARY} {
+            background: var(--oyl-color-surface-overlay);
+            border-color: var(--oyl-color-surface-overlay);
+            color: var(--oyl-color-accent-text);
+          }`,
+        });
+        await page.waitForTimeout(TRANSITION_WAIT_MS);
+        const kinds = await readKinds(page);
+        expect(kinds.primary.fill).toBe(kinds.secondary.fill);
+        expect(hierarchyFaults(kinds)).toContain('the primary and the secondary are drawn alike');
       });
     });
 
