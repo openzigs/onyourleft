@@ -440,8 +440,9 @@ describe('the illustrated home — #939', () => {
     const main = document.querySelector('main');
     expect(main?.querySelectorAll('img')).toHaveLength(0);
     const pictures = [...(main?.querySelectorAll('svg') ?? [])];
-    // Next up's three layers, the cards' eight, the trainer's glyph and the ring.
-    expect(pictures.length).toBeGreaterThanOrEqual(13);
+    // The cards' eight, the trainer's glyph and the ring. (#2043 took Next
+    // up's three layers away: a free ride draws nothing there.)
+    expect(pictures.length).toBeGreaterThanOrEqual(10);
     for (const picture of pictures) {
       expect(
         picture.closest('[aria-hidden="true"]'),
@@ -450,7 +451,7 @@ describe('the illustrated home — #939', () => {
       expect(picture.querySelectorAll('text, title, desc')).toHaveLength(0);
       expect((picture.textContent ?? '').trim()).toBe('');
     }
-    expect(document.querySelector('.oyl-next-up__art')?.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelectorAll('.oyl-next-up svg')).toHaveLength(0);
     for (const art of document.querySelectorAll('.oyl-ride-card__art')) {
       expect(art.getAttribute('aria-hidden')).toBe('true');
     }
@@ -516,9 +517,13 @@ describe('next up — #1010', () => {
     expect(rideLink()?.textContent).toBe('Ride');
     expect(rideLink()?.getAttribute('href')).toBe('#/game?route=hill');
     expect(rideLink()?.getAttribute('aria-describedby')).toBe('oyl-next-up-name');
-    expect(nextUp()?.querySelector('.oyl-next-up__profile')).not.toBeNull();
-    // Words carry the meaning: the picture says nothing to assistive technology.
-    expect(nextUp()?.querySelector('.oyl-next-up__art')?.getAttribute('aria-hidden')).toBe('true');
+    // #2043: the route's own climb is the card's ONE drawing — no sky, hills
+    // or road — and it says nothing to assistive technology: the line does.
+    const drawings = [...(nextUp()?.querySelectorAll('svg') ?? [])];
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]?.classList.contains('oyl-next-up__profile')).toBe(true);
+    expect(drawings[0]?.getAttribute('aria-hidden')).toBe('true');
+    expect(nextUp()?.querySelectorAll('img')).toHaveLength(0);
     // The first control on the screen.
     expect(document.querySelector('main a, main button')).toBe(rideLink());
     expectClean('home, next up on a route');
@@ -546,6 +551,77 @@ describe('next up — #1010', () => {
     mounted?.unmount();
     await openHome([ride('theirs', 3, { routeId: stubRouteId('theirs') })], idleSnapshot(), routes);
     expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+  });
+
+  it('names no destination until both reads settle, then the route — #1020 item 1, #2043', async () => {
+    const routes = routeStub(OWNER, [savedRoute('hill')]);
+    const held: (() => void)[] = [];
+    const slow: RoutePort = {
+      athleteId: OWNER,
+      store: {
+        ...routes.store,
+        getRoute: (owner, id) =>
+          new Promise((resolve, reject) => {
+            held.push(() => {
+              routes.store.getRoute(owner, id).then(resolve, reject);
+            });
+          }),
+      },
+    };
+    await openHome([ride('r', 3, { routeId: stubRouteId('hill') })], idleSnapshot(), slow);
+    // The rides are read; the route is not. Before #2043 this was "A free ride"
+    // with a Ride to #/ride, which then became the route.
+    expect(held.length).toBeGreaterThan(0);
+    expect(nextUp()?.querySelector('h2')?.textContent).toBe('Next up');
+    expect(rideLink()).toBeNull();
+    expect(nextUp()?.textContent).toBe('Next up');
+    expectClean('home, next up while the route is read');
+    for (const release of held) release();
+    await settle();
+    await settle();
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('Up the hill');
+    expect(rideLink()?.getAttribute('href')).toBe('#/game?route=hill');
+  });
+
+  it('names no destination while the rides are read', async () => {
+    const stub = stubAnalysis(OWNER, [ride('r', 3)]);
+    const hanging = {
+      ...stub,
+      store: { ...stub.store, listActivitySummaries: () => new Promise<never>(() => undefined) },
+    } as typeof stub;
+    globalThis.location.hash = '#/';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        analysis={hanging}
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    expect(text()).toContain('Reading your rides');
+    expect(rideLink()).toBeNull();
+    expect(nextUp()?.textContent).toBe('Next up');
+  });
+
+  it('offers a free ride when the rides cannot be read, or there is no store to read', async () => {
+    const stub = stubAnalysis(OWNER, [ride('r', 3)]);
+    const failing = {
+      ...stub,
+      store: { ...stub.store, listActivitySummaries: () => Promise.reject(new Error('no store')) },
+    } as typeof stub;
+    globalThis.location.hash = '#/';
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} analysis={failing} />);
+    await settle();
+    await settle();
+    expect(text()).toContain('Your rides could not be read on this device.');
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+    expect(rideLink()?.getAttribute('href')).toBe(hrefFor(routeById('ride')));
+    mounted.unmount();
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
+    await settle();
+    expect(text()).toContain('No local store on this browser.');
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+    expect(rideLink()?.getAttribute('href')).toBe(hrefFor(routeById('ride')));
   });
 
   it('falls back to a free ride, with no error on the screen, when the route cannot be read', async () => {

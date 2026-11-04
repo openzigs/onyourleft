@@ -21,7 +21,8 @@
  *
  * `measure()` also publishes the fold (the viewport less its bottom inset, or
  * the top of a bottom navigation bar — `reflow-harness.tsx` §`foldLine`'s
- * rule); *Next up*'s card, picture, band, words and Ride; *This week*'s and
+ * rule); *Next up*'s card, its fill, its drawings (since #2043 only the
+ * route's small climb, where the frame shows it), words and Ride; *This week*'s and
  * the Trainer card's boxes and the ride cards' section; and each ride card
  * with its picture, its band, the band's computed fill, its words and its
  * link — the link's box, its declared `min-height`/`min-width`, the box it
@@ -36,13 +37,21 @@
  *
  * The controls, each the defect its assertion exists for:
  *
- * - `home.html?hero=tall` — Next up's picture at 90 vh, which must push its
- *   Ride under a phone's fold;
+ * - `home.html?hero=tall` — a picture 90 vh tall put back across Next up above
+ *   its words, which must push its Ride under a phone's fold;
+ * - `home.html?picture=back` — #2043's: the picture #1010 drew put back above
+ *   Next up's words at the 12rem floor it had, which is the card #2043
+ *   replaced — its Ride under 30 % of the window, and the card over 20 %;
  * - `home.html?dashboard=off` — the landscape dashboard rule deleted, so Next
  *   up no longer has This week beside it;
  * - `home.html?band=overlay` — the words laid over the picture on a clear
- *   band, which is what "text on art" would be;
- * - `home.html?short=off` — the short-viewport rule deleted.
+ *   band, which is what "text on art" would be.
+ *
+ * ⚠️ Since #2043 Next up has no picture of its own, so the first two put one
+ * back as the card's first flex item, a whole line wide — `::before`, which
+ * pushes the row under it exactly as #1010's picture pushed its band. The
+ * short-viewport control (`?short=off`) went with the picture: the rule it
+ * deleted no longer holds Next up's Ride above any fold.
  */
 
 import { StrictMode } from 'react';
@@ -140,11 +149,11 @@ export interface HomeMeasurement {
 
 export interface NextUpMeasurement {
   readonly card: Box;
-  readonly art: Box | undefined;
-  readonly band: Box | undefined;
-  /** The band's computed `background-color`. */
-  readonly bandFill: string;
-  /** Every line of the band's words, as line boxes. */
+  /** The card's computed `background-color`: what its words stand on. */
+  readonly fill: string;
+  /** Every drawing the card renders, `display: none` ones left out. */
+  readonly pictures: readonly Box[];
+  /** Every line of the card's words, as line boxes. */
   readonly words: readonly Box[];
   readonly name: string;
   readonly ride: Box;
@@ -230,12 +239,10 @@ function measureNextUp(): NextUpMeasurement | undefined {
   if (card === null || card === undefined || ride === null || ride === undefined) {
     return undefined;
   }
-  const band = card.querySelector('.oyl-next-up__band');
   return {
     card: boxOf(card),
-    art: boxOrNothing(card.querySelector('.oyl-next-up__art')),
-    band: boxOrNothing(band),
-    bandFill: band === null ? '' : getComputedStyle(band).backgroundColor,
+    fill: getComputedStyle(card).backgroundColor,
+    pictures: [...card.querySelectorAll('svg')].flatMap((svg) => boxOrNothing(svg) ?? []),
     words: lineBoxes(card, 'h2, p'),
     name: (card.querySelector('.oyl-next-up__name')?.textContent ?? '').trim(),
     ride: boxOf(ride),
@@ -367,17 +374,6 @@ function deleteOneRule(what: string, matches: (rule: CSSRule) => boolean): void 
   }
 }
 
-/** `?short=off`: Home's short-viewport rule. The build writes range syntax. */
-function deleteShortViewportRule(): void {
-  deleteOneRule(
-    'short-viewport Home',
-    (rule) =>
-      rule instanceof CSSMediaRule &&
-      ['(max-height: 30rem)', '(height <= 30rem)'].includes(rule.conditionText) &&
-      rule.cssText.includes('.oyl-next-up__art'),
-  );
-}
-
 /** `?dashboard=off`: the landscape dashboard's container rule. */
 function deleteDashboardRule(): void {
   deleteOneRule(
@@ -391,8 +387,10 @@ function deleteDashboardRule(): void {
 
 /** The controls that are a stylesheet of their own. */
 const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
-  // #1010's fold control: Next up's picture a screen tall.
-  ['hero=tall', '.oyl-next-up__art { min-height: 90vh; }'],
+  // #1010's fold control: a picture a screen tall above Next up's words.
+  ['hero=tall', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 90vh; }"],
+  // #2043's: #1010's picture back above the words, at its 12rem floor.
+  ['picture=back', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 12rem; }"],
   // Words over the picture on a clear band: "text on art".
   [
     'band=overlay',
@@ -436,8 +434,6 @@ async function run(): Promise<void> {
       const style = document.createElement('style');
       style.textContent = css;
       document.head.append(style);
-    } else if (key === 'short' && value === 'off') {
-      deleteShortViewportRule();
     } else if (key === 'dashboard' && value === 'off') {
       deleteDashboardRule();
     } else {
