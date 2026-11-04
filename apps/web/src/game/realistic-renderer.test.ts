@@ -2229,9 +2229,10 @@ describe('what the realistic world costs the GPU, lever by lever — #619', () =
  * and the two brake hoods PR #2116's second pass drew (Refs #1999): two boxes
  * of 12, so 5 332. The frame's sum counts the bicycle as built
  * (`realistic-budget.test.ts`), so the 24 come out of its spare and are held
- * there.
+ * there. Named `…_BEFORE_SURFACES` until PR #2116's third pass, which no
+ * longer described it once the hoods were in it.
  */
-const BICYCLE_TRIANGLES_BEFORE_SURFACES = 5_308 + 2 * 12;
+const BICYCLE_TRIANGLES_AS_BUILT = 5_308 + 2 * 12;
 
 describe('the realistic bicycle — #369', () => {
   it('is built from bicycle.ts’s own parts inside its budget', () => {
@@ -2253,7 +2254,7 @@ describe('the realistic bicycle — #369', () => {
     // the 5 308 #506's frame sum counts, or under it. The ceiling above is
     // 12 000 and would let 6 000 more through, every one of them out of the
     // frame's 1 350 spare.
-    expect(triangles).toBeLessThanOrEqual(BICYCLE_TRIANGLES_BEFORE_SURFACES);
+    expect(triangles).toBeLessThanOrEqual(BICYCLE_TRIANGLES_AS_BUILT);
   });
 });
 

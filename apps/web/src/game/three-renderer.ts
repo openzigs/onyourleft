@@ -12958,8 +12958,6 @@ export class RealisticRiderBelt {
   readonly #handWanted = new Vector3();
   readonly #wristAt = new Vector3();
   readonly #handNow = new Vector3();
-  /** PR #2116's second pass: the bicycle's down, in world space, this frame. */
-  readonly #below = new Vector3();
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -13367,33 +13365,38 @@ export class RealisticRiderBelt {
     this.#turnInWorld(boneOf(rider.bones, 'neck01'), across, nod);
     this.#turnInWorld(head, across, nod);
     const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
-    const below = this.#below.set(0, -1, 0).transformDirection(rider.root.matrixWorld);
     for (const index of [0, 1] as const) {
       const limb = LIMB_BONES[index];
       // The arm: shoulder to the grip. ⚠️ The owner's ruling of 2026-11-04:
-      // the HAND goes on the grip. It is solved as the end of the forearm —
-      // the forearm and the hand one segment, the wrist held straight — so the
-      // middle of the drawn hand is on the grip and the wrist is behind it by
-      // the hand's own length. Putting the WRIST on the grip left the hand
-      // hanging 12 cm past the bar, inward and low, at the hips.
+      // the HAND goes on the grip — the middle of the drawn hand, not the
+      // wrist. Putting the WRIST on the grip left the hand hanging 12 cm past
+      // the bar, inward and low, at the hips.
       //
-      // ⚠️ PR #2116's second pass: the wrist bends DOWN by the position's own
-      // angle (`RiderStance.wristDown`), so in the drops and the tuck the hand
-      // turns down round the bar instead of carrying a level forearm's line
-      // on past the bar's end, fingers open, in the air.
+      // ⚠️ PR #2116's third pass: the hand lies along its own line in the
+      // BICYCLE's frame — forward, and down by the position's own angle
+      // (`RiderStance.handDown`) — and the wrist is behind the grip on that
+      // line by the hand's own length. Until then the hand was bent down from
+      // the FOREARM's line, so wherever a folded arm's forearm already sloped
+      // down (the drops, the tuck) the fingers hung 6 to 7 cm under the drop
+      // and out past its end. The arm is then solved from the shoulder to
+      // that wrist.
       const shoulder = boneOf(rider.bones, limb.upperArm).getWorldPosition(this.#a);
       const grip = toWorld(joints.grip[index], this.#b);
       const upper = this.#length(rider, limb.upperArm, limb.forearm);
       const fore = this.#length(rider, limb.forearm, limb.wrist);
-      const reach = this.#handReach[index];
-      // The elbow to the hand's middle, across the bent wrist.
-      const bent = Math.cos(stance.wristDown);
-      const lower = Math.sqrt(fore * fore + reach * reach + 2 * fore * reach * bent);
+      const along = this.#handWanted
+        .set(0, -Math.sin(stance.handDown), Math.cos(stance.handDown))
+        .transformDirection(rider.root.matrixWorld);
+      const wrist = this.#wristAt.copy(grip).addScaledVector(along, -this.#handReach[index]);
       // The elbow's bend: out from straight down by the position's own angle,
-      // swung further with its downstroke, and turned back toward the saddle
-      // by the position's own angle. ⚠️ Never in past straight down: a
-      // standing rider's upstroke swung the elbow under the chest.
-      const out = Math.max(0, stance.elbowOut + motion.elbow[index]);
+      // swung with the stroke by a SHARE of that angle (`RiderMotion.elbow`),
+      // and turned back toward the saddle by the position's own angle. ⚠️ PR
+      // #2116's third pass: a share, never an angle added — an added 12° to
+      // 18° turned the drops' 12° elbow out past its shoulder on its own
+      // downstroke and clamped the other one in under the chest, which is the
+      // left/right difference the owner's frames caught (every one of them at
+      // a crank near a quarter turn, `+X`'s downstroke).
+      const out = stance.elbowOut * (1 + motion.elbow[index]);
       const pole = this.#c
         .set(
           (index === 0 ? 1 : -1) * Math.sin(out),
@@ -13401,30 +13404,16 @@ export class RealisticRiderBelt {
           -Math.cos(out) * Math.sin(stance.elbowBack),
         )
         .transformDirection(rider.root.matrixWorld);
-      const elbow = twoBoneJoint(shoulder, grip, upper, lower, pole, this.#d);
-      // The forearm leaves the elbow–hand line UPWARD by the angle the bent
-      // wrist takes back, in the plane of that line and the bicycle's down,
-      // and the hand comes down from the wrist onto the grip.
-      const toGrip = this.#handWanted.copy(grip).sub(elbow).normalize();
-      const fall = this.#wristAt
-        .copy(below)
-        .addScaledVector(toGrip, -below.dot(toGrip))
-        .normalize();
-      const lift = Math.asin(Math.min(1, (reach * Math.sin(stance.wristDown)) / lower));
-      const wrist = fall
-        .multiplyScalar(-Math.sin(lift) * fore)
-        .addScaledVector(toGrip, Math.cos(lift) * fore)
-        .add(elbow);
-      const hand = toGrip.copy(grip).sub(wrist);
+      const elbow = twoBoneJoint(shoulder, wrist, upper, fore, pole, this.#d);
       this.#aim(rider, limb.upperArm, limb.forearm, this.#c.copy(elbow).sub(shoulder));
       this.#aim(rider, limb.forearm, limb.wrist, this.#c.copy(wrist).sub(elbow));
-      // The hand itself, turned at the wrist onto the grip.
+      // The hand itself, turned at the wrist onto its line.
       const wristBone = boneOf(rider.bones, limb.wrist);
       wristBone.getWorldQuaternion(this.#world);
       this.#turnBoneTo(
         wristBone,
         this.#handNow.copy(this.#handAlong[index]).applyQuaternion(this.#world),
-        hand,
+        along,
       );
       // The leg: hip to the pedal, the knee forward — `bicycle.ts`'s own rule.
       const hip = boneOf(rider.bones, limb.thigh).getWorldPosition(this.#a);
@@ -14817,7 +14806,8 @@ function realisticBicycle(): {
         ),
       );
     } else if (solid.shape === 'box') {
-      // The saddle: nothing drawn on it, so the rubber's flat bead.
+      // The saddle and, since PR #2116, the two brake hoods: nothing drawn on
+      // them, so the rubber's flat bead.
       const into = softly(part, frame, rubber);
       into.push(
         placedPart(

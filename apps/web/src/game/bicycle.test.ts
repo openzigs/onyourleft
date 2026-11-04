@@ -60,7 +60,7 @@ import {
   simulatedCrankAngle,
   blendStance,
   emptyRiderStance,
-  ELBOW_SWING_RADIANS,
+  ELBOW_SWING_SHARE,
   HEAD_NOD_RADIANS,
   stanceOf,
   STANDING_BICYCLE_ROCK_RADIANS,
@@ -454,6 +454,19 @@ describe('the rider sits on the bicycle — #369', () => {
       expect(Math.sign(at.x)).toBe(side);
       // The hand rests on it: within a hood's own half-height and a hand's.
       expect(Math.hypot(at.y - hoods.y, at.z - hoods.z)).toBeLessThan(0.025);
+      // PR #2116's third pass, review 5773686294: and it RISES forward, as a
+      // lever body does off the bend — its nose up and ahead of its foot. A
+      // turn about `+X` takes `+Z` toward `−Y`, so the nose's end is at
+      // `(−sin, cos)` of the pitch times half the box's depth.
+      const half = (at.solid as { readonly depth: number }).depth / 2;
+      const pitch = at.pitch;
+      const rise = -Math.sin(pitch) * half;
+      const ahead = Math.cos(pitch) * half;
+      expect(rise).toBeGreaterThan(0.01);
+      expect(ahead).toBeGreaterThan(0.01);
+      // 41°, from the bend's own geometry: between 30° and 50°.
+      expect((Math.atan2(rise, ahead) * 180) / Math.PI).toBeGreaterThan(30);
+      expect((Math.atan2(rise, ahead) * 180) / Math.PI).toBeLessThan(50);
     }
   });
 
@@ -1268,13 +1281,14 @@ describe('the rider in each position on the bicycle — #1999', () => {
         expect(grip.z, posture).toBeCloseTo(where[posture].z, 12);
       }
       // The owner's ruling of 2026-11-04: across the bar too. The hoods and
-      // the drops are on the bends, the bar's own ends; the tops inside them,
-      // but out past the hips, so the chase camera sees the hands.
+      // the drops are on the bends, the bar's own ends; the tops beside the
+      // stem — PR #2116's third pass, where they were out at the hips' width
+      // and from behind the arms hung straight beside the hips.
       const [plus, minus] = joints.grip;
       expect(minus.x, posture).toBe(-plus.x);
       if (posture === 'upright') {
-        expect(plus.x).toBeGreaterThan(0.15);
-        expect(plus.x).toBeLessThan(RIDER_HALF_WIDTH_METRES);
+        expect(plus.x).toBeGreaterThan(0.06);
+        expect(plus.x).toBeLessThan(0.12);
       } else {
         expect(plus.x, posture).toBeCloseTo(RIDER_HALF_WIDTH_METRES, 12);
       }
@@ -1337,10 +1351,13 @@ describe('the rider in each position on the bicycle — #1999', () => {
     return { angle: (Math.atan2(up, along) * 180) / Math.PI, length: Math.hypot(up, along) };
   };
 
-  it('reads from behind: the back at least 20° flatter in the drops and 12° more upright on the tops than on the hoods', () => {
+  it('reads from behind: the back at least 20° flatter in the drops and 5° more upright on the tops than on the hoods', () => {
     const hoods = backOf('hoods');
     expect(hoods.angle - backOf('drops').angle).toBeGreaterThan(20);
-    expect(backOf('upright').angle - hoods.angle).toBeGreaterThan(12);
+    // ⚠️ 12° until PR #2116's third pass, which raised the hoods' back from
+    // 48° to 58° so the arm reaches the hood rather than folding to it. The
+    // tops read by their hands beside the stem since then, not by the back.
+    expect(backOf('upright').angle - hoods.angle).toBeGreaterThan(5);
     // The owner's ruling of 2026-11-04: the aero tuck's back is flat — 30°
     // flatter than the hoods and 8° flatter than the drops, at the least.
     expect(hoods.angle - backOf('aero').angle).toBeGreaterThan(30);
@@ -1372,21 +1389,25 @@ describe('the rider in each position on the bicycle — #1999', () => {
     expect(half.headPitch).toBeCloseTo(stanceOf('drops', emptyRiderStance()).headPitch / 2, 12);
   });
 
-  it('turns the tuck’s elbows furthest back and bends its wrists furthest down, and blends both — #2148', () => {
+  it('turns the tuck’s elbows furthest back and the tops’ hands furthest down, and blends both — #2148', () => {
     // Refs #2148: dropping `elbowBack` from `blendStance`, or the tuck's
     // `elbowBack` set to nought, passed every test. PR #2116's second pass adds
-    // `wristDown`, which the same two mutations would pass by too.
+    // the hand's angle, which the same two mutations would pass by too. Since
+    // the third pass it is `handDown`, the hand's own line below the
+    // bicycle's horizontal, and steepest on the tops, over the bar.
     const of = (posture: DrawnPosture) => stanceOf(posture, emptyRiderStance());
     for (const posture of ['upright', 'hoods', 'drops', 'standing'] as const) {
       expect(of('aero').elbowBack, posture).toBeGreaterThan(of(posture).elbowBack);
-      expect(of('aero').wristDown, posture).toBeGreaterThan(of(posture).wristDown);
+    }
+    for (const posture of ['hoods', 'drops', 'aero', 'standing'] as const) {
+      expect(of('upright').handDown, posture).toBeGreaterThan(of(posture).handDown);
     }
     // Drops' elbows in, not out to the side: the owner's "chicken wings".
     expect(of('drops').elbowOut).toBeLessThan(of('hoods').elbowOut);
     // Blended as every other figure is: half-way is half of each.
     const half = blendStance(of('hoods'), of('aero'), 0.5, emptyRiderStance());
     expect(half.elbowBack).toBeCloseTo((of('hoods').elbowBack + of('aero').elbowBack) / 2, 12);
-    expect(half.wristDown).toBeCloseTo((of('hoods').wristDown + of('aero').wristDown) / 2, 12);
+    expect(half.handDown).toBeCloseTo((of('hoods').handDown + of('aero').handDown) / 2, 12);
   });
 });
 
@@ -1439,20 +1460,24 @@ describe('the body’s motion grows with effort, and a standing rider rocks the 
 
   it('swings each elbow out with its own downstroke, further with effort, and not out of the saddle', () => {
     const down = riderMotion(HALF_PI, 1, 0, emptyRiderMotion());
-    // `+X`'s downstroke: `+X`'s elbow out, `−X`'s in by as much.
-    expect(down.elbow[0]).toBeCloseTo(ELBOW_SWING_RADIANS, 12);
-    expect(down.elbow[1]).toBeCloseTo(-ELBOW_SWING_RADIANS, 12);
+    // `+X`'s downstroke: `+X`'s elbow out, `−X`'s in by as much — each by a
+    // SHARE of its position's own turn out (PR #2116's third pass).
+    expect(down.elbow[0]).toBeCloseTo(ELBOW_SWING_SHARE, 12);
+    expect(down.elbow[1]).toBeCloseTo(-ELBOW_SWING_SHARE, 12);
     const other = riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion());
-    expect(other.elbow[0]).toBeCloseTo(-ELBOW_SWING_RADIANS, 12);
+    expect(other.elbow[0]).toBeCloseTo(-ELBOW_SWING_SHARE, 12);
+    // At the hardest, three quarters of the turn: never all of it, so an
+    // elbow never swings in past straight down.
     expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).elbow[0]).toBeCloseTo(
-      1.5 * ELBOW_SWING_RADIANS,
+      1.5 * ELBOW_SWING_SHARE,
       12,
     );
+    expect(1.5 * ELBOW_SWING_SHARE).toBeLessThan(1);
     // PR #2116's second pass: standing, the doubled trunk rock carries the
     // shoulder out, and an elbow swung out on top of it kicked out past it.
     expect(Math.abs(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).elbow[0])).toBe(0);
     expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0.5).elbow[0]).toBeCloseTo(
-      0.5 * ELBOW_SWING_RADIANS,
+      0.5 * ELBOW_SWING_SHARE,
       12,
     );
     expect(Math.abs(riderMotion(HALF_PI, 0, 0, emptyRiderMotion()).elbow[0])).toBe(0);

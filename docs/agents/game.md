@@ -246,7 +246,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         rocks a standing rider's bicycle. Absent a stance it
                         is the hoods. Exaggerated on the owner's rulings of
                         2026-11-03 and 2026-11-04 so they read from the chase
-                        camera: the back 64° on the tops, 48° on the hoods,
+                        camera: the back 64° on the tops, 58° on the hoods,
                         22° in the drops and 12° tucked, the head turned down
                         or up (`headPitch`), a 6° trunk rock and the elbows
                         swinging out with each downstroke (`RiderMotion.elbow`).
@@ -268,6 +268,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the drops and the tuck so the helmet faces the camera
                         (half of `headPitch` at `neck01`), and a standing
                         rider's elbows do not swing out.
+                        ⚠️ **PR #2116's third pass** ("Third pass on the
+                        arms"): the left/right difference was the elbow swing,
+                        12°–18° ADDED to each position's turn out (the drops'
+                        12° went to 30° on the left's downstroke, the right's
+                        clamped in) — the model and the pose are mirror images
+                        at rest. `RiderMotion.elbow` is now a SHARE of the
+                        position's own turn (`ELBOW_SWING_SHARE`). The hoods'
+                        back is 58° and the standing one 63°
+                        (`STANDING_BACK_DEGREES`), so the elbow opens from
+                        109° to 150°; the tops' hands are beside the stem
+                        (`TOPS_GRIP_ACROSS` 0.09 m), elbows out; and each hand
+                        lies on its own line in the bicycle's frame
+                        (`handDown`, which replaces `wristDown`), so the
+                        drops' fingers lie forward round the bend.
     src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
                         the owner's ruling of 2026-11-02): standing on a climb
                         (under 65 rpm with 300 W, or over 7 %), the aero tuck
