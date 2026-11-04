@@ -43,7 +43,9 @@
  *   Next up's words at the 12rem floor it had, which is the card #2043
  *   replaced — its Ride under 30 % of the window, and the card over 20 %;
  * - `home.html?dashboard=off` — the landscape dashboard rule deleted, so Next
- *   up no longer has This week beside it;
+ *   up no longer has the sensors beside it;
+ * - `home.html?columns=one` — #2044's: every module one column wide, which
+ *   must push the week module under a landscape tablet's fold;
  * - `home.html?band=overlay` — the words laid over the picture on a clear
  *   band, which is what "text on art" would be.
  *
@@ -72,6 +74,7 @@ import {
 } from '@onyourleft/domain';
 import { activityId, athleteId, type RouteRecord } from '@onyourleft/store';
 
+import { tabbableElements } from '../src/a11y/audit';
 import { stubAnalysis } from '../src/analysis/testing';
 import { routeStub, stubRouteId } from '../src/routes/testing';
 import { stubActivity } from '../src/detail/testing';
@@ -135,6 +138,16 @@ export interface HomeMeasurement {
   readonly nextUp: NextUpMeasurement | undefined;
   readonly week: Box | undefined;
   readonly trainer: Box | undefined;
+  /** #2044: the last ride's module. */
+  readonly lastRide: Box | undefined;
+  /** #2044: every child of the module grid, in DOM order. */
+  readonly modules: readonly ModuleMeasurement[];
+  /**
+   * #2044: for each tab stop in the grid, in tab order
+   * (`a11y/audit.ts` §`tabbableElements`), the index in {@link modules} of
+   * the module it is in.
+   */
+  readonly tabModules: readonly number[];
   /** The ride cards' section. */
   readonly start: Box | undefined;
   /** The ride cards, in document order. */
@@ -145,6 +158,12 @@ export interface HomeMeasurement {
   readonly daysRing: Box | undefined;
   /** Every `.oyl-button` in main that is a PRIMARY, by its text. */
   readonly primaries: readonly string[];
+}
+
+export interface ModuleMeasurement {
+  /** Its first heading's words, or the start of its text when it has none. */
+  readonly name: string;
+  readonly box: Box;
 }
 
 export interface NextUpMeasurement {
@@ -255,6 +274,7 @@ function measureNextUp(): NextUpMeasurement | undefined {
 function measure(): HomeMeasurement {
   window.scrollTo(0, 0);
   const main = document.querySelector('main');
+  const modules = [...document.querySelectorAll('.oyl-home > *')];
   const head = {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     main: main === null ? undefined : boxOf(main),
@@ -265,6 +285,16 @@ function measure(): HomeMeasurement {
     nextUp: measureNextUp(),
     week: boxOrNothing(document.querySelector('.oyl-home__week')),
     trainer: boxOrNothing(document.querySelector('.oyl-home__trainer')),
+    lastRide: boxOrNothing(document.querySelector('.oyl-home__last')),
+    modules: modules.map((module) => ({
+      name: (module.querySelector('h2')?.textContent ?? module.textContent ?? '')
+        .trim()
+        .slice(0, 40),
+      box: boxOf(module),
+    })),
+    tabModules: tabbableElements(document)
+      .map((stop) => modules.findIndex((module) => module.contains(stop)))
+      .filter((index) => index >= 0),
     start: boxOrNothing(document.querySelector('.oyl-home__start')),
     trainerGlyph: boxOrNothing(document.querySelector('.oyl-home__glyph')),
     daysRing: boxOrNothing(document.querySelector('.oyl-home__ring')),
@@ -391,6 +421,12 @@ const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
   ['hero=tall', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 90vh; }"],
   // #2043's: #1010's picture back above the words, at its 12rem floor.
   ['picture=back', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 12rem; }"],
+  // #2044's: every module one column wide, the layout the grid replaced.
+  [
+    'columns=one',
+    '.oyl-home { grid-template-columns: minmax(0, 1fr) !important; } ' +
+      '.oyl-home > * { grid-column: 1 / -1 !important; }',
+  ],
   // Words over the picture on a clear band: "text on art".
   [
     'band=overlay',

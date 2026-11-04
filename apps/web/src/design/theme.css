@@ -1627,19 +1627,31 @@ html {
 }
 
 /*
- * Home — #1010. One column on a phone; two where the frame is a portrait
- * tablet's or a phone on its side; and on a landscape tablet a DASHBOARD:
- * *Next up* across two of three columns with the Trainer card under it (since
- * #2043), *This week* beside them, and the three ride cards across the whole
- * width under them. Keyed to the FRAME's width (`.oyl-home-frame` is a size
- * container, `tw:@container` in `HomeView.tsx`) rather than the window's,
- * because the rail takes a different share of each window.
+ * Home — a grid of MODULES since #2044 (#1010 drew the first dashboard).
+ * Keyed to the FRAME's width (`.oyl-home-frame` is a size container,
+ * `tw:@container` in `HomeView.tsx`) rather than the window's, because the
+ * rail takes a different share of each window.
  *
- * ⚠️ **The DOM order is the reading order on every layout**: Next up, This
- * week, Trainer, the ride cards, then the rest. The dashboard places them
- * with explicit columns and auto rows, so a card never jumps ahead of one it
- * follows. `home.browser.spec.ts` §"#1010" measures each layout, and its
- * control (`home.html?dashboard=off`) deletes the dashboard rule.
+ * ⚠️ **The DOM order is the reading order, the visual order and the tab order
+ * on every layout**: Next up (the quick-launch), the sensors (the Trainer
+ * card, #2045's slot), the last ride (#2048's; on a first open the other ways
+ * to start), the week (#2049's), then the ride cards, fitness and the badges.
+ * Every module is placed by its columns alone and the rows are auto, so none
+ * can jump ahead of one it follows.
+ *
+ * - **One column** on a phone, in that order.
+ * - **Two** from 36rem (a portrait tablet, a phone on its side): Next up and
+ *   the sensors each a whole row, then the last ride beside the week.
+ * - **Three** from 60rem — the landscape DASHBOARD: two rows of two, each a
+ *   wide module in the first two columns beside a narrow one in the third —
+ *   Next up beside the sensors, the last ride beside the week — which fits
+ *   all four inside the first screen at 1280×800.
+ *
+ * The two breakpoints are the ones Home already had: a container query cannot
+ * read a custom property (`--oyl-list-detail-from`'s comment says the same),
+ * so no new number is introduced. `home.browser.spec.ts` §"#2044" measures
+ * each layout; its controls are `home.html?columns=one` (every module one
+ * column wide) and `?dashboard=off` (the 60rem rule deleted).
  *
  * The band under the title that #939 drew is gone, and since #2043 so is
  * Next up's picture: the title is every view's ordinary display `h1`, and
@@ -1662,38 +1674,26 @@ html {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .oyl-next-up {
+  .oyl-next-up,
+  .oyl-home__trainer {
     grid-column: 1 / -1;
   }
 }
 
-/*
- * ⚠️ **Since #2043 Next up is one compact row, not a picture down to the
- * fold**, and a reviewer who remembers it spanning two rows at
- * `calc(100dvh - 16rem)` is reading the old file. On the dashboard it takes
- * the first two columns of its row; This week (or, on a first open, the empty
- * state) stands in the third across two rows, and the Trainer card fills the
- * second row under Next up — DOM order, with no hole beside either.
- */
 @container (min-width: 60rem) {
   .oyl-home {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .oyl-next-up {
-    grid-column: 1 / 3;
-  }
-
-  .oyl-home__week,
+  .oyl-next-up,
+  .oyl-home__last,
   .oyl-home__empty {
-    grid-column: 3;
-    grid-row: span 2;
-    align-self: stretch;
+    grid-column: 1 / 3;
   }
 
-  .oyl-home__trainer {
-    grid-column: 1 / 3;
-    align-self: stretch;
+  .oyl-home__trainer,
+  .oyl-home__week {
+    grid-column: 3;
   }
 }
 
