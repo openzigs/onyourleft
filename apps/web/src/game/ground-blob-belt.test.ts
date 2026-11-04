@@ -230,8 +230,12 @@ describe('GroundBlobBelt.update — #1674', () => {
     // §`meetingRises`): only the ground moved, and the count did not.
     // `f4cf2584…7191cd` before it. Letting the meeting height out as well
     // (#2117's review) moved none of these blobs' ground: the digest held.
+    // Re-taken for the owner's ruling of 2026-11-04, which holds the relief
+    // beside a seam from rising and lets it fall past the line (`landform.ts`
+    // §`SEAM_CREST_FADE_METRES`): only the ground moved, and the count did
+    // not. `0886e568…7e6b53` before it.
     expect(`${drawn} ${hash.digest('hex')}`).toBe(
-      '2622 0886e5687780ef32f9ccff5da6529fa0f700dc43a99f70e1139e02e22f7e6b53',
+      '2622 1d9fb5d10f8a68be7d4be4ea6bf964612a6ef013a7916aa98dc7f52e2f70c7ac',
     );
   });
 });

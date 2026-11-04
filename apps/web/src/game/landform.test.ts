@@ -1328,6 +1328,211 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
     },
     120_000,
   );
+
+  /**
+   * The ground's triangles that face `eye` — three culls the rest, so a ray
+   * passes through them — bucketed by {@link FACING_CELL_METRES} in plan.
+   */
+  const facingGround = (
+    ground: TerrainMesh,
+    eye: { readonly x: number; readonly y: number; readonly z: number },
+  ): Map<number, number[]> => {
+    const cells = new Map<number, number[]>();
+    const v = ground.vertices;
+    for (let at = 0; at + 2 < ground.indices.length; at += 3) {
+      const [a, b, c] = [0, 1, 2].map((k) => (ground.indices[at + k] as number) * 3) as [
+        number,
+        number,
+        number,
+      ];
+      const e1 = [0, 1, 2].map((k) => (v[b + k] as number) - (v[a + k] as number));
+      const e2 = [0, 1, 2].map((k) => (v[c + k] as number) - (v[a + k] as number));
+      const nx = (e1[1] as number) * (e2[2] as number) - (e1[2] as number) * (e2[1] as number);
+      const ny = (e1[2] as number) * (e2[0] as number) - (e1[0] as number) * (e2[2] as number);
+      const nz = (e1[0] as number) * (e2[1] as number) - (e1[1] as number) * (e2[0] as number);
+      const toward =
+        (eye.x - (v[a] as number)) * nx +
+        (eye.y - (v[a + 1] as number)) * ny +
+        (eye.z - (v[a + 2] as number)) * nz;
+      if (!(toward > 0)) continue;
+      const xs = [v[a] as number, v[b] as number, v[c] as number];
+      const zs = [v[a + 2] as number, v[b + 2] as number, v[c + 2] as number];
+      for (
+        let cx = Math.floor(Math.min(...xs) / FACING_CELL_METRES);
+        cx <= Math.floor(Math.max(...xs) / FACING_CELL_METRES);
+        cx += 1
+      ) {
+        for (
+          let cz = Math.floor(Math.min(...zs) / FACING_CELL_METRES);
+          cz <= Math.floor(Math.max(...zs) / FACING_CELL_METRES);
+          cz += 1
+        ) {
+          const key = cx * 100_003 + cz;
+          const list = cells.get(key) ?? [];
+          if (list.length === 0) cells.set(key, list);
+          list.push(at);
+        }
+      }
+    }
+    return cells;
+  };
+  /** The side of {@link facingGround}'s buckets, in metres. */
+  const FACING_CELL_METRES = 8;
+  /** The highest of `cells`' triangles over a point in plan, or `-Infinity`. */
+  const facingTop = (
+    ground: TerrainMesh,
+    cells: Map<number, number[]>,
+    x: number,
+    z: number,
+  ): number => {
+    const key = Math.floor(x / FACING_CELL_METRES) * 100_003 + Math.floor(z / FACING_CELL_METRES);
+    const v = ground.vertices;
+    let top = Number.NEGATIVE_INFINITY;
+    for (const at of cells.get(key) ?? []) {
+      const a = (ground.indices[at] as number) * 3;
+      const b = (ground.indices[at + 1] as number) * 3;
+      const c = (ground.indices[at + 2] as number) * 3;
+      const [ax, az, bx, bz, cx, cz] = [a, a + 2, b, b + 2, c, c + 2].map(
+        (index) => v[index] as number,
+      ) as [number, number, number, number, number, number];
+      const area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+      if (Math.abs(area) < 1e-9) continue;
+      const u = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / area;
+      const w = ((cx - x) * (az - z) - (ax - x) * (cz - z)) / area;
+      if (u < -1e-6 || w < -1e-6 || 1 - u - w < -1e-6) continue;
+      top = Math.max(
+        top,
+        u * (v[a + 1] as number) + w * (v[b + 1] as number) + (1 - u - w) * (v[c + 1] as number),
+      );
+    }
+    return top;
+  };
+
+  it.each(corners.filter(([, , grade]) => grade === 0 || grade === -0.03))(
+    'shows the far leg’s road from the approach over no bank beyond the bend, %s',
+    (_name, profile, grade) => {
+      // The owner's ruling of 2026-11-04, on frames of this fix at a 143°
+      // bend: coming up to it, a steep raised bank with stretched grass on
+      // the right, beyond the bend, hid the far leg's road that main showed.
+      // It was the far leg's own ground between its clear band and the line,
+      // whose relief the hold let rise and fall back to the line: a ridge
+      // whose face towards the rider is drawn, where main's same ground rose
+      // all the way out and turned that face away (`landform.ts`
+      // §`SEAM_CREST_FADE_METRES`). And on a descent the approach's own
+      // ground past its line, held at the meeting height and flat, stood
+      // over the lower far leg where main's relief fell away.
+      //
+      // So, from the chase camera's eye on the approach, a ray to every point
+      // of the far leg's road in its frame — the centreline, 10 cm up, where
+      // the road faces the eye — passes over every triangle of the ground
+      // that faces the eye, as three draws it, sampled every metre. Nothing
+      // exempt: a road that faces the eye is hidden by no verge of its own.
+      // Climbs are not asked: there the far leg is above the eye and faces
+      // away from it, with or without any ground.
+      //
+      // Measured before this fix: hidden by up to 2.09 m on the level (140°
+      // to the right), and 2.03 m descending at 3 %. At 3 % a ray to a road
+      // eight metres below grazes ground lowered towards it, by up to 0.46 m
+      // after the fix (140° to the left), so the bound there is 0.5 m. At 6 %
+      // that ground stands up to 5.4 m over the far leg near it, before this
+      // fix as after: stated, not held.
+      const slack = grade === 0 ? 0.05 : 0.5;
+      let rays = 0;
+      const hidden: string[] = [];
+      for (let at = bend - 300; at <= bend - 60; at += 10) {
+        const frame = sceneAt(profile, at);
+        const rig = cameraRig(frame.camera);
+        const ground = frame.terrain.mesh;
+        const cells = facingGround(ground, rig.eye);
+        const centre = frame.corridor.centre;
+        for (let index = 1; index + 1 < centre.length; index += 1) {
+          const point = centre[index] as RoadCorridor['centre'][number];
+          if (!(point.distance > bend + 15)) continue;
+          const target = { x: point.x, y: point.y + 0.1, z: point.z };
+          if (framed(rig, target) === undefined) continue;
+          // Whether the road there faces the eye: the eye above its plane.
+          const before = centre[index - 1] as typeof point;
+          const after = centre[index + 1] as typeof point;
+          const run = Math.hypot(after.x - before.x, after.z - before.z);
+          const along =
+            ((rig.eye.x - point.x) * (after.x - before.x) +
+              (rig.eye.z - point.z) * (after.z - before.z)) /
+            run;
+          if (!(rig.eye.y - point.y > ((after.y - before.y) / run) * along + 0.5)) continue;
+          rays += 1;
+          const dx = target.x - rig.eye.x;
+          const dy = target.y - rig.eye.y;
+          const dz = target.z - rig.eye.z;
+          const span = Math.hypot(dx, dz);
+          for (let step = 3; step < span - 6; step += 1) {
+            const share = step / span;
+            const over =
+              facingTop(ground, cells, rig.eye.x + dx * share, rig.eye.z + dz * share) -
+              (rig.eye.y + dy * share);
+            if (over > slack) {
+              hidden.push(
+                `${over.toFixed(2)} m at ${String(at)}, road ${point.distance.toFixed(0)}`,
+              );
+              break;
+            }
+          }
+        }
+      }
+      expect(hidden).toEqual([]);
+      // Non-vacuity: the far leg's road really is in the frame, facing the eye.
+      expect(rays).toBeGreaterThan(300);
+    },
+    120_000,
+  );
+
+  it.each(corners.filter(([, , grade]) => grade !== 0))(
+    'lets the meeting height go along the road, far from any seam, %s',
+    (_name, profile) => {
+      // #2117's re-review: `landform.ts` §`MEET_TAPER_PER_METRE` was held
+      // from above only — a rate of nought, the height carried undiminished
+      // along every row, left every test green. Coming up to the bend, with
+      // its first rows in the corridor's far end, the rows by the rider are
+      // some 270 m of road from any row with a seam: their ground must be
+      // the ground a corridor that stops short of the bend builds there, to
+      // the bit, at every column out to the 135 m one (past it the line,
+      // let out 2 m a metre, can still hold the relief).
+      let compared = 0;
+      const moved: string[] = [];
+      for (const at of [bend - 360, bend - 350, bend - 340]) {
+        const origin = corridorOrigin(profile);
+        const seed = scatterSeed(profile);
+        const whole = roadCorridor(profile, origin, at);
+        const short = roadCorridor(profile, origin, at, { aheadMetres: bend - at - 100 });
+        const ground = terrainCorridor(profile, origin, whole, seed, NO_LAND_CLASS);
+        // A copy: the next build lends the same storage.
+        const heights = ground.vertices.slice();
+        const without = terrainCorridor(profile, origin, short, seed, NO_LAND_CLASS);
+        for (let row = 0; row < short.centre.length; row += 1) {
+          const point = whole.centre[row];
+          const same = short.centre[row];
+          if (point === undefined || same === undefined) continue;
+          if (point.distance > at + 60) continue;
+          // The two corridors share their rows near the rider.
+          expect([same.x, same.z, same.y]).toEqual([point.x, point.z, point.y]);
+          for (let side = 0; side < 2; side += 1) {
+            for (let column = 0; column <= 9; column += 1) {
+              const index = (row * COLUMNS * 2 + side * COLUMNS + column) * 3 + 1;
+              compared += 1;
+              const step = (heights[index] as number) - (without.vertices[index] as number);
+              if (step !== 0) {
+                moved.push(
+                  `${step.toFixed(3)} m at ${String(at)}, road ${point.distance.toFixed(0)}, side ${String(side)}, column ${String(column)}`,
+                );
+              }
+            }
+          }
+        }
+      }
+      expect(moved.slice(0, 5)).toEqual([]);
+      expect(compared).toBeGreaterThan(1_000);
+    },
+    120_000,
+  );
 });
 
 /**

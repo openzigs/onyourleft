@@ -456,7 +456,14 @@ export function terrainHeightAt(
   // under whatever ceiling water puts on it. A third of the scenery stands in
   // that band, and this is the whole of what it costs to stand it there.
   if (lateral <= RELIEF_CLEAR_METRES && ways.crossings.length + ways.lakes.length === 0) {
-    return groundHeight(road, NO_RELIEF, lateral, DRY, Number.POSITIVE_INFINITY);
+    return groundHeight(
+      road,
+      NO_RELIEF,
+      lateral,
+      DRY,
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+    );
   }
   // The far field starts to count at the blend's near end; a bracket that
   // ends inside it reads only the near field, and no bracket reads the mottle.
@@ -493,8 +500,10 @@ export function terrainHeightAt(
     LEVEL_POINTS[3] = frame.z + frame.normalZ * outer * sign;
     reliefHolds(land, 2);
   }
-  const from = groundHeight(road, fields, inner, shaped(inner), LEVEL_HOLDS[0] as number);
-  const to = groundHeight(road, fields, outer, shaped(outer), LEVEL_HOLDS[1] as number);
+  const fromHold = LEVEL_HOLDS[0] as number;
+  const toHold = LEVEL_HOLDS[1] as number;
+  const from = groundHeight(road, fields, inner, shaped(inner), fromHold, fromHold);
+  const to = groundHeight(road, fields, outer, shaped(outer), toHold, toHold);
   return from + (to - from) * share;
 }
 
@@ -545,6 +554,9 @@ export function terrainCorridor(
   // And how far each side may sink past its seam: a metre where it has
   // only the shallow seam, deepening along the road from there.
   const depths = roadToNone(centre, seams, lent.depths);
+  // And how far each side is along the road from a row whose side has any
+  // seam: the relief may stand up again only away from one. @see SEAM_CREST_FADE_METRES
+  const away = roadToSeam(centre, shallow, lent.away);
   // And the line each side is held to, let out along the road from the rows
   // that have a seam rather than dropped where they stop having one, and
   // the height each side moves by to meet the other leg. @see meetingRises
@@ -591,6 +603,9 @@ export function terrainCorridor(
       const deepest =
         SHALLOW_SINK_METRES + SEAM_DEEPEN_PER_METRE * (depths[row * 2 + side] as number);
       const tint = 1 + TERRAIN_MOTTLE * relief.mottle;
+      // How much of the hold on the relief's rising part is let go: none on
+      // a row with a seam, all of it {@link SEAM_CREST_FADE_METRES} of road on.
+      const crestShare = Math.min(1, (away[row * 2 + side] as number) / SEAM_CREST_FADE_METRES);
       columnLaterals(limit, line);
       // #1547: every column's hold, asked in one call where anything is levelled.
       if (levelled) {
@@ -622,9 +637,14 @@ export function terrainCorridor(
         // The relief is held to `line`, the seam let out along the road, which
         // is `held` or nearer, and `Infinity` only far from any seam.
         const flat = Math.min(hold, RELIEF_SLOPE * Math.max(0, line - lateral));
+        // And no higher than the road within it, near a seam, while past it
+        // the relief may fall as it did before #2101: the owner's ruling of
+        // 2026-11-04. @see SEAM_CREST_FADE_METRES
+        const crest = crestShare < 1 ? flat * crestShare : flat;
+        const fall = Math.min(hold, RELIEF_SLOPE * Math.abs(line - lateral));
         const met = Math.min(
           shaping.ceiling,
-          groundHeight(point.y, relief, lateral, shaping, flat) +
+          groundHeight(point.y, relief, lateral, shaping, fall, crest) +
             meet * towardsSeam(lateral, line, from),
         );
         const height = Number.isFinite(held)
@@ -783,9 +803,14 @@ function meetingRises(
  * 4.8 m over 2 m of road, 62 to 165 m ahead, on a 147° bend at 6 % — where
  * the owner saw a smaller hump leaving the bend. A side moves about half of
  * it by the line, so at 0.25 its ground there fades no faster than 0.125 m a
- * metre along the road, under {@link RELIEF_SLOPE}. Measured: 1 passes too,
- * and without the fade 18 of the 28 graded corners step by more than a metre
- * a metre.
+ * metre along the road, under {@link RELIEF_SLOPE}. Without the fade 18 of
+ * the 28 graded corners step by more than a metre a metre.
+ *
+ * Held both ways since #2117's re-review, which found nought left every test
+ * green: `landform.test.ts` §"lets the meeting height go along the road"
+ * goes red on all 28 graded corners at 0.05 and below and on 12 at 0.1, and
+ * §"…where a seam starts" on 4 at 1 and at 2 (at 6 %, measured). 0.15 and
+ * 0.2 pass as well: nothing tells them from 0.25, kept for the reason above.
  */
 const MEET_TAPER_PER_METRE = 0.25;
 
@@ -804,6 +829,33 @@ function roadToNone(
   for (let index = 0; index < rows * 2; index += 1) {
     out[index] = Number.isFinite(seams[index]) ? Number.POSITIVE_INFINITY : 0;
   }
+  return roadToNearest(centre, out);
+}
+
+/**
+ * The road from each side of each row to the nearest row whose side has a
+ * seam in `seams`, in metres, into `out`: nought on a row with one, and
+ * `Infinity` where no row has one — {@link roadToNone}'s other half.
+ */
+function roadToSeam(
+  centre: readonly CorridorPoint[],
+  seams: Float64Array,
+  out: Float64Array,
+): Float64Array {
+  const rows = centre.length;
+  for (let index = 0; index < rows * 2; index += 1) {
+    out[index] = Number.isFinite(seams[index]) ? 0 : Number.POSITIVE_INFINITY;
+  }
+  return roadToNearest(centre, out);
+}
+
+/**
+ * Each entry of `out`, no more than any other row's on its side plus the
+ * road between them, in place: one pass forward and one back, as
+ * {@link tapered}'s.
+ */
+function roadToNearest(centre: readonly CorridorPoint[], out: Float64Array): Float64Array {
+  const rows = centre.length;
   const gap = (row: number): number => {
     const from = centre[row] as CorridorPoint;
     const to = centre[row + 1] as CorridorPoint;
@@ -849,6 +901,34 @@ function roadToNone(
 const SEAM_DEEPEN_PER_METRE = 1.5;
 
 /**
+ * How far along the road from a row whose side has a seam the relief takes to
+ * be let rise above the road again inside the line, in metres: **100** —
+ * #2101, the owner's ruling of 2026-11-04. @see terrainCorridor
+ *
+ * ⚠️ **What stopped a bank standing beyond the bend on the approach.** Within
+ * the line each side's relief was held to {@link RELIEF_SLOPE} a metre from
+ * it, both ways, so between a leg's clear band and the line it could still
+ * rise a few metres and fall back to the line: a ridge along the far leg,
+ * between it and the rider coming up to the bend, whose face towards the
+ * rider is front-facing and drawn. Before #2101 the same ground rose all the
+ * way out, so that face looked away from the rider and was culled, and the
+ * far leg's road showed through: the owner's frames at 143°. So beside a seam
+ * the relief may fall but not rise, and the hold on its rising part is let go
+ * along the road from the last row with a seam rather than dropped there — a
+ * dropped hold is the crease #2117's review found on the meeting height.
+ * Past the line the relief may fall again as it did before #2101, rather
+ * than being held flat: on a descent the approach's ground past its line,
+ * flat at the meeting height, stood over the lower far leg's road.
+ *
+ * Measured on the graded corners: 10 and 30 step the ground by more than a
+ * metre a metre between rows where a seam ends (35 and 13 tests red), and
+ * holding the rise everywhere a corridor has a seam reds 114. 50 passes,
+ * and so does 400: nothing measured holds it from above, so 100 is twice
+ * the least that passes, not a measured optimum.
+ */
+const SEAM_CREST_FADE_METRES = 100;
+
+/**
  * The storage {@link terrainCorridor} writes into, and the row count it is
  * sized for — #469.
  *
@@ -883,6 +963,8 @@ let terrainScratch:
       readonly lines: Float64Array;
       /** {@link meetingRises}' answer. */
       readonly rises: Float64Array;
+      /** {@link roadToSeam}'s answer over the shallow seams. */
+      readonly away: Float64Array;
     }
   | undefined;
 
@@ -908,6 +990,7 @@ function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
     depths: new Float64Array(rows * 2),
     lines: new Float64Array(rows * 2),
     rises: new Float64Array(rows * 2),
+    away: new Float64Array(rows * 2),
   };
   return terrainScratch;
 }
@@ -1282,7 +1365,8 @@ function reliefHolds(land: LandClassMask, count: number): void {
  * ⚠️ **Never above the road inside {@link RELIEF_CLEAR_METRES}**: the drop is
  * at least zero, and the relief is exactly zero there. `hold` is
  * {@link reliefHolds}': the relief is held within it, and `Infinity` holds
- * nothing.
+ * nothing. `crest` holds only its rising part, and no more loosely than `hold`
+ * does — #2101's ruling of 2026-11-04 (@see SEAM_CREST_FADE_METRES).
  */
 function groundHeight(
   road: number,
@@ -1290,6 +1374,7 @@ function groundHeight(
   lateral: number,
   water: WaterShaping,
   hold: number,
+  crest: number,
 ): number {
   const drop =
     lateral <= ROAD_HALF_WIDTH_METRES
@@ -1306,7 +1391,10 @@ function groundHeight(
   const most = Math.min(RELIEF_MAX_METRES, hold);
   // #459: the water's bed is a ceiling. Under a bridge that includes the road's
   // own edge, which is the bridge's opening.
-  return Math.min(water.ceiling, road - drop + Math.min(most, Math.max(-most, relief)));
+  return Math.min(
+    water.ceiling,
+    road - drop + Math.min(Math.min(most, crest), Math.max(-most, relief)),
+  );
 }
 
 /**
