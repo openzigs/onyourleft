@@ -4832,15 +4832,28 @@ select.oyl-input {
  * is `none` on the element, so the drawing stretches horizontally and keeps its
  * vertical scale. That is right for a time series and wrong for a map, which is
  * one more reason #63's track is not drawn with this.
+ *
+ * Since #2068 the ride page stacks one trace per recorded channel, so each is
+ * a small chart: 6rem, room for its three value labels.
  */
 .oyl-trace {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   display: block;
-  height: 10rem;
+  height: 6rem;
   margin-top: var(--oyl-space-sm);
   width: 100%;
+}
+
+/*
+ * The place one stacked chart is drawn in — #2068. Its channel is read when
+ * the slot scrolls into view (`detail/visibility.ts`), so the slot holds about
+ * a drawn chart's height meanwhile, and the page below it moves little when
+ * the chart arrives.
+ */
+.oyl-trace-slot {
+  min-height: 12rem;
 }
 
 /*

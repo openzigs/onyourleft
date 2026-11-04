@@ -64,6 +64,21 @@ export interface TraceChartProps {
   readonly format: (value: number) => string;
   /** Missing samples in the **stored** series, which is more than the drawing shows. */
   readonly missingSamples: number;
+  /**
+   * The ride time the time axis spans, in seconds — #2068's shared axis.
+   *
+   * The activity page stacks one chart per channel and hands every one the
+   * ride's own length (the stream summary's samples times their interval), so
+   * a minute is at the same place across the stack. A trace covering less of
+   * the ride than that is drawn over its share of the width rather than
+   * stretched to all of it. Without it the axis spans the trace itself.
+   */
+  readonly timeSpan?: number | undefined;
+}
+
+/** The seconds the time axis covers: the shared span when one is given, else the trace's own. */
+function spanOf(props: TraceChartProps): number {
+  return props.timeSpan ?? props.points.length * props.secondsPerPoint;
 }
 
 /**
@@ -109,13 +124,16 @@ function pathFor(
   totalPoints: number,
   low: number,
   high: number,
+  /** The share of the chart's width the trace covers: 1 unless the shared axis is longer. */
+  covered: number,
 ): string {
   // A flat trace — every reading identical, which a stopped trainer produces —
   // would divide by zero. Drawn down the middle instead of at the top, because
   // "constant" is a shape and pinning it to an edge reads as a maximum.
   const span = high - low;
+  const width = CHART_WIDTH * covered;
   const xOf = (index: number): number =>
-    totalPoints <= 1 ? CHART_WIDTH / 2 : ((from + index) / (totalPoints - 1)) * CHART_WIDTH;
+    totalPoints <= 1 ? width / 2 : ((from + index) / (totalPoints - 1)) * width;
   const yOf = (value: number): number =>
     span === 0 ? CHART_HEIGHT / 2 : CHART_HEIGHT - ((value - low) / span) * CHART_HEIGHT;
 
@@ -150,9 +168,9 @@ export const TIME_AXIS_TITLE = 'Time into the ride';
  * trace, drawn down the middle, has its one value there.
  */
 export function traceAxes(props: TraceChartProps): TraceAxes {
-  const { label, unit, points, secondsPerPoint, format } = props;
+  const { label, unit, points, format } = props;
   const extent = traceExtent(points);
-  const total = points.length * secondsPerPoint;
+  const total = spanOf(props);
   const withUnit = (value: number): string => `${format(value)} ${unit}`;
   const values =
     extent === undefined
@@ -185,11 +203,13 @@ export function traceAxes(props: TraceChartProps): TraceAxes {
  * nine bare numbers between them.
  */
 export default function TraceChart(props: TraceChartProps): JSX.Element {
-  const { points } = props;
+  const { points, secondsPerPoint } = props;
   const extent = traceExtent(points);
   const segments = traceSegments(points);
   const description = describeTrace(props);
   const axes = traceAxes(props);
+  const span = spanOf(props);
+  const covered = span <= 0 ? 1 : Math.min(1, (points.length * secondsPerPoint) / span);
 
   return (
     <div className="oyl-trace-chart">
@@ -226,6 +246,7 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
                 points.length,
                 extent?.low ?? 0,
                 extent?.high ?? 0,
+                covered,
               )}
             />
           ))}

@@ -39,6 +39,24 @@ describe('the trace’s axes — #1439', () => {
     expect(axes.times).toStrictEqual(['0:00', '30:00', '1:00:00']);
   });
 
+  it('labels the shared time axis from the ride’s own span when one is given — #2068', () => {
+    // A stacked chart on a two-hour ride whose trace is the first hour.
+    expect(traceAxes({ ...POWER, timeSpan: 7200 }).times).toStrictEqual([
+      '0:00',
+      '1:00:00',
+      '2:00:00',
+    ]);
+  });
+
+  it('draws a trace over its share of a longer shared axis — #2068', async () => {
+    mounted = await mount(<TraceChart {...POWER} timeSpan={7200} />);
+    const d = mounted.container.querySelector('svg.oyl-trace path')?.getAttribute('d') ?? '';
+    const xs = [...d.matchAll(/[ML](-?[\d.]+)/g)].map((match) => Number(match[1]));
+    // An hour of a two-hour axis is the left half of the 600-unit drawing.
+    expect(Math.min(...xs)).toBe(0);
+    expect(Math.max(...xs)).toBeCloseTo(300, 6);
+  });
+
   it('puts a flat trace’s one value in the middle, where it is drawn', () => {
     const flat = { ...POWER, points: POWER.points.map(() => 150) };
     expect(traceAxes(flat).values).toStrictEqual(['', '150 W', '']);

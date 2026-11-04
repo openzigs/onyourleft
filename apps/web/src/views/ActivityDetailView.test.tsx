@@ -18,6 +18,7 @@ import {
   distanceBetween,
   geographicPosition,
   metres,
+  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   thresholdShare,
@@ -27,16 +28,33 @@ import {
 import {
   activityId,
   athleteId,
+  openActivityStore,
   privacyZoneId,
   type PrivacyZoneRecord,
   type Samples,
+  type StreamChannel,
   type UnitSystem,
 } from '@onyourleft/store';
+import {
+  ATHLETE_A,
+  createStoreHarness,
+  resetFixtureIds,
+  seedAthletes,
+  seedRide,
+  streamSetFor,
+} from '@onyourleft/store/testing';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { trimRadius } from '../detail/privacy';
-import { stubActivity, stubDetail, stubLap, type StubDetail } from '../detail/testing';
+import {
+  installFakeIntersectionObserver,
+  stubActivity,
+  stubDetail,
+  stubLap,
+  type FakeIntersectionObservers,
+  type StubDetail,
+} from '../detail/testing';
 import { CHART_POINTS } from '../detail/series';
 import {
   OSM_ATTRIBUTION,
@@ -56,7 +74,7 @@ import {
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { UnitsProvider } from '../units/context';
 
-import { ActivityDetailView } from './ActivityDetailView';
+import { ActivityDetailView, READING_RIDE_TEXT } from './ActivityDetailView';
 
 const ATHLETE = athleteId('athlete-a');
 const RIDE = activityId('ride-1');
@@ -344,80 +362,146 @@ describe('criterion 2 — a gap renders as a visible discontinuity', () => {
     expect(document.body.textContent).toContain('no reading');
   });
 
-  it('draws one path and no gap language for an unbroken ride', async () => {
+  it('draws one path a chart and no gap language for an unbroken ride', async () => {
     mounted = await open(indoorRide());
-    expect(queryAll(document, 'svg.oyl-trace path')).toHaveLength(2 * 1);
+    // Three channels stored, three charts, one unbroken run each.
+    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(3);
+    expect(queryAll(document, 'svg.oyl-trace path')).toHaveLength(3 * 1);
     expect(document.body.textContent).not.toContain('no reading');
   });
 });
 
-describe('criterion 3 — toggling a series changes what is rendered', () => {
-  it('adds a trace to the page, not merely to a state store', async () => {
-    // The criterion is explicit that a store-level assertion is a no-op that
-    // passes: client state nothing renders from changes nothing. So this counts
-    // drawings before and after.
+describe('#2068 — every recorded channel is a chart, read when it scrolls into view', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  const slotOf = (channel: string): Element =>
+    document.querySelector(`[data-oyl-trace-slot="${channel}"]`) as Element;
+
+  it('decodes on first render only the charts in view, and the rest as each scrolls in', async () => {
+    observers = installFakeIntersectionObserver();
     const port = indoorRide();
     mounted = await open(port);
+    // Every chart's slot is drawn and watched, and nothing is read until one
+    // is in view: a four-hour ride inflates only what is seen.
+    expect(
+      queryAll(document, '[data-oyl-trace-slot]').map((slot) =>
+        slot.getAttribute('data-oyl-trace-slot'),
+      ),
+    ).toEqual(['power', 'heartRate', 'cadence']);
+    expect(observers.observed()).toHaveLength(3);
+    expect(port.channelReads).toEqual([]);
+
+    // The first two in view, as a page opened at the top shows them.
+    await observers.reveal([slotOf('power'), slotOf('heartRate')]);
+    await settle();
+    await settle();
+    expect(port.channelReads).toEqual(['power', 'heartRate']);
     expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(2);
+    expect(slotOf('cadence').textContent).toBe('Reading cadence…');
 
-    const show = queryAll<HTMLButtonElement>(document, 'button').find(
-      (button) => button.textContent?.trim() === 'Show cadence',
-    );
-    expect(show).toBeDefined();
-    await activateWithKeyboard(show as HTMLButtonElement);
+    // Scrolled down: the third arrives, and the first two are not read again.
+    await observers.reveal([slotOf('cadence')]);
     await settle();
     await settle();
-
+    expect(port.channelReads).toEqual(['power', 'heartRate', 'cadence']);
     expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(3);
-    expect(document.body.textContent).toContain('Cadence (rpm)');
-  });
-
-  it('removes a trace from the page when it is switched off', async () => {
-    const port = indoorRide();
-    mounted = await open(port);
-    const showPower = queryAll<HTMLButtonElement>(document, 'button').find(
-      (button) => button.textContent?.trim() === 'Show power',
+    expect(slotOf('cadence').querySelector('.oyl-trace-chart__value-title')?.textContent).toBe(
+      'Cadence (rpm)',
     );
-    // #668: a toggle, whose name is stable and whose state is aria-pressed.
-    expect(showPower?.getAttribute('aria-pressed')).toBe('true');
-    await activateWithKeyboard(showPower as HTMLButtonElement);
-    await settle();
-
-    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(1);
-    expect(document.body.textContent).not.toContain('Power (W)');
   });
 
-  it('reads a channel once even after switching it off and on again', async () => {
+  it('reads a chart once, however often it scrolls back into view', async () => {
     // The samples do not change, so a second inflate of the same blob is pure
     // cost — and it is the read this whole module is arranged to avoid.
+    observers = installFakeIntersectionObserver();
     const port = indoorRide();
     mounted = await open(port);
-    expect(port.channelReads).toEqual(['power', 'heartRate']);
-
-    const buttonNamed = (text: string): HTMLButtonElement =>
-      queryAll<HTMLButtonElement>(document, 'button').find(
-        (button) => button.textContent?.trim() === text,
-      ) as HTMLButtonElement;
-
-    await activateWithKeyboard(buttonNamed('Show power'));
+    await observers.reveal([slotOf('power')]);
     await settle();
-    expect(buttonNamed('Show power').getAttribute('aria-pressed')).toBe('false');
-    await activateWithKeyboard(buttonNamed('Show power'));
+    // A slot once seen is no longer watched, so a second sighting cannot ask.
+    expect(observers.observed()).not.toContain(slotOf('power'));
+    await observers.reveal([slotOf('power')]);
     await settle();
-    await settle();
+    expect(port.channelReads).toEqual(['power']);
+  });
 
-    expect(port.channelReads).toEqual(['power', 'heartRate']);
-    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(2);
+  it('draws every chart on one time axis: the ride’s own start and end', async () => {
+    // Power is 1 200 s long and heart rate only 600 s, so a chart that took its
+    // axis from its own trace would end heart rate's at 10:00.
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: {
+          power: powerSeries(1200),
+          heartRate: Array.from({ length: 600 }, () => beatsPerMinute(142)),
+        },
+        laps: [],
+      }),
+    );
+    const times = queryAll(document, '.oyl-trace-chart').map((chart) =>
+      queryAll(chart, '.oyl-trace-chart__times > div').map((each) => each.textContent),
+    );
+    expect(times).toEqual([
+      ['0:00', '10:00', '20:00'],
+      ['0:00', '10:00', '20:00'],
+    ]);
+    // And the shorter trace is drawn over its own half of the width.
+    const xsOf = (path: Element): number[] =>
+      [...(path.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+)/g)].map((match) =>
+        Number(match[1]),
+      );
+    const [power, heartRate] = queryAll(document, 'svg.oyl-trace path');
+    expect(Math.max(...xsOf(power as Element))).toBeCloseTo(600, 0);
+    expect(Math.max(...xsOf(heartRate as Element))).toBeCloseTo(300, 0);
+  });
+
+  it('labels a speed chart and its table in km/h once converted, not twice', async () => {
+    // 10 m/s is 36 km/h. Before #2068 the axis and the table converted the
+    // already-converted points again, and read 129.6.
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: { speed: Array.from({ length: 600 }, () => metresPerSecond(10)) },
+        laps: [],
+      }),
+    );
+    const chart = document.querySelector('[data-oyl-trace-slot="speed"]');
+    expect(
+      queryAll(chart as Element, '.oyl-trace-chart__values > div').map((each) => each.textContent),
+    ).toEqual(['', '36.0 km/h', '']);
+    const cells = queryAll(chart as Element, 'table.oyl-data-table tbody tr > :nth-child(2)').map(
+      (cell) => cell.textContent,
+    );
+    expect(cells.length).toBeGreaterThan(0);
+    expect(new Set(cells)).toEqual(new Set(['36.0']));
+  });
+
+  it('charts no coordinate: an outdoor ride’s latitude and longitude are neither read nor drawn', async () => {
+    const port = outdoorRide([]);
+    mounted = await open(port);
+    expect(
+      queryAll(document, '[data-oyl-trace-slot]').map((slot) =>
+        slot.getAttribute('data-oyl-trace-slot'),
+      ),
+    ).toEqual(['power']);
+    expect(port.channelReads).toEqual(['power']);
+    expect(document.body.textContent).not.toMatch(/latitude|longitude/i);
+    expect(document.body.textContent).not.toContain('51.5');
   });
 });
 
 describe('criterion 4 — the view does not load a full 1 Hz stream', () => {
-  it('reads only the series it opens with, and never the ones it does not draw', async () => {
+  it('reads each chart’s channel once and never one it does not draw', async () => {
+    // No observer in jsdom, so every slot counts as in view (`detail/visibility.ts`).
     const port = indoorRide();
     mounted = await open(port);
-    // Cadence is stored and is not read, because it is not switched on.
-    expect(port.channelReads).toEqual(['power', 'heartRate']);
-    expect(port.channelReads).not.toContain('cadence');
+    expect(port.channelReads).toEqual(['power', 'heartRate', 'cadence']);
+    expect(port.channelReads).not.toContain('latitude');
   });
 
   it('states the reduction on the page, so the budget is visible rather than assumed', async () => {
@@ -599,14 +683,14 @@ describe('criterion 6 — every chart has a non-visual equivalent', () => {
   it('renders a table of the same series beside the drawing', async () => {
     mounted = await open(indoorRide());
     const tables = queryAll(document, 'table.oyl-data-table');
-    expect(tables.length).toBe(2);
+    expect(tables.length).toBe(3);
     expect(tables[0]?.querySelector('caption')?.textContent).toBe('Power (W)');
   });
 
   it('puts each table behind a closed disclosure under its chart, named for its readings — #1439', async () => {
     mounted = await open(indoorRide());
     const disclosures = queryAll<HTMLDetailsElement>(document, 'details.oyl-chart-table');
-    expect(disclosures).toHaveLength(2);
+    expect(disclosures).toHaveLength(3);
     for (const disclosure of disclosures) {
       expect(disclosure.open).toBe(false);
       expect(disclosure.querySelector('table.oyl-data-table')).not.toBeNull();
@@ -769,13 +853,13 @@ describe('a trace is not left converted into the units the rider has left (#238)
     mounted = view;
 
     const before = [...port.channelReads];
-    expect(before).toEqual(['power', 'heartRate']);
+    expect(before).toEqual(['power', 'heartRate', 'cadence']);
 
     await view.rerender(reading(port, 'imperial'));
     await settle();
     await settle();
 
-    expect(port.channelReads).toEqual([...before, 'power', 'heartRate']);
+    expect(port.channelReads).toEqual([...before, 'power', 'heartRate', 'cadence']);
   });
 
   it('renders the ride summary in the rider\u2019s units', async () => {
@@ -791,5 +875,104 @@ describe('a trace is not left converted into the units the rider has left (#238)
     const summary = document.querySelector('.oyl-ride-summary')?.textContent ?? '';
     expect(summary).toContain('mi');
     expect(summary).not.toContain('km');
+  });
+});
+
+describe('#2068 — the stacked charts, read back from the real store (docs/agents/quality-gate.md §5)', () => {
+  /** Turns of the event loop a real-store read may take before the test gives up (#575's bound). */
+  const READ_TURNS = 200;
+  const SAMPLES = 1800;
+
+  async function until(done: () => boolean, what: string): Promise<void> {
+    for (let turn = 0; !done(); turn += 1) {
+      if (turn >= READ_TURNS) {
+        throw new Error(`${what} after ${String(READ_TURNS)} turns`);
+      }
+      await settle();
+    }
+  }
+
+  interface DrawnChart {
+    readonly channel: string | null;
+    readonly paths: number;
+    readonly times: readonly (string | null)[];
+  }
+
+  /**
+   * Record a ride with `channels` through the store's public writes, open its
+   * page on a connection nothing wrote on, scroll every chart into view, and
+   * read what each one drew.
+   */
+  async function chartsOf(channels: readonly StreamChannel[]): Promise<readonly DrawnChart[]> {
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    const observers = installFakeIntersectionObserver();
+    try {
+      await seedAthletes(harness);
+      const ride = await seedRide(harness, ATHLETE_A);
+      await harness.write(async (store) =>
+        store.putStreamSet(streamSetFor(ride, { sampleCount: SAMPLES, channels })),
+      );
+      await harness.discard();
+      const store = openActivityStore(harness.databaseName);
+      try {
+        await import('../detail/TraceChart');
+        mounted = await mount(
+          <ActivityDetailView port={{ athleteId: ATHLETE_A, store }} activityId={ride.id} />,
+        );
+        await until(
+          () => !(document.body.textContent ?? '').includes(READING_RIDE_TEXT),
+          'the ride’s page was still reading its ride',
+        );
+        // Scrolled from the top to the bottom, one slot at a time.
+        const slots = queryAll(document, '[data-oyl-trace-slot]');
+        for (const slot of slots) {
+          await observers.reveal([slot]);
+          await until(
+            () => slot.querySelector('svg.oyl-trace') !== null,
+            `the ${slot.getAttribute('data-oyl-trace-slot') ?? ''} chart was still not drawn`,
+          );
+        }
+        return slots.map((slot) => ({
+          channel: slot.getAttribute('data-oyl-trace-slot'),
+          paths: queryAll(slot, 'svg.oyl-trace path').length,
+          times: queryAll(slot, '.oyl-trace-chart__times > div').map((each) => each.textContent),
+        }));
+      } finally {
+        mounted?.unmount();
+        mounted = undefined;
+        store.close();
+      }
+    } finally {
+      observers.restore();
+      await harness.destroy();
+    }
+  }
+
+  it('draws five charts for a ride with all five channels, each on the ride’s own time axis', async () => {
+    const charts = await chartsOf(['power', 'heartRate', 'cadence', 'speed', 'altitude']);
+    expect(charts.map((chart) => chart.channel)).toEqual([
+      'power',
+      'heartRate',
+      'cadence',
+      'speed',
+      'altitude',
+    ]);
+    for (const chart of charts) {
+      expect(chart.paths, `${chart.channel ?? ''} drew no line`).toBeGreaterThanOrEqual(1);
+      // 1 800 samples a second apart: the ride starts at 0:00 and ends at 30:00.
+      expect(chart.times[0]).toBe('0:00');
+      expect(chart.times.at(-1)).toBe('30:00');
+    }
+  });
+
+  it('draws four for the same ride with no cadence — the control', async () => {
+    const charts = await chartsOf(['power', 'heartRate', 'speed', 'altitude']);
+    expect(charts.map((chart) => chart.channel)).toEqual([
+      'power',
+      'heartRate',
+      'speed',
+      'altitude',
+    ]);
   });
 });
