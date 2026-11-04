@@ -224,8 +224,12 @@ describe('GroundBlobBelt.update — #1674', () => {
     // them and each sinks past it under the other's (`landform.ts`
     // §`seamReach`), so a blob there lies on ground at another height. The
     // count of blobs drawn did not move. `ee765c15…a951e1` before it.
+    // Re-taken again for the owner's ruling of 2026-11-03, which lets the
+    // seam's hold and meeting height out along the road rather than dropping
+    // them where a row's seam ends (`landform.ts` §`meetingRises`): only the
+    // ground moved, and the count did not. `f4cf2584…7191cd` before it.
     expect(`${drawn} ${hash.digest('hex')}`).toBe(
-      '2622 f4cf25843b8d9a66eb8148be5f9ed9c8e45d387524370bb663db1134097191cd',
+      '2622 0886e5687780ef32f9ccff5da6529fa0f700dc43a99f70e1139e02e22f7e6b53',
     );
   });
 });

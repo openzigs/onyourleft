@@ -545,6 +545,12 @@ export function terrainCorridor(
   // And how far each side may sink past its seam: a metre where it has
   // only the shallow seam, deepening along the road from there.
   const depths = roadToNone(centre, seams, lent.depths);
+  // And the line each side is held to, let out along the road from the rows
+  // that have a seam rather than dropped where they stop having one, and
+  // the height each side moves by to meet the other leg. @see meetingRises
+  lent.lines.set(shallow);
+  const lines = tapered(centre, lent.lines);
+  const rises = meetingRises(centre, shallow, meets, lent.rises);
   const perRow = COLUMNS * 2;
   const { vertices, colours, fields, normals } = lent;
   // #1547: asked only where the mask levels anything, so a ride with no
@@ -564,18 +570,28 @@ export function terrainCorridor(
       const limit = reach[row * 2 + side] as number;
       const seam = seams[row * 2 + side] as number;
       const held = shallow[row * 2 + side] as number;
-      // Half the way to the other leg's road height, at the seam: where both
-      // legs meet. Nothing where there is no seam.
-      const meet = Number.isFinite(held) ? ((meets[row * 2 + side] as number) - point.y) / 2 : 0;
+      const line = lines[row * 2 + side] as number;
+      // How far this side moves towards the other leg's road height by the
+      // line, and from where: a side lowered from the verge's foot, a side
+      // raised from the clear band's edge, each its share of the difference
+      // by the width it has, so the two meet on the line at one slope.
+      // Nothing far from any seam, where `line` is `Infinity` and `rise`
+      // nought. @see meetingRises
+      const rise = rises[row * 2 + side] as number;
+      const from = rise < 0 ? ROAD_CLEARANCE_METRES : RELIEF_CLEAR_METRES;
+      const ramp = Math.max(
+        1,
+        Math.max(0, line - ROAD_CLEARANCE_METRES) + Math.max(0, line - RELIEF_CLEAR_METRES),
+      );
+      const meet = rise === 0 ? 0 : (rise * Math.max(0, line - from)) / ramp;
       // And sunk past the seam faster than the other leg's ground falls away
-      // from it towards its own road, which it does at `meet` over the width
-      // between its clear band and the line, on top of the relief.
-      const sinking =
-        SEAM_SINK_PER_METRE + (2 * Math.abs(meet)) / Math.max(1, held - RELIEF_CLEAR_METRES);
+      // from it towards its own road, which it does at `rise` over `ramp`, on
+      // top of the relief.
+      const sinking = SEAM_SINK_PER_METRE + (2 * Math.abs(rise)) / ramp;
       const deepest =
         SHALLOW_SINK_METRES + SEAM_DEEPEN_PER_METRE * (depths[row * 2 + side] as number);
       const tint = 1 + TERRAIN_MOTTLE * relief.mottle;
-      columnLaterals(limit, held);
+      columnLaterals(limit, line);
       // #1547: every column's hold, asked in one call where anything is levelled.
       if (levelled) {
         for (let column = 0; column < COLUMNS; column += 1) {
@@ -603,23 +619,21 @@ export function terrainCorridor(
         // more than a metre where that leg's ground does not cover the rest
         // (`held`, the shallow seam), and deepening from there along the
         // road. Neither where no other leg takes over: both are `Infinity`.
+        // The relief is held to `line`, the seam let out along the road, which
+        // is `held` or nearer, and `Infinity` only far from any seam.
+        const flat = Math.min(hold, RELIEF_SLOPE * Math.max(0, line - lateral));
+        const met = Math.min(
+          shaping.ceiling,
+          groundHeight(point.y, relief, lateral, shaping, flat) +
+            meet * towardsSeam(lateral, line, from),
+        );
         const height = Number.isFinite(held)
-          ? Math.min(
-              shaping.ceiling,
-              groundHeight(
-                point.y,
-                relief,
-                lateral,
-                shaping,
-                Math.min(hold, RELIEF_SLOPE * Math.max(0, held - lateral)),
-              ) +
-                meet * towardsSeam(lateral, held),
-            ) -
+          ? met -
             Math.max(
               Math.min(deepest, sunk(lateral - seam, sinking)),
               Math.min(SHALLOW_SINK_METRES, sunk(lateral - held, sinking)),
             )
-          : groundHeight(point.y, relief, lateral, shaping, hold);
+          : met;
         vertices[at * 3 + 1] = height;
         vertices[at * 3 + 2] = z;
         // #501: the wet margin. Column 0 is the road's own edge and is never
@@ -689,6 +703,47 @@ function columnLaterals(limit: number, seam: number): void {
 }
 
 /**
+ * How far each side of each row is from the other leg's road height at its
+ * seam, other minus own, into `out` — #2101: nought where a side has no seam.
+ *
+ * ⚠️ **What stopped a bank standing on the inside of a very sharp bend** —
+ * the owner's ruling of 2026-11-03, on frames of #2101's first fix: a raised
+ * green bank inside a 143° bend with a hard straight edge, hiding part of the
+ * far leg's road, and a smaller hump leaving it. Two things stood it up, each
+ * measured on a planner's 140° to 150° corner:
+ *
+ * 1. **The hold stopped dead.** A side is held to {@link RELIEF_SLOPE} a metre
+ *    from its seam; where a row's seam ended — the other leg's rows run out
+ *    at the corridor's end — the next row had its relief back in full, 3 m
+ *    beside a row held to the road's height, two metres of road away: the
+ *    straight edge, at |ny| 0.47 to 0.59 on the level. So the seam is let out
+ *    along the road at {@link REACH_TAPER_PER_METRE} ({@link tapered}, the
+ *    reach's own taper), and the hold, the meeting ramp and the columns
+ *    drawn in to the line all read the line it gives.
+ * 2. **Both legs met halfway, each from its clear band's edge**, and near
+ *    the bend the seam is centimetres past that edge, so the step between the
+ *    legs stood on end (|ny| 0.11 at 143° descending at 6 %) and the upper
+ *    leg's ground hid the lower leg's road (by up to 1.8 m descending at
+ *    6 %). Rule 2 of this file's header forbids only rising inside the clear
+ *    band, so a side lowered now starts from the verge's foot, a side raised
+ *    from the clear band's edge, and each takes the share of the difference
+ *    its width gives: the two meet on the line at one slope.
+ */
+function meetingRises(
+  centre: readonly CorridorPoint[],
+  shallow: Float64Array,
+  meets: Float64Array,
+  out: Float64Array,
+): Float64Array {
+  for (let index = 0; index < centre.length * 2; index += 1) {
+    out[index] = Number.isFinite(shallow[index])
+      ? (meets[index] as number) - (centre[index >> 1] as CorridorPoint).y
+      : 0;
+  }
+  return out;
+}
+
+/**
  * The road from each side of each row to the nearest row whose side has no
  * seam in `seams`, in metres, into `out`: nought on a row with none, and
  * `Infinity` where every row has one. One pass forward and one back, as
@@ -736,8 +791,14 @@ function roadToNone(
  * a side sunk tens of metres stood beside one sunk a metre at most, and the
  * triangles between them stood on end: |ny| 0.029, measured on a road with a
  * 100° bend before a 145° one.
+ *
+ * ⚠️ **1.5, not the taper's 2, since the owner's ruling of 2026-11-03**: where
+ * a deep side met a shallow one, two metres of road apart, 2 stood the
+ * ground between them at |ny| 0.44 in view, on a 147° bend at 3 %. 0.5 left
+ * sunk ground uncovered, measured, on every corner of 140° to 150° on a
+ * grade.
  */
-const SEAM_DEEPEN_PER_METRE = 2;
+const SEAM_DEEPEN_PER_METRE = 1.5;
 
 /**
  * The storage {@link terrainCorridor} writes into, and the row count it is
@@ -770,6 +831,10 @@ let terrainScratch:
       readonly meets: Float64Array;
       /** {@link roadToNone}'s answer over the full seams. */
       readonly depths: Float64Array;
+      /** The shallow seams, {@link tapered} along the road. @see meetingRises */
+      readonly lines: Float64Array;
+      /** {@link meetingRises}' answer. */
+      readonly rises: Float64Array;
     }
   | undefined;
 
@@ -793,6 +858,8 @@ function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
     shallow: new Float64Array(rows * 2),
     meets: new Float64Array(rows * 2),
     depths: new Float64Array(rows * 2),
+    lines: new Float64Array(rows * 2),
+    rises: new Float64Array(rows * 2),
   };
   return terrainScratch;
 }
@@ -1732,21 +1799,23 @@ function sunk(past: number, rate: number): number {
 
 /**
  * How much of the way to the seam's meeting height a side's ground is moved,
- * at `lateral` out with its seam at `seam`: none within the clear band, all
- * of it at the seam and past it — #2101. @see seamReach
+ * at `lateral` out with its seam at `seam`: none `from` the road in, all of
+ * it at the seam and past it — #2101. @see seamReach
  *
  * ⚠️ **What makes two legs at different heights meet.** On a climbing bend
  * the other leg's road is higher or lower than this one's — 14 m, a 25 m
  * hairpin's legs at 4 % — so holding each leg's relief to nought at the line
- * left a step as tall between them. Each moves half the difference, from
- * nothing at the edge of its own clear band to all of it at the line, where
- * they then meet; the road and the ground beside it are where they were.
+ * left a step as tall between them. Each moves its share of the difference,
+ * from nothing at `from` to all of it at the line, where they then meet; the
+ * road and the ground beside it are where they were. Since the owner's ruling
+ * of 2026-11-03 a side lowered starts at the verge's foot rather than the
+ * clear band's edge, and the shares follow the widths ({@link meetingRises}).
  */
-function towardsSeam(lateral: number, seam: number): number {
-  // From the clear band's edge, never inside it: rule 2 of this file's
-  // header, nothing above the road within it, holds whatever the other leg's
-  // height. A seam inside the clear band moves nothing.
-  const from = RELIEF_CLEAR_METRES;
+function towardsSeam(lateral: number, seam: number, from: number): number {
+  // A side raised from the clear band's edge, never inside it: rule 2 of
+  // this file's header, nothing above the road within it, holds whatever the
+  // other leg's height. A side lowered from the verge's foot, which rule 2
+  // allows.
   if (!(seam > from) || !(lateral > from)) return 0;
   return Math.min(1, (lateral - from) / (seam - from));
 }

@@ -131,8 +131,16 @@ export function bentValleyRoute(degrees = 45): RouteProfile {
  * nought metres everywhere a field is enclosed and the scenery is planted
  * right through the corner, which is the only place the drawn road
  * (`terrain.ts` §`BEND_SMOOTHING_METRES`) and the route are different lines.
+ *
+ * `grade`, a fraction, tilts the whole road at that steady gradient — #2101's
+ * review: a climb or descent through the corner, so its two legs pass at
+ * different heights. Nought, the default, is the level road above.
  */
-export function plannerCornerRoute(degrees = 90, hand: 'right' | 'left' = 'right'): RouteProfile {
+export function plannerCornerRoute(
+  degrees = 90,
+  hand: 'right' | 'left' = 'right',
+  grade = 0,
+): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
   const corner = 1_500;
@@ -148,7 +156,7 @@ export function plannerCornerRoute(degrees = 90, hand: 'right' | 'left' = 'right
         degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
         degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
       ),
-      elevation: altitudeMetres(0),
+      elevation: altitudeMetres(grade * along),
     });
   }
   return routeProfile(points, { loop: false });

@@ -718,8 +718,10 @@ describe('which ground a blob lies on — #620, #686’s review', () => {
     // triangle found is the wrong sheet for some of them — the defect #686's
     // review measured, one blob in 29 under the visible ground.
     expect(overlapping).toBeGreaterThan(20);
-    // 15 of the 30, measured: the rest stand at the line or sink with it.
-    expect(judged).toBeGreaterThan(10);
+    // 10 of the 30, measured: the rest stand at the line or sink with it.
+    // It was 15 until the owner's ruling of 2026-11-03 moved the ground
+    // between a hairpin's legs (`landform.ts` §`meetingRises`).
+    expect(judged).toBeGreaterThanOrEqual(10);
     expect(firstFoundWrong).toBeGreaterThan(0);
   }, 60_000);
 });
