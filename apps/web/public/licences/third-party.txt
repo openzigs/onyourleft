@@ -15,10 +15,11 @@ is the fonts this app's source repository commits and the app serves.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-Part 1 — in the app (73 packages)
+Part 1 — in the app (74 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
   @capacitor/core 8.5.3 — MIT
+  @capacitor/splash-screen 8.0.2 — MIT
   @mapbox/jsonlint-lines-primitives 2.0.3 — MIT
   @mapbox/point-geometry 1.1.0 — ISC
   @mapbox/tiny-sdf 2.2.0 — BSD-2-Clause
@@ -146,6 +147,7 @@ Part 2 — in the Android app only (50 libraries)
   :capacitor-android — built from @capacitor/android, noticed in part 1
   :capacitor-community-bluetooth-le — built from @capacitor-community/bluetooth-le, noticed in part 1
   :capacitor-cordova-android-plugins — Written by `cap sync` and holding no Cordova plugin, because this app uses none. It contributes no third-party code of its own; the Cordova framework it depends on is listed above.
+  :capacitor-splash-screen — built from @capacitor/splash-screen, noticed in part 1
 
 Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.1.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
@@ -252,6 +254,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+========================================================================
+Name: @capacitor/splash-screen
+Version: 8.0.2
+Licence: MIT
+Part: app
+
+--- LICENSE (from the package) ---
+
+Copyright 2020-present Ionic
+https://ionic.io
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
 Name: @mapbox/jsonlint-lines-primitives

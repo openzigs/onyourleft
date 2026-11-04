@@ -1025,6 +1025,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         implements it; the game is handed the port, never the
                         client, because the clients write to the controller
                         and so may not be imported under `game/delivery/`
+    src/game/delivery/controller-input.ts, lane-input-port.ts,
+    src/game/hud/ControllerIntents.tsx
+                        a controller's steer buttons, handlebar angle and
+                        throws as Delivery's intents (#1827), handed on once
+                        an animation frame, at most one of each, by the HUD on
+                        a solo round only. ⚠️ The angle SELECTS one of the
+                        three lanes (10° to a side, back to the centre within
+                        5°); it is not a proportional offset, because
+                        `lanes.ts` and ADR 0060 D-6.3 need spike 0030's
+                        reading re-run before any continuous steer
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`

@@ -212,7 +212,9 @@ import {
   stepDeliveryRide,
   type DeliveryRide,
 } from './delivery/ride-round';
-import { steeredLateralFor, steerToward } from './delivery/steer';
+import { steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
+import type { ControllerPort } from './delivery/controller-port';
+import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
 import { throwSideFor, type ThrowSide } from './delivery/throw';
 import type { ThrowInputPort } from './delivery/throw-input-port';
@@ -371,6 +373,14 @@ export interface GameViewProps {
    * `check:wiring` (§Limits); `GameView.test.tsx` §"#247" drives this half.
    */
   readonly thermal?: ThermalPort | undefined;
+  /**
+   * A steering controller paired on the Devices screen — #1826, #1827. A
+   * Delivery round's HUD hands its lane changes, lanes and throws to the
+   * round's ports (`hud/ControllerIntents.tsx`); no other ride reads it, and
+   * a room runs no round (DL9). ⚠️ An optional prop threaded through JSX, as
+   * {@link thermal} is: `delivery-wiring.test.tsx` §"#1827" drives it.
+   */
+  readonly controller?: ControllerPort | undefined;
   /**
    * Loads the renderer, lazily.
    *
@@ -1410,6 +1420,20 @@ function GameScreen({
       const ride = deliveryRef.current;
       if (ride === undefined) return;
       deliveryRef.current = { ...ride, steer: steerToward(ride.steer, intent) };
+    },
+  });
+  /**
+   * A steering controller's handlebar angle hands the round the lane the bars
+   * point at here — #1827. Delivery's alone: a lap race steers by lane steps
+   * (`steerPortRef`), and the angle is not handed to one. Not taken while
+   * paused, as a lane key's press is not.
+   */
+  const lanePortRef = useRef<LaneInputPort>({
+    steerToLane: (lane) => {
+      if (!loopRunningRef.current) return;
+      const ride = deliveryRef.current;
+      if (ride === undefined) return;
+      deliveryRef.current = { ...ride, steer: steerToLane(ride.steer, lane) };
     },
   });
   /**
@@ -3333,6 +3357,10 @@ function GameScreen({
               },
               throwing: throwPortRef.current,
               steering: steerPortRef.current,
+              // #1827: a paired controller, and the lane its angle asks for.
+              ...(props.controller === undefined
+                ? {}
+                : { controller: props.controller, lanes: lanePortRef.current }),
             })}
         // #1906: the lap race on the HUD — place, lap, item, standings — and
         // its lane keys and item control, only on a ride running one.

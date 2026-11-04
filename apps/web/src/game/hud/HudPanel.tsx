@@ -63,6 +63,8 @@ import { useUnits } from '../../units/context';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 
 import { NO_READING, type HudInput, type TrainerLine } from './fields';
+import type { ControllerPort } from '../delivery/controller-port';
+import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import { RaceStandings } from './RaceStandings';
@@ -304,6 +306,15 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * runs no lap race (#1906).
    */
   readonly items?: ItemInputPort | undefined;
+  /**
+   * A paired steering controller — #1827. With it, and a round's ports, the
+   * HUD hands the controller's lane changes, lanes and throws to them
+   * (`ControllerIntents.tsx`), and draws nothing; `undefined` on every ride
+   * that runs no round, and wherever no controller is paired.
+   */
+  readonly controller?: ControllerPort | undefined;
+  /** A Delivery round's lane, as a controller's handlebar angle asks for one — #1827. */
+  readonly lanes?: LaneInputPort | undefined;
 }
 
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */
