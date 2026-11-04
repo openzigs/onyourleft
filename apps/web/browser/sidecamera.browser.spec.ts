@@ -419,8 +419,8 @@ const LIVE_VIEW_VIEWPORT = { width: 1280, height: 800 };
 /** How far a joint may sit from its square's centre, in CSS pixels. */
 const JOINT_ON_SQUARE_PIXELS = 3;
 
-/** HUD ink, `tokens.ts` §`hudInk` #f5f8fa, as the engine resolves it. */
-const HUD_INK = 'rgb(245, 248, 250)';
+/** HUD ink, `tokens.ts` §`hudInk` #f4f7f9, as the engine resolves it. */
+const HUD_INK = 'rgb(244, 247, 249)';
 
 function furthestMiss(measured: LiveCaseMeasurement): number {
   let furthest = 0;

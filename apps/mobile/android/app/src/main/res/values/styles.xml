@@ -25,9 +25,12 @@
       The launch window (#672): on Android 12 and later the system splash screen,
       whose background is the page's canvas rather than the device's default; on
       Android 7 to 11 the launch background colors.xml names per palette.
+      Since #2050 the splash-screen plugin holds it until the page has painted,
+      and postSplashScreenTheme is the theme the window takes when it lets go.
     -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/oyl_launch_background</item>
         <item name="windowSplashScreenBackground">@color/oyl_canvas</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

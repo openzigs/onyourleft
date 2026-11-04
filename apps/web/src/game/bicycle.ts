@@ -213,15 +213,8 @@
 import type { KitColour } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
-import { COLOUR_TOKENS } from '../design/tokens';
 import type { SensorReading } from './hud/fields';
 import { BICYCLE_MASS_KILOGRAMS, DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
-
-/** A design token's `#rrggbb` as the number three's colours take. */
-function hexColour(token: string): number {
-  if (!/^#[0-9a-f]{6}$/i.test(token)) throw new Error(`${token} is not a six-digit colour`);
-  return Number.parseInt(token.slice(1), 16);
-}
 
 /** A turn, in radians. Written out once so that no call site spells `2 * PI`. */
 const TAU = Math.PI * 2;
@@ -229,19 +222,24 @@ const TAU = Math.PI * 2;
 /**
  * Every colour the rider is drawn in.
  *
- * ⚠️ **`jersey` is the app's own `accent` since #623, and a reviewer who
+ * ⚠️ **`jersey` is the teal house kit since #623, and a reviewer who
  * remembers "the blue the sphere wore", `0x2f6fed`, is reading the old file.**
  * The owner ruled on 2026-09-27 (#623) that the rider's kit is an On Your Left
- * house kit in the app's colours, and the realistic rider's jersey is drawn
- * from the same kit (`three-renderer.ts` §`RIDER_KITS`, the `rider` entry), so
- * both worlds wear one colour. Since #623's second half the rider may choose
- * another from {@link KIT_PALETTE}, whose first entry is this one; what the
- * rider wears is {@link riderKitFor}'s answer, handed to the view with
- * `GameView.setRiderKit`, and it replaces the `rider` entry and nothing else. `limb` is `accentHover`, the accent's darker named
- * variant, so the legs and helmet stay darker than the jersey and the
- * pedalling still reads as motion. #93's third criterion is unchanged and is
- * still what the three tints are measured against (`game.browser.spec.ts`
- * §"the pacer and the ghost are bicycles").
+ * house kit in the app's colours. Until #2037 it was read from `tokens.ts`'s
+ * `accent` and `accentHover`; #2037 replaced the page's teal with the Hi-Vis
+ * palette (ADR 0063 D-1), whose light `accent` is an olive within a few
+ * degrees of {@link KIT_PALETTE}'s Lime, so the two values are written here,
+ * unchanged, and the house kit's colour under Hi-Vis is the owner's to choose
+ * (#2123). The realistic rider's jersey is drawn from the same kit
+ * (`three-renderer.ts` §`RIDER_KITS`, the `rider` entry), so both worlds wear
+ * one colour. Since #623's second half the rider may choose another from
+ * {@link KIT_PALETTE}, whose first entry is this one; what the rider wears is
+ * {@link riderKitFor}'s answer, handed to the view with `GameView.setRiderKit`,
+ * and it replaces the `rider` entry and nothing else.
+ * `limb` is the kit's darker shade, so the legs and helmet stay darker than
+ * the jersey and the pedalling still reads as motion. #93's third criterion is
+ * unchanged and is still what the three tints are measured against
+ * (`game.browser.spec.ts` §"the pacer and the ghost are bicycles").
  *
  * ⚠️ **No skin tone appears here, and that is a decision rather than an
  * oversight.** At eight metres behind, on a phone, it conveys nothing, and it
@@ -254,10 +252,10 @@ const TAU = Math.PI * 2;
  * test red, which is the intended way to find out.
  */
 export const RIDER_PALETTE = {
-  /** The rider's body: jersey, tights and arms. The app's `accent` (#623). */
-  jersey: hexColour(COLOUR_TOKENS.accent),
-  /** Legs and helmet — darker than the jersey, so the pedalling reads as motion. `accentHover`. */
-  limb: hexColour(COLOUR_TOKENS.accentHover),
+  /** The rider's body: jersey, tights and arms. The teal house kit (#623, #2037). */
+  jersey: 0x0b5c55,
+  /** Legs and helmet — darker than the jersey, so the pedalling reads as motion. */
+  limb: 0x07443f,
   /** The machine's tubes. Pale, so the frame is a silhouette against the road. */
   frame: 0xd8dee3,
   /** Tyres, saddle and cranks. Near-black, so the wheels read as wheels. */

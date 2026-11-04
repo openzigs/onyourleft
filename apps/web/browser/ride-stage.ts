@@ -46,7 +46,7 @@ export const SUBPIXEL_TOLERANCE = 1;
 export const MINIMUM_TIER_RATIO = 1.5;
 
 /** `theme.css` §`--oyl-color-hud-surface`, as `getComputedStyle` spells it. */
-export const HUD_SURFACE = 'rgb(16, 22, 28)';
+export const HUD_SURFACE = 'rgb(16, 18, 21)';
 
 export interface Viewport {
   readonly name: string;
@@ -311,8 +311,13 @@ export function usesAnchorPositioning(viewport: Viewport): boolean {
  * the room, so this cannot fail there and is not run there; what failed at
  * 360×800 was a standing notice beside it, which §"a ride with a standing
  * notice" holds both ways.
+ *
+ * ⚠️ **390×844 left the set in #2041.** The HUD's numbers are Barlow with
+ * tabular figures since then (ADR 0063 D-5), narrower than the system face
+ * they were measured in, and on CI's fonts the widest ride then had the room
+ * there too, so the control found nothing over the rider.
  */
-export const MAIN_FALLBACK_OVER_THE_RIDER = new Set(['736×360', '390×844', '360×752']);
+export const MAIN_FALLBACK_OVER_THE_RIDER = new Set(['736×360', '360×752']);
 
 /** The two ways a stage is laid out (#1120), each with the words a failure carries. */
 export const ANCHORED = 'with anchor positioning';
