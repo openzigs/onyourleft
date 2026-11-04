@@ -660,8 +660,12 @@ test.describe('a room ride with sounds on — #1398', () => {
   // control may find nothing and fail. Measured only on the runner's fonts,
   // as are the other two: 7 px off the stage at 736×360 and 24 px into the
   // rider at 360×752.
+  // ⚠️ #2041 closed that 7 px: the HUD's numbers are Barlow with tabular
+  // figures (ADR 0063 D-5), narrower than the system face, and on CI's fonts
+  // the 1024×768 control then found nothing. So 1024×768 is no longer a
+  // control here; the case above still holds it.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
-    ['736×360', '1024×768', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
+    ['736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
   )) {
     test(`the control — with the block undone, the same measurement fails — ${viewport.name}`, async ({
       page,

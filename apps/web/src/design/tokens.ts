@@ -687,6 +687,37 @@ export const FONT_FAMILY_TOKENS = {
 } as const satisfies Record<string, string>;
 
 /**
+ * THE METRIC TYPE — #2041, [ADR 0063](../../../../docs/adr/0063-the-design-system-direction-hi-vis.md)
+ * D-5: every live and summary number is one face, one weight, and digits that
+ * do not jitter as they change. Barlow (the display family) at 700, with
+ * tabular figures, so `1111` and `8888` are the same width.
+ *
+ * The sizes stay where they were: a reading's `xxl` (a Home figure, 1.953rem),
+ * the ride's `metric` (3.815rem) and `zoom`, and the HUD's own sizes, whose
+ * constraints `game/hud/hud-value-size.test.ts` holds. What this adds is the
+ * face, the weight and the figures, for every number class at once.
+ *
+ * `theme.css` §"THE METRIC TYPE" is ONE rule over {@link METRIC_TYPE_SELECTORS}
+ * declaring exactly these, and `metric-type.test.ts` holds the two equal.
+ */
+export const METRIC_TYPE = {
+  'font-family': 'var(--oyl-font-family-display)',
+  'font-weight': '700',
+  'font-variant-numeric': 'tabular-nums',
+} as const satisfies Record<string, string>;
+
+/**
+ * The classes a number is set in: a `design/Reading.tsx` (Home's figures, the
+ * Ride screen's `ride/MetricGrid.tsx` and clock), a summary metric
+ * (`views/AnalysisView.tsx`), and a HUD reading (`game/hud/HudCore.tsx`).
+ */
+export const METRIC_TYPE_SELECTORS = [
+  '.oyl-reading__value',
+  '.oyl-metric__value',
+  '.oyl-hud__value',
+] as const;
+
+/**
  * The menus' motion (#936), in milliseconds — the one place a duration is
  * written. Epic #935's principle 4: motion is short, explains a change, and is
  * optional. `short` is feedback on a press; `medium` is a change of place — a

@@ -1860,6 +1860,22 @@ html {
 }
 
 /*
+ * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
+ * in a summary, in one face (Barlow, the display family), at 700, with
+ * tabular figures so a changing number does not jitter. One rule over every
+ * number class; `tokens.ts` §`METRIC_TYPE` is the same declarations, and
+ * `design/metric-type.test.ts` holds the two equal. Sizes stay with each
+ * class below.
+ */
+.oyl-reading__value,
+.oyl-metric__value,
+.oyl-hud__value {
+  font-family: var(--oyl-font-family-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
  * A READING — #992 (`design/Reading.tsx`): large tabular numerals and a small
  * unit label, the one size every menu's facts are set at. Tabular so a column
  * of times does not jitter, and `xxl` because a reading is the thing a fact

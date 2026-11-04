@@ -2325,9 +2325,11 @@ for (const viewport of RESULT_CARD_FIT_VIEWPORTS) {
   });
 }
 
-// At 7rem the 4:3 tablet's card takes three tracks of about 123 px; at the
-// landscape tablet all four facts fit whatever the floor, so it is no control.
-test(`#1083 — the control — 7rem tracks wrap or spill a 10:23:45 — ${SMALL_TABLET_IN_THE_SHELL.name}`, async ({
+// On fixed 5.5rem tracks (88 px) no 10:23:45 fits; until #2041 this was
+// minmax(7rem, 1fr), about 123 px here, which a Barlow 10:23:45 now fits (ADR
+// 0063 D-5). At the landscape tablet all four facts fit whatever the floor, so
+// it is no control.
+test(`#1083 — the control — 5.5rem tracks wrap or spill a 10:23:45 — ${SMALL_TABLET_IN_THE_SHELL.name}`, async ({
   page,
 }, testInfo) => {
   await open(page, SMALL_TABLET_IN_THE_SHELL, '?ride=saved');
@@ -2337,7 +2339,7 @@ test(`#1083 — the control — 7rem tracks wrap or spill a 10:23:45 — ${SMALL
   const card = (await measure(page)).resultCard;
   expect(card, 'the result card did not render').toBeDefined();
   const note =
-    `7rem tracks: at most ${String(card!.mostReadingLines)} line(s), ` +
+    `5.5rem tracks: at most ${String(card!.mostReadingLines)} line(s), ` +
     `spill ${card!.readingSpill.toFixed(1)} px`;
   testInfo.annotations.push({ type: '#1083 control', description: note });
   console.log(`#1083 — the control — ${note}`);
