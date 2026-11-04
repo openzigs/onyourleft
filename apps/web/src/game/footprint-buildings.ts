@@ -270,10 +270,11 @@
  * rising above the
  * roof under a pyramidal spire. Its tower is `wall` in the walls' cladding and
  * its spire `roof`, so it costs 12 triangles, on the far level too, and no
- * draw call. Since #2100 a belfry's band rings the tower's top, capped (24 triangles
- * in all, still no draw call), the tower stands 6 m over the roof, the spire
- * is shaded as a roof slope, and a church with a steeple roofs in `slate`, so
- * its spire is never the flat roof's gravel. Over a cap it is left off
+ * draw call. Since #2100 a belfry's band rings the tower's top, capped and
+ * painted in the trim's paint (`trim`: 24 triangles in all near, 12 far, still
+ * no draw call), the tower stands 6 m over the roof, the spire is shaded as a
+ * slope a touch steeper than the town's roofs, and a church with a steeple
+ * roofs in `slate`, so its spire is never the flat roof's gravel. Over a cap it is left off
  * before a courtyard's holes are. A
  * footprint too narrow or too short for a tower beside a nave has none, and so
  * has every one with `?levers=-steeples` ({@link FootprintPlanOptions}'
@@ -980,17 +981,26 @@ export const CHIMNEY = { along: 0.6, across: 0.9, above: 0.9 } as const;
  * sit on the roof, the spire looked unfinished): `above` is 6 m, where it was
  * 4, so more of the tower shows over the nave; a belfry's `band`, `height`
  * deep and `proud` of the tower, rings its top under the spire; and the
- * spire's faces are shaded as a roof slope at `lit` degrees, the steepest of
- * {@link ROOF_PITCHES_DEGREES}, so the light falls on them as on the town's
- * roofs rather than as on a wall, where one face stood in deep shade.
+ * spire's faces are shaded as a slope at `lit` degrees, rather than as the
+ * wall their true 76° makes them, where one face stood in deep shade.
+ *
+ * The owner's ruling of 2026-11-03 on #2115's frames: the band, 0.4 m of the
+ * walls' own cladding, showed only as its shadowed underside, a thin, broken,
+ * aliased dark line; and the spire, lit at 45° as the steepest roof, took so
+ * much sky it blended into an overcast one. So the band is `height` 0.8 m and
+ * painted in the trim's paint, as #1590's cornice is, a solid band against
+ * the tower; and `lit` is 60°, steeper than every one of
+ * {@link ROOF_PITCHES_DEGREES}, so the spire takes less of the sky than any
+ * roof in the town and stays darker than the sky behind it, while its faces
+ * still differ by the sun.
  */
 export const STEEPLE = {
   share: 0.4,
   least: 3,
   most: 6,
   above: 6,
-  band: { height: 0.4, proud: 0.2 },
-  lit: 45,
+  band: { height: 0.8, proud: 0.2 },
+  lit: 60,
   spire: 2,
   nave: 2,
   proud: EAVES_OVERHANG_METRES + 0.1,
@@ -2444,8 +2454,6 @@ function box(
   const cap = (y: number, normal: Vec): void => {
     const u = halfE / STOREY_METRES;
     const v = halfN / STOREY_METRES;
-    // #2100: faced, every corner says the cap's height over the floor.
-    const up = (y - floor) / STOREY_METRES;
     quad(
       into,
       [at(-halfE, -halfN, y), at(halfE, -halfN, y), at(halfE, halfN, y), at(-halfE, halfN, y)],
@@ -2457,14 +2465,6 @@ function box(
         [-u, v],
       ],
       face,
-      faced
-        ? [
-            [-u, up],
-            [u, up],
-            [u, up],
-            [-u, up],
-          ]
-        : NO_FACADE,
     );
   };
   if (ends.top) cap(top, [0, 1, 0]);
@@ -4865,13 +4865,14 @@ function steepleSiteOf(ring: Ring, rectangle: Rectangle, end: number): SteepleSi
  * A steeple — #2021: a square tower from `bottom` to `top`, plain and in the
  * walls' cladding, into `wall`, and its pyramidal spire, in the roof's, into
  * `roof`: 12 triangles, and none past the roles a plan already has. Since
- * #2100 a belfry's band round the tower's top, its four sides and its
- * underside in `wall` (10 more, 22 in all); the spire shaded as a roof slope
- * at {@link STEEPLE}'s `lit` pitch, and every face of it carrying a facade
- * that says how high it stands, as a wall's and a roof's do.
+ * #2100 a belfry's band round the tower's top, its four sides, its underside
+ * and its top painted in `trim` (12 more, 24 in all near; the far level keeps
+ * the tower and spire's 12); the spire shaded as a slope at {@link STEEPLE}'s
+ * `lit` pitch, and the tower and spire carrying a facade that says how high
+ * they stand, as a wall's and a roof's do.
  */
 function steeple(
-  writing: Pick<Writing, 'wall' | 'roof'>,
+  writing: Pick<Writing, 'wall' | 'roof' | 'trim'>,
   site: SteepleSite,
   heights: readonly [bottom: number, top: number, floor: number],
   styles: { readonly wall: Style; readonly roof: Style },
@@ -4889,22 +4890,22 @@ function steeple(
     true,
   );
   // #2100: the belfry's band round the tower's top, closed underneath and on top (the spire
-  // stands inside it), so no slit shows between the spire's foot and the band's face.
+  // stands inside it), so no slit shows between the spire's foot and the band's face; painted
+  // in the trim's paint (the owner's ruling on #2115), so it reads as a band, not as its shadow.
   const band = half + STEEPLE.band.proud;
   box(
-    writing.wall,
+    writing.trim,
     [cx, cz],
     [ux, uz],
     [band, band],
     [top - STEEPLE.band.height, top, floor],
-    plainIn(styles.wall),
+    PAINTED,
     { top: true, bottom: true },
-    true,
   );
   const rise = 2 * half * STEEPLE.spire;
   const apex: Vec = [cx, top + rise, cz];
   const slant = Math.hypot(rise, half);
-  // #2100: shaded as a roof slope at the steepest pitch the town's roofs are built at.
+  // #2100: shaded as a slope at `lit`, a touch steeper than the town's roofs.
   const lit = (STEEPLE.lit * Math.PI) / 180;
   const across = Math.sin(lit);
   const up = Math.cos(lit);

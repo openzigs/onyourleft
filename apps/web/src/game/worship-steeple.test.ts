@@ -8,9 +8,9 @@
  * vertex floats the belt uploads.
  *
  * #2100 polishes it (the owner's frames of 2026-11-03): the church roofed in
- * slate, the spire shaded as a roof slope, the tower and spire saying how high
- * they stand to the shader's weathering (read through `facade.ts`' twin), and
- * a belfry's band round a taller tower.
+ * slate, the spire shaded as a slope steeper than the town's roofs, the tower
+ * and spire saying how high they stand to the shader's weathering (read
+ * through `facade.ts`' twin), and a painted belfry's band round a taller tower.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,6 +20,7 @@ import type { BuildingFeature, BuildingType, Landmark } from '@onyourleft/map-fe
 import { weatheringAt } from './facade';
 import {
   FACADE_OFFSET,
+  FACADE_PAINT,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_VERTEX_FLOATS,
@@ -86,7 +87,7 @@ function planOne(
 
 const CHURCH = { type: 'church', landmark: 'worship' } as const;
 
-const triangles = (plan: FootprintPlan, role: 'wall' | 'roof'): number =>
+const triangles = (plan: FootprintPlan, role: 'wall' | 'roof' | 'trim'): number =>
   plan.triangles[role].length / (3 * FOOTPRINT_VERTEX_FLOATS);
 
 /** The highest vertex of the plan's roof — a steeple's apex, where it has one. */
@@ -113,7 +114,7 @@ function lateralOf(x: number, z: number, along: number): number {
  */
 function lateralsOf(
   plan: FootprintPlan,
-  role: 'wall' | 'roof' | 'door',
+  role: 'wall' | 'roof' | 'door' | 'trim',
   below = Number.POSITIVE_INFINITY,
 ): number[] {
   const floats = plan.triangles[role];
@@ -141,7 +142,7 @@ function insideFootprint(plan: FootprintPlan, x: number, z: number): boolean {
 }
 
 describe('#2021: a mapped place of worship’s steeple, read back from the plan', () => {
-  it('gives the typed street’s church a steeple, and its school none — 24 triangles, on the far level too', () => {
+  it('gives the typed street’s church a steeple, and its school none — 24 triangles, 12 on the far level', () => {
     const street = typedStreetFixture();
     const land = landClassMask(street.corridor);
     const plan = (options: FootprintPlanOptions): readonly FootprintPlan[] =>
@@ -164,11 +165,13 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
         churches += 1;
         expect(each.steeple).toBe(true);
         // The tower's four sides, and the spire's four faces (#2021); since #2100 the belfry's
-        // band, its four sides, underside and top: measured.
-        expect(triangles(each, 'wall') - triangles(without, 'wall')).toBe(20);
+        // band, its four sides, underside and top, painted in `trim`, which the far level
+        // leaves off as it does #1590's cornice: measured.
+        expect(triangles(each, 'wall') - triangles(without, 'wall')).toBe(8);
         expect(triangles(each, 'roof') - triangles(without, 'roof')).toBe(4);
+        expect(triangles(each, 'trim') - triangles(without, 'trim')).toBe(12);
         expect(each.triangleCount - without.triangleCount).toBe(24);
-        expect(each.farTriangleCount - without.farTriangleCount).toBe(24);
+        expect(each.farTriangleCount - without.farTriangleCount).toBe(12);
         expect(each.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
         expect(each.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
       } else {
@@ -269,11 +272,10 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
     const near = lateralOf(x, z, 1_000) - side / 2;
     expect(near).toBeGreaterThanOrEqual(28 + STEEPLE.nave * side - 1e-6);
     // Its far face stands `proud` out past the far wall, and no eave sticks out through it.
-    // (#2100: below the belfry's band, which stands its own `proud` out from the tower.)
-    const bandFoot = apexOf(plan)[1] - STEEPLE.spire * side - STEEPLE.band.height;
-    const face = Math.max(...lateralsOf(plan, 'wall', bandFoot - 0.05));
+    // (#2100: the belfry's band, painted in `trim`, stands its own `proud` out from the tower.)
+    const face = Math.max(...lateralsOf(plan, 'wall'));
     expect(face).toBeCloseTo(52 + STEEPLE.proud, 2);
-    expect(Math.max(...lateralsOf(plan, 'wall'))).toBeCloseTo(
+    expect(Math.max(...lateralsOf(plan, 'trim'))).toBeCloseTo(
       52 + STEEPLE.proud + STEEPLE.band.proud,
       2,
     );
@@ -362,7 +364,11 @@ describe('#2021: the lever', () => {
 });
 
 /** Where each of `role`'s vertices starts in the plan's floats, higher than `above`. */
-function verticesAbove(plan: FootprintPlan, role: 'wall' | 'roof', above: number): number[] {
+function verticesAbove(
+  plan: FootprintPlan,
+  role: 'wall' | 'roof' | 'trim',
+  above: number,
+): number[] {
   const floats = plan.triangles[role];
   const out: number[] = [];
   for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
@@ -428,16 +434,19 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
   it('closes the belfry band on top, so no slit shows between the spire and the band', () => {
     const plan = planOne(hipAt, CHURCH);
     const roofTop = apexOf(planOne(hipAt, CHURCH, { steeples: false }))[1];
-    const walls = plan.triangles.wall;
-    const caps = verticesAbove(plan, 'wall', roofTop).filter(
-      (at) => (walls[at + 4] as number) > 0.99,
+    const trims = plan.triangles.trim;
+    const caps = verticesAbove(plan, 'trim', roofTop).filter(
+      (at) => (trims[at + 4] as number) > 0.99,
     );
     // Two triangles, three corners each.
     expect(caps).toHaveLength(6);
   });
 
-  it('shades every face of the spire as a roof slope at the steepest pitch the town builds', () => {
-    expect(STEEPLE.lit).toBe(Math.max(...ROOF_PITCHES_DEGREES));
+  it('shades every face of the spire darker than the town’s steepest roof, and lighter than a wall', () => {
+    // The owner's ruling on #2115: at 45°, the steepest roof's, the spire took so much sky that
+    // it blended into an overcast one. Steeper than every roof the town builds, so it takes less
+    // sky than any of them, and yet not the true faces' 76°, where the far face was in deep shade.
+    expect(STEEPLE.lit).toBeGreaterThan(Math.max(...ROOF_PITCHES_DEGREES));
     const lit = (STEEPLE.lit * Math.PI) / 180;
     for (const at of [flatAt, hipAt]) {
       const { plan, spire } = spireOf(at);
@@ -461,6 +470,24 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
           oz += (floats[corner + 2] as number) - az;
         }
         expect(nx * ox + nz * oz).toBeGreaterThan(0);
+        // The sky's share a face takes, (1 + n.y) / 2: less than the steepest roof's, more than
+        // its own true face's, the normal of its corners.
+        const [p, q, r] = corners.map((corner) => [
+          floats[corner] as number,
+          floats[corner + 1] as number,
+          floats[corner + 2] as number,
+        ]) as [number[], number[], number[]];
+        const e = [0, 1, 2].map((k) => (q[k] as number) - (p[k] as number));
+        const f = [0, 1, 2].map((k) => (r[k] as number) - (p[k] as number));
+        const cross = [
+          (e[1] as number) * (f[2] as number) - (e[2] as number) * (f[1] as number),
+          (e[2] as number) * (f[0] as number) - (e[0] as number) * (f[2] as number),
+          (e[0] as number) * (f[1] as number) - (e[1] as number) * (f[0] as number),
+        ];
+        const trueUp = Math.abs(cross[1] as number) / Math.hypot(...cross);
+        const steepestRoof = Math.cos((Math.max(...ROOF_PITCHES_DEGREES) * Math.PI) / 180);
+        expect((1 + ny) / 2).toBeLessThan((1 + steepestRoof) / 2 - 0.05);
+        expect((1 + ny) / 2).toBeGreaterThan((1 + trueUp) / 2 + 0.05);
       }
     }
   });
@@ -497,23 +524,36 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
     }
   });
 
-  it('rings the tower’s top with the belfry’s band, under the spire', () => {
+  it('rings the tower’s top with the belfry’s band, solid and painted, under the spire', () => {
     const plan = planOne(hipAt, CHURCH);
     const roofTop = apexOf(planOne(hipAt, CHURCH, { steeples: false }))[1];
     const [ax, , az] = apexOf(plan);
-    const walls = plan.triangles.wall;
     // On this north road the tower is square to x and z: each vertex's reach from its middle.
-    const above = verticesAbove(plan, 'wall', roofTop).map((at) => ({
-      reach: Math.max(
-        Math.abs((walls[at] as number) - ax),
-        Math.abs((walls[at + 2] as number) - az),
-      ),
-      y: walls[at + 1] as number,
-    }));
+    const reachOf = (role: 'wall' | 'trim') => {
+      const floats = plan.triangles[role];
+      return verticesAbove(plan, role, roofTop).map((at) => ({
+        reach: Math.max(
+          Math.abs((floats[at] as number) - ax),
+          Math.abs((floats[at + 2] as number) - az),
+        ),
+        y: floats[at + 1] as number,
+        top: floats[at + FACADE_OFFSET + 2] as number,
+      }));
+    };
+    const above = reachOf('wall');
     const tower = Math.min(...above.map((each) => each.reach));
-    const band = above.filter((each) => each.reach > tower + 0.01);
-    expect(band.length).toBeGreaterThan(0);
-    for (const each of band) expect(each.reach).toBeCloseTo(tower + STEEPLE.band.proud, 3);
+    // The tower alone in the walls' cladding: no band of it, whose shadowed underside was all a
+    // rider saw of it (the owner's ruling on #2115).
+    for (const each of above) expect(each.reach).toBeCloseTo(tower, 3);
+    // The band in `trim`, painted in the trim's paint, as #1590's cornice is: a solid band of
+    // its own colour against the tower, its four sides, underside and top.
+    const band = reachOf('trim');
+    expect(band).toHaveLength(12 * 3);
+    for (const each of band) {
+      expect(each.reach).toBeCloseTo(tower + STEEPLE.band.proud, 3);
+      expect(each.top).toBe(FACADE_PAINT);
+    }
+    expect(STEEPLE.band.height).toBe(0.8);
     // From the spire's foot, the tower's top, down its height.
     const top = Math.max(...above.map((each) => each.y));
     const heights = band.map((each) => each.y);
