@@ -76,6 +76,20 @@ export interface ScriptedStack {
    */
   readonly services?: readonly PluginService[];
   readonly servicesRejectWith?: unknown;
+  /**
+   * Plugin calls that are received and never answered (#1825), by method
+   * name: `requestDevice`, `connect`, `getServices`, `startNotifications`,
+   * `write`, `requestConnectionPriority` or `disconnect`. The call is recorded
+   * first, as `initializeNeverAnswers` records its own.
+   */
+  readonly neverAnswers?: ReadonlySet<string>;
+  /**
+   * `connect` answers only once this settles (#1825): a link that comes up
+   * after the caller has stopped waiting for it.
+   */
+  readonly connectWaitsFor?: Promise<void>;
+  /** #1825: `requestConnectionPriority` rejects with this. */
+  readonly connectionPriorityRejectsWith?: unknown;
   /** #1435: what `readRssi` answers, in dBm — or rejects with. */
   readonly rssi?: number;
   readonly rssiRejectsWith?: unknown;
@@ -150,6 +164,8 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
    * bound under test.
    */
   const never = (): Promise<never> => new Promise<never>(() => undefined);
+  /** Whether `method` is scripted never to answer (#1825). */
+  const silent = (method: string): boolean => stack.neverAnswers?.has(method) === true;
 
   return {
     get calls() {
@@ -203,6 +219,9 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
         // was green against a product that could not open a chooser at all.
         return notInitialized();
       }
+      if (silent('requestDevice')) {
+        return never();
+      }
       if (stack.chooserRejectsWith !== undefined) {
         return reject(stack.chooserRejectsWith);
       }
@@ -228,16 +247,28 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
       if (!started) {
         return notInitialized();
       }
+      if (silent('connect')) {
+        // The link may still come up later; the double keeps the callback so
+        // a test can drop it.
+        onDisconnect = disconnected;
+        return never();
+      }
       if (stack.connectRejectsWith !== undefined) {
         return reject(stack.connectRejectsWith);
       }
       onDisconnect = disconnected;
+      if (stack.connectWaitsFor !== undefined) {
+        await stack.connectWaitsFor;
+      }
     },
 
     disconnect(deviceId) {
       calls.push(`disconnect:${deviceId}`);
       if (!started) {
         return notInitialized();
+      }
+      if (silent('disconnect')) {
+        return never();
       }
       return Promise.resolve();
     },
@@ -246,6 +277,9 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
       calls.push(`getServices:${deviceId}`);
       if (!started) {
         return notInitialized();
+      }
+      if (silent('getServices')) {
+        return never();
       }
       if (stack.servicesRejectWith !== undefined) {
         return reject(stack.servicesRejectWith);
@@ -262,6 +296,19 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
         return reject(stack.rssiRejectsWith);
       }
       return stack.rssi ?? -60;
+    },
+
+    async requestConnectionPriority(deviceId, priority) {
+      calls.push(`requestConnectionPriority:${deviceId}:${priority}`);
+      if (!started) {
+        return notInitialized();
+      }
+      if (silent('requestConnectionPriority')) {
+        return never();
+      }
+      if (stack.connectionPriorityRejectsWith !== undefined) {
+        return reject(stack.connectionPriorityRejectsWith);
+      }
     },
 
     async read(_deviceId, service, characteristic) {
@@ -282,6 +329,9 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
         return notInitialized();
       }
       listeners.set(`${service}|${characteristic}`, onValue);
+      if (silent('startNotifications')) {
+        return never();
+      }
       return Promise.resolve();
     },
 
@@ -309,6 +359,9 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
         return notInitialized();
       }
       writes.push({ service, characteristic, value });
+      if (silent('write')) {
+        return never();
+      }
       return Promise.resolve();
     },
 

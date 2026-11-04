@@ -17,6 +17,7 @@
  */
 
 import type { SensorCapability } from '../capability';
+import type { ControllerOptions } from './controller';
 import type { FtmsOptions } from './ftms';
 
 /**
@@ -26,8 +27,12 @@ import type { FtmsOptions } from './ftms';
  * proprietary control point**, modelled as a presence rather than a protocol so
  * that a device can serve it *and* FTMS and #90's precedence rule has something
  * to be observed against. `vendor-control.ts` says what it is and is not.
+ *
+ * `obc` is an OpenBikeControl steering and button controller (#1823): a device
+ * a rider steers with, which is neither a sensor nor a trainer.
+ * `controller.ts` says what it is.
  */
-export type SimulatedService = 'ftms' | 'cps' | 'cscs' | 'hrs' | 'wahoo';
+export type SimulatedService = 'ftms' | 'cps' | 'cscs' | 'hrs' | 'wahoo' | 'obc';
 
 /**
  * What each profile lets a device declare.
@@ -45,6 +50,8 @@ export const SERVICE_CAPABILITIES: Readonly<Record<SimulatedService, readonly Se
     // A control capability and no measurement: the proprietary characteristic
     // makes a machine controllable and reports nothing.
     wahoo: ['trainer-control'],
+    // Nothing at all: a controller measures nothing and controls no trainer.
+    obc: [],
   };
 
 export interface SimulatedDeviceSpec {
@@ -58,6 +65,8 @@ export interface SimulatedDeviceSpec {
    */
   readonly services: readonly SimulatedService[];
   readonly ftms?: FtmsOptions;
+  /** The script an `obc` controller plays. */
+  readonly controller?: ControllerOptions;
 }
 
 /** Everything a spec's services let the device declare, as one set. */
@@ -146,6 +155,21 @@ export function vendorOnlyTrainer(options: DeviceOptions = {}): SimulatedDeviceS
     id: options.id ?? 'vendor-only-trainer',
     name: options.name ?? 'KICKR SNAP 9C8D',
     services: ['wahoo', 'cps'],
+  };
+}
+
+/**
+ * An OpenBikeControl steering and button controller (#1823), playing `script`
+ * on the simulator's clock. `controller.ts` describes the script.
+ */
+export function steeringController(
+  options: DeviceOptions & ControllerOptions = {},
+): SimulatedDeviceSpec {
+  return {
+    id: options.id ?? 'steering-controller',
+    name: options.name ?? 'Steering Controller 4E21',
+    services: ['obc'],
+    controller: options.script === undefined ? {} : { script: options.script },
   };
 }
 

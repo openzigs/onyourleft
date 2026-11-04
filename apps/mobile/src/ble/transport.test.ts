@@ -340,6 +340,8 @@ describe('the scripted plugin enforces the ordering the real one has (#230)', ()
     ['getServices', (port) => port.getServices('AA:BB')],
     // #1435. A read of the phone's own radio, and the plugin guards it too.
     ['readRssi', (port) => port.readRssi('AA:BB')],
+    // #1825. A link-parameter request for a controller; guarded by the plugin too.
+    ['requestConnectionPriority', (port) => port.requestConnectionPriority('AA:BB', 'high')],
     ['read', (port) => port.read('AA:BB', 'service', 'characteristic')],
     [
       'startNotifications',

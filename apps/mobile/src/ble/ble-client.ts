@@ -31,7 +31,7 @@
  * `CapacitorBlePort` and asserts #39's contract, and none of that changes here.
  */
 
-import { BleClient } from '@capacitor-community/bluetooth-le';
+import { BleClient, ConnectionPriority } from '@capacitor-community/bluetooth-le';
 
 import type {
   CapacitorBlePort,
@@ -104,6 +104,20 @@ export function capacitorBlePort(): CapacitorBlePort {
     },
 
     readRssi: async (deviceId: string): Promise<number> => BleClient.readRssi(deviceId),
+
+    requestConnectionPriority: async (
+      deviceId: string,
+      priority: 'balanced' | 'high' | 'low-power',
+    ): Promise<void> => {
+      await BleClient.requestConnectionPriority(
+        deviceId,
+        priority === 'high'
+          ? ConnectionPriority.CONNECTION_PRIORITY_HIGH
+          : priority === 'low-power'
+            ? ConnectionPriority.CONNECTION_PRIORITY_LOW_POWER
+            : ConnectionPriority.CONNECTION_PRIORITY_BALANCED,
+      );
+    },
 
     read: async (deviceId: string, service: string, characteristic: string): Promise<DataView> =>
       BleClient.read(deviceId, service, characteristic),

@@ -53,6 +53,10 @@ import { deviceId, type DeviceId, type MeasurementFor } from '../../src/index';
 import {
   createSimulator,
   ftmsTrainer,
+  steeringController,
+  type AppInformation,
+  type ControllerNotification,
+  type SimulatedController,
   FITNESS_MACHINE_STATUS_OP_CODE,
   FTMS_CONTROL_OP_CODE,
   FTMS_RESULT_CODE,
@@ -80,7 +84,14 @@ import {
   type TrainerControl,
 } from './fitness-machine-control';
 import { heartRateProfile } from './heart-rate';
+import {
+  OPEN_BIKE_CONTROL_APP_INFORMATION,
+  OPEN_BIKE_CONTROL_BUTTON_STATE,
+  OPEN_BIKE_CONTROL_HAPTIC,
+  OPEN_BIKE_CONTROL_SERVICE,
+} from './open-bike-control';
 import type { MeasurementSink } from './profile';
+import type { GattUuid } from './uuid';
 
 export const viewOf = (bytes: readonly number[]): DataView => {
   const array = Uint8Array.from(bytes);
@@ -420,6 +431,233 @@ export async function connectSimulatedTrainer(
       }
     },
   };
+}
+
+// --- The OpenBikeControl controller (#1823) ---------------------------------
+//
+// The simulator's controller notifies typed changes; these write them as the
+// octets a real controller sends, with literal values from the specification
+// (OpenBikeControl v1, `BLE.md` and `PROTOCOL.md` at `760a7b15`), and never
+// through `open-bike-control.ts`' own arithmetic. The UUIDs are taken from
+// there: they are names, not arithmetic.
+
+/** A pair's state octet: released, pressed. */
+const OBC_RELEASED = 0x00;
+const OBC_PRESSED = 0x01;
+
+/**
+ * One notification as a controller sends it: `0x01`, then id and state pairs.
+ * An angle is `0x80` plus half-degree steps, clamped to `0x02`..`0xFE` (±63°)
+ * as the specification tells a device to clamp it; no angle is `0x00`.
+ */
+export function controllerNotificationToOctets(notification: ControllerNotification): DataView {
+  if (notification.kind === 'malformed') {
+    switch (notification.shape) {
+      case 'empty':
+        return viewOf([]);
+      case 'no-buttons':
+        return viewOf([0x01]);
+      case 'unknown-message-type':
+        // The haptic message type, where a button state belongs.
+        return viewOf([0x03, 0x18, 0x01]);
+      case 'odd-length':
+        return viewOf([0x01, 0x18, 0x01, 0x19]);
+      case 'oversized':
+        // 40 pairs: past any cap a client could reasonably set from the
+        // specification's recommended nine.
+        return viewOf([0x01, ...Array.from({ length: 40 }, () => [0x20, 0x01]).flat()]);
+    }
+  }
+  const octets = [0x01];
+  for (const change of notification.changes) {
+    switch (change.kind) {
+      case 'press':
+        octets.push(change.button, OBC_PRESSED);
+        break;
+      case 'release':
+        octets.push(change.button, OBC_RELEASED);
+        break;
+      case 'angle':
+        octets.push(0x1b, Math.min(0xfe, Math.max(0x02, 0x80 + Math.round(change.degrees * 2))));
+        break;
+      case 'angle-unavailable':
+        octets.push(0x1b, 0x00);
+        break;
+    }
+  }
+  return viewOf(octets);
+}
+
+/**
+ * The device's reading of an app-information write: `0x04`, format `0x01`, a
+ * length-prefixed id, a length-prefixed version, a count and the ids. Read
+ * with literal offsets; `undefined` for a write the device cannot read, which
+ * the specification lets it ignore.
+ */
+export function appInformationFromOctets(bytes: Uint8Array): AppInformation | undefined {
+  if (bytes[0] !== 0x04 || bytes[1] !== 0x01) return undefined;
+  const text = (from: number, length: number): string | undefined =>
+    from + length > bytes.length
+      ? undefined
+      : String.fromCharCode(...bytes.subarray(from, from + length));
+  const idLength = bytes[2];
+  if (idLength === undefined) return undefined;
+  const appId = text(3, idLength);
+  const versionAt = 3 + idLength;
+  const versionLength = bytes[versionAt];
+  if (appId === undefined || versionLength === undefined) return undefined;
+  const appVersion = text(versionAt + 1, versionLength);
+  const countAt = versionAt + 1 + versionLength;
+  const count = bytes[countAt];
+  if (appVersion === undefined || count === undefined) return undefined;
+  if (countAt + 1 + count !== bytes.length) return undefined;
+  return { appId, appVersion, buttons: [...bytes.subarray(countAt + 1)] };
+}
+
+/** What a characteristic of the simulated controller allows. */
+export type ControllerCharacteristicProperty = 'notify' | 'write' | 'write-without-response';
+
+/** One write the controller received, in the order received. */
+export interface ControllerWrite {
+  readonly characteristic: GattUuid;
+  readonly bytes: readonly number[];
+}
+
+/**
+ * The simulated controller as a central sees it over GATT: what it
+ * advertises, its characteristics, a link, notifications and writes. Flat and
+ * object-free, so a Web Bluetooth double (#1824) and a Capacitor plugin double
+ * (#1825) can each be built over it.
+ */
+export interface SimulatedControllerGatt {
+  readonly name: string;
+  readonly advertisedServices: readonly GattUuid[];
+  readonly characteristics: ReadonlyMap<GattUuid, readonly ControllerCharacteristicProperty[]>;
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  isConnected(): boolean;
+  /** Called once each time the link goes down, whoever dropped it. */
+  onDisconnect(listener: () => void): Unsubscribe;
+  /**
+   * Subscribe to a notifying characteristic. A subscription lasts one link,
+   * as a real one does: after a disconnect a client subscribes again.
+   *
+   * @throws {Error} when not connected, or for a characteristic that does not notify.
+   */
+  startNotifications(characteristic: GattUuid, listener: (value: DataView) => void): Unsubscribe;
+  /**
+   * Write to a writable characteristic. Recorded before the device reads it,
+   * so a write the device cannot make sense of is still in {@link writes}.
+   *
+   * @throws {Error} when not connected, or for a characteristic that is not writable.
+   */
+  write(characteristic: GattUuid, value: Uint8Array): void;
+  /** Every write received, in order, on every characteristic. */
+  writes(): readonly ControllerWrite[];
+}
+
+export interface SimulatedControllerBench {
+  readonly bench: SimulatorBench;
+  readonly deviceId: DeviceId;
+  readonly controller: SimulatedController;
+  readonly gatt: SimulatedControllerGatt;
+}
+
+export interface SimulatedControllerOptions {
+  /** Defaults to `steeringController()` with no script. */
+  readonly spec?: SimulatedDeviceSpec | undefined;
+  /** Other devices on the same simulator: a trainer, a strap. */
+  readonly others?: readonly SimulatedDeviceSpec[] | undefined;
+}
+
+const CONTROLLER_CHARACTERISTICS: ReadonlyMap<
+  GattUuid,
+  readonly ControllerCharacteristicProperty[]
+> = new Map<GattUuid, readonly ControllerCharacteristicProperty[]>([
+  [OPEN_BIKE_CONTROL_BUTTON_STATE, ['notify']],
+  [OPEN_BIKE_CONTROL_HAPTIC, ['write', 'write-without-response']],
+  [OPEN_BIKE_CONTROL_APP_INFORMATION, ['write', 'write-without-response']],
+]);
+
+/**
+ * A simulated OpenBikeControl controller on a fresh simulator, not yet
+ * connected. Advance `bench` to play its script.
+ */
+export function openSimulatedController(
+  options: SimulatedControllerOptions = {},
+): SimulatedControllerBench {
+  const spec = options.spec ?? steeringController();
+  const id = deviceId(spec.id);
+  const { transport, bench } = createSimulator({ devices: [spec, ...(options.others ?? [])] });
+  const controller = bench.device(id).controller;
+  if (controller === undefined) {
+    throw new Error('that device serves no OpenBikeControl controller');
+  }
+  const written: ControllerWrite[] = [];
+  let subscriptions: Unsubscribe[] = [];
+  const connected = (): boolean => transport.connectionState(id) === 'connected';
+  const requireConnected = (what: string): void => {
+    if (!connected()) throw new Error(`${what} needs a connection`);
+  };
+  const properties = (characteristic: GattUuid): readonly ControllerCharacteristicProperty[] =>
+    CONTROLLER_CHARACTERISTICS.get(characteristic) ?? [];
+
+  // A subscription dies with its link.
+  let linked = false;
+  const disconnectListeners: Array<() => void> = [];
+  transport.observeConnectionState(id, (state) => {
+    if (state === 'connected') {
+      linked = true;
+      return;
+    }
+    if (linked) {
+      linked = false;
+      for (const unsubscribe of subscriptions) unsubscribe();
+      subscriptions = [];
+      for (const listener of [...disconnectListeners]) listener();
+    }
+  });
+
+  const gatt: SimulatedControllerGatt = {
+    name: spec.name,
+    advertisedServices: [OPEN_BIKE_CONTROL_SERVICE],
+    characteristics: CONTROLLER_CHARACTERISTICS,
+    connect: () => transport.connect(id),
+    disconnect: () => transport.disconnect(id),
+    isConnected: connected,
+    onDisconnect(listener) {
+      disconnectListeners.push(listener);
+      return () => {
+        const at = disconnectListeners.indexOf(listener);
+        if (at !== -1) disconnectListeners.splice(at, 1);
+      };
+    },
+    startNotifications(characteristic, listener) {
+      requireConnected('subscribing');
+      if (!properties(characteristic).includes('notify')) {
+        throw new Error(`the controller does not notify on ${characteristic}`);
+      }
+      const unsubscribe = controller.onNotification((notification) => {
+        listener(controllerNotificationToOctets(notification));
+      });
+      subscriptions.push(unsubscribe);
+      return unsubscribe;
+    },
+    write(characteristic, value) {
+      requireConnected('writing');
+      if (!properties(characteristic).includes('write')) {
+        throw new Error(`the controller has no writable ${characteristic}`);
+      }
+      written.push({ characteristic, bytes: [...value] });
+      if (characteristic === OPEN_BIKE_CONTROL_APP_INFORMATION) {
+        const information = appInformationFromOctets(value);
+        if (information !== undefined) controller.receiveAppInformation(information);
+      }
+    },
+    writes: () => [...written],
+  };
+
+  return { bench, deviceId: id, controller, gatt };
 }
 
 /** The #43 shape, kept so its own tests read as they did. */
