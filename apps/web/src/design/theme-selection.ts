@@ -13,8 +13,9 @@
  * be the absence of one, and absence now means {@link DEFAULT_THEME_CHOICE}.
  * The key keeps its `v1`: every value a v1 key ever held still means what it
  * meant, and only the empty key's meaning moved, which is the ruling itself.
- * The HUD is untouched: `theme.css` §`.oyl-hud` pins it to the light palette
- * whatever the page is in.
+ * The HUD does not follow it: `theme.css` §`.oyl-hud` pins it to the DARK
+ * palette whatever the page is in (#2042, ADR 0063 D-2; it was the light one
+ * from #672 until then).
  *
  * ## Decided before the first paint, by a script that cannot import this file
  *

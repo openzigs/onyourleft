@@ -232,11 +232,11 @@ const GRAPH_VIEWPORTS: readonly (Viewport & {
 ];
 
 /** `tokens.ts`: `hudInk`, `hudInkMuted`, `hudBorder` — in BOTH page themes, like `HUD_SURFACE`. */
-const HUD_INK = 'rgb(245, 248, 250)';
+const HUD_INK = 'rgb(244, 247, 249)';
 
-const HUD_INK_MUTED = 'rgb(168, 182, 194)';
+const HUD_INK_MUTED = 'rgb(157, 163, 168)';
 
-const HUD_BORDER = 'rgb(123, 139, 153)';
+const HUD_BORDER = 'rgb(120, 124, 130)';
 
 const PAINTS_NOTHING = 'rgba(0, 0, 0, 0)';
 

@@ -465,6 +465,69 @@ for (const viewport of VIEWPORTS) {
       ).toBeLessThan(RIDE_TIME_TARGET_PIXELS);
     });
 
+    /**
+     * PR #2113's review: *Preview without a trainer*'s other controls. Its
+     * button is on the list and measured above; the stepper's two buttons, the
+     * power box and the four speed-ups are not buttons the list can name, and
+     * get their 48 px from `theme.css` §`.oyl-chooser__preview` alone. Each is
+     * found by its role in the tile and measured as shipped, and the counts are
+     * held so a control the tile stops rendering is red rather than skipped.
+     */
+    test('Preview without a trainer: its stepper, power box and speed-ups are 48×48', async ({
+      page,
+    }, testInfo) => {
+      const scene = SCENES.find((each) => each.query === '?picker=chooser');
+      if (scene === undefined) throw new Error('no stage chooser scene');
+      await open(page, scene);
+      const readings = await page.evaluate(() => {
+        const tile = document.querySelector('.oyl-chooser__preview');
+        if (tile === null) throw new Error('no Preview without a trainer tile');
+        const read = (kind: string, element: Element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            kind,
+            name: (element.textContent ?? '').trim() || element.getAttribute('aria-label') || kind,
+            width: rect.width,
+            height: rect.height,
+          };
+        };
+        return [
+          ...[...tile.querySelectorAll('.oyl-stepper__step')].map((each) => read('step', each)),
+          ...[...tile.querySelectorAll('input[type=number]')].map((each) => read('power', each)),
+          ...[...tile.querySelectorAll('.oyl-segmented__options > label')].map((each) =>
+            read('speed-up', each),
+          ),
+        ];
+      });
+      const note = readings
+        .map(
+          (each) =>
+            `${each.kind} “${each.name}” ${each.width.toFixed(1)}×${each.height.toFixed(1)}`,
+        )
+        .join(' · ');
+      testInfo.annotations.push({ type: 'preview targets', description: note });
+      console.log(`PR #2113 preview targets — ${viewport.name} — ${note}`);
+      expect(readings.map((each) => each.kind)).toEqual([
+        'step',
+        'step',
+        'power',
+        'speed-up',
+        'speed-up',
+        'speed-up',
+        'speed-up',
+      ]);
+      for (const each of readings) {
+        expect(
+          each.height,
+          `${each.kind} “${each.name}” is ${each.height.toFixed(1)} px tall`,
+        ).toBeGreaterThanOrEqual(RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE);
+        expect(
+          each.width,
+          `${each.kind} “${each.name}” is ${each.width.toFixed(1)} px wide`,
+        ).toBeGreaterThanOrEqual(RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE);
+      }
+    });
+
     test('the control — without the modifier, Set target falls under 48', async ({ page }) => {
       const scene = SCENES[1];
       if (scene === undefined) throw new Error('no mid-ride scene');
