@@ -56,6 +56,9 @@ const config = {
       // frame: long enough for Home on the tablet, and the most a broken page
       // can hold a rider at the splash.
       launchShowDuration: 3000,
+      // The exit fade, stated rather than left to the plugin's implicit 200 ms
+      // (`SplashScreenConfig.java`), which is the lane's motion ceiling itself.
+      launchFadeOutDuration: 150,
     },
   },
 };
