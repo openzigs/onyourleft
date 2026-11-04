@@ -138,15 +138,20 @@ export const ROOM_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'not_found', 'rate_limited'],
     response: {
       contentType: 'application/json',
-      schema: object({
-        roomId: string,
-        kind,
-        ridingPosition: position,
-        drafting: { type: 'boolean' },
-        loop: { type: 'boolean' },
-        routeSha256: string,
-        creator: { type: 'boolean' },
-      }),
+      schema: object(
+        {
+          roomId: string,
+          kind,
+          ridingPosition: position,
+          drafting: { type: 'boolean' },
+          loop: { type: 'boolean' },
+          routeSha256: string,
+          creator: { type: 'boolean' },
+          // #1912: a lap race's laps and items; never its seed.
+          lapRace: object({ laps: { type: 'integer' }, items: { type: 'boolean' } }),
+        },
+        ['roomId', 'kind', 'ridingPosition', 'drafting', 'loop', 'routeSha256', 'creator'],
+      ),
     },
     handle: async (context) =>
       answer(await roomsOf(context).join(callerOf(context), context.json, context.client)),
@@ -203,15 +208,20 @@ export const ROOM_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'not_found', 'not_eligible'],
     response: {
       contentType: 'application/json',
-      schema: object({
-        roomId: string,
-        kind,
-        ridingPosition: position,
-        drafting: { type: 'boolean' },
-        loop: { type: 'boolean' },
-        routeSha256: string,
-        creator: { type: 'boolean' },
-      }),
+      schema: object(
+        {
+          roomId: string,
+          kind,
+          ridingPosition: position,
+          drafting: { type: 'boolean' },
+          loop: { type: 'boolean' },
+          routeSha256: string,
+          creator: { type: 'boolean' },
+          // #1912: a lap race's laps and items; never its seed.
+          lapRace: object({ laps: { type: 'integer' }, items: { type: 'boolean' } }),
+        },
+        ['roomId', 'kind', 'ridingPosition', 'drafting', 'loop', 'routeSha256', 'creator'],
+      ),
     },
     handle: async (context) =>
       answer(await roomsOf(context).joinPublic(callerOf(context), context.params.roomId ?? '')),

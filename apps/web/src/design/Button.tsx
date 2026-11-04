@@ -84,6 +84,13 @@ interface ButtonCommonProps {
    * press**: a click still reaches `onClick`, and the caller refuses it there.
    */
   readonly unavailable?: boolean;
+  /**
+   * `aria-busy`, for a button whose action is under way — #1826's *Pair a
+   * steering controller* while the controller is paired. It says nothing a
+   * click is refused by: pair it with {@link unavailable}, and refuse the
+   * press in `onClick`.
+   */
+  readonly busy?: boolean;
   /** The id of an element that explains this button, for `aria-describedby`. */
   readonly describedBy?: string;
   /**
@@ -164,6 +171,7 @@ export function Button({
   type = 'button',
   disabled = false,
   unavailable = false,
+  busy = false,
   describedBy,
   focusOnMount = false,
   ref,
@@ -206,6 +214,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       aria-disabled={unavailable ? true : undefined}
+      aria-busy={busy ? true : undefined}
       aria-describedby={describedBy}
       // Only a toggle says which way it stands. `undefined` renders nothing,
       // so a primary or secondary is never announced as "not pressed".

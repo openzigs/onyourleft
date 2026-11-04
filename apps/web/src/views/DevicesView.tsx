@@ -5,7 +5,9 @@ import { useState, type JSX } from 'react';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import type { RideController } from '../ride/controller';
+import { ControllerPairing } from '../ride/ControllerPairing';
 import { ONE_GESTURE_PER_DEVICE, PairingPanel } from '../ride/SensorPairing';
+import type { SteeringController } from '../ride/steering-controller';
 import type { SignalStrengthPort } from '../ride/signal-port';
 import {
   BLUETOOTH_ABSENT_STILL_WORKS,
@@ -66,6 +68,12 @@ export interface DevicesViewProps {
    * @see ../support/system-settings-port.ts
    */
   readonly settings?: SystemSettingsPort | undefined;
+  /**
+   * The steering controller — #1826. Paired beneath the trainer and sensors,
+   * through its own client, where this platform can pair at all. Absent, the
+   * screen offers no controller block.
+   */
+  readonly steering?: SteeringController | undefined;
 }
 
 /**
@@ -117,9 +125,10 @@ export function DevicesView({
   signal,
   bluetoothAsk,
   settings,
+  steering,
 }: DevicesViewProps): JSX.Element {
   return shell === undefined ? (
-    <BrowserDevices capabilities={capabilities} controller={controller} />
+    <BrowserDevices capabilities={capabilities} controller={controller} steering={steering} />
   ) : (
     <ShellDevices
       port={shell}
@@ -127,6 +136,7 @@ export function DevicesView({
       signal={signal}
       ask={bluetoothAsk}
       settings={settings}
+      steering={steering}
     />
   );
 }
@@ -190,9 +200,11 @@ function NoController(): JSX.Element {
 function BrowserDevices({
   capabilities,
   controller,
+  steering,
 }: {
   readonly capabilities: CapabilityProbe;
   readonly controller: RideController | undefined;
+  readonly steering: SteeringController | undefined;
 }): JSX.Element {
   const { support, recheck } = useBluetoothSupport(capabilities);
   const notice = <BluetoothSupportNotice support={support} onRecheck={recheck} />;
@@ -211,6 +223,7 @@ function BrowserDevices({
         >
           {notice}
         </PairingPanel>
+        {steering === undefined ? null : <ControllerPairing controller={steering} />}
       </>
     );
   }
@@ -263,12 +276,14 @@ function ShellDevices({
   signal,
   ask,
   settings,
+  steering,
 }: {
   readonly port: ShellSupportPort;
   readonly controller: RideController | undefined;
   readonly signal: SignalStrengthPort | undefined;
   readonly ask: BluetoothAskPort | undefined;
   readonly settings: SystemSettingsPort | undefined;
+  readonly steering: SteeringController | undefined;
 }): JSX.Element {
   // #1436: the first read is the one that raises Android's dialog, so a rider
   // who has not been told why yet is told first, and the read waits for
@@ -285,7 +300,13 @@ function ShellDevices({
     );
   }
   return (
-    <ShellDevicesAsked port={port} controller={controller} signal={signal} settings={settings} />
+    <ShellDevicesAsked
+      port={port}
+      controller={controller}
+      signal={signal}
+      settings={settings}
+      steering={steering}
+    />
   );
 }
 
@@ -314,11 +335,13 @@ function ShellDevicesAsked({
   controller,
   signal,
   settings,
+  steering,
 }: {
   readonly port: ShellSupportPort;
   readonly controller: RideController | undefined;
   readonly signal: SignalStrengthPort | undefined;
   readonly settings: SystemSettingsPort | undefined;
+  readonly steering: SteeringController | undefined;
 }): JSX.Element {
   const { support, recheck } = useShellSupport(port);
   const notice = (
@@ -350,6 +373,7 @@ function ShellDevicesAsked({
         >
           {notice}
         </PairingPanel>
+        {steering === undefined ? null : <ControllerPairing controller={steering} />}
       </>
     );
   }
