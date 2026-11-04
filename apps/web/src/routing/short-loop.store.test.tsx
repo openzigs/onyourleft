@@ -12,8 +12,8 @@
  *    length the planner's readout said.
  * 2. That saved loop is a choosable course where a lap race is chosen: the
  *    game's route picker offers its lap race, and the room panel on the same
- *    screen makes a race room on it, whose request to the instance says it is
- *    a loop. The game reads routes as `main.tsx` §`listRoutes` does, from the
+ *    screen makes a Lap race room on it (#1912), whose request to the
+ *    instance says it is a loop with its laps. The game reads routes as `main.tsx` §`listRoutes` does, from the
  *    store; the room port is `createRoomsPort` over a scripted instance, as
  *    `rooms-shell.test.tsx` builds it.
  *
@@ -51,6 +51,7 @@ import { OSM_ATTRIBUTION } from '../map/basemap';
 import { stubMapPort } from '../map/testing';
 import { createRoomPort } from '../net/room-port';
 import { createRoomsPort } from '../net/rooms-port';
+import { ROOM_LAP_RACE_TEXT } from '../rooms/RoomPanel';
 import { ROOMS_ORIGIN, ScriptedInstance } from '../rooms/rooms-testing';
 import type { RoutePort } from '../routes/store-port';
 import { AppShell } from '../shell/AppShell';
@@ -304,29 +305,30 @@ describe('a short loop drawn on the planner — #2102', () => {
     expect(text()).toContain(LAP_RACE_CHOICE_TEXT.label);
     expect(text()).not.toContain(LAP_RACE_CHOICE_TEXT.notALoop);
 
-    // The room panel: the loop is a route a race room is made on.
+    // The room panel: the loop is a route a lap-race room is made on (#1912).
     const routeSelect = queryAll<HTMLSelectElement>(mounted.container, 'select').find(
       (each) => each.closest('label')?.textContent?.startsWith('Route') === true,
     );
     if (routeSelect === undefined) throw new Error('no room route chooser');
     expect([...routeSelect.options].map((option) => option.value)).toEqual([saved.id]);
     await chooseOption(routeSelect, saved.id);
-    const race = queryAll<HTMLInputElement>(mounted.container, 'input[type="radio"]').find(
-      (each) => each.closest('label')?.textContent?.startsWith('Race') === true,
+    const lapRace = queryAll<HTMLInputElement>(mounted.container, 'input[type="radio"]').find(
+      (each) => each.closest('label')?.textContent?.startsWith(ROOM_LAP_RACE_TEXT.kind) === true,
     );
-    if (race === undefined) throw new Error('no Race choice');
+    if (lapRace === undefined) throw new Error('no Lap race choice');
     await act(async () => {
-      race.click();
+      lapRace.click();
       await Promise.resolve();
     });
+    // The room's lap race accepts the planner's loop: it is not refused as a line.
+    expect(text()).not.toContain(ROOM_LAP_RACE_TEXT.notALoop);
     await activateWithKeyboard(buttonNamed('Make a room'));
     for (let i = 0; i < 50 && !text().includes('Its code is'); i += 1) await settle();
 
     const made = instance.seen.find((each) => each.path === '/v1/rooms');
     if (made === undefined) throw new Error('no room was asked for');
     const body = made.body as { kind: string; loop: boolean; lengthMetres: number };
-    expect(body.kind).toBe('race');
-    expect(body.loop).toBe(true);
+    expect(body).toMatchObject({ kind: 'race', loop: true, lapRace: { laps: 3 } });
     expect(body.lengthMetres).toBeCloseTo(saved.profile.totalDistance, -1);
   });
 });

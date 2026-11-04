@@ -162,6 +162,10 @@ describe('the length against a target', () => {
     expect(nearerTarget(metres(2_600), 2, 'over')).toBe(3);
     // 1.2 km against 1 km: 2 km would be 0.8 km off, worse than 0.2 km.
     expect(nearerTarget(metres(1_200), 1, 'over')).toBeUndefined();
+    // A tie keeps the chosen target: 1.5 km is 0.5 km from both 1 km and 2 km,
+    // and 2.5 km is 0.5 km from both 2 km and 3 km.
+    expect(nearerTarget(metres(1_500), 2, 'under')).toBeUndefined();
+    expect(nearerTarget(metres(2_500), 2, 'over')).toBeUndefined();
     // Nothing shorter than the shortest, nothing longer than the longest.
     expect(nearerTarget(metres(100), 1, 'under')).toBeUndefined();
     expect(nearerTarget(metres(20_000), 8, 'over')).toBeUndefined();

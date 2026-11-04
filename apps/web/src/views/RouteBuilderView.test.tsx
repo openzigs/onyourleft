@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
+import { IS_A_LOOP_TEXT, NOT_YET_A_LOOP_TEXT } from '../routing/loop';
 import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
 import {
   activateWithKeyboard,
@@ -561,19 +562,18 @@ describe('closing the loop, from the keyboard and to a screen reader (#2102)', (
     expect(document.activeElement?.textContent).toBe('A short loop for a lap race');
   });
 
-  it('announces the loop closing, and a new target, from a live region on the page from the start', async () => {
+  it('announces the loop closing, and its fit to a new target, from a live region on the page from the start', async () => {
     await open();
     await place(3);
     const region = loopStatus();
     // On the page before anything changes, or a change inside it is not announced.
     expect(region).toBeDefined();
     expect(region?.getAttribute('role')).toBe('status');
-    expect(region?.textContent).not.toContain('Loop length');
+    expect(region?.textContent).toContain(NOT_YET_A_LOOP_TEXT);
 
     await press('Close the loop');
     expect(loopStatus()).toBe(region);
-    expect(region?.textContent).toContain('It ends where it starts');
-    expect(region?.textContent).toContain('Loop length');
+    expect(region?.textContent).toContain(IS_A_LOOP_TEXT);
 
     const target = mounted?.container.querySelector<HTMLSelectElement>(
       'select:not(#surface-tolerance)',
@@ -581,8 +581,44 @@ describe('closing the loop, from the keyboard and to a screen reader (#2102)', (
     if (target === null || target === undefined) throw new Error('no target select');
     await chooseOption(target, '8');
     expect(loopStatus()).toBe(region);
-    expect(region?.textContent).toContain('against a target of 8 km');
-    expect(region?.textContent).toContain('under the target');
+    // The fit, as a word: the loop is now under its target.
+    expect(region?.textContent).toContain('Under the target.');
+  });
+
+  /** The loop's length line, outside the live region. */
+  function lengthLine(): string | undefined {
+    if (mounted === undefined) throw new Error('nothing is mounted');
+    return (
+      queryAll(mounted.container, 'p').find((line) =>
+        line.textContent?.includes('against a target of'),
+      )?.textContent ?? undefined
+    );
+  }
+
+  it('keeps the running length and the note out of the live region, so a tap is not announced', async () => {
+    await open();
+    await place(3);
+    const region = loopStatus();
+    if (region === undefined) throw new Error('no loop live region');
+    // The length is on the page, but outside the region.
+    expect(mounted?.container.textContent).toContain('so far, against a target of');
+    expect(region.textContent).not.toContain('so far');
+    expect(region.textContent).not.toContain('against a target');
+
+    // Another waypoint changes the length and not the state, so the region's
+    // words are the same and nothing is announced.
+    const before = region.textContent;
+    const lengthBefore = lengthLine();
+    await place(1);
+    expect(lengthLine()).not.toBe(lengthBefore);
+    expect(loopStatus()).toBe(region);
+    expect(region.textContent).toBe(before);
+
+    // A closed loop: its length and its note, with their numbers, stay outside too.
+    await press('Close the loop');
+    expect(mounted?.container.textContent).toContain('Loop length');
+    expect(region.textContent).not.toContain('Loop length');
+    expect(region.textContent).not.toMatch(/\d/);
   });
 
   it('styles the target select as the page’s other select: no class of its own', async () => {

@@ -81,6 +81,7 @@ import {
   DEFAULT_LOOP_TARGET_KM,
   LOOP_TARGETS_KM,
   loopReadout,
+  type LoopFit,
   loopTargetText,
   type LoopTargetKm,
 } from '../routing/loop';
@@ -258,6 +259,18 @@ export const NUDGE_DEGREES = 0.0005;
  * which does not matter for "about 55 m".
  */
 const METRES_PER_DEGREE_LATITUDE = 111_320;
+
+/**
+ * A loop's fit to its target, as a word with no number: the note's label, and
+ * what the loop's live region says when the fit changes (#2102).
+ */
+function fitLabel(fit: LoopFit): string {
+  return fit.kind === 'under'
+    ? 'Under the target'
+    : fit.kind === 'over'
+      ? 'Over the target'
+      : 'Near the target';
+}
 
 const DEFAULT_ORIGIN = geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12));
 
@@ -894,27 +907,27 @@ export function RouteBuilderView({
       </select>
       {/*
         A polite live region, on the page from the start so a change inside it
-        is announced: closing the loop, a new target, and the length as it
-        changes. Its note is not `live` of its own, or it would be said twice.
+        is announced. It holds the loop's state only: the state sentence and
+        whether a loop is near, under or over its target (PR #2111 review). The
+        running length and the note, whose numbers change on every tap, drag
+        and nudge, sit outside it, so a rider drawing a long ride does not hear
+        the loop advice again after every waypoint.
       */}
       <div role="status">
         <p>{loop.state}</p>
-        {loop.length === undefined ? null : <p>{loop.length}</p>}
-        {loop.note === undefined ? null : (
-          <StatusMessage
-            tone={loop.fit?.kind === 'near' ? 'success' : 'warning'}
-            label={
-              loop.fit?.kind === 'under'
-                ? 'Under the target'
-                : loop.fit?.kind === 'over'
-                  ? 'Over the target'
-                  : 'Near the target'
-            }
-          >
-            {loop.note}
-          </StatusMessage>
+        {loop.fit === undefined ? null : (
+          <VisuallyHidden>{`${fitLabel(loop.fit)}.`}</VisuallyHidden>
         )}
       </div>
+      {loop.length === undefined ? null : <p>{loop.length}</p>}
+      {loop.note === undefined || loop.fit === undefined ? null : (
+        <StatusMessage
+          tone={loop.fit.kind === 'near' ? 'success' : 'warning'}
+          label={fitLabel(loop.fit)}
+        >
+          {loop.note}
+        </StatusMessage>
+      )}
 
       {/* #2006: the drawn route, into the same library as an imported one. */}
       {routes === undefined ? null : (
