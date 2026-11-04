@@ -4377,6 +4377,27 @@ select.oyl-input {
   block-size: 2.5rem;
 }
 
+/*
+ * #1826: the steering controller's card wears a Lucide icon (ADR 0034) where
+ * the sensors' wear a drawn glyph, in the glyphs' accent so the cards read as
+ * one set. A stroke rather than a fill, so the colour is the stroke's.
+ */
+.oyl-pairing__icon {
+  color: var(--oyl-color-accent);
+}
+
+/*
+ * A Pair button whose pairing is under way (#1826): `aria-busy` and
+ * `aria-disabled`, so it stays a tab stop and says it is busy, and looks the
+ * way an unavailable ask control does (#805), with the progress cursor.
+ */
+.oyl-pairing .oyl-button[aria-busy='true'] {
+  cursor: progress;
+  border-color: var(--oyl-color-border);
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-ink-muted);
+}
+
 .oyl-pairing__body {
   display: flex;
   flex-wrap: wrap;

@@ -94,6 +94,7 @@ import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
+import type { SteeringController } from '../ride/steering-controller';
 import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { SystemSettingsPort } from '../support/system-settings-port';
 
@@ -219,6 +220,11 @@ export interface AppShellProps {
    */
   readonly bluetoothAsk?: BluetoothAskPort | undefined;
   readonly systemSettings?: SystemSettingsPort | undefined;
+  /**
+   * The steering controller, paired on the Devices screen — #1826. Built
+   * beside the ride controller where this platform can pair.
+   */
+  readonly steering?: SteeringController | undefined;
   /**
    * Running inside the Android shell — `support/capacitor.ts` §`isNativeShell`,
    * read by `main.tsx`. #1438: History's footer says what deletes the rides on
@@ -725,6 +731,7 @@ function viewFor(
           {...(props.signal === undefined ? {} : { signal: props.signal })}
           {...(props.bluetoothAsk === undefined ? {} : { bluetoothAsk: props.bluetoothAsk })}
           {...(props.systemSettings === undefined ? {} : { settings: props.systemSettings })}
+          {...(props.steering === undefined ? {} : { steering: props.steering })}
           // #659: pairing lives on Devices, through the controller the Ride
           // screen reads — mounted above this router, so what is paired here is
           // what Ride shows.
