@@ -20,22 +20,21 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { POWER_ZONE_LOWER_FRACTIONS } from '@onyourleft/domain';
+import { HEART_RATE_ZONE_NAMES, POWER_ZONE_LOWER_FRACTIONS } from '@onyourleft/domain';
 
 import { contrastRatio, relativeLuminance } from './contrast';
 import {
-  BAND_DIRECTION,
   BAND_TOKENS,
   COLOUR_TOKENS,
   DARK_COLOUR_TOKENS,
   ELEVATION_DIRECTION,
   ELEVATION_SURFACES,
   FONT_SIZE_TOKENS,
+  HEART_RATE_BAND_TOKENS,
   ILLUSTRATION_DEPTH,
   ILLUSTRATION_TOKENS,
   MAXIMUM_ELEVATION_STEP,
   MINIMUM_ELEVATION_STEP,
-  MINIMUM_BAND_STEP,
   MINIMUM_ILLUSTRATION_STEP,
   MOTION_DURATION_MS,
   MOTION_EASING,
@@ -257,30 +256,9 @@ describe("the workout block chart's bands (#1043)", () => {
     expect(BAND_TOKENS).toHaveLength(POWER_ZONE_LOWER_FRACTIONS.length);
   });
 
-  describe.each(THEMES)('in the %s palette', (theme) => {
-    const colours = paletteColours(theme);
-
-    it('moves one way in lightness, band by band, far enough to read in greyscale', () => {
-      // SC 1.4.1: the band is told by the block's height as well, but a ramp
-      // that is a ramp in luminance is one a reader without hue still reads.
-      for (let index = 1; index < BAND_TOKENS.length; index += 1) {
-        const easier = BAND_TOKENS[index - 1] ?? 'bandRecovery';
-        const here = BAND_TOKENS[index] ?? 'bandRecovery';
-        const message = `${theme}: ${here} is not ${BAND_DIRECTION[theme]} than ${easier}`;
-        const before = relativeLuminance(colours[easier]);
-        const now = relativeLuminance(colours[here]);
-        if (BAND_DIRECTION[theme] === 'darker') {
-          expect(now, message).toBeLessThan(before);
-        } else {
-          expect(now, message).toBeGreaterThan(before);
-        }
-        const step = contrastRatio(colours[here], colours[easier]);
-        expect(
-          step,
-          `${theme}: ${easier} → ${here} is ${step.toFixed(3)}:1, too close to tell apart`,
-        ).toBeGreaterThanOrEqual(MINIMUM_BAND_STEP);
-      }
-    });
+  it('gives each heart-rate zone the power zone colour at its position (#2039, ADR 0063 D-4)', () => {
+    expect(HEART_RATE_BAND_TOKENS).toHaveLength(HEART_RATE_ZONE_NAMES.length);
+    expect(HEART_RATE_BAND_TOKENS).toEqual(BAND_TOKENS.slice(0, HEART_RATE_ZONE_NAMES.length));
   });
 });
 

@@ -964,6 +964,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         implements it; the game is handed the port, never the
                         client, because the clients write to the controller
                         and so may not be imported under `game/delivery/`
+    src/game/delivery/controller-input.ts, lane-input-port.ts,
+    src/game/hud/ControllerIntents.tsx
+                        a controller's steer buttons, handlebar angle and
+                        throws as Delivery's intents (#1827), handed on once
+                        an animation frame, at most one of each, by the HUD on
+                        a solo round only. ⚠️ The angle SELECTS one of the
+                        three lanes (10° to a side, back to the centre within
+                        5°); it is not a proportional offset, because
+                        `lanes.ts` and ADR 0060 D-6.3 need spike 0030's
+                        reading re-run before any continuous steer
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -1564,6 +1574,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         valley, a hairpin, a circuit. Test support, never shipped
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
+    src/game/simulated-rider.ts
+                        the simulated rider (#1992), a developer's debug mode:
+                        `#/game?simulate=<watts>` (with `&speedup=<1–32>` and
+                        `&at=<metres>`) rides a rider's own route at a steady
+                        power with no trainer or sensor, faster than real time
+                        and from a distance if asked. `GameView` §`useSimulatedRide`
+                        builds the ride with NO trainer port, room or rooms and
+                        no Delivery round, so nothing is written to a machine,
+                        recorded, saved or posted; the HUD's `oyl-hud__simulated`
+                        line marks it. `simulated-rider-wiring.test.tsx` holds it.
+                        The picker offers the same ride as *Preview without a
+                        trainer* (PR #2113's ruling; `StageChooser.tsx`
+                        §`PreviewControl`): a power and a 1–8× speed-up, ridden
+                        on a NEW screen `GameView` mounts with none of those
+                        ports; ending it mounts an ordinary picker again.
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

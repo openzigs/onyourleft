@@ -55,7 +55,7 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { Fragment, type JSX, type ReactNode } from 'react';
 
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
@@ -63,6 +63,8 @@ import { useUnits } from '../../units/context';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 
 import { NO_READING, type HudInput, type TrainerLine } from './fields';
+import type { ControllerPort } from '../delivery/controller-port';
+import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import { RaceStandings } from './RaceStandings';
@@ -171,6 +173,15 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    */
   readonly sideCamera?:
     { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
+  /**
+   * The simulated rider's mark — #1992: the sentence that says this ride is
+   * simulated, in the actions panel (after Pause and End ride) for every frame of the ride, so a
+   * screenshot of it cannot pass for a real effort. Absent on every real ride.
+   * One string a sentence: each is set as its own inline box
+   * (`theme.css` §`.oyl-hud__simulated`), so a line breaks between the
+   * sentences rather than inside one.
+   */
+  readonly simulated?: readonly string[] | undefined;
   /**
    * Another rider's ghost — #331: whose it is, and *Stop ghost*, which takes
    * it off the road and the HUD for the rest of the ride. `undefined` for the
@@ -295,6 +306,15 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * runs no lap race (#1906).
    */
   readonly items?: ItemInputPort | undefined;
+  /**
+   * A paired steering controller — #1827. With it, and a round's ports, the
+   * HUD hands the controller's lane changes, lanes and throws to them
+   * (`ControllerIntents.tsx`), and draws nothing; `undefined` on every ride
+   * that runs no round, and wherever no controller is paired.
+   */
+  readonly controller?: ControllerPort | undefined;
+  /** A Delivery round's lane, as a controller's handlebar angle asks for one — #1827. */
+  readonly lanes?: LaneInputPort | undefined;
 }
 
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */
@@ -311,6 +331,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     workout,
     sound,
     sideCamera,
+    simulated,
     ghostStop,
     onFollowNext,
     report,
@@ -353,6 +374,16 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       }
       moreActions={
         <>
+          {simulated === undefined ? null : (
+            <p className="oyl-hud__simulated">
+              {simulated.map((sentence, index) => (
+                <Fragment key={sentence}>
+                  {index === 0 ? null : ' '}
+                  <span>{sentence}</span>
+                </Fragment>
+              ))}
+            </p>
+          )}
           {/*
               #1244: *Keep the plan*, on a row of its own under Pause and End ride
               and only while a re-plan waits. ⚠️ **Not a third control in the row

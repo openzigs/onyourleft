@@ -3,7 +3,14 @@
 import { useMemo, type JSX } from 'react';
 
 import { BAND_TOKENS, type ColourToken } from '../design/tokens';
-import { blockChartPaths, CHART_HEIGHT, CHART_WIDTH, type BlockChartSegment } from './block-chart';
+import { ZoneKey, zonesPainted } from '../design/ZoneKey';
+import {
+  blockChartPaths,
+  CHART_HEIGHT,
+  CHART_WIDTH,
+  type BlockChartPaths,
+  type BlockChartSegment,
+} from './block-chart';
 
 /**
  * The class each part of the block chart is painted by, and the token that
@@ -40,6 +47,10 @@ function bandClass(token: string): string {
  * — every block's share in the builder's list, the shape sentence on a saved
  * workout — and the chart repeats them; it does not replace them
  * (`library.ts` §`WorkoutRow.shape`). An empty timeline draws nothing at all.
+ *
+ * ⚠️ **Every zone it paints is named beside it** (#2039): a {@link ZoneKey}
+ * follows the drawing, listing each zone present by its number and name, so
+ * no zone is told by its colour alone (SC 1.4.1).
  */
 export function BlockChart({
   segments,
@@ -51,9 +62,38 @@ export function BlockChart({
     return null;
   }
   return (
+    <>
+      <BlockChartDrawing paths={paths} />
+      <ZoneKey zones={zonesPainted(paths.bands)} />
+    </>
+  );
+}
+
+/**
+ * The block chart's drawing alone, from paths already computed — the saved
+ * workout cards on Workouts draw it at their own size (the owner's ruling of
+ * 2026-11-04 on #2125: zone colours on the card, not one accent).
+ *
+ * ⚠️ **It names no zone, so whatever renders it must.** {@link BlockChart} puts
+ * a {@link ZoneKey} after it; the Workouts list puts ONE key over its cards,
+ * naming every zone any card paints (`views/WorkoutsView.tsx`), and
+ * `views/shape-cards.test.tsx` holds that.
+ */
+export function BlockChartDrawing({
+  paths,
+  className,
+}: {
+  readonly paths: BlockChartPaths;
+  /** A modifier beside `oyl-block-chart`, such as the card's size. */
+  readonly className?: string;
+}): JSX.Element | null {
+  if (paths.rule === '') {
+    return null;
+  }
+  return (
     <svg
       aria-hidden="true"
-      className="oyl-block-chart"
+      className={className === undefined ? 'oyl-block-chart' : `oyl-block-chart ${className}`}
       data-oyl-block-chart=""
       focusable="false"
       preserveAspectRatio="none"

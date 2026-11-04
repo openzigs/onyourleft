@@ -6,7 +6,7 @@
  *
  * ⚠️ **A shape names a LAYER, never a colour.** Each paint is a class in
  * `theme.css` (§"THE ILLUSTRATION KIT'S PAINT") that sets `fill` or `stroke` to
- * one token's `var(--oyl-…)`, so the dark palette, the HUD's light pin and any
+ * one token's `var(--oyl-…)`, so the dark palette, the HUD's dark pin (#2042) and any
  * later palette re-point it with no edit here. No part of the kit writes a
  * `fill`, a `stroke` or a `style` colour of its own; `illustration.test.tsx`
  * fails one that does.

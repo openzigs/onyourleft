@@ -88,6 +88,16 @@ import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './deliv
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
+import {
+  PREVIEW_DEFAULT_WATTS,
+  PREVIEW_MAXIMUM_WATTS,
+  PREVIEW_MINIMUM_WATTS,
+  PREVIEW_SPEEDUPS,
+  previewPower,
+  previewRider,
+  type PreviewSpeedup,
+  type SimulatedRider,
+} from './simulated-rider';
 
 /** One route the rider could ride, as the picker needs it. */
 export interface RidableRoute {
@@ -295,6 +305,13 @@ interface RoutePickerProps {
   readonly delivery?: DeliveryOffer | undefined;
   /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
   readonly lapRace?: LapRaceOffer | undefined;
+  /**
+   * *Preview without a trainer* — #1992, the owner's ruling on PR #2113: the
+   * chosen route ridden by the simulated rider. `undefined` draws nothing.
+   * @see PreviewControl
+   */
+  readonly onPreview?:
+    ((route: RidableRoute, rider: SimulatedRider, position: RidingPosition) => void) | undefined;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
@@ -615,7 +632,128 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
         {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
+      {props.onPreview === undefined ? null : (
+        <PreviewControl
+          route={chosen}
+          asking={props.asking}
+          onPreview={(rider) => {
+            props.onPreview?.(chosen, rider, props.position);
+          }}
+          idPrefix={ids}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * *Preview without a trainer* — #1992, the owner's ruling on PR #2113 ("Add a
+ * button"): the address switch (`simulated-rider.ts`) cannot be typed in the
+ * tablet app, so the same simulated ride is offered here, for the chosen route.
+ *
+ * ⚠️ **Its own tile, after the loadout and outside it**, because it is not
+ * a way of riding: it is a look at the route with nothing paired, and none of
+ * the loadout applies to it but the riding position. Its button names what it
+ * does, and the sentence above it says what it does not — the trainer, the
+ * recording and sharing — before the press, as #503's promise does for *Ride*.
+ *
+ * Every control in it is a 48 px target (`theme.css` §`.oyl-chooser__preview`;
+ * the button is on `RIDE_TIME_CONTROLS`), held by `ride-targets.browser.spec.ts`:
+ * the button by the list, and the stepper, the power box and the speed-ups by
+ * its *Preview without a trainer* case. A power the box cannot make refuses the
+ * press, as the pacer's box does (#237).
+ *
+ * ⚠️ **Unavailable while the trainer is being asked for control**, as *Ride*
+ * is (#509, PR #2113's review). A preview mounts a new screen, and a control
+ * granted to the old one in that window would be kept with nothing to release
+ * it (#372). As with *Ride*, `aria-disabled` is what the rider is told; the
+ * refusal is `GameView` §`startingRef`, which holds for a press that lands
+ * before this re-renders.
+ */
+function PreviewControl(props: {
+  readonly route: RidableRoute;
+  readonly asking: boolean;
+  readonly onPreview: (rider: SimulatedRider) => void;
+  readonly idPrefix: string;
+}): JSX.Element {
+  const [power, setPower] = useState(String(PREVIEW_DEFAULT_WATTS));
+  const [speedup, setSpeedup] = useState<PreviewSpeedup>(1);
+  const read = previewPower(power);
+  const headingId = `${props.idPrefix}-preview`;
+  const powerId = `${props.idPrefix}-preview-power`;
+  const problemId = `${props.idPrefix}-preview-problem`;
+  return (
+    <section
+      className="oyl-chooser__preview tw:mb-md tw:bg-surface-raised tw:rounded-card"
+      aria-labelledby={headingId}
+    >
+      <h3 id={headingId} className="tw:mt-0">
+        Preview without a trainer
+      </h3>
+      <p>Ride this route at a steady power with nothing paired. Not recorded or shared.</p>
+      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+        <label htmlFor={powerId}>Power, watts</label>
+        <Stepper
+          name="preview power"
+          step={10}
+          min={PREVIEW_MINIMUM_WATTS}
+          max={PREVIEW_MAXIMUM_WATTS}
+        >
+          <input
+            id={powerId}
+            className="oyl-input"
+            type="number"
+            inputMode="numeric"
+            min={PREVIEW_MINIMUM_WATTS}
+            max={PREVIEW_MAXIMUM_WATTS}
+            step={10}
+            value={power}
+            aria-invalid={read.problem === undefined ? undefined : true}
+            aria-describedby={read.problem === undefined ? undefined : problemId}
+            onChange={(event) => {
+              setPower(event.target.value);
+            }}
+          />
+        </Stepper>
+        {read.problem === undefined ? null : (
+          <p className="oyl-game__problem tw:m-0" id={problemId} role="alert">
+            {read.problem}
+          </p>
+        )}
+      </div>
+      <fieldset className="oyl-segmented">
+        <legend>Speed-up</legend>
+        <div className="oyl-segmented__options">
+          {PREVIEW_SPEEDUPS.map((each) => (
+            <label key={each} htmlFor={`${props.idPrefix}-preview-speedup-${String(each)}`}>
+              <input
+                type="radio"
+                id={`${props.idPrefix}-preview-speedup-${String(each)}`}
+                name={`${props.idPrefix}-preview-speedup`}
+                value={each}
+                checked={speedup === each}
+                onChange={() => {
+                  setSpeedup(each);
+                }}
+              />
+              {`${String(each)}×`}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <Button
+        variant="secondary"
+        size="ride"
+        unavailable={read.problem !== undefined || props.asking}
+        describedBy={read.problem === undefined ? undefined : problemId}
+        onClick={() => {
+          if (read.watts === undefined) return;
+          props.onPreview(previewRider(read.watts, speedup));
+        }}
+      >
+        <span className="oyl-chooser__ride-label">Preview {props.route.name}</span>
+      </Button>
+    </section>
   );
 }
 
@@ -680,7 +818,7 @@ function RouteCards(props: {
               */}
               {chosen ? (
                 <span
-                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent"
+                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent-text"
                   aria-hidden="true"
                 >
                   <Check focusable="false" />
