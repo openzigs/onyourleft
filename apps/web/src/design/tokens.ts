@@ -17,10 +17,17 @@
  * [ADR 0009](../../../../docs/adr/0009-clean-room-posture.md) rule L1 bars this
  * product from reproducing another product's "screen layout, colour palette and
  * icon set as a set", which is trade dress and is protected independently of
- * any mark. The hues below are a desaturated teal and a warm neutral, chosen
- * to clear WCAG AA against the two surfaces and for no other reason. There are
- * no brand oranges, no brand blues, and no imported icon set — the status
- * glyphs in `StatusMessage.tsx` are three characters of text.
+ * any mark. Since #2037 the palette is **Hi-Vis**, the direction the owner
+ * chose on #2035 on 2026-11-03 and [ADR 0063](../../../../docs/adr/0063-the-design-system-direction-hi-vis.md)
+ * D-1 records: graphite neutrals with no hue and one fluorescent lime accent.
+ * **The accent's source** is the fluorescent yellow-green of high-visibility
+ * cycling clothing (the background-material class of EN ISO 20471, a public
+ * safety standard, not a brand), pushed toward green so it reads as lime and
+ * not as any product's yellow. In light a lime cannot carry text on white, so
+ * `accent` is a deep olive there and the lime survives as `selected`. There
+ * are no brand oranges, no brand blues, and no imported icon set — the status
+ * glyphs in `StatusMessage.tsx` are three characters of text. Until #2037 the
+ * hues were a desaturated teal on grey-green neutrals.
  *
  * ## Colour is never the only signal
  *
@@ -65,20 +72,21 @@ export const COLOUR_TOKENS = {
    * Elevation 1: a panel resting on the page — a card, the footer's rule, the
    * well a chart or a map is drawn into.
    */
-  surface: '#f2f5f4',
+  surface: '#ebeef0',
   /**
    * Elevation 2: two steps off the page, for something that has to read as an
    * object rather than as a tinted area — a metric card, a table's header row.
    *
    * ⚠️ Two steps, and **not** because either of them rests on a level-1 panel:
    * both consumers sit directly on the canvas. One step was not enough at the
-   * size they are drawn. `#f2f5f4` on `#ffffff` is 1.097:1, and a 10 rem card
-   * at that separation reads as a faintly tinted rectangle. The level is what
+   * size they were drawn in the teal palette: `#f2f5f4` on `#ffffff` was 1.097:1,
+   * and a 10 rem card at that separation read as a faintly tinted rectangle
+   * (Hi-Vis, #2037, steps 1.17:1 in light and about 1.24:1 in dark). The level is what
    * the separation had to be, not a count of the things underneath — and an
    * earlier version of this comment said the opposite of the two rules in
    * `theme.css` that use it.
    */
-  surfaceRaised: '#e7eae9',
+  surfaceRaised: '#dbdde0',
   /**
    * Elevation 3: the header, the chrome that frames every view — and the only
    * surface other content ever passes beneath.
@@ -91,20 +99,20 @@ export const COLOUR_TOKENS = {
    * it: the header is the top of the ramp on every viewport, and on a small
    * one it simply does not have anything scrolling under it.
    */
-  surfaceOverlay: '#dde0df',
+  surfaceOverlay: '#cbcdd0',
   /** The boundary of a control or a panel. A non-text contrast, not a text one. */
-  border: '#767e7e',
+  border: '#6a6c6e',
   /** Body text. */
-  ink: '#141b1a',
+  ink: '#131415',
   /** Secondary text: captions, helper text, the "nothing here yet" line. */
-  inkMuted: '#4a5b5c',
+  inkMuted: '#515355',
   /**
    * The one accent: primary buttons, the active navigation item. A link in
-   * running text is `link` since #661, which has the same value today.
+   * running text is `link` since #661, a separate value since #2037 (ADR 0063).
    */
-  accent: '#0b5c55',
+  accent: '#405e00',
   /** The accent under a pointer or a press. */
-  accentHover: '#07443f',
+  accentHover: '#2c4300',
   /** Text and glyphs drawn on `accent` or `accentHover`. */
   accentInk: '#ffffff',
   /**
@@ -112,7 +120,7 @@ export const COLOUR_TOKENS = {
    * control (#668) — a light tint of the accent.
    *
    * ⚠️ **It is not the signal on its own, and cannot be**: against the page it
-   * is 1.25:1, nowhere near SC 1.4.11's 3:1, and a state told by colour alone
+   * is 1.24:1 (light), nowhere near SC 1.4.11's 3:1, and a state told by colour alone
    * fails SC 1.4.1 whatever the ratio. The state is the doubled border drawn
    * inside the control's own (`theme.css` §"THE THREE KINDS OF BUTTON"), and
    * a segment's radio dot. What this tint must clear is the text and the ring
@@ -121,7 +129,7 @@ export const COLOUR_TOKENS = {
    * Its own token rather than `surfaceRaised` reused, so #672's dark theme can
    * give "on" a value of its own without moving every card.
    */
-  selected: '#d4ebe7',
+  selected: '#cdf39c',
 
   /*
    * A link in running text, one token per state (#661).
@@ -142,13 +150,13 @@ export const COLOUR_TOKENS = {
    * every surface in `LINK_SURFACES` — see `LINK_CONTRAST_MEASURED`.
    */
   /** An unvisited link at rest. */
-  link: '#0b5c55',
+  link: '#3d5b00',
   /** A link to somewhere this browser has been. */
-  linkVisited: '#5b3a8c',
+  linkVisited: '#5e3a91',
   /** A link under a pointer, or focused from the keyboard. */
-  linkHover: '#07443f',
+  linkHover: '#2c4300',
   /** A link while it is being pressed. */
-  linkActive: '#042e2a',
+  linkActive: '#1b2b00',
   /**
    * The focus indicator.
    *
@@ -158,27 +166,27 @@ export const COLOUR_TOKENS = {
    * button it surrounds is invisible exactly when it matters, and offsetting it
    * is the fix rather than a second focus colour per component.
    */
-  focus: '#141b1a',
+  focus: '#131415',
 
   /** Neutral information. */
-  infoSurface: '#e3f0f4',
-  infoInk: '#0e4a57',
-  infoBorder: '#2c7288',
+  infoSurface: '#dceeff',
+  infoInk: '#004876',
+  infoBorder: '#328bcd',
 
   /** Something worked. */
-  successSurface: '#e2f2e9',
-  successInk: '#14513a',
-  successBorder: '#2a7a58',
+  successSurface: '#dbf2df',
+  successInk: '#005122',
+  successBorder: '#3b9655',
 
   /** Something is degraded but usable — the Linux-with-a-flag case. */
-  warningSurface: '#fbefda',
-  warningInk: '#654100',
-  warningBorder: '#8a6212',
+  warningSurface: '#f9ebd3',
+  warningInk: '#5d4000',
+  warningBorder: '#ae7c00',
 
   /** Something cannot work here — the Safari and Firefox case. */
-  dangerSurface: '#fbe8e8',
-  dangerInk: '#7a1d1d',
-  dangerBorder: '#a83232',
+  dangerSurface: '#ffe7e4',
+  dangerInk: '#792b29',
+  dangerBorder: '#cc6660',
 
   /**
    * The destructive answer to a confirmation — #1002, the owner's ruling of
@@ -189,7 +197,7 @@ export const COLOUR_TOKENS = {
    * heaviest thing in the dialog. Never the only signal: the label names the
    * action ("Delete the ride"), and under forced colours the edge is dashed.
    */
-  dangerAction: '#9e2626',
+  dangerAction: '#a21a21',
   /** Text drawn on `dangerAction` — the danger button's label under a pointer (#1002). */
   dangerActionInk: '#ffffff',
 
@@ -214,15 +222,15 @@ export const COLOUR_TOKENS = {
    * LIGHTER in the dark one, where the far hills sink into the night.
    */
   /** The sky behind a scene. The one illustration colour text sits on most. */
-  illoSky: '#cfe4ef',
+  illoSky: '#c6d9f2',
   /** The sun. Small, warm, and nothing is drawn over it but a focus ring. */
-  illoSun: '#f4c65a',
+  illoSun: '#e0c24b',
   /** The hills on the horizon, paler than the near ones. */
-  illoHillFar: '#a7d3a3',
+  illoHillFar: '#adcca7',
   /** The hill in front, which a primary control may stand on. */
-  illoHillNear: '#7db678',
+  illoHillNear: '#8fb686',
   /** The road ribbon, the nearest thing in the scene. */
-  illoRoad: '#6f726c',
+  illoRoad: '#91969c',
 
   /*
    * The workout block chart's seven intensity bands (#1043) — one per power
@@ -324,16 +332,17 @@ export type ThemedColourToken = Exclude<ColourToken, HudColourToken>;
  * to know which one is on. `tokens.test.ts` holds the key sets equal in both
  * directions.
  *
- * - **No pure black or white.** The canvas is a green-tinted near-black and
- *   body text a near-white — a comfort choice (halation on a dark page), not a
+ * - **No pure black or white.** The canvas is a graphite near-black with no
+ *   hue (Hi-Vis, #2037) and body text a near-white — a comfort choice (halation on a dark page), not a
  *   WCAG rule.
  * - **Elevation goes LIGHTER.** A raised surface on a dark page is lighter
  *   than what it rests on, the other way from the light palette — so
  *   {@link ELEVATION_DIRECTION} states the direction per palette and
  *   `tokens.test.ts` holds each ramp to its own, with both step bounds.
- * - **Its own accent.** The light palette's `#0b5c55` is 2.3:1 on this canvas,
- *   so `accent`, `accentHover` and `accentInk` are light teal on dark ink here,
- *   and a hover is LIGHTER, as elevation is. The links follow, as #661 left
+ * - **Its own accent.** The light palette's olive `#405e00` is 2.5:1 on this
+ *   canvas, so `accent` and `accentHover` are the fluorescent lime here with a
+ *   dark `accentInk` on them (ADR 0063 D-1), and a hover is LIGHTER, as
+ *   elevation is. The links follow, as #661 left
  *   room for.
  * - **The status messages are dark tints with light ink**, each the hue of its
  *   light counterpart.
@@ -343,41 +352,41 @@ export type ThemedColourToken = Exclude<ColourToken, HudColourToken>;
  * here too.
  */
 export const DARK_COLOUR_TOKENS = {
-  canvas: '#121816',
-  surface: '#19201f',
-  surfaceRaised: '#222a29',
-  surfaceOverlay: '#2b3433',
-  border: '#869391',
-  ink: '#e4ebe9',
-  inkMuted: '#a9b7b5',
-  accent: '#6cc9bd',
-  accentHover: '#9ddcd3',
-  accentInk: '#0d1f1c',
-  selected: '#1d4540',
-  link: '#6cc9bd',
-  linkVisited: '#c4a8f0',
-  linkHover: '#9ddcd3',
-  linkActive: '#c6ede7',
-  focus: '#e4ebe9',
-  infoSurface: '#12303a',
-  infoInk: '#a9dcec',
-  infoBorder: '#4f9db5',
-  successSurface: '#13301f',
-  successInk: '#a7e0c1',
-  successBorder: '#4ea77e',
-  warningSurface: '#33280f',
-  warningInk: '#f1d08f',
-  warningBorder: '#b98c31',
-  dangerSurface: '#3a1818',
-  dangerInk: '#f4b8b8',
-  dangerBorder: '#d46a6a',
-  dangerAction: '#f08c8c',
-  dangerActionInk: '#2a0d0d',
-  illoSky: '#152637',
-  illoSun: '#9a7a30',
-  illoHillFar: '#1d3a2b',
-  illoHillNear: '#2f5d3b',
-  illoRoad: '#5f6a63',
+  canvas: '#101215',
+  surface: '#242729',
+  surfaceRaised: '#333639',
+  surfaceOverlay: '#414447',
+  border: '#93969a',
+  ink: '#edeef1',
+  inkMuted: '#b3b7ba',
+  accent: '#aff13c',
+  accentHover: '#c7fd7b',
+  accentInk: '#121809',
+  selected: '#304216',
+  link: '#aade5b',
+  linkVisited: '#c5acf2',
+  linkHover: '#cdf39c',
+  linkActive: '#e6fad0',
+  focus: '#aff13c',
+  infoSurface: '#142b3d',
+  infoInk: '#93cbfc',
+  infoBorder: '#1e72ac',
+  successSurface: '#162e1b',
+  successInk: '#99d3a4',
+  successBorder: '#287b42',
+  warningSurface: '#35260d',
+  warningInk: '#e5c182',
+  warningBorder: '#906500',
+  dangerSurface: '#3e211e',
+  dangerInk: '#ffb2ac',
+  dangerBorder: '#ac514c',
+  dangerAction: '#fb8981',
+  dangerActionInk: '#321312',
+  illoSky: '#102239',
+  illoSun: '#897626',
+  illoHillFar: '#263a22',
+  illoHillNear: '#304f2a',
+  illoRoad: '#53595e',
   bandRecovery: '#467a73',
   bandEndurance: '#529085',
   bandTempo: '#62a596',
@@ -400,9 +409,9 @@ export function paletteColours(theme: Theme): Readonly<Record<ColourToken, strin
  * `theme-color` metas in `index.html`, which `offline/manifest.test.ts` holds
  * to these (#672).
  *
- * Light keeps the accent it always had, which is also the manifest's single
+ * Light takes its accent (the olive since #2037), which is also the manifest's single
  * `theme_color`. Dark takes the header's surface rather than the dark accent:
- * a bright teal band over a dark page is the flash of light this theme exists
+ * a bright lime band over a dark page is the flash of light this theme exists
  * to take away.
  */
 export const THEME_COLOUR_TOKEN: Readonly<Record<Theme, ThemedColourToken>> = {
@@ -517,11 +526,16 @@ export const MINIMUM_ILLUSTRATION_STEP = 1.2;
 export const MINIMUM_ELEVATION_STEP = 1.05;
 
 /**
- * The largest, for the opposite reason: past about a fifth of a stop the ramp
- * stops reading as one surface lifted off another and starts reading as two
- * unrelated colours, and the page looks striped rather than layered.
+ * The largest, for the opposite reason: past this the ramp stops reading as
+ * one surface lifted off another and starts reading as two unrelated colours,
+ * and the page looks striped rather than layered.
+ *
+ * ⚠️ 1.3 since #2037 ([ADR 0063](../../../../docs/adr/0063-the-design-system-direction-hi-vis.md)
+ * D-3); it was 1.2. The Hi-Vis dark palette steps about 1.24 between levels
+ * so that a card reads as a card, which is what #307 and the 2026-11-03 audit
+ * of #2030 asked for, and 1.2 would have refused it.
  */
-export const MAXIMUM_ELEVATION_STEP = 1.2;
+export const MAXIMUM_ELEVATION_STEP = 1.3;
 
 /** Spacing, on a 4px base. Unitless names so a component never writes a pixel. */
 export const SPACE_TOKENS = {
@@ -772,8 +786,8 @@ export interface ContrastRequirement {
 export const PLATFORM_CHECK_MARK: Readonly<
   Record<Theme, { readonly colour: string; readonly measured: number }>
 > = {
-  light: { colour: '#ffffff', measured: 7.85 },
-  dark: { colour: '#3b3b3b', measured: 5.72 },
+  light: { colour: '#ffffff', measured: 7.45 },
+  dark: { colour: '#3b3b3b', measured: 8.25 },
 };
 
 /** The four states a link in running text is painted in (#661). */
@@ -816,100 +830,99 @@ export type LinkSurface = (typeof LINK_SURFACES)[number];
  *
  * The same erosion gate applies: `contrast.a11y.test.ts` requires every cell
  * to equal the computed ratio in both directions. The tightest is `link` on
- * `surfaceOverlay`, at 5.90 — what `accent` on `surfaceOverlay` already
- * recorded, because it is the same value.
+ * `surfaceOverlay`, at 4.89 (Hi-Vis, #2037).
  *
  * ## The dark palette's half (#672)
  *
  * This section used to say what a dark palette WOULD owe here: its own copy of
  * the table, because a ratio is a property of a pair of values. `dark` is that
- * copy. Its tightest cell is `link` on `surfaceOverlay` too, at 6.53.
+ * copy. Its tightest cell is `linkVisited` on `surfaceOverlay`, at 4.93.
  */
 export const LINK_CONTRAST_MEASURED: Readonly<
   Record<Theme, Readonly<Record<LinkStateToken, Readonly<Record<LinkSurface, number>>>>>
 > = {
   light: {
     link: {
-      canvas: 7.85,
-      surface: 7.15,
-      surfaceRaised: 6.48,
-      surfaceOverlay: 5.9,
-      infoSurface: 6.74,
-      successSurface: 6.77,
-      warningSurface: 6.9,
-      dangerSurface: 6.65,
+      canvas: 7.79,
+      surface: 6.69,
+      surfaceRaised: 5.73,
+      surfaceOverlay: 4.89,
+      infoSurface: 6.57,
+      successSurface: 6.6,
+      warningSurface: 6.62,
+      dangerSurface: 6.61,
     },
     linkVisited: {
-      canvas: 8.65,
-      surface: 7.88,
-      surfaceRaised: 7.14,
-      surfaceOverlay: 6.51,
-      infoSurface: 7.43,
-      successSurface: 7.46,
-      warningSurface: 7.6,
-      dangerSurface: 7.33,
+      canvas: 8.43,
+      surface: 7.24,
+      surfaceRaised: 6.2,
+      surfaceOverlay: 5.29,
+      infoSurface: 7.12,
+      successSurface: 7.14,
+      warningSurface: 7.17,
+      dangerSurface: 7.15,
     },
     linkHover: {
-      canvas: 11.01,
-      surface: 10.03,
-      surfaceRaised: 9.09,
-      surfaceOverlay: 8.28,
-      infoSurface: 9.45,
-      successSurface: 9.49,
-      warningSurface: 9.68,
-      dangerSurface: 9.34,
+      canvas: 11,
+      surface: 9.44,
+      surfaceRaised: 8.08,
+      surfaceOverlay: 6.9,
+      infoSurface: 9.28,
+      successSurface: 9.31,
+      warningSurface: 9.35,
+      dangerSurface: 9.32,
     },
     linkActive: {
-      canvas: 14.69,
-      surface: 13.39,
-      surfaceRaised: 12.13,
-      surfaceOverlay: 11.06,
-      infoSurface: 12.62,
-      successSurface: 12.67,
-      warningSurface: 12.92,
-      dangerSurface: 12.46,
+      canvas: 15.08,
+      surface: 12.94,
+      surfaceRaised: 11.08,
+      surfaceOverlay: 9.47,
+      infoSurface: 12.73,
+      successSurface: 12.77,
+      warningSurface: 12.82,
+      dangerSurface: 12.79,
     },
   },
   dark: {
     link: {
-      canvas: 9.18,
-      surface: 8.46,
-      surfaceRaised: 7.5,
-      surfaceOverlay: 6.53,
-      infoSurface: 7.11,
-      successSurface: 7.3,
-      warningSurface: 7.39,
-      dangerSurface: 8.1,
+      canvas: 11.89,
+      surface: 9.53,
+      surfaceRaised: 7.7,
+      surfaceOverlay: 6.21,
+      infoSurface: 9.23,
+      successSurface: 9.24,
+      warningSurface: 9.28,
+      dangerSurface: 9.24,
     },
     linkVisited: {
-      canvas: 8.74,
-      surface: 8.05,
-      surfaceRaised: 7.13,
-      surfaceOverlay: 6.22,
-      infoSurface: 6.76,
-      successSurface: 6.94,
-      warningSurface: 7.03,
-      dangerSurface: 7.71,
+      canvas: 9.43,
+      surface: 7.56,
+      surfaceRaised: 6.11,
+      surfaceOverlay: 4.93,
+      infoSurface: 7.32,
+      successSurface: 7.33,
+      warningSurface: 7.36,
+      dangerSurface: 7.33,
     },
     linkHover: {
-      canvas: 11.65,
-      surface: 10.74,
-      surfaceRaised: 9.51,
-      surfaceOverlay: 8.29,
-      infoSurface: 9.02,
-      successSurface: 9.26,
-      warningSurface: 9.38,
-      dangerSurface: 10.28,
+      canvas: 15.09,
+      surface: 12.09,
+      surfaceRaised: 9.78,
+      surfaceOverlay: 7.89,
+      infoSurface: 11.71,
+      successSurface: 11.73,
+      warningSurface: 11.78,
+      dangerSurface: 11.72,
     },
     linkActive: {
-      canvas: 14.27,
-      surface: 13.15,
-      surfaceRaised: 11.65,
-      surfaceOverlay: 10.15,
-      infoSurface: 11.04,
-      successSurface: 11.34,
-      warningSurface: 11.49,
-      dangerSurface: 12.59,
+      canvas: 16.93,
+      surface: 13.56,
+      surfaceRaised: 10.97,
+      surfaceOverlay: 8.84,
+      infoSurface: 13.14,
+      successSurface: 13.15,
+      warningSurface: 13.21,
+      dangerSurface: 13.15,
     },
   },
 };
@@ -941,11 +954,11 @@ export type IllustrationToken = (typeof ILLUSTRATION_TOKENS)[number];
 const ILLUSTRATION_FOCUS_MEASURED: Readonly<
   Record<IllustrationToken, Readonly<Record<Theme, number>>>
 > = {
-  illoSky: { light: 13.31, dark: 12.72 },
-  illoSun: { light: 10.88, dark: 3.34 },
-  illoHillFar: { light: 10.4, dark: 10.26 },
-  illoHillNear: { light: 7.35, dark: 6.31 },
-  illoRoad: { light: 3.58, dark: 4.66 },
+  illoSky: { light: 12.83, dark: 11.81 },
+  illoSun: { light: 10.53, dark: 3.3 },
+  illoHillFar: { light: 10.51, dark: 9.04 },
+  illoHillNear: { light: 8.08, dark: 6.79 },
+  illoRoad: { light: 6.19, dark: 5.23 },
 };
 
 /**
@@ -987,13 +1000,13 @@ export const MINIMUM_BAND_STEP = 1.15;
  * `contrast.a11y.test.ts` (#307's erosion rule).
  */
 const BAND_ON_SURFACE_MEASURED: Readonly<Record<BandToken, Readonly<Record<Theme, number>>>> = {
-  bandRecovery: { light: 3.32, dark: 3.39 },
-  bandEndurance: { light: 4.2, dark: 4.49 },
-  bandTempo: { light: 5.47, dark: 5.79 },
-  bandThreshold: { light: 6.88, dark: 7.17 },
-  bandVo2: { light: 8.05, dark: 9.18 },
-  bandAnaerobic: { light: 10.66, dark: 11.18 },
-  bandSprint: { light: 13.34, dark: 13.97 },
+  bandRecovery: { light: 3.13, dark: 3.07 },
+  bandEndurance: { light: 3.96, dark: 4.07 },
+  bandTempo: { light: 5.15, dark: 5.25 },
+  bandThreshold: { light: 6.47, dark: 6.5 },
+  bandVo2: { light: 7.58, dark: 8.33 },
+  bandAnaerobic: { light: 10.04, dark: 10.15 },
+  bandSprint: { light: 12.56, dark: 12.68 },
 };
 
 /**
@@ -1035,56 +1048,56 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'ink',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 17.48, dark: 14.86 },
+    measured: { light: 18.44, dark: 16.17 },
     where: 'body text on the page',
   },
   {
     foreground: 'ink',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 15.93, dark: 13.69 },
+    measured: { light: 15.83, dark: 12.95 },
     where: 'body text on a panel',
   },
   {
     foreground: 'inkMuted',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.14, dark: 8.67 },
+    measured: { light: 7.73, dark: 9.29 },
     where: 'helper and empty-state text on the page',
   },
   {
     foreground: 'inkMuted',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 6.51, dark: 7.99 },
+    measured: { light: 6.63, dark: 7.44 },
     where: 'helper and empty-state text on a panel',
   },
   {
     foreground: 'border',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 4.15, dark: 5.65 },
+    measured: { light: 5.27, dark: 6.32 },
     where: 'the edge of a control on the page (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'border',
     background: 'surface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.79, dark: 5.2 },
+    measured: { light: 4.52, dark: 5.06 },
     where: 'the edge of a control on a panel (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.85, dark: 8.72 },
+    measured: { light: 7.45, dark: 13.33 },
     where: 'the label of a primary button',
   },
   {
     foreground: 'accentInk',
     background: 'accentHover',
     minimum: AA_TEXT,
-    measured: { light: 11.01, dark: 11.07 },
+    measured: { light: 11, dark: 15.31 },
     where: 'the label of a primary button under a pointer',
   },
   /*
@@ -1104,63 +1117,63 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.85, dark: 8.72 },
+    measured: { light: 7.45, dark: 13.33 },
     where: 'a primary button at rest (#668)',
   },
   {
     foreground: 'accentInk',
     background: 'accentHover',
     minimum: AA_TEXT,
-    measured: { light: 11.01, dark: 11.07 },
+    measured: { light: 11, dark: 15.31 },
     where: 'a primary button under a pointer or a press (#668)',
   },
   {
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.85, dark: 9.18 },
+    measured: { light: 7.45, dark: 13.82 },
     where: 'the label of a secondary button, an off toggle and an unchecked segment (#668)',
   },
   {
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.85, dark: 9.18 },
+    measured: { light: 7.45, dark: 13.82 },
     where: 'the border of a secondary button, a toggle and a segment, on the page (#668)',
   },
   {
     foreground: 'accentHover',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 10.03, dark: 10.74 },
+    measured: { light: 9.44, dark: 12.71 },
     where: 'a secondary button, an off toggle or a segment under a pointer or a press (#688)',
   },
   {
     foreground: 'accentHover',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 11.01, dark: 11.65 },
+    measured: { light: 11, dark: 15.87 },
     where: 'the border of a button under a pointer, on the page (#668, #688)',
   },
   {
     foreground: 'accentHover',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 11.01, dark: 11.65 },
+    measured: { light: 11, dark: 15.87 },
     where: 'the label of a tertiary (text) button under a pointer or a press, on the page (#992)',
   },
   {
     foreground: 'accentHover',
     background: 'selected',
     minimum: AA_TEXT,
-    measured: { light: 8.83, dark: 6.88 },
+    measured: { light: 8.85, dark: 9.27 },
     where: 'the label of an on toggle and of the checked segment (#668)',
   },
   {
     foreground: 'accent',
     background: 'selected',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 6.29, dark: 5.42 },
+    measured: { light: 5.99, dark: 8.07 },
     where:
       'the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
   },
@@ -1168,28 +1181,28 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentHover',
     background: 'selected',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 8.83, dark: 6.88 },
+    measured: { light: 8.85, dark: 9.27 },
     where: 'the doubled border of an on toggle under a pointer (#668)',
   },
   {
     foreground: 'focus',
     background: 'selected',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 14.01, dark: 8.78 },
+    measured: { light: 14.84, dark: 8.07 },
     where: "the focus ring on a checked segment's radio, landing on the segment's fill (#668)",
   },
   {
     foreground: 'inkMuted',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 6.51, dark: 7.99 },
+    measured: { light: 6.63, dark: 7.44 },
     where: 'the label of a disabled button of any kind (#668)',
   },
   {
     foreground: 'border',
     background: 'surface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.79, dark: 5.2 },
+    measured: { light: 4.52, dark: 5.06 },
     where: 'the border of a disabled button, and the doubled border of a disabled on toggle (#668)',
   },
   /*
@@ -1207,7 +1220,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.85, dark: 9.18 },
+    measured: { light: 7.45, dark: 13.82 },
     where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
   },
   {
@@ -1250,28 +1263,28 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.85, dark: 9.18 },
+    measured: { light: 7.45, dark: 13.82 },
     where: 'link text',
   },
   {
     foreground: 'accent',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 7.15, dark: 8.46 },
+    measured: { light: 6.39, dark: 11.07 },
     where: 'link text and the active navigation item in the header',
   },
   {
     foreground: 'focus',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 17.48, dark: 14.86 },
+    measured: { light: 18.44, dark: 13.82 },
     where: 'the focus ring, offset onto the page (WCAG 2.2 SC 2.4.13)',
   },
   {
     foreground: 'focus',
     background: 'surface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 15.93, dark: 13.69 },
+    measured: { light: 15.83, dark: 11.07 },
     where: 'the focus ring, offset onto a panel (WCAG 2.2 SC 2.4.13)',
   },
 
@@ -1290,70 +1303,70 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'ink',
     background: 'surfaceRaised',
     minimum: AA_TEXT,
-    measured: { light: 14.44, dark: 12.13 },
+    measured: { light: 13.55, dark: 10.48 },
     where: 'body text on a card resting on a panel',
   },
   {
     foreground: 'inkMuted',
     background: 'surfaceRaised',
     minimum: AA_TEXT,
-    measured: { light: 5.89, dark: 7.08 },
+    measured: { light: 5.68, dark: 6.02 },
     where: 'a label on a card resting on a panel',
   },
   {
     foreground: 'border',
     background: 'surfaceRaised',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.43, dark: 4.61 },
+    measured: { light: 3.87, dark: 4.09 },
     where: 'the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'accent',
     background: 'surfaceRaised',
     minimum: AA_TEXT,
-    measured: { light: 6.48, dark: 7.5 },
+    measured: { light: 5.47, dark: 8.96 },
     where: 'link text on a raised card',
   },
   {
     foreground: 'focus',
     background: 'surfaceRaised',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 14.44, dark: 12.13 },
+    measured: { light: 13.55, dark: 8.96 },
     where: 'the focus ring, offset onto a raised card (WCAG 2.2 SC 2.4.13)',
   },
   {
     foreground: 'ink',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 13.15, dark: 10.57 },
+    measured: { light: 11.58, dark: 8.45 },
     where: 'the wordmark and the navigation, on the app header',
   },
   {
     foreground: 'inkMuted',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 5.37, dark: 6.17 },
+    measured: { light: 4.85, dark: 4.85 },
     where: 'secondary text on the app header',
   },
   {
     foreground: 'ink',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 13.15, dark: 10.57 },
+    measured: { light: 11.58, dark: 8.45 },
     where: "a route tile's facts band, on the game's chooser (#1011)",
   },
   {
     foreground: 'border',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.13, dark: 4.02 },
+    measured: { light: 3.31, dark: 3.3 },
     where: "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
   },
   {
     foreground: 'accent',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 5.9, dark: 6.53 },
+    measured: { light: 4.68, dark: 7.22 },
     where: 'a navigation link on the app header',
   },
   /*
@@ -1369,21 +1382,21 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.85, dark: 8.72 },
+    measured: { light: 7.45, dark: 13.33 },
     where: "the current destination's label and icon, on the navigation's active indicator (#944)",
   },
   {
     foreground: 'accent',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.9, dark: 6.53 },
+    measured: { light: 4.68, dark: 7.22 },
     where: "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
   },
   {
     foreground: 'focus',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 13.15, dark: 10.57 },
+    measured: { light: 11.58, dark: 7.22 },
     where: 'the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)',
   },
 
@@ -1391,56 +1404,56 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'infoInk',
     background: 'infoSurface',
     minimum: AA_TEXT,
-    measured: { light: 8.44, dark: 9.36 },
+    measured: { light: 8.1, dark: 8.45 },
     where: 'an info message',
   },
   {
     foreground: 'infoBorder',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.43, dark: 5.84 },
+    measured: { light: 3.68, dark: 3.63 },
     where: 'the edge of an info message',
   },
   {
     foreground: 'successInk',
     background: 'successSurface',
     minimum: AA_TEXT,
-    measured: { light: 7.99, dark: 9.57 },
+    measured: { light: 8.08, dark: 8.47 },
     where: 'a success message',
   },
   {
     foreground: 'successBorder',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.22, dark: 6.12 },
+    measured: { light: 3.7, dark: 3.58 },
     where: 'the edge of a success message',
   },
   {
     foreground: 'warningInk',
     background: 'warningSurface',
     minimum: AA_TEXT,
-    measured: { light: 7.99, dark: 9.76 },
+    measured: { light: 8.12, dark: 8.56 },
     where: 'a warning message — the Chrome-on-Linux path',
   },
   {
     foreground: 'warningBorder',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.47, dark: 5.87 },
+    measured: { light: 3.7, dark: 3.62 },
     where: 'the edge of a warning message',
   },
   {
     foreground: 'dangerInk',
     background: 'dangerSurface',
     minimum: AA_TEXT,
-    measured: { light: 8.81, dark: 9.36 },
+    measured: { light: 8.13, dark: 8.48 },
     where: 'an error message — the Safari and Firefox path',
   },
   {
     foreground: 'dangerBorder',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 6.63, dark: 5.2 },
+    measured: { light: 3.73, dark: 3.61 },
     where: 'the edge of an error message',
   },
   /*
@@ -1453,21 +1466,21 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'dangerAction',
     background: 'dangerSurface',
     minimum: AA_TEXT,
-    measured: { light: 6.46, dark: 6.67 },
+    measured: { light: 6.58, dark: 6.24 },
     where: 'the label of a danger button at rest (#1002)',
   },
   {
     foreground: 'dangerAction',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.61, dark: 7.56 },
+    measured: { light: 7.76, dark: 8.04 },
     where: 'the edge of a danger button, at rest and under a pointer, on the dialog (#1002)',
   },
   {
     foreground: 'dangerActionInk',
     background: 'dangerAction',
     minimum: AA_TEXT,
-    measured: { light: 7.61, dark: 7.6 },
+    measured: { light: 7.76, dark: 7.27 },
     where: 'the label of a danger button under a pointer or a press (#1002)',
   },
 
@@ -1480,28 +1493,28 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'focus',
     background: 'infoSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 15.01, dark: 11.5 },
+    measured: { light: 15.56, dark: 10.72 },
     where: 'the focus ring round a link in an info message (WCAG 2.2 SC 2.4.13)',
   },
   {
     foreground: 'focus',
     background: 'successSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 15.07, dark: 11.81 },
+    measured: { light: 15.61, dark: 10.74 },
     where: 'the focus ring round a link in a success message (WCAG 2.2 SC 2.4.13)',
   },
   {
     foreground: 'focus',
     background: 'warningSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 15.37, dark: 11.96 },
+    measured: { light: 15.68, dark: 10.78 },
     where: 'the focus ring round a link in a warning message (WCAG 2.2 SC 2.4.13)',
   },
   {
     foreground: 'focus',
     background: 'dangerSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 14.82, dark: 13.11 },
+    measured: { light: 15.64, dark: 10.73 },
     where: 'the focus ring round a link in an error message (WCAG 2.2 SC 2.4.13)',
   },
 
@@ -1519,28 +1532,28 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'ink',
     background: 'illoSky',
     minimum: AA_TEXT,
-    measured: { light: 13.31, dark: 12.72 },
+    measured: { light: 12.83, dark: 13.82 },
     where: 'a hero title drawn on the sky of a menu illustration',
   },
   {
     foreground: 'inkMuted',
     background: 'illoSky',
     minimum: AA_TEXT,
-    measured: { light: 5.44, dark: 7.42 },
+    measured: { light: 5.37, dark: 7.94 },
     where: 'the line under a hero title, on the sky',
   },
   {
     foreground: 'ink',
     background: 'illoHillFar',
     minimum: AA_TEXT,
-    measured: { light: 10.4, dark: 10.26 },
+    measured: { light: 10.51, dark: 10.58 },
     where: 'a card title where it overlaps the far hills',
   },
   {
     foreground: 'accent',
     background: 'illoHillNear',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.3, dark: 3.9 },
+    measured: { light: 3.26, dark: 6.79 },
     where: 'the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)',
   },
   ...ILLUSTRATION_TOKENS.map((token): ContrastRequirement => ({

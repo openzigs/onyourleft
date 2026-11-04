@@ -47,6 +47,11 @@
  *    light reads. **Control:** the pin (`theme.css` §`.oyl-hud`) deleted
  *    through the CSSOM, after which the mute toggle and the warning notice
  *    must follow the page, which is what #744's review measured.
+ * 5. **The palette painted is the one the owner chose** (#2037, ADR 0063 D-1):
+ *    Home on the PRODUCT build, in each theme, read for its page, its ink, the
+ *    header and its primary action, against ADR 0063's values written out in
+ *    this file rather than read from `tokens.ts`. **Control:** the old teal
+ *    accent set on the same page, after which the primary action reads teal.
  *
  * ## What this does NOT prove
  *
@@ -65,6 +70,7 @@ import { PRODUCT_ORIGIN } from '../playwright.config';
 import { THEME_STORAGE_KEY } from '../src/design/theme-selection';
 import {
   DARK_COLOUR_TOKENS,
+  THEMES,
   paletteColours,
   type ColourToken,
   type Theme,
@@ -266,6 +272,81 @@ test.describe('#672 — a choice made in Settings survives a reload', () => {
       .poll(() => next.evaluate(() => document.documentElement.dataset['theme']))
       .toBe('light');
   });
+});
+
+/**
+ * #2037 — the Hi-Vis palette, as ADR 0063 D-1 records it, written out here
+ * rather than read from `tokens.ts`: a spec that compared the page with the
+ * token module would pass whatever the module said, and the point is that the
+ * PAINTED page is the direction the owner chose on #2035.
+ */
+const HI_VIS: Readonly<
+  Record<Theme, { canvas: string; ink: string; surfaceOverlay: string; accent: string }>
+> = {
+  dark: {
+    canvas: 'rgb(16, 18, 21)',
+    ink: 'rgb(237, 238, 241)',
+    surfaceOverlay: 'rgb(65, 68, 71)',
+    accent: 'rgb(175, 241, 60)',
+  },
+  light: {
+    canvas: 'rgb(255, 255, 255)',
+    ink: 'rgb(19, 20, 21)',
+    surfaceOverlay: 'rgb(203, 205, 208)',
+    accent: 'rgb(64, 94, 0)',
+  },
+};
+
+/** The teal palette #2037 replaced, per theme: the control's accent. */
+const OLD_TEAL_ACCENT: Readonly<Record<Theme, string>> = { dark: '#6cc9bd', light: '#0b5c55' };
+
+/** A `#rrggbb` as Chromium reports a computed colour. */
+function rgbOfHex(hex: string): string {
+  const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
+  return `rgb(${String(channel(1))}, ${String(channel(3))}, ${String(channel(5))})`;
+}
+
+/** What Home paints where the four tokens show: the page, its ink, the header, a primary button. */
+async function readHome(page: Page) {
+  // Home's primary action, *Start a ride*, is a link drawn as the primary
+  // button (`design/Button.tsx` §ButtonLink): an action that goes somewhere.
+  const start = page.getByRole('link', { name: 'Start a ride' });
+  await start.waitFor();
+  const accent = await start.evaluate((link) => getComputedStyle(link).backgroundColor);
+  return page.evaluate((primary) => {
+    const header = document.querySelector('.oyl-header');
+    return {
+      canvas: getComputedStyle(document.body).backgroundColor,
+      ink: getComputedStyle(document.body).color,
+      surfaceOverlay: header === null ? 'no header' : getComputedStyle(header).backgroundColor,
+      accent: primary,
+    };
+  }, accent);
+}
+
+test.describe('#2037 — the product paints ADR 0063’s Hi-Vis palette, in both themes', () => {
+  test.use({ storageState: NOTHING_CHOSEN, viewport: { width: 1280, height: 800 } });
+
+  for (const theme of THEMES) {
+    test(`Home in ${theme}: the page, its ink, the header and a primary button`, async ({
+      page,
+    }) => {
+      await chooseBeforeLoad(page, theme);
+      await page.goto(`${PRODUCT_ORIGIN}/`);
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      expect(await readHome(page)).toEqual(HI_VIS[theme]);
+
+      // The control: the old teal accent put back on the same page. The read
+      // above must see it, or it was not reading the paint. Polled, because
+      // the button eases its fill over `--oyl-motion-short`.
+      await page.evaluate((teal) => {
+        document.documentElement.style.setProperty('--oyl-color-accent', teal);
+      }, OLD_TEAL_ACCENT[theme]);
+      await expect
+        .poll(async () => (await readHome(page)).accent)
+        .toBe(rgbOfHex(OLD_TEAL_ACCENT[theme]));
+    });
+  }
 });
 
 /** What one route paints, read back from the engine. */

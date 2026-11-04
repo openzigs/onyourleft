@@ -63,22 +63,22 @@
      every gate this repository has, and a surface colour arrives inside the
      contrast suite that already exists. */
   --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #f2f5f4;
-  --oyl-color-surface-raised: #e7eae9;
-  --oyl-color-surface-overlay: #dde0df;
-  --oyl-color-border: #767e7e;
-  --oyl-color-ink: #141b1a;
-  --oyl-color-ink-muted: #4a5b5c;
-  --oyl-color-accent: #0b5c55;
-  --oyl-color-accent-hover: #07443f;
+  --oyl-color-surface: #ebeef0;
+  --oyl-color-surface-raised: #dbdde0;
+  --oyl-color-surface-overlay: #cbcdd0;
+  --oyl-color-border: #6a6c6e;
+  --oyl-color-ink: #131415;
+  --oyl-color-ink-muted: #515355;
+  --oyl-color-accent: #405e00;
+  --oyl-color-accent-hover: #2c4300;
   --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #d4ebe7;
+  --oyl-color-selected: #cdf39c;
   /* A link in running text, one per state (#661) — see the `a` rules below. */
-  --oyl-color-link: #0b5c55;
-  --oyl-color-link-visited: #5b3a8c;
-  --oyl-color-link-hover: #07443f;
-  --oyl-color-link-active: #042e2a;
-  --oyl-color-focus: #141b1a;
+  --oyl-color-link: #3d5b00;
+  --oyl-color-link-visited: #5e3a91;
+  --oyl-color-link-hover: #2c4300;
+  --oyl-color-link-active: #1b2b00;
+  --oyl-color-focus: #131415;
 
   /* The ride HUD (#94). Opaque, so its contrast does not depend on the 3D
      scene behind it — `tokens.ts` records why that is the only way #94's
@@ -89,31 +89,31 @@
   --oyl-color-hud-border: #7b8b99;
   --oyl-color-hud-stale-ink: #f0b45f;
 
-  --oyl-color-info-surface: #e3f0f4;
-  --oyl-color-info-ink: #0e4a57;
-  --oyl-color-info-border: #2c7288;
+  --oyl-color-info-surface: #dceeff;
+  --oyl-color-info-ink: #004876;
+  --oyl-color-info-border: #328bcd;
 
-  --oyl-color-success-surface: #e2f2e9;
-  --oyl-color-success-ink: #14513a;
-  --oyl-color-success-border: #2a7a58;
+  --oyl-color-success-surface: #dbf2df;
+  --oyl-color-success-ink: #005122;
+  --oyl-color-success-border: #3b9655;
 
-  --oyl-color-warning-surface: #fbefda;
-  --oyl-color-warning-ink: #654100;
-  --oyl-color-warning-border: #8a6212;
+  --oyl-color-warning-surface: #f9ebd3;
+  --oyl-color-warning-ink: #5d4000;
+  --oyl-color-warning-border: #ae7c00;
 
-  --oyl-color-danger-surface: #fbe8e8;
-  --oyl-color-danger-ink: #7a1d1d;
-  --oyl-color-danger-border: #a83232;
-  --oyl-color-danger-action: #9e2626;
+  --oyl-color-danger-surface: #ffe7e4;
+  --oyl-color-danger-ink: #792b29;
+  --oyl-color-danger-border: #cc6660;
+  --oyl-color-danger-action: #a21a21;
   --oyl-color-danger-action-ink: #ffffff;
 
   /* The illustration palette (#936) — decoration, painted only by art. What
      may be drawn OVER each is a pair in `tokens.ts` §CONTRAST_REQUIREMENTS. */
-  --oyl-color-illo-sky: #cfe4ef;
-  --oyl-color-illo-sun: #f4c65a;
-  --oyl-color-illo-hill-far: #a7d3a3;
-  --oyl-color-illo-hill-near: #7db678;
-  --oyl-color-illo-road: #6f726c;
+  --oyl-color-illo-sky: #c6d9f2;
+  --oyl-color-illo-sun: #e0c24b;
+  --oyl-color-illo-hill-far: #adcca7;
+  --oyl-color-illo-hill-near: #8fb686;
+  --oyl-color-illo-road: #91969c;
 
   /* The workout block chart's intensity bands (#1043), easiest first. Each
      is a pair against `surface` in `tokens.ts` §CONTRAST_REQUIREMENTS. */
@@ -244,48 +244,48 @@
   color-scheme: dark;
 
   /* The elevation ramp, darkest first: a raised surface is LIGHTER here. */
-  --oyl-color-canvas: #121816;
-  --oyl-color-surface: #19201f;
-  --oyl-color-surface-raised: #222a29;
-  --oyl-color-surface-overlay: #2b3433;
-  --oyl-color-border: #869391;
-  --oyl-color-ink: #e4ebe9;
-  --oyl-color-ink-muted: #a9b7b5;
-  --oyl-color-accent: #6cc9bd;
-  --oyl-color-accent-hover: #9ddcd3;
-  --oyl-color-accent-ink: #0d1f1c;
-  --oyl-color-selected: #1d4540;
-  --oyl-color-link: #6cc9bd;
-  --oyl-color-link-visited: #c4a8f0;
-  --oyl-color-link-hover: #9ddcd3;
-  --oyl-color-link-active: #c6ede7;
-  --oyl-color-focus: #e4ebe9;
+  --oyl-color-canvas: #101215;
+  --oyl-color-surface: #242729;
+  --oyl-color-surface-raised: #333639;
+  --oyl-color-surface-overlay: #414447;
+  --oyl-color-border: #93969a;
+  --oyl-color-ink: #edeef1;
+  --oyl-color-ink-muted: #b3b7ba;
+  --oyl-color-accent: #aff13c;
+  --oyl-color-accent-hover: #c7fd7b;
+  --oyl-color-accent-ink: #121809;
+  --oyl-color-selected: #304216;
+  --oyl-color-link: #aade5b;
+  --oyl-color-link-visited: #c5acf2;
+  --oyl-color-link-hover: #cdf39c;
+  --oyl-color-link-active: #e6fad0;
+  --oyl-color-focus: #aff13c;
 
-  --oyl-color-info-surface: #12303a;
-  --oyl-color-info-ink: #a9dcec;
-  --oyl-color-info-border: #4f9db5;
+  --oyl-color-info-surface: #142b3d;
+  --oyl-color-info-ink: #93cbfc;
+  --oyl-color-info-border: #1e72ac;
 
-  --oyl-color-success-surface: #13301f;
-  --oyl-color-success-ink: #a7e0c1;
-  --oyl-color-success-border: #4ea77e;
+  --oyl-color-success-surface: #162e1b;
+  --oyl-color-success-ink: #99d3a4;
+  --oyl-color-success-border: #287b42;
 
-  --oyl-color-warning-surface: #33280f;
-  --oyl-color-warning-ink: #f1d08f;
-  --oyl-color-warning-border: #b98c31;
+  --oyl-color-warning-surface: #35260d;
+  --oyl-color-warning-ink: #e5c182;
+  --oyl-color-warning-border: #906500;
 
-  --oyl-color-danger-surface: #3a1818;
-  --oyl-color-danger-ink: #f4b8b8;
-  --oyl-color-danger-border: #d46a6a;
-  --oyl-color-danger-action: #f08c8c;
-  --oyl-color-danger-action-ink: #2a0d0d;
+  --oyl-color-danger-surface: #3e211e;
+  --oyl-color-danger-ink: #ffb2ac;
+  --oyl-color-danger-border: #ac514c;
+  --oyl-color-danger-action: #fb8981;
+  --oyl-color-danger-action-ink: #321312;
 
   /* Nearer is LIGHTER here, as the elevation ramp is (`tokens.ts`
      §ILLUSTRATION_DEPTH). */
-  --oyl-color-illo-sky: #152637;
-  --oyl-color-illo-sun: #9a7a30;
-  --oyl-color-illo-hill-far: #1d3a2b;
-  --oyl-color-illo-hill-near: #2f5d3b;
-  --oyl-color-illo-road: #5f6a63;
+  --oyl-color-illo-sky: #102239;
+  --oyl-color-illo-sun: #897626;
+  --oyl-color-illo-hill-far: #263a22;
+  --oyl-color-illo-hill-near: #304f2a;
+  --oyl-color-illo-road: #53595e;
   --oyl-color-band-recovery: #467a73;
   --oyl-color-band-endurance: #529085;
   --oyl-color-band-tempo: #62a596;
@@ -430,7 +430,7 @@ h3:first-child {
  * that is something else — `.oyl-button`, `.oyl-nav-link`, `.oyl-skip-link`,
  * `.oyl-subnav-link` — is painted by its own class, and a bare `a:visited` or
  * `a:hover` is (0,1,1), which beats a single class: a visited "Ride" button
- * would have turned purple on a teal fill. Written this way, any class wins.
+ * would have turned purple on the accent fill. Written this way, any class wins.
  *
  * The order is the one the cascade needs when specificity ties — visited,
  * then hover and keyboard focus, then a press — so a visited link still
@@ -808,9 +808,9 @@ html {
  * The current destination is marked four ways and only one of them is colour:
  * `aria-current` for assistive technology, a heavier label, a larger icon, and
  * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
- * #48's sixth, and #944's third. The fill is `accent`, at 5.90 (light) and
- * 6.53 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
- * label and icon on it are `accentInk`, at 7.85 and 8.72 — both declared pairs
+ * #48's sixth, and #944's third. The fill is `accent`, at 4.68 (light) and
+ * 7.22 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
+ * label and icon on it are `accentInk`, at 7.45 and 13.33 — both declared pairs
  * in `tokens.ts` §CONTRAST_REQUIREMENTS.
  *
  * ⚠️ The fill is its OWN rule, `.oyl-nav-link[aria-current] .oyl-nav-indicator`,
@@ -2768,9 +2768,9 @@ a.oyl-button {
 
 /*
  * Elevation 2: a card, and the grid it sits in is the page rather than a panel,
- * so it is two steps up from the canvas behind it. One step was not enough —
- * `#f2f5f4` on `#ffffff` is 1.097:1 and a 10 rem card at that separation reads
- * as a faintly tinted rectangle rather than as an object.
+ * so it is two steps up from the canvas behind it. One step was not enough in
+ * the teal palette — `#f2f5f4` on `#ffffff` was 1.097:1 and a 10 rem card at that
+ * separation read as a faintly tinted rectangle rather than as an object.
  */
 .oyl-metric {
   background: var(--oyl-color-surface-raised);
@@ -6200,40 +6200,40 @@ select.oyl-input {
      `theme.browser.spec.ts` reads every descendant in both palettes. */
   color-scheme: light;
   --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #f2f5f4;
-  --oyl-color-surface-raised: #e7eae9;
-  --oyl-color-surface-overlay: #dde0df;
-  --oyl-color-border: #767e7e;
-  --oyl-color-ink: #141b1a;
-  --oyl-color-ink-muted: #4a5b5c;
-  --oyl-color-accent: #0b5c55;
-  --oyl-color-accent-hover: #07443f;
+  --oyl-color-surface: #ebeef0;
+  --oyl-color-surface-raised: #dbdde0;
+  --oyl-color-surface-overlay: #cbcdd0;
+  --oyl-color-border: #6a6c6e;
+  --oyl-color-ink: #131415;
+  --oyl-color-ink-muted: #515355;
+  --oyl-color-accent: #405e00;
+  --oyl-color-accent-hover: #2c4300;
   --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #d4ebe7;
-  --oyl-color-link: #0b5c55;
-  --oyl-color-link-visited: #5b3a8c;
-  --oyl-color-link-hover: #07443f;
-  --oyl-color-link-active: #042e2a;
-  --oyl-color-focus: #141b1a;
-  --oyl-color-info-surface: #e3f0f4;
-  --oyl-color-info-ink: #0e4a57;
-  --oyl-color-info-border: #2c7288;
-  --oyl-color-success-surface: #e2f2e9;
-  --oyl-color-success-ink: #14513a;
-  --oyl-color-success-border: #2a7a58;
-  --oyl-color-warning-surface: #fbefda;
-  --oyl-color-warning-ink: #654100;
-  --oyl-color-warning-border: #8a6212;
-  --oyl-color-danger-surface: #fbe8e8;
-  --oyl-color-danger-ink: #7a1d1d;
-  --oyl-color-danger-border: #a83232;
-  --oyl-color-danger-action: #9e2626;
+  --oyl-color-selected: #cdf39c;
+  --oyl-color-link: #3d5b00;
+  --oyl-color-link-visited: #5e3a91;
+  --oyl-color-link-hover: #2c4300;
+  --oyl-color-link-active: #1b2b00;
+  --oyl-color-focus: #131415;
+  --oyl-color-info-surface: #dceeff;
+  --oyl-color-info-ink: #004876;
+  --oyl-color-info-border: #328bcd;
+  --oyl-color-success-surface: #dbf2df;
+  --oyl-color-success-ink: #005122;
+  --oyl-color-success-border: #3b9655;
+  --oyl-color-warning-surface: #f9ebd3;
+  --oyl-color-warning-ink: #5d4000;
+  --oyl-color-warning-border: #ae7c00;
+  --oyl-color-danger-surface: #ffe7e4;
+  --oyl-color-danger-ink: #792b29;
+  --oyl-color-danger-border: #cc6660;
+  --oyl-color-danger-action: #a21a21;
   --oyl-color-danger-action-ink: #ffffff;
-  --oyl-color-illo-sky: #cfe4ef;
-  --oyl-color-illo-sun: #f4c65a;
-  --oyl-color-illo-hill-far: #a7d3a3;
-  --oyl-color-illo-hill-near: #7db678;
-  --oyl-color-illo-road: #6f726c;
+  --oyl-color-illo-sky: #c6d9f2;
+  --oyl-color-illo-sun: #e0c24b;
+  --oyl-color-illo-hill-far: #adcca7;
+  --oyl-color-illo-hill-near: #8fb686;
+  --oyl-color-illo-road: #91969c;
   --oyl-color-band-recovery: #5e8f88;
   --oyl-color-band-endurance: #467f75;
   --oyl-color-band-tempo: #336d61;
