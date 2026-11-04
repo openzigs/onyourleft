@@ -13,7 +13,7 @@
   theme-selection.ts DEFAULT_THEME_CHOICE comes to.
 -->
 <resources>
-    <color name="oyl_canvas">#121816</color>
+    <color name="oyl_canvas">#101215</color>
     <!--
       The launch window's background on Android 7 to 11, where the system splash
       screen does not exist: the canvas itself rather than Capacitor's splash

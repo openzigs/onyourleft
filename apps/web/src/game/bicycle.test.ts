@@ -230,7 +230,7 @@ describe('the rider is a bicycle with somebody on it', () => {
     expect(BICYCLE_COLOURS).toContain(RIDER_PALETTE.jersey);
   });
 
-  it('wears the app’s own accent, and legs darker than it — #623', () => {
+  it('wears the teal house kit, and legs darker than it — #623, #2037', () => {
     // The owner's ruling: the house kit is in the app's colours. It was the
     // sphere's blue, 0x2f6fed, until #623.
     expect(RIDER_PALETTE.jersey).toBe(0x0b5c55);
