@@ -92,6 +92,14 @@ const MAXIMUM_USER_LIMIT = 99;
  */
 export const MAXIMUM_VOICE_ROOMS = 400;
 
+/**
+ * How long {@link RoomVoice.close} makes its caller wait. A room is over when
+ * its close commits; Discord's latency (timeouts, rate-limit waits) must not
+ * hold up an account erase or the instance's stop. The delete carries on in
+ * the background, and one that fails is the sweep's to find.
+ */
+export const CLOSE_WAIT_MS = 2000;
+
 /** Why voice is off, as the log says it. */
 export type VoiceOffCode = 'token-refused' | 'guild-unreachable' | 'membership-screening';
 
@@ -125,6 +133,8 @@ export interface RoomVoiceOptions {
   readonly log: LogSink;
   /** {@link MAXIMUM_VOICE_ROOMS} unless a test's. */
   readonly maximumRooms?: number;
+  /** {@link CLOSE_WAIT_MS} unless a test's. */
+  readonly closeWaitMs?: number;
 }
 
 /** A room's voice, as this process holds it. */
@@ -137,10 +147,15 @@ interface Held {
 export function createRoomVoice(options: RoomVoiceOptions): RoomVoice {
   const { discord, log } = options;
   const maximumRooms = options.maximumRooms ?? MAXIMUM_VOICE_ROOMS;
+  const closeWaitMs = options.closeWaitMs ?? CLOSE_WAIT_MS;
   const held = new Map<string, Held>();
   /** Rooms whose channel is being made: the sweep leaves a channel of theirs alone. */
   const opening = new Set<string>();
+  /** Slots taken by a room being given its channel: the cap counts them with `held`. */
+  let reserved = 0;
   const turns = new Map<string, Promise<void>>();
+  /** Whether the guild check failed in a way that may pass later: no answer, or a 5xx. */
+  let startRetryable = false;
   let refusedAtStart: VoiceOffCode | undefined;
   let started: Promise<void> | undefined;
 
@@ -258,17 +273,49 @@ export function createRoomVoice(options: RoomVoiceOptions): RoomVoice {
     return offCode() === undefined;
   }
 
+  /** Asks Discord whether the bot can use the server, and records the answer. */
+  async function checkGuild(): Promise<void> {
+    const guild = await discord.request('GET /guilds/:id', 'GET', `/guilds/${discord.guildId}`);
+    let code: VoiceOffCode | undefined;
+    startRetryable = false;
+    if (guild.kind === 'off') {
+      code = 'token-refused';
+    } else if (guild.kind !== 'ok') {
+      failed('guild', guild);
+      code = 'guild-unreachable';
+      startRetryable = guild.kind === 'failed' || guild.status >= 500;
+    } else {
+      const features = (guild.body as { features?: unknown } | null)?.features;
+      if (Array.isArray(features) && features.includes('MEMBER_VERIFICATION_GATE_ENABLED')) {
+        code = 'membership-screening';
+      }
+    }
+    refusedAtStart = code;
+    if (offCode() === undefined) {
+      saidOff = false;
+      logEvent(log, 'voice', { state: 'on' });
+    } else sayIfOff();
+  }
+
   const roomVoice: RoomVoice = {
     async inviteFor(roomId, riders) {
       if (!ROOM_ID.test(roomId) || !Number.isSafeInteger(riders) || riders < 1) return undefined;
       return inTurn(roomId, async () => {
         const already = held.get(roomId);
         if (already !== undefined) return link(already);
-        if (!(await usable()) || held.size >= maximumRooms) return undefined;
-        const made = await open(roomId, riders);
-        if (made === undefined) return undefined;
-        held.set(roomId, made);
-        return link(made);
+        // The slot is taken before the first await: rooms' turns are per room,
+        // so every room's ask reaches this line before any has made a channel.
+        if (held.size + reserved >= maximumRooms) return undefined;
+        reserved += 1;
+        try {
+          if (!(await usable())) return undefined;
+          const made = await open(roomId, riders);
+          if (made === undefined) return undefined;
+          held.set(roomId, made);
+          return link(made);
+        } finally {
+          reserved -= 1;
+        }
       });
     },
 
@@ -277,18 +324,23 @@ export function createRoomVoice(options: RoomVoiceOptions): RoomVoice {
         const old = held.get(roomId);
         if (old === undefined) return undefined;
         held.delete(roomId);
-        // A channel Discord would not delete is the sweep's to find.
-        await deleteChannel(old.channelId, old.inviteCode);
-        if (!(await usable())) return undefined;
-        const made = await open(roomId, old.riders);
-        if (made === undefined) return undefined;
-        held.set(roomId, made);
-        return link(made);
+        reserved += 1;
+        try {
+          // A channel Discord would not delete is the sweep's to find.
+          await deleteChannel(old.channelId, old.inviteCode);
+          if (!(await usable())) return undefined;
+          const made = await open(roomId, old.riders);
+          if (made === undefined) return undefined;
+          held.set(roomId, made);
+          return link(made);
+        } finally {
+          reserved -= 1;
+        }
       });
     },
 
     async close(roomId) {
-      await inTurn(roomId, async () => {
+      const deleted = inTurn(roomId, async () => {
         const voice = held.get(roomId);
         if (voice === undefined) return;
         // Forgotten first: a delete Discord refuses leaves a channel no room
@@ -297,29 +349,29 @@ export function createRoomVoice(options: RoomVoiceOptions): RoomVoice {
         if (offCode() !== undefined) return;
         await deleteChannel(voice.channelId, voice.inviteCode);
       });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const waited = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, closeWaitMs);
+      });
+      try {
+        await Promise.race([deleted, waited]);
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     start() {
-      started ??= (async () => {
-        const guild = await discord.request('GET /guilds/:id', 'GET', `/guilds/${discord.guildId}`);
-        if (guild.kind === 'off') {
-          refusedAtStart = 'token-refused';
-        } else if (guild.kind !== 'ok') {
-          failed('guild', guild);
-          refusedAtStart = 'guild-unreachable';
-        } else {
-          const features = (guild.body as { features?: unknown } | null)?.features;
-          if (Array.isArray(features) && features.includes('MEMBER_VERIFICATION_GATE_ENABLED')) {
-            refusedAtStart = 'membership-screening';
-          }
-        }
-        if (offCode() === undefined) logEvent(log, 'voice', { state: 'on' });
-        else sayIfOff();
-      })();
+      started ??= checkGuild();
       return started;
     },
 
     async sweep() {
+      // A guild that could not be read for a reason that may pass (no answer,
+      // a 5xx) is asked again, by this sweep, rather than left off until a restart.
+      if (startRetryable) {
+        startRetryable = false;
+        started = checkGuild();
+      }
       if (!(await usable())) return 0;
       const listed = await discord.request(
         'GET /guilds/:id/channels',

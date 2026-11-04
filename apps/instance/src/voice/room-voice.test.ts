@@ -6,7 +6,7 @@
  * back what Discord would hold, not what the bot said it sent.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createDiscordClient } from './discord.ts';
 import { fakeDiscord, TEST_BOT_TOKEN, TEST_GUILD_ID, type FakeDiscord } from './discord-testing.ts';
@@ -382,5 +382,86 @@ describe('the bot token never reaches a log line (#874, spike 0017 §3.5)', () =
       { event: 'voice-failed', code: 'delete-channel', error: 'Error' },
       { event: 'voice-failed', code: 'list', error: 'Error' },
     ]);
+  });
+});
+
+describe('review of #874: the cap, a slow Discord and a brief outage', () => {
+  const ROOMS = [
+    ROOM,
+    OTHER_ROOM,
+    'fedcba9876543210fedcba9876543210',
+    '1111111111111111aaaaaaaaaaaaaaaa',
+    '2222222222222222bbbbbbbbbbbbbbbb',
+  ];
+
+  it('holds its cap when different rooms ask at the same moment', async () => {
+    const discord = fakeDiscord();
+    const { voice } = voiceOver(discord, { maximumRooms: 2 });
+    await voice.start();
+    const links = await Promise.all(ROOMS.map((room) => voice.inviteFor(room, 8)));
+    expect(links.filter((link) => link !== undefined)).toHaveLength(2);
+    expect(discord.ourChannels()).toHaveLength(2);
+  });
+
+  it('gives the slot back when a channel could not be made', async () => {
+    const discord = fakeDiscord();
+    const { voice } = voiceOver(discord, { maximumRooms: 1 });
+    await voice.start();
+    discord.failNext(/^POST \/guilds\/[0-9]+\/channels$/, { status: 500 });
+    expect(await voice.inviteFor(ROOM, 8)).toBeUndefined();
+    expect(await voice.inviteFor(OTHER_ROOM, 8)).toBeDefined();
+  });
+
+  it('does not make its caller wait on a Discord that is slow to delete, and still deletes', async () => {
+    const discord = fakeDiscord();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const voice = createRoomVoice({
+      discord: createDiscordClient({
+        settings: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID },
+        version: '0.0.0',
+        fetch: async (input, init) => {
+          if (init?.method === 'DELETE') await gate;
+          return discord.fetch(input, init);
+        },
+        sleep: () => Promise.resolve(),
+      }),
+      log: () => undefined,
+      closeWaitMs: 10,
+    });
+    expect(await voice.inviteFor(ROOM, 8)).toBeDefined();
+    await voice.close(ROOM);
+    // close returned while the delete was still waiting on Discord.
+    expect(discord.ourChannels()).toHaveLength(1);
+    release();
+    await vi.waitFor(() => expect(discord.ourChannels()).toEqual([]));
+  });
+
+  it('asks again from the sweep after a failure that may pass: no answer, or a 5xx', async () => {
+    for (const failure of [{ throws: new TypeError('dns') }, { status: 503 }] as const) {
+      const discord = fakeDiscord();
+      discord.failNext(/^GET \/guilds\/[0-9]+$/, failure);
+      const { voice, lines } = voiceOver(discord);
+      await voice.start();
+      expect(voice.offCode).toBe('guild-unreachable');
+      expect(await voice.inviteFor(ROOM, 8)).toBeUndefined();
+
+      await voice.sweep();
+      expect(voice.offCode).toBeUndefined();
+      expect(await voice.inviteFor(ROOM, 8)).toBeDefined();
+      expect(records(lines)).toContainEqual({ event: 'voice', state: 'on' });
+    }
+  });
+
+  it('does not ask again after a refusal: a wrong id or a bot not in the server stays off', async () => {
+    const discord = fakeDiscord();
+    discord.failNext(/^GET \/guilds\/[0-9]+$/, { status: 404 });
+    const { voice } = voiceOver(discord);
+    await voice.start();
+    await voice.sweep();
+    expect(voice.offCode).toBe('guild-unreachable');
+    expect(
+      discord.requests.filter((each) => each.path === `/guilds/${TEST_GUILD_ID}`),
+    ).toHaveLength(1);
   });
 });

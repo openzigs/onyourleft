@@ -598,8 +598,13 @@ voice: nothing else changes.
   topic, no category, no audit-log reason, no ride data and nothing a rider typed.
 - **What the instance keeps.** Which channel is which room's is held in memory only: nothing about
   Discord is in the database or a backup. After a restart, or when Discord refused a delete, the
-  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel no open room
-  holds. That is why the bot needs a server of its own.
+  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel this instance
+  process does not hold. That is why the bot needs a server of its own.
+- **Keep the token encrypted at rest.** Discord's terms treat the bot token as API Data that must be
+  encrypted at rest (Developer Terms §5(c), §13). The instance reads it from
+  `OYL_INSTANCE_DISCORD_BOT_TOKEN` and does not encrypt it itself, so the duty is yours: keep the
+  `.env` that holds it on an encrypted disk or volume, or supply it from a Docker secret or your
+  operating system's secret store, and keep it out of backups that are not encrypted.
 - **The token** is sent only to `discord.com`, in the `Authorization` header, and is never logged:
   an error is logged by its name alone. Rate limits are honoured from Discord's headers, as its
   terms require; a `401` turns voice off until the next start, so a dead token never loops.
@@ -608,7 +613,7 @@ voice: nothing else changes.
 |---|---|
 | `"event":"voice","state":"on"` at start | the bot's token and server answered; rooms may have voice |
 | `"event":"voice","state":"off","code":"token-refused"` | Discord refused the token, at start or later. Nothing more is sent. Reset the token in the Developer Portal, set it, and restart |
-| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it. A `voice-failed` line before it has the status |
+| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it (a `403` or `404`), or Discord or the network was briefly down (no status, or a `5xx`). A `voice-failed` line before it has the status. A brief failure is retried by the room sweep every ten minutes; a refusal is not, so fix the id or the bot's membership and restart |
 | `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
 | `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
 | `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
@@ -648,6 +653,18 @@ the blob count, and the database's SHA-256). `--keep N` removes all but the newe
 copies the snapshot to a second place — the off-box copy. The home deployment runs this on a
 schedule (the `backup` service: every six hours, fourteen kept, into `OYL_BACKUP_DIR` with a copy in
 `OYL_OFFBOX_DIR`).
+
+⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
+the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
+account that was erased. The privacy policy tells riders and notifiers that the project's own
+instance keeps no backup for longer than 30 days, so that is the limit. The home deployment's
+defaults keep the newest fourteen of one every six hours, which is 3.5 days, and are well inside it.
+If you change `OYL_BACKUP_KEEP` or `OYL_BACKUP_INTERVAL_SECONDS`, keep their product under 30 days
+(`OYL_BACKUP_KEEP` × `OYL_BACKUP_INTERVAL_SECONDS` ≤ 2 592 000 seconds). Nothing enforces that: it is
+yours to check. Count the other places a snapshot lands too: `OYL_OFFBOX_DIR` keeps the same number,
+the `pre-deploy` folder keeps the last three deploys' snapshots however old they are, and a copy you
+make by hand or with `rclone` is yours to delete. Restoring one needs no extra step for notifier
+details: the instance erases whatever is due again when it starts.
 
 ⚠️ **A backup kept only on the box it backs up is not a backup** of the box. `OYL_OFFBOX_DIR` is a
 drive or a share that survives the machine: a USB drive that is unplugged and kept elsewhere, or a
