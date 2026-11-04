@@ -3,10 +3,10 @@
 /**
  * Every keyboard focus ring on the ride HUD can be seen — #748.
  *
- * The HUD is pinned to the light palette (`theme.css` §`.oyl-hud`, #672), so
- * `--oyl-color-focus` there is #141b1a, and a control that took the page's
+ * The HUD was pinned to the light palette (`theme.css` §`.oyl-hud`, #672) until
+ * #2042, so `--oyl-color-focus` there was #131415, and a control that took the page's
  * `:focus-visible` drew that ring 2 px outside itself onto `hudSurface`,
- * #10161c: **1.04:1**. The mute toggle, the volume and the side camera's Stop
+ * #10161c: **1.01:1**. The mute toggle, the volume and the side camera's Stop
  * all did, in both page palettes, and nothing measured it: `contrast.a11y.test`
  * checks declared PAIRS, and no pair said which colour a HUD ring is.
  *
@@ -17,10 +17,11 @@
  * non-text contrast), in the light page palette and the dark one. The three
  * controls #748 names must each be among those visited.
  *
- * **Control:** the rule #748 added is deleted through the CSSOM, and the same
- * three rings must read back at the 1.04:1 #748's review measured — so a
- * green run is a statement about that rule, not about a page whose rings
- * happened to be light.
+ * **Control:** the rule #748 added is deleted through the CSSOM and the HUD's
+ * focus token is put back at the light palette's (what it was until #2042),
+ * and the same three rings must then read back near 1:1, as #748's review
+ * measured — so a green run is a statement about that rule, not about a page
+ * whose rings happened to be light.
  *
  * ⚠️ Not a screen reader and not a real phone: what it proves is the colour the
  * engine gives a keyboard focus ring, and where that ring lands.
@@ -29,6 +30,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { paletteColours } from '../src/design/tokens';
 
 const QUERY = '?sounds=on&side=lost';
 
@@ -46,7 +48,7 @@ interface Ring {
   readonly surface: string;
 }
 
-/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+/** `rgb(16, 18, 21)` → `#101215`, for {@link contrastRatio}. */
 function hex(rgb: string): string {
   const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
   if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
@@ -151,21 +153,34 @@ for (const colorScheme of ['light', 'dark'] as const) {
   });
 }
 
-test('#748 control — without the rule, the three rings are back at 1.04:1', async ({ page }) => {
+test('#748 control — without the rule, and the page focus the light one, the three rings vanish', async ({
+  page,
+}) => {
   await openRide(page);
-  const deleted = await page.evaluate((selector) => {
-    let removed = 0;
-    for (const sheet of document.styleSheets) {
-      for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
-        const rule = sheet.cssRules[index];
-        if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
-          sheet.deleteRule(index);
-          removed += 1;
+  const lightFocus = paletteColours('light').focus;
+  const deleted = await page.evaluate(
+    ({ selector, lightFocus }) => {
+      // ⚠️ Since #2042 the HUD restates the DARK palette, whose focus token is
+      // the lime, so a ring that fell back to the page's focus would still show.
+      // #748's failure was the LIGHT focus (what the HUD carried until #2042)
+      // landing on hudSurface, so the control puts that back too.
+      document
+        .querySelector<HTMLElement>('.oyl-hud')
+        ?.style.setProperty('--oyl-color-focus', lightFocus);
+      let removed = 0;
+      for (const sheet of document.styleSheets) {
+        for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
+          const rule = sheet.cssRules[index];
+          if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
+            sheet.deleteRule(index);
+            removed += 1;
+          }
         }
       }
-    }
-    return removed;
-  }, RULE);
+      return removed;
+    },
+    { selector: RULE, lightFocus },
+  );
   expect(deleted, `${RULE} was not found to delete`).toBe(1);
   const named = (await tabThroughTheHud(page)).filter((ring) => NAMED.includes(ring.name));
   expect(named.map((ring) => ring.name).sort()).toEqual([...NAMED].sort());

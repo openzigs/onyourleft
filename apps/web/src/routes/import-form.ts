@@ -33,7 +33,9 @@
  * claim the rider made and the refusal below is the only place the geometry
  * gets a vote. The route builder (#71) is deliberately untouched: a rider who
  * draws back to their start has said it with the geometry, and what that should
- * mean is its own question with its own screen.
+ * mean is its own question with its own screen. #2102 answered it there:
+ * `routing/loop.ts`, where the planner says before the save that a closed line
+ * is saved as a loop.
  */
 
 import type { UnixSeconds } from '@onyourleft/domain';

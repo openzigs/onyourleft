@@ -27,6 +27,7 @@ import {
   VERGE_DROP_METRES,
   ROAD_CLEARANCE_METRES,
   horizonRelief,
+  standingOnGround,
   terrainCorridor,
   terrainHeightAt,
   type TerrainMesh,
@@ -34,6 +35,7 @@ import {
 import {
   circuitRoute,
   hairpinRoute,
+  PLANNER_BENDS,
   hillRoute,
   northRoute,
   plannerRoute,
@@ -592,6 +594,93 @@ describe('the scenery stands on the ground — #458', () => {
     expect(stood).toBeGreaterThan(500);
     expect(worst).toBeGreaterThan(0);
   });
+});
+
+describe('no scenery stands over ground that is not drawn — #2099', () => {
+  // A planner's 90° corner, both ways round so each side is the inside of a
+  // bend: before and after it the inside's ground is tapered in (#2096), and
+  // the scenery, placed from the route, stood out past it over the sky.
+  const planners: readonly (readonly [string, RouteProfile])[] = [
+    ["a planner's route", plannerRoute()],
+    ["a planner's route, mirrored", plannerRoute({ mirrored: true })],
+  ];
+
+  it.each(planners)('stands every item of a frame over a triangle of it, %s', (_name, profile) => {
+    // ⚠️ Read off the frame's own triangles, ground and road, as a driver is
+    // handed them. Measured before #2099 on this sweep: 26 items over no
+    // triangle at all (14 mirrored), 12 to 42 m from the road.
+    const origin = corridorOrigin(profile);
+    const start = atStartLine(profile);
+    let items = 0;
+    const bare: string[] = [];
+    for (let at = 0; at < profile.totalDistance; at += 37) {
+      const frame = sceneFrame({
+        profile,
+        origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(at) } },
+      });
+      const road = { vertices: frame.corridor.vertices, indices: frame.corridor.indices };
+      for (const each of frame.scatter) {
+        items += 1;
+        if (
+          meshHeightAt(frame.terrain.mesh, each.x, each.z) === undefined &&
+          heightOver(road, each.x, each.z, -1e-6) === undefined
+        ) {
+          bare.push(`${each.kind} at ${String(at)}`);
+        }
+      }
+    }
+    expect(bare).toEqual([]);
+    expect(items).toBeGreaterThan(5_000);
+  });
+
+  it.each(planners)(
+    'keeps exactly the points over a triangle, near a bend and far from one, %s',
+    (_name, profile) => {
+      // `standingOnGround` asks only the rows a point lies between; this asks
+      // every triangle of the frame. They must agree both ways — dropping a
+      // tree over drawn ground is a bare verge for no reason.
+      const laterals = [
+        -410, -350, -150, -80, -60, -45, -35, -27, -20, -14, -10, -6, 6, 10, 14, 20, 27, 35, 45, 60,
+        80, 150, 350, 410,
+      ];
+      let kept = 0;
+      let dropped = 0;
+      for (const bend of PLANNER_BENDS) {
+        for (const before of [300, 100, 0, -30]) {
+          const { corridor, ground } = frameAt(profile, bend.middleMetres - before);
+          const points: { readonly x: number; readonly z: number }[] = [];
+          const centre = corridor.centre;
+          for (let row = 0; row + 1 < centre.length; row += 3) {
+            const from = centre[row] as (typeof centre)[number];
+            const to = centre[row + 1] as (typeof centre)[number];
+            const dx = to.x - from.x;
+            const dz = to.z - from.z;
+            const apart = Math.hypot(dx, dz);
+            if (!(apart > 0)) continue;
+            for (const lateral of laterals) {
+              // Half-way between the rows, out along the normal `(−z, x)`.
+              points.push({
+                x: (from.x + to.x) / 2 + (-dz / apart) * lateral,
+                z: (from.z + to.z) / 2 + (dx / apart) * lateral,
+              });
+            }
+          }
+          const standing = new Set(standingOnGround(points, ground));
+          for (const point of points) {
+            const over = meshHeightAt(ground, point.x, point.z) !== undefined;
+            expect(standing.has(point), `(${String(point.x)}, ${String(point.z)})`).toBe(over);
+            if (over) kept += 1;
+            else dropped += 1;
+          }
+        }
+      }
+      // Non-vacuity: both answers are given, many times.
+      expect(kept).toBeGreaterThan(1_000);
+      expect(dropped).toBeGreaterThan(100);
+    },
+    60_000,
+  );
 });
 
 describe('the ground is the same place on every lap — #458', () => {

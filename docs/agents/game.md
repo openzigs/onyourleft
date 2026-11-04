@@ -298,10 +298,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
                         its digests to the digit. ⚠️ **Since #1995 a rider
                         FACES the line, not the road**: `RiderMarker.headingX`
-                        points from the drawn rear wheel to the front wheel
-                        (`wheelToWheel`, `lineSlopeAt`'s chord), held to 12°
-                        off the road (`facingTurn`), so a rider crossing it no
-                        longer slides sideways and never turns in a step. Measure across the road
+                        points from the rear wheel to the front wheel
+                        (`facingAt`, `lineSlopeAt`'s chord), held to 12° off
+                        the road under the bicycle (`facingTurn`), so a rider
+                        crossing it no longer slides sideways. No step at the
+                        edge hold, nor since #2017 where a bot or ghost crosses
+                        a corridor point (the rider never does): held off the
+                        corridor SEGMENT's heading, which steps there, it
+                        turned up to 7° in 2 cm. Measure across the road
                         with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
@@ -1297,8 +1301,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in
-                        400 m first, ≤ 36 (ADR 0054 D-5.6's cap, the owner's
-                        ruling), ranked by distance with the frame's procedural
+                        400 m first — since #2094 after the nearest 4
+                        landmarks in reach (a place of worship, a school, a
+                        town hall: `MAPPED_LANDMARKS_AHEAD`, inside the same
+                        count, budget and calls; `footprint-census-testing.ts`
+                        counts why each kind is not drawn) — ≤ 36 (ADR 0054
+                        D-5.6's cap, the owner's ruling), ranked by distance
+                        with the frame's procedural
                         structures inside the 23 040-triangle term (#1586), the far
                         level past 150 m, in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
@@ -1565,6 +1574,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         valley, a hairpin, a circuit. Test support, never shipped
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
+    src/game/simulated-rider.ts
+                        the simulated rider (#1992), a developer's debug mode:
+                        `#/game?simulate=<watts>` (with `&speedup=<1–32>` and
+                        `&at=<metres>`) rides a rider's own route at a steady
+                        power with no trainer or sensor, faster than real time
+                        and from a distance if asked. `GameView` §`useSimulatedRide`
+                        builds the ride with NO trainer port, room or rooms and
+                        no Delivery round, so nothing is written to a machine,
+                        recorded, saved or posted; the HUD's `oyl-hud__simulated`
+                        line marks it. `simulated-rider-wiring.test.tsx` holds it.
+                        The picker offers the same ride as *Preview without a
+                        trainer* (PR #2113's ruling; `StageChooser.tsx`
+                        §`PreviewControl`): a power and a 1–8× speed-up, ridden
+                        on a NEW screen `GameView` mounts with none of those
+                        ports; ending it mounts an ordinary picker again.
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists
