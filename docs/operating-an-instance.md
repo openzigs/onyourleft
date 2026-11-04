@@ -593,8 +593,13 @@ voice: nothing else changes.
   topic, no category, no audit-log reason, no ride data and nothing a rider typed.
 - **What the instance keeps.** Which channel is which room's is held in memory only: nothing about
   Discord is in the database or a backup. After a restart, or when Discord refused a delete, the
-  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel no open room
-  holds. That is why the bot needs a server of its own.
+  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel this instance
+  process does not hold. That is why the bot needs a server of its own.
+- **Keep the token encrypted at rest.** Discord's terms treat the bot token as API Data that must be
+  encrypted at rest (Developer Terms §5(c), §13). The instance reads it from
+  `OYL_INSTANCE_DISCORD_BOT_TOKEN` and does not encrypt it itself, so the duty is yours: keep the
+  `.env` that holds it on an encrypted disk or volume, or supply it from a Docker secret or your
+  operating system's secret store, and keep it out of backups that are not encrypted.
 - **The token** is sent only to `discord.com`, in the `Authorization` header, and is never logged:
   an error is logged by its name alone. Rate limits are honoured from Discord's headers, as its
   terms require; a `401` turns voice off until the next start, so a dead token never loops.
@@ -603,7 +608,7 @@ voice: nothing else changes.
 |---|---|
 | `"event":"voice","state":"on"` at start | the bot's token and server answered; rooms may have voice |
 | `"event":"voice","state":"off","code":"token-refused"` | Discord refused the token, at start or later. Nothing more is sent. Reset the token in the Developer Portal, set it, and restart |
-| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it. A `voice-failed` line before it has the status |
+| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it (a `403` or `404`), or Discord or the network was briefly down (no status, or a `5xx`). A `voice-failed` line before it has the status. A brief failure is retried by the room sweep every ten minutes; a refusal is not, so fix the id or the bot's membership and restart |
 | `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
 | `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
 | `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
