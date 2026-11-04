@@ -332,6 +332,7 @@ export class RoomHost {
     socketId: string,
     started = false,
     startedBy: RaceStarter = 'any-seated-rider',
+    voiceInvite?: string,
   ): void {
     if (this.#stopping) {
       socket.close(1001, 'server-stopping');
@@ -347,6 +348,8 @@ export class RoomHost {
       return;
     }
     const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings, startedBy);
+    // #875: the newest plan's voice link, which this socket's welcome says.
+    hosted.room.setVoiceInvite(voiceInvite);
     const connection: Connection = {
       id: hosted.nextConnection,
       socketId,

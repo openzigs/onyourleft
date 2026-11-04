@@ -82,6 +82,19 @@ const MESSAGES: readonly ProtocolMessage[] = [
       lapRace: { laps: 3, items: 'on' },
     },
   },
+  {
+    type: 'welcome',
+    riderId: 5,
+    routeRef: { sha256: SHA },
+    roomConfig: {
+      kind: 'ride',
+      ridingPosition: 'upright',
+      reportIntervalMs: REPORT_INTERVAL_MS,
+      frameIntervalMs: FRAME_INTERVAL_MS,
+      drafting: 'on',
+    },
+    voiceInvite: 'https://discord.gg/Ab3-xyz9',
+  },
   { type: 'refuse', reason: 'physics-mismatch' },
   { type: 'frame', tick: 0, riders: [] },
   {
@@ -328,8 +341,14 @@ describe('what the decoder refuses — one check, one reason', () => {
   it('refuses a version-2 build, as version 2 refused version 1 — #1908', () => {
     // Version 3 added the lap race's inputs, settings and frame slots. A
     // version-2 build would be seated in a lap race it cannot steer or read.
-    expect(PROTOCOL_VERSION).toBe(3);
     expect(refusalOf(decodeClientMessage(hello({ protocol: 2 }), PHYSICS))).toBe(
+      'protocol-mismatch',
+    );
+  });
+
+  it('refuses a version-3 build, which would refuse a welcome carrying a voice link — #875', () => {
+    expect(PROTOCOL_VERSION).toBe(4);
+    expect(refusalOf(decodeClientMessage(hello({ protocol: 3 }), PHYSICS))).toBe(
       'protocol-mismatch',
     );
   });
@@ -724,6 +743,49 @@ describe('the lap race — #1908', () => {
         ],
       }),
     ).toThrow(ProtocolEncodeError);
+  });
+
+  it('takes a voice link on Discord’s invite host and nothing else — #875', () => {
+    const welcome = (voiceInvite: unknown) =>
+      refusalOf(
+        decodeRoomMessage(
+          JSON.stringify({
+            type: 'welcome',
+            riderId: 1,
+            routeRef: { sha256: SHA },
+            roomConfig: {
+              kind: 'ride',
+              ridingPosition: 'hoods',
+              reportIntervalMs: 500,
+              frameIntervalMs: 1000,
+              drafting: 'on',
+            },
+            voiceInvite,
+          }),
+        ),
+      );
+    expect(welcome(undefined)).toBe('accepted');
+    expect(welcome('https://discord.gg/ab')).toBe('accepted');
+    expect(welcome(`https://discord.gg/${'a'.repeat(32)}`)).toBe('accepted');
+    for (const bad of [
+      'http://discord.gg/abc123',
+      'https://discord.com/invite/abc123',
+      'https://discord.gg.evil.example/abc123',
+      'https://evil.example/https://discord.gg/abc123',
+      'https://discord.gg/abc123?next=https://evil.example',
+      'https://discord.gg/abc123#x',
+      'https://discord.gg/abc/../x',
+      'https://discord.gg/a',
+      `https://discord.gg/${'a'.repeat(33)}`,
+      'https://discord.gg/',
+      'javascript:alert(1)',
+      ' https://discord.gg/abc123',
+      'https://discord.gg/abc123\n',
+      42,
+      { url: 'https://discord.gg/abc123' },
+    ]) {
+      expect(welcome(bad), JSON.stringify(bad)).toBe('bad-value');
+    }
   });
 
   it('refuses a lap race’s settings out of bounds, or one without the other', () => {

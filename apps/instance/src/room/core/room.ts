@@ -153,6 +153,7 @@ import {
   type Report,
   type RoomMessage,
   type StandingsRider,
+  VOICE_INVITE_PATTERN,
 } from '@onyourleft/protocol';
 
 import { CeilingWatch } from './ceilings.ts';
@@ -247,6 +248,15 @@ export interface Room {
    * but the bar.
    */
   remove(athleteId: string, nowMs: number): Outbound[];
+  /**
+   * The room's Discord voice link (#875), said in every welcome from now on —
+   * the first and every rejoin — and never in anything else, so a rider the
+   * room refuses is never told it. `undefined` is none. A value that is not a
+   * link on Discord's invite host (`@onyourleft/protocol` §`VOICE_INVITE_PATTERN`)
+   * is taken as none, so a welcome is never one the encoder would refuse.
+   * Sends nothing: a rider already welcomed is not told of a new link here.
+   */
+  setVoiceInvite(invite: string | undefined): void;
   view(): RoomView;
 }
 
@@ -322,6 +332,8 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   const finishers: Seat[] = [];
   /** Athletes removed from this room (#789): never seated again. */
   const barred = new Set<string>();
+  /** The room's Discord voice link, said in a welcome and nowhere else (#875). */
+  let voiceInvite: string | undefined;
   const tickDuration: Seconds = seconds(settings.frameIntervalMs / 1000);
   const lap = settings.lapRace;
   const lapCourse: RaceCourse | undefined =
@@ -379,6 +391,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
               ? {}
               : { lapRace: { laps: lap.laps, items: lap.items ? 'on' : 'off' } }),
           },
+          ...(voiceInvite === undefined ? {} : { voiceInvite }),
         },
       },
     ];
@@ -1035,6 +1048,11 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         emptySinceMs ??= nowMs;
       }
       return out;
+    },
+
+    setVoiceInvite(invite) {
+      voiceInvite =
+        invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
     },
 
     view() {

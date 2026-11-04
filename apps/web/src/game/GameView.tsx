@@ -98,6 +98,12 @@ import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
 import { RoomPanel } from '../rooms/RoomPanel';
 import {
+  voiceLinkShown,
+  voiceNoticeAfter,
+  type VoiceNotice as RoomVoiceNotice,
+} from './room-voice';
+import { VoiceLine, VoiceNotice } from './hud/VoiceNotice';
+import {
   acrossTheRoomsLine,
   heldOnTheLine,
   nextToFollow,
@@ -1296,6 +1302,11 @@ export function GameView(props: GameViewProps): JSX.Element {
   const roomRef = useRef<RoomConnection | undefined>(undefined);
   /** What the room frame remembers between frames. @see room-ride.ts */
   const roomStateRef = useRef<RoomRideState>(roomRideState());
+  /**
+   * The room's Discord voice link and when it came (#875), read during the
+   * render the tick schedules, as {@link roomRef}'s status is. `room-voice.ts`.
+   */
+  const voiceNoticeRef = useRef<RoomVoiceNotice | undefined>(undefined);
   /** The last room frame, for the render the tick schedules. */
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
@@ -1785,6 +1796,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
+        voiceNoticeRef.current = undefined;
         roomRef.current = props.room.join({
           roomId,
           // #784: the room's `welcome.routeRef` must be the route this device
@@ -2160,6 +2172,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         roomRecordAskedRef.current = true;
         void trainerPortRef.current?.recordRoomRide?.();
       }
+      // #875: the room's voice link, from its welcome, and when it came.
+      voiceNoticeRef.current = voiceNoticeAfter(
+        voiceNoticeRef.current,
+        room?.status(),
+        simulation.state.elapsed,
+      );
       const roomNow =
         room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
       roomFrameRef.current = roomNow;
@@ -2988,6 +3006,13 @@ export function GameView(props: GameViewProps): JSX.Element {
   // #785: where the race is, read during render like `sensors` — the tick's
   // `setState` is what schedules this render.
   const race = roomRef.current?.race();
+  // #875: the room's voice link, while it is shown (`room-voice.ts`).
+  const voiceLink = voiceLinkShown(
+    voiceNoticeRef.current,
+    race,
+    state?.elapsed ?? 0,
+    STANDING_NOTICE_SECONDS,
+  );
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
@@ -3407,8 +3432,18 @@ export function GameView(props: GameViewProps): JSX.Element {
                   Start the race
                 </Button>
               ) : undefined}
+              {/* #875: the room's voice link, while the race waits on its line. */}
+              {voiceLink?.place === 'race' ? <VoiceLine invite={voiceLink.invite} /> : undefined}
             </div>
           ),
+          // #875: the room's Discord voice link, only after the room let the
+          // rider in (its welcome), while a race holds them on the line and
+          // for a standing notice's span of ride (`room-voice.ts`). Not
+          // `live`: a link to press, not a fault to hear. It says it opens
+          // Discord; `target="_blank"` hands it to the system in the shell.
+          voiceLink?.place === 'notice' ? (
+            <VoiceNotice key="voice" invite={voiceLink.invite} />
+          ) : undefined,
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.

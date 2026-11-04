@@ -106,6 +106,7 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
             message.socketId,
             message.started,
             message.plan.startedBy,
+            message.plan.voiceInvite,
           );
         },
       );

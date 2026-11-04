@@ -7377,6 +7377,34 @@ select.oyl-input {
 }
 
 /*
+ * A RACE'S VOICE LINK, ON ITS LINE — #875.
+ *
+ * *Join voice on Discord*, as the last line of a race's notice while the race
+ * waits on its line (`game/room-voice.ts`), is shown only on a TABLET — the
+ * corners layout at 47 rem tall or more, the standings' query below — and is
+ * `display: none` everywhere else, so on a phone it is neither drawn nor in
+ * the keyboard's order. ⚠️ **What that costs, recorded as #419 asks: in a race
+ * a phone offers no voice link.** One more line in the race's notice ran the
+ * notice cell below a 736×360 stage and put the lifted sound row over the
+ * primary readings there, and put the cell over the leaning rider at 360×752
+ * (measured in the browser gate, #875); the race's notice alone already ends
+ * 41 px above the rider at 360×752. A group ride's link is a notice of its own
+ * and is shown on a phone too. `ride-room.browser.spec.ts` §"#1407" holds the
+ * race with the link at every overlay viewport, both ways: drawn and pressable
+ * on a tablet, laid out at no size on a phone.
+ */
+.oyl-hud__voice {
+  display: none;
+  margin: 0;
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__voice {
+    display: block;
+  }
+}
+
+/*
  * A RACE'S STANDINGS — #1347, ADR 0051.
  *
  * Visually hidden everywhere (by clip, as `.oyl-visually-hidden`, so a screen

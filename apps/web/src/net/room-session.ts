@@ -284,7 +284,18 @@ export interface RoomLapRace {
 /** Where a session is. */
 export type RoomSessionStatus =
   | { readonly kind: 'connecting' }
-  | { readonly kind: 'joined'; readonly riderId: number; readonly config: RoomConfig }
+  | {
+      readonly kind: 'joined';
+      readonly riderId: number;
+      readonly config: RoomConfig;
+      /**
+       * The room's Discord voice link, from its welcome (#875): only where the
+       * instance offers voice for this room, and only once the room let the
+       * rider in. Held to Discord's invite host by the decoder
+       * (`@onyourleft/protocol` §`VOICE_INVITE_PATTERN`). `game/room-voice.ts`.
+       */
+      readonly voiceInvite?: string;
+    }
   /** Connection lost; reconnecting by itself. `since` is the local instant it went. */
   | { readonly kind: 'lost'; readonly since: number }
   /** The room said no, and will keep saying it. */
@@ -628,6 +639,7 @@ export class RoomSession {
               kind: 'joined',
               riderId: message.riderId,
               config: message.roomConfig,
+              ...(message.voiceInvite === undefined ? {} : { voiceInvite: message.voiceInvite }),
             });
             return;
           }

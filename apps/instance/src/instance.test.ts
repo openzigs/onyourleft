@@ -96,7 +96,7 @@ async function start(
     resolve?: Resolver;
     timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
     hosted?: Pick<InstanceOptions, 'hostedFetch'>;
-    voice?: Pick<InstanceOptions, 'discordFetch'>;
+    voice?: Pick<InstanceOptions, 'discordFetch' | 'voiceInviteWaitMs'>;
   } = {},
 ) {
   const lines: string[] = [];
@@ -1871,5 +1871,133 @@ describe('voice on Discord, as the running instance starts it (#874)', () => {
     const link = await instance.voice()?.inviteFor('a1b2c3d4e5f60718293a4b5c6d7e8f90', 4);
     expect(link).toMatch(/^https:\/\/discord\.gg\//);
     expect(discord.ourChannels()).toHaveLength(1);
+  });
+});
+
+describe('a rider’s private room says its voice link in the welcome, and only there (#875)', () => {
+  const VOICE_SERVER = { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } };
+
+  async function post(url: string, path: string, token: string, body: unknown) {
+    const response = await fetch(`${url}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  async function welcomeOf(url: string, token: string, roomId: string) {
+    const client = await joinRoom(wsUrl(url), roomId, await ticket(url, token, roomId));
+    clients.push(client);
+    await until(() => client.messages.length > 0, 'a welcome');
+    const [first] = client.messages;
+    if (first?.type !== 'welcome') throw new Error(`no welcome: ${JSON.stringify(first)}`);
+    return first;
+  }
+
+  it('the welcome carries the link to the channel Discord holds for the room, the same for every rider', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const bob = await signIn(instance.url, 'Bob');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    expect(made.status).toBe(200);
+    const roomId = made.body.roomId as string;
+    expect(
+      (await post(instance.url, '/v1/rooms/join', bob.sessionToken, { code: made.body.code }))
+        .status,
+    ).toBe(200);
+
+    const annWelcome = await welcomeOf(instance.url, ann.sessionToken, roomId);
+    const bobWelcome = await welcomeOf(instance.url, bob.sessionToken, roomId);
+    const [invite] = [...discord.invites.values()];
+    expect(discord.ourChannels().map((each) => each.name)).toEqual([
+      `oyl-ride-${roomId.slice(0, 12)}`,
+    ]);
+    expect(annWelcome.voiceInvite).toBe(`https://discord.gg/${String(invite?.code)}`);
+    expect(bobWelcome.voiceInvite).toBe(annWelcome.voiceInvite);
+    // The room's capacity, not one invite per rider.
+    expect(invite?.max_uses).toBe(50);
+  });
+
+  it('a socket refused at its hello is told no link', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    const stranger = await joinRoom(wsUrl(instance.url), roomId, 'not-a-ticket');
+    clients.push(stranger);
+    await until(() => stranger.messages.length > 0, 'a refusal');
+    expect(stranger.messages).toEqual([{ type: 'refuse', reason: 'ticket-refused' }]);
+  });
+
+  it('a welcome sent before Discord answered has no link, and the next socket’s has it', async () => {
+    const discord = fakeDiscord();
+    let letDiscordAnswer = (): void => undefined;
+    const held = new Promise<void>((resolve) => (letDiscordAnswer = resolve));
+    const slowed = ((input: string | URL, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? held.then(() => discord.fetch(input, init))
+        : discord.fetch(input, init)) as typeof globalThis.fetch;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: slowed, voiceInviteWaitMs: 100 },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+
+    const early = await welcomeOf(instance.url, ann.sessionToken, roomId);
+    expect(early).not.toHaveProperty('voiceInvite');
+    letDiscordAnswer();
+    await until(() => discord.invites.size === 1, 'the invite made');
+    const later = await welcomeOf(instance.url, ann.sessionToken, roomId);
+    expect(later.voiceInvite).toBe(`https://discord.gg/${String([...discord.invites.keys()][0])}`);
+  });
+
+  it('an instance with no bot says no link, and asks Discord nothing', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, {}, { voice: { discordFetch: discord.fetch } });
+    await instance.opened;
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const welcome = await welcomeOf(instance.url, ann.sessionToken, made.body.roomId as string);
+    expect(welcome).not.toHaveProperty('voiceInvite');
+    expect(discord.requests).toEqual([]);
   });
 });

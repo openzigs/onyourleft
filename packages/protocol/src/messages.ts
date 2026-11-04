@@ -11,7 +11,7 @@
  *
  * ```text
  * client → room   hello   { protocol, physicsVersion, ticket }
- * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig } | refuse { reason }
+ * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig, voiceInvite? } | refuse { reason }
  * client → room   report  { sequence, atMs, powerWatts, cadenceRpm? }        every 500 ms
  * client → room   item-use { sequence, atMs }                               a lap race only
  * client → room   lane    { sequence, atMs, lane }                           a lap race only
@@ -63,8 +63,14 @@
  * lane, held item and laps ({@link FrameRider}) and the tick's
  * {@link ItemEvent}s. A version-2 build is refused `protocol-mismatch` at its
  * hello, as a version-1 build was by version 2.
+ *
+ * **4** since #875 (spike 0017 option A, #794): a welcome may carry the
+ * room's Discord voice link ({@link Welcome.voiceInvite}). The decoder refuses
+ * a key it does not know (`codec.ts`, `unknown-key`), so a version-3 build
+ * would refuse every welcome from a room with voice; it is refused
+ * `protocol-mismatch` at its hello instead, and told to update.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Where a rider's hands are, fixed by the race — `@onyourleft/physics`' `RidingPosition`. */
 export type RidingPosition = 'upright' | 'hoods' | 'drops';
@@ -180,7 +186,22 @@ export interface Welcome {
   /** The route, by the SHA-256 of its content, lower-case hex. Never its geometry. */
   readonly routeRef: { readonly sha256: string };
   readonly roomConfig: RoomConfig;
+  /**
+   * The room's Discord voice channel, as an invite link — #875, spike 0017
+   * option A. Present only where the instance's operator turned voice on and
+   * the room has a channel (a rider's private room, `apps/instance`
+   * §`voice/room-voice.ts`), and absent everywhere else: a room works exactly
+   * as it does without it.
+   *
+   * ⚠️ **In the welcome, and so only after admission**: a hello that is
+   * refused is answered by a {@link Refuse}, which carries no link, so a
+   * rider the room does not admit never receives one. Held to
+   * `schema.ts` §`VOICE_INVITE_PATTERN`, so a client can put it in an `href`
+   * knowing it opens Discord's invite host and nothing else.
+   */
+  readonly voiceInvite?: string;
 }
+
 
 /**
  * Why a room refused a hello. Settled by #779, where the room that sends them
