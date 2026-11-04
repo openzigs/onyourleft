@@ -655,9 +655,9 @@ five kinds with one rule each — every one but the tertiary FILLED since #992:
 
 | Kind | Use | Drawn as |
 |---|---|---|
-| **Primary** | The one action a view exists for. **At most one per view** | `Button` (default) or `a.oyl-button` — filled with the accent |
-| **Secondary** | Every other action | `variant="secondary"` — TONAL: `surfaceOverlay`, no outline (an outline until #992) |
-| **Tertiary** | The lowest action beside a primary | `variant="tertiary"` — text: the accent underlined, no fill and no edge (#992) |
+| **Primary** | The one action a view exists for. **At most one per view** | `Button` (default) or `a.oyl-button` — filled with `accent`, its 2 px edge in `accentText` (#2118) |
+| **Secondary** | Every other action | `variant="secondary"` — TONAL: `surfaceOverlay`, an `accentText` label, no outline (an outline until #992) |
+| **Tertiary** | The lowest action beside a primary | `variant="tertiary"` — text: `accentText` underlined, no fill and no edge (#992) |
 | **Danger** | The destructive answer to a confirmation, **only inside a modal dialog** ([#1002](https://github.com/openzigs/onyourleft/issues/1002)) | `variant="danger"` — a `dangerSurface` fill with a `dangerAction` edge and label, LIGHTER than the filled safe answer beside it, which takes focus; a dashed edge under forced colours. Not counted as a primary |
 | **Toggle** | Changes how something is shown or heard, not what happens | A single on/off: `variant="toggle"`, which **requires** `pressed` and renders `aria-pressed` (a toggle without it does not compile). An exclusive choice of two or three: native radios in a `fieldset.oyl-segmented`. Four or more: a native `<select>` |
 

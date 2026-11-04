@@ -818,7 +818,7 @@ function RouteCards(props: {
               */}
               {chosen ? (
                 <span
-                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent"
+                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent-text"
                   aria-hidden="true"
                 >
                   <Check focusable="false" />
