@@ -21,10 +21,8 @@ import type { OpenBikeControlEvent } from '@onyourleft/sensors/protocol';
 export interface ControllerPort {
   /**
    * Each notification's events, in order, while a controller is paired.
-   *
-   * @unwired #1827 maps these events to Delivery's lane and throw intents.
-   * Until it lands, `views/DevicesView.controller.test.tsx` and
-   * `ride/steering-controller.test.ts` are its readers.
+   * `hud/ControllerIntents.tsx` maps them to a Delivery round's intents
+   * (#1827, `controller-input.ts`).
    */
   onControllerEvents(listener: (events: readonly OpenBikeControlEvent[]) => void): () => void;
 }
