@@ -22,6 +22,7 @@ import {
   kilograms,
   metres,
   metresPerSecond,
+  percent,
   resistanceLevel,
   revolutionsPerMinute,
   seconds,
@@ -117,6 +118,31 @@ describe('resistance level, which is unitless and non-negative', () => {
 
   it('rejects NaN', () => {
     expect(() => resistanceLevel(Number.NaN)).toThrow(UnitError);
+  });
+});
+
+describe('percent, a whole share of a full scale (#2046)', () => {
+  it('accepts both ends of the scale and a level between', () => {
+    expect(percent(0)).toBe(0);
+    expect(percent(37)).toBe(37);
+    expect(percent(100)).toBe(100);
+  });
+
+  it('rejects 101, because nothing is more than full', () => {
+    expect(() => percent(101)).toThrow(UnitError);
+    expect(() => percent(101)).toThrow('percentage must be between 0 and 100, received 101');
+  });
+
+  it('rejects a negative share', () => {
+    expect(() => percent(-1)).toThrow('percentage must be between 0 and 100, received -1');
+  });
+
+  it('rejects a fraction, which means the caller already scaled the value', () => {
+    expect(() => percent(37.5)).toThrow('percentage must be a whole number, received 37.5');
+  });
+
+  it('rejects NaN', () => {
+    expect(() => percent(Number.NaN)).toThrow(UnitError);
   });
 });
 

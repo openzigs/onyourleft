@@ -47,7 +47,7 @@ export function zoneLabel(basis: ZoneBasis, index: number): string {
  * The zones a drawing paints, each by its number and name beside its colour —
  * #2039, ADR 0063 D-4. A zone colour is never the only signal (WCAG 2.2 SC
  * 1.4.1): whatever paints one renders this beside it, and
- * `a11y/zones.a11y.test.ts` fails any component that reads a zone colour and
+ * `a11y/zones.a11y.test.tsx` fails any component that reads a zone colour and
  * does not.
  *
  * `zones` are the 0-based zones the drawing actually paints, so the key names

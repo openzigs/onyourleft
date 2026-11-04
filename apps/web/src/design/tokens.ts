@@ -57,6 +57,8 @@
  * size edited off the ladder goes red.
  */
 
+import { HEART_RATE_ZONE_NAMES } from '@onyourleft/domain';
+
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT } from './contrast';
 
 /**
@@ -242,7 +244,7 @@ export const COLOUR_TOKENS = {
    *
    * ⚠️ **A zone is never told by its colour alone** (SC 1.4.1): wherever one
    * is painted, `design/ZoneKey.tsx` writes its number and name beside it,
-   * and `a11y/zones.a11y.test.ts` fails a component that reads
+   * and `a11y/zones.a11y.test.tsx` fails a component that reads
    * {@link BAND_TOKENS} without rendering that key. What the colours DO owe
    * is SC 1.4.11's 3:1 against the well they are drawn on (`surface`), the
    * pair each declares in {@link CONTRAST_REQUIREMENTS}.
@@ -251,7 +253,7 @@ export const COLOUR_TOKENS = {
    * in this hue order a monotone ramp turns the dark yellow brown or the light
    * purple pink. Neighbours are held apart by lightness instead, at 1.20:1
    * under normal vision and under simulated deuteranopia, protanopia and
-   * tritanopia (`a11y/zones.a11y.test.ts`). In light, zone 4's "yellow" is a
+   * tritanopia (`a11y/zones.a11y.test.tsx`). In light, zone 4's "yellow" is a
    * dark ochre so that it reaches 3:1 on a light surface; it is labelled
    * "4 Threshold" wherever it is drawn.
    */
@@ -1009,7 +1011,7 @@ const ILLUSTRATION_FOCUS_MEASURED: Readonly<
  * The workout block chart's intensity bands (#1043), easiest first — one per
  * power zone, in `@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`' order.
  * `workouts/BlockChart.tsx` paints band `n` with the `n`th of these, and
- * `a11y/zones.a11y.test.ts` holds neighbours apart under simulated
+ * `a11y/zones.a11y.test.tsx` holds neighbours apart under simulated
  * colour-vision deficiency (ADR 0063 D-4).
  */
 export const BAND_TOKENS = [
@@ -1034,7 +1036,10 @@ export type BandToken = (typeof BAND_TOKENS)[number];
  * ⚠️ Nothing paints a heart-rate zone in colour yet; the first screen that
  * does reads this rather than choosing again.
  */
-export const HEART_RATE_BAND_TOKENS = BAND_TOKENS.slice(0, 5) as readonly BandToken[];
+export const HEART_RATE_BAND_TOKENS: readonly BandToken[] = BAND_TOKENS.slice(
+  0,
+  HEART_RATE_ZONE_NAMES.length,
+);
 
 /**
  * What each band measures against the chart's well, `surface`, per palette —

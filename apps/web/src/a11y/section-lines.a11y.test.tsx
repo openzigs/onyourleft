@@ -70,6 +70,8 @@ const READINGS: Record<string, string> = {
     'the rider’s own streak, read back from their rides, and how many of their older rides are still to be looked at — their data and this device’s state, not an explanation of a control (#947)',
   'route-builder Distance, climbing and surface':
     'the route being drawn, read back: its distance, its surfaces and its profile, each a reading of the draft',
+  'route-builder A short loop for a lap race':
+    'the route being drawn, read back against the chosen target (#2102): whether it is a loop yet and its length, each a reading of the draft',
 };
 
 let mounted: Mounted | undefined;

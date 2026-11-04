@@ -49,7 +49,12 @@ import {
   type Watts,
 } from '@onyourleft/domain';
 
-import { deviceId, type DeviceId, type MeasurementFor } from '../../src/index';
+import {
+  deviceId,
+  type DeviceId,
+  type MeasurementFor,
+  type SensorTransport,
+} from '../../src/index';
 import {
   createSimulator,
   ftmsTrainer,
@@ -561,6 +566,12 @@ export interface SimulatedControllerBench {
   readonly deviceId: DeviceId;
   readonly controller: SimulatedController;
   readonly gatt: SimulatedControllerGatt;
+  /**
+   * The simulator's own transport, for the other devices on it (#1826): a
+   * trainer and a strap connected beside the controller share its connection
+   * budget, as they share one radio.
+   */
+  readonly transport: SensorTransport;
 }
 
 export interface SimulatedControllerOptions {
@@ -657,7 +668,7 @@ export function openSimulatedController(
     writes: () => [...written],
   };
 
-  return { bench, deviceId: id, controller, gatt };
+  return { bench, deviceId: id, controller, gatt, transport };
 }
 
 /** The #43 shape, kept so its own tests read as they did. */
