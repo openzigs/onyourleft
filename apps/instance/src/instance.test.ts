@@ -56,6 +56,7 @@ import { PHASE_ONE_SEALED_ROUTES, SEALED_FAMILIES } from './sealed/phase-one.ts'
 import { sealedAt } from './sealed/sealed-testing.ts';
 import { openDatabase } from './store/node-sqlite.ts';
 import { corpusFile, uploadBody } from './sync/sync-testing.ts';
+import { fakeDiscord, TEST_BOT_TOKEN, TEST_GUILD_ID } from './voice/discord-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -95,12 +96,14 @@ async function start(
     resolve?: Resolver;
     timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
     hosted?: Pick<InstanceOptions, 'hostedFetch'>;
+    voice?: Pick<InstanceOptions, 'discordFetch'>;
   } = {},
 ) {
   const lines: string[] = [];
   running = await startInstance({
     ...extra.timing,
     ...extra.hosted,
+    ...extra.voice,
     config: testConfig({ bodyLimitBytes: 16_384, registration: 'open', ...extra.config }),
     ...(extra.resolve === undefined ? {} : { resolve: extra.resolve }),
     server: serverConfig(databasePath, overrides),
@@ -1827,4 +1830,46 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       expect(testRequests).toStrictEqual([]);
     },
   );
+});
+
+describe('voice on Discord, as the running instance starts it (#874)', () => {
+  it('is off — no voice at all, no request, no line — unless the operator configured a bot', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(path, {}, { voice: { discordFetch: discord.fetch } });
+    await instance.opened;
+    await instance.voiceReady;
+    expect(instance.voice()).toBeUndefined();
+    expect(discord.requests).toEqual([]);
+    expect(lines.some((line) => line.includes('"voice'))).toBe(false);
+  });
+
+  it('configured: asks Discord about the server, says voice is on, sweeps what an earlier run left — and never logs the token', async () => {
+    const discord = fakeDiscord();
+    const leftover = discord.addChannel({ name: 'oyl-ride-0123456789ab', type: 2 });
+    const general = discord.addChannel({ name: 'General', type: 2 });
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(
+      path,
+      { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } },
+      { voice: { discordFetch: discord.fetch } },
+    );
+    await instance.opened;
+    await instance.voiceReady;
+    expect(discord.channels.has(leftover.id)).toBe(false);
+    expect(discord.channels.has(general.id)).toBe(true);
+    const said = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(said).toContainEqual({ event: 'voice', state: 'on' });
+    expect(said).toContainEqual({ event: 'voice-swept', deleted: 1 });
+    // Its token went to Discord, in the header, and nowhere else.
+    expect(discord.requests[0]?.headers.authorization).toBe(`Bot ${TEST_BOT_TOKEN}`);
+    expect(discord.requests[0]?.headers['user-agent']).toContain('9.8.7');
+    for (const line of lines) expect(line).not.toContain(TEST_BOT_TOKEN);
+    // And a room asked for voice is given a link that opens a channel Discord holds.
+    const link = await instance.voice()?.inviteFor('a1b2c3d4e5f60718293a4b5c6d7e8f90', 4);
+    expect(link).toMatch(/^https:\/\/discord\.gg\//);
+    expect(discord.ourChannels()).toHaveLength(1);
+  });
 });
