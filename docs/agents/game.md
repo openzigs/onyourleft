@@ -1330,7 +1330,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         end away from the front door, stepped onto the
                         footprint, 12 triangles
                         in `wall` and `roof`, left off before holes over a
-                        cap (`STEEPLE`, `-steeples`, `town=typed`);
+                        cap (`STEEPLE`, `-steeples`, `town=typed`); since
+                        #2100 24 (12 far) with a belfry's band 0.8 m deep
+                        painted in `trim`, 6 m over the roof, the spire
+                        shaded as a 60° slope and the church roofed in
+                        `slate`;
                         since #2023 an untagged footprint inferred a shed
                         (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
                         rectangularity ≥ 0.9, a house-sized footprint within
