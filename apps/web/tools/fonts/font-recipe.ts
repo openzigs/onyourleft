@@ -76,7 +76,7 @@ export const LICENCE_BODY_STARTS =
 
 /** One weight: the committed upstream file and the WOFF2 made from it. */
 export interface FontWeight {
-  readonly weight: 700 | 800;
+  readonly weight: 600 | 700 | 800;
   /** The upstream file name, committed under `tools/fonts/barlow/`. */
   readonly member: string;
   readonly memberSha256: string;
@@ -85,11 +85,20 @@ export interface FontWeight {
 }
 
 /**
- * The two weights, and why two (ADR 0043 D-6): 800 is the display step
- * (`theme.css` §`.oyl-display`), and 700 is the big numerals Phase 1's type
- * scale asks for (#992). Each costs about 13.6 KB; a third is a line here.
+ * The three weights (ADR 0043 D-6, extended by ADR 0063 D-5): 800 is the
+ * display step (`theme.css` §`.oyl-display`), 700 is the big numerals
+ * Phase 1's type scale asks for (#992), and 600 (#2040) is the third heading
+ * and the labels of the Hi-Vis type scale, so that labels and numerals share
+ * the face. Each costs about 13 to 14 KB, and a browser downloads a weight
+ * only when a rule asks for it.
  */
 export const FONT_WEIGHTS: readonly FontWeight[] = [
+  {
+    weight: 600,
+    member: 'Barlow-SemiBold.ttf',
+    memberSha256: '86577cb32f8abe3673db53ca0f4221e6856751a4f6730c867e00f720f8bb1fc5',
+    output: 'barlow-latin-600.woff2',
+  },
   {
     weight: 700,
     member: 'Barlow-Bold.ttf',

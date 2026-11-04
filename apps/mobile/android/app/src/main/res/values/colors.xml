@@ -13,7 +13,7 @@
   theme-selection.ts DEFAULT_THEME_CHOICE comes to.
 -->
 <resources>
-    <color name="oyl_canvas">#121816</color>
+    <color name="oyl_canvas">#101215</color>
     <!--
       The launch window's canvas: the canvas itself rather than Capacitor's
       splash picture, which is white (#999). Since #2127 it is the first layer

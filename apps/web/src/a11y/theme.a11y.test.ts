@@ -64,9 +64,9 @@ const LIGHT_BLOCK = ':root';
 /** The dark palette's block (#672). */
 const DARK_BLOCK = ":root[data-theme='dark']";
 /**
- * The ride HUD's rule, which restates the LIGHT value of every page colour
- * token so nothing inside the HUD follows the page's palette (#672, #744's
- * review).
+ * The ride HUD's rule, which restates the DARK value of every page colour
+ * token so nothing inside the HUD follows the page's palette — #2042, ADR 0063
+ * D-2. It restated the LIGHT values from #672 (#744's review) until then.
  */
 const HUD_BLOCK = '.oyl-hud';
 
@@ -126,24 +126,21 @@ describe('theme.css and tokens.ts cannot drift', () => {
     ]).toEqual([]);
   });
 
-  it('pins the HUD to the light palette: every page colour token, at its light value (#672)', () => {
-    // The owner's ruling: the in-ride HUD is left alone. Its panels paint with
-    // the HUD's own tokens, but the mute toggle, the volume, the side camera's
-    // Stop and a notice's status tones paint with PAGE tokens — so this rule
-    // restates every one of them, and nothing else. A token missing here
-    // follows the page inside the HUD; a HUD token here is a second value for
-    // a theme-independent one; a value that is not the light one is a colour
-    // no contrast pair measured.
+  it('pins the HUD to the dark palette: every page colour token, at its dark value (#2042)', () => {
+    // ADR 0063 D-2, the owner's ruling of 2026-11-03: ride and HUD screens are
+    // dark, whatever the page. Its panels paint with the HUD's own tokens, but
+    // the mute toggle, the volume, the side camera's Stop and a notice's
+    // status tones paint with PAGE tokens — so this rule restates every one of
+    // them, and nothing else. A token missing here follows a light page inside
+    // the HUD; a HUD token here is a second value for a theme-independent one;
+    // a value that is not the dark one is a colour no contrast pair measured.
     const declared = declarationsWithPrefix('color', blockOf(HUD_BLOCK));
-    const expected = Object.fromEntries(
-      Object.keys(DARK_COLOUR_TOKENS)
-        .sort()
-        .map((token) => [token, COLOUR_TOKENS[token as keyof typeof DARK_COLOUR_TOKENS]]),
+    expect(Object.fromEntries([...declared].sort())).toEqual(
+      Object.fromEntries(Object.entries(DARK_COLOUR_TOKENS).sort()),
     );
-    expect(Object.fromEntries([...declared].sort())).toEqual(expected);
     // And what the platform draws itself inside it — a range's track, a check
-    // mark — is the light platform's.
-    expect(blockOf(HUD_BLOCK)).toMatch(/\n\s*color-scheme: light;/);
+    // mark — is the dark platform's.
+    expect(blockOf(HUD_BLOCK)).toMatch(/\n\s*color-scheme: dark;/);
   });
 
   it('tells the platform which palette each block is (#672)', () => {
@@ -956,5 +953,105 @@ describe('a kept-visible sentence stays in the reading measure on a sections rou
     expect(rule?.[1]).toContain('p');
     expect(rule?.[1]).toContain('[data-oyl-kept-visible]');
     expect(rule?.[2]).toContain('max-width: var(--oyl-measure)');
+  });
+});
+
+/**
+ * #2118, ADR 0063 D-1: the accent is two tokens. `accent` is a FILL and
+ * `accentText` is text and thin lines, and each owes only its own pairs —
+ * which is what lets the light fill be brighter than the light label. A rule
+ * that paints a label with `accent`, or fills a shape with `accentText`, draws
+ * a pair `tokens.ts` §CONTRAST_REQUIREMENTS never declared for it, and in dark,
+ * where the two hold one value, nothing else would notice.
+ */
+describe('#2118 — a fill reads `accent`, and text and lines read `accentText`', () => {
+  /** The properties that paint an area rather than a glyph or a line. */
+  const FILL_PROPERTIES = new Set(['background', 'background-color', 'fill', 'accent-color']);
+
+  /**
+   * A thin line drawn as a fill, so it reads `accentText` through a fill
+   * property: the target band's 3 s power, a 4 px wide bar (`theme.css`
+   * §`.oyl-target-band__power`).
+   */
+  const LINES_DRAWN_AS_FILLS = new Set(['.oyl-target-band__power']);
+
+  const FILL_TOKEN = /var\(\s*--oyl-color-accent\s*\)/;
+  const TEXT_TOKEN = /var\(\s*--oyl-color-accent-text\s*\)/;
+
+  /** Every declaration that reads either token, with its rule's selector. */
+  function accentReads(css: string): { selector: string; property: string; token: string }[] {
+    const reads: { selector: string; property: string; token: string }[] = [];
+    const bare = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, selector = '', body = ''] of bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const declaration of body.split(';')) {
+        const colon = declaration.indexOf(':');
+        if (colon < 0) continue;
+        const property = declaration.slice(0, colon).trim();
+        const value = declaration.slice(colon + 1);
+        if (property.startsWith('--')) continue;
+        for (const [token, pattern] of [
+          ['accent', FILL_TOKEN],
+          ['accentText', TEXT_TOKEN],
+        ] as const) {
+          if (pattern.test(value)) reads.push({ selector: selector.trim(), property, token });
+        }
+      }
+    }
+    return reads;
+  }
+
+  /** A sentence for each read on the wrong token. Empty is a pass. */
+  function misreads(css: string): string[] {
+    return accentReads(css)
+      .filter(({ selector, property, token }) =>
+        token === 'accent'
+          ? !FILL_PROPERTIES.has(property)
+          : FILL_PROPERTIES.has(property) && !LINES_DRAWN_AS_FILLS.has(selector),
+      )
+      .map(
+        ({ selector, property, token }) =>
+          `${selector} { ${property} } reads ${token}: ` +
+          (token === 'accent'
+            ? 'text and lines are `accentText`'
+            : 'a fill is `accent`, unless it is a line listed in LINES_DRAWN_AS_FILLS'),
+      );
+  }
+
+  it('holds every rule in theme.css to its token, and reads both', () => {
+    expect(misreads(themeCss)).toEqual([]);
+    const reads = accentReads(themeCss);
+    // Not vacuous: the primary's fill and the secondary's label are both read.
+    expect(reads).toContainEqual({
+      selector: '.oyl-button',
+      property: 'background',
+      token: 'accent',
+    });
+    expect(reads).toContainEqual({
+      selector: '.oyl-button--secondary',
+      property: 'color',
+      token: 'accentText',
+    });
+  });
+
+  it('holds every utility the product ships to its token', async () => {
+    const { css } = await shippedUtilities();
+    expect(misreads(css)).toEqual([]);
+    expect(accentReads(css).map((read) => read.token)).toContain('accentText');
+  });
+
+  it('finds a label on the fill and a fill in the text token — the check can fail', () => {
+    expect(
+      misreads(
+        '\n.a {\n  color: var(--oyl-color-accent);\n}\n.b {\n  background: var(--oyl-color-accent-text);\n}\n' +
+          '@media (min-width: 1px) {\n  .c {\n    border: 2px solid var(--oyl-color-accent);\n  }\n}\n',
+      ),
+    ).toHaveLength(3);
+    expect(
+      misreads(
+        '\n.a {\n  background: var(--oyl-color-accent);\n  color: var(--oyl-color-accent-ink);\n}\n' +
+          '.b {\n  border-color: var(--oyl-color-accent-text);\n  color: var(--oyl-color-accent-hover);\n}\n' +
+          '.oyl-target-band__power {\n  background-color: var(--oyl-color-accent-text);\n}\n',
+      ),
+    ).toEqual([]);
   });
 });

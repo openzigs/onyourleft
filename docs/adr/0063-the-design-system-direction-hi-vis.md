@@ -288,3 +288,31 @@ A visual pull request in the redesign epics:
   recorded here. The remedy is a dated amendment to the value, never a lowered minimum.
 - The owner's tablet measuring well off 0.1700 mm per CSS px: D-5's 27.4 px floor scales with it.
 - An accent that turns out to be another product's identity colour: D-9 then fails and D-1 changes.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-04** — D-1's light `accent` is **`#3e6100`**, not `#405e00`, on the owner's ruling of
+  2026-11-04 on [#2125](https://github.com/openzigs/onyourleft/pull/2125#issuecomment-6628092171)
+  (*"Approve, fix the 3 items"*; item 1: brighten the light-theme olive a little, within the contrast
+  rules). The tightest accent pair, `accent` on `surfaceOverlay`, moves from 4.68 to 4.52 against its
+  4.5, and every other light `accent` pair keeps its minimum; `contrast.a11y.test.ts` records each.
+  The fill/text split D-1 names is not made yet, so the one `accent` token is both a primary
+  button's fill and accent text, and both move. Every other value in D-1's table is unchanged.
+- **2026-11-04** — D-1's split is made (#2118), on the owner's ruling of 2026-11-04 on
+  [#2118](https://github.com/openzigs/onyourleft/issues/2118#issuecomment-6629308912) (*"Split it,
+  brighter buttons"*), which supersedes D-1's "the split moves no pixel" for light. `accent` is the
+  FILL (a primary button, the navigation's active pill, the current sub-page, a checked box's
+  `accent-color`) and a new `accentText` is text and thin lines (every accent label, a toggle's or a
+  segment's edge, a chosen item's ring, a chart's accent line, and a primary button's 2 px edge).
+  Light: `accent` **`#517d00`**, a brighter lime-olive at the old olive's hue, and `accentText`
+  **`#3e6100`**, the value the amendment above recorded for `accent`. Dark: both **`#aff13c`**, so no
+  dark pixel moves. The fill now owes only a fill's pairs: `accentInk` on it 4.9 (min 4.5), the pill
+  on `surfaceOverlay` 3.08 (min 3), a checked box on the page 4.9 and a segment's radio on `selected`
+  3.94 (min 3). Every text and line pair moved to `accentText` at the margins it had, the tightest
+  still `accentText` on `surfaceOverlay` at 4.52. A primary's edge is `accentText` so that a primary
+  standing on the near hill keeps its 3:1 edge (3.16); the brighter fill there is 2.15. The light
+  `theme_color` follows `accent`, the fill. `contrast.a11y.test.ts` records each pair.

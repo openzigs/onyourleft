@@ -175,6 +175,7 @@
       "version": "1.408",
       "licence": "OFL-1.1",
       "files": [
+        "apps/web/src/design/fonts/barlow-latin-600.woff2",
         "apps/web/src/design/fonts/barlow-latin-700.woff2",
         "apps/web/src/design/fonts/barlow-latin-800.woff2"
       ],

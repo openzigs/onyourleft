@@ -251,7 +251,7 @@ describe('on one radio with a trainer and a strap', () => {
     expect(controller.appInformation()).toEqual({
       appId: 'onyourleft',
       appVersion: '',
-      buttons: [0x18, 0x19, 0x1b],
+      buttons: [0x18, 0x19, 0x1b, 0x50, 0x51],
     });
   });
 
