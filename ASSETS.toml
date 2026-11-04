@@ -2061,6 +2061,13 @@ tool = "Node.js 24 (.nvmrc), then KTX-Software v4.4.2"
 # ---------------------------------------------------------------------------
 
 [[asset]]
+path = "apps/web/tools/fonts/barlow/Barlow-SemiBold.ttf"
+source = "Barlow 1.408, Barlow-SemiBold.ttf from google/fonts at commit 9710da1eacb3be272583c3224dcb70f9da6eadbb (ofl/barlow); upstream bytes, unmodified — https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-SemiBold.ttf"
+licence = "OFL-1.1"
+read = "2026-11-03"
+sha256 = "86577cb32f8abe3673db53ca0f4221e6856751a4f6730c867e00f720f8bb1fc5"
+
+[[asset]]
 path = "apps/web/tools/fonts/barlow/Barlow-Bold.ttf"
 source = "Barlow 1.408, Barlow-Bold.ttf from google/fonts at commit 9710da1eacb3be272583c3224dcb70f9da6eadbb (ofl/barlow); upstream bytes, unmodified — https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-Bold.ttf"
 licence = "OFL-1.1"
@@ -2073,6 +2080,20 @@ source = "Barlow 1.408, Barlow-ExtraBold.ttf from google/fonts at commit 9710da1
 licence = "OFL-1.1"
 read = "2026-10-02"
 sha256 = "5234d91030e1bb89525cbaccc4386892c3fe005a0582c705264ce3572d96a1a1"
+
+[[asset]]
+path = "apps/web/src/design/fonts/barlow-latin-600.woff2"
+source = "Barlow 1.408 SemiBold, subset to the Latin range and written as WOFF2 by this repository's subsetting step (#991, #2040) from apps/web/tools/fonts/barlow/Barlow-SemiBold.ttf"
+licence = "OFL-1.1"
+read = "2026-11-03"
+sha256 = "5171e8d1d81f0da001ab5818ba1f32e86285a00ecacbc7a646e020bb698a897b"
+creator = "Jeremy Tribby and the Barlow Project Authors (Barlow 1.408, Copyright 2017 The Barlow Project Authors)"
+url = "https://github.com/jpt/barlow"
+modified = "subset to the Latin range the interface uses, its hinting removed, and written as WOFF2 by fontTools; the outlines, the metrics, the family name and the copyright and licence records are unchanged"
+input = "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-SemiBold.ttf"
+inputsha256 = "86577cb32f8abe3673db53ca0f4221e6856751a4f6730c867e00f720f8bb1fc5"
+script = "apps/web/tools/fonts/subset-fonts.ts"
+tool = "fontTools 4.66.1 with Brotli 1.2.0"
 
 [[asset]]
 path = "apps/web/src/design/fonts/barlow-latin-700.woff2"
