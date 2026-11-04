@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!--
-  The app window's background on Android 12 and later (#2127). AppCompat
-  takes it from the launch theme in super.onCreate, before BridgeActivity
-  switches theme, so this, not AppTheme.NoActionBar's, is the window behind
-  the WebView. It is the canvas, per palette, with the launcher icon where
-  the system splash draws an adaptive icon on a different-coloured
-  background (160 dp visible), so a frame of the bare window is the splash
-  and never Theme.DeviceDefault's near-black or white.
+  The app window's first background on Android 12 and later (#2127).
+  AppCompat takes it from the launch theme in super.onCreate, before
+  BridgeActivity switches theme, so a frame of the bare window before
+  MainActivity resets it to the canvas is the splash, and never
+  Theme.DeviceDefault's near-black or white. It is the canvas, per palette,
+  with the launcher icon where the system splash draws an adaptive icon on
+  a different-coloured background (160 dp visible).
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@drawable/oyl_launch_background" />

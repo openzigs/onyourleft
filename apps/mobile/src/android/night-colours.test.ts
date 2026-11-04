@@ -100,6 +100,22 @@ describe('the shell before the page paints is the page’s canvas — #672', () 
     );
   });
 
+  it('resets the window behind the WebView to it after super.onCreate, on every path (#2127)', () => {
+    // AppCompat takes the window's background from the launch theme in super.onCreate, and that
+    // is the canvas with the logo; without the reset the logo is behind the page all session and
+    // shows wherever the WebView does not cover, as on Capacitor's no_webview screen.
+    const activity = read('java/dev/openzigs/onyourleft/MainActivity.java');
+    const created = activity.indexOf('super.onCreate(savedInstanceState);');
+    const reset = activity.indexOf(
+      'getWindow().setBackgroundDrawableResource(R.color.oyl_canvas);',
+    );
+    const guarded = activity.indexOf('if (bridge != null && bridge.getWebView() != null) {');
+    expect(created).toBeGreaterThan(0);
+    expect(reset).toBeGreaterThan(created);
+    // Before the bridge guard, so the no_webview path, which has no bridge, gets it too.
+    expect(guarded).toBeGreaterThan(reset);
+  });
+
   it('paints the WebView’s own background with it, after the bridge exists', () => {
     const activity = read('java/dev/openzigs/onyourleft/MainActivity.java');
     const created = activity.indexOf('super.onCreate(savedInstanceState);');

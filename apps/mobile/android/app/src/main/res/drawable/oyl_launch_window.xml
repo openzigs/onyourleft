@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!--
-  The launch window below Android 12 (#2127): the canvas, per palette, with
-  the launcher icon at the size the compat splash library draws it (192 dp
-  visible), so the hand-over to its splash view does not jump. It is also
-  the app window's background, which AppCompat takes from the launch theme.
+  The launch window below Android 12 (#2127), and so the splash itself there:
+  the system's preview window, which the splash plugin holds until the page
+  has painted. With launchFadeOutDuration 0 the plugin registers no exit
+  listener, so core-splashscreen never builds a splash view of its own to
+  hand over to. The canvas, per palette, with the launcher icon at 192 dp,
+  the size the compat library would draw it. AppCompat also takes it as the
+  app window's background in super.onCreate, until MainActivity resets that
+  to the canvas.
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@drawable/oyl_launch_background" />

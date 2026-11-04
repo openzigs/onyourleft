@@ -14,24 +14,19 @@
       Since #672 the window behind the WebView is the page's canvas, per palette
       (colors.xml and values-night/colors.xml), not AppCompat's own background.
       ⚠️ #2127: AppCompat sets the window's background in super.onCreate, from
-      the launch theme, before BridgeActivity switches to this one, so the
-      launch theme's android:windowBackground is the one a rider sees. This
-      one applies only to a window this theme creates.
+      the launch theme, before BridgeActivity switches to this one, so this
+      item applies only to a window this theme creates. MainActivity resets
+      the window's background to the canvas after super.onCreate, so the
+      launch theme's logo is not behind the WebView for the whole session.
+      No splash item belongs here: below Android 12 the compat library builds
+      its own splash view only for an exit listener, which the plugin skips
+      at launchFadeOutDuration 0, so the launch window is the splash there.
     -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
         <item name="android:windowBackground">@color/oyl_canvas</item>
-        <!--
-          #2127: read only below Android 12. The splash plugin installs the
-          splash from its load(), after BridgeActivity has switched to this
-          theme, and the compat library reads the splash's colour and logo
-          from the theme it finds then. Android 12 and later read them from
-          the launch theme below, through the manifest.
-        -->
-        <item name="windowSplashScreenBackground">@color/oyl_canvas</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/oyl_splash_icon_compat</item>
     </style>
 
     <!--
@@ -48,11 +43,14 @@
       - windowSplashScreenBehavior icon_preferred (API 33+) asks for the icon
         where Android would otherwise choose a plain-colour splash.
       - android:windowBackground, not android:background (a view attribute,
-        which painted no window): AppCompat paints the app's window from this
-        theme in super.onCreate, before BridgeActivity switches theme, and
-        on API 31+ it was Theme.DeviceDefault.DayNight's, near-black in the
-        device's dark mode. drawable/ and drawable-v31/oyl_launch_window.xml
-        are the canvas with the logo where the splash draws it.
+        which painted no window). drawable/ and drawable-v31/oyl_launch_window.xml
+        are the canvas with the logo where the splash draws it. Below
+        Android 12 this IS the splash: the system's preview window, held by
+        the plugin until the page has painted. AppCompat also paints the
+        app's window from this theme in super.onCreate, before BridgeActivity
+        switches theme (on API 31+ it was Theme.DeviceDefault.DayNight's,
+        near-black in the device's dark mode), until MainActivity resets it
+        to the canvas.
     -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:windowBackground">@drawable/oyl_launch_window</item>

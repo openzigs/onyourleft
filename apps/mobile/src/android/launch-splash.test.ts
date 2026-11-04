@@ -144,10 +144,12 @@ describe('the installed plugin honours that configuration (#2050)', () => {
  *    `Theme.DeviceDefault.DayNight`'s, near-black in the device's dark mode.
  *    The `android:background` item that was meant to paint it paints views,
  *    not windows.
- * 4. **Below API 31 the compat splash read the wrong theme.** The plugin
- *    installs the splash from `load()`, after BridgeActivity's `setTheme`, so
- *    the compat library reads its colour and logo from `AppTheme.NoActionBar`,
- *    which had neither.
+ * 4. **Below API 31 the launch window is the splash.** The plugin takes
+ *    core-splashscreen's path on every API level, and below 31 that library
+ *    builds a splash view of its own only for an exit listener, which 1
+ *    removes. So the rider sees the system's preview window, the launch
+ *    theme's `android:windowBackground`, held until the page has painted,
+ *    and no theme carries splash items that nothing would draw.
  *
  * ⚠️ CI builds no Android: this proves what ships, not what the tablet
  * draws. The premises in 1, 2 and 4 that live in installed code are read
@@ -219,20 +221,21 @@ describe('every launch shows the branded splash, cold or warm (#2127)', () => {
     expect(switched).toBeGreaterThan(created);
   });
 
-  it('gives the compat splash (API 24 to 30) its colour and logo in the theme it reads them from', () => {
-    expect(app?.get('windowSplashScreenBackground')).toBe('@color/oyl_canvas');
-    // The launcher icon, inset to the circle the compat library masks it to.
-    expect(app?.get('windowSplashScreenAnimatedIcon')).toBe('@drawable/oyl_splash_icon_compat');
-    expect(withoutComments(read(join(RES, 'drawable/oyl_splash_icon_compat.xml')))).toMatch(
-      /<inset[^>]*android:drawable="@mipmap\/ic_launcher"[^>]*android:inset="48dp"/,
+  it('below API 31 shows the launch window as the splash, and styles no splash view that is never built', () => {
+    // The premise: 8.0.2 takes core-splashscreen's path on every API level, so
+    // with no exit listener (above) the compat library builds no splash view
+    // of its own, and what shows is the launch theme's window background.
+    const launched = methodBody(splash, 'public void showOnLaunch(');
+    expect(launched).toMatch(/try \{\s*showWithAndroid12API\(activity, settings\);/);
+    expect(launched.slice(0, launched.indexOf('showWithAndroid12API('))).not.toContain(
+      'Build.VERSION',
     );
-    // The premise: the splash is installed from the plugin's load(), which
-    // BridgeActivity reaches only after its own setTheme.
-    const switched = bridge.indexOf('setTheme(R.style.AppTheme_NoActionBar);');
-    const loaded = bridge.indexOf('this.load();');
-    expect(loaded).toBeGreaterThan(switched);
-    expect(read(join(PLUGIN_JAVA, 'SplashScreenPlugin.java'))).toMatch(
-      /public void load\(\) \{[\s\S]*?splashScreen\.showOnLaunch\(getActivity\(\)\)/,
-    );
+    expect(launch?.get('android:windowBackground')).toBe('@drawable/oyl_launch_window');
+    // So the app theme carries no compat splash items: they would style a view
+    // that a fade of 0 never builds.
+    expect(
+      [...(app?.keys() ?? [])].filter((name) => name.startsWith('windowSplashScreen')),
+    ).toEqual([]);
+    expect(existsSync(join(RES, 'drawable/oyl_splash_icon_compat.xml'))).toBe(false);
   });
 });
