@@ -2,8 +2,18 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { ITEM_KEYS, MESSAGE_FIELDS } from '@onyourleft/protocol';
+
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
-import { LOGGED_CLOSE_REASONS, logEvent, loggedMethod, logUnhandled, REDACTED } from './log.ts';
+import {
+  LOGGED_CLOSE_REASONS,
+  LOGGED_ITEM_EVENTS,
+  LOGGED_ITEM_KEYS,
+  logEvent,
+  loggedMethod,
+  logUnhandled,
+  REDACTED,
+} from './log.ts';
 import * as closeCodes from './room/close-codes.ts';
 
 let running: TestInstance | undefined;
@@ -151,6 +161,73 @@ describe('what the instance logs about a request (#767)', () => {
     for (const secret of [TOKEN, 'Ann Rider', LATITUDE, '51.50']) {
       expect(written).not.toContain(secret);
     }
+  });
+
+  it('keeps a room-item-event line’s room, rider number, event and item key, and nothing else — #1909', () => {
+    const lines: string[] = [];
+    const sink = (line: string): void => {
+      lines.push(line);
+    };
+    const room = 'f97eae750123456789abcdef01234567';
+    logEvent(sink, 'room-item-event', {
+      worker: 0,
+      room,
+      riderId: 3,
+      itemEvent: 'hit',
+      item: 'crosswind-gust',
+    });
+    // The same keys holding something else: an athlete id, a name, a place.
+    logEvent(sink, 'room-item-event', {
+      worker: 0,
+      room: 'athlete-7f3a',
+      riderId: Number(LATITUDE),
+      itemEvent: 'Ann Rider hit Bea',
+      item: 'banana',
+      // And what a careless caller might add: never kept.
+      athleteId: 'athlete-7f3a',
+      displayName: 'Ann Rider',
+      latitude: Number(LATITUDE),
+      raceOffset: 9.5,
+    });
+    // A rider number that is a whole number but not one a room seats.
+    logEvent(sink, 'room-item-event', { riderId: -1, itemEvent: 'use', item: 'tow' });
+    // And on any other event, those keys are not loggable.
+    logEvent(sink, 'room-report', { riderId: 3, itemEvent: 'hit', item: 'tow' });
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual<Record<string, unknown>[]>([
+      {
+        event: 'room-item-event',
+        worker: 0,
+        room,
+        riderId: 3,
+        itemEvent: 'hit',
+        item: 'crosswind-gust',
+      },
+      {
+        event: 'room-item-event',
+        worker: 0,
+        room: REDACTED,
+        riderId: REDACTED,
+        itemEvent: REDACTED,
+        item: REDACTED,
+        athleteId: REDACTED,
+        displayName: REDACTED,
+        latitude: REDACTED,
+        raceOffset: REDACTED,
+      },
+      { event: 'room-item-event', riderId: REDACTED, itemEvent: 'use', item: 'tow' },
+      { event: 'room-report', riderId: REDACTED, itemEvent: REDACTED, item: REDACTED },
+    ]);
+    const written = lines.join('');
+    for (const secret of ['athlete-7f3a', 'Ann Rider', LATITUDE, '51.50', 'banana']) {
+      expect(written).not.toContain(secret);
+    }
+  });
+
+  it('logs every item key and event the protocol has, and the log’s lists are the protocol’s — #1909', () => {
+    expect(LOGGED_ITEM_KEYS).toEqual(new Set(ITEM_KEYS));
+    expect(LOGGED_ITEM_EVENTS).toEqual(
+      new Set(MESSAGE_FIELDS.frame.itemEvents.shape.items.slots[1].shape.values),
+    );
   });
 
   it('keeps every fixed close reason a room closes with, and the log’s list is the rooms’ — #1402', () => {

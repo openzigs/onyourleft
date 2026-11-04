@@ -26,6 +26,11 @@
  * room's newest frame put them, so the spec can read both across an edge
  * restart (`room.browser.spec.ts` §"an edge drops every room socket").
  *
+ * Since #1911 it also races in a LAP RACE (`lap()`, `changeLane`, `useItem`,
+ * `start`): what the room's newest frame holds for this rider — lane, held
+ * item, offset — and the two inputs the game sends, through the same
+ * production room port.
+ *
  * ⚠️ **What it does not prove**: anything about the game's drawing (the game
  * gate's §"#783" is that), a phone's WebView, the screen going off, or a
  * Cloudflare Tunnel in the path — those are #733's.
@@ -59,6 +64,13 @@ export interface RoomSample {
   readonly others: readonly { readonly riderId: number; readonly distanceMetres: number }[];
 }
 
+/** This rider's lap-race slots in the room's newest frame (#1911); `undefined` before one. */
+export interface LapSample {
+  readonly lane: number;
+  readonly held: string;
+  readonly raceOffsetMetres: number;
+}
+
 /** What making or joining a room came to, as the spec reads it. */
 export type RoomOutcome =
   | { readonly kind: 'made'; readonly roomId: string; readonly code: string }
@@ -89,6 +101,14 @@ export interface RoomHarness {
   ride(watts: number): void;
   /** Where the connection is, and the other riders as this page would draw them now. */
   sample(): RoomSample;
+  /** #1911: this rider's lane, held item and offset in the room's newest frame. */
+  lap(): LapSample | undefined;
+  /** #1911: ask the room for a lane; the input's sequence, or `undefined` when nothing went. */
+  changeLane(lane: number): number | undefined;
+  /** #1911: ask the room to use the held item. */
+  useItem(): number | undefined;
+  /** Start the race of the room this page joined, as a seated rider (#785). */
+  start(): Promise<string>;
   leave(): void;
 }
 
@@ -100,6 +120,8 @@ declare global {
 
 let connection: RoomConnection | undefined;
 let entered: EnteredRoom | undefined;
+/** The room this page joined, for `start`. */
+let joinedRoomId: string | undefined;
 
 /**
  * This page's own saved route: three kilometres north-north-east, up and down
@@ -167,6 +189,7 @@ async function signIn(address: string, name: string): Promise<ConnectOutcome> {
 }
 
 function joinRoom(roomId: string, watts: number, fanOut: boolean): void {
+  joinedRoomId = roomId;
   connection = createRoomPort({
     ...sealing,
     storage: localStorage,
@@ -238,6 +261,24 @@ window.__oylRoom = {
         distanceMetres: rider.distanceMetres,
       })),
     };
+  },
+  lap: () => {
+    const race = connection?.lapRace();
+    const own = race?.newest?.riders.get(race.riderId);
+    return own === undefined
+      ? undefined
+      : { lane: own.lane, held: own.held, raceOffsetMetres: own.raceOffsetMetres };
+  },
+  changeLane: (lane) => connection?.changeLane(lane),
+  useItem: () => connection?.useItem(),
+  start: async () => {
+    if (joinedRoomId === undefined) throw new Error('this page joined no room');
+    const answer = await createRoomsPort({
+      ...sealing,
+      storage: localStorage,
+      zones: () => Promise.resolve([]),
+    }).start(joinedRoomId);
+    return answer.kind === 'refused' ? `refused: ${answer.reason}` : answer.kind;
   },
   leave: () => {
     connection?.leave();

@@ -16,7 +16,8 @@ import {
   OPEN_BIKE_CONTROL_SERVICE,
   type OpenBikeControlEvent,
 } from '../../protocol/src/open-bike-control';
-import { SensorError } from '../../src/errors';
+import { ForgetUnconfirmedError, SensorError } from '../../src/errors';
+import type { BluetoothPort } from './gatt';
 
 import { createOpenBikeControlClient, type ControllerConnection } from './open-bike-control-client';
 import {
@@ -62,13 +63,17 @@ const settle = async (): Promise<void> => {
   for (let turn = 0; turn < 200; turn += 1) await Promise.resolve();
 };
 
-function rig(spec: FakeDeviceSpec = controllerSpec()) {
+function rig(
+  spec: FakeDeviceSpec = controllerSpec(),
+  extra: { userActivation?: () => boolean } = {},
+) {
   const fake = createFakeBluetooth({ devices: [spec] });
   const clock = manualClock();
   const client = createOpenBikeControlClient({
     bluetooth: fake.bluetooth,
     buttons: BUTTONS,
     schedule: (callback) => clock.schedule(callback),
+    ...extra,
   });
   return { ...fake, clock, client, device: () => fake.bench.device(spec.id) };
 }
@@ -268,5 +273,169 @@ describe('forgetting', () => {
     await forgetting.forget();
     expect(device().connected).toBe(false);
     expect(device().forgets).toBe(1);
+  });
+});
+
+const domError = (name: string): Error => Object.assign(new Error(name), { name });
+
+describe('forgetting is bounded and honest', () => {
+  it('rejects with ForgetUnconfirmedError when the browser never answers, and still drops the link', async () => {
+    const parts = rig({ ...controllerSpec(), forgetNeverSettles: true });
+    const connection = await parts.client.requestAndConnect();
+    const outcome = connection.forget().catch((error: unknown) => error);
+    await settle();
+    parts.clock.fire();
+    const error = await outcome;
+    expect(error).toBeInstanceOf(ForgetUnconfirmedError);
+    expect(error).toMatchObject({ code: 'forget-timed-out', holding: 'permission' });
+    expect((error as ForgetUnconfirmedError).stillRunning).toBeInstanceOf(Promise);
+    expect(parts.device().connected).toBe(false);
+    expect(parts.clock.pending).toBe(0);
+  });
+
+  it('rejects with forget-refused when the browser refuses', async () => {
+    const parts = rig({ ...controllerSpec(), forgetRejects: true });
+    const connection = await parts.client.requestAndConnect();
+    await expect(connection.forget()).rejects.toMatchObject({ code: 'forget-refused' });
+    expect(parts.clock.pending).toBe(0);
+  });
+
+  it('resolves, having dropped the link, in a browser with no forget()', async () => {
+    const parts = rig({ ...controllerSpec(), withoutForget: true });
+    const connection = await parts.client.requestAndConnect();
+    await connection.forget();
+    expect(parts.device().connected).toBe(false);
+  });
+
+  it('still forgets when a disconnect listener throws', async () => {
+    const { connection, device } = await connected();
+    connection.onDisconnect(() => {
+      throw new Error('listener fault');
+    });
+    await connection.forget();
+    expect(device().forgets).toBe(1);
+  });
+});
+
+describe('a refused step is reported for what it was', () => {
+  const steps: ReadonlyArray<readonly [FakeGattOperation, string]> = [
+    ['connect', 'connect'],
+    ['startNotifications', 'subscribe'],
+    ['writeValueWithResponse', 'write'],
+  ];
+  for (const [operation, step] of steps) {
+    it(`calls a NetworkError in the ${step} step not-connected, with the cause kept`, async () => {
+      const { bench, client, device } = rig();
+      bench.hold(operation);
+      const outcome = client.requestAndConnect().catch((error: unknown) => error);
+      await settle();
+      const cause = domError('NetworkError');
+      bench.held.find((held) => held.operation === operation)?.fail(cause);
+      const error = await outcome;
+      expect(error).toMatchObject({ code: 'not-connected' });
+      expect((error as SensorError).message).toContain(`refused the ${step} step`);
+      expect((error as SensorError).cause).toBe(cause);
+      expect(device().connected).toBe(false);
+    });
+  }
+
+  it.each(['NotFoundError', 'SecurityError'])(
+    'calls a %s while discovering the service not a controller',
+    async (name) => {
+      const { bench, client } = rig();
+      bench.hold('getPrimaryService');
+      const outcome = client.requestAndConnect().catch((error: unknown) => error);
+      await settle();
+      bench.held.find((held) => held.operation === 'getPrimaryService')?.fail(domError(name));
+      expect(await outcome).toMatchObject({ code: 'capability-unsupported' });
+    },
+  );
+
+  it('calls a NetworkError while discovering not-connected', async () => {
+    const { bench, client } = rig();
+    bench.hold('getPrimaryService');
+    const outcome = client.requestAndConnect().catch((error: unknown) => error);
+    await settle();
+    bench.held
+      .find((held) => held.operation === 'getPrimaryService')
+      ?.fail(domError('NetworkError'));
+    expect(await outcome).toMatchObject({ code: 'not-connected' });
+  });
+
+  it('does not take a failed optional app-information lookup for an absent one', async () => {
+    const { bench, client, device } = rig();
+    bench.hold('getCharacteristic');
+    const outcome = client.requestAndConnect().catch((error: unknown) => error);
+    await settle();
+    const held = (): ReturnType<typeof bench.held.find> =>
+      bench.held.find((entry) => entry.subject === INFORMATION);
+    // Let the required button-state lookup through, then fail the optional one.
+    bench.held.find((entry) => entry.subject === STATE)?.settle();
+    await settle();
+    held()?.fail(domError('NetworkError'));
+    expect(await outcome).toMatchObject({ code: 'not-connected' });
+    expect(device().connected).toBe(false);
+  });
+
+  it('reports a device with no GATT server as not-connected', async () => {
+    const bluetooth = {
+      getAvailability: () => Promise.resolve(true),
+      requestDevice: () =>
+        Promise.resolve({ id: 'x', addEventListener() {}, removeEventListener() {} }),
+    } as unknown as BluetoothPort;
+    const client = createOpenBikeControlClient({ bluetooth, buttons: BUTTONS });
+    await expect(client.requestAndConnect()).rejects.toMatchObject({
+      code: 'not-connected',
+      message: expect.stringContaining('no GATT server') as string,
+    });
+  });
+});
+
+describe('the options and the platform', () => {
+  it('bounds each step by the timeout it is given', async () => {
+    const fake = createFakeBluetooth({ devices: [controllerSpec()] });
+    const afters: number[] = [];
+    const client = createOpenBikeControlClient({
+      bluetooth: fake.bluetooth,
+      buttons: BUTTONS,
+      timeout: 7 as never,
+      schedule: (_callback, after) => {
+        afters.push(after);
+        return () => undefined;
+      },
+    });
+    await client.requestAndConnect();
+    expect(afters.length).toBeGreaterThan(0);
+    expect(afters.every((after) => after === 7)).toBe(true);
+  });
+
+  it('asks for a user gesture before the chooser opens', async () => {
+    const { bench, client } = rig(controllerSpec(), { userActivation: () => false });
+    await expect(client.requestAndConnect()).rejects.toMatchObject({
+      code: 'user-gesture-required',
+    });
+    expect(bench.requests).toEqual([]);
+  });
+
+  it('survives a gatt.disconnect() that throws', async () => {
+    const { connection } = await (async () => {
+      const parts = rig({ ...controllerSpec(), disconnectThrows: true });
+      return { ...parts, connection: await parts.client.requestAndConnect() };
+    })();
+    expect(() => connection.disconnect()).not.toThrow();
+    expect(connection.connected).toBe(false);
+  });
+
+  it('keeps delivering to the next listener when one throws', async () => {
+    const { device, connection } = await connected();
+    const seen: number[] = [];
+    connection.onEvents(() => {
+      throw new Error('listener fault');
+    });
+    connection.onEvents((batch) => seen.push(batch.length));
+    expect(() =>
+      device().notify(SERVICE, STATE, Uint8Array.from([0x01, 0x19, 0x01])),
+    ).not.toThrow();
+    expect(seen).toEqual([1]);
   });
 });

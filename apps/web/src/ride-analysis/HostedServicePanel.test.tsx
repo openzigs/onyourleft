@@ -248,6 +248,27 @@ describe('agreeing', () => {
     );
   });
 
+  // #1935, the owner's ruling of 2026-11-03: removing the rider's key does not
+  // delete the masking list while the operator's command still serves the
+  // account (`apps/instance` §`hosted-settings.ts` `clearKey`), so the consent
+  // says so, whichever key the instance holds. Literal on purpose: this reads
+  // the words a rider is shown, not the constant they came from.
+  it.each(['app', 'operator-command'] as const)(
+    'says when the masking list is deleted, true where the operator’s command set the key too (key set by %s)',
+    async (setBy) => {
+      await open(scriptedHostedSettings({ key: { ...SCRIPTED_HOSTED_KEY, setBy }, consent: null }));
+      const box = agreeBox();
+      const described = document.getElementById(box?.getAttribute('aria-describedby') ?? '');
+      const shown = described?.textContent ?? '';
+      expect(shown).toContain(
+        'Your instance deletes them when you withdraw your agreement. It also deletes them when ' +
+          "you remove your key, unless the operator's command set a key for your account: then " +
+          'they stay until you withdraw.',
+      );
+      expect(shown).not.toContain('deletes them when you withdraw or remove your key');
+    },
+  );
+
   it('records the consent for the service the INSTANCE named, and withdraws it', async () => {
     const scripted = scriptedHostedSettings({ key: SCRIPTED_HOSTED_KEY, consent: null });
     await open(scripted);

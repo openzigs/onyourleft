@@ -4,12 +4,12 @@
  * The Worker `workerd` loads for `test:workerd` (#781) — bundled by
  * `workerd-testing.ts` and never deployed. It is the only module that turns
  * the runtime's globals into {@link WorkersPlatform}, and it mounts the
- * adapter twice:
+ * adapter three times:
  *
  * - **`ConformanceRoom`**, on a clock the suite sets and with ticks the suite
  *   fires, so the conformance script's room times are the room's times. The
  *   tick it fires is the adapter's own `alarm()`; only the scheduling of it is
- *   the suite's.
+ *   the suite's. **`LapConformanceRoom`** is the same for the lap race (#1909).
  * - **`WallClockRoom`**, on `Date.now` and real storage alarms — the adapter as
  *   it would run — for the alarm case and the hibernation case.
  *
@@ -23,7 +23,12 @@
  * Routing: `/room/<CLASS>/<name>/…` goes to the object `<name>` of that class.
  */
 
-import { admitConformance, conformanceSettings, wallClockSettings } from '../conformance-room.ts';
+import {
+  admitConformance,
+  conformanceSettings,
+  lapRaceConformanceSettings,
+  wallClockSettings,
+} from '../conformance-room.ts';
 import type { Admit } from '../core/room.ts';
 import type { RoomSettings } from '../core/settings.ts';
 import type {
@@ -154,9 +159,10 @@ function observed(): Observed {
   return { clockMs: 0, admissions: 0, closed: [], generation: constructions };
 }
 
-export class ConformanceRoom extends ObservedRoom {
-  constructor(ctx: DurableObjectContext) {
-    super(ctx, conformanceSettings(), admitConformance, observed(), true);
+/** A room on the suite's clock, ticked by the suite: the conformance script's room times are its own. */
+class DrivenRoom extends ObservedRoom {
+  constructor(ctx: DurableObjectContext, settings: RoomSettings) {
+    super(ctx, settings, admitConformance, observed(), true);
   }
 
   override async fetch(request: IncomingRequest): Promise<unknown> {
@@ -170,6 +176,19 @@ export class ConformanceRoom extends ObservedRoom {
       return PLATFORM.status(200, 'ticked');
     }
     return super.fetch(request);
+  }
+}
+
+export class ConformanceRoom extends DrivenRoom {
+  constructor(ctx: DurableObjectContext) {
+    super(ctx, conformanceSettings());
+  }
+}
+
+/** The conformance lap race (#1909), on the same driven clock. */
+export class LapConformanceRoom extends DrivenRoom {
+  constructor(ctx: DurableObjectContext) {
+    super(ctx, lapRaceConformanceSettings());
   }
 }
 
