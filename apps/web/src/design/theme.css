@@ -7704,6 +7704,19 @@ select.oyl-input {
   }
 }
 
+/* On an upright phone the button's words are a notice's size, as the race's
+   notice above it is set: at the page size, on the CI runner's wider fonts,
+   *Start the race* left 183 px at 360 px wide and "Join voice on Discord"
+   broke over two lines of its own, a 69 px button (the browser gate,
+   §"#875"). The target stays 48 px; only its words and its side padding
+   are smaller. */
+@media (width < 46rem) {
+  .oyl-hud__voice > .oyl-button {
+    padding-inline: var(--oyl-space-xs);
+    font-size: var(--oyl-font-size-sm);
+  }
+}
+
 /*
  * A RACE'S STANDINGS — #1347, ADR 0051.
  *
