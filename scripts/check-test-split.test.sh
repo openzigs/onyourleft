@@ -27,6 +27,9 @@ CHECK="${SCRIPT_DIR}/check-test-split.mjs"
 REQUIRED='vitest run --exclude src/slow.test.ts'
 UNINSTRUMENTED='vitest run apps/web/src/slow.test.ts'
 A11Y='vitest run --project web .a11y.test.'
+# #2154: the required run's two parts, one per CI job.
+SHARD_1='pnpm run test:required --project web'
+SHARD_2="pnpm run test:required --project '!web'"
 
 pass=0
 fail=0
@@ -36,7 +39,8 @@ cleanup() { [ -n "${tmp}" ] && rm -rf "${tmp}"; }
 trap cleanup EXIT
 
 # new_fixture [test:required] [test:uninstrumented] [test:a11y] [test:coverage]
-# -- a root whose package.json carries the four scripts. An argument of `-`
+#             [test:required:shard-1] [test:required:shard-2]
+# -- a root whose package.json carries the six scripts. An argument of `-`
 # leaves that script out. `test:coverage` defaults to what it must be since
 # #1280: `test:required` with `--coverage` after `run`.
 new_fixture() {
@@ -44,31 +48,44 @@ new_fixture() {
   tmp="$(mktemp -d)"
   local required="${1-${REQUIRED}}" uninstrumented="${2-${UNINSTRUMENTED}}" a11y="${3-${A11Y}}"
   local coverage="${4-${required/#vitest run/vitest run --coverage}}"
+  local shard1="${5-${SHARD_1}}" shard2="${6-${SHARD_2}}"
   {
     printf '{"name":"f","scripts":{"test":"vitest run"'
     [ "${required}" != '-' ] && printf ',"test:required":"%s"' "${required}"
     [ "${coverage}" != '-' ] && printf ',"test:coverage":"%s"' "${coverage}"
     [ "${uninstrumented}" != '-' ] && printf ',"test:uninstrumented":"%s"' "${uninstrumented}"
     [ "${a11y}" != '-' ] && printf ',"test:a11y":"%s"' "${a11y}"
+    [ "${shard1}" != '-' ] && printf ',"test:required:shard-1":"%s"' "${shard1}"
+    [ "${shard2}" != '-' ] && printf ',"test:required:shard-2":"%s"' "${shard2}"
     printf '}}'
   } > "${tmp}/package.json"
-  lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts
-  lists required apps/web/src/fast.test.ts
+  lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts \
+    packages/store/src/store.test.ts
+  lists required apps/web/src/fast.test.ts packages/store/src/store.test.ts
   lists uninstrumented apps/web/src/slow.test.ts
   lists a11y apps/web/src/form.a11y.test.ts
 }
 
-# lists <all|required|uninstrumented|a11y> <path...> -- what `vitest list
-# --filesOnly` would print for that selection.
+# lists <all|required|uninstrumented|a11y|required-shard-N> <path...> -- what
+# `vitest list --filesOnly` would print for that selection.
 lists() {
   local name="$1"
   shift
   : > "${tmp}/${name}.txt"
   local path
-  for path in "$@"; do printf '[web] %s\n' "${path}" >> "${tmp}/${name}.txt"; done
+  # The project is the package's directory, as the workspace names it.
+  for path in "$@"; do
+    printf '[%s] %s\n' "$(cut -d/ -f2 <<< "${path}")" "${path}" >> "${tmp}/${name}.txt"
+  done
 }
 
+# A case that does not write the parts' selections gets what the two default
+# patterns would select from its required run: `web` and every other project.
 run_check() {
+  [ -f "${tmp}/required-shard-1.txt" ] || grep '^\[web\] ' "${tmp}/required.txt" \
+    > "${tmp}/required-shard-1.txt"
+  [ -f "${tmp}/required-shard-2.txt" ] || grep -v '^\[web\] ' "${tmp}/required.txt" \
+    > "${tmp}/required-shard-2.txt"
   out="$(node "${CHECK}" --root "${tmp}" --lists "${tmp}" 2>&1)"
   code=$?
 }
@@ -95,13 +112,14 @@ assert_says() {
 new_fixture
 run_check
 assert_green 'three runs that are the whole suite, once each, pass'
-assert_says 'and say what each run holds' 'all 3 test files run once — 1 in the required run, 1 without it (nightly), 1 in the Accessibility step'
+assert_says 'and say what each run holds' 'all 4 test files run once — 2 in the required run, 1 without it (nightly), 1 in the Accessibility step'
+assert_says 'and how the required run is divided' "the required run's 2 are 1 in \`test:required:shard-1\`, 1 in \`test:required:shard-2\`"
 
 new_fixture 'vitest run --exclude src/a.test.ts --exclude tools/b.test.ts' \
   'vitest run apps/web/src/a.test.ts packages/fit/tools/b.test.ts'
 lists all apps/web/src/a.test.ts apps/web/src/c.test.ts packages/fit/tools/b.test.ts \
-  apps/web/src/form.a11y.test.ts
-lists required apps/web/src/c.test.ts
+  apps/web/src/form.a11y.test.ts packages/fit/src/d.test.ts
+lists required apps/web/src/c.test.ts packages/fit/src/d.test.ts
 lists uninstrumented apps/web/src/a.test.ts packages/fit/tools/b.test.ts
 run_check
 assert_green 'two excludes and two filters, one file each, pass'
@@ -299,6 +317,74 @@ assert_red 'coverage on the accessibility run fails'
 new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" 'vitest run --project web'
 run_check
 assert_red 'a test:a11y with no filter fails'
+
+# --- The required run's parts, one per CI job (#2154) ------------------------
+new_fixture
+lists required-shard-1 apps/web/src/fast.test.ts
+lists required-shard-2
+run_check
+assert_red 'a part of the required run that selects nothing fails'
+assert_says 'and names the part' '`test:required:shard-2` selects no files at all'
+
+new_fixture
+lists required-shard-1 apps/web/src/fast.test.ts packages/store/src/store.test.ts
+lists required-shard-2 packages/store/src/store.test.ts
+run_check
+assert_red 'a file in two parts of the required run fails'
+assert_says 'and names it and both parts' 'packages/store/src/store.test.ts runs in `test:required:shard-1` and `test:required:shard-2`'
+
+new_fixture
+lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts \
+  packages/store/src/store.test.ts packages/zz/src/new.test.ts
+lists required apps/web/src/fast.test.ts packages/store/src/store.test.ts packages/zz/src/new.test.ts
+lists required-shard-1 apps/web/src/fast.test.ts
+lists required-shard-2 packages/store/src/store.test.ts
+run_check
+assert_red 'a required file in no part of the required run fails'
+assert_says 'and names it' 'packages/zz/src/new.test.ts is in `test:required` and in NONE of its parts'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" -
+run_check
+assert_red 'a required run in one part fails: it is divided between at least two jobs'
+assert_says 'and says how many it found' 'package.json has 1 `test:required:shard-<n>` scripts'
+
+new_fixture
+node -e 'const f=process.argv[1], p=JSON.parse(require("fs").readFileSync(f));
+  p.scripts["test:required:shard-3"]=p.scripts["test:required:shard-2"];
+  delete p.scripts["test:required:shard-2"]; require("fs").writeFileSync(f, JSON.stringify(p));' \
+  "${tmp}/package.json"
+lists required-shard-3 packages/store/src/store.test.ts
+run_check
+assert_red 'a gap in the parts numbering fails'
+assert_says 'and names the part after it' '`test:required:shard-3` follows `test:required:shard-1`'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  'vitest run --project web' "${SHARD_2}"
+run_check
+assert_red 'a part that is not test:required plus a project filter fails'
+assert_says 'and says what shape it expects' 'followed only by `--project <pattern>` pairs'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  'pnpm run test:required --project web --coverage' "${SHARD_2}"
+run_check
+assert_red 'coverage on a part of the required run fails'
+assert_says 'and names the part' '`test:required:shard-1` is'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  'pnpm run test:required' "${SHARD_2}"
+run_check
+assert_red 'a part with no project filter fails: it would be the whole run again'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  'pnpm run test:required --project web --project' "${SHARD_2}"
+run_check
+assert_red 'a dangling --project fails'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" 'pnpm run test:required --project !web'
+run_check
+assert_red 'an unquoted ! fails: the check reads only plain words and whole single-quoted ones'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ] || exit 1
