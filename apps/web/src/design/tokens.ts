@@ -57,6 +57,8 @@
  * size edited off the ladder goes red.
  */
 
+import { HEART_RATE_ZONE_NAMES } from '@onyourleft/domain';
+
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT } from './contrast';
 
 /**
@@ -233,28 +235,35 @@ export const COLOUR_TOKENS = {
   illoRoad: '#91969c',
 
   /*
-   * The workout block chart's seven intensity bands (#1043) — one per power
-   * zone (`@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`), easiest first.
+   * The seven power zones' colours (#1043, #2039) — one per power zone
+   * (`@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`), easiest first.
+   * Since #2039 they are ADR 0063 D-4's ramp, the owner's ruling of 2026-11-03:
+   * grey, blue, green, yellow, orange, red, and purple above red for Sprint.
+   * The ORDER is a convention shared across cycling, which is why it is
+   * readable; the hues are this project's own (ADR 0009 L1).
    *
-   * ⚠️ **A band is never told by its colour alone** (SC 1.4.1): a block's
-   * band follows from its height, drawn against the dashed threshold rule,
-   * and the shares are in the words beside the chart. What the colours DO
-   * owe is SC 1.4.11's 3:1 against the chart's well (`surface`), as a
-   * graphical object, which is the pair each declares in
-   * {@link CONTRAST_REQUIREMENTS} — and a lightness that moves one way along
-   * the ramp, darker in the light palette and lighter in the dark one, so the
-   * ramp reads in greyscale ({@link BAND_TOKENS}, held by `tokens.test.ts`).
+   * ⚠️ **A zone is never told by its colour alone** (SC 1.4.1): wherever one
+   * is painted, `design/ZoneKey.tsx` writes its number and name beside it,
+   * and `a11y/zones.a11y.test.tsx` fails a component that reads
+   * {@link BAND_TOKENS} without rendering that key. What the colours DO owe
+   * is SC 1.4.11's 3:1 against the well they are drawn on (`surface`), the
+   * pair each declares in {@link CONTRAST_REQUIREMENTS}.
    *
-   * Our own ramp (ADR 0009 L1): the house teal deepening to threshold, a slate
-   * at threshold, then brick and plum above it.
+   * ⚠️ **The ramp is not monotone in lightness, on purpose** (ADR 0063 D-4):
+   * in this hue order a monotone ramp turns the dark yellow brown or the light
+   * purple pink. Neighbours are held apart by lightness instead, at 1.20:1
+   * under normal vision and under simulated deuteranopia, protanopia and
+   * tritanopia (`a11y/zones.a11y.test.tsx`). In light, zone 4's "yellow" is a
+   * dark ochre so that it reaches 3:1 on a light surface; it is labelled
+   * "4 Threshold" wherever it is drawn.
    */
-  bandRecovery: '#5e8f88',
-  bandEndurance: '#467f75',
-  bandTempo: '#336d61',
-  bandThreshold: '#2e5878',
-  bandVo2: '#7a3622',
-  bandAnaerobic: '#5e2537',
-  bandSprint: '#3d1d3a',
+  bandRecovery: '#6c7278',
+  bandEndurance: '#00468c',
+  bandTempo: '#007d30',
+  bandThreshold: '#968200',
+  bandVo2: '#8f4c00',
+  bandAnaerobic: '#820b0f',
+  bandSprint: '#7e439f',
 
   /*
    * The ride HUD (#94), which is the one surface in this app that is drawn over
@@ -387,13 +396,13 @@ export const DARK_COLOUR_TOKENS = {
   illoHillFar: '#263a22',
   illoHillNear: '#304f2a',
   illoRoad: '#53595e',
-  bandRecovery: '#467a73',
-  bandEndurance: '#529085',
-  bandTempo: '#62a596',
-  bandThreshold: '#7fb0d6',
-  bandVo2: '#f2b391',
-  bandAnaerobic: '#f5c9d3',
-  bandSprint: '#f8e7f3',
+  bandRecovery: '#949aa1',
+  bandEndurance: '#2d74ca',
+  bandTempo: '#5fc372',
+  bandThreshold: '#f9df5d',
+  bandVo2: '#f59441',
+  bandAnaerobic: '#cb574d',
+  bandSprint: '#cf91f3',
 } as const satisfies Record<ThemedColourToken, string>;
 
 /**
@@ -971,7 +980,8 @@ const ILLUSTRATION_FOCUS_MEASURED: Readonly<
  * The workout block chart's intensity bands (#1043), easiest first — one per
  * power zone, in `@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`' order.
  * `workouts/BlockChart.tsx` paints band `n` with the `n`th of these, and
- * `tokens.test.ts` holds the ramp's lightness to one direction per palette.
+ * `a11y/zones.a11y.test.tsx` holds neighbours apart under simulated
+ * colour-vision deficiency (ADR 0063 D-4).
  */
 export const BAND_TOKENS = [
   'bandRecovery',
@@ -987,18 +997,18 @@ export const BAND_TOKENS = [
 export type BandToken = (typeof BAND_TOKENS)[number];
 
 /**
- * Which way a band's luminance moves as intensity rises, per palette: the
- * ramp darkens on the light page and lightens on the dark one, as a raised
- * surface does ({@link ELEVATION_DIRECTION}).
+ * The five heart-rate zones' colours (#2039, ADR 0063 D-4): the first five
+ * power zones' by POSITION, the owner's ruling of 2026-11-03 — heart-rate zone
+ * `n` is drawn in power zone `n`'s colour, and named by its own name
+ * (`@onyourleft/domain` §`HEART_RATE_ZONE_NAMES`).
+ *
+ * ⚠️ Nothing paints a heart-rate zone in colour yet; the first screen that
+ * does reads this rather than choosing again.
  */
-export const BAND_DIRECTION: Readonly<Record<Theme, 'darker' | 'lighter'>> = ELEVATION_DIRECTION;
-
-/**
- * The smallest contrast ratio two neighbouring bands may have, so the ramp is
- * still a ramp in greyscale (SC 1.4.1's spirit; WCAG states no number for
- * it). A legibility floor of this design system's own.
- */
-export const MINIMUM_BAND_STEP = 1.15;
+export const HEART_RATE_BAND_TOKENS: readonly BandToken[] = BAND_TOKENS.slice(
+  0,
+  HEART_RATE_ZONE_NAMES.length,
+);
 
 /**
  * What each band measures against the chart's well, `surface`, per palette —
@@ -1006,13 +1016,13 @@ export const MINIMUM_BAND_STEP = 1.15;
  * `contrast.a11y.test.ts` (#307's erosion rule).
  */
 const BAND_ON_SURFACE_MEASURED: Readonly<Record<BandToken, Readonly<Record<Theme, number>>>> = {
-  bandRecovery: { light: 3.13, dark: 3.07 },
-  bandEndurance: { light: 3.96, dark: 4.07 },
-  bandTempo: { light: 5.15, dark: 5.25 },
-  bandThreshold: { light: 6.47, dark: 6.5 },
-  bandVo2: { light: 7.58, dark: 8.33 },
-  bandAnaerobic: { light: 10.04, dark: 10.15 },
-  bandSprint: { light: 12.56, dark: 12.68 },
+  bandRecovery: { light: 4.18, dark: 5.29 },
+  bandEndurance: { light: 7.99, dark: 3.19 },
+  bandTempo: { light: 4.53, dark: 6.82 },
+  bandThreshold: { light: 3.28, dark: 11.27 },
+  bandVo2: { light: 5.63, dark: 6.58 },
+  bandAnaerobic: { light: 8.99, dark: 3.59 },
+  bandSprint: { light: 5.65, dark: 6.44 },
 };
 
 /**
