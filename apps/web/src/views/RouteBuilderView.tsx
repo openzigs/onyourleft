@@ -75,6 +75,16 @@ import {
   mapWaypoints,
   nearestLeg,
 } from '../routing/map-edit';
+import {
+  canCloseLoop,
+  closeLoop,
+  DEFAULT_LOOP_TARGET_KM,
+  LOOP_TARGETS_KM,
+  loopReadout,
+  type LoopFit,
+  loopTargetText,
+  type LoopTargetKm,
+} from '../routing/loop';
 import { RIDING_DEFAULTS, strandingRisk, SURFACE_LABELS } from '../routing/preferences';
 import {
   elevationSentence,
@@ -133,6 +143,15 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * *Save to your routes* writes the drawn line as an ordinary saved route
  * (`routes/save.ts` §`routeFromDraft`), in the same list as an import, ridden
  * and downloaded the same way. The draft stays on screen afterwards.
+ *
+ * ## A short loop — #2102
+ *
+ * A lap race in a room is ridden on a loop its host saved (ADR 0060 D-11.1),
+ * so the planner helps draw a short one: a target length, *Close the loop*
+ * beside *Reverse*, and a readout of the length against the target with a note
+ * when the loop is under or over it (`routing/loop.ts`). A line that ends where
+ * it starts is saved as a loop, and the screen says so before and after the
+ * save.
  *
  * ## What this screen is careful about
  *
@@ -197,6 +216,10 @@ export const PLANNER_MAP_FAILED_TEXT =
 export const PLANNER_MAP_TEXT =
   'Tap the map to add a waypoint, drag one to move it, or drag the line to add one there.';
 
+/** What the save says of a route saved as a loop (#2102): where it is offered. */
+export const SAVED_LOOP_TEXT =
+  'It is a loop: choose it on the game’s route picker to race laps on it, or make a room on it.';
+
 /** A profile, and the draft it was worked out for — see `routeFromDraft`'s `elevation`. */
 interface ElevationFor {
   readonly draft: RouteDraft;
@@ -205,7 +228,14 @@ interface ElevationFor {
 
 /** The last save, said under the form. */
 type Saved =
-  | { readonly kind: 'saved'; readonly id: string; readonly name: string; readonly flat: boolean }
+  | {
+      readonly kind: 'saved';
+      readonly id: string;
+      readonly name: string;
+      readonly flat: boolean;
+      /** Saved as a loop (#2102), so a lap race can be ridden on it. */
+      readonly loop: boolean;
+    }
   | { readonly kind: 'refused'; readonly refusal: SaveRefusal };
 
 /**
@@ -229,6 +259,18 @@ export const NUDGE_DEGREES = 0.0005;
  * which does not matter for "about 55 m".
  */
 const METRES_PER_DEGREE_LATITUDE = 111_320;
+
+/**
+ * A loop's fit to its target, as a word with no number: the note's label, and
+ * what the loop's live region says when the fit changes (#2102).
+ */
+function fitLabel(fit: LoopFit): string {
+  return fit.kind === 'under'
+    ? 'Under the target'
+    : fit.kind === 'over'
+      ? 'Over the target'
+      : 'Near the target';
+}
 
 const DEFAULT_ORIGIN = geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12));
 
@@ -258,6 +300,15 @@ export function RouteBuilderView({
   const [tiles] = useState(() => readMapTilesChoice(tilePreferences ?? deviceStorage()));
   const online = useOnline();
   const nameId = useId();
+  const targetId = useId();
+  /** The short loop's target (#2102). This screen's alone: nothing is saved with it. */
+  const [loopTarget, setLoopTarget] = useState<LoopTargetKm>(DEFAULT_LOOP_TARGET_KM);
+  /**
+   * The loop section's heading, where focus goes once *Close the loop* has
+   * acted and left (WCAG 2.4.3): the button is absent once the loop is closed,
+   * and focus would otherwise fall to the page.
+   */
+  const loopHeading = useRef<HTMLHeadingElement>(null);
   /** The live map, for its centre (#2006). */
   const mapView = useRef<MapView | undefined>(undefined);
   const units = useUnits();
@@ -428,6 +479,7 @@ export function RouteBuilderView({
       id: outcome.record.id,
       name: outcome.record.name,
       flat: outcome.record.elevation === undefined,
+      loop: outcome.record.profile.loop,
     });
   };
 
@@ -449,6 +501,7 @@ export function RouteBuilderView({
   const surfaces = surfaceSummary(draft);
   const unresolved = unresolvedSentence(draft.legs);
   const risk = strandingRisk(preferences.surface);
+  const loop = loopReadout(draft, loopTarget, units);
 
   return (
     <>
@@ -516,6 +569,18 @@ export function RouteBuilderView({
             }}
           >
             Reverse
+          </Button>
+        ) : null}
+        {/* #2102: a new last waypoint where the first is, so the line ends where it starts. */}
+        {canCloseLoop(draft) ? (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              apply(closeLoop(draft, newLegMode));
+              loopHeading.current?.focus();
+            }}
+          >
+            Close the loop
           </Button>
         ) : null}
         {clearArmed ? (
@@ -819,6 +884,51 @@ export function RouteBuilderView({
         </>
       )}
 
+      {/* #2102: a short loop for a lap race, its length against a target. */}
+      <h2 ref={loopHeading} tabIndex={-1}>
+        A short loop for a lap race
+      </h2>
+      {/* The same bare native select, label above, as "What you will ride on". */}
+      <p>
+        <label htmlFor={targetId}>Target length</label>
+      </p>
+      <select
+        id={targetId}
+        value={String(loopTarget)}
+        onChange={(event) => {
+          setLoopTarget(Number(event.target.value) as LoopTargetKm);
+        }}
+      >
+        {LOOP_TARGETS_KM.map((target) => (
+          <option key={target} value={String(target)}>
+            {loopTargetText(target, units)}
+          </option>
+        ))}
+      </select>
+      {/*
+        A polite live region, on the page from the start so a change inside it
+        is announced. It holds the loop's state only: the state sentence and
+        whether a loop is near, under or over its target (PR #2111 review). The
+        running length and the note, whose numbers change on every tap, drag
+        and nudge, sit outside it, so a rider drawing a long ride does not hear
+        the loop advice again after every waypoint.
+      */}
+      <div role="status">
+        <p>{loop.state}</p>
+        {loop.fit === undefined ? null : (
+          <VisuallyHidden>{`${fitLabel(loop.fit)}.`}</VisuallyHidden>
+        )}
+      </div>
+      {loop.length === undefined ? null : <p>{loop.length}</p>}
+      {loop.note === undefined || loop.fit === undefined ? null : (
+        <StatusMessage
+          tone={loop.fit.kind === 'near' ? 'success' : 'warning'}
+          label={fitLabel(loop.fit)}
+        >
+          {loop.note}
+        </StatusMessage>
+      )}
+
       {/* #2006: the drawn route, into the same library as an imported one. */}
       {routes === undefined ? null : (
         <>
@@ -850,7 +960,8 @@ export function RouteBuilderView({
           {saved?.kind === 'saved' ? (
             <StatusMessage tone="success" live>
               {`Saved “${saved.name}” to your routes. It is private.`}
-              {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}{' '}
+              {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}
+              {saved.loop ? ` ${SAVED_LOOP_TEXT}` : ''}{' '}
               <a href={hrefForSelection(routeById('routes'), saved.id)}>Open it in Routes</a>
             </StatusMessage>
           ) : null}

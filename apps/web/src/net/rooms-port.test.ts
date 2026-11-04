@@ -422,3 +422,57 @@ describe('public rooms — #788', () => {
     });
   });
 });
+
+describe('a private lap race — #1912', () => {
+  it('makes one with its laps and items, and keeps them with the room entered', async () => {
+    const instance = new ScriptedInstance();
+    const answer = await port(instance).create({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      route: ROUTE,
+      lapRace: { laps: 3, items: true },
+    });
+    const body = instance.seen[0]?.body as Record<string, unknown>;
+    expect(body.lapRace).toEqual({ laps: 3, items: true });
+    expect(body.kind).toBe('race');
+    expect(body).not.toHaveProperty('visibility');
+    expect(answer).toMatchObject({ kind: 'created', room: { lapRace: { laps: 3, items: true } } });
+  });
+
+  it('sends no lapRace for any other room', async () => {
+    const instance = new ScriptedInstance();
+    const answer = await port(instance).create({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      route: ROUTE,
+    });
+    expect(instance.seen[0]?.body).not.toHaveProperty('lapRace');
+    expect(answer.kind === 'created' ? answer.room.lapRace : 'none').toBeUndefined();
+  });
+
+  it('tells a joiner the laps and items the instance said, and refuses an answer carrying more', async () => {
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute();
+    instance.offer('room-xyz', 'race', gpx, sha256);
+    const joined = instance.joined.body as Record<string, unknown>;
+    instance.joined = { status: 200, body: { ...joined, lapRace: { laps: 5, items: false } } };
+    expect(await port(instance).join('abcde-fghjk-mnpqr')).toMatchObject({
+      kind: 'joined',
+      room: { lapRace: { laps: 5, items: false } },
+    });
+    for (const lapRace of [
+      { laps: 5, items: false, seed: 7 },
+      { laps: 0, items: true },
+      { laps: 11, items: true },
+      'yes',
+    ]) {
+      instance.joined = { status: 200, body: { ...joined, lapRace } };
+      expect(await port(instance).join('abcde-fghjk-mnpqr'), JSON.stringify(lapRace)).toEqual({
+        kind: 'refused',
+        reason: 'instance-refused',
+      });
+    }
+  });
+});

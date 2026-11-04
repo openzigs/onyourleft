@@ -31,6 +31,7 @@ import type {
   GradePercent,
   Metres,
   MetresPerSecond,
+  Percent,
   ResistanceLevel,
   Watts,
 } from './index';
@@ -49,6 +50,7 @@ import {
   metres,
   metresPerSecond,
   metresPerSecondToKilometresPerHour,
+  percent,
   resistanceLevel,
   seconds,
   watts,
@@ -191,6 +193,18 @@ describe('the two setpoints written to a trainer are not interchangeable', () =>
     // @ts-expect-error a power is not a brake level, however alike the numbers look
     const level: ResistanceLevel = watts(250);
     expect(level).toBe(250);
+  });
+
+  it('does not accept a battery percentage where a gradient belongs (#2046)', () => {
+    // @ts-expect-error a share of a full scale is not a slope, though both are "percent"
+    const grade: GradePercent = percent(37);
+    expect(grade).toBe(37);
+  });
+
+  it('does not accept a gradient where a percentage belongs (#2046)', () => {
+    // @ts-expect-error a signed, unbounded gradient is not a share of a full scale
+    const level: Percent = gradePercent(37);
+    expect(level).toBe(37);
   });
 
   it('does not accept a distance where a gradient belongs', () => {

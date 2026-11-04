@@ -4,9 +4,9 @@
  * Every keyboard focus ring on the ride HUD can be seen — #748.
  *
  * The HUD is pinned to the light palette (`theme.css` §`.oyl-hud`, #672), so
- * `--oyl-color-focus` there is #141b1a, and a control that took the page's
+ * `--oyl-color-focus` there is #131415, and a control that took the page's
  * `:focus-visible` drew that ring 2 px outside itself onto `hudSurface`,
- * #10161c: **1.04:1**. The mute toggle, the volume and the side camera's Stop
+ * #10161c: **1.01:1**. The mute toggle, the volume and the side camera's Stop
  * all did, in both page palettes, and nothing measured it: `contrast.a11y.test`
  * checks declared PAIRS, and no pair said which colour a HUD ring is.
  *

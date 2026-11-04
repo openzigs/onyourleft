@@ -490,3 +490,40 @@ describe('save to your routes — #2006', () => {
     );
   });
 });
+
+describe('a closed loop’s start and finish on the map — #2102', () => {
+  it('shows one "1" where the loop starts and finishes, and numbers the last again once it moves', async () => {
+    const planner = await open();
+    for (const point of [A, B, C]) {
+      await gesture(planner, (map) => {
+        map.tap(point);
+      });
+    }
+    await activateWithKeyboard(buttonNamed(planner.view, 'Close the loop'));
+    await settle();
+    // The last waypoint sits on the first and is drawn over it: it shows "1"
+    // too, so the marker on top says the start, and the finish is the same place.
+    expect(
+      planner
+        .map()
+        .waypoints.at(-1)
+        ?.map(({ position, label }) => [position, label]),
+    ).toEqual([
+      [A, '1'],
+      [B, '2'],
+      [C, '3'],
+      [A, '1'],
+    ]);
+    // Dragged away, it is the fourth waypoint again: the loop is open.
+    const away = at(40.01, -104.99);
+    await gesture(planner, (map) => {
+      map.moveWaypoint('w4', away);
+    });
+    expect(
+      planner
+        .map()
+        .waypoints.at(-1)
+        ?.map(({ label }) => label),
+    ).toEqual(['1', '2', '3', '4']);
+  });
+});

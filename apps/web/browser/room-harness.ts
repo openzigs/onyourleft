@@ -31,6 +31,12 @@
  * item, offset — and the two inputs the game sends, through the same
  * production room port.
  *
+ * Since #1912 it also MAKES a private lap race on a loop of its own and rides
+ * it on power read from `@onyourleft/sensors`' simulator — a simulated power
+ * meter, connected and subscribed through the simulator's own transport, as
+ * the app reads a real one — and reads the race's finish order off the room
+ * and its published result off the instance.
+ *
  * ⚠️ **What it does not prove**: anything about the game's drawing (the game
  * gate's §"#783" is that), a phone's WebView, the screen going off, or a
  * Cloudflare Tunnel in the path — those are #733's.
@@ -42,9 +48,13 @@ import {
   degreesLongitude,
   geographicPosition,
   routeProfile,
+  seconds,
   unixSeconds,
+  watts as wattsOf,
   type SigningKey,
 } from '@onyourleft/domain';
+import { deviceId } from '@onyourleft/sensors';
+import { cpsPowerMeter, createSimulator } from '@onyourleft/sensors/simulator';
 import { ensureDeviceSigningKey, openActivityStore } from '@onyourleft/store';
 
 import { planPath, routePlan } from '../src/game/hud/plan';
@@ -109,6 +119,17 @@ export interface RoomHarness {
   useItem(): number | undefined;
   /** Start the race of the room this page joined, as a seated rider (#785). */
   start(): Promise<string>;
+  /** #1912: make a private lap race of `laps` laps of this page's own loop, items on. */
+  makeLapRace(laps: number): Promise<RoomOutcome>;
+  /**
+   * #1912: ride the room this page made or entered on power from a simulated
+   * power meter set to `watts` — read through the simulator's transport.
+   */
+  rideSimulated(watts: number): Promise<void>;
+  /** #1912: the room's finish order by the names the room gave, once it has sent one. */
+  finishNames(): readonly (string | null)[] | undefined;
+  /** #1912: the race's published result, read through the instance's result route. */
+  resultNames(): Promise<readonly (string | null)[] | string>;
   leave(): void;
 }
 
@@ -139,6 +160,23 @@ function ownRoute() {
     });
   }
   return { id: 'harness-route', profile: routeProfile(points) };
+}
+
+/** #1912: a loop of about 113 m round a park, ending where it starts — a lap race’s road. */
+function ownLoop() {
+  const points = [];
+  const radiusMetres = 18;
+  for (let step = 0; step <= 60; step += 1) {
+    const angle = (step / 60) * 2 * Math.PI;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.45 + (radiusMetres * Math.sin(angle)) / 111_194.93),
+        degreesLongitude(-0.31 + (radiusMetres * (1 - Math.cos(angle))) / 69_500),
+      ),
+      elevation: altitudeMetres(20),
+    });
+  }
+  return { id: 'harness-loop', profile: routeProfile(points, { loop: true }) };
 }
 
 /** Draw a room's road with the HUD's own plan projection, as the game would. */
@@ -188,7 +226,12 @@ async function signIn(address: string, name: string): Promise<ConnectOutcome> {
   return instance.connect(address, name);
 }
 
-function joinRoom(roomId: string, watts: number, fanOut: boolean): void {
+function joinRoom(
+  roomId: string,
+  watts: number,
+  fanOut: boolean,
+  sampled?: () => number | undefined,
+): void {
   joinedRoomId = roomId;
   connection = createRoomPort({
     ...sealing,
@@ -197,8 +240,13 @@ function joinRoom(roomId: string, watts: number, fanOut: boolean): void {
   }).join({
     roomId,
     declaredMassKilograms: 72,
-    sample: () => ({ powerWatts: watts, cadenceRpm: 90 }),
+    sample: () => ({ powerWatts: sampled === undefined ? watts : sampled(), cadenceRpm: 90 }),
   });
+}
+
+/** This page's rooms port, for the rider signed in last. */
+function roomsPort() {
+  return createRoomsPort({ ...sealing, storage: localStorage, zones: () => Promise.resolve([]) });
 }
 
 window.__oylRoom = {
@@ -271,6 +319,59 @@ window.__oylRoom = {
   },
   changeLane: (lane) => connection?.changeLane(lane),
   useItem: () => connection?.useItem(),
+  makeLapRace: async (laps) => {
+    const answer = await roomsPort().create({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      route: ownLoop(),
+      lapRace: { laps, items: true },
+    });
+    if (answer.kind !== 'created') {
+      return {
+        kind: 'refused',
+        reason: answer.kind === 'refused' ? answer.reason : 'unreachable',
+      };
+    }
+    entered = answer.room;
+    return { kind: 'made', roomId: answer.room.roomId, code: answer.room.code ?? '' };
+  },
+  rideSimulated: async (power) => {
+    if (entered === undefined) throw new Error('this page is in no room');
+    const { transport, bench } = createSimulator({
+      devices: [cpsPowerMeter({ id: 'meter', name: 'Harness power meter' })],
+      rider: { power: wattsOf(power) },
+    });
+    const meter = deviceId('meter');
+    await transport.connect(meter);
+    let latest: number | undefined;
+    await transport.subscribe(meter, 'power', (measurement) => {
+      latest = measurement.power;
+    });
+    // The simulator's clock, a second a second: each second, a fresh reading.
+    setInterval(() => {
+      bench.advance(seconds(1));
+    }, 1_000);
+    bench.advance(seconds(1));
+    joinRoom(entered.roomId, power, true, () => latest);
+  },
+  finishNames: () => {
+    const race = connection?.race();
+    if (race?.kind !== 'finished') return undefined;
+    const names = new Map(
+      (connection?.standings()?.rows ?? []).map((row) => [row.riderId, row.displayName]),
+    );
+    return race.order.map((riderId) => names.get(riderId) ?? null);
+  },
+  resultNames: async () => {
+    if (joinedRoomId === undefined) throw new Error('this page joined no room');
+    const answer = await roomsPort().results(joinedRoomId);
+    if (answer.kind !== 'result') return answer.kind;
+    return [...answer.rows]
+      .filter((row) => row.place !== null)
+      .sort((a, b) => (a.place ?? 0) - (b.place ?? 0))
+      .map((row) => row.displayName);
+  },
   start: async () => {
     if (joinedRoomId === undefined) throw new Error('this page joined no room');
     const answer = await createRoomsPort({
