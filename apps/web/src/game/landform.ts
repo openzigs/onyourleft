@@ -52,7 +52,10 @@
  *    of the radius is the most it reaches. Since #2096 the fold also tapers
  *    back out, {@link REACH_TAPER_PER_METRE} metres of reach a metre of road,
  *    rather than jumping from the fold to the full 420 m between two rows —
- *    which stood the relief up on end as a wall beside the road.
+ *    which stood the relief up on end as a wall beside the road. The scenery
+ *    is placed from the route and knows nothing of either, so since #2099 a
+ *    frame keeps only what stands over its own triangles
+ *    ({@link standingOnGround}).
  *
  * ⚠️ **What it does not cover, stated rather than hidden:** two stretches of
  * the same corridor that pass within the ground's reach of each other other
@@ -664,6 +667,154 @@ function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
 /** Whether a mesh's buffers are still the ones its build wrote. @see TerrainMesh.lease */
 export function terrainMeshIsCurrent(mesh: TerrainMesh): boolean {
   return mesh.lease === undefined || mesh.lease === terrainLease;
+}
+
+/**
+ * The things in `items` that stand over a triangle of `mesh`, in order — #2099.
+ *
+ * ⚠️ **What keeps scenery off ground that is not drawn.** Everything beside the
+ * road is placed by a function of the ROUTE (`scatter.ts`, `settlements.ts`),
+ * and the ground's reach is a function of the FRAME: {@link foldReach} pulls a
+ * sharp bend's inside in, and since #2096 {@link tapered} lets it back out at
+ * {@link REACH_TAPER_PER_METRE}, so for some way before and after the bend the
+ * inside's ground stops short of where the scenery stands. Measured on a
+ * planner's 90° corner before this existed: 26 items of about 6 000 (14
+ * mirrored), 12 to 42 m from the road, standing over sky. Only this frame's
+ * triangles can say where the ground is, so they are what is asked.
+ *
+ * Each item is tested against the triangles between the two rows whose
+ * cross-sections it lies between, both sides and every band: the same
+ * triangles {@link terrainIndices} hands the renderer. A row's cross-section
+ * is the line through its two road-edge vertices, so which side of it a point
+ * lies on is one product; a point is only ever measured against the few pairs
+ * of rows whose cross-sections it lies between, which on a straight road is
+ * one. Nothing here moves anything: an item is kept or dropped.
+ *
+ * Lent storage, like {@link terrainCorridor}'s: valid for the mesh it was
+ * asked about, and asked about in the same frame it was built in.
+ */
+export function standingOnGround<T extends { readonly x: number; readonly z: number }>(
+  items: readonly T[],
+  mesh: TerrainMesh,
+): readonly T[] {
+  const rows = mesh.rows;
+  const across = rowCrossings(mesh);
+  const kept: T[] = [];
+  for (const item of items) {
+    if (overGround(mesh, across, rows, item.x, item.z)) {
+      kept.push(item);
+    }
+  }
+  return kept;
+}
+
+/**
+ * Each row's cross-section, four numbers a row: the point between its two
+ * road edges and the unit heading along the road there. Lent, like
+ * {@link terrainScratch}.
+ */
+let crossings = new Float64Array(0);
+
+function rowCrossings(mesh: TerrainMesh): Float64Array {
+  const { vertices, rows } = mesh;
+  if (crossings.length !== rows * 4) {
+    crossings = new Float64Array(rows * 4);
+  }
+  for (let row = 0; row < rows; row += 1) {
+    // Column 0 of side 0, and of side 1: the road's two edges, which lie on
+    // the row's own normal through its centreline point.
+    const right = row * COLUMNS * 2 * 3;
+    const left = right + COLUMNS * 3;
+    const rx = vertices[right] as number;
+    const rz = vertices[right + 2] as number;
+    const lx = vertices[left] as number;
+    const lz = vertices[left + 2] as number;
+    const nx = rx - lx;
+    const nz = rz - lz;
+    const length = Math.hypot(nx, nz);
+    crossings[row * 4] = (rx + lx) / 2;
+    crossings[row * 4 + 1] = (rz + lz) / 2;
+    // The normal is `(−z, x)` of the heading (`terrain.ts`), so the heading
+    // is `(z, −x)` of the normal. A collapsed row has none: 0, which puts
+    // every point on its cross-section, and the triangles decide.
+    crossings[row * 4 + 2] = length > 0 ? nz / length : 0;
+    crossings[row * 4 + 3] = length > 0 ? -nx / length : 0;
+  }
+  return crossings;
+}
+
+/**
+ * How far past a cross-section, in metres, a point still counts as between
+ * two rows: **1 cm**, for Float32 vertices a kilometre from the origin. Only
+ * which triangles are asked depends on it; the triangles decide.
+ */
+const CROSSING_SLACK_METRES = 1e-2;
+
+function overGround(
+  mesh: TerrainMesh,
+  across: Float64Array,
+  rows: number,
+  x: number,
+  z: number,
+): boolean {
+  const along = (row: number): number =>
+    (x - (across[row * 4] as number)) * (across[row * 4 + 2] as number) +
+    (z - (across[row * 4 + 1] as number)) * (across[row * 4 + 3] as number);
+  let behind = along(0);
+  for (let row = 0; row + 1 < rows; row += 1) {
+    const ahead = along(row + 1);
+    if (
+      behind >= -CROSSING_SLACK_METRES &&
+      ahead <= CROSSING_SLACK_METRES &&
+      overRowPair(mesh.vertices, row, x, z)
+    ) {
+      return true;
+    }
+    behind = ahead;
+  }
+  return false;
+}
+
+/** Whether a point lies over a ground triangle between `row` and the next, either side. */
+function overRowPair(vertices: Float32Array, row: number, x: number, z: number): boolean {
+  const perRow = COLUMNS * 2;
+  for (let side = 0; side < 2; side += 1) {
+    for (let band = 0; band < TERRAIN_BANDS; band += 1) {
+      const a = row * perRow + side * COLUMNS + band;
+      const b = a + 1;
+      const c = a + perRow;
+      const d = c + 1;
+      // {@link terrainIndices}' two triangles of the quad, whichever way wound.
+      if (inTriangle(vertices, a, b, c, x, z) || inTriangle(vertices, b, d, c, x, z)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Whether a point lies in a triangle of vertices, in plan, edges included. */
+function inTriangle(
+  vertices: Float32Array,
+  a: number,
+  b: number,
+  c: number,
+  x: number,
+  z: number,
+): boolean {
+  const ax = vertices[a * 3] as number;
+  const az = vertices[a * 3 + 2] as number;
+  const bx = vertices[b * 3] as number;
+  const bz = vertices[b * 3 + 2] as number;
+  const cx = vertices[c * 3] as number;
+  const cz = vertices[c * 3 + 2] as number;
+  const area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+  // A folded row's outer columns are one point: a triangle with no area
+  // covers nothing.
+  if (!(Math.abs(area) > 1e-9)) return false;
+  const u = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / area;
+  const v = ((cx - x) * (az - z) - (ax - x) * (cz - z)) / area;
+  return u >= -1e-6 && v >= -1e-6 && 1 - u - v >= -1e-6;
 }
 
 /**

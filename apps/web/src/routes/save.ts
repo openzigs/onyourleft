@@ -44,6 +44,7 @@ import type {
 
 import { unresolvedLegs, type RouteDraft } from '../routing/draft';
 import { plannedShape, type PlannedElevation } from '../routing/elevation';
+import { draftIsLoop } from '../routing/loop';
 import { routeShare, ROUTE_SHARE_FAULT_TEXT } from './share';
 
 /** The longest name a route may carry. Long enough for a real one, short enough for a list row. */
@@ -240,6 +241,12 @@ export const FLAT_DRAWN_ROUTE_TEXT =
  * asked; zero everywhere is the honest floor, `elevation` is left absent so
  * the record does not claim a dataset (`RouteRecord.elevation`'s rule), and
  * the rider is told ({@link FLAT_DRAWN_ROUTE_TEXT}).
+ *
+ * ⚠️ **A drawn line that ends where it starts is saved as a loop** (#2102):
+ * `routing/loop.ts` §`draftIsLoop`, the test a lap race's course passes. The
+ * planner says so before the save, which is what keeps it from being the silent
+ * inference `import-form.ts` refuses for an import. The elevation path carries
+ * it already: `planElevation` builds its profile with the same test.
  */
 export function routeFromDraft(draft: RouteDraft, options: DraftSaveOptions): SaveOutcome {
   const nameFault = checkName(options.name);
@@ -267,6 +274,7 @@ export function routeFromDraft(draft: RouteDraft, options: DraftSaveOptions): Sa
     if (options.elevation === undefined) {
       profile = routeProfile(
         plannedShape(draft).map((position) => ({ position, elevation: altitudeMetres(0) })),
+        { loop: draftIsLoop(draft) },
       );
     } else {
       profile = options.elevation.profile;
