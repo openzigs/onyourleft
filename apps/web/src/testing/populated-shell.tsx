@@ -840,18 +840,32 @@ export function PopulatedShell({
       instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,
-        rides.map((activity) => ({
-          activity: {
-            ...activity,
-            effortWeightedPower: watts(210),
-            loadCoveredTime: seconds(3600),
-          },
-          // #2069: the populated ride's own streams, so its page and Analysis
-          // both draw its time in zone (the reflow and look walks lay it out).
-          ...(activity.id === RIDE_ID
-            ? { power: POPULATED_POWER, heartRate: POPULATED_HEART_RATE }
-            : {}),
-        })),
+        rides.map((activity) =>
+          activity.id === RIDE_ID
+            ? {
+                // #2069: the populated ride's own streams, so its page and
+                // Analysis both draw its time in zone (the reflow and look
+                // walks lay it out). At 21 s a sample they cover the whole of
+                // its 10:23:45 moving time, which Home's walk holds on one
+                // line: a ride whose sensors went quiet is
+                // `AnalysisView.test.tsx`'s case, not the walk's.
+                activity: {
+                  ...activity,
+                  effortWeightedPower: watts(210),
+                  loadCoveredTime: seconds(3600),
+                },
+                power: POPULATED_POWER,
+                heartRate: POPULATED_HEART_RATE,
+                sampleInterval: 21,
+              }
+            : {
+                activity: {
+                  ...activity,
+                  effortWeightedPower: watts(210),
+                  loadCoveredTime: seconds(3600),
+                },
+              },
+        ),
       )}
       segments={stubSegments(
         ATHLETE,

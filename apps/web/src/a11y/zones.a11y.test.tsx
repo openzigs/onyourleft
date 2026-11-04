@@ -194,7 +194,9 @@ const FIXTURES: Readonly<Record<string, () => JSX.Element>> = {
   // #2069: a ride through every power zone, a minute in each.
   'analysis/ZoneChart.tsx': () => {
     const zones = powerZones(watts(200));
-    const samples = zones.map((zone) => zone.lower + 1).flatMap((value) => Array(60).fill(value));
+    const samples = zones.flatMap((zone) =>
+      Array.from({ length: 60 }, (): number => zone.lower + 1),
+    );
     return (
       <ZoneChart
         rows={zoneRows(zones, timeInZones(zones, samples, seconds(1)), 'W')}
