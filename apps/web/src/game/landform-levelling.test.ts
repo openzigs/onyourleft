@@ -476,7 +476,11 @@ describe('unchanged where nothing is mapped — #1547', () => {
   it('builds main’s ground to the bit with NO_LAND_CLASS, on every fixture', () => {
     // ⚠️ Taken on `main` at 515a2b5c, before a line of #1547: `landform.ts`
     // there, with this file's own fixtures and digest. A digest taken after
-    // the change would describe it rather than guard against it.
+    // the change would describe it rather than guard against it. ⚠️ Except
+    // five, re-taken by #2096, which tapers a fold back out on purpose: the
+    // circuit's three (a fold at the seam between two-metre and grid rows) and
+    // the planner's first two. That change moved no line of the levelling, and
+    // every fixture without a fold is still main's digest from 515a2b5c.
     expect(everyFixtureDigest(NO_LAND_CLASS)).toStrictEqual(MAIN_DIGESTS);
   });
 
@@ -653,13 +657,13 @@ const MAIN_DIGESTS: readonly string[] = [
   'steady climb 0 8cfac12c',
   'steady climb 650 248e737d',
   'steady climb 1200 1627e29d',
-  'circuit 0 f110d38a',
-  'circuit 650 ad448b06',
-  'circuit 1200 76ca3877',
+  'circuit 0 33448aa1',
+  'circuit 650 63159ea7',
+  'circuit 1200 1b5bc7ae',
   'hairpin 0 e8d96393',
   'hairpin 650 9a0efc7',
   'hairpin 1200 e55a5825',
-  'planner 0 61325c60',
-  'planner 650 4d982d35',
+  'planner 0 98afcae4',
+  'planner 650 580b6608',
   'planner 1200 490487f8',
 ];

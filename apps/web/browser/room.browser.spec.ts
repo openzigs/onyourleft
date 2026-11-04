@@ -34,7 +34,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
-import type { RoomHarness, RoomSample } from './room-harness';
+import type { LapSample, RoomHarness, RoomSample } from './room-harness';
 
 interface RoomGateInstance {
   readonly origin: string;
@@ -50,6 +50,7 @@ interface RoomGateEdge {
 interface RoomGateTesting {
   startRoomGateInstance(): Promise<RoomGateInstance>;
   startRoomGateInstanceBehindEdge(): Promise<RoomGateInstance & { readonly edge: RoomGateEdge }>;
+  startLapRaceGateInstanceBehindEdge(): Promise<RoomGateInstance & { readonly edge: RoomGateEdge }>;
 }
 
 const ROOM_GATE_TESTING = new URL('../../instance/src/room/room-gate-testing.ts', import.meta.url)
@@ -313,6 +314,67 @@ test.describe('a group ride made, shared by its code, joined and ridden — #784
     expect(await seesAnotherMove(friend, 2.5)).toBe(true);
 
     for (const page of [maker, friend, control]) {
+      await page.evaluate(() => {
+        (window.__oylRoom as RoomHarness).leave();
+      });
+      await page.context().close();
+    }
+  });
+});
+
+test.describe('a lap race in a room, through an edge restart — #1911', () => {
+  // An instance of its own, as the describes above: three registrations an address an hour.
+  let racing: RoomGateInstance & { readonly edge: RoomGateEdge };
+  test.beforeAll(async () => {
+    const testing = (await import(ROOM_GATE_TESTING)) as RoomGateTesting;
+    racing = await testing.startLapRaceGateInstanceBehindEdge();
+  });
+  test.afterAll(async () => {
+    await racing.close();
+  });
+
+  const lap = (page: Page): Promise<LapSample | undefined> =>
+    page.evaluate(() => (window.__oylRoom as RoomHarness).lap());
+
+  test('the rider is seen lost, comes back on their own, and the ROOM gives back their item and lane', async ({
+    browser,
+  }) => {
+    const pages = [
+      await rider(browser, 'Ivy', true, racing),
+      await rider(browser, 'Jo', true, racing),
+    ] as const;
+    const [ivy] = pages;
+    await expect
+      .poll(async () => (await Promise.all(pages.map(sample))).map((s) => s.status), {
+        timeout: 15_000,
+      })
+      .toEqual(['joined', 'joined']);
+    // A seated rider starts the race; it has no countdown.
+    expect(await ivy.evaluate(() => (window.__oylRoom as RoomHarness).start())).toBe('started');
+    // A quarter of the 40 m loop in, Ivy picks an item up: the room's frame says so.
+    await expect
+      .poll(async () => (await lap(ivy))?.held ?? 'none', { timeout: 20_000 })
+      .not.toBe('none');
+    // She steers left, an input the room takes into its next frame.
+    expect(await ivy.evaluate(() => (window.__oylRoom as RoomHarness).changeLane(0))).toBeDefined();
+    await expect.poll(async () => (await lap(ivy))?.lane, { timeout: 10_000 }).toBe(0);
+    const before = await lap(ivy);
+
+    // The edge restarts mid-race: every socket through it closes.
+    expect(racing.edge.restart(3_000)).toBe(2);
+    await expect.poll(async () => (await sample(ivy)).status, { timeout: 3_000 }).toBe('lost');
+    // Back on her own, through a fresh socket, to her own seat …
+    await expect.poll(async () => (await sample(ivy)).status, { timeout: 30_000 }).toBe('joined');
+    // … where the slots this client kept were forgotten on the welcome (`room-session.ts`),
+    // so what it reads now is the room's next frame: the same item, the same lane.
+    await expect
+      .poll(() => lap(ivy), { timeout: 10_000 })
+      .toMatchObject({
+        held: before?.held,
+        lane: 0,
+      });
+    // No lane was asked for since: the lane is the one the room kept.
+    for (const page of pages) {
       await page.evaluate(() => {
         (window.__oylRoom as RoomHarness).leave();
       });

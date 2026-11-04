@@ -77,9 +77,53 @@
  *   refuses them a ticket from then on (`room_removal`, migration 0031).
  * - **What a flag does** is the adapter's to hand on: a flagged duration in
  *   the view becomes a report the room files (`node/room-host.ts`).
+ *
+ * ## A lap race with items — #1909, ADR 0060
+ *
+ * A race whose settings carry `lapRace` runs `@onyourleft/domain`'s lap race
+ * (#1897, #1899) — the same `stepRace` the device predicts with — and its
+ * answer is the one that counts (ADR 0028 D-2 rule 4):
+ *
+ * - **Effort distance is the re-simulation's**, unchanged: every rider is
+ *   still ridden at reported power through the one physics, and the grade is
+ *   read at their effort distance round the lap. Drafting reads it too (ADR
+ *   0060 D-5.3). A frame's `decimetres` is the effort distance and never the
+ *   drawn one, so a race offset can never reach a client's correction, and so
+ *   never the grade it reads (D-5.4).
+ * - **Items, lanes, offsets, laps and the finish are the race's**, stepped
+ *   once a tick on the room's own instants (`tick × frameIntervalMs`), from
+ *   the room's own seed. The field is fixed when the race starts.
+ * - **Inputs, never outcomes.** A seated rider may send `lane` and
+ *   `item-use`; each is admitted only past the last input sequence admitted
+ *   on that connection, and spent by the next tick. **One use a tick** is the
+ *   rate (ADR 0060 D-5.5: one item held at a time): the rest of a burst is
+ *   dropped and never queued, since a queued use would fire on the next
+ *   pick-up by itself. A use with nothing held changes nothing. The decoder has already refused any outcome
+ *   a client claimed (`outcome-from-client`, #1908).
+ * - **A dropped rider** is coasted at 0 W as any other (rule 1) and keeps
+ *   their lane, held item and offset through the rejoin window.
+ * - **Rules 2 and 3 are unchanged**: a rider is flagged, never stopped.
+ * - A frame carries each rider's offset, lane, held item and laps, and the
+ *   tick's item events: a rider id and an item key, never a place.
  */
 
-import { gradePercent, kilograms, seconds, type Kilograms, type Seconds } from '@onyourleft/domain';
+import {
+  createItemRace,
+  gradePercent,
+  ITEM_RULES,
+  kilograms,
+  raceCourse,
+  racePosition,
+  seconds,
+  standings as lapStandings,
+  stepRace,
+  type ItemKind,
+  type ItemRaceState,
+  type Kilograms,
+  type LapRacer,
+  type RaceCourse,
+  type Seconds,
+} from '@onyourleft/domain';
 import {
   advanceRider,
   declaredMassAdmissible,
@@ -98,8 +142,13 @@ import {
   FLAG_FINISHED,
   FLAG_PLAUSIBILITY,
   MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ITEM_EVENTS,
+  MAXIMUM_RACE_OFFSET_CENTIMETRES,
   MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   type FrameRider,
+  type ItemEvent,
+  type ItemUse,
+  type LaneChange,
   type RefuseReason,
   type Report,
   type RoomMessage,
@@ -201,6 +250,13 @@ export interface Room {
   view(): RoomView;
 }
 
+/** Which item slows a racer at this rate, by `ITEM_RULES`: a hit's item (#1909). */
+const SLOWING_ITEMS: ReadonlyMap<number, ItemKind> = new Map(
+  Object.entries(ITEM_RULES)
+    .filter(([, rule]) => rule.rateMetresPerSecond < 0)
+    .map(([kind, rule]) => [rule.rateMetresPerSecond, kind as ItemKind]),
+);
+
 /** A race's cut-off: how long after the first finisher the others have. */
 export const FINISH_CUT_OFF_TICKS = 30 * 60;
 
@@ -240,6 +296,12 @@ interface Seat {
    * two-hour race, a rider.
    */
   readonly history: number[];
+  /** A lap race's lane asked for since the last tick (#1909); spent by the tick. */
+  pendingLane: number | undefined;
+  /** Whether an `item-use` was admitted since the last tick: one a tick, spent by it. */
+  pendingUse: boolean;
+  /** The last lap-race input sequence admitted on this connection. */
+  lastInputSequence: number | undefined;
 }
 
 /**
@@ -261,6 +323,14 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   /** Athletes removed from this room (#789): never seated again. */
   const barred = new Set<string>();
   const tickDuration: Seconds = seconds(settings.frameIntervalMs / 1000);
+  const lap = settings.lapRace;
+  const lapCourse: RaceCourse | undefined =
+    lap === undefined ? undefined : raceCourse(settings.course.lengthMetres, lap.laps);
+  /** A lap race's race, from its first tick (#1909). */
+  let race: ItemRaceState | undefined;
+  let racers = new Map<string, LapRacer>();
+  /** The item events of the last tick, in the order they happened. */
+  let itemEvents: readonly ItemEvent[] = [];
 
   function refuseAndClose(connection: ConnectionId, reason: RefuseReason): Outbound[] {
     return [
@@ -305,6 +375,9 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
             reportIntervalMs: settings.reportIntervalMs,
             frameIntervalMs: settings.frameIntervalMs,
             drafting: settings.drafting ? 'on' : 'off',
+            ...(lap === undefined
+              ? {}
+              : { lapRace: { laps: lap.laps, items: lap.items ? 'on' : 'off' } }),
           },
         },
       },
@@ -327,6 +400,9 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     seat.clock = UNSET_CLIENT_CLOCK;
     seat.lastAdmittedSequence = undefined;
     seat.latest = undefined;
+    seat.lastInputSequence = undefined;
+    seat.pendingLane = undefined;
+    seat.pendingUse = false;
     byConnection.set(connection, seat);
     return [
       ...out,
@@ -401,6 +477,9 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       finishedAt: 0,
       lastPowerWatts: 0,
       history: [0],
+      pendingLane: undefined,
+      pendingUse: false,
+      lastInputSequence: undefined,
     };
     nextRiderId += 1;
     // #1347: everybody already in a race is told the new rider's name.
@@ -451,9 +530,52 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     }
   }
 
+  /**
+   * A lap race's input (#1909): admitted past the last input sequence on this
+   * connection, a lane and a use kept for the next tick, and one use a tick
+   * at most. Nothing before the race runs, nothing
+   * in a race that is not a lap race, and no use with items off.
+   */
+  function lapInput(seat: Seat, message: ItemUse | LaneChange): void {
+    if (lap === undefined || race === undefined) return;
+    if (seat.lastInputSequence !== undefined && message.sequence <= seat.lastInputSequence) return;
+    if (message.type === 'item-use') {
+      if (!lap.items || seat.pendingUse) return;
+      seat.pendingUse = true;
+    } else {
+      seat.pendingLane = message.lane;
+    }
+    seat.lastInputSequence = message.sequence;
+  }
+
+  function racerId(seat: Seat): string {
+    return String(seat.riderId);
+  }
+
+  /** This seat's racer in the lap race, if it is one and the race has begun. */
+  function racerOf(seat: Seat): LapRacer | undefined {
+    return racers.get(racerId(seat));
+  }
+
+  /** The race, and its racers by id for {@link racerOf}: every write to `race` goes through here. */
+  function setRace(next: ItemRaceState): void {
+    race = next;
+    racers = new Map(next.racers.map((entry) => [entry.racer.id, entry]));
+  }
+
+  /**
+   * Where a race ranks and times a rider: a lap race's drawn distance (ADR
+   * 0060 D-3.3), and otherwise the distance the room rode them.
+   */
+  function position(seat: Seat): number {
+    const entry = racerOf(seat);
+    return entry === undefined ? seat.ride.distance : racePosition(entry.racer);
+  }
+
   function frameRider(seat: Seat): FrameRider {
     const decimetres = Math.floor(seat.ride.distance * 10);
     const centimetres = Math.round(seat.ride.speed * 100);
+    const entry = racerOf(seat);
     return {
       riderId: seat.riderId,
       decimetres: decimetres > MAXIMUM_FRAME_DECIMETRES ? MAXIMUM_FRAME_DECIMETRES : decimetres,
@@ -463,6 +585,23 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
           : centimetres,
       draftPercent: Math.round((1 - seat.draftFactor) * 100),
       flags: flagsOf(seat),
+      ...(entry === undefined ? {} : lapSlots(entry)),
+    };
+  }
+
+  /** A lap racer's four frame slots: the room's answer, each inside its wire bound. */
+  function lapSlots(
+    entry: LapRacer,
+  ): Pick<FrameRider, 'raceOffsetCentimetres' | 'lane' | 'held' | 'lapsDone'> {
+    const centimetres = Math.round(entry.racer.raceOffset * 100);
+    return {
+      raceOffsetCentimetres: Math.max(
+        -MAXIMUM_RACE_OFFSET_CENTIMETRES,
+        Math.min(MAXIMUM_RACE_OFFSET_CENTIMETRES, centimetres === 0 ? 0 : centimetres),
+      ),
+      lane: entry.lane,
+      held: entry.held ?? 'none',
+      lapsDone: entry.racer.lapsDone,
     };
   }
 
@@ -479,7 +618,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       seat.ride,
       {
         verdict,
-        grade: gradePercent(settings.course.gradePercentAt(before)),
+        // A lap race reads the grade round the lap, at the effort distance (ADR 0060 D-3.1).
+        grade: gradePercent(
+          settings.course.gradePercentAt(
+            lapCourse === undefined ? before : before % lapCourse.lapLengthMetres,
+          ),
+        ),
         duration: tickDuration,
       },
       seat.draftFactor === 1
@@ -490,7 +634,8 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     seat.ceilings.record(power);
     seat.lastPowerWatts = power;
     const line = settings.course.lengthMetres;
-    if (settings.kind === 'race') {
+    // A lap race's finish is the race's, at the drawn distance (`stepLapRace`).
+    if (settings.kind === 'race' && lap === undefined) {
       seat.history.push(seat.ride.distance);
       if (seat.ride.distance >= line) {
         seat.state = 'finished';
@@ -499,6 +644,101 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         finishers.push(seat);
       }
     }
+  }
+
+  /** A lap race's field on the line, fixed as the race starts (#1909). */
+  function startLapRace(): void {
+    if (lap === undefined || lapCourse === undefined || race !== undefined) return;
+    const field = seated().filter(onTheRoad);
+    if (field.length === 0) return;
+    setRace(
+      createItemRace({
+        course: lapCourse,
+        seed: lap.seed,
+        itemsOn: lap.items,
+        racerIds: field.map(racerId),
+        startMs: 0,
+      }),
+    );
+  }
+
+  /**
+   * One tick of the lap race, after every rider was ridden (#1909): each
+   * racer's effort distance from the re-simulation, the lanes and uses the
+   * riders asked for, on the room's instant. Then the riders the race
+   * finished, and the tick's item events.
+   */
+  function stepLapRace(): void {
+    if (race === undefined || lapCourse === undefined) return;
+    const atMs = tickNumber * settings.frameIntervalMs;
+    const effortDistances: Record<string, number> = {};
+    const lanes: Record<string, number> = {};
+    const uses: string[] = [];
+    const bySeat = new Map(seated().map((seat) => [racerId(seat), seat]));
+    for (const entry of race.racers) {
+      const seat = bySeat.get(entry.racer.id);
+      if (seat === undefined) continue;
+      effortDistances[entry.racer.id] = seat.ride.distance;
+      if (seat.state === 'connected') {
+        if (seat.pendingLane !== undefined) lanes[entry.racer.id] = seat.pendingLane;
+        if (seat.pendingUse) uses.push(entry.racer.id);
+      }
+      seat.pendingLane = undefined;
+      seat.pendingUse = false;
+    }
+    const before = race;
+    const after = stepRace(race, { atMs, effortDistances, lanes, uses });
+    setRace(after);
+    itemEvents = eventsOf(before, after, new Set(uses), atMs);
+    const line = lapCourse.lapLengthMetres * lapCourse.laps;
+    for (const entry of after.racers) {
+      const seat = bySeat.get(entry.racer.id);
+      if (seat === undefined || !onTheRoad(seat)) continue;
+      const was = seat.history.at(-1) ?? 0;
+      const now = racePosition(entry.racer);
+      seat.history.push(now);
+      if (entry.racer.finishedAtMs !== null) {
+        seat.state = 'finished';
+        // Where in this tick the drawn distance crossed the line, for the time gaps.
+        const share = now > was ? Math.min(1, Math.max(0, (line - was) / (now - was))) : 1;
+        seat.finishedAt = tickNumber - 1 + share;
+        finishers.push(seat);
+      }
+    }
+  }
+
+  /**
+   * What happened to items on a tick, read from the race before and after it:
+   * each use, then each hit, then each pick-up, each in id order. A hit is a
+   * slowing effect that starts on the tick; one a rain cape absorbed moves
+   * nobody and is not an event. At most `MAXIMUM_ITEM_EVENTS`.
+   */
+  function eventsOf(
+    before: ItemRaceState,
+    after: ItemRaceState,
+    uses: ReadonlySet<string>,
+    atMs: number,
+  ): readonly ItemEvent[] {
+    const used: ItemEvent[] = [];
+    const hits: ItemEvent[] = [];
+    const pickUps: ItemEvent[] = [];
+    after.racers.forEach((now, index) => {
+      const was = before.racers[index] as LapRacer;
+      const riderId = Number(now.racer.id);
+      const held = was.held;
+      const didUse = uses.has(now.racer.id) && held !== null && was.racer.finishedAtMs === null;
+      if (didUse) used.push({ riderId, event: 'use', item: held });
+      for (const effect of now.effects) {
+        const kind = SLOWING_ITEMS.get(effect.rateMetresPerSecond);
+        if (effect.fromMs === atMs && kind !== undefined) {
+          hits.push({ riderId, event: 'hit', item: kind });
+        }
+      }
+      if (now.held !== null && now.pickUpsPassed > was.pickUpsPassed && (held === null || didUse)) {
+        pickUps.push({ riderId, event: 'pick-up', item: now.held });
+      }
+    });
+    return [...used, ...hits, ...pickUps].slice(0, MAXIMUM_ITEM_EVENTS);
   }
 
   /**
@@ -549,21 +789,23 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     if (rider.state === 'finished' && to.state === 'finished') {
       return rider.finishedAt - to.finishedAt;
     }
-    const mine = to.ride.distance;
-    const theirs = rider.ride.distance;
+    const mine = position(to);
+    const theirs = position(rider);
     if (theirs < mine) return tickNumber - passedAt(to, theirs);
     if (theirs > mine) return -(tickNumber - passedAt(rider, mine));
     return 0;
   }
 
-  /** A race's field in the room's order: finishers by their finish, then by distance, furthest first. */
+  /**
+   * A race's field in the room's order: finishers by their finish, then by
+   * distance, furthest first — a lap race's drawn distance (#1909).
+   */
   function standingsOrder(): Seat[] {
-    const finished = [...finishers].sort(
-      (a, b) => a.finishedAt - b.finishedAt || a.riderId - b.riderId,
-    );
+    const byRider = new Map(finishers.map((seat) => [seat.riderId, seat]));
+    const finished = finishOrder().flatMap((riderId) => byRider.get(riderId) ?? []);
     const riding = seated()
       .filter(onTheRoad)
-      .sort((a, b) => b.ride.distance - a.ride.distance || a.riderId - b.riderId);
+      .sort((a, b) => position(b) - position(a) || a.riderId - b.riderId);
     return [...finished, ...riding];
   }
 
@@ -618,14 +860,25 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
             ? {}
             : { ackSequence: seat.lastAdmittedSequence }),
           riders,
+          ...(itemEvents.length === 0 ? {} : { itemEvents }),
         },
       });
     }
     return out;
   }
 
-  /** Finishers by where in their tick they crossed the line, then by rider id. */
+  /**
+   * Finishers by where in their tick they crossed the line, then by rider id —
+   * and in a lap race, by the race's own rule (`@onyourleft/domain`
+   * §`standings`: the finish instant, then the drawn distance at it).
+   */
   function finishOrder(): number[] {
+    if (race !== undefined) {
+      const finished = new Set(finishers.map(racerId));
+      return lapStandings(race.racers.map((entry) => entry.racer))
+        .filter((id) => finished.has(id))
+        .map(Number);
+    }
     return [...finishers]
       .sort((a, b) => a.finishedAt - b.finishedAt || a.riderId - b.riderId)
       .map((seat) => seat.riderId);
@@ -667,6 +920,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       if (seat === undefined) {
         return [{ kind: 'close', connection }];
       }
+      if (message.type !== 'report') {
+        // A lap race's inputs (#1909). In any other room they change nothing,
+        // and close nobody: a client on this build may send them.
+        if (seat.state === 'connected') lapInput(seat, message);
+        return [];
+      }
       if (seat.state === 'connected') {
         report(seat, message, nowMs);
       }
@@ -682,6 +941,8 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       }
       seat.connection = undefined;
       seat.latest = undefined;
+      seat.pendingLane = undefined;
+      seat.pendingUse = false;
       if (seat.state === 'connected') {
         if (phase === 'lobby' || (phase === 'countdown' && settings.kind === 'race')) {
           // Nobody has ridden yet: a race's lobby gives the seat back at once.
@@ -713,6 +974,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       expireHeldSeats(nowMs);
       if (phase === 'countdown' && nowMs >= startsAtMs) {
         phase = 'running';
+        startLapRace();
       }
       if (
         settings.kind === 'ride' &&
@@ -732,6 +994,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       for (const seat of seated()) {
         if (onTheRoad(seat)) ride(seat);
       }
+      stepLapRace();
       const out = frames();
       if (settings.kind === 'race') {
         out.push(...standings());

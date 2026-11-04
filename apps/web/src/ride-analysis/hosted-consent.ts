@@ -47,6 +47,10 @@
  * 4. **#1104 B1-a, after it**: *"Your instance deletes them when you withdraw
  *    or remove your key."* — the owner's ruling of 2026-10-26, which the
  *    instance carries out (`apps/instance` §`analysis/hosted-settings.ts`).
+ *    [#1935](https://github.com/openzigs/onyourleft/issues/1935), the owner's
+ *    ruling of 2026-11-03, makes it true where the operator's command also set
+ *    a key for the account: removing the rider's key then leaves a key that
+ *    serves it, so `clearKey` keeps the list and only withdrawing deletes it.
  *
  * It names no vendor and no model (ADR 0031 D-4): the service is named by the
  * address the rider typed.
@@ -116,7 +120,8 @@ export function hostedInstanceConsent(endpoint: string): HostedInstanceConsent {
         'privacy zones — their names, where they are and how large — when you agree, and again ' +
         'each time you ask for a ride analysis by this service. They are sealed on the way, and ' +
         'your instance keeps them with your account. Your instance deletes them when you ' +
-        'withdraw or remove your key.',
+        'withdraw your agreement. It also deletes them when you remove your key, unless the ' +
+        "operator's command set a key for your account: then they stay until you withdraw.",
       `Your key is held by your instance, encrypted, and is sent only to ${endpoint}. It is never ` +
         'sent back to this device and is never put in a file the app or your instance exports. ' +
         HOSTED_KEY_OPERATOR_CAN_READ,

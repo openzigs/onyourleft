@@ -1399,15 +1399,126 @@ const UNTAGGED_ROWS: readonly UntaggedRow[] = [
       ],
     ],
   },
+  // #2024: a barn's footprint behind a house, but in the village: no barn.
+  {
+    row: 'barn-in-village',
+    subject: { corners: rectangleBeside(0, 70, 12, 15) },
+    others: [FRONT_HOUSE],
+  },
 ];
 
 /** The along-road spacing of {@link untaggedStreetFixture}'s rows, metres: no row's house is within 40 m of the next's footprints. */
 const UNTAGGED_ROW_METRES = 60;
 
+/** #2024's rows, on the rural stretch beyond the village, in order along the road. */
+const RURAL_ROWS: readonly UntaggedRow[] = [
+  // 12 by 15 m, 180 m², 62.5 m back, behind a farmhouse: a barn.
+  { row: 'barn', subject: { corners: rectangleBeside(0, 70, 12, 15) }, others: [FRONT_HOUSE] },
+  // 20 by 16 m, 320 m², 52 m back: a pole building.
+  {
+    row: 'pole-building',
+    subject: { corners: rectangleBeside(0, 60, 20, 16) },
+    others: [FRONT_HOUSE],
+  },
+  // 32.5 m back: too near the street.
+  {
+    row: 'barn-near-street',
+    subject: { corners: rectangleBeside(0, 40, 12, 15) },
+    others: [FRONT_HOUSE],
+  },
+  // No house within 80 m.
+  { row: 'barn-alone', subject: { corners: rectangleBeside(0, 70, 12, 15) }, others: [] },
+  // In front of the farmhouse, which stands farther back — mapped, or it would be a barn itself.
+  {
+    row: 'barn-in-front',
+    subject: { corners: rectangleBeside(0, 60, 12, 15) },
+    others: [{ corners: rectangleBeside(0, 100, 12, 9), buildingType: 'house' }],
+  },
+  // 9 by 10 m, 90 m²: too small.
+  {
+    row: 'barn-small',
+    subject: { corners: rectangleBeside(0, 70, 9, 10) },
+    others: [FRONT_HOUSE],
+  },
+  // An L in a 12 by 15 m rectangle, rectangularity 0.75: too ragged.
+  {
+    row: 'barn-ragged',
+    subject: {
+      corners: [
+        [-6, 62.5],
+        [6, 62.5],
+        [6, 70],
+        [0, 70],
+        [0, 77.5],
+        [-6, 77.5],
+      ],
+    },
+    others: [FRONT_HOUSE],
+  },
+  // A barn's footprint mapped as a house: the mapped type wins.
+  {
+    row: 'mapped-barnlike-house',
+    subject: { corners: rectangleBeside(0, 70, 12, 15), buildingType: 'house' },
+    others: [FRONT_HOUSE],
+  },
+];
+
+/**
+ * #2026's rows, on the main street before the village, in order along the
+ * road: the road is mapped a tertiary street from 350 m to 620 m, and a
+ * residential one past it.
+ */
+const COMMERCIAL_ROWS: readonly UntaggedRow[] = [
+  // 40 by 30 m, 1 200 m², 25 m from the main street: commercial.
+  { row: 'commercial', subject: { corners: rectangleBeside(0, 40, 40, 30) }, others: [] },
+  // 40 by 25 m, 1 000 m²: commercial.
+  {
+    row: 'commercial-at-1000',
+    subject: { corners: rectangleBeside(0, 40, 40, 25) },
+    others: [],
+  },
+  // 36 by 25 m, 900 m²: too small.
+  {
+    row: 'commercial-small',
+    subject: { corners: rectangleBeside(0, 40, 36, 25) },
+    others: [],
+  },
+  // A shop's footprint mapped as a house: the mapped type wins.
+  {
+    row: 'commercial-mapped-house',
+    subject: { corners: rectangleBeside(0, 40, 40, 30), buildingType: 'house' },
+    others: [],
+  },
+  // 50 by 20 m, 60 m back from the main street: too far from it.
+  { row: 'commercial-far', subject: { corners: rectangleBeside(0, 70, 50, 20) }, others: [] },
+  // Past the main street's end, beside the residential street alone: no shop.
+  {
+    row: 'commercial-off-main',
+    subject: { corners: rectangleBeside(0, 40, 40, 30) },
+    others: [],
+  },
+];
+
+/** Where {@link COMMERCIAL_ROWS} start along the road, metres, and their spacing; the last stands past the main street. */
+const COMMERCIAL_FROM_METRES = 400;
+const COMMERCIAL_ROW_METRES = 60;
+/** Where the main street ends and the residential street starts, metres. */
+const MAIN_STREET_END_METRES = 620;
+
+/** Where {@link RURAL_ROWS} start along the road, metres, and their spacing: no row's house is within 80 m of the next's footprints. */
+const RURAL_FROM_METRES = 2_150;
+const RURAL_ROW_METRES = 100;
+
 /**
  * #2023's fixture: a street of untagged footprints the inference rules are
- * asked about, for the owner's look pair (`?town=untagged` against
- * `levers=-inferred-outbuildings`) and for the plans to be asserted over.
+ * asked about, for the owner's look pairs (`?town=untagged` against
+ * `levers=-inferred-outbuildings`, since #2024 `levers=-inferred-barns` and
+ * since #2026 `levers=-inferred-commercial`) and for the plans to be asserted
+ * over. Since #2026 it opens with a main street, the road mapped a tertiary
+ * street from 350 m to 620 m on residential land, and #2026's rows every 60 m
+ * from 400 m: a 1 200 m² and a 1 000 m² footprint the rule calls commercial,
+ * and a 900 m² one, one mapped as a house, one 60 m back and one past the
+ * main street's end, which it must not.
  * Along a level road from 1 000 m, a row every 60 m, mirrored on both sides,
  * every footprint on residential land, and the road mapped as a residential
  * street down its middle: in most rows a house 12 m by 9 m, its front 17.5 m
@@ -1416,7 +1527,13 @@ const UNTAGGED_ROW_METRES = 60;
  * beside the house nearer the street, one in front of a house, one with no
  * house within 40 m, one too long, one too ragged, one too big, two mapped as
  * houses, one behind a hall and one behind a shop; a three-car garage, two
- * garages side by side, and a garage beside a driveway (a service road). `rows` names each
+ * garages side by side, and a garage beside a driveway (a service road); and
+ * since #2024 a barn's footprint behind a village house. Beyond the village,
+ * from 2 150 m on land no polygon covers, a rural stretch of #2024's rows a
+ * farmhouse and a footprint behind it every 100 m: a barn, a pole building,
+ * and the footprints no rule may call — one too near the street, one with no
+ * house within 80 m, one in front of its house, one too small, one too ragged
+ * and one mapped as a house. `rows` names each
  * footprint of the corridor, in its order, and `subjects` says which are the
  * row's subject. Nothing here is a real place, and every type is synthetic.
  */
@@ -1434,23 +1551,42 @@ export function untaggedStreetFixture(latitude = FIXTURE_LATITUDE): {
   const subjects: boolean[] = [];
   const streets: StreetFeature[] = [];
   const end = 1_000 + UNTAGGED_ROWS.length * UNTAGGED_ROW_METRES;
+  const ruralEnd = RURAL_FROM_METRES + RURAL_ROWS.length * RURAL_ROW_METRES;
   const street = (
     kindDetail: string,
     pairs: readonly (readonly [number, number])[],
+    kind = 'minor_road',
   ): StreetFeature => ({
-    kind: 'minor_road',
+    kind,
     kindDetail,
     grade: 'ground',
     line: ringBeside(profile, origin, pairs),
   });
   streets.push(
+    // #2026: a tertiary main street, then the residential street.
+    street(
+      'tertiary',
+      [
+        [350, 0],
+        [MAIN_STREET_END_METRES, 0],
+      ],
+      'major_road',
+    ),
     street('residential', [
-      [950, 0],
-      [end, 0],
+      [MAIN_STREET_END_METRES, 0],
+      [ruralEnd, 0],
     ]),
   );
-  UNTAGGED_ROWS.forEach((each, index) => {
-    const along = 1_000 + index * UNTAGGED_ROW_METRES;
+  const placed: (readonly [UntaggedRow, number])[] = [
+    ...COMMERCIAL_ROWS.map(
+      (each, index) => [each, COMMERCIAL_FROM_METRES + index * COMMERCIAL_ROW_METRES] as const,
+    ),
+    ...UNTAGGED_ROWS.map((each, index) => [each, 1_000 + index * UNTAGGED_ROW_METRES] as const),
+    ...RURAL_ROWS.map(
+      (each, index) => [each, RURAL_FROM_METRES + index * RURAL_ROW_METRES] as const,
+    ),
+  ];
+  placed.forEach(([each, along]) => {
     for (const side of [1, -1]) {
       for (const [at, footprint] of [each.subject, ...each.others].entries()) {
         const ring = footprint.corners.map(([a, n]) => [along + a, side * n] as const);
@@ -1479,7 +1615,7 @@ export function untaggedStreetFixture(latitude = FIXTURE_LATITUDE): {
       origin,
       covered: () => true,
       coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
-      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, end, -80, 80)],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 350, end, -80, 80)],
       buildings,
       paths: [],
       streets,
