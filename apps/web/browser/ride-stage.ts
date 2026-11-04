@@ -46,7 +46,7 @@ export const SUBPIXEL_TOLERANCE = 1;
 export const MINIMUM_TIER_RATIO = 1.5;
 
 /** `theme.css` §`--oyl-color-hud-surface`, as `getComputedStyle` spells it. */
-export const HUD_SURFACE = 'rgb(16, 22, 28)';
+export const HUD_SURFACE = 'rgb(16, 18, 21)';
 
 export interface Viewport {
   readonly name: string;

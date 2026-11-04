@@ -280,13 +280,13 @@ export const COLOUR_TOKENS = {
    * bright panel over a bright scene is what a rider reads at arm's length in
    * sunlight with a bloom around it.
    */
-  hudSurface: '#10161c',
+  hudSurface: '#101215',
   /** The numbers a rider is pacing to. Large, and the highest contrast here. */
-  hudInk: '#f5f8fa',
+  hudInk: '#f4f7f9',
   /** Field labels, which are read once and then found by position. */
-  hudInkMuted: '#a8b6c2',
+  hudInkMuted: '#9da3a8',
   /** The edge of a HUD control, per WCAG 2.2 SC 1.4.11. */
-  hudBorder: '#7b8b99',
+  hudBorder: '#787c82',
   /**
    * A reading that is **stale**, not zero.
    *
@@ -295,7 +295,7 @@ export const COLOUR_TOKENS = {
    * other half is that the value is replaced by a dash rather than tinted, so
    * the distinction survives for a rider who cannot see the tint at all.
    */
-  hudStaleInk: '#f0b45f',
+  hudStaleInk: '#f1af48',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -1269,28 +1269,28 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where: 'a metric on the ride HUD, over its own opaque panel (#94)',
   },
   {
     foreground: 'hudInkMuted',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 8.79, dark: 8.79 },
+    measured: { light: 7.36, dark: 7.36 },
     where: 'a field label on the ride HUD (#94)',
   },
   {
     foreground: 'hudBorder',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.2, dark: 5.2 },
+    measured: { light: 4.47, dark: 4.47 },
     where: 'the edge of a HUD control (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where:
       'the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)',
   },
@@ -1298,7 +1298,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'hudStaleInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 9.88, dark: 9.88 },
+    measured: { light: 9.8, dark: 9.8 },
     where: 'the mark on a HUD reading whose sensor has dropped (#94)',
   },
   {

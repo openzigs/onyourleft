@@ -1492,7 +1492,7 @@ test(`#1329 — the control — the rest of the disclosure above the list puts t
   expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
 });
 
-/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+/** `rgb(16, 18, 21)` → `#101215`, for {@link contrastRatio}. */
 function hexOf(rgb: string): string {
   const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
   if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
