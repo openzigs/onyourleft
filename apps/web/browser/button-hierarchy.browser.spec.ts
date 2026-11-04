@@ -222,10 +222,69 @@ for (const theme of THEMES) {
         await secondary.hover();
         await page.waitForTimeout(TRANSITION_WAIT_MS);
         const read = await painted(secondary);
-        expectToken(read.color, 'accent', 'without the rule, the label');
+        expectToken(read.color, 'accentText', 'without the rule, the label');
         expectToken(read.background, 'accentHover', 'without the rule, the fill');
-        expect(contrastRatio(colours.accent, colours.accentHover)).toBeLessThan(AA_TEXT);
-        expect(declared('accent', 'accentHover', AA_TEXT)).toBe(false);
+        expect(contrastRatio(colours.accentText, colours.accentHover)).toBeLessThan(AA_TEXT);
+        expect(declared('accentText', 'accentHover', AA_TEXT)).toBe(false);
+      });
+    });
+
+    /*
+     * #2118, ADR 0063 D-1: the accent is two tokens, a FILL (`accent`) and a
+     * TEXT token (`accentText`). In dark they hold one value and in light two,
+     * so a read that only compared colours could pass in dark with the label
+     * reading the fill. The read therefore also moves the fill to a value
+     * neither palette uses, and requires the label to stay where it was.
+     */
+    test.describe('#2118 — the fill and the label are two tokens', () => {
+      test.use({ viewport: { width: 1280, height: 800 } });
+
+      /** A value no palette paints, so whatever follows it is unmistakable. */
+      const STRANGER = '#ff00ff';
+      const STRANGER_RGB = 'rgb(255, 0, 255)';
+
+      async function moveTheFill(page: Page): Promise<void> {
+        await page.evaluate((value) => {
+          document.documentElement.style.setProperty('--oyl-color-accent', value);
+        }, STRANGER);
+        // The primary eases its fill over `--oyl-motion-short`.
+        await page.waitForTimeout(TRANSITION_WAIT_MS);
+      }
+
+      test('a primary is filled with `accent`, and a secondary’s label is `accentText`', async ({
+        page,
+      }) => {
+        await open(page);
+        expectToken(
+          (await painted(kind(page, 'primary'))).background,
+          'accent',
+          'a primary, its fill',
+        );
+        expectToken(
+          (await painted(kind(page, 'secondary'))).color,
+          'accentText',
+          'a secondary, its label',
+        );
+        await moveTheFill(page);
+        expect((await painted(kind(page, 'primary'))).background).toBe(STRANGER_RGB);
+        expectToken(
+          (await painted(kind(page, 'secondary'))).color,
+          'accentText',
+          'a secondary, its label, with the fill moved',
+        );
+      });
+
+      test('the control — a label pointed back at `accent` follows the fill, and the read sees it', async ({
+        page,
+      }) => {
+        await open(page);
+        await page.addStyleTag({
+          content: '.oyl-button--secondary { color: var(--oyl-color-accent); }',
+        });
+        await moveTheFill(page);
+        const label = (await painted(kind(page, 'secondary'))).color;
+        expect(label).toBe(STRANGER_RGB);
+        expect(label).not.toBe(rgbOf('accentText'));
       });
     });
 
@@ -241,7 +300,7 @@ for (const theme of THEMES) {
           link.evaluate((element) => getComputedStyle(element).textDecorationLine);
         expectLabelPair(
           await painted(link),
-          { fg: 'accent', bg: 'surfaceOverlay' },
+          { fg: 'accentText', bg: 'surfaceOverlay' },
           'a button-link',
         );
         expect(await decoration()).toBe('none');
@@ -264,8 +323,8 @@ for (const theme of THEMES) {
         Record<Exclude<(typeof KINDS)[number], 'tertiary'>, { fg: ColourToken; bg: ColourToken }>
       > = {
         primary: { fg: 'accentInk', bg: 'accent' },
-        secondary: { fg: 'accent', bg: 'surfaceOverlay' },
-        'toggle-off': { fg: 'accent', bg: 'surfaceOverlay' },
+        secondary: { fg: 'accentText', bg: 'surfaceOverlay' },
+        'toggle-off': { fg: 'accentText', bg: 'surfaceOverlay' },
         'toggle-on': { fg: 'accentHover', bg: 'selected' },
         'primary-disabled': { fg: 'inkMuted', bg: 'surface' },
         'secondary-disabled': { fg: 'inkMuted', bg: 'surface' },
@@ -299,7 +358,10 @@ for (const theme of THEMES) {
         // A tonal secondary's edge is its own fill: no outline in another colour.
         expect(secondary.border).toBe(secondary.background);
         expect(off.border).toBe(off.background);
-        expect(primary.border).toBe(primary.background);
+        // #2118: the primary's 2 px edge is a thin line, so it is `accentText`,
+        // and its fill `accent` — one value in dark, two in light.
+        expectToken(primary.border, 'accentText', 'a primary, its edge');
+        expectToken(primary.background, 'accent', 'a primary, its fill');
         // And the three kinds are three fills: none of them is the page.
         const pageFill = rgbOf('canvas');
         expect(new Set([primary.background, secondary.background, pageFill]).size).toBe(3);
@@ -324,11 +386,11 @@ for (const theme of THEMES) {
         const atRest = await read();
         expect(atRest.background, 'a tertiary has a fill').toBe('rgba(0, 0, 0, 0)');
         expect(atRest.border, 'a tertiary has an edge').toBe('rgba(0, 0, 0, 0)');
-        expectToken(atRest.color, 'accent', 'a tertiary, its label');
+        expectToken(atRest.color, 'accentText', 'a tertiary, its label');
         expect(atRest.underline).toBe('underline');
         expect(atRest.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
         // Its label stands on the page behind it, and that is a declared pair.
-        expect(declared('accent', 'canvas', AA_TEXT)).toBe(true);
+        expect(declared('accentText', 'canvas', AA_TEXT)).toBe(true);
         await tertiary.hover();
         await page.waitForTimeout(TRANSITION_WAIT_MS);
         const hovered = await read();
@@ -381,7 +443,7 @@ for (const theme of THEMES) {
         // The doubled border: an inset ring inside the 2 px border, in the accent.
         expect(off.shadow).toBe('none');
         expect(on.shadow).toMatch(/inset/);
-        expect(on.shadow).toContain(rgbOf('accent'));
+        expect(on.shadow).toContain(rgbOf('accentText'));
         expect(on.shadow).toMatch(/0px 0px 0px 2px/);
         expect(await kind(page, 'toggle-on').getAttribute('aria-pressed')).toBe('true');
         expect(await kind(page, 'toggle-off').getAttribute('aria-pressed')).toBe('false');
@@ -417,10 +479,12 @@ for (const theme of THEMES) {
         const checked = await painted(segment(page, 'Miles'));
         const unchecked = await painted(segment(page, 'Kilometres'));
         expectLabelPair(checked, { fg: 'accentHover', bg: 'selected' }, 'the checked segment');
-        expectLabelPair(unchecked, { fg: 'accent', bg: 'canvas' }, 'an unchecked segment');
+        expectLabelPair(unchecked, { fg: 'accentText', bg: 'canvas' }, 'an unchecked segment');
         expect(unchecked.shadow).toBe('none');
         expect(checked.shadow).toMatch(/inset/);
-        expect(checked.shadow).toContain(rgbOf('accent'));
+        expect(checked.shadow).toContain(rgbOf('accentText'));
+        expect(declared('accentText', 'selected', 3)).toBe(true);
+        // #2118: the radio is a FILL (`accent-color`) on the segment's fill.
         expect(declared('accent', 'selected', 3)).toBe(true);
         // The radio itself: checked, drawn in the accent, on the segment's fill.
         const radio = segment(page, 'Miles').locator('input');
