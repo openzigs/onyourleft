@@ -859,7 +859,7 @@ for (const scheme of ['light', 'dark'] as const) {
     // The apparatus: the two schemes paint two different surfaces, so the
     // dark case is not the light one measured twice.
     expect(notice.background, note).toBe(
-      scheme === 'dark' ? 'rgb(51, 40, 15)' : 'rgb(251, 239, 218)',
+      scheme === 'dark' ? 'rgb(53, 38, 13)' : 'rgb(249, 235, 211)',
     );
     expect(sentence, note).toBeGreaterThanOrEqual(AA_TEXT);
     expect(label, note).toBeGreaterThanOrEqual(AA_TEXT);
@@ -1634,7 +1634,7 @@ test.describe(`#1329 — the trainer card, trimmed — ${TABLET_IN_THE_SHELL.nam
       console.log(`#1329 — the range sentence — ${note}`);
       // The apparatus: the two schemes are two palettes, and what is painted
       // behind the sentence is the trainer group's own background in each.
-      expect(hint.background).toBe(scheme === 'dark' ? 'rgb(18, 24, 22)' : 'rgb(255, 255, 255)');
+      expect(hint.background).toBe(scheme === 'dark' ? 'rgb(16, 18, 21)' : 'rgb(255, 255, 255)');
       expect(ratio, note).toBeGreaterThanOrEqual(AA_TEXT);
     });
   }
@@ -3138,9 +3138,9 @@ test('the running workout’s graph in the dark theme: the frame, the numbers an
   expect(seen.theme).toBe('dark');
   expectGraphLaidOut(seen, TABLET);
   // `tokens.ts` §DARK_COLOUR_TOKENS: surface, ink, inkMuted, accent, surfaceRaised.
-  const SURFACE = 'rgb(25, 32, 31)';
-  const INK = 'rgb(228, 235, 233)';
-  const INK_MUTED = 'rgb(169, 183, 181)';
+  const SURFACE = 'rgb(36, 39, 41)';
+  const INK = 'rgb(237, 238, 241)';
+  const INK_MUTED = 'rgb(179, 183, 186)';
   expect(seen.frameBackground).toBe(SURFACE);
   expect(seen.readingColour).toBe(INK);
   const paints = new Map(
@@ -3151,8 +3151,8 @@ test('the running workout’s graph in the dark theme: the frame, the numbers an
   expect(paints.get('oyl-workout-graph__target-edge')).toBe(INK);
   expect(paints.get('oyl-workout-graph__range-edge')).toBe(INK_MUTED);
   expect(paints.get('oyl-workout-graph__done')).toBe(INK_MUTED);
-  expect(paints.get('oyl-workout-graph__power')).toBe('rgb(108, 201, 189)');
-  expect(paints.get('oyl-workout-graph__range')).toBe('rgb(34, 42, 41)');
+  expect(paints.get('oyl-workout-graph__power')).toBe('rgb(175, 241, 60)');
+  expect(paints.get('oyl-workout-graph__range')).toBe('rgb(51, 54, 57)');
   for (const chip of seen.lanes.flatMap((lane) => lane.chips)) {
     expect(chip.colour, chip.text).toBe(INK_MUTED);
   }

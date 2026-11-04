@@ -156,8 +156,8 @@ const CHROME_AREA_BEFORE_944: Readonly<Record<(typeof VIEWPORTS)[number]['name']
  */
 const MINIMUM_HEADING_CLEARANCE = 16;
 
-/** `#dde0df`, elevation 3 in `design/tokens.ts`, as Chromium reports a colour. */
-const ELEVATION_3 = 'rgb(221, 224, 223)';
+/** `#cbcdd0`, elevation 3 in `design/tokens.ts`, as Chromium reports a colour. */
+const ELEVATION_3 = 'rgb(203, 205, 208)';
 
 async function openShell(page: Page): Promise<void> {
   await page.goto('/shell.html');
