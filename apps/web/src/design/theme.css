@@ -28,7 +28,22 @@
  * §LATIN_RANGES, so a character outside it is drawn in the system face rather
  * than as a missing glyph; `font-display: swap` draws the system face until
  * the file has loaded, rather than nothing.
+ *
+ * Three weights since #2040 (ADR 0063 D-5): 600 for the third heading and the
+ * labels, 700 for the numerals, 800 for the display step. A browser fetches a
+ * weight only when a rule asks for it.
  */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/barlow-latin-600.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @font-face {
   font-family: 'Barlow';
   font-style: normal;
@@ -63,67 +78,67 @@
      every gate this repository has, and a surface colour arrives inside the
      contrast suite that already exists. */
   --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #f2f5f4;
-  --oyl-color-surface-raised: #e7eae9;
-  --oyl-color-surface-overlay: #dde0df;
-  --oyl-color-border: #767e7e;
-  --oyl-color-ink: #141b1a;
-  --oyl-color-ink-muted: #4a5b5c;
-  --oyl-color-accent: #0b5c55;
-  --oyl-color-accent-hover: #07443f;
+  --oyl-color-surface: #ebeef0;
+  --oyl-color-surface-raised: #dbdde0;
+  --oyl-color-surface-overlay: #cbcdd0;
+  --oyl-color-border: #6a6c6e;
+  --oyl-color-ink: #131415;
+  --oyl-color-ink-muted: #515355;
+  --oyl-color-accent: #3e6100;
+  --oyl-color-accent-hover: #2c4300;
   --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #d4ebe7;
+  --oyl-color-selected: #cdf39c;
   /* A link in running text, one per state (#661) — see the `a` rules below. */
-  --oyl-color-link: #0b5c55;
-  --oyl-color-link-visited: #5b3a8c;
-  --oyl-color-link-hover: #07443f;
-  --oyl-color-link-active: #042e2a;
-  --oyl-color-focus: #141b1a;
+  --oyl-color-link: #3d5b00;
+  --oyl-color-link-visited: #5e3a91;
+  --oyl-color-link-hover: #2c4300;
+  --oyl-color-link-active: #1b2b00;
+  --oyl-color-focus: #131415;
 
   /* The ride HUD (#94). Opaque, so its contrast does not depend on the 3D
      scene behind it — `tokens.ts` records why that is the only way #94's
      contrast criterion is checkable. */
-  --oyl-color-hud-surface: #10161c;
-  --oyl-color-hud-ink: #f5f8fa;
-  --oyl-color-hud-ink-muted: #a8b6c2;
-  --oyl-color-hud-border: #7b8b99;
-  --oyl-color-hud-stale-ink: #f0b45f;
+  --oyl-color-hud-surface: #101215;
+  --oyl-color-hud-ink: #f4f7f9;
+  --oyl-color-hud-ink-muted: #9da3a8;
+  --oyl-color-hud-border: #787c82;
+  --oyl-color-hud-stale-ink: #f1af48;
 
-  --oyl-color-info-surface: #e3f0f4;
-  --oyl-color-info-ink: #0e4a57;
-  --oyl-color-info-border: #2c7288;
+  --oyl-color-info-surface: #dceeff;
+  --oyl-color-info-ink: #004876;
+  --oyl-color-info-border: #328bcd;
 
-  --oyl-color-success-surface: #e2f2e9;
-  --oyl-color-success-ink: #14513a;
-  --oyl-color-success-border: #2a7a58;
+  --oyl-color-success-surface: #dbf2df;
+  --oyl-color-success-ink: #005122;
+  --oyl-color-success-border: #3b9655;
 
-  --oyl-color-warning-surface: #fbefda;
-  --oyl-color-warning-ink: #654100;
-  --oyl-color-warning-border: #8a6212;
+  --oyl-color-warning-surface: #f9ebd3;
+  --oyl-color-warning-ink: #5d4000;
+  --oyl-color-warning-border: #ae7c00;
 
-  --oyl-color-danger-surface: #fbe8e8;
-  --oyl-color-danger-ink: #7a1d1d;
-  --oyl-color-danger-border: #a83232;
-  --oyl-color-danger-action: #9e2626;
+  --oyl-color-danger-surface: #ffe7e4;
+  --oyl-color-danger-ink: #792b29;
+  --oyl-color-danger-border: #cc6660;
+  --oyl-color-danger-action: #a21a21;
   --oyl-color-danger-action-ink: #ffffff;
 
   /* The illustration palette (#936) — decoration, painted only by art. What
      may be drawn OVER each is a pair in `tokens.ts` §CONTRAST_REQUIREMENTS. */
-  --oyl-color-illo-sky: #cfe4ef;
-  --oyl-color-illo-sun: #f4c65a;
-  --oyl-color-illo-hill-far: #a7d3a3;
-  --oyl-color-illo-hill-near: #7db678;
-  --oyl-color-illo-road: #6f726c;
+  --oyl-color-illo-sky: #c6d9f2;
+  --oyl-color-illo-sun: #e0c24b;
+  --oyl-color-illo-hill-far: #adcca7;
+  --oyl-color-illo-hill-near: #8fb686;
+  --oyl-color-illo-road: #91969c;
 
   /* The workout block chart's intensity bands (#1043), easiest first. Each
      is a pair against `surface` in `tokens.ts` §CONTRAST_REQUIREMENTS. */
-  --oyl-color-band-recovery: #5e8f88;
-  --oyl-color-band-endurance: #467f75;
-  --oyl-color-band-tempo: #336d61;
-  --oyl-color-band-threshold: #2e5878;
-  --oyl-color-band-vo2: #7a3622;
-  --oyl-color-band-anaerobic: #5e2537;
-  --oyl-color-band-sprint: #3d1d3a;
+  --oyl-color-band-recovery: #6c7278;
+  --oyl-color-band-endurance: #00468c;
+  --oyl-color-band-tempo: #007d30;
+  --oyl-color-band-threshold: #968200;
+  --oyl-color-band-vo2: #8f4c00;
+  --oyl-color-band-anaerobic: #820b0f;
+  --oyl-color-band-sprint: #7e439f;
 
   --oyl-space-xs: 0.25rem;
   --oyl-space-sm: 0.5rem;
@@ -244,55 +259,55 @@
   color-scheme: dark;
 
   /* The elevation ramp, darkest first: a raised surface is LIGHTER here. */
-  --oyl-color-canvas: #121816;
-  --oyl-color-surface: #19201f;
-  --oyl-color-surface-raised: #222a29;
-  --oyl-color-surface-overlay: #2b3433;
-  --oyl-color-border: #869391;
-  --oyl-color-ink: #e4ebe9;
-  --oyl-color-ink-muted: #a9b7b5;
-  --oyl-color-accent: #6cc9bd;
-  --oyl-color-accent-hover: #9ddcd3;
-  --oyl-color-accent-ink: #0d1f1c;
-  --oyl-color-selected: #1d4540;
-  --oyl-color-link: #6cc9bd;
-  --oyl-color-link-visited: #c4a8f0;
-  --oyl-color-link-hover: #9ddcd3;
-  --oyl-color-link-active: #c6ede7;
-  --oyl-color-focus: #e4ebe9;
+  --oyl-color-canvas: #101215;
+  --oyl-color-surface: #242729;
+  --oyl-color-surface-raised: #333639;
+  --oyl-color-surface-overlay: #414447;
+  --oyl-color-border: #93969a;
+  --oyl-color-ink: #edeef1;
+  --oyl-color-ink-muted: #b3b7ba;
+  --oyl-color-accent: #aff13c;
+  --oyl-color-accent-hover: #c7fd7b;
+  --oyl-color-accent-ink: #121809;
+  --oyl-color-selected: #304216;
+  --oyl-color-link: #aade5b;
+  --oyl-color-link-visited: #c5acf2;
+  --oyl-color-link-hover: #cdf39c;
+  --oyl-color-link-active: #e6fad0;
+  --oyl-color-focus: #aff13c;
 
-  --oyl-color-info-surface: #12303a;
-  --oyl-color-info-ink: #a9dcec;
-  --oyl-color-info-border: #4f9db5;
+  --oyl-color-info-surface: #142b3d;
+  --oyl-color-info-ink: #93cbfc;
+  --oyl-color-info-border: #1e72ac;
 
-  --oyl-color-success-surface: #13301f;
-  --oyl-color-success-ink: #a7e0c1;
-  --oyl-color-success-border: #4ea77e;
+  --oyl-color-success-surface: #162e1b;
+  --oyl-color-success-ink: #99d3a4;
+  --oyl-color-success-border: #287b42;
 
-  --oyl-color-warning-surface: #33280f;
-  --oyl-color-warning-ink: #f1d08f;
-  --oyl-color-warning-border: #b98c31;
+  --oyl-color-warning-surface: #35260d;
+  --oyl-color-warning-ink: #e5c182;
+  --oyl-color-warning-border: #906500;
 
-  --oyl-color-danger-surface: #3a1818;
-  --oyl-color-danger-ink: #f4b8b8;
-  --oyl-color-danger-border: #d46a6a;
-  --oyl-color-danger-action: #f08c8c;
-  --oyl-color-danger-action-ink: #2a0d0d;
+  --oyl-color-danger-surface: #3e211e;
+  --oyl-color-danger-ink: #ffb2ac;
+  --oyl-color-danger-border: #ac514c;
+  --oyl-color-danger-action: #fb8981;
+  --oyl-color-danger-action-ink: #321312;
 
   /* Nearer is LIGHTER here, as the elevation ramp is (`tokens.ts`
      §ILLUSTRATION_DEPTH). */
-  --oyl-color-illo-sky: #152637;
-  --oyl-color-illo-sun: #9a7a30;
-  --oyl-color-illo-hill-far: #1d3a2b;
-  --oyl-color-illo-hill-near: #2f5d3b;
-  --oyl-color-illo-road: #5f6a63;
-  --oyl-color-band-recovery: #467a73;
-  --oyl-color-band-endurance: #529085;
-  --oyl-color-band-tempo: #62a596;
-  --oyl-color-band-threshold: #7fb0d6;
-  --oyl-color-band-vo2: #f2b391;
-  --oyl-color-band-anaerobic: #f5c9d3;
-  --oyl-color-band-sprint: #f8e7f3;
+  --oyl-color-illo-sky: #102239;
+  --oyl-color-illo-sun: #897626;
+  --oyl-color-illo-hill-far: #263a22;
+  --oyl-color-illo-hill-near: #304f2a;
+  --oyl-color-illo-road: #53595e;
+  --oyl-color-band-recovery: #949aa1;
+  --oyl-color-band-endurance: #2d74ca;
+  --oyl-color-band-tempo: #5fc372;
+  --oyl-color-band-threshold: #f9df5d;
+  --oyl-color-band-vo2: #f59441;
+  --oyl-color-band-anaerobic: #cb574d;
+  --oyl-color-band-sprint: #cf91f3;
 }
 
 *,
@@ -430,7 +445,7 @@ h3:first-child {
  * that is something else — `.oyl-button`, `.oyl-nav-link`, `.oyl-skip-link`,
  * `.oyl-subnav-link` — is painted by its own class, and a bare `a:visited` or
  * `a:hover` is (0,1,1), which beats a single class: a visited "Ride" button
- * would have turned purple on a teal fill. Written this way, any class wins.
+ * would have turned purple on the accent fill. Written this way, any class wins.
  *
  * The order is the one the cascade needs when specificity ties — visited,
  * then hover and keyboard focus, then a press — so a visited link still
@@ -808,9 +823,9 @@ html {
  * The current destination is marked four ways and only one of them is colour:
  * `aria-current` for assistive technology, a heavier label, a larger icon, and
  * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
- * #48's sixth, and #944's third. The fill is `accent`, at 5.90 (light) and
- * 6.53 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
- * label and icon on it are `accentInk`, at 7.85 and 8.72 — both declared pairs
+ * #48's sixth, and #944's third. The fill is `accent`, at 4.52 (light) and
+ * 7.22 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
+ * label and icon on it are `accentInk`, at 7.2 and 13.33 — both declared pairs
  * in `tokens.ts` §CONTRAST_REQUIREMENTS.
  *
  * ⚠️ The fill is its OWN rule, `.oyl-nav-link[aria-current] .oyl-nav-indicator`,
@@ -1443,6 +1458,31 @@ html {
     padding: var(--oyl-space-sm);
     margin: calc(-1 * var(--oyl-space-sm));
   }
+
+  /*
+   * A short section beside a long one stays whole — the owner's ruling of
+   * 2026-11-04 on #2125, item 3. Workouts' detail pane holds *Build a workout*
+   * and *Import a workout* side by side in ONE scroll container, so scrolling
+   * the builder to its *Add block* form (or its chart's zone key) carried the
+   * short import column with it, and its heading went under the pane's top
+   * edge half cut: at 1280 × 800 a 34 px scroll left "Import a workout" sliced
+   * through its letters. Sticky at the pane's content edge, the short column
+   * stays put while the long one scrolls beside it. The grid's own height is
+   * the long column's, so the long column cannot stick, and the short one
+   * comes off the top only where the grid itself ends.
+   *
+   * Opt-in (`oyl-sections--pinned`), and only where the pane scrolls on its
+   * own and the sections are columns: below 40rem tall the page scrolls under
+   * a sticky header, and a pinned section would go under it.
+   * `list-detail.browser.spec.ts` §"#2125" scrolls the pane and reads the
+   * heading back, with this rule deleted as the control.
+   */
+  @container oyl-pane (min-width: 40rem) {
+    .oyl-list-detail--two > .oyl-list-detail__detail .oyl-sections--pinned > * {
+      position: sticky;
+      top: 0;
+    }
+  }
 }
 
 /*
@@ -1842,6 +1882,22 @@ html {
   flex: none;
   width: 3rem;
   height: 3rem;
+}
+
+/*
+ * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
+ * in a summary, in one face (Barlow, the display family), at 700, with
+ * tabular figures so a changing number does not jitter. One rule over every
+ * number class; `tokens.ts` §`METRIC_TYPE` is the same declarations, and
+ * `design/metric-type.test.ts` holds the two equal. Sizes stay with each
+ * class below.
+ */
+.oyl-reading__value,
+.oyl-metric__value,
+.oyl-hud__value {
+  font-family: var(--oyl-font-family-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -2770,9 +2826,9 @@ a.oyl-button {
 
 /*
  * Elevation 2: a card, and the grid it sits in is the page rather than a panel,
- * so it is two steps up from the canvas behind it. One step was not enough —
- * `#f2f5f4` on `#ffffff` is 1.097:1 and a 10 rem card at that separation reads
- * as a faintly tinted rectangle rather than as an object.
+ * so it is two steps up from the canvas behind it. One step was not enough in
+ * the teal palette — `#f2f5f4` on `#ffffff` was 1.097:1 and a 10 rem card at that
+ * separation read as a faintly tinted rectangle rather than as an object.
  */
 .oyl-metric {
   background: var(--oyl-color-surface-raised);
@@ -3439,8 +3495,58 @@ a.oyl-button {
     min-width: 0;
   }
 
-  .oyl-ride__group--graph .oyl-workout-graph__key {
+  /*
+   * The notes column: the zone key (#2039) and the sentence. The key is a
+   * column of its own here, one zone a line, so it adds nothing to the
+   * group's height either.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph__notes {
+    display: flex;
+    flex: 0 0 auto;
+    max-width: 13rem;
+    flex-direction: column;
+    gap: var(--oyl-space-xs);
+  }
+
+  /* With a sentence the column is the sentence's 13rem; with only the key, the key's own width. */
+  .oyl-ride__group--graph .oyl-workout-graph__notes:has(.oyl-workout-graph__key) {
+    flex-basis: 13rem;
+  }
+
+  .oyl-ride__group--graph .oyl-zone-key {
+    flex-direction: column;
+    margin: 0;
+  }
+
+  /*
+   * In a hold there are three lanes and their captions are the longest there
+   * are: a column beside them would wrap a caption. There is room UNDER them
+   * instead (a hold's group ends about 70 px clear of the fold, measured), so
+   * there the key is a row of its own under the frame and the sentence, if
+   * any, keeps its column.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph:has([data-oyl-lane='heart-rate']) {
+    flex-wrap: wrap;
+  }
+
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has([data-oyl-lane='heart-rate'])
+    .oyl-workout-graph__notes {
+    display: contents;
+  }
+
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has([data-oyl-lane='heart-rate'])
+    .oyl-workout-graph__key {
     flex: 0 0 13rem;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph:has([data-oyl-lane='heart-rate']) .oyl-zone-key {
+    flex: 1 0 100%;
+    flex-direction: row;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__key {
     margin: 0;
   }
 
@@ -5884,6 +5990,22 @@ select.oyl-input {
   width: 100%;
 }
 
+/*
+ * On a saved workout's card (the owner's ruling of 2026-11-04 on #2125): the
+ * same drawing at the card's own height, `.oyl-shape-card`'s 3rem, which its
+ * wrapper sets. The well stays `surface`, the background every band colour is
+ * declared against, and the list names the zones once above the cards.
+ */
+.oyl-block-chart--card {
+  height: 100%;
+  margin-top: 0;
+}
+
+/* The Workouts list's one key, over its cards: the cards' own gap below it. */
+.oyl-zone-key + .oyl-pane-list {
+  margin-top: var(--oyl-space-sm);
+}
+
 .oyl-block-chart__band-recovery {
   fill: var(--oyl-color-band-recovery);
 }
@@ -5910,6 +6032,71 @@ select.oyl-input {
 
 .oyl-block-chart__band-sprint {
   fill: var(--oyl-color-band-sprint);
+}
+
+/*
+ * THE ZONE KEY (#2039, ADR 0063 D-4) — `design/ZoneKey.tsx`.
+ *
+ * Every drawing that paints a zone colour lists the zones it paints, each by
+ * its number and name beside a swatch of its colour, so no zone is told by
+ * colour alone (WCAG 2.2 SC 1.4.1). The key sits on `surface`, the well the
+ * zone colours declare their 3:1 against, and each swatch carries the
+ * `border` edge as well, which is what survives `forced-colors`.
+ */
+.oyl-zone-key {
+  background: var(--oyl-color-surface);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-ink);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs) var(--oyl-space-md);
+  list-style: none;
+  margin: var(--oyl-space-xs) 0 0;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+}
+
+.oyl-zone-key__zone {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-zone-key__swatch {
+  border: 1px solid var(--oyl-color-border);
+  border-radius: 2px;
+  display: inline-block;
+  flex: none;
+  height: 0.875rem;
+  width: 0.875rem;
+}
+
+.oyl-zone-key__swatch--band-recovery {
+  background: var(--oyl-color-band-recovery);
+}
+
+.oyl-zone-key__swatch--band-endurance {
+  background: var(--oyl-color-band-endurance);
+}
+
+.oyl-zone-key__swatch--band-tempo {
+  background: var(--oyl-color-band-tempo);
+}
+
+.oyl-zone-key__swatch--band-threshold {
+  background: var(--oyl-color-band-threshold);
+}
+
+.oyl-zone-key__swatch--band-vo2 {
+  background: var(--oyl-color-band-vo2);
+}
+
+.oyl-zone-key__swatch--band-anaerobic {
+  background: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-zone-key__swatch--band-sprint {
+  background: var(--oyl-color-band-sprint);
 }
 
 .oyl-block-chart__free-ride {
@@ -6247,59 +6434,62 @@ select.oyl-input {
  * The two overlay layouts are the media queries at the end of this block.
  */
 .oyl-hud {
-  /* ⚠️ #672 (the review of #744): the HUD KEEPS THE LIGHT PALETTE, whatever
-     the page is in — the owner's ruling that the in-ride HUD is left alone.
-     Its panels paint with the theme-independent `--oyl-color-hud-*` tokens,
-     but what sits inside them — the mute toggle and the volume (#400), the
-     side camera's Stop (#551), a notice's status tones — paints with PAGE
-     tokens, and on a dark page those followed it. So every page colour token
-     is restated here with its LIGHT value, and `color-scheme` pins what the
-     platform draws itself (a range's track, a check mark). `theme.a11y.test.ts`
-     holds this list to `tokens.ts` §`COLOUR_TOKENS`, key for key, and
+  /* ⚠️ #2042, ADR 0063 D-2 (the owner's ruling of 2026-11-03, "Dark screens"):
+     the HUD is DARK, whatever the page is in. Until #2042 it kept the LIGHT
+     palette here (#672, the review of #744); a reviewer who remembers that pin
+     is reading the old file. Its panels paint with the theme-independent
+     `--oyl-color-hud-*` tokens, but what sits inside them — the mute toggle
+     and the volume (#400), the side camera's Stop (#551), a notice's status
+     tones, a zone drawn on the plan — paints with PAGE tokens, which on a light
+     page would follow it. So every page colour token is restated here with its
+     DARK value, and `color-scheme` pins what the platform draws itself (a
+     range's track, a check mark) to the dark platform's. A rider who chose
+     light for the menus still rides on dark. `theme.a11y.test.ts` holds this
+     list to `tokens.ts` §`DARK_COLOUR_TOKENS`, key for key, and
      `theme.browser.spec.ts` reads every descendant in both palettes. */
-  color-scheme: light;
-  --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #f2f5f4;
-  --oyl-color-surface-raised: #e7eae9;
-  --oyl-color-surface-overlay: #dde0df;
-  --oyl-color-border: #767e7e;
-  --oyl-color-ink: #141b1a;
-  --oyl-color-ink-muted: #4a5b5c;
-  --oyl-color-accent: #0b5c55;
-  --oyl-color-accent-hover: #07443f;
-  --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #d4ebe7;
-  --oyl-color-link: #0b5c55;
-  --oyl-color-link-visited: #5b3a8c;
-  --oyl-color-link-hover: #07443f;
-  --oyl-color-link-active: #042e2a;
-  --oyl-color-focus: #141b1a;
-  --oyl-color-info-surface: #e3f0f4;
-  --oyl-color-info-ink: #0e4a57;
-  --oyl-color-info-border: #2c7288;
-  --oyl-color-success-surface: #e2f2e9;
-  --oyl-color-success-ink: #14513a;
-  --oyl-color-success-border: #2a7a58;
-  --oyl-color-warning-surface: #fbefda;
-  --oyl-color-warning-ink: #654100;
-  --oyl-color-warning-border: #8a6212;
-  --oyl-color-danger-surface: #fbe8e8;
-  --oyl-color-danger-ink: #7a1d1d;
-  --oyl-color-danger-border: #a83232;
-  --oyl-color-danger-action: #9e2626;
-  --oyl-color-danger-action-ink: #ffffff;
-  --oyl-color-illo-sky: #cfe4ef;
-  --oyl-color-illo-sun: #f4c65a;
-  --oyl-color-illo-hill-far: #a7d3a3;
-  --oyl-color-illo-hill-near: #7db678;
-  --oyl-color-illo-road: #6f726c;
-  --oyl-color-band-recovery: #5e8f88;
-  --oyl-color-band-endurance: #467f75;
-  --oyl-color-band-tempo: #336d61;
-  --oyl-color-band-threshold: #2e5878;
-  --oyl-color-band-vo2: #7a3622;
-  --oyl-color-band-anaerobic: #5e2537;
-  --oyl-color-band-sprint: #3d1d3a;
+  color-scheme: dark;
+  --oyl-color-canvas: #101215;
+  --oyl-color-surface: #242729;
+  --oyl-color-surface-raised: #333639;
+  --oyl-color-surface-overlay: #414447;
+  --oyl-color-border: #93969a;
+  --oyl-color-ink: #edeef1;
+  --oyl-color-ink-muted: #b3b7ba;
+  --oyl-color-accent: #aff13c;
+  --oyl-color-accent-hover: #c7fd7b;
+  --oyl-color-accent-ink: #121809;
+  --oyl-color-selected: #304216;
+  --oyl-color-link: #aade5b;
+  --oyl-color-link-visited: #c5acf2;
+  --oyl-color-link-hover: #cdf39c;
+  --oyl-color-link-active: #e6fad0;
+  --oyl-color-focus: #aff13c;
+  --oyl-color-info-surface: #142b3d;
+  --oyl-color-info-ink: #93cbfc;
+  --oyl-color-info-border: #1e72ac;
+  --oyl-color-success-surface: #162e1b;
+  --oyl-color-success-ink: #99d3a4;
+  --oyl-color-success-border: #287b42;
+  --oyl-color-warning-surface: #35260d;
+  --oyl-color-warning-ink: #e5c182;
+  --oyl-color-warning-border: #906500;
+  --oyl-color-danger-surface: #3e211e;
+  --oyl-color-danger-ink: #ffb2ac;
+  --oyl-color-danger-border: #ac514c;
+  --oyl-color-danger-action: #fb8981;
+  --oyl-color-danger-action-ink: #321312;
+  --oyl-color-illo-sky: #102239;
+  --oyl-color-illo-sun: #897626;
+  --oyl-color-illo-hill-far: #263a22;
+  --oyl-color-illo-hill-near: #304f2a;
+  --oyl-color-illo-road: #53595e;
+  --oyl-color-band-recovery: #949aa1;
+  --oyl-color-band-endurance: #2d74ca;
+  --oyl-color-band-tempo: #5fc372;
+  --oyl-color-band-threshold: #f9df5d;
+  --oyl-color-band-vo2: #f59441;
+  --oyl-color-band-anaerobic: #cb574d;
+  --oyl-color-band-sprint: #cf91f3;
 
   color: var(--oyl-color-hud-ink);
   display: flex;
@@ -7229,11 +7419,14 @@ select.oyl-input {
 /* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
    the `.oyl-hud__control`s'. The mute toggle, the volume and the side
    camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
-   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
-   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
-   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
-   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
-   its own light surface, which is where its ring lands. Read back off the
+   `--oyl-color-focus` to its light value (#141b1a then; #131415 now) — drawn
+   2 px outside the control onto `hudSurface`: 1.01:1, a ring nobody
+   could see (WCAG 2.2 SC 2.4.7, 2.4.13). Since #2042 `.oyl-hud` restates the
+   DARK palette, so the pinned focus is the lime, #aff13c, and a ring that
+   fell back to it would show; the rule still holds the ring to the HUD's
+   own pair, `hudInk` on `hudSurface` (17.44:1, declared in `tokens.ts`). A
+   notice keeps the page's ring: its surface is dark too (the warning's is
+   #35260d), which is where its ring lands, in the pinned lime. Read back off the
    engine, with this rule deleted as the control, by
    `browser/hud-focus.browser.spec.ts`. */
 .oyl-hud :focus-visible {

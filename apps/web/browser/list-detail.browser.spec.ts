@@ -50,7 +50,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { paletteColours, THEMES } from '../src/design/tokens';
+import { BAND_TOKENS, paletteColours, THEMES } from '../src/design/tokens';
 import {
   ALL_ROUTES,
   hrefFor,
@@ -1511,7 +1511,14 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           }),
         );
         expect(cards.length, `${route.id}: no card on the page`).toBeGreaterThan(0);
-        const token = route.id === 'routes' ? 'illoHillNear' : 'accent';
+        // A route's climb is the kit's hill; a workout is its block chart, each
+        // block in its zone's colour since the owner's ruling of 2026-11-04 on
+        // #2125 (`zones.browser.spec.ts` reads which zone), and the chart's
+        // free-ride outline and threshold rule are strokes with no fill.
+        const allowed =
+          route.id === 'routes'
+            ? [rgbOf(colours.illoHillNear)]
+            : [...BAND_TOKENS.map((band) => rgbOf(colours[band])), 'none'];
         for (const card of cards) {
           expect(card.svgs).toBe(1);
           expect(card.hidden).toBe('true');
@@ -1520,7 +1527,10 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           expect(card.height, `${route.id}: the drawing's height`).toBeCloseTo(SHAPE_ART_PIXELS, 0);
           expect(card.fills.length).toBeGreaterThan(0);
           for (const fill of card.fills) {
-            expect(fill, `${route.id} in ${theme}`).toBe(rgbOf(colours[token]));
+            expect(allowed, `${route.id} in ${theme}: ${fill}`).toContain(fill);
+          }
+          if (route.id === 'workouts') {
+            expect(card.fills.filter((fill) => fill !== 'none').length).toBeGreaterThan(0);
           }
         }
       }
@@ -1991,4 +2001,99 @@ test.describe('#1442 — choosing a row does not move the list', () => {
       expect(faults).toEqual([]);
     });
   }
+});
+
+/**
+ * The owner's ruling of 2026-11-04 on #2125, item 3: the "Import a workout"
+ * heading was clipped at the top of its column on Workouts at 1280 × 800.
+ *
+ * The cause: Workouts' detail pane holds *Build a workout* and *Import a
+ * workout* side by side in ONE scroll container (#723, #1014), so scrolling
+ * the builder — to its *Add block* form, or 34 px to bring its chart's zone
+ * key into view — carried the short import column with it, and the pane's top
+ * edge cut through its heading. `theme.css` §`.oyl-sections--pinned` keeps
+ * the short column at the pane's content edge while the long one scrolls.
+ *
+ * Read here with the builder holding blocks (`?builder=blocks`), the pane
+ * scrolled by the sheet's 34 px, by half its travel and to its end: the
+ * heading must lie wholly inside the pane, at every offset. **Control:** the
+ * pinned rule deleted through the CSSOM, after which the 34 px read must find
+ * the heading cut by the pane's top edge — the owner's picture.
+ */
+test.describe('#2125 — the import heading stays whole while the builder scrolls', () => {
+  /** Scroll the detail pane to `offset` (or its end) and read the import heading against it. */
+  async function importHeadingAt(
+    page: Page,
+    offset: number | 'end' | 'half',
+  ): Promise<{ scrolled: number; travel: number; paneTop: number; headingTop: number }> {
+    return page.evaluate((to) => {
+      const pane = document.querySelector<HTMLElement>('[data-oyl-pane="detail"]');
+      const heading = [...(pane?.querySelectorAll('h2') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === 'Import a workout',
+      );
+      if (pane === null || heading === undefined) {
+        throw new Error('no detail pane, or no "Import a workout" heading in it');
+      }
+      const travel = pane.scrollHeight - pane.clientHeight;
+      pane.scrollTop = to === 'end' ? travel : to === 'half' ? travel / 2 : to;
+      return {
+        scrolled: pane.scrollTop,
+        travel,
+        paneTop: pane.getBoundingClientRect().top,
+        headingTop: heading.getBoundingClientRect().top,
+      };
+    }, offset);
+  }
+
+  for (const viewport of TWO_PANES) {
+    test(`at ${viewport.name}, scrolled any distance`, async ({ page }) => {
+      await open(page, viewport, 'data=populated&builder=blocks');
+      const route = LIST_DETAIL.find((candidate) => candidate.id === 'workouts');
+      if (route === undefined) throw new Error('Workouts is not a list–detail route');
+      await visit(page, route, hrefFor(route));
+      const lines: string[] = [];
+      for (const offset of [34, 'half', 'end'] as const) {
+        const read = await importHeadingAt(page, offset);
+        lines.push(
+          `${String(offset)}: scrolled ${read.scrolled.toFixed(0)} of ${read.travel.toFixed(0)}, ` +
+            `heading top ${read.headingTop.toFixed(1)}, pane top ${read.paneTop.toFixed(1)}`,
+        );
+        // The pane must scroll at least the sheet's 34 px, or this read nothing.
+        expect(read.travel, 'the detail pane does not scroll').toBeGreaterThan(34);
+        expect(read.scrolled).toBeGreaterThan(0);
+        expect(
+          read.headingTop,
+          `scrolled ${String(offset)}: the pane's top edge cuts the heading`,
+        ).toBeGreaterThanOrEqual(read.paneTop - 0.5);
+      }
+      console.log(`[#2125] import heading @ ${viewport.name}\n  ${lines.join('\n  ')}`);
+    });
+  }
+
+  test('the control — without the pinned rule, 34 px cuts the heading', async ({ page }) => {
+    await open(page, TABLET_IN_THE_SHELL, 'data=populated&builder=blocks');
+    const route = LIST_DETAIL.find((candidate) => candidate.id === 'workouts');
+    if (route === undefined) throw new Error('Workouts is not a list–detail route');
+    await visit(page, route, hrefFor(route));
+    const removed = await page.evaluate(() => {
+      let count = 0;
+      const sweep = (rules: CSSRuleList, owner: CSSGroupingRule | CSSStyleSheet): void => {
+        for (let index = rules.length - 1; index >= 0; index -= 1) {
+          const rule = rules[index];
+          if (rule instanceof CSSStyleRule && rule.selectorText.includes('.oyl-sections--pinned')) {
+            owner.deleteRule(index);
+            count += 1;
+          } else if (rule instanceof CSSGroupingRule) {
+            sweep(rule.cssRules, rule);
+          }
+        }
+      };
+      for (const sheet of document.styleSheets) sweep(sheet.cssRules, sheet);
+      return count;
+    });
+    expect(removed, 'the pinned rule was not found to remove').toBe(1);
+    const read = await importHeadingAt(page, 34);
+    expect(read.scrolled).toBeGreaterThan(0);
+    expect(read.headingTop).toBeLessThan(read.paneTop - 0.5);
+  });
 });

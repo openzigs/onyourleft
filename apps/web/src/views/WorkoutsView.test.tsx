@@ -487,11 +487,15 @@ describe('#1043 — the block chart', () => {
 
   it('draws a saved workout below its own controls, hidden from assistive technology', async () => {
     const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
-    const drawn = chart(view.container);
+    // The chosen workout's own chart, in the detail: since the owner's ruling
+    // of 2026-11-04 on #2125 its card in the list draws the same chart too.
+    const detail = view.container.querySelector('.oyl-selected');
+    if (detail === null) throw new Error('no chosen workout in the detail');
+    const drawn = chart(detail);
     expect(drawn).not.toBeNull();
     expect(drawn?.getAttribute('aria-hidden')).toBe('true');
     expect(drawn?.textContent).toBe('');
-    expect(bandsDrawn(view.container)).toEqual(['oyl-block-chart__band-endurance']);
+    expect(bandsDrawn(detail)).toEqual(['oyl-block-chart__band-endurance']);
     // The words it repeats are on the page beside it.
     expect(view.container.textContent).toContain('10 min at 60%');
     const remove = buttonSaying(view.container, 'Delete Sweet spot');

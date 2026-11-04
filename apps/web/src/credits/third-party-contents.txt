@@ -161,4 +161,4 @@ Part 4 — code the build tools write into the app
   rolldown 1.2.13 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
 
 Part 5 — fonts committed in the source repository and served by the app
-  Barlow 1.408 — OFL-1.1: apps/web/src/design/fonts/barlow-latin-700.woff2, apps/web/src/design/fonts/barlow-latin-800.woff2 (apps/web/tools/fonts/subset-fonts.ts)
+  Barlow 1.408 — OFL-1.1: apps/web/src/design/fonts/barlow-latin-600.woff2, apps/web/src/design/fonts/barlow-latin-700.woff2, apps/web/src/design/fonts/barlow-latin-800.woff2 (apps/web/tools/fonts/subset-fonts.ts)
