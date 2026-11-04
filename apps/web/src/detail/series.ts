@@ -313,3 +313,24 @@ export function traceMean(points: readonly (number | undefined)[]): number | und
   }
   return count === 0 ? undefined : total / count;
 }
+
+/**
+ * The drawn point a trace has at `seconds` into the ride — the shared
+ * cursor's reading (#2068). `undefined` in a gap, and past the end of a trace
+ * that stops before the ride does: no reading, never the last one repeated.
+ */
+export function pointAt(
+  points: readonly (number | undefined)[],
+  secondsPerPoint: number,
+  seconds: number,
+): number | undefined {
+  if (secondsPerPoint <= 0 || seconds < 0) {
+    return undefined;
+  }
+  const index = Math.floor(seconds / secondsPerPoint);
+  // The trace's own end belongs to its last point, not to one past it.
+  if (index === points.length && seconds === points.length * secondsPerPoint) {
+    return points[index - 1];
+  }
+  return points[index];
+}

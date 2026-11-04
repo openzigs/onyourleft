@@ -8,6 +8,7 @@ import {
   CHART_POINTS,
   downsample,
   gapSamples,
+  pointAt,
   seriesFor,
   TABLE_ROWS,
   traceExtent,
@@ -187,6 +188,28 @@ describe('the declared sizes', () => {
     for (const channel of channels) {
       expect(seriesFor(channel, 'metric').label).not.toBe('');
     }
+  });
+});
+
+describe('pointAt \u2014 the shared cursor\u2019s reading (#2068)', () => {
+  const points = [10, 20, undefined, 40];
+
+  it('reads the point whose span holds the time', () => {
+    expect(pointAt(points, 2, 0)).toBe(10);
+    expect(pointAt(points, 2, 1.9)).toBe(10);
+    expect(pointAt(points, 2, 2)).toBe(20);
+    expect(pointAt(points, 2, 7)).toBe(40);
+  });
+
+  it('reads a gap as no reading, never a zero', () => {
+    expect(pointAt(points, 2, 4)).toBeUndefined();
+  });
+
+  it('gives the trace\u2019s own end its last point, and nothing past it', () => {
+    expect(pointAt(points, 2, 8)).toBe(40);
+    expect(pointAt(points, 2, 9)).toBeUndefined();
+    expect(pointAt(points, 2, -1)).toBeUndefined();
+    expect(pointAt(points, 0, 1)).toBeUndefined();
   });
 });
 
