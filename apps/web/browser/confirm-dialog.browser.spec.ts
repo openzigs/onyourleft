@@ -351,7 +351,8 @@ function asTokens(answer: Answer) {
 
 function expectedKeep(theme: Theme) {
   const colours = paletteColours(theme);
-  return { background: colours.accent, color: colours.accentInk, border: colours.accent };
+  // #2118: the fill is `accent` and the 2 px edge, a thin line, `accentText`.
+  return { background: colours.accent, color: colours.accentInk, border: colours.accentText };
 }
 
 function expectedDelete(theme: Theme) {
