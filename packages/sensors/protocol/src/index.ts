@@ -4,7 +4,8 @@
  * `@onyourleft/sensors/protocol` — the GATT profile clients.
  *
  * Heart Rate (0x180D), Cycling Speed and Cadence (0x1816), Cycling Power
- * (0x1818) and the Fitness Machine Service (0x1826): the half of the sensor
+ * (0x1818), the Fitness Machine Service (0x1826) and the Battery Service
+ * (0x180F, a decoder only, #2046): the half of the sensor
  * stack that turns an untrusted little-endian GATT payload into branded domain
  * quantities.
  *
@@ -84,6 +85,20 @@ export {
   HEART_RATE_SERVICE,
   heartRateProfile,
 } from './heart-rate';
+
+// --- Battery Service (0x180F) -----------------------------------------------
+//
+// A decoder only (#2046): a battery level is not a `MeasurementCapability`, so
+// no profile carries it across the transport boundary yet.
+
+export type { BatteryLevelError, BatteryLevelResult } from './battery';
+
+export {
+  BATTERY_LEVEL,
+  BATTERY_SERVICE,
+  MAX_BATTERY_LEVEL_PERCENT,
+  parseBatteryLevel,
+} from './battery';
 
 // --- Cycling Speed and Cadence Service (0x1816) -----------------------------
 

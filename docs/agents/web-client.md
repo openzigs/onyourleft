@@ -677,7 +677,10 @@ apps/                 AGPL-3.0-or-later, without exception
     src/routing/        planning a route (#70, #71, #72) — the draft and the
                         legs an edit makes stale, undo over whole drafts, what
                         a half-drawn route keeps across a reload, the elevation
-                        profile and where its numbers came from. ⚠️ The
+                        profile and where its numbers came from; since #2102
+                        `loop.ts`, a short loop for a lap race: Close the loop,
+                        a target length, and a drawn line that ends where it
+                        starts saved as a loop. ⚠️ The
                         RoutingProvider INTERFACE is in packages/domain; there
                         is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),
