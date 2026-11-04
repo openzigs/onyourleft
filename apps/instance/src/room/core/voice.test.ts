@@ -129,4 +129,28 @@ describe('a changed voice link, told to the riders already welcomed — #876', (
     expect(sentTo(out, 2)).toEqual([]);
     expect(sentTo(out, 1)).toEqual([{ type: 'voice', voiceInvite: NEWER }]);
   });
+
+  it('keeps a withheld rider out of every later change, whoever it is about', () => {
+    const room = testRoom({ kind: 'ride' });
+    room.setVoiceInvite(INVITE);
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bea'), 0);
+    room.setVoiceInvite(NEWER, 'bea');
+    const later = room.setVoiceInvite('https://discord.gg/inv3abc');
+    expect(sentTo(later, 2)).toEqual([]);
+    expect(sentTo(later, 1)).toEqual([
+      { type: 'voice', voiceInvite: 'https://discord.gg/inv3abc' },
+    ]);
+  });
+
+  it('keeps a withheld rider out of the link a later join makes after a rotation that made none', () => {
+    const room = testRoom({ kind: 'ride' });
+    room.setVoiceInvite(INVITE);
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bea'), 0);
+    room.setVoiceInvite(undefined, 'bea');
+    const fresh = room.setVoiceInvite(NEWER);
+    expect(sentTo(fresh, 2)).toEqual([]);
+    expect(sentTo(fresh, 1)).toEqual([{ type: 'voice', voiceInvite: NEWER }]);
+  });
 });

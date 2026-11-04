@@ -339,6 +339,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   const barred = new Set<string>();
   /** The room's Discord voice link, said in a welcome and nowhere else (#875). */
   let voiceInvite: string | undefined;
+  /**
+   * Athletes a voice change was made about (#876), for the room's life: a
+   * suspension leaves the socket open (#789), so every later `voice` broadcast
+   * must skip them too, not only the one that named them.
+   */
+  const voiceWithheld = new Set<string>();
   const tickDuration: Seconds = seconds(settings.frameIntervalMs / 1000);
   const lap = settings.lapRace;
   const lapCourse: RaceCourse | undefined =
@@ -1056,12 +1062,13 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     },
 
     setVoiceInvite(invite, withheldFrom) {
+      if (withheldFrom !== undefined) voiceWithheld.add(withheldFrom);
       const next = invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
       if (next === voiceInvite) return [];
       voiceInvite = next;
       const out: Outbound[] = [];
       for (const seat of seated()) {
-        if (seat.connection === undefined || seat.athleteId === withheldFrom) continue;
+        if (seat.connection === undefined || voiceWithheld.has(seat.athleteId)) continue;
         out.push({
           kind: 'send',
           connection: seat.connection,
