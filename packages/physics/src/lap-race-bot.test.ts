@@ -615,6 +615,20 @@ describe('the race plan (#1960, ADR 0061 D-8)', () => {
   });
 
   it('rides the same power at one effort distance whatever items did to its race offset (D-3.3)', () => {
+    // How ADR 0061 D-8.5's race-level property is held here. D-8.5 asks that
+    // the same bot, course and seed read back an identical power as a function
+    // of its own effort distance whatever the other racers' items do, and that
+    // a plan reading its drawn distance turn that red. What other racers' items
+    // change about a bot is its `raceOffset` and nothing else (ADR 0060 D-5.1,
+    // D-4: a solo race's bots have no draft), so this fixture builds that
+    // change directly: one race state, the bot at one effort distance, and the
+    // offset an item would leave it with set to 0, +10 m and −10 m. Equal power
+    // across the three is the property at one effort distance; the two
+    // distances either side of the sprint's opening are where a drawn-distance
+    // read must differ, and it does (M6 in the PR body). #1900's whole-race
+    // lead-or-trail run holds the rank half; it stays green under a
+    // drawn-distance read, because a whole race rarely sits an offset across
+    // the sprint's opening, which is why this fixture puts one there.
     const seed = 2;
     const start = createItemRace({
       course: raceCourse(FLAT.totalDistance, 3),

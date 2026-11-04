@@ -110,6 +110,7 @@ export {
 export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
 export {
   BOT_PLAN_BANKING,
+  BOT_PLAN_FLAT_GRADE_PERCENT,
   BOT_PLAN_MEAN_TOLERANCE,
   BOT_PLAN_SURGE_CEILING,
   BOT_SPRINT_LONGEST_METRES,

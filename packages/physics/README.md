@@ -302,7 +302,7 @@ has just joined.
 `lap-race-bot.ts` races the #92 bot. `stepBotRace` takes each bot's decision from
 `@onyourleft/domain` §`strategicBotDecision` (#1959: when to use its held item, which lane, by the
 bot's personality and skill, with the memory it handed back last tick), rides its race plan's
-power through `advanceBot` (#1960, ADR 0061: `@onyourleft/domain` §`botPlanStep`, from its tier, the
+power through `advanceBot`'s tick at that power, `pacer.ts` §`advancePlannedBot`, which `index.ts` does not export so that `advanceBot` keeps no parameter for a rider's power (#1960, ADR 0061: `@onyourleft/domain` §`botPlanStep`, from its tier, the
 grade under it, the effort distance it has left and its own reserve), and hands the bots' effort distances and decisions to §`stepRace` with
 the rider's inputs. A bot's inputs are a tier, the plan, the course and a seed. Its public
 signatures take no activity, stream or ghost type, which a type-level test holds. Its power never reads

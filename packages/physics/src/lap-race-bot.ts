@@ -5,7 +5,7 @@
  * 0061's race plan.
  *
  * Built on the #92 bot pacer, and only on it. A bot's effort distance is
- * where {@link advanceBot} takes it: its race plan's power (`@onyourleft/domain`
+ * where {@link advancePlannedBot}, `advanceBot`'s tick at a planned power, takes it: its race plan's power (`@onyourleft/domain`
  * §`botPlanStep`) for the bot's tier on the grade under the bot, through
  * {@link advance}, the one tick in this package. A bot on separate maths would fail `lap-race-bot.test.ts`,
  * which replaces `advance` with a sentinel and requires the bot's position to
@@ -32,7 +32,7 @@
  * (`botRacePlan`), and stepped on the bot's own odometer, which is its effort
  * distance: **never its `raceOffset`, its drawn distance or its place**, which
  * other racers' items move (ADR 0061 D-3). The race's standings are never read
- * on the way to {@link advanceBot}, and neither is its strategy: two races
+ * on the way to {@link advancePlannedBot}, and neither is its strategy: two races
  * where the same bot leads and trails read back identical power traces, and so
  * do two bots of one tier and different skill. That holds because a solo
  * race's bots have no draft (ADR 0061 D-4).
@@ -61,7 +61,7 @@ import {
   type BotTier,
 } from '@onyourleft/domain';
 
-import { advanceBot, BOT_AT_START_LINE, botDemand, type BotCourse } from './pacer';
+import { advancePlannedBot, BOT_AT_START_LINE, botDemand, type BotCourse } from './pacer';
 import type { RideState } from './simulate';
 
 /** One bot in a race: an id, a tier, a strategy, and where its own power has taken it. */
@@ -115,12 +115,13 @@ export function lapRaceBot(id: string, tier: BotTier, strategy: BotStrategy): La
 
 /**
  * The race and its bots one tick on. Each bot decides from the race as it
- * stood, rides its race plan's power through {@link advanceBot}, and the race
+ * stood, rides its race plan's power through {@link advancePlannedBot}, and the race
  * takes the bots' effort distances and decisions with the rider's inputs.
  *
- * @throws through {@link advanceBot} for an elapsed time that is not finite,
- * through `botPlanStep` for one below zero, and through `stepRace` for any
- * input the race refuses.
+ * @throws through `strategicBotDecision` (`travel-out-of-range`) or
+ * `botPlanStep` (`elapsed-out-of-range`) for an elapsed time that is not
+ * finite or is below zero, through {@link advance} for zero, and through
+ * `stepRace` for any input the race refuses.
  */
 export function stepBotRace(
   race: ItemRaceState,
@@ -151,7 +152,7 @@ export function stepBotRace(
       grade: botDemand(bot.ride, course).grade,
       elapsed: step.elapsed,
     });
-    const tick = advanceBot(bot.ride, step.elapsed, course, planned.power);
+    const tick = advancePlannedBot(bot.ride, step.elapsed, course, planned.power);
     effortDistances[bot.id] = tick.state.distance;
     return {
       ...bot,

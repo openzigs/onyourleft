@@ -12,12 +12,14 @@ import { describe, expect, it } from 'vitest';
 import {
   BOT_MASS_KILOGRAMS,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  PACING_CLIMB_REFERENCE_GRADE_PERCENT,
   PACING_FACTOR_FLOOR,
 } from '../pacer/pacing';
 import { BOT_TIER_WATTS_PER_KILOGRAM, BOT_TIERS } from './bots';
 import { LapRaceError } from './errors';
 import {
   BOT_PLAN_BANKING,
+  BOT_PLAN_FLAT_GRADE_PERCENT,
   BOT_PLAN_SURGE_CEILING,
   BOT_SPRINT_LONGEST_METRES,
   BOT_SPRINT_SHORTEST_METRES,
@@ -161,6 +163,32 @@ describe('the course asks, and the reserve decides (ADR 0061 D-2.4)', () => {
     expect(nearlyFull.reserve).toBeCloseTo(HARD.budgetJoules, 9);
     // Full: it holds its tier rather than ease for nothing.
     expect(step(HARD, HARD.budgetJoules, -6).power).toBe(TIER);
+  });
+
+  it('has no step in its power across the flat, and asks a climb’s from 1 % up (#2140)', () => {
+    // On an interpolated profile the grade is almost never exactly 0, so a
+    // step at 0 % is a bot flicking between banking and spending on
+    // near-flat ground. Swept in 0.01 % steps with room to bank and to spend,
+    // the steepest the ask climbs is the blend's, about 0.11 % of the tier per
+    // step; a step of 5 % of the tier anywhere fails it.
+    const powers: number[] = [];
+    for (let hundredths = -300; hundredths <= 300; hundredths += 1) {
+      powers.push(step(HARD, 1_000, hundredths / 100).power);
+    }
+    for (let index = 1; index < powers.length; index += 1) {
+      expect(Math.abs((powers[index] ?? 0) - (powers[index - 1] ?? 0))).toBeLessThan(TIER * 0.002);
+    }
+    // The ends of the blend: banking at 0 %, a climb's ask from its edge.
+    expect(step(HARD, 1_000, 0).power).toBeCloseTo(TIER * (1 - BOT_PLAN_BANKING), 9);
+    const edge =
+      TIER +
+      (BOT_PLAN_FLAT_GRADE_PERCENT / PACING_CLIMB_REFERENCE_GRADE_PERCENT) *
+        (HARD.surgeWatts - TIER);
+    expect(step(HARD, 1_000, BOT_PLAN_FLAT_GRADE_PERCENT).power).toBeCloseTo(edge, 9);
+    expect(step(HARD, 1_000, BOT_PLAN_FLAT_GRADE_PERCENT / 2).power).toBeCloseTo(
+      (TIER * (1 - BOT_PLAN_BANKING) + edge) / 2,
+      9,
+    );
   });
 
   it('takes a non-finite grade as the flat', () => {

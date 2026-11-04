@@ -56,9 +56,14 @@
  * rider present, i.e. it is not driven by rider state"* — and here it is a
  * property of the signatures rather than of the tests: there is no parameter
  * through which rider state could arrive. `pacer.test.ts` rides a whole route
- * with nothing else constructed, which is the criterion's own wording.
- * {@link advanceBot}'s one optional scalar, `power`, is a lap-race bot plan's
- * (#1960); `lap-race-bot.ts` is its one caller, and `lap-race-bot.test.ts`
+ * with nothing else constructed, which is the criterion's own wording, and it
+ * holds {@link advanceBot} to its three parameters.
+ *
+ * A lap-race bot's plan (#1960) chooses its own power, so it rides through
+ * {@link advancePlannedBot}: the same tick, with the power handed in. That
+ * function is **not** exported from this package's `index.ts`, so nothing
+ * outside `packages/physics/src` can call it, and `pacer.test.ts` holds
+ * `lap-race-bot.ts` to being its one caller there. `lap-race-bot.test.ts`
  * holds that caller's inputs to a tier, the course, the race's seed and the
  * bot's own ride.
  *
@@ -191,22 +196,41 @@ export function botDemand(
  * arguments gives the same answer, which is what makes a bot testable at all.
  *
  * @param elapsed - how much time this tick covers. Supplied, never read.
- * @param power - the power a lap-race bot's plan chose for this tick
- *   (`@onyourleft/domain` §`botPlanStep`, #1960, ADR 0061), from the grade
- *   {@link botDemand} reads here. Left out, the bot rides #92's grade pacing.
- *   Either way it is ridden through {@link advance}: a plan changes how hard a
- *   bot pedals, never the physics it pedals through. `lap-race-bot.ts` is the
- *   one caller that passes it, and its tests hold what that caller may read.
  * @throws {PhysicsError} through {@link advance} if the integration step is not
  * strictly positive, and directly if `elapsed` is not a finite duration — a
  * `NaN` here would put a `NaN` into the odometer and the bot would silently
  * stop reporting a position for the rest of the ride.
  */
-export function advanceBot(
+export function advanceBot(state: RideState, elapsed: Seconds, course: BotCourse): BotTick {
+  return rideTick(state, elapsed, course, undefined);
+}
+
+/**
+ * {@link advanceBot}, at a power a lap-race bot's plan chose (#1960, ADR 0061).
+ *
+ * ⚠️ **Internal to this package**: `index.ts` does not export it, and
+ * `lap-race-bot.ts` is its one caller (`pacer.test.ts` holds both). The power is
+ * `@onyourleft/domain` §`botPlanStep`'s, from the grade {@link botDemand} reads
+ * here, and it is ridden through {@link advance}: a plan changes how hard a bot
+ * pedals, never the physics it pedals through.
+ *
+ * @throws {PhysicsError} as {@link advanceBot}.
+ */
+export function advancePlannedBot(
   state: RideState,
   elapsed: Seconds,
   course: BotCourse,
-  power?: Watts,
+  power: Watts,
+): BotTick {
+  return rideTick(state, elapsed, course, power);
+}
+
+/** The one bot tick: the pacing rule's power, or the plan's where one is handed in. */
+function rideTick(
+  state: RideState,
+  elapsed: Seconds,
+  course: BotCourse,
+  power: Watts | undefined,
 ): BotTick {
   if (!Number.isFinite(elapsed)) {
     throw new PhysicsError(

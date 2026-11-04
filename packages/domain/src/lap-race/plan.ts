@@ -44,7 +44,8 @@
  * - **Above the tier** (a climb, the sprint) the bot spends no more than it
  *   holds: with an empty reserve it rides at its tier, never over it (D-2).
  * - **Below the tier** (a descent, or {@link BOT_PLAN_BANKING} under it on the
- *   flat) the bot eases only while the reserve has room, and only by as much as
+ *   flat, blending up to a climb's ask over {@link BOT_PLAN_FLAT_GRADE_PERCENT})
+ *   the bot eases only while the reserve has room, and only by as much as
  *   fills it. With a full reserve it holds its tier.
  *
  * So a race's surplus over the tier is the reserve at the start less the
@@ -111,6 +112,20 @@ export const BOT_PLAN_SURGE_CEILING = 1.5;
  * with no descent.
  */
 export const BOT_PLAN_BANKING = 0.05;
+
+/**
+ * How far up from the flat, in percent of grade, a bot blends from banking to
+ * climbing: **1 %**. At 0 % and below it banks ({@link BOT_PLAN_BANKING}); at
+ * this grade and above it asks what a climb asks; between, it asks a straight
+ * line between the two.
+ *
+ * Without it the ask stepped by about 5 % of the tier at 0 %, banking on any
+ * grade of 0 or below and spending on any above, so on an interpolated route
+ * profile's near-flat ground a bot's power flicked between −5 % and +3 % from
+ * tick to tick (#2140's review). A feel number, as #92's references are; it
+ * changes no joule of the account, so the mean's guarantee holds as before.
+ */
+export const BOT_PLAN_FLAT_GRADE_PERCENT = 1;
 
 /**
  * Each tier's reserve when full, in joules: **twenty seconds of a full
@@ -216,15 +231,29 @@ export interface BotPlanStep {
   readonly reserve: number;
 }
 
-/** What the course asks for at this grade, before the reserve has its say. */
+/** What a climb asks for at this grade: from the tier at 0 % to the surge ceiling at 8 %. */
+function climbPower(plan: BotRacePlan, grade: number): number {
+  const climb = Math.min(grade / PACING_CLIMB_REFERENCE_GRADE_PERCENT, 1);
+  return plan.tierWatts + climb * (plan.surgeWatts - plan.tierWatts);
+}
+
+/**
+ * What the course asks for at this grade, banking included, before the reserve
+ * has its say. Continuous in the grade: see {@link BOT_PLAN_FLAT_GRADE_PERCENT}.
+ */
 function coursePower(plan: BotRacePlan, grade: number): number {
-  if (!Number.isFinite(grade)) return plan.tierWatts;
-  if (grade >= 0) {
-    const climb = Math.min(grade / PACING_CLIMB_REFERENCE_GRADE_PERCENT, 1);
-    return plan.tierWatts + climb * (plan.surgeWatts - plan.tierWatts);
+  const banked = plan.tierWatts * (1 - BOT_PLAN_BANKING);
+  if (!Number.isFinite(grade)) return banked;
+  if (grade >= BOT_PLAN_FLAT_GRADE_PERCENT) return climbPower(plan, grade);
+  if (grade > 0) {
+    // Near-flat and rising: from banking at 0 % to the climb's ask at the
+    // band's edge, so the power has no step anywhere along the grade.
+    const along = grade / BOT_PLAN_FLAT_GRADE_PERCENT;
+    return banked + along * (climbPower(plan, BOT_PLAN_FLAT_GRADE_PERCENT) - banked);
   }
-  // Downhill the bot eases as #92's rule does, to the same −20 % floor.
-  return plan.tierWatts * pacingFactor(grade);
+  // Flat and downhill the bot banks, and eases further as #92's rule does,
+  // to the same −20 % floor.
+  return Math.min(banked, plan.tierWatts * pacingFactor(grade));
 }
 
 /**
@@ -234,7 +263,8 @@ function coursePower(plan: BotRacePlan, grade: number): number {
  * the plan's sprint or less (and past the race length), and otherwise for what
  * the grade asks: more up a climb, less down a descent, and
  * {@link BOT_PLAN_BANKING} under its tier on the flat while its reserve has
- * room. The reserve then decides how much of that it may have (see the
+ * room, blended into a climb's ask over the first
+ * {@link BOT_PLAN_FLAT_GRADE_PERCENT} of rise. The reserve then decides how much of that it may have (see the
  * header).
  *
  * @param reserve - joules in the bot's reserve: 0 at the start, then what the
@@ -275,9 +305,8 @@ export function botPlanStep(plan: BotRacePlan, reserve: number, input: BotPlanIn
   } else {
     // Refill: ease only while there is room, and only by as much as fills it.
     const room = plan.budgetJoules - reserve;
-    const eased = Math.min(wanted, tierWatts * (1 - BOT_PLAN_BANKING));
     if (room <= 0) power = tierWatts;
-    else power = elapsed > 0 ? Math.max(eased, tierWatts - room / elapsed) : eased;
+    else power = elapsed > 0 ? Math.max(wanted, tierWatts - room / elapsed) : wanted;
   }
   const after = reserve - (power - tierWatts) * elapsed;
   return { power: watts(power), reserve: Math.min(plan.budgetJoules, Math.max(0, after)) };
