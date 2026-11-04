@@ -120,10 +120,10 @@ describe('simulatedStartMetres', () => {
 describe('simulatedRideText', () => {
   it('says the ride is simulated, at what power and pace, and that it is kept nowhere', () => {
     expect(simulatedRideText({ watts: 200, speedup: 1, startMetres: undefined })).toBe(
-      'Simulated ride at 200 W. Not recorded or shared, so Moving shows no time.',
+      'Simulated ride at 200 W. Not recorded or shared. Moving needs a recording.',
     );
     expect(simulatedRideText({ watts: 200, speedup: 8, startMetres: 5 })).toBe(
-      'Simulated ride at 200 W, 8× real time. Not recorded or shared, so Moving shows no time.',
+      'Simulated ride at 200 W, 8× real time. Not recorded or shared. Moving needs a recording.',
     );
   });
 });

@@ -175,9 +175,9 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * The simulated rider's mark — #1992: the sentence that says this ride is
    * simulated, in the actions panel (after Pause and End ride) for every frame of the ride, so a
    * screenshot of it cannot pass for a real effort. Absent on every real ride.
-   * One string a sentence: each is set as one unbreakable-at-the-seam box
-   * (`theme.css` §`.oyl-hud__simulated`), so a phone breaks the line between
-   * the sentences rather than inside the first.
+   * One string a sentence: each is set as its own inline box
+   * (`theme.css` §`.oyl-hud__simulated`), so a line breaks between the
+   * sentences rather than inside one.
    */
   readonly simulated?: readonly string[] | undefined;
   /**

@@ -64,7 +64,8 @@ function route(): ReturnType<typeof routeProfile> {
 
 const MARK = [
   'Simulated ride at 200 W, 8× real time.',
-  'Not recorded or shared, so Moving shows no time.',
+  'Not recorded or shared.',
+  'Moving needs a recording.',
 ] as const;
 
 let mounted: Mounted | undefined;

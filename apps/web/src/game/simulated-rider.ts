@@ -152,16 +152,19 @@ export function simulatedStartMetres(
  * The HUD's mark — #1992's "clearly marked": a screenshot of a simulated ride
  * says so on the stage. Worded for the owner's approval.
  *
- * Two sentences, kept apart so the HUD can break the line BETWEEN them on a
- * phone rather than inside one (the owner's review of PR #2113). The second
- * also says why *Moving* shows a dash: its figure is the recorder's
- * (`hud/fields.ts` §`movingTimeReading`), and nothing is recorded.
+ * Short sentences, kept apart so the HUD breaks its lines BETWEEN them
+ * rather than inside one (the owner's review of PR #2113): each fits the
+ * actions panel on a 412 px phone and on the 1280 px tablet. The third says
+ * why *Moving* shows a dash on this ride: its figure is the recorder's
+ * (`hud/fields.ts` §`movingTimeReading`), and nothing is recorded. As a
+ * clause of the second it was one long sentence, broken inside itself.
  */
-export function simulatedRideSentences(rider: SimulatedRider): readonly [string, string] {
+export function simulatedRideSentences(rider: SimulatedRider): readonly string[] {
   const pace = rider.speedup === 1 ? '' : `, ${String(rider.speedup)}× real time`;
   return [
     `Simulated ride at ${String(rider.watts)} W${pace}.`,
-    'Not recorded or shared, so Moving shows no time.',
+    'Not recorded or shared.',
+    'Moving needs a recording.',
   ];
 }
 
