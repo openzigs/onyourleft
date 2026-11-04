@@ -8,7 +8,6 @@ const ROOM = '0123456789abcdef0123456789abcdef';
 
 describe('a moderation item’s identifier (#907)', () => {
   const items: readonly [string, ModerationItem][] = [
-    ['rider:athlete_A-1', { kind: 'rider', athleteId: 'athlete_A-1' }],
     [`room:${ROOM}`, { kind: 'room', roomId: ROOM }],
     [`route:${ROOM}`, { kind: 'route', roomId: ROOM }],
     [`result:${ROOM}:12`, { kind: 'result', roomId: ROOM, row: 12 }],
@@ -22,9 +21,10 @@ describe('a moderation item’s identifier (#907)', () => {
 
   it.each([
     '',
+    // A display name is not an item a notice can name (#1381): the app never holds
+    // another rider's athlete id, so no screen shows one.
+    'rider:athlete_A-1',
     'rider:',
-    'rider:has space',
-    `rider:${'a'.repeat(129)}`,
     'room:0123',
     `room:${ROOM.toUpperCase()}`,
     `route:${ROOM}x`,

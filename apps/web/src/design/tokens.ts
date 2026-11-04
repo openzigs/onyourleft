@@ -24,7 +24,10 @@
  * cycling clothing (the background-material class of EN ISO 20471, a public
  * safety standard, not a brand), pushed toward green so it reads as lime and
  * not as any product's yellow. In light a lime cannot carry text on white, so
- * `accent` is a deep olive there and the lime survives as `selected`. There
+ * the accent's text is a deep olive there and the lime survives as `selected`.
+ * Since #2118 the accent is two tokens (ADR 0063 D-1): `accent` is a FILL and
+ * `accentText` is text and thin lines, so in light a button's fill is a
+ * brighter lime-olive than the label beside it. There
  * are no brand oranges, no brand blues, and no imported icon set — the status
  * glyphs in `StatusMessage.tsx` are three characters of text. Until #2037 the
  * hues were a desaturated teal on grey-green neutrals.
@@ -56,6 +59,8 @@
  * could never fail. Written out by hand, `tokens.test.ts` re-derives them and a
  * size edited off the ladder goes red.
  */
+
+import { HEART_RATE_ZONE_NAMES } from '@onyourleft/domain';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT } from './contrast';
 
@@ -107,10 +112,24 @@ export const COLOUR_TOKENS = {
   /** Secondary text: captions, helper text, the "nothing here yet" line. */
   inkMuted: '#515355',
   /**
-   * The one accent: primary buttons, the active navigation item. A link in
-   * running text is `link` since #661, a separate value since #2037 (ADR 0063).
+   * The one accent, as a FILL (#2118, ADR 0063 D-1): a primary button, the
+   * navigation's active pill, the current sub-page, a checked box's
+   * `accent-color`. Text and thin lines in the accent are {@link accentText},
+   * so the fill only owes the pairs a fill makes: `accentInk` on it, and 3:1
+   * against what it is drawn on. Which is why, in light, it can be a brighter
+   * lime-olive than the text — the owner's ruling of 2026-11-04 on #2118
+   * (*"Split it, brighter buttons"*). A link in running text is `link`.
    */
-  accent: '#405e00',
+  accent: '#517d00',
+  /**
+   * The accent as TEXT and as a thin line (#2118, ADR 0063 D-1): a secondary
+   * or tertiary button's label, a navigation link, a segment's or a toggle's
+   * edge, a chosen item's ring, a chart's accent line, and the edge of a
+   * primary button. It owes 4.5:1 on every surface it is drawn on as text,
+   * which is what kept it a deep olive in light. Its own token so that
+   * `accent`, the fill, can move without moving one label.
+   */
+  accentText: '#3e6100',
   /** The accent under a pointer or a press. */
   accentHover: '#2c4300',
   /** Text and glyphs drawn on `accent` or `accentHover`. */
@@ -233,28 +252,35 @@ export const COLOUR_TOKENS = {
   illoRoad: '#91969c',
 
   /*
-   * The workout block chart's seven intensity bands (#1043) — one per power
-   * zone (`@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`), easiest first.
+   * The seven power zones' colours (#1043, #2039) — one per power zone
+   * (`@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`), easiest first.
+   * Since #2039 they are ADR 0063 D-4's ramp, the owner's ruling of 2026-11-03:
+   * grey, blue, green, yellow, orange, red, and purple above red for Sprint.
+   * The ORDER is a convention shared across cycling, which is why it is
+   * readable; the hues are this project's own (ADR 0009 L1).
    *
-   * ⚠️ **A band is never told by its colour alone** (SC 1.4.1): a block's
-   * band follows from its height, drawn against the dashed threshold rule,
-   * and the shares are in the words beside the chart. What the colours DO
-   * owe is SC 1.4.11's 3:1 against the chart's well (`surface`), as a
-   * graphical object, which is the pair each declares in
-   * {@link CONTRAST_REQUIREMENTS} — and a lightness that moves one way along
-   * the ramp, darker in the light palette and lighter in the dark one, so the
-   * ramp reads in greyscale ({@link BAND_TOKENS}, held by `tokens.test.ts`).
+   * ⚠️ **A zone is never told by its colour alone** (SC 1.4.1): wherever one
+   * is painted, `design/ZoneKey.tsx` writes its number and name beside it,
+   * and `a11y/zones.a11y.test.tsx` fails a component that reads
+   * {@link BAND_TOKENS} without rendering that key. What the colours DO owe
+   * is SC 1.4.11's 3:1 against the well they are drawn on (`surface`), the
+   * pair each declares in {@link CONTRAST_REQUIREMENTS}.
    *
-   * Our own ramp (ADR 0009 L1): the house teal deepening to threshold, a slate
-   * at threshold, then brick and plum above it.
+   * ⚠️ **The ramp is not monotone in lightness, on purpose** (ADR 0063 D-4):
+   * in this hue order a monotone ramp turns the dark yellow brown or the light
+   * purple pink. Neighbours are held apart by lightness instead, at 1.20:1
+   * under normal vision and under simulated deuteranopia, protanopia and
+   * tritanopia (`a11y/zones.a11y.test.tsx`). In light, zone 4's "yellow" is a
+   * dark ochre so that it reaches 3:1 on a light surface; it is labelled
+   * "4 Threshold" wherever it is drawn.
    */
-  bandRecovery: '#5e8f88',
-  bandEndurance: '#467f75',
-  bandTempo: '#336d61',
-  bandThreshold: '#2e5878',
-  bandVo2: '#7a3622',
-  bandAnaerobic: '#5e2537',
-  bandSprint: '#3d1d3a',
+  bandRecovery: '#6c7278',
+  bandEndurance: '#00468c',
+  bandTempo: '#007d30',
+  bandThreshold: '#968200',
+  bandVo2: '#8f4c00',
+  bandAnaerobic: '#820b0f',
+  bandSprint: '#7e439f',
 
   /*
    * The ride HUD (#94), which is the one surface in this app that is drawn over
@@ -273,13 +299,13 @@ export const COLOUR_TOKENS = {
    * bright panel over a bright scene is what a rider reads at arm's length in
    * sunlight with a bloom around it.
    */
-  hudSurface: '#10161c',
+  hudSurface: '#101215',
   /** The numbers a rider is pacing to. Large, and the highest contrast here. */
-  hudInk: '#f5f8fa',
+  hudInk: '#f4f7f9',
   /** Field labels, which are read once and then found by position. */
-  hudInkMuted: '#a8b6c2',
+  hudInkMuted: '#9da3a8',
   /** The edge of a HUD control, per WCAG 2.2 SC 1.4.11. */
-  hudBorder: '#7b8b99',
+  hudBorder: '#787c82',
   /**
    * A reading that is **stale**, not zero.
    *
@@ -288,7 +314,7 @@ export const COLOUR_TOKENS = {
    * other half is that the value is replaced by a dash rather than tinted, so
    * the distinction survives for a rider who cannot see the tint at all.
    */
-  hudStaleInk: '#f0b45f',
+  hudStaleInk: '#f1af48',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -339,10 +365,11 @@ export type ThemedColourToken = Exclude<ColourToken, HudColourToken>;
  *   than what it rests on, the other way from the light palette — so
  *   {@link ELEVATION_DIRECTION} states the direction per palette and
  *   `tokens.test.ts` holds each ramp to its own, with both step bounds.
- * - **Its own accent.** The light palette's olive `#405e00` is 2.5:1 on this
- *   canvas, so `accent` and `accentHover` are the fluorescent lime here with a
- *   dark `accentInk` on them (ADR 0063 D-1), and a hover is LIGHTER, as
- *   elevation is. The links follow, as #661 left
+ * - **Its own accent.** The light palette's olive `#3e6100` is 2.6:1 on this
+ *   canvas, so `accent`, `accentText` and `accentHover` are the fluorescent
+ *   lime here with a dark `accentInk` on them (ADR 0063 D-1) — the fill and
+ *   the text one value, since the lime clears every text pair — and a hover
+ *   is LIGHTER, as elevation is. The links follow, as #661 left
  *   room for.
  * - **The status messages are dark tints with light ink**, each the hue of its
  *   light counterpart.
@@ -360,6 +387,7 @@ export const DARK_COLOUR_TOKENS = {
   ink: '#edeef1',
   inkMuted: '#b3b7ba',
   accent: '#aff13c',
+  accentText: '#aff13c',
   accentHover: '#c7fd7b',
   accentInk: '#121809',
   selected: '#304216',
@@ -387,13 +415,13 @@ export const DARK_COLOUR_TOKENS = {
   illoHillFar: '#263a22',
   illoHillNear: '#304f2a',
   illoRoad: '#53595e',
-  bandRecovery: '#467a73',
-  bandEndurance: '#529085',
-  bandTempo: '#62a596',
-  bandThreshold: '#7fb0d6',
-  bandVo2: '#f2b391',
-  bandAnaerobic: '#f5c9d3',
-  bandSprint: '#f8e7f3',
+  bandRecovery: '#949aa1',
+  bandEndurance: '#2d74ca',
+  bandTempo: '#5fc372',
+  bandThreshold: '#f9df5d',
+  bandVo2: '#f59441',
+  bandAnaerobic: '#cb574d',
+  bandSprint: '#cf91f3',
 } as const satisfies Record<ThemedColourToken, string>;
 
 /**
@@ -409,10 +437,10 @@ export function paletteColours(theme: Theme): Readonly<Record<ColourToken, strin
  * `theme-color` metas in `index.html`, which `offline/manifest.test.ts` holds
  * to these (#672).
  *
- * Light takes its accent (the olive since #2037), which is also the manifest's single
- * `theme_color`. Dark takes the header's surface rather than the dark accent:
- * a bright lime band over a dark page is the flash of light this theme exists
- * to take away.
+ * Light takes its accent FILL (a brighter lime-olive than its text since
+ * #2118), which is also the manifest's single `theme_color`. Dark takes the
+ * header's surface rather than the dark accent: a bright lime band over a dark
+ * page is the flash of light this theme exists to take away.
  */
 export const THEME_COLOUR_TOKEN: Readonly<Record<Theme, ThemedColourToken>> = {
   light: 'accent',
@@ -678,6 +706,37 @@ export const FONT_FAMILY_TOKENS = {
 } as const satisfies Record<string, string>;
 
 /**
+ * THE METRIC TYPE — #2041, [ADR 0063](../../../../docs/adr/0063-the-design-system-direction-hi-vis.md)
+ * D-5: every live and summary number is one face, one weight, and digits that
+ * do not jitter as they change. Barlow (the display family) at 700, with
+ * tabular figures, so `1111` and `8888` are the same width.
+ *
+ * The sizes stay where they were: a reading's `xxl` (a Home figure, 1.953rem),
+ * the ride's `metric` (3.815rem) and `zoom`, and the HUD's own sizes, whose
+ * constraints `game/hud/hud-value-size.test.ts` holds. What this adds is the
+ * face, the weight and the figures, for every number class at once.
+ *
+ * `theme.css` §"THE METRIC TYPE" is ONE rule over {@link METRIC_TYPE_SELECTORS}
+ * declaring exactly these, and `metric-type.test.ts` holds the two equal.
+ */
+export const METRIC_TYPE = {
+  'font-family': 'var(--oyl-font-family-display)',
+  'font-weight': '700',
+  'font-variant-numeric': 'tabular-nums',
+} as const satisfies Record<string, string>;
+
+/**
+ * The classes a number is set in: a `design/Reading.tsx` (Home's figures, the
+ * Ride screen's `ride/MetricGrid.tsx` and clock), a summary metric
+ * (`views/AnalysisView.tsx`), and a HUD reading (`game/hud/HudCore.tsx`).
+ */
+export const METRIC_TYPE_SELECTORS = [
+  '.oyl-reading__value',
+  '.oyl-metric__value',
+  '.oyl-hud__value',
+] as const;
+
+/**
  * The menus' motion (#936), in milliseconds — the one place a duration is
  * written. Epic #935's principle 4: motion is short, explains a change, and is
  * optional. `short` is feedback on a press; `medium` is a change of place — a
@@ -792,7 +851,7 @@ export interface ContrastRequirement {
 export const PLATFORM_CHECK_MARK: Readonly<
   Record<Theme, { readonly colour: string; readonly measured: number }>
 > = {
-  light: { colour: '#ffffff', measured: 7.45 },
+  light: { colour: '#ffffff', measured: 4.9 },
   dark: { colour: '#3b3b3b', measured: 8.25 },
 };
 
@@ -971,7 +1030,8 @@ const ILLUSTRATION_FOCUS_MEASURED: Readonly<
  * The workout block chart's intensity bands (#1043), easiest first — one per
  * power zone, in `@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`' order.
  * `workouts/BlockChart.tsx` paints band `n` with the `n`th of these, and
- * `tokens.test.ts` holds the ramp's lightness to one direction per palette.
+ * `a11y/zones.a11y.test.tsx` holds neighbours apart under simulated
+ * colour-vision deficiency (ADR 0063 D-4).
  */
 export const BAND_TOKENS = [
   'bandRecovery',
@@ -987,18 +1047,18 @@ export const BAND_TOKENS = [
 export type BandToken = (typeof BAND_TOKENS)[number];
 
 /**
- * Which way a band's luminance moves as intensity rises, per palette: the
- * ramp darkens on the light page and lightens on the dark one, as a raised
- * surface does ({@link ELEVATION_DIRECTION}).
+ * The five heart-rate zones' colours (#2039, ADR 0063 D-4): the first five
+ * power zones' by POSITION, the owner's ruling of 2026-11-03 — heart-rate zone
+ * `n` is drawn in power zone `n`'s colour, and named by its own name
+ * (`@onyourleft/domain` §`HEART_RATE_ZONE_NAMES`).
+ *
+ * ⚠️ Nothing paints a heart-rate zone in colour yet; the first screen that
+ * does reads this rather than choosing again.
  */
-export const BAND_DIRECTION: Readonly<Record<Theme, 'darker' | 'lighter'>> = ELEVATION_DIRECTION;
-
-/**
- * The smallest contrast ratio two neighbouring bands may have, so the ramp is
- * still a ramp in greyscale (SC 1.4.1's spirit; WCAG states no number for
- * it). A legibility floor of this design system's own.
- */
-export const MINIMUM_BAND_STEP = 1.15;
+export const HEART_RATE_BAND_TOKENS: readonly BandToken[] = BAND_TOKENS.slice(
+  0,
+  HEART_RATE_ZONE_NAMES.length,
+);
 
 /**
  * What each band measures against the chart's well, `surface`, per palette —
@@ -1006,13 +1066,13 @@ export const MINIMUM_BAND_STEP = 1.15;
  * `contrast.a11y.test.ts` (#307's erosion rule).
  */
 const BAND_ON_SURFACE_MEASURED: Readonly<Record<BandToken, Readonly<Record<Theme, number>>>> = {
-  bandRecovery: { light: 3.13, dark: 3.07 },
-  bandEndurance: { light: 3.96, dark: 4.07 },
-  bandTempo: { light: 5.15, dark: 5.25 },
-  bandThreshold: { light: 6.47, dark: 6.5 },
-  bandVo2: { light: 7.58, dark: 8.33 },
-  bandAnaerobic: { light: 10.04, dark: 10.15 },
-  bandSprint: { light: 12.56, dark: 12.68 },
+  bandRecovery: { light: 4.18, dark: 5.29 },
+  bandEndurance: { light: 7.99, dark: 3.19 },
+  bandTempo: { light: 4.53, dark: 6.82 },
+  bandThreshold: { light: 3.28, dark: 11.27 },
+  bandVo2: { light: 5.63, dark: 6.58 },
+  bandAnaerobic: { light: 8.99, dark: 3.59 },
+  bandSprint: { light: 5.65, dark: 6.44 },
 };
 
 /**
@@ -1096,7 +1156,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 4.9, dark: 13.33 },
     where: 'the label of a primary button',
   },
   {
@@ -1114,7 +1174,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
    * 1.40:1, because nobody had meant to draw it and so nobody declared it.
    *
    * Some of these pairs are ALSO declared above for another use (link text is
-   * `accent` on `canvas`, a disabled label is `inkMuted` on `surface`). They
+   * `accentText` on `canvas`, a disabled label is `inkMuted` on `surface`). They
    * are repeated here, named for the button state, so that the list of a
    * button's states is complete in one place and a change to either use has
    * to face both.
@@ -1123,7 +1183,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 4.9, dark: 13.33 },
     where: 'a primary button at rest (#668)',
   },
   {
@@ -1134,18 +1194,18 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'a primary button under a pointer or a press (#668)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'the label of a secondary button, an off toggle and an unchecked segment (#668)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
-    where: 'the border of a secondary button, a toggle and a segment, on the page (#668)',
+    measured: { light: 7.2, dark: 13.82 },
+    where: 'the border of a primary button, a toggle and a segment, on the page (#668, #2118)',
   },
   {
     foreground: 'accentHover',
@@ -1176,12 +1236,20 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'the label of an on toggle and of the checked segment (#668)',
   },
   {
+    foreground: 'accentText',
+    background: 'selected',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 5.8, dark: 8.07 },
+    where:
+      'the doubled border of an on toggle and a checked segment, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
+  },
+  {
     foreground: 'accent',
     background: 'selected',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.99, dark: 8.07 },
+    measured: { light: 3.94, dark: 8.07 },
     where:
-      'the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
+      "a checked segment's radio, its `accent-color` fill on the `selected` fill (SC 1.4.11, #668, #2118)",
   },
   {
     foreground: 'accentHover',
@@ -1213,8 +1281,8 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
   },
   /*
    * #667: `accent-color` paints checkboxes, radios, a range and a progress bar
-   * in `accent`, so two non-text pairs (WCAG 2.2 SC 1.4.11, 3:1) are new even
-   * though both colours already meet here as text. The fill against the page
+   * in `accent`, the FILL (#2118), so two non-text pairs (WCAG 2.2 SC 1.4.11,
+   * 3:1) are its own. The fill against the page
    * is what says "on"; the mark against the fill is the check itself. The
    * platform picks the mark's colour — a light or a dark glyph by the accent's
    * luminance — so the mark is NOT a token and is not a pair here: it is
@@ -1226,35 +1294,35 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'accent',
     background: 'canvas',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 4.9, dark: 13.82 },
     where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where: 'a metric on the ride HUD, over its own opaque panel (#94)',
   },
   {
     foreground: 'hudInkMuted',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 8.79, dark: 8.79 },
+    measured: { light: 7.36, dark: 7.36 },
     where: 'a field label on the ride HUD (#94)',
   },
   {
     foreground: 'hudBorder',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 5.2, dark: 5.2 },
+    measured: { light: 4.47, dark: 4.47 },
     where: 'the edge of a HUD control (WCAG 2.2 SC 1.4.11)',
   },
   {
     foreground: 'hudInk',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 17.07, dark: 17.07 },
+    measured: { light: 17.44, dark: 17.44 },
     where:
       'the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)',
   },
@@ -1262,21 +1330,21 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     foreground: 'hudStaleInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
-    measured: { light: 9.88, dark: 9.88 },
+    measured: { light: 9.8, dark: 9.8 },
     where: 'the mark on a HUD reading whose sensor has dropped (#94)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'canvas',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.82 },
+    measured: { light: 7.2, dark: 13.82 },
     where: 'link text',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'surface',
     minimum: AA_TEXT,
-    measured: { light: 6.39, dark: 11.07 },
+    measured: { light: 6.18, dark: 11.07 },
     where: 'link text and the active navigation item in the header',
   },
   {
@@ -1327,10 +1395,10 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'the edge of a control on a raised card (WCAG 2.2 SC 1.4.11)',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'surfaceRaised',
     minimum: AA_TEXT,
-    measured: { light: 5.47, dark: 8.96 },
+    measured: { light: 5.29, dark: 8.96 },
     where: 'link text on a raised card',
   },
   {
@@ -1369,10 +1437,10 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: "the header's own bottom rule (WCAG 2.2 SC 1.4.11)",
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
-    measured: { light: 4.68, dark: 7.22 },
+    measured: { light: 4.52, dark: 7.22 },
     where: 'a navigation link on the app header',
   },
   /*
@@ -1380,22 +1448,23 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
    * destination's icon and label, on the bar and the rail (both painted in
    * `surfaceOverlay`). The label and icon drawn on the pill are text, 4.5:1;
    * the pill against the bar is the shape that says where you are, so it is a
-   * non-text boundary, 3:1 (SC 1.4.11). Both colours already meet elsewhere —
-   * a primary button, a navigation link — and are repeated here, named for the
-   * indicator, so a change to either use has to face this one too.
+   * non-text boundary, 3:1 (SC 1.4.11). The pill is a FILL, so it is `accent`
+   * (#2118), and its label `accentInk` as on a primary button; the pair is
+   * repeated here, named for the indicator, so a change to either use has to
+   * face this one too.
    */
   {
     foreground: 'accentInk',
     background: 'accent',
     minimum: AA_TEXT,
-    measured: { light: 7.45, dark: 13.33 },
+    measured: { light: 4.9, dark: 13.33 },
     where: "the current destination's label and icon, on the navigation's active indicator (#944)",
   },
   {
     foreground: 'accent',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 4.68, dark: 7.22 },
+    measured: { light: 3.08, dark: 7.22 },
     where: "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
   },
   {
@@ -1556,11 +1625,12 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'a card title where it overlaps the far hills',
   },
   {
-    foreground: 'accent',
+    foreground: 'accentText',
     background: 'illoHillNear',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.26, dark: 6.79 },
-    where: 'the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)',
+    measured: { light: 3.16, dark: 6.79 },
+    where:
+      'the edge of a primary button standing on the near hill, drawn in `accentText` (WCAG 2.2 SC 1.4.11, #2118)',
   },
   ...ILLUSTRATION_TOKENS.map((token): ContrastRequirement => ({
     foreground: 'focus',

@@ -115,6 +115,19 @@ describe.each(THEMES)('the platform check mark on the %s accent', (theme) => {
   });
 });
 
+/**
+ * #2042, ADR 0063 D-1 and D-2: a primary HUD numeral is read mid-effort at
+ * arm's length on a dark ride, so it is held to AAA's 7:1 on its own panel,
+ * not only AA's 4.5:1 — in both palettes, because the HUD is dark in both.
+ */
+describe.each(THEMES)('a primary HUD numeral on its panel, the %s palette (#2042)', (theme) => {
+  it('is at least 7:1', () => {
+    const colours = paletteColours(theme);
+    const ratio = contrastRatio(colours.hudInk, colours.hudSurface);
+    expect(ratio, `hudInk on hudSurface is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(7);
+  });
+});
+
 describe('the HUD measures the same in both palettes (#672)', () => {
   it('records one margin for a pair whose colours are both HUD tokens', () => {
     // The HUD is theme-independent, so a HUD pair recorded differently in the

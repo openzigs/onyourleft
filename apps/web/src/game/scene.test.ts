@@ -17,8 +17,17 @@ import type { RiderMarker, SceneFrame } from './port';
 import { qualitySettings } from './quality';
 import { SCATTER_KINDS, SCATTER_MAX_ITEMS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
-import { northRoute } from './route-fixtures-testing';
-import { cameraPose, ghostFinished, placedRiders, sceneFrame, type SceneInput } from './scene';
+import { easedPlace, GIVE_BACK_SHARE } from './bend-easing';
+import { racingLine } from './racing-line';
+import { hairpinRoute, northRoute } from './route-fixtures-testing';
+import {
+  cameraPose,
+  drawnRiderDistance,
+  ghostFinished,
+  placedRiders,
+  sceneFrame,
+  type SceneInput,
+} from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
 import {
   GameSimulation,
@@ -35,8 +44,11 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradeAt,
+  gradePercent,
   kilograms,
   metres,
+  metresPerSecond,
   pacerGap,
   routeProfile,
   seconds,
@@ -1142,5 +1154,162 @@ describe('a lap race’s bots on the road — #1902', () => {
     expect('hit' in (frame.markers[2] ?? {})).toBe(false);
     const ordinary = sceneFrame(input({}));
     expect('hit' in (ordinary.markers[0] ?? {})).toBe(false);
+  });
+});
+
+/**
+ * What each rider is doing reaches its marker — #1999: the inputs its drawn
+ * position on the bicycle is chosen from (`posture.ts`). ⚠️ `RiderMarker.riding`
+ * is optional the UNSAFE way round (absent draws the hoods), so this reads it
+ * back off every kind of marker `sceneFrame` builds.
+ */
+describe('what each rider is doing, for the position it is drawn in — #1999', () => {
+  const climb = hairpinRoute(20);
+  const origin = corridorOrigin(climb);
+  const start = atStartLine(climb);
+  const ridingAt = (frame: SceneFrame, kind: RiderMarker['kind']) =>
+    frame.markers.find((marker) => marker.kind === kind)?.riding;
+
+  it('gives the rider their cadence, live power, grade and speed, and the pacer its own', () => {
+    const state: GameState = {
+      ...start,
+      ride: { speed: metresPerSecond(6), distance: metres(200) },
+      grade: gradePercent(4),
+      input: { ...start.input, power: watts(320), live: true },
+      ridden: seconds(20),
+      bot: {
+        state: { speed: metresPerSecond(5), distance: metres(230) },
+        distanceOnRoute: metres(230),
+        grade: gradePercent(4),
+        power: watts(180),
+      },
+    };
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state,
+      cadence: 62,
+      botDistance: 230,
+      ghost: GHOST,
+      remoteRiders: [{ riderId: 3, distanceMetres: 220, speedMetresPerSecond: 7 }],
+    });
+    expect(ridingAt(frame, 'rider')).toEqual({ cadence: 62, power: 320, grade: 4, speed: 6 });
+    expect(ridingAt(frame, 'bot')).toEqual({ cadence: undefined, power: 180, grade: 4, speed: 5 });
+    // The ghost and a room's rider have their speed and the route's grade.
+    for (const kind of ['ghost', 'remote'] as const) {
+      const riding = ridingAt(frame, kind);
+      expect(riding?.cadence, kind).toBeUndefined();
+      expect(riding?.power, kind).toBeUndefined();
+      expect(riding?.speed, kind).toBeGreaterThan(0);
+      expect(riding?.grade, kind).toBeCloseTo(gradeAt(climb, metres(200)), 6);
+    }
+  });
+
+  it('gives a rider whose power reading has dropped no power, which is not a power of nought', () => {
+    const state: GameState = {
+      ...start,
+      ride: { speed: metresPerSecond(6), distance: metres(200) },
+      input: { ...start.input, power: watts(0), live: false },
+    };
+    const frame = sceneFrame({ profile: climb, origin, state });
+    expect(ridingAt(frame, 'rider')?.power).toBeUndefined();
+    expect(ridingAt(frame, 'rider')?.cadence).toBeUndefined();
+  });
+
+  it('gives the rider their own speed, not the drawn one hurrying out of a bend', () => {
+    // The owner fed 55 km/h in and the marker said about 63: 55 × 1.15, the
+    // drawn rider giving a hairpin's lag back (`bend-easing.ts`). Found here
+    // rather than typed: the first place past the hairpin where it does.
+    const own = 55 / 3.6;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const input: SceneInput = {
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        grade: gradePercent(-5),
+      },
+    };
+    // Non-vacuity: the rider IS drawn behind their odometer, catching up.
+    expect(drawnRiderDistance(input)).toBeLessThan(past);
+    expect(ridingAt(sceneFrame(input), 'rider')?.speed).toBe(own);
+  });
+
+  it('gives the pacer and a room’s rider their own speeds too', () => {
+    const own = 15;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        bot: {
+          state: { speed: metresPerSecond(own), distance: metres(past) },
+          distanceOnRoute: metres(past),
+          grade: gradePercent(-5),
+          power: watts(180),
+        },
+      },
+      botDistance: past,
+      remoteRiders: [{ riderId: 3, distanceMetres: past, speedMetresPerSecond: own }],
+    });
+    expect(ridingAt(frame, 'bot')?.speed).toBe(own);
+    expect(ridingAt(frame, 'remote')?.speed).toBe(own);
+  });
+
+  it('gives the ghost its own replayed speed too — #2148', () => {
+    // Refs #2148: the ghost's `ownSpeed` set back to its drawn speed passed
+    // every test. A ghost that rode `own` m/s throughout, `ridden` seconds in,
+    // is at the first place past the hairpin where the drawn one hurries.
+    const own = 15;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const span = (2 * past) / own;
+    const ghost = buildGhostTrack({
+      elapsedSeconds: [0, span],
+      distanceMetres: [0, own * span],
+    });
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        ridden: seconds(past / own),
+      },
+      ghost,
+    });
+    expect(ridingAt(frame, 'ghost')?.speed).toBeCloseTo(own, 9);
+  });
+
+  it('gives a lap race’s bots their speed and grade', () => {
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: { ...start, ride: { speed: metresPerSecond(6), distance: metres(200) } },
+      raceBots: [{ distanceMetres: 230, speedMetresPerSecond: 8, lateralMetres: 1 }],
+    });
+    expect(ridingAt(frame, 'bot')).toEqual({
+      cadence: undefined,
+      power: undefined,
+      grade: gradeAt(climb, metres(230)),
+      speed: 8,
+    });
   });
 });

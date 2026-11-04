@@ -2699,7 +2699,8 @@ for (const theme of THEMES) {
       });
       expect(read, 'the file input, its label or a secondary button is missing').toBeDefined();
       expect(read?.file).toEqual(read?.secondary);
-      expect(read?.file.color).toBe(rgbOf('accent', theme));
+      // #2118: a label is the accent's TEXT token.
+      expect(read?.file.color).toBe(rgbOf('accentText', theme));
       // #992: tonal, so a filled surface step and not the page.
       expect(read?.file.backgroundColor).toBe(rgbOf('surfaceOverlay', theme));
       // `--oyl-space-sm`, 8 px: "GPX fileChoose File" is the defect.
@@ -3384,6 +3385,54 @@ test.describe('#991 — the display face is the bundled one, from this app’s o
       read.status,
       'the face loaded with its file refused, so the case above measured something else',
     ).not.toBe('loaded');
+  });
+});
+
+/*
+ * #2040, ADR 0063 D-5 — the third weight, 600, through the same pipeline and
+ * from the same origin. No product rule asks for 600 yet (its first users are
+ * the type-scale issues after #2041), so the case sets one line in the display
+ * family at 600 on the specimen page, as a rule would, and reads what the
+ * engine loaded for it. The control refuses the font files, as #991's does.
+ */
+async function semiBold(page: Page): Promise<{ readonly status: string; readonly check: boolean }> {
+  return page.evaluate(async () => {
+    const line = document.createElement('p');
+    line.textContent = 'Label 0123456789';
+    line.style.fontFamily = 'var(--oyl-font-family-display)';
+    line.style.fontWeight = '600';
+    document.body.append(line);
+    await document.fonts.load('600 16px Barlow').catch(() => []);
+    await document.fonts.ready;
+    const face = [...document.fonts].find(
+      (candidate) =>
+        candidate.family.replaceAll(/['"]/g, '') === 'Barlow' && candidate.weight === '600',
+    );
+    return { status: face?.status ?? 'absent', check: document.fonts.check('600 16px Barlow') };
+  });
+}
+
+test.describe('#2040 — Barlow 600 is the bundled one, from this app’s own origin', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('loads Barlow 600 from the page’s origin when a line asks for it', async ({ page }) => {
+    const fonts: string[] = [];
+    page.on('request', (request) => {
+      if (request.resourceType() === 'font') fonts.push(request.url());
+    });
+    await openIllustration(page);
+    const read = await semiBold(page);
+    const origin = new URL(page.url()).origin;
+    expect(read.status, 'Barlow 600 did not load').toBe('loaded');
+    expect(read.check).toBe(true);
+    expect(fonts.some((url) => /\/assets\/barlow-latin-600-[^/]+\.woff2$/.test(url))).toBe(true);
+    expect(fonts.filter((url) => new URL(url).origin !== origin)).toEqual([]);
+  });
+
+  test('the control — with the font files refused, 600 does not load', async ({ page }) => {
+    await page.route('**/*.woff2', (route) => route.abort());
+    await openIllustration(page);
+    expect((await semiBold(page)).status).not.toBe('loaded');
   });
 });
 

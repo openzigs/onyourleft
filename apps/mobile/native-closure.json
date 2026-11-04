@@ -281,6 +281,11 @@
       "why": "The Bluetooth LE plugin's native code, built from the npm package's own source; its notice is that package's LICENSE, in the web half."
     },
     {
+      "project": ":capacitor-splash-screen",
+      "package": "@capacitor/splash-screen",
+      "why": "The launch splash plugin's native code (#2050), built from the npm package's own source; its notice is that package's LICENSE, in the web half. Its Maven dependencies, appcompat 1.7.1 and core-splashscreen 1.2.0, are already listed above."
+    },
+    {
       "project": ":capacitor-cordova-android-plugins",
       "package": null,
       "why": "Written by `cap sync` and holding no Cordova plugin, because this app uses none. It contributes no third-party code of its own; the Cordova framework it depends on is listed above."
