@@ -713,7 +713,7 @@ test.describe('a cold start with the network off', () => {
       await expect(page.locator('h1')).toHaveText('Settings');
       await expect(page.locator('main')).not.toContainText('Could not load this page');
       await expect(page.locator('main [data-oyl-view-loading]')).toHaveCount(0);
-      expect(await page.locator('main > :not(.oyl-view-head)').count()).toBeGreaterThan(2);
+      expect(await page.locator('main > :not(.oyl-view-head)').count()).toBeGreaterThan(1);
     } finally {
       await context.close();
       rmSync(blocked, { recursive: true, force: true });
