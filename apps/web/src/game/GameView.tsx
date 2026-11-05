@@ -61,7 +61,7 @@ import {
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
 import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
-import { advanceCrank, cadenceTurns } from './bicycle';
+import { advanceCrank, cadenceTurns, turningCadence } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
 import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
@@ -105,6 +105,12 @@ import type { EnteredRoom, RoomsPort } from '../net/rooms-port';
 import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
 import { RoomPanel } from '../rooms/RoomPanel';
+import {
+  voiceLinkShown,
+  voiceNoticeAfter,
+  type VoiceNotice as RoomVoiceNotice,
+} from './room-voice';
+import { VoiceButton, VoiceNotice } from './hud/VoiceNotice';
 import {
   acrossTheRoomsLine,
   heldOnTheLine,
@@ -672,6 +678,22 @@ function useRideMovingSeconds(trainer: GameTrainerPort | undefined): number | un
 }
 
 /**
+ * The recorder's ELAPSED time, kept current — #2072. Subscribed for
+ * {@link useRideMovingSeconds}'s reason: a paused game does not re-render, and
+ * the elapsed time goes on counting through every pause, the game's and the
+ * recording's alike. Still the recorder's figure: never the simulation's
+ * `elapsed`.
+ */
+function useRideElapsedSeconds(trainer: GameTrainerPort | undefined): number | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideElapsedSeconds?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * The moving time of the lap in progress, kept current — #1312. The
  * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason: a
  * paused GAME does not pause the recording, and the lap's clock is the
@@ -1188,6 +1210,8 @@ function GameScreen({
   const sideCamera = useSideCamera(props.sidePairing);
   /** @see useRideMovingSeconds */
   const movingSeconds = useRideMovingSeconds(props.trainer);
+  /** @see useRideElapsedSeconds */
+  const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
   /** @see useRecordingPaused */
@@ -1291,6 +1315,12 @@ function GameScreen({
   const crankRef = useRef<number>(0);
   /** Whether a cadence reading turned {@link crankRef} on the last frame — #625. */
   const pedallingRef = useRef<boolean>(false);
+  /**
+   * The cadence that turned {@link crankRef} on the last frame, or `undefined`
+   * when the HUD shows none — #1999, what the rider's drawn position is chosen
+   * from (`posture.ts`).
+   */
+  const cadenceRef = useRef<number | undefined>(undefined);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
   /**
    * Whether a press on *Ride* is still on its way to a ride — #509.
@@ -1457,6 +1487,15 @@ function GameScreen({
   const roomRef = useRef<RoomConnection | undefined>(undefined);
   /** What the room frame remembers between frames. @see room-ride.ts */
   const roomStateRef = useRef<RoomRideState>(roomRideState());
+  /**
+   * The room's Discord voice link and when it came (#875), as the tick last
+   * read it. ⚠️ **Mirrored in {@link voiceNotice}, state**, because a race
+   * holding its rider on the line renders nothing new from the tick (the
+   * simulation's state does not change), so a link the room replaced there
+   * (#876) would never be drawn from a ref alone. `room-voice.ts`.
+   */
+  const voiceNoticeRef = useRef<RoomVoiceNotice | undefined>(undefined);
+  const [voiceNotice, setVoiceNotice] = useState<RoomVoiceNotice | undefined>(undefined);
   /** The last room frame, for the render the tick schedules. */
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
@@ -1950,6 +1989,8 @@ function GameScreen({
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
+        voiceNoticeRef.current = undefined;
+        setVoiceNotice(undefined);
         roomRef.current = props.room.join({
           roomId,
           // #784: the room's `welcome.routeRef` must be the route this device
@@ -2347,6 +2388,17 @@ function GameScreen({
         roomRecordAskedRef.current = true;
         void trainerPortRef.current?.recordRoomRide?.();
       }
+      // #875: the room's voice link, from its welcome, and when it came — a
+      // render scheduled whenever it changes (#876), held on the line or not.
+      const voiceNow = voiceNoticeAfter(
+        voiceNoticeRef.current,
+        room?.status(),
+        simulation.state.elapsed,
+      );
+      if (voiceNow !== voiceNoticeRef.current) {
+        voiceNoticeRef.current = voiceNow;
+        setVoiceNotice(voiceNow);
+      }
       const roomNow =
         room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
       roomFrameRef.current = roomNow;
@@ -2373,6 +2425,7 @@ function GameScreen({
       const sinceLastFrame = at - lastFrameAt;
       crankRef.current = advanceCrank(crankRef.current, sensors.cadence, sinceLastFrame / 1000);
       pedallingRef.current = cadenceTurns(sensors.cadence);
+      cadenceRef.current = turningCadence(sensors.cadence);
       // ⚠️ Before `setState`, so the render it schedules already has the answer.
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
@@ -2820,6 +2873,9 @@ function GameScreen({
           // #625: whether that angle is being turned by a reading — the body
           // rocks exactly while the HUD shows a cadence. @see cadenceTurns
           pedalling: pedallingRef.current,
+          // #1999: the cadence the rider's position on the bicycle is chosen
+          // from, beside their power, grade and speed. @see turningCadence
+          cadence: cadenceRef.current,
           // #783: the room's drawn riders — where they are, and nothing else.
           // #1911: in a lap race, each at their effort distance plus the
           // room's race offset for them.
@@ -3193,6 +3249,30 @@ function GameScreen({
   // #785: where the race is, read during render like `sensors` — the tick's
   // `setState` is what schedules this render.
   const race = roomRef.current?.race();
+  // #875: the room's voice link, while it is shown (`room-voice.ts`).
+  const voiceLink = voiceLinkShown(voiceNotice, race, state?.elapsed ?? 0, STANDING_NOTICE_SECONDS);
+  // #785: *Start the race*, offered to the rider who made the room and to
+  // nobody else (the owner's ruling of 2026-09-30), while the race waits.
+  const startRace =
+    race?.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
+      <Button
+        size="ride"
+        unavailable={starting === 'asking'}
+        onClick={() => {
+          const rooms = props.rooms;
+          const roomId = roomIdRef.current;
+          if (starting === 'asking' || rooms === undefined || roomId === undefined) {
+            return;
+          }
+          setStarting('asking');
+          void rooms.start(roomId).then((answer) => {
+            setStarting(answer.kind === 'started' ? undefined : 'refused');
+          });
+        }}
+      >
+        Start the race
+      </Button>
+    ) : undefined;
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
@@ -3300,6 +3380,8 @@ function GameScreen({
         // `elapsed`, which is a second clock that does not know about the
         // recorder's auto-pause. @see useRideMovingSeconds
         movingSeconds={movingSeconds}
+        // #2072: and the elapsed time, the recorder's again — pauses included.
+        elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
@@ -3601,27 +3683,28 @@ function GameScreen({
                   ? ' The race could not be started from here: it may have been started already.'
                   : ''}
               </StatusMessage>
-              {race.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
-                <Button
-                  size="ride"
-                  unavailable={starting === 'asking'}
-                  onClick={() => {
-                    const rooms = props.rooms;
-                    const roomId = roomIdRef.current;
-                    if (starting === 'asking' || rooms === undefined || roomId === undefined) {
-                      return;
-                    }
-                    setStarting('asking');
-                    void rooms.start(roomId).then((answer) => {
-                      setStarting(answer.kind === 'started' ? undefined : 'refused');
-                    });
-                  }}
-                >
-                  Start the race
-                </Button>
-              ) : undefined}
+              {/* #875: the room's voice link, while the race waits on its line, is a
+                  button beside *Start the race*, the two on a row of their own
+                  (`theme.css` §"A RACE'S VOICE BUTTON, ON ITS LINE"). Without it
+                  the race's notice is exactly what it was. */}
+              {voiceLink?.place === 'race' ? (
+                <div className="oyl-hud__race-actions">
+                  {startRace}
+                  <VoiceButton invite={voiceLink.invite} />
+                </div>
+              ) : (
+                startRace
+              )}
             </div>
           ),
+          // #875: the room's Discord voice link, only after the room let the
+          // rider in (its welcome), while a race holds them on the line and
+          // for a standing notice's span of ride (`room-voice.ts`). Not
+          // `live`: a link to press, not a fault to hear. It says it opens
+          // Discord; `target="_blank"` hands it to the system in the shell.
+          voiceLink?.place === 'notice' ? (
+            <VoiceNotice key="voice" invite={voiceLink.invite} />
+          ) : undefined,
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.

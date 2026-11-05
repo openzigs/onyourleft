@@ -2,7 +2,7 @@
 
 /**
  * A room ride's HUD, measured by a real engine — #1347, #789, #1356, #1358,
- * #1398, #1407 and #1409.
+ * #1398, #1407, #875 and #1409.
  *
  * Sections of `ride.browser.spec.ts` until #1414, which divided that file so
  * the browser gate's shards could divide it too: its header is still this
@@ -29,10 +29,14 @@ import {
   UNANCHORED,
   bothWays,
   TABLET_VIEWPORTS,
+  drawnItems,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
+import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
+import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
+import { HORIZON_HAZE } from '../src/game/world';
 
-import type { StageItem, StageMeasurement } from './ride-harness';
+import type { StageItem, StageMeasurement, VoiceMeasurement } from './ride-harness';
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
@@ -395,6 +399,9 @@ test.describe('a room ride’s HUD — #1356', () => {
             'Gradient',
             'To go',
             'Moving',
+            // #2072: in the primary panel's clock row on the stage.
+            'Elapsed',
+            'Clock',
             'Pacer',
             'Your best',
             'Wilhelmina Vandersteen-Oduya Mbe',
@@ -474,7 +481,7 @@ function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] 
     ...(phone ? ROOM_GIVES_WAY : []),
     ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
   ] as readonly string[];
-  return seen.items
+  return drawnItems(seen, viewport)
     .filter((each) => !givesWay.includes(each.name))
     .filter((each) => !inside(each.box, viewport) || !each.onTop)
     .map(describeItem);
@@ -700,7 +707,9 @@ test.describe('a room ride with sounds on — #1398', () => {
  * #1407 — the two room rides with sounds on that §"#1398" left over:
  * *Report*'s reasons open (`?room=report&sounds=on`) and a race waiting on
  * its start line (`?room=race&sounds=on`: the room's maker's notice, with
- * *Start the race*, and no room row).
+ * *Start the race*, and no room row) — and, since #875, that race with the
+ * room's Discord voice link as its notice's last line
+ * (`?room=race-voice&sounds=on`, {@link RACE_VOICE_WITH_SOUNDS}).
  *
  * ## What is held
  *
@@ -730,6 +739,14 @@ const REPORT_WITH_SOUNDS = `${REPORT_OPEN}&sounds=on`;
 
 const RACE_WITH_SOUNDS = '?room=race&sounds=on';
 
+/**
+ * #875: the same race on its line, its welcome carrying the room's Discord
+ * voice link, which `GameView` draws as a button beside *Start the race*
+ * (`game/room-voice.ts`). Held to everything `?room=race&sounds=on` is, both
+ * ways; §"#875" holds the button itself.
+ */
+const RACE_VOICE_WITH_SOUNDS = '?room=race-voice&sounds=on';
+
 const VOLUME = 'sound: Sound volume';
 
 /** `REPORT_REASONS_MS` in `RoomReport.tsx`: the reasons close by themselves. */
@@ -740,7 +757,9 @@ const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
 /** What `theme.css` records as giving way in this state at this viewport. */
 function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
   const phone = !TABLET_VIEWPORTS.includes(viewport);
-  if (query === RACE_WITH_SOUNDS) return phone ? ROUTE_READINGS : [];
+  if (query === RACE_WITH_SOUNDS || query === RACE_VOICE_WITH_SOUNDS) {
+    return phone ? ROUTE_READINGS : [];
+  }
   if (!phone) return [];
   return onItsSide(viewport)
     ? ROOM_REPORT_CONTROLS.slice(0, 2)
@@ -791,7 +810,7 @@ async function reasonsClipped(page: Page): Promise<string[]> {
 }
 
 test.describe('Report’s reasons open, and a race on its start line, with sounds on — #1407', () => {
-  for (const query of [REPORT_WITH_SOUNDS, RACE_WITH_SOUNDS]) {
+  for (const query of [REPORT_WITH_SOUNDS, RACE_WITH_SOUNDS, RACE_VOICE_WITH_SOUNDS]) {
     for (const viewport of OVERLAY_VIEWPORTS) {
       test(`${query}: every panel whole and clear of the rider, every reading and control on the stage — ${viewport.name}`, async ({
         browser,
@@ -900,6 +919,296 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
       expect(failures).not.toEqual([]);
     });
   }
+});
+
+/**
+ * #875 — a race's *Join voice on Discord* on its start line
+ * (`?room=race-voice&sounds=on`), the owner's ruling of 2026-11-04: *"Make it
+ * a button first."* `theme.css` §"A RACE'S VOICE BUTTON, ON ITS LINE".
+ *
+ * ## What is held
+ *
+ * Where `theme.css` shows it — 47 rem tall or more (the tablets and the
+ * upright phones), and 64 rem wide or more at any height over 30 rem (the
+ * laptops: 1280×720 and 1024×600, measured here though neither is an overlay
+ * viewport of the other specs) — both ways (#1120):
+ *
+ * - **a target**: the link's box at least 48 × 48 (the owner's ride-time
+ *   size, `design/ride-time-controls.ts` §`RIDE_TIME_TARGET_PIXELS`), drawn
+ *   as a secondary button at that size, the topmost thing at its centre and
+ *   2 px inside each corner, its words exactly the approved ones, none
+ *   running out of its box and each half on one line, still a link to the
+ *   room's invite;
+ * - **on a panel that reads over a bright sky**: the panel's computed
+ *   background opaque and at least 3:1 (WCAG 2.2 SC 1.4.11) against the
+ *   world's brightest sky, its horizon haze (`game/world.ts`
+ *   §`HORIZON_HAZE`); the button's own fill opaque, and its label at least
+ *   4.5:1 on it;
+ * - **in its place**: inside the viewport and the notice cell, beside
+ *   *Start the race* (no lower than its row and no more than a tenth
+ *   taller, and *Start the race* still its one 48 px line), over neither the race's notice
+ *   nor *Start the race*, over no other panel, and not over the leaning
+ *   rider's box (`game/camera.ts` §`riderFrameBox`).
+ *
+ * On a phone on its side (736×360, 844×390, 736×480) and at 802×600, under
+ * 64 rem wide and under 47 rem tall, it is laid out at no size: the recorded
+ * trade.
+ *
+ * ## The controls
+ *
+ * Each undoes one half and requires the same measurement to fail: the link
+ * drawn as the bare text it replaced (a target under 48 px); the panel and
+ * the button drawn with no fill (no contrast with the sky); the button shown
+ * on a 736×360 phone on its side (squeezed beside *Start the race* into
+ * 107 px, its words run out of it: measured 26 px); and, at
+ * 360×752, the button put under *Start the race* rather than beside it
+ * (over the rider).
+ */
+const VOICE_WORDS = 'Join voice on Discord (opens Discord)';
+
+/** The fake invite `ride-harness.tsx` §`RACE_VOICE`'s welcome carries. */
+const VOICE_INVITE = 'https://discord.gg/example';
+
+/**
+ * How much taller than *Start the race* the button may be: two lines at the
+ * HUD's 1.2 leading come to 50 px beside its 48.
+ */
+const VOICE_ROW_SLACK = 1.1;
+
+/**
+ * Where the button is shown (`theme.css`): 47 rem tall or more, or 64 rem
+ * wide or more and over 30 rem tall.
+ */
+function voiceShown(viewport: Viewport): boolean {
+  return viewport.height >= 752 || (viewport.width >= 1024 && viewport.height > 480);
+}
+
+/**
+ * The overlay viewports, and the band between 30 and 47 rem tall that none of
+ * them is in (review 5777449216 on #2141): the two edges of the wide screens
+ * the button is shown on there, and 802×600, which it is not.
+ */
+const VOICE_VIEWPORTS: readonly Viewport[] = [
+  ...OVERLAY_VIEWPORTS,
+  { name: 'a laptop — 1280×720', width: 1280, height: 720, unstagedFails: true },
+  { name: 'the narrowest wide screen — 1024×600', width: 1024, height: 600, unstagedFails: true },
+  {
+    name: 'under 64 rem wide and under 47 rem tall — 802×600',
+    width: 802,
+    height: 600,
+    unstagedFails: true,
+  },
+];
+
+/** The colour a computed `rgb()`/`rgba()` names, as hex, and its alpha. */
+function hexOf(computed: string): { readonly hex: string; readonly alpha: number } {
+  const parts = /^rgba?\(([^)]*)\)$/
+    .exec(computed)?.[1]
+    ?.split(/[\s,/]+/)
+    .filter(Boolean);
+  if (parts === undefined || parts.length < 3) {
+    throw new Error(`not a computed rgb() colour: ${computed}`);
+  }
+  const hex = parts
+    .slice(0, 3)
+    .map((each) => Math.round(Number(each)).toString(16).padStart(2, '0'))
+    .join('');
+  return { hex: `#${hex}`, alpha: parts[3] === undefined ? 1 : Number(parts[3]) };
+}
+
+const SKY = `#${HORIZON_HAZE.toString(16).padStart(6, '0')}`;
+
+function voiceOf(seen: StageMeasurement, how: string): VoiceMeasurement {
+  expect(seen.voice, `${how}: no voice button on the race's line`).toBeDefined();
+  return seen.voice as VoiceMeasurement;
+}
+
+/** The button as a target a rider can press. */
+function voiceTargetFailures(voice: VoiceMeasurement): string[] {
+  const found: string[] = [];
+  const { box } = voice.button;
+  const minimum = RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE;
+  if (box.width < minimum || box.height < minimum) {
+    found.push(`${describeItem(voice.button)} under ${String(RIDE_TIME_TARGET_PIXELS)} px`);
+  }
+  for (const each of ['oyl-button', 'oyl-button--secondary', 'oyl-button--ride']) {
+    if (!voice.classes.split(/\s+/).includes(each)) found.push(`not drawn as ${each}`);
+  }
+  if (!voice.button.onTop || !voice.cornersOnTop) {
+    found.push(`${describeItem(voice.button)} not wholly the topmost thing`);
+  }
+  if (voice.overflow > SUBPIXEL_TOLERANCE) {
+    found.push(`its words run ${voice.overflow.toFixed(0)} px out of the button`);
+  }
+  if (voice.halfLines.length !== 2 || voice.halfLines.some((lines) => lines !== 1)) {
+    found.push(`its two halves set on ${voice.halfLines.join(' and ')} lines, not one each`);
+  }
+  return found;
+}
+
+/** The panel against a bright sky, and the label on the button. */
+function voiceContrastFailures(voice: VoiceMeasurement): string[] {
+  const found: string[] = [];
+  const panel = hexOf(voice.panelBackground);
+  const fill = hexOf(voice.fill);
+  const label = hexOf(voice.label);
+  if (panel.alpha < 1) found.push(`the panel is not opaque: ${voice.panelBackground}`);
+  else if (contrastRatio(panel.hex, SKY) < AA_LARGE_TEXT_OR_NON_TEXT) {
+    found.push(`the panel ${panel.hex} is ${contrastRatio(panel.hex, SKY).toFixed(2)}:1 on ${SKY}`);
+  }
+  if (fill.alpha < 1) found.push(`the button's fill is not opaque: ${voice.fill}`);
+  else if (contrastRatio(label.hex, fill.hex) < AA_TEXT) {
+    found.push(`the label is ${contrastRatio(label.hex, fill.hex).toFixed(2)}:1 on its fill`);
+  }
+  return found;
+}
+
+/** The button's place: on the stage, beside *Start the race*, over nothing and not the rider. */
+function voicePlaceFailures(
+  seen: StageMeasurement,
+  voice: VoiceMeasurement,
+  viewport: Viewport,
+): string[] {
+  const found: string[] = [];
+  const { box } = voice.button;
+  const button = describeItem(voice.button);
+  if (!inside(voice.panel, viewport)) found.push(`${button}'s panel off the stage`);
+  const cell = voice.cell;
+  if (
+    cell === undefined ||
+    voice.panel.left < cell.left - SUBPIXEL_TOLERANCE ||
+    voice.panel.right > cell.right + SUBPIXEL_TOLERANCE ||
+    voice.panel.top < cell.top - SUBPIXEL_TOLERANCE ||
+    voice.panel.bottom > cell.bottom + SUBPIXEL_TOLERANCE
+  ) {
+    found.push(`${button}'s panel outside the notice cell`);
+  }
+  if (voice.notice === undefined || overlap(voice.panel, voice.notice)) {
+    found.push(`${button} over the race's notice`);
+  }
+  if (voice.start === undefined) found.push('no Start the race beside it');
+  else {
+    if (overlap(voice.panel, voice.start)) found.push(`${button} over Start the race`);
+    if (box.top > voice.start.bottom) found.push(`${button} below Start the race, not beside it`);
+    if (voice.start.height > RIDE_TIME_TARGET_PIXELS + SUBPIXEL_TOLERANCE) {
+      found.push(`Start the race squeezed to ${voice.start.height.toFixed(0)} px tall beside it`);
+    }
+    // Set as tight as the row it joins: a taller row is paid for out of an
+    // upright phone's clearance above the rider.
+    if (box.height > voice.start.height * VOICE_ROW_SLACK) {
+      found.push(`${button} taller than Start the race's ${voice.start.height.toFixed(0)} px row`);
+    }
+  }
+  for (const panel of seenPanels(seen)) {
+    if (!panel.name.includes('oyl-hud__notices') && overlap(voice.panel, panel.box)) {
+      found.push(`${button} over ${describeItem(panel)}`);
+    }
+  }
+  if (overlap(voice.panel, riderBox(viewport))) found.push(`${button} over the rider`);
+  return found;
+}
+
+test.describe('a race’s voice button on its line — #875', () => {
+  for (const viewport of VOICE_VIEWPORTS) {
+    test(`${voiceShown(viewport) ? 'a 48 px secondary button on an opaque panel, beside Start the race, over nothing' : 'laid out at no size where it does not fit'} — ${viewport.name}`, async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport, RACE_VOICE_WITH_SOUNDS);
+      for (const [how, seen] of await bothWays(page)) {
+        const voice = voiceOf(seen, how);
+        console.log(
+          `#875 — ${viewport.name} — ${how}: ${describeItem(voice.button)}; panel ` +
+            `${voice.panelBackground}; rider top ${riderBox(viewport).top.toFixed(0)}`,
+        );
+        expect(voice.text, how).toBe(VOICE_WORDS);
+        expect(voice.href, how).toBe(VOICE_INVITE);
+        if (!voiceShown(viewport)) {
+          expect(voice.button.box.width * voice.button.box.height, how).toBe(0);
+          continue;
+        }
+        expect(voiceTargetFailures(voice), how).toEqual([]);
+        expect(voiceContrastFailures(voice), how).toEqual([]);
+        expect(voicePlaceFailures(seen, voice, viewport), how).toEqual([]);
+      }
+    });
+  }
+
+  const at = (size: string): Viewport =>
+    VOICE_VIEWPORTS.find(
+      (each) => `${String(each.width)}×${String(each.height)}` === size,
+    ) as Viewport;
+
+  test('the control — the link drawn as the bare text it replaced is under 48 px — 1280×800', async ({
+    page,
+  }) => {
+    await openRide(page, at('1280×800'), RACE_VOICE_WITH_SOUNDS);
+    await page.evaluate(() => {
+      document.querySelector('.oyl-hud__voice > a')?.removeAttribute('class');
+    });
+    const voice = voiceOf(await measure(page), ANCHORED);
+    const failures = voiceTargetFailures(voice);
+    console.log(`#875 control, target: ${failures.join('; ')}`);
+    expect(failures.some((each) => each.includes('under 48 px'))).toBe(true);
+  });
+
+  test('the control — the panel and the button with no fill do not read over the sky — 1280×800', async ({
+    page,
+  }) => {
+    await openRide(page, at('1280×800'), RACE_VOICE_WITH_SOUNDS);
+    await page.addStyleTag({
+      content: `.oyl-hud .oyl-hud__voice, .oyl-hud .oyl-hud__voice > .oyl-button {
+        background: transparent !important; transition: none !important; }`,
+    });
+    const voice = voiceOf(await measure(page), ANCHORED);
+    const failures = voiceContrastFailures(voice);
+    console.log(`#875 control, contrast: ${failures.join('; ')}`);
+    expect(failures.some((each) => each.startsWith('the panel'))).toBe(true);
+  });
+
+  test('the control — shown on a phone on its side, it does not fit — 736×360', async ({
+    page,
+  }) => {
+    const viewport = at('736×360');
+    await openRide(page, viewport, RACE_VOICE_WITH_SOUNDS);
+    await page.addStyleTag({
+      content: '.oyl-game--riding .oyl-hud .oyl-hud__voice { display: block !important; }',
+    });
+    const seen = await measure(page);
+    const voice = voiceOf(seen, ANCHORED);
+    const failures = [...voiceTargetFailures(voice), ...voicePlaceFailures(seen, voice, viewport)];
+    console.log(`#875 control, a phone on its side: ${failures.join('; ')}`);
+    expect(failures).not.toEqual([]);
+  });
+
+  test('the control — shown under 64 rem wide and under 47 rem tall, it does not fit — 802×600', async ({
+    page,
+  }) => {
+    const viewport = at('802×600');
+    await openRide(page, viewport, RACE_VOICE_WITH_SOUNDS);
+    await page.addStyleTag({
+      content: '.oyl-game--riding .oyl-hud .oyl-hud__voice { display: block !important; }',
+    });
+    const seen = await measure(page);
+    const voice = voiceOf(seen, ANCHORED);
+    const failures = [...voiceTargetFailures(voice), ...voicePlaceFailures(seen, voice, viewport)];
+    console.log(`#875 control, 802×600: ${failures.join('; ')}`);
+    expect(failures).not.toEqual([]);
+  });
+
+  test('the control — under Start the race rather than beside it, it is over the rider — 360×752', async ({
+    page,
+  }) => {
+    const viewport = at('360×752');
+    await openRide(page, viewport, RACE_VOICE_WITH_SOUNDS);
+    await page.addStyleTag({
+      content: `.oyl-game--riding .oyl-hud .oyl-hud__race-actions {
+        flex-direction: column !important; align-items: flex-start !important; }`,
+    });
+    const seen = await measure(page);
+    const failures = voicePlaceFailures(seen, voiceOf(seen, ANCHORED), viewport);
+    console.log(`#875 control, below: ${failures.join('; ')}`);
+    expect(failures.some((each) => each.endsWith('over the rider'))).toBe(true);
+  });
 });
 
 /**

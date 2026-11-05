@@ -60,6 +60,14 @@ export interface RoomPlan {
    * room's course (migration 0037, #1910) by {@link planFor}.
    */
   readonly lapRace?: LapRaceSettings;
+  /**
+   * The room's Discord voice link (#875), where the operator turned voice on
+   * and this is a rider's private room: what the room says in a welcome. Not
+   * from the store — `instance.ts` asks `voice/room-voice.ts` for it as it
+   * looks the room up for each socket, so a later socket carries the newest
+   * link. Absent is no voice.
+   */
+  readonly voiceInvite?: string;
 }
 
 /**

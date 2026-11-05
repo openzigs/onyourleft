@@ -34,7 +34,8 @@ export function valueResources(xml: string, element: string): ReadonlyMap<string
 
 /**
  * The items of one `<style name="…">`, item name to value, or `undefined`
- * when the file declares no such style.
+ * when the file declares no such style. An item may carry other attributes
+ * after its name, as `tools:targetApi` (#2127).
  */
 export function styleItems(xml: string, style: string): ReadonlyMap<string, string> | undefined {
   const text = withoutComments(xml);
@@ -44,7 +45,7 @@ export function styleItems(xml: string, style: string): ReadonlyMap<string, stri
   );
   if (block?.[1] === undefined) return undefined;
   const items = new Map<string, string>();
-  for (const match of block[1].matchAll(/<item\s+name\s*=\s*"([^"]+)"\s*>([^<]*)<\/item>/g)) {
+  for (const match of block[1].matchAll(/<item\s+name\s*=\s*"([^"]+)"[^>]*>([^<]*)<\/item>/g)) {
     const [, name, value] = match;
     if (name !== undefined && value !== undefined) items.set(name, value.trim());
   }
