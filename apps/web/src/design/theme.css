@@ -1445,6 +1445,16 @@ html {
   grid-column: 1 / -1;
 }
 
+/*
+ * A section that is a very long list (Credits' credited works and its
+ * software, thousands of pixels): across every column, since in one cell the
+ * other columns stood empty beside it for most of the page (#2190's review:
+ * 15220 px in three columns against 12240 on the measure).
+ */
+.oyl-sections > .oyl-sections__long {
+  grid-column: 1 / -1;
+}
+
 /* A Settings card of many boxes (#1237's workout goals): across every column,
    its boxes side by side, rather than one column three times its neighbour. */
 .oyl-sections > .oyl-settings-card--wide {
@@ -1452,21 +1462,50 @@ html {
 }
 
 @container oyl-pane (min-width: 40rem) {
-  .oyl-sections:not(.oyl-sections--broad) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--oyl-space-md) var(--oyl-space-lg);
     align-items: start;
   }
 
-  .oyl-sections:not(.oyl-sections--broad) > * {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) > * {
     margin-block: 0;
   }
 }
 
 @container oyl-pane (min-width: 64rem) {
-  .oyl-sections:not(.oyl-sections--broad) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * A pair — #2067: a screen whose view gathers itself into exactly two groups
+ * (the route builder: the waypoints and their map, then the legs and the
+ * save; a ride's own page: its figures, traces and laps, then the rest). Two
+ * columns from 54rem, as `--broad` below, and never three, which would leave
+ * a third of a landscape tablet empty beside two groups. Not from 40rem: an
+ * upright tablet's `main` (42.5rem) halved gave the route builder's map 328
+ * px, narrower than a phone's column (#2190's review). A group holding a
+ * table keeps its column rather than spanning both, as a lone table section
+ * does above: each group is half of the pair, and its table scrolls sideways
+ * inside its own region (`design/ScrollTable.tsx`).
+ */
+@container oyl-pane (min-width: 54rem) {
+  .oyl-sections--pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--oyl-space-md) var(--oyl-space-lg);
+    align-items: start;
+  }
+
+  .oyl-sections--pair > * {
+    margin-block: 0;
+  }
+
+  .oyl-sections--pair > :has(.oyl-scroll-region) {
+    grid-column: auto;
   }
 }
 

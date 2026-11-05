@@ -16,7 +16,8 @@ import { hrefFor, moreMenuRoutes } from '../shell/routes';
 
 export function MoreView(): JSX.Element {
   return (
-    <ul className="oyl-more">
+    // #2067: a screen of sections, one page to a cell, in rows on a tablet.
+    <ul className="oyl-more oyl-sections">
       {moreMenuRoutes().map((route) => (
         <li key={route.id}>
           <a href={hrefFor(route)} aria-describedby={`oyl-more-${route.id}`}>
