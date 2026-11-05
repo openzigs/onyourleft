@@ -6021,6 +6021,65 @@ select.oyl-input {
 }
 
 /*
+ * THE ROUTE SLIDE — #2054.
+ *
+ * Going into a page below the one on screen (Segments to one segment, About
+ * to its credits) and back out of it is a short slide, so the rider can tell
+ * where they went; one tab to another stays the cross-fade above.
+ * `shell/route-motion.ts` §`navigationKind` decides which, `AppShell.tsx`'s
+ * `<ViewTransition>` sets the class, and these rules name only the keyframes:
+ * the duration and the curve are the rule above's, so the 200 ms ceiling and
+ * both blocks that collapse motion hold for these too. Deeper slides the new
+ * page in from the right and the old out towards the left (physical
+ * `translateX`: the app has no RTL, no `dir=` under `apps/web/src`); back is the
+ * mirror. Where the WebView has no View Transition API, React swaps the views
+ * with no animation at all.
+ */
+::view-transition-old(*.oyl-route-deeper) {
+  animation-name: oyl-route-out-to-start;
+}
+
+::view-transition-new(*.oyl-route-deeper) {
+  animation-name: oyl-route-in-from-end;
+}
+
+::view-transition-old(*.oyl-route-back) {
+  animation-name: oyl-route-out-to-end;
+}
+
+::view-transition-new(*.oyl-route-back) {
+  animation-name: oyl-route-in-from-start;
+}
+
+@keyframes oyl-route-in-from-end {
+  from {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+}
+
+@keyframes oyl-route-out-to-start {
+  to {
+    opacity: 0;
+    transform: translateX(-2rem);
+  }
+}
+
+@keyframes oyl-route-in-from-start {
+  from {
+    opacity: 0;
+    transform: translateX(-2rem);
+  }
+}
+
+@keyframes oyl-route-out-to-end {
+  to {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+}
+
+/*
  * Motion is opt-in. Every duration in this file is a `--oyl-motion-*` token
  * (#936), and this block collapses every one of them for a reader who asked
  * for less motion.

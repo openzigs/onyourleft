@@ -53,6 +53,14 @@ interface TransitionLog {
   settled: number;
   /** The longest animation `document.getAnimations()` held at each `ready`, in ms. */
   longest: number[];
+  /**
+   * #2054: at each `ready`, every `view-transition-class` an element of the
+   * page carried — what React's `<ViewTransition>` applied — sorted, and the
+   * keyframes each `::view-transition-old`/`-new` other than the root's ran,
+   * so the class is read both where it was set and where it took effect.
+   */
+  classes: string[][];
+  keyframes: string[][];
 }
 
 declare global {
@@ -65,7 +73,7 @@ declare global {
 
 /** Runs before any page script: wraps the one call React makes to start a transition. */
 function recordViewTransitions(): void {
-  const log: TransitionLog = { started: 0, settled: 0, longest: [] };
+  const log: TransitionLog = { started: 0, settled: 0, longest: [], classes: [], keyframes: [] };
   window.__oylViewTransitions = log;
   // eslint-disable-next-line @typescript-eslint/unbound-method -- called with `apply` below, on the document it was called on.
   const original = Document.prototype.startViewTransition;
@@ -89,6 +97,25 @@ function recordViewTransitions(): void {
           return typeof duration === 'number' ? duration : 0;
         });
         log.longest.push(Math.max(0, ...durations));
+        const classes = new Set<string>();
+        for (const element of document.querySelectorAll('*')) {
+          const value = getComputedStyle(element).getPropertyValue('view-transition-class').trim();
+          if (value !== '' && value !== 'none') classes.add(value);
+        }
+        log.classes.push([...classes].sort());
+        log.keyframes.push(
+          document
+            .getAnimations()
+            .filter(
+              (animation) =>
+                // Not the root's snapshot, which keeps the browser's own fade.
+                /^::view-transition-(old|new)\((?!root\))/.test(
+                  (animation.effect as KeyframeEffect | null)?.pseudoElement ?? '',
+                ) && animation instanceof CSSAnimation,
+            )
+            .map((animation) => (animation as CSSAnimation).animationName)
+            .sort(),
+        );
       },
       () => undefined,
     );
@@ -799,5 +826,111 @@ test.describe('the first-paint intro — #2053', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     expect((await coldLoad(page, 'home')).animations).toEqual([]);
     await expect(page.locator('h1')).toHaveText(routeById('home').title);
+  });
+});
+
+/** The populated harness's one segment (`testing/populated-shell.tsx`). */
+const SEGMENT = hrefFor(routeById('segment-detail'), 'the-drag');
+
+/** Navigates to `hash`, waits for `title` in the `h1`, and for any transition to end. */
+async function goTo(page: Page, hash: string, title: string): Promise<TransitionLog> {
+  await page.evaluate((next) => {
+    window.location.hash = next;
+  }, hash);
+  await expect(page.locator('h1')).toHaveText(title);
+  await expect
+    .poll(async () => {
+      const now = await log(page);
+      return now.settled === now.started;
+    })
+    .toBe(true);
+  return log(page);
+}
+
+/** What the transition each navigation started applied: its classes and its keyframes. */
+async function applied(
+  page: Page,
+  hash: string,
+  title: string,
+): Promise<{ started: number; classes: string[]; keyframes: string[]; longest: number }> {
+  const before = (await log(page)).started;
+  const after = await goTo(page, hash, title);
+  return {
+    started: after.started - before,
+    classes: after.classes.at(-1) ?? [],
+    keyframes: after.keyframes.at(-1) ?? [],
+    longest: after.longest.at(-1) ?? Number.NaN,
+  };
+}
+
+/*
+ * Directional route transitions — #2054. Into a page below and back out of it
+ * is a short slide; one tab to another stays #945's cross-fade.
+ * `shell/route-motion.ts` §`navigationKind` decides, `useRoute.ts` announces
+ * it with `addTransitionType`, `AppShell`'s `<ViewTransition>` sets the class
+ * and `theme.css` §"THE ROUTE SLIDE" names the keyframes. Read here at each
+ * transition's `ready`, both as the class an element carried and as the
+ * keyframes the pseudo-elements ran.
+ */
+test.describe('directional route transitions — #2054', () => {
+  test('list to detail, detail back, and tab to tab each apply their own class', async ({
+    page,
+  }) => {
+    await open(page, '');
+    const segments = routeById('segments');
+    const detail = routeById('segment-detail');
+    await goTo(page, hrefFor(segments), segments.title);
+    const deeper = await applied(page, SEGMENT, detail.title);
+    const back = await applied(page, hrefFor(segments), segments.title);
+    const across = await applied(page, hrefFor(routeById('routes')), routeById('routes').title);
+    console.log('#2054: deeper, back, across', deeper, back, across);
+    for (const navigation of [deeper, back, across]) {
+      expect(navigation.started).toBe(1);
+      expect(navigation.longest).toBeLessThanOrEqual(MOTION_DURATION_MS.medium);
+    }
+    expect(deeper.classes).toEqual(['oyl-route-deeper']);
+    expect(back.classes).toEqual(['oyl-route-back']);
+    expect(across.classes).toEqual(['oyl-route']);
+    expect(deeper.keyframes).toEqual(['oyl-route-in-from-end', 'oyl-route-out-to-start']);
+    expect(back.keyframes).toEqual(['oyl-route-in-from-start', 'oyl-route-out-to-end']);
+    // The cross-fade is the browser's own: none of the slide's keyframes.
+    expect(across.keyframes.filter((name) => name.startsWith('oyl-route-'))).toEqual([]);
+  });
+
+  test('reduced motion collapses the slide too', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page, '');
+    await goTo(page, hrefFor(routeById('segments')), routeById('segments').title);
+    const deeper = await applied(page, SEGMENT, routeById('segment-detail').title);
+    expect(deeper.started).toBe(1);
+    expect(deeper.classes).toEqual(['oyl-route-deeper']);
+    expect(deeper.longest).toBeLessThanOrEqual(1);
+  });
+
+  test('where the engine has no View Transition API, the swap is instant and nothing breaks', async ({
+    page,
+  }) => {
+    // An old, un-updated WebView on minSdk 24. Taken away before any page
+    // script runs, as such a WebView would never have had it.
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(Document.prototype, 'startViewTransition');
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const response = await page.goto('/reflow.html?data=populated&motion=on#/');
+    expect(response?.status()).toBe(200);
+    await page.waitForFunction(() => window.__oylReflow !== undefined);
+    expect(await page.evaluate(() => typeof document.startViewTransition)).toBe('undefined');
+    for (const [hash, title] of [
+      [hrefFor(routeById('segments')), routeById('segments').title],
+      [SEGMENT, routeById('segment-detail').title],
+      [hrefFor(routeById('segments')), routeById('segments').title],
+      [hrefFor(routeById('routes')), routeById('routes').title],
+    ] as const) {
+      await page.evaluate((next) => {
+        window.location.hash = next;
+      }, hash);
+      await expect(page.locator('h1')).toHaveText(title);
+    }
+    expect(await page.evaluate(() => window.__oylReflow?.errors)).toEqual([]);
   });
 });
