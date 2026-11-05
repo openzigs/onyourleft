@@ -11,6 +11,13 @@
  * slate, the spire shaded as a slope steeper than the town's roofs, the tower
  * and spire saying how high they stand to the shader's weathering (read
  * through `facade.ts`' twin), and a painted belfry's band round a taller tower.
+ *
+ * Since #1794 a place of worship whose footprint holds a nave is drawn as a
+ * church — a nave under a steep gable with this steeple, its spire to the
+ * height rule's top (`mapped-landmarks.test.ts`). These tests hold the
+ * steeple on #1791's civic block, which is what a footprint too small for a
+ * nave and every one with `levers=-landmark-churches` still draws, so they
+ * plan with `landmarkChurches: false`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -79,7 +86,8 @@ function planOne(
     origin,
     undefined,
     undefined,
-    options,
+    // #1794: the civic block's steeple, not the church's.
+    { landmarkChurches: false, ...options },
   );
   expect(plans).toHaveLength(1);
   return plans[0] as FootprintPlan;
@@ -153,7 +161,8 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
         street.origin,
         undefined,
         urbanClassMap(street.corridor, land, street.profile),
-        options,
+        // #1794: the civic block's steeple, not the church's.
+        { landmarkChurches: false, ...options },
       ).plans;
     const on = plan({});
     const off = plan({ steeples: false });

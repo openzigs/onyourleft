@@ -1440,6 +1440,128 @@ export function mappedPaintStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** One footprint of {@link churchStreetFixture}: its name, corners about its slot, and height. */
+export interface ChurchFootprint {
+  readonly name: 'rectangle' | 'ell' | 'cross' | 'tall' | 'wide' | 'chapel' | 'notched';
+  readonly corners: readonly (readonly [number, number])[];
+  readonly height: number | null;
+}
+
+/**
+ * #1794's church footprints, each about its slot's middle and its middle 40 m
+ * out, its door's wall toward the road: a rectangular nave 12 m along the road
+ * by 26 deep; an L, that nave with a 9 by 8 m vestry off its back corner; a
+ * cross, a nave 10 by 30 with transepts 20 m across and 8 deep two thirds of
+ * the way back; the rectangle with a mapped height of 35 m, which is its
+ * spire's; a wide nave 30 by 40, whose ridge is high enough that its spire is
+ * held at `CHURCH.highest`; and two a nave does not fit, though #2021's tower
+ * does: a chapel 6 m along by 12 deep (72 m²), and an L of two 6 m wide
+ * arms, 20 m each, 14 by 14 m cut from its back corner (204 m², rectangularity
+ * 0.51).
+ */
+export const CHURCH_FOOTPRINTS: readonly ChurchFootprint[] = [
+  { name: 'rectangle', corners: rectangleBeside(0, 0, 12, 26), height: 7 },
+  {
+    name: 'ell',
+    corners: [
+      [-6, -13],
+      [6, -13],
+      [6, 5],
+      [15, 5],
+      [15, 13],
+      [-6, 13],
+    ],
+    height: 7,
+  },
+  {
+    name: 'cross',
+    corners: [
+      [-5, -15],
+      [5, -15],
+      [5, 1],
+      [10, 1],
+      [10, 9],
+      [5, 9],
+      [5, 15],
+      [-5, 15],
+      [-5, 9],
+      [-10, 9],
+      [-10, 1],
+      [-5, 1],
+    ],
+    height: 7,
+  },
+  { name: 'tall', corners: rectangleBeside(0, 0, 12, 26), height: 35 },
+  { name: 'wide', corners: rectangleBeside(0, 0, 30, 40), height: 9 },
+  { name: 'chapel', corners: rectangleBeside(0, 0, 6, 12), height: 6 },
+  {
+    name: 'notched',
+    corners: [
+      [-10, -10],
+      [10, -10],
+      [10, -4],
+      [-4, -4],
+      [-4, 10],
+      [-10, 10],
+    ],
+    height: 7,
+  },
+];
+
+/**
+ * #1794's fixture: a street of mapped churches, each of {@link CHURCH_FOOTPRINTS}
+ * in turn, for the owner's look pair (`?town=churches`, whose before is
+ * `levers=-landmark-churches`) and for the plans to be asserted over. Along a
+ * level road from 1 000 m, every 70 m, alternately on the right and the left
+ * (`rows`, in order, with each one's side), its middle 40 m out (the wide one
+ * 50 m), on residential land from 26 m out (none nearer the road, so no
+ * village lot stands in front of them), each mapped `church`. Every tag is synthetic,
+ * and nothing here is a real place.
+ */
+export function churchStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly (readonly [ChurchFootprint['name'], side: number])[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: (readonly [ChurchFootprint['name'], number])[] = [];
+  CHURCH_FOOTPRINTS.forEach((church, index) => {
+    const along = 1_000 + index * 70;
+    const side = index % 2 === 0 ? 1 : -1;
+    const out = church.name === 'wide' ? 50 : 40;
+    // Its door's wall toward the road on either side: the corners' depth runs away from it.
+    const ring = church.corners.map(([a, n]) => [along + a, side * (out + n)] as const);
+    buildings.push({
+      ...buildingBeside(profile, origin, [side > 0 ? ring : [...ring].reverse()], church.height),
+      buildingType: 'church',
+    });
+    rows.push([church.name, side]);
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'church-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      // Residential land from 26 m out, which the churches stand on, and none nearer the
+      // road, so no village lot stands between the road and them in the look pair's frames.
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_500, 26, 90),
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_500, -90, -26),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+    rows,
+  };
+}
+
 /** One footprint of an {@link UntaggedRow}: its corners about the slot's middle, and a mapped type. */
 interface UntaggedFootprint {
   readonly corners: readonly (readonly [number, number])[];

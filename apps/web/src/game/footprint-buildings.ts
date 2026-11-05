@@ -416,6 +416,13 @@ import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } fro
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
+import {
+  CHURCH,
+  CHURCH_FEATURES,
+  churchFits,
+  spireApexOf,
+  spireIsMapped,
+} from './mapped-landmarks';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
@@ -4923,6 +4930,8 @@ function steeple(
   site: SteepleSite,
   heights: readonly [bottom: number, top: number, floor: number],
   styles: { readonly wall: Style; readonly roof: Style },
+  // #1794: how far the spire rises over the tower, metres; #2021's `spire` sides by default.
+  spireRise?: number,
 ): void {
   const { cx, cz, ux, uz, half } = site;
   const [, top, floor] = heights;
@@ -4949,7 +4958,7 @@ function steeple(
     PAINTED,
     { top: true, bottom: true },
   );
-  const rise = 2 * half * STEEPLE.spire;
+  const rise = spireRise ?? 2 * half * STEEPLE.spire;
   const apex: Vec = [cx, top + rise, cz];
   const slant = Math.hypot(rise, half);
   // #2100: shaded as a slope at `lit`, a touch steeper than the town's roofs.
@@ -5373,6 +5382,7 @@ export function footprintPlans(
         steeples: options.steeples ?? true,
         mappedPaint,
         startYear: options.mappedStartYear ?? true,
+        churches: options.landmarkChurches ?? true,
       },
     );
     plans.push(plan);
@@ -6388,6 +6398,14 @@ export interface FootprintPlanOptions {
    * before (`?levers=-start-year`).
    */
   readonly mappedStartYear?: boolean;
+  /**
+   * #1794: a mapped place of worship whose footprint holds one drawn as a
+   * church — a nave under a steep gable with #2021's tower and spire
+   * (`mapped-landmarks.ts`); `true` by default, and only while `buildingTypes`
+   * and `steeples` are on. Off, every one is planned as before
+   * (`?levers=-landmark-churches`).
+   */
+  readonly landmarkChurches?: boolean;
 }
 
 /**
@@ -6440,6 +6458,8 @@ interface ArchetypeChoice {
   readonly mappedPaint?: boolean;
   /** #1793: whether its mapped start year narrows its archetype (`-start-year` off). */
   readonly startYear?: boolean;
+  /** #1794: whether a mapped place of worship is drawn as a church (`-landmark-churches` off). */
+  readonly churches?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -6482,7 +6502,7 @@ function planFootprint(
 ): FootprintPlan {
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
-  const { storeys, wallHeight, base, floor, eaves, family, inferred } = measured;
+  const { base, floor, family, inferred } = measured;
   // #1791: a mapped garage or shed stands on a home's land and is no home — no window, no
   // house feature; a civic block is no house and no shop.
   const outbuilding = family === 'garage' || family === 'shed';
@@ -6504,6 +6524,64 @@ function planFootprint(
   const terraced = party.length > 0;
   // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
   const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
+  const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
+  const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
+  // #2021: a mapped place of worship's steeple, at the end of its long axis away from its
+  // front door (the owner's ruling of 2026-11-03), and seeded where the door is within `tell`
+  // of the axis's middle, or there is none.
+  const steepleAt = ((): SteepleSite | undefined => {
+    if (choice.steeples !== true || part || family !== 'civic') return undefined;
+    if (!isWorship(building.buildingType, building.landmark)) return undefined;
+    const doorAlong =
+      frontFrame === undefined
+        ? 0
+        : (frontFrame.mx - rectangle.cx) * rectangle.ux +
+          (frontFrame.mz - rectangle.cz) * rectangle.uz;
+    const end =
+      Math.abs(doorAlong) >= STEEPLE.tell
+        ? doorAlong > 0
+          ? -1
+          : 1
+        : share(STREAM_STEEPLE) < 0.5
+          ? 1
+          : -1;
+    return steepleSiteOf(drawn, rectangle, end);
+  })();
+  // #1790: the mapped `roof:shape`, where the lever is on and the footprint is not terraced. A
+  // pitched one only on a shape a pitched roof is built on — a rectangle, or #1660's L, T, U
+  // or Z; on any other the tag is not read, and the roof is as before.
+  const tag =
+    roofing.mapped === true && !terraced && building.roofShape !== null
+      ? MAPPED_ROOFS[building.roofShape]
+      : undefined;
+  const mappedRoof =
+    tag !== undefined &&
+    (tag.roof === 'flat' ||
+      split !== undefined ||
+      rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY)
+      ? tag
+      : undefined;
+  // #1794: a mapped place of worship drawn as a church — a nave under a steep gable and
+  // #2021's tower and spire — where its footprint holds a nave and the tower stands on it
+  // (`mapped-landmarks.ts`); a flat mapped roof is no nave's. A split roof that fell back to
+  // the flat one is no church either, and keeps its block.
+  const church =
+    choice.churches === true &&
+    !roofing.flat &&
+    !terraced &&
+    steepleAt !== undefined &&
+    (mappedRoof === undefined || mappedRoof.roof !== 'flat') &&
+    churchFits({ area, rectangularity, rectilinear: split !== undefined });
+  // #1794: and where its mapped height is its spire's, its nave's walls are its mapped storeys'
+  // or `CHURCH.storeys`, and the spire's top is that height.
+  const naveStoreys =
+    (roofing.mapped === true ? levelsOf(building.levels) : null) ?? CHURCH.storeys;
+  const spired = church && spireIsMapped(building.heightMetres, naveStoreys * STOREY_METRES);
+  const storeys = spired ? naveStoreys : measured.storeys;
+  const wallHeight = spired ? naveStoreys * STOREY_METRES : measured.wallHeight;
+  const eaves = spired ? floor + wallHeight : measured.eaves;
+  const storey = spired ? STOREY_METRES : measured.storey;
+  const mappedSpire = spired ? lowest + (building.heightMetres ?? 0) : undefined;
   // #1783: the commercial or multi-family building it is, which sets its cladding, roof,
   // ground floor and upper windows together; `unknown` is planned as before.
   // #1791: an untyped or commercial footprint by its cue, an apartment block as a garden
@@ -6527,41 +6605,27 @@ function planFootprint(
           terraced,
         })
       : 'unknown';
-  // #1790: the mapped `roof:shape`, where the lever is on and the footprint is not terraced. A
-  // pitched one only on a shape a pitched roof is built on — a rectangle, or #1660's L, T, U
-  // or Z; on any other the tag is not read, and the roof is as before.
-  const tag =
-    roofing.mapped === true && !terraced && building.roofShape !== null
-      ? MAPPED_ROOFS[building.roofShape]
-      : undefined;
-  const mappedRoof =
-    tag !== undefined &&
-    (tag.roof === 'flat' ||
-      split !== undefined ||
-      rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY)
-      ? tag
-      : undefined;
   const pitched =
     !roofing.flat &&
-    (mappedRoof !== undefined
-      ? mappedRoof.roof !== 'flat'
-      : pitchedFootprint({
-          // #2024: a pole building's low gable, at any size.
-          area: pole ? Math.min(area, FOOTPRINT_GABLE_MAX_AREA) : area,
-          rectangularity,
-          wallHeight,
-          use,
-          terraced,
-          rectilinear: split !== undefined,
-        }) ||
-        // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
-        (buildingArchetype === 'garden-apartment' &&
-          wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES));
+    // #1794: a church's nave is pitched, at any size or height.
+    (church ||
+      (mappedRoof !== undefined
+        ? mappedRoof.roof !== 'flat'
+        : pitchedFootprint({
+            // #2024: a pole building's low gable, at any size.
+            area: pole ? Math.min(area, FOOTPRINT_GABLE_MAX_AREA) : area,
+            rectangularity,
+            wallHeight,
+            use,
+            terraced,
+            rectilinear: split !== undefined,
+          }) ||
+          // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
+          (buildingArchetype === 'garden-apartment' &&
+            wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES)));
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = terraced ? { party: { walls: party, eaves } } : {};
-  const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
-  const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
   const residential = use === 'residential' && !outbuilding;
   // #1782: the US house it is, from what the plan already has, which sets its features
   // together; `unknown` keeps every independent share, as before. #1791: a mapped house
@@ -6591,18 +6655,21 @@ function planFootprint(
         )
       : 'unknown';
   const features = droppedFeatures(
-    archetype !== 'unknown'
-      ? ARCHETYPE_FEATURES[archetype]
-      : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
-        // block's, so none has a garage.
-        buildingArchetype === 'garden-apartment' || family === 'apartments'
-        ? GARDEN_APARTMENT_FEATURES
-        : family === undefined
-          ? SEEDED_FEATURES
-          : // #2024: an inferred barn's gambrel on a seeded share only.
-            measured.inferred && family === 'barn'
-            ? INFERRED_BARN_FEATURES
-            : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
+    // #1794: a church's nave under its steep gable.
+    church
+      ? CHURCH_FEATURES
+      : archetype !== 'unknown'
+        ? ARCHETYPE_FEATURES[archetype]
+        : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
+          // block's, so none has a garage.
+          buildingArchetype === 'garden-apartment' || family === 'apartments'
+          ? GARDEN_APARTMENT_FEATURES
+          : family === undefined
+            ? SEEDED_FEATURES
+            : // #2024: an inferred barn's gambrel on a seeded share only.
+              measured.inferred && family === 'barn'
+              ? INFERRED_BARN_FEATURES
+              : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -6926,8 +6993,8 @@ function planFootprint(
       : -1;
   const windows: Windows = {
     // #1790: in storeys of the mapped levels', where it has them.
-    top: (eaves - floor) / measured.storey,
-    ...(measured.storey === STOREY_METRES ? {} : { storey: measured.storey }),
+    top: (eaves - floor) / storey,
+    ...(storey === STOREY_METRES ? {} : { storey }),
     doorEdge: front?.edge ?? -1,
     clad: wallClad,
     flags,
@@ -6973,27 +7040,6 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  // #2021: a mapped place of worship's steeple, at the end of its long axis away from its
-  // front door (the owner's ruling of 2026-11-03), and seeded where the door is within `tell`
-  // of the axis's middle, or there is none.
-  const steepleAt = ((): SteepleSite | undefined => {
-    if (choice.steeples !== true || part || family !== 'civic') return undefined;
-    if (!isWorship(building.buildingType, building.landmark)) return undefined;
-    const doorAlong =
-      frontFrame === undefined
-        ? 0
-        : (frontFrame.mx - rectangle.cx) * rectangle.ux +
-          (frontFrame.mz - rectangle.cz) * rectangle.uz;
-    const end =
-      Math.abs(doorAlong) >= STEEPLE.tell
-        ? doorAlong > 0
-          ? -1
-          : 1
-        : share(STREAM_STEEPLE) < 0.5
-          ? 1
-          : -1;
-    return steepleSiteOf(drawn, rectangle, end);
-  })();
   /** What one build drew of #1588's extras, #1590's cornice and #2021's steeple. */
   interface Extras {
     garage: boolean;
@@ -7148,10 +7194,18 @@ function planFootprint(
       }
     }
     if (withSteeple && steepleAt !== undefined) {
-      steeple(writing, steepleAt, [base, roofTop + STEEPLE.above, floor], {
-        wall: wallStyle,
-        roof: roofStyle,
-      });
+      const towerTop = roofTop + STEEPLE.above;
+      steeple(
+        writing,
+        steepleAt,
+        [base, towerTop, floor],
+        { wall: wallStyle, roof: roofStyle },
+        // #1794: a church's spire, to its top by `CHURCH`'s height rule.
+        church
+          ? spireApexOf({ ground: lowest, ridge: roofTop, towerTop, mapped: mappedSpire }) -
+              towerTop
+          : undefined,
+      );
       drew.steeple = true;
     }
     if (frontFrame !== undefined) {

@@ -18,6 +18,8 @@
  * materials without it, and every colour and material ignored with it.
  * Since #1793 `-start-year`: the dated road's 1915 houses Foursquares without
  * it, and every year ignored with it.
+ * Since #1794 `-landmark-churches`: the street of churches' naves under their
+ * steep gables without it, and every one planned as before with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -32,6 +34,7 @@ import {
   type FootprintPlan,
 } from '../../src/game/footprint-buildings';
 import {
+  churchStreetFixture,
   commercialStreetFixture,
   datedStreetFixture,
   houseStreetFixture,
@@ -203,6 +206,34 @@ describe('the realistic page’s `start-year` lever — #1793', () => {
     }).plans;
     expect(planFingerprint(plans)).toBe(planFingerprint(off));
     expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
+  });
+});
+
+describe('the realistic page’s `landmark-churches` lever — #1794', () => {
+  const street = churchStreetFixture();
+
+  it('draws the street’s churches under their steep gables on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=churches').leversOff);
+    const naves = plans.filter((plan) => plan.roof === 'gable' && plan.pitchDegrees === 45);
+    expect(naves.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('plans the street, with `levers=-landmark-churches`, as the planner with them off does', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=churches&levers=-landmark-churches').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { landmarkChurches: false },
+    ).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.some((plan) => plan.pitchDegrees === 45)).toBe(false);
   });
 });
 
