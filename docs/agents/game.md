@@ -1335,6 +1335,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         painted in `trim`, 6 m over the roof, the spire
                         shaded as a 60° slope and the church roofed in
                         `slate`;
+                        since #1794 one whose footprint holds a nave
+                        (≥ 80 m², rectangularity ≥ 0.6, a rectangle or
+                        #1660's rectangles, its tower standing on it) a
+                        church (`mapped-landmarks.ts`): the nave under a 45°
+                        gable at any size, with that tower and spire, the
+                        spire's top at a mapped height ≥ 1.6 times the
+                        nave's walls (then 2 storeys) or else at 1.8 times
+                        the ridge, at most 40 m, never under 3 m over the
+                        tower; every other one as before
+                        (`-landmark-churches`, `town=churches`);
                         since #2023 an untagged footprint inferred a shed
                         (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
                         rectangularity ≥ 0.9, a house-sized footprint within
@@ -1363,6 +1373,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/mapped-landmarks.ts
+                        the mapped landmarks drawn as themselves (#1794): a
+                        church's fit (`churchFits`), its steep nave's
+                        features (`CHURCH_FEATURES`) and its spire's height
+                        rule (`spireIsMapped`, `spireApexOf`), read by
+                        `footprint-buildings.ts`; pure, plan-time, no draw
+                        call, byte or shader term
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in

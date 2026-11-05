@@ -14,6 +14,8 @@
  * and none with it — and since #1922, the pair's frames planted alike but on
  * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
  * the tagged street's roofs as tagged without it, and every tag ignored with it.
+ * Since #1794 `-landmark-churches`: the street of churches' naves under their
+ * steep gables without it, and every one planned as before with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,6 +30,7 @@ import {
   type FootprintPlan,
 } from '../../src/game/footprint-buildings';
 import {
+  churchStreetFixture,
   commercialStreetFixture,
   houseStreetFixture,
   mappedRoofStreetFixture,
@@ -134,6 +137,34 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
         expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
       }
     });
+  });
+});
+
+describe('the realistic page’s `landmark-churches` lever — #1794', () => {
+  const street = churchStreetFixture();
+
+  it('draws the street’s churches under their steep gables on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=churches').leversOff);
+    const naves = plans.filter((plan) => plan.roof === 'gable' && plan.pitchDegrees === 45);
+    expect(naves.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('plans the street, with `levers=-landmark-churches`, as the planner with them off does', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=churches&levers=-landmark-churches').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { landmarkChurches: false },
+    ).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.some((plan) => plan.pitchDegrees === 45)).toBe(false);
   });
 });
 
