@@ -876,7 +876,20 @@ describe('one leg’s ground does not rise through another’s at a very sharp b
     120_000,
   );
 
-  it.each(corners)(
+  /**
+   * And the corners as a course sampled every 10 m draws them — #2149, whose
+   * `landform.ts` §`closeFan` moves columns to a point off their rows'
+   * cross-sections: the scenery over those triangles is what
+   * `standingOnGround` must still find.
+   */
+  const sampledCorners: readonly (readonly [string, RouteProfile])[] = (
+    ['right', 'left'] as const
+  ).map((hand) => [
+    `a 143° corner of 10 m to the ${hand}, sampled every 10 m, climbing at 10 %`,
+    sampledCornerRoute(143, hand, 10, 0.1),
+  ]);
+
+  it.each([...corners, ...sampledCorners])(
     'stands no scenery more than 0.3 m off the drawn ground, swept along the bend, %s',
     (_name, profile) => {
       // ⚠️ Read off the frame's own triangles — the highest one under an
@@ -1743,7 +1756,11 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
         // §`CORRIDOR_DENSE_AHEAD_METRES`), up to 200 such points a frame
         // (none on the 10 m bends); and bends of 15 and
         // 20 m, whose centre lies past the clear band (`landform.ts`
-        // §`closeFans`), up to 359 a frame, as many as before the change.
+        // §`closeFans`), up to 359 a frame, as many as before the change; and
+        // a bend that keeps climbing through its apex, a switchback (the
+        // fixture's height `grade * along` all the way round, changed
+        // temporarily): 10 of its 12 climbing corners red on main and 5 of 12
+        // after, and on the 145° and 150° bends of 10 m no fan forms at all.
         let probed = 0;
         const seen: string[] = [];
         for (let at = apex - 120; at <= apex + 20; at += 10) {

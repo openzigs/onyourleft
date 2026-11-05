@@ -1048,9 +1048,10 @@ export function standingOnGround<
   T extends { readonly x: number; readonly y: number; readonly z: number },
 >(items: readonly T[], mesh: TerrainMesh): readonly T[] {
   const across = rowCrossings(mesh);
+  const fanned = fannedPairs(mesh);
   const kept: T[] = [];
   for (const item of items) {
-    const y = groundTop(mesh, across, item.x, item.z);
+    const y = groundTop(mesh, across, fanned, item.x, item.z);
     if (Number.isNaN(y)) continue;
     kept.push(y === item.y ? item : { ...item, y });
   }
@@ -1093,6 +1094,40 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
 }
 
 /**
+ * Which pairs of rows have a triangle {@link closeFan} drew, by the pair's
+ * first row: 1 if so. Lent, like {@link crossings}.
+ *
+ * ⚠️ **A fan's triangles lie off the cross-sections of their rows** — #2149:
+ * its point is not between the cross-sections of every pair it closes on, so
+ * asking only the pairs a point lies between never reaches them, and scenery
+ * over a fan stood on the ground of another leg, or was dropped. A pair is a
+ * fan's when a side's outermost column is one point on a row and its
+ * neighbour, which a fold alone never does: it collapses a row's columns onto
+ * that row's own end. The pair before a fan's first row and the one after
+ * its last are its, too: their quads end on the point.
+ */
+let fannedRows = new Uint8Array(0);
+
+function fannedPairs(mesh: TerrainMesh): Uint8Array {
+  const { vertices, rows } = mesh;
+  if (fannedRows.length !== rows) fannedRows = new Uint8Array(rows);
+  fannedRows.fill(0);
+  for (let side = 0; side < 2; side += 1) {
+    for (let row = 0; row + 1 < rows; row += 1) {
+      const a = ((row * 2 + side) * COLUMNS + COLUMNS - 1) * 3;
+      const b = a + COLUMNS * 2 * 3;
+      if (vertices[a] !== vertices[b] || vertices[a + 2] !== vertices[b + 2]) continue;
+      // Rows `row` and `row + 1` share the point: the pair between them, the
+      // one before `row` and the one after `row + 1` are the fan's.
+      fannedRows[row] = 1;
+      if (row > 0) fannedRows[row - 1] = 1;
+      if (row + 2 < rows) fannedRows[row + 1] = 1;
+    }
+  }
+  return fannedRows;
+}
+
+/**
  * How far past a cross-section, in metres, a point still counts as between
  * two rows: **1 cm**, for Float32 vertices a kilometre from the origin. Only
  * which triangles are asked depends on it; the triangles decide.
@@ -1100,7 +1135,13 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
 const CROSSING_SLACK_METRES = 1e-2;
 
 /** The highest ground triangle's height over a point in plan, or `NaN` where there is none. */
-function groundTop(mesh: TerrainMesh, across: Float64Array, x: number, z: number): number {
+function groundTop(
+  mesh: TerrainMesh,
+  across: Float64Array,
+  fanned: Uint8Array,
+  x: number,
+  z: number,
+): number {
   const along = (row: number): number =>
     (x - (across[row * 4] as number)) * (across[row * 4 + 2] as number) +
     (z - (across[row * 4 + 1] as number)) * (across[row * 4 + 3] as number);
@@ -1108,7 +1149,7 @@ function groundTop(mesh: TerrainMesh, across: Float64Array, x: number, z: number
   let behind = along(0);
   for (let row = 0; row + 1 < mesh.rows; row += 1) {
     const ahead = along(row + 1);
-    if (behind >= -CROSSING_SLACK_METRES && ahead <= CROSSING_SLACK_METRES) {
+    if ((behind >= -CROSSING_SLACK_METRES && ahead <= CROSSING_SLACK_METRES) || fanned[row] === 1) {
       top = topOfRowPair(mesh.vertices, row, x, z, top);
     }
     behind = ahead;
@@ -1608,7 +1649,7 @@ function closeFan(
   if (seed < 0) return;
   // Each row's first column to move: the one after the first that its
   // reach collapsed onto its end, or the outermost if none did.
-  if (FAN_FROM.length < centre.length) FAN_FROM = new Int32Array(centre.length);
+  if (fanFrom.length < centre.length) fanFrom = new Int32Array(centre.length);
   for (let row = start; row <= stop; row += 1) {
     const outer = groundVertex(side, row, COLUMNS - 1);
     let from = COLUMNS - 1;
@@ -1617,7 +1658,7 @@ function closeFan(
       if (vertices[at] !== vertices[outer] || vertices[at + 2] !== vertices[outer + 2]) break;
       from = column + 1;
     }
-    FAN_FROM[row] = from;
+    fanFrom[row] = from;
   }
   let first = seed;
   let end = seed + 1;
@@ -1633,14 +1674,15 @@ function closeFan(
       grown = true;
     }
   }
-  fanFits(centre, normals, vertices, side, first, end);
+  // `FAN_POINT` holds the point of the last `(first, end)` that fitted, which
+  // is the current one: a call that fails returns before it writes.
   const x = FAN_POINT[0] as number;
   const y = FAN_POINT[1] as number;
   const z = FAN_POINT[2] as number;
   for (let row = first; row <= end; row += 1) {
     const point = centre[row] as CorridorPoint;
     const lateral = sign * Math.hypot(x - point.x, z - point.z);
-    for (let column = FAN_FROM[row] as number; column < COLUMNS; column += 1) {
+    for (let column = fanFrom[row] as number; column < COLUMNS; column += 1) {
       const at = groundVertex(side, row, column);
       vertices[at] = x;
       vertices[at + 1] = y;
@@ -1653,7 +1695,7 @@ function closeFan(
 /**
  * Whether rows `first` to `end` of a side can close on one point, and where,
  * into {@link FAN_POINT}: `x`, height, `z` — each row's columns from
- * {@link FAN_FROM} on standing at it.
+ * {@link fanFrom} on standing at it.
  *
  * Each triangle that the point is one corner of faces up on one side of the
  * line through its other two, so the points that turn none over are the
@@ -1680,18 +1722,18 @@ function fanFits(
   // A box's four corners, and at most one more for each line: two for each
   // band of each quad, and one for each row.
   const most = 4 + (end - first + 2) * TERRAIN_BANDS * 2 + (end - first + 1);
-  if (FAN_POLYGON.length < most * 2) {
-    FAN_POLYGON = new Float64Array(most * 2);
-    FAN_CLIPPED = new Float64Array(most * 2);
+  if (fanPolygon.length < most * 2) {
+    fanPolygon = new Float64Array(most * 2);
+    fanClipped = new Float64Array(most * 2);
   }
-  FAN_POLYGON[0] = seedX - FAN_BOX_METRES;
-  FAN_POLYGON[1] = seedZ - FAN_BOX_METRES;
-  FAN_POLYGON[2] = seedX + FAN_BOX_METRES;
-  FAN_POLYGON[3] = seedZ - FAN_BOX_METRES;
-  FAN_POLYGON[4] = seedX + FAN_BOX_METRES;
-  FAN_POLYGON[5] = seedZ + FAN_BOX_METRES;
-  FAN_POLYGON[6] = seedX - FAN_BOX_METRES;
-  FAN_POLYGON[7] = seedZ + FAN_BOX_METRES;
+  fanPolygon[0] = seedX - FAN_BOX_METRES;
+  fanPolygon[1] = seedZ - FAN_BOX_METRES;
+  fanPolygon[2] = seedX + FAN_BOX_METRES;
+  fanPolygon[3] = seedZ - FAN_BOX_METRES;
+  fanPolygon[4] = seedX + FAN_BOX_METRES;
+  fanPolygon[5] = seedZ + FAN_BOX_METRES;
+  fanPolygon[6] = seedX - FAN_BOX_METRES;
+  fanPolygon[7] = seedZ + FAN_BOX_METRES;
   let count = 4;
   // Each quad from the row before the run to its last row, band by band, as
   // its two triangles (`a b c` and `b d c`), a moved column standing for the
@@ -1729,8 +1771,8 @@ function fanFits(
   let x = 0;
   let z = 0;
   for (let k = 0; k < count; k += 1) {
-    x += FAN_POLYGON[k * 2] as number;
-    z += FAN_POLYGON[k * 2 + 1] as number;
+    x += fanPolygon[k * 2] as number;
+    z += fanPolygon[k * 2 + 1] as number;
   }
   x /= count;
   z /= count;
@@ -1769,10 +1811,10 @@ function groundVertex(side: number, row: number, column: number): number {
 
 /**
  * {@link groundVertex}, or `-1` for a column that rows `first` to `end` of a
- * fan move to its point ({@link FAN_FROM}).
+ * fan move to its point ({@link fanFrom}).
  */
 function fanCorner(side: number, first: number, end: number, row: number, column: number): number {
-  return row >= first && row <= end && column >= (FAN_FROM[row] as number)
+  return row >= first && row <= end && column >= (fanFrom[row] as number)
     ? -1
     : groundVertex(side, row, column);
 }
@@ -1837,43 +1879,43 @@ const FAN_POINT = new Float64Array(3);
  * Each row's first column {@link closeFan} moves, by row. Lent, like
  * {@link terrainScratch}: grown to the row count, never shrunk.
  */
-let FAN_FROM = new Int32Array(0);
+let fanFrom = new Int32Array(0);
 
 /**
  * {@link fanFits}' polygon, two numbers a corner, and the one {@link clipped}
  * clips it into: a box's four corners, and at most one more for each line.
  * Lent, like {@link terrainScratch}: grown to the most a run needs, never shrunk.
  */
-let FAN_POLYGON = new Float64Array(0);
-let FAN_CLIPPED = new Float64Array(0);
+let fanPolygon = new Float64Array(0);
+let fanClipped = new Float64Array(0);
 
 /**
- * {@link FAN_POLYGON}'s first `count` corners, clipped IN PLACE to where
+ * {@link fanPolygon}'s first `count` corners, clipped IN PLACE to where
  * `a·x + b·z + c` is no less than nought: how many corners are left.
  */
 function clipped(count: number, a: number, b: number, c: number): number {
   let kept = 0;
   for (let k = 0; k < count; k += 1) {
-    const x1 = FAN_POLYGON[k * 2] as number;
-    const z1 = FAN_POLYGON[k * 2 + 1] as number;
+    const x1 = fanPolygon[k * 2] as number;
+    const z1 = fanPolygon[k * 2 + 1] as number;
     const next = k + 1 === count ? 0 : k + 1;
-    const x2 = FAN_POLYGON[next * 2] as number;
-    const z2 = FAN_POLYGON[next * 2 + 1] as number;
+    const x2 = fanPolygon[next * 2] as number;
+    const z2 = fanPolygon[next * 2 + 1] as number;
     const v1 = a * x1 + b * z1 + c;
     const v2 = a * x2 + b * z2 + c;
     if (v1 >= 0) {
-      FAN_CLIPPED[kept * 2] = x1;
-      FAN_CLIPPED[kept * 2 + 1] = z1;
+      fanClipped[kept * 2] = x1;
+      fanClipped[kept * 2 + 1] = z1;
       kept += 1;
     }
     if (v1 >= 0 !== v2 >= 0) {
       const share = v1 / (v1 - v2);
-      FAN_CLIPPED[kept * 2] = x1 + (x2 - x1) * share;
-      FAN_CLIPPED[kept * 2 + 1] = z1 + (z2 - z1) * share;
+      fanClipped[kept * 2] = x1 + (x2 - x1) * share;
+      fanClipped[kept * 2 + 1] = z1 + (z2 - z1) * share;
       kept += 1;
     }
   }
-  for (let k = 0; k < kept * 2; k += 1) FAN_POLYGON[k] = FAN_CLIPPED[k] as number;
+  for (let k = 0; k < kept * 2; k += 1) fanPolygon[k] = fanClipped[k] as number;
   return kept;
 }
 
