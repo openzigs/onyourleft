@@ -910,6 +910,76 @@ export function houseStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** One house of {@link datedStreetFixture}: a {@link StreetHouse} and its mapped start year. */
+export interface DatedHouse extends StreetHouse {
+  readonly startYear: number | null;
+}
+
+/**
+ * #1793's rows, in order along the road: a near-square two-storey house 9 m
+ * along by 10.5 m deep — which #1782's bands admit, on a rural stretch, as a
+ * farmhouse and as a Foursquare — dated 1915, 1965 and not at all; and a
+ * one-storey bungalow 7.5 along by 13 deep dated 1960, which its era rules
+ * out and so is ignored.
+ */
+export const DATED_HOUSES: readonly DatedHouse[] = [
+  { corners: rectangleBeside(0, 0, 9, 10.5), height: 6.5, startYear: 1915 },
+  { corners: rectangleBeside(0, 0, 9, 10.5), height: 6.5, startYear: 1965 },
+  { corners: rectangleBeside(0, 0, 9, 10.5), height: 6.5, startYear: null },
+  { corners: rectangleBeside(0, 0, 7.5, 13), height: 3.5, startYear: 1960 },
+];
+
+/**
+ * #1793's fixture: a rural road of houses carrying #1789's `startYear`, for
+ * the owner's look pair (`?town=dated`, whose before is `levers=-start-year`)
+ * and for the plans to be asserted over. From 1 700 m to 2 100 m, on land the
+ * map draws nothing on, a house every 50 m on the right and every 50 m on the
+ * left, 25 m behind, its middle 22 m out, square to the road, each of
+ * {@link DATED_HOUSES} in turn — sparse enough that #1633 reads the stretch
+ * rural, as #1782's farmhouses are. Every year is synthetic, and nothing here
+ * is a real place.
+ */
+export function datedStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  let index = 0;
+  for (let along = 1_700; along < 2_100; along += 50) {
+    for (const side of [1, -1]) {
+      const house = DATED_HOUSES[index % DATED_HOUSES.length] as DatedHouse;
+      const at = along + (side < 0 ? 25 : 0);
+      const ring = house.corners.map(([a, n]) => [at + a, side * 22 + n] as const);
+      buildings.push({
+        ...buildingBeside(profile, origin, [ring], house.height),
+        startYear: house.startYear,
+      });
+      index += 1;
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'dated-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        // The houses' fields, behind them and across the road between them.
+        landBeside(profile, origin, 'landuse', 'farmland', 1_650, 2_150, 32, 300),
+        landBeside(profile, origin, 'landuse', 'farmland', 1_650, 2_150, -300, -32),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /**
  * #1783's fixture: a main street and a commercial strip, for each of
  * `building-archetypes.ts`' archetypes, for the owner's look pair

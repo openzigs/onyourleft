@@ -14,6 +14,8 @@
  * and none with it — and since #1922, the pair's frames planted alike but on
  * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
  * the tagged street's roofs as tagged without it, and every tag ignored with it.
+ * Since #1793 `-start-year`: the dated road's 1915 houses Foursquares without
+ * it, and every year ignored with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -29,6 +31,7 @@ import {
 } from '../../src/game/footprint-buildings';
 import {
   commercialStreetFixture,
+  datedStreetFixture,
   houseStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
@@ -134,6 +137,29 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
         expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
       }
     });
+  });
+});
+
+describe('the realistic page’s `start-year` lever — #1793', () => {
+  const road = datedStreetFixture();
+
+  it('draws the dated road’s 1915 houses as Foursquares on the product’s page', () => {
+    const { plans } = plannedTown(road, parseConfig('?town=dated').leversOff);
+    const of1915 = plans.filter((_, index) => road.corridor.buildings[index]?.startYear === 1915);
+    expect(of1915.length).toBeGreaterThan(0);
+    expect(of1915.every((plan) => plan.archetype === 'foursquare')).toBe(true);
+  });
+
+  it('plans the dated road, with `levers=-start-year`, as the planner with the years off does', () => {
+    const { land, plans, urban } = plannedTown(
+      road,
+      parseConfig('?town=dated&levers=-start-year').leversOff,
+    );
+    const off = footprintPlans(road.corridor, land, road.profile, road.origin, undefined, urban, {
+      mappedStartYear: false,
+    }).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
   });
 });
 

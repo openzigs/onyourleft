@@ -33,6 +33,7 @@ import {
   surfacesWithLevers,
   treesWithLevers,
   splitRoofsWithLevers,
+  startYearWithLevers,
   steeplesWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
@@ -531,6 +532,26 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=roofs&levers=-mapped-roof-shape'))).toBe(
       `?levers=${encodeURIComponent('-mapped-roof-shape')}&town=roofs`,
     );
+  });
+
+  it('narrows a mapped house’s archetype by its start year, as the product does, unless #1793’s lever takes it out', () => {
+    expect(LEVERS).toContain('start-year');
+    expect(startYearWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(startYearWithLevers(LEVERS.filter((lever) => lever !== 'start-year'))).toBe(true);
+    expect(startYearWithLevers(parseConfig('?levers=-start-year').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=dated&levers=-start-year'))).toBe(
+      `?levers=${encodeURIComponent('-start-year')}&town=dated`,
+    );
+  });
+
+  it('rides the dated road through #1793’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=dated').town).toBe('dated');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'dated'\s*\?\s*datedStreetFixture\(latitude\)/);
   });
 
   it('rides the tagged street through #1790’s fixture, which is where it is wired', () => {
