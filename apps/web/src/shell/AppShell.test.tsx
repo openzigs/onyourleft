@@ -393,6 +393,20 @@ describe('the header', () => {
     );
   });
 
+  it('heads the navigation with the app’s mark, as decoration — #2066', async () => {
+    await open('/');
+    const nav = document.querySelector('nav[aria-label="Primary"]');
+    const marks = [...(nav?.querySelectorAll('img') ?? [])];
+    expect(marks).toHaveLength(1);
+    const [mark] = marks;
+    // Before the destinations, so a rail draws it at the top.
+    expect(nav?.firstElementChild).toBe(mark);
+    expect(mark?.getAttribute('src')).toBe(`${import.meta.env.BASE_URL}icon-192.png`);
+    // Named nowhere: the header's wordmark and label name the app once.
+    expect(mark?.getAttribute('alt')).toBe('');
+    expect(mark?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('lists the current group’s pages, and only that group’s', async () => {
     await open('/ride');
     const pages = [...document.querySelectorAll('nav[aria-label="Ride pages"] a')];

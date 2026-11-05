@@ -823,8 +823,9 @@ html {
 
 /*
  * The current destination is marked four ways and only one of them is colour:
- * `aria-current` for assistive technology, a heavier label, a larger icon, and
- * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
+ * `aria-current` for assistive technology, a heavier label, a larger icon in a
+ * heavier stroke (#2066), and the filled pill — a SHAPE the other destinations
+ * lack. Criterion 4 of #427,
  * #48's sixth, and #944's third. The fill is `accent`, at 3.08 (light) and
  * 7.22 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
  * label and icon on it are `accentInk`, at 4.9 and 13.33 — both declared pairs
@@ -848,6 +849,16 @@ html {
 
 .oyl-nav-link[aria-current] .oyl-nav-icon {
   transform: scale(1.2);
+}
+
+/*
+ * #2066: the current destination's icon in a heavier stroke as well, as its
+ * label is in a heavier weight — the two weights say "here" in the one place
+ * a rider looks, with no colour at all. `NavIcon.tsx` draws every icon at
+ * 1.8; this is a CSS property, so it outranks that presentation attribute.
+ */
+.oyl-nav-link[aria-current] .oyl-nav-icon {
+  stroke-width: 2.25;
 }
 
 .oyl-nav-link:hover .oyl-nav-label {
@@ -996,6 +1007,29 @@ html {
    */
   html:has(.oyl-nav) {
     scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
+  }
+}
+
+/*
+ * THE MARK — #2066. The app's launcher icon heads the RAIL (`AppShell.tsx`
+ * §`PrimaryNav`), decorative and hidden from assistive technology, and only
+ * where the rail has the height for it: 40rem, the sticky header's own floor.
+ * Below that — a phone on its side shows the rail at 390 px tall — its 4 rem
+ * would push the fifth destination toward the bottom edge for a picture. Not
+ * on a phone's bar at all: whether a phone carries the brand is the owner's
+ * open question on #2030. `shell.browser.spec.ts` §"#2066" measures it.
+ */
+.oyl-nav-mark {
+  display: none;
+}
+
+@media (min-width: 37.5rem) and (min-height: 40rem) {
+  .oyl-nav-mark {
+    display: block;
+    inline-size: 3rem;
+    block-size: 3rem;
+    margin: 0 auto var(--oyl-space-md);
+    border-radius: var(--oyl-radius);
   }
 }
 
