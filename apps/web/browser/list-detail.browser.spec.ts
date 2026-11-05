@@ -1810,25 +1810,6 @@ test.describe('#1072 — a card is not carried under reduced motion', () => {
 });
 
 /**
- * #1312 — the ride page's lap table, scrolled to its last column.
- *
- * A ride with every figure a lap can state has eleven columns, which is wider
- * than the ride page's column, so the table is read scrolled sideways inside
- * its region (`design/ScrollTable.tsx`). Scrolled, the Lap column used to be
- * gone, and with it which lap a figure is and which lap is the best (#1316's
- * second pass saw it in a screenshot; no gate case laid the table out). Its
- * first column is sticky now (`theme.css` §`.oyl-table--laps`).
- *
- * The fixture is `testing/populated-shell.tsx` §`POPULATED_LAPS`: five laps,
- * the third the best and the last a part lap. In light and in dark, because a
- * sticky cell is only as good as its own background: a transparent one shows
- * the figures through the lap's number.
- *
- * ⚠️ **The control is in the case**: the same table with the class taken off
- * has its Lap column scrolled out of the region, which is what makes "it is
- * still on screen" a finding about the class and not about the table.
- */
-/**
  * #2068 — the ride page stacks one chart per recorded channel, and reads a
  * chart's channel only when its slot scrolls into view.
  *
@@ -1903,6 +1884,25 @@ test.describe('#2068 — a stacked chart is read when it scrolls into view', () 
   }
 });
 
+/**
+ * #1312 — the ride page's lap table, scrolled to its last column.
+ *
+ * A ride with every figure a lap can state has eleven columns, which is wider
+ * than the ride page's column, so the table is read scrolled sideways inside
+ * its region (`design/ScrollTable.tsx`). Scrolled, the Lap column used to be
+ * gone, and with it which lap a figure is and which lap is the best (#1316's
+ * second pass saw it in a screenshot; no gate case laid the table out). Its
+ * first column is sticky now (`theme.css` §`.oyl-table--laps`).
+ *
+ * The fixture is `testing/populated-shell.tsx` §`POPULATED_LAPS`: five laps,
+ * the third the best and the last a part lap. In light and in dark, because a
+ * sticky cell is only as good as its own background: a transparent one shows
+ * the figures through the lap's number.
+ *
+ * ⚠️ **The control is in the case**: the same table with the class taken off
+ * has its Lap column scrolled out of the region, which is what makes "it is
+ * still on screen" a finding about the class and not about the table.
+ */
 test.describe('#1312 — the lap table keeps its Lap column when it is scrolled', () => {
   for (const theme of ['light', 'dark'] as const) {
     test.describe(theme, () => {
