@@ -16,12 +16,15 @@ import {
   PLAN_PADDING,
   PLAN_SIZE,
   describePlan,
+  planCut,
   planLap,
   planPath,
   planPoint,
   planProgress,
   riderMark,
   routePlan,
+  splitPlan,
+  type PlanRun,
 } from './plan';
 import { profileReading } from './fields';
 import { atStartLine } from '../simulation';
@@ -479,5 +482,165 @@ describe('what bounds the points that reach the DOM', () => {
     expect(near?.points[(near.points.length ?? 1) - 1]).toEqual(
       planPoint(plan.projection, positions[split - 1] as GeographicPosition),
     );
+  });
+});
+
+/**
+ * The road behind the rider and the road ahead — #2070.
+ *
+ * Asserted on what `PlanTrace.tsx` draws from: the runs `splitPlan` returns
+ * for the sample `planCut` names, read as the points each side holds.
+ */
+describe('the road is split at the rider', () => {
+  const allPoints = (runs: readonly PlanRun[]): number =>
+    runs.reduce((total, run) => total + run.points.length, 0);
+
+  it('has nothing ridden at the start line, and the whole road ahead', () => {
+    const profile = northwards();
+    const plan = routePlan(profile);
+    const split = splitPlan(plan, planCut(plan, profile, 0));
+
+    expect(split.ridden).toEqual([]);
+    expect(split.ahead).toEqual(plan.runs);
+  });
+
+  it('cuts at the drawn sample at or behind the rider, and both sides share it', () => {
+    const profile = northwards();
+    const plan = routePlan(profile);
+    // 255 m on a 10 m grid: sample 25 is behind the rider, 26 ahead.
+    const cut = planCut(plan, profile, 255);
+    expect(cut).toBe(25);
+
+    const split = splitPlan(plan, cut);
+    const ridden = split.ridden[0];
+    const ahead = split.ahead[0];
+    expect(ridden?.indices.at(-1)).toBe(25);
+    expect(ahead?.indices[0]).toBe(25);
+    // One shared point, so the two lines meet under the mark.
+    expect(ridden?.points.at(-1)).toEqual(ahead?.points[0]);
+    expect(allPoints(split.ridden) + allPoints(split.ahead)).toBe(allPoints(plan.runs) + 1);
+    // Every ridden sample is behind every sample ahead.
+    expect(Math.max(...(ridden?.indices ?? []))).toBeLessThanOrEqual(
+      Math.min(...(ahead?.indices ?? [])),
+    );
+  });
+
+  it('puts the ridden road behind the rider’s own mark, not elsewhere on the route', () => {
+    const profile = northwards();
+    const plan = routePlan(profile);
+    const distance = 600;
+    const split = splitPlan(plan, planCut(plan, profile, distance));
+    const mark = riderMark(plan, profile, distance);
+
+    // The route runs north, so north of the mark (a smaller y) is ahead.
+    expect(split.ridden.length).toBeGreaterThan(0);
+    for (const point of split.ridden.flatMap((run) => run.points)) {
+      expect(point.y).toBeGreaterThanOrEqual(mark.y - 0.001);
+    }
+    for (const point of split.ahead.flatMap((run) => run.points).slice(1)) {
+      expect(point.y).toBeLessThan(mark.y);
+    }
+  });
+
+  it('has the whole road ridden at the finish of a route that is not a loop', () => {
+    const profile = northwards();
+    const plan = routePlan(profile);
+    const split = splitPlan(plan, planCut(plan, profile, (profile.totalDistance as number) + 500));
+
+    expect(split.ahead).toEqual([]);
+    expect(split.ridden).toEqual(plan.runs);
+  });
+
+  it('starts the ridden road again on lap two of a loop', () => {
+    const profile = circuit();
+    const plan = routePlan(profile);
+    const total = profile.totalDistance as number;
+    const lapOne = splitPlan(plan, planCut(plan, profile, total / 4));
+    const lapTwo = splitPlan(plan, planCut(plan, profile, total + total / 4));
+
+    // A quarter of the way round on lap two is the same road ridden as on lap
+    // one, not the whole loop: an unwrapped odometer would mark it all ridden.
+    expect(lapTwo).toEqual(lapOne);
+    expect(allPoints(lapTwo.ahead)).toBeGreaterThan(allPoints(lapTwo.ridden));
+  });
+
+  it('keeps a break a break on both sides of the rider', () => {
+    const profile = withATeleport();
+    const plan = routePlan(profile);
+    expect(plan.runs).toHaveLength(2);
+
+    // In the first run: it is cut, and the second run is wholly ahead.
+    const early = splitPlan(plan, planCut(plan, profile, 45));
+    expect(early.ridden).toHaveLength(1);
+    expect(early.ahead).toHaveLength(2);
+    expect(early.ahead[1]).toEqual(plan.runs[1]);
+
+    // In the second: the first run is wholly ridden, and nothing joins them.
+    const late = splitPlan(plan, planCut(plan, profile, 150));
+    expect(late.ridden[0]).toEqual(plan.runs[0]);
+    expect(late.ridden).toHaveLength(2);
+    expect(late.ahead).toHaveLength(1);
+    for (const run of [...late.ridden, ...late.ahead]) {
+      expect(planPath(run).split('M')).toHaveLength(2);
+    }
+  });
+
+  it('draws no ridden stub of one point just past a run’s first sample', () => {
+    const profile = northwards();
+    const plan = routePlan(profile);
+    const split = splitPlan(plan, planCut(plan, profile, 5));
+
+    expect(split.ridden).toEqual([]);
+    expect(split.ahead).toEqual(plan.runs);
+  });
+
+  /** 20 km due north: long enough to be thinned, with a kept tail. */
+  function thinned(): RouteProfile {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 2_000; index += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (index * 10) / METRES_PER_DEGREE_LATITUDE),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(10),
+      });
+    }
+    return routeProfile(points);
+  }
+
+  it('cuts a thinned route at a sample it actually drew', () => {
+    const profile = thinned();
+    const plan = routePlan(profile);
+    const drawn = new Set(plan.runs.flatMap((run) => run.indices));
+    // A sample the thinning dropped, and the rider just past it.
+    const dropped = Array.from({ length: 200 }, (_, offset) => 1_000 + offset).find(
+      (index) => !drawn.has(index),
+    );
+    if (dropped === undefined) {
+      throw new Error('the fixture was not thinned');
+    }
+    const resolution = profile.resolution as number;
+    const cut = planCut(plan, profile, (dropped + 0.7) * resolution);
+
+    expect(drawn.has(cut)).toBe(true);
+    expect(cut).toBeLessThan(dropped);
+    expect([...drawn].filter((index) => index > cut && index <= dropped)).toEqual([]);
+  });
+
+  it('has each drawn point’s index name the sample it was projected from', () => {
+    // The thinned route keeps a tail that is not on the stride — the one point
+    // `closeRun` adds — and the broken one has two runs.
+    for (const profile of [withATeleport(), thinned()]) {
+      const plan = routePlan(profile);
+      for (const run of plan.runs) {
+        expect(run.indices).toHaveLength(run.points.length);
+        for (const [at, index] of run.indices.entries()) {
+          expect(run.points[at]).toEqual(
+            planPoint(plan.projection, profile.positions[index] as GeographicPosition),
+          );
+        }
+      }
+    }
   });
 });
