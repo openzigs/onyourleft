@@ -86,7 +86,9 @@ export const MAXIMUM_SIDE_POSE_ANSWER = 4096;
  * count of pictures, because time is what another rider waits for: the two
  * local models asked in spike 0025 took five to seven seconds a picture, so
  * a count high enough for a fast model would never stop a slow one. Half an
- * hour leaves any hour's other half to everybody else. A rider filming longer
+ * hour leaves any clock hour's other half to everybody else, but the window
+ * is a clock hour and not a sliding one: a rider who films from :30 to :30
+ * across the boundary can hold the model for about an hour running. A rider filming longer
  * than that with a slow model is refused for the rest of the hour, and the
  * side-camera screen counts those pictures. A hosted model is not counted: it
  * is the rider's own key, and not this machine's time.

@@ -91,6 +91,19 @@ describe('every segment of a picture is walked, not a window of it (#2175)', () 
     );
   });
 
+  it.each([
+    ['APP11 (JUMBF/C2PA)', 0xeb],
+    ['APP12', 0xec],
+    ['a comment', 0xfe],
+  ])(
+    'refuses %s, which is neither a re-encode’s segment nor a known metadata block',
+    (_n, marker) => {
+      expect(pictureFrom(base64Of(testPicture(segment(marker, ascii('free text')))))).toStrictEqual(
+        METADATA,
+      );
+    },
+  );
+
   it('takes the segments a re-encode writes, a second scan, restarts and stuffed bytes', () => {
     const picture = beforeTheEnd(
       testPicture([...padding(64), ...segment(0xdb, new Array<number>(65).fill(1))]),

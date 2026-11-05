@@ -38,14 +38,26 @@ export type PictureProblem =
   | 'must carry no location or device metadata';
 
 /**
- * The JPEG segments this refuses, wherever in the file they are: `APP1`, which
- * holds Exif (the GPS IFD, the camera's make and model) and XMP (the same as
- * text), and `APP13`, which holds IPTC and its own location fields. Every
- * `APP1` and every `APP13` is refused, not only one whose signature is the
- * usual one: a canvas re-encode writes neither (ADR 0029 D-9), so a picture
- * carrying one was not made by the app.
+ * The JPEG segments a picture may carry (#2175): the ones a canvas re-encode
+ * writes, and no others. `APP0` (JFIF), `APP2` (an ICC profile), the
+ * quantisation and Huffman tables, a frame header (`SOF0`..`SOF15`, less the
+ * three that are not frame headers), the restart interval, and the scan
+ * header. Any other segment is refused, wherever in the file it is: `APP1`
+ * (Exif with its GPS IFD and the camera's make and model, and XMP), `APP11`
+ * (JUMBF/C2PA, which can carry an Exif assertion), `APP12`, `APP13` (IPTC) and
+ * `COM` (free text) among them. An allowlist, not a list of the known bad
+ * ones, because a re-encode from pixels writes none of those (ADR 0029 D-9),
+ * so a picture carrying one was not made by the app.
  */
-const METADATA_SEGMENTS: ReadonlySet<number> = new Set([0xe1, 0xed]);
+const ALLOWED_SEGMENTS: ReadonlySet<number> = new Set([
+  0xe0,
+  0xe2,
+  0xdb,
+  0xc4,
+  0xdd,
+  0xda,
+  ...[0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf],
+]);
 
 /** Markers that stand alone, with no length after them: `TEM` and the restarts. */
 const standsAlone = (marker: number): boolean =>
@@ -79,7 +91,7 @@ function endOfScan(bytes: Uint8Array, from: number): number {
 
 /**
  * Every segment of the picture, from start of image to end of image, walked
- * (#2175): `metadata` when any is one of {@link METADATA_SEGMENTS},
+ * (#2175): `metadata` when any is not one of {@link ALLOWED_SEGMENTS},
  * `malformed` when the segments do not parse — a length past the end, a
  * second start of image, no end of image, or any byte after it — and `clean`
  * otherwise. Before #2175 this scanned a window of the file for each
@@ -105,7 +117,7 @@ function segmentsOf(bytes: Uint8Array): 'clean' | 'metadata' | 'malformed' {
     if (high === undefined || low === undefined) return 'malformed';
     const length = (high << 8) | low;
     if (length < 2 || at + length > bytes.length) return 'malformed';
-    if (METADATA_SEGMENTS.has(marker)) return 'metadata';
+    if (!ALLOWED_SEGMENTS.has(marker)) return 'metadata';
     at += length;
     // A scan header is followed by its entropy-coded data, which has no length.
     if (marker === 0xda) at = endOfScan(bytes, at);
