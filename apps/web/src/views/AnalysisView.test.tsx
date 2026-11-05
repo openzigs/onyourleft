@@ -182,19 +182,19 @@ describe('AnalysisView — zones', () => {
     expect(rows[3]?.[3]).toBe('100%');
   });
 
-  it('hides the bar from assistive technology, because the row already says the share', async () => {
-    // The only coloured thing on the screen. It repeats the percentage in the
-    // same cell, so announcing it would read the number twice.
+  it('hides the zone chart from assistive technology, because the table already says every share', async () => {
+    // #2069: the chart repeats the table's shares, so announcing it would read
+    // each number twice.
     const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })]);
 
     mounted = await mount(<AnalysisView port={port} />);
     await settle();
 
-    const bars = queryAll(mounted.container, '.oyl-zone-bar');
-    expect(bars).toHaveLength(7);
-    for (const bar of bars) {
-      expect(bar.getAttribute('aria-hidden')).toBe('true');
-    }
+    const charts = queryAll(mounted.container, '.oyl-zone-chart');
+    expect(charts).toHaveLength(1);
+    expect(charts[0]?.getAttribute('aria-hidden')).toBe('true');
+    // The single-accent bar it replaced in the Share cell is gone.
+    expect(queryAll(mounted.container, '.oyl-zone-bar')).toHaveLength(0);
   });
 
   it('states the boundary rule, so a reading on a shown number can be placed', async () => {
@@ -281,6 +281,95 @@ describe('AnalysisView — zones', () => {
     // The stub activity's moving time is 3500 s; the channel covered half of it.
     expect(mounted.container.textContent).toContain('the sensor reported nothing for the rest');
     expect(mounted.container.textContent).toContain('50%');
+  });
+});
+
+describe('AnalysisView — the zone chart (#2069)', () => {
+  /**
+   * 100 s at 100 W (zone 1 at the 200 W default threshold), 200 s at 200 W
+   * (zone 4), 100 s at 280 W (zone 6), and a 100 s gap where the meter said
+   * nothing. Covered: 400 s of the stub's 3 500 s moving time, so a share of
+   * covered time (25 / 50 / 25 %) and a share of moving time (3 / 6 / 3 %) are
+   * far apart.
+   */
+  function knownRide(): StubAnalysisRide {
+    const power = [
+      ...steadyPower(100, 100),
+      ...steadyPower(200, 200),
+      ...Array.from({ length: 100 }, () => undefined),
+      ...steadyPower(280, 100),
+    ];
+    return ride('ride-1', { power });
+  }
+
+  /** Each bar's zone, words, drawn width (as a share of 100) and share text, read from the DOM. */
+  function barsOf(container: HTMLElement): {
+    readonly zone: string | null;
+    readonly words: string;
+    readonly width: number;
+    readonly share: string;
+  }[] {
+    return queryAll(container, '.oyl-zone-chart__row').map((row) => ({
+      zone: row.getAttribute('data-oyl-zone-bar'),
+      words: row.querySelector('.oyl-zone-chart__label')?.textContent ?? '',
+      width: Number.parseFloat(
+        row.querySelector('.oyl-zone-chart__fill')?.getAttribute('width') ?? 'NaN',
+      ),
+      share: row.querySelector('.oyl-zone-chart__share')?.textContent ?? '',
+    }));
+  }
+
+  it('draws each bar at its share of covered time, and says the same share as the table', async () => {
+    const port = stubAnalysis(OWNER, [knownRide()]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    const bars = barsOf(mounted.container);
+    const rows = rowsOf(mounted.container, 'Power zones');
+    expect(bars).toHaveLength(7);
+    expect(bars.map((bar) => bar.share)).toEqual(['25%', '0%', '0%', '50%', '0%', '25%', '0%']);
+    expect(bars.map((bar) => Math.round(bar.width))).toEqual([25, 0, 0, 50, 0, 25, 0]);
+    // The chart and the table are one set of rows: each bar's share is its row's.
+    for (const [index, bar] of bars.entries()) {
+      expect(bar.share).toBe(rows[index]?.[3]);
+      expect(`${String(Math.round(bar.width))}%`).toBe(rows[index]?.[3]);
+    }
+  });
+
+  it('names every bar by its zone number and name, as text beside its colour', async () => {
+    const port = stubAnalysis(OWNER, [knownRide()]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    expect(barsOf(mounted.container).map((bar) => bar.words)).toEqual([
+      '1 Recovery',
+      '2 Endurance',
+      '3 Tempo',
+      '4 Threshold',
+      '5 VO₂',
+      '6 Anaerobic',
+      '7 Sprint',
+    ]);
+    const threshold = mounted.container.querySelector('[data-oyl-zone-bar="4"]');
+    expect(threshold?.querySelector('.oyl-zone-key__swatch--band-threshold')).not.toBeNull();
+    expect(threshold?.querySelector('.oyl-zone-chart__fill--band-threshold')).not.toBeNull();
+  });
+
+  it('draws heart rate’s five zones in the first five power zones’ colours, by their own names', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { heartRate: steadyHeartRate(150, 600) })]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    const chart = mounted.container.querySelector('[data-oyl-zone-key="heartRate"]');
+    expect(
+      queryAll(chart as Element, '.oyl-zone-chart__label').map((label) => label.textContent),
+    ).toEqual(['1 Recovery', '2 Endurance', '3 Tempo', '4 Threshold', '5 Maximal']);
+    expect(
+      chart?.querySelector('[data-oyl-zone-bar="5"] .oyl-zone-chart__fill--band-vo2'),
+    ).not.toBeNull();
   });
 });
 
