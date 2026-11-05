@@ -223,7 +223,7 @@ and no other — never yours — and sends the service the picture and one fixed
 | `"event":"picture-model","state":"off","code":"not-set"` | none is named: a rider who asks for the local model is answered `pictures_off` |
 | `…"code":"no-server"`, `"bad-model"` | `OYL_INSTANCE_PICTURE_MODEL` is set and unusable; standard error says why (`instance: pictures are off: …`) |
 | a rider reports *"The model answered that it does not take pictures"* | the model's server refused the picture (`model_without_pictures`): name a model that reads images |
-| a rider's pictures are refused `rate_limited` | one of theirs was still with the model, or their session passed 120 sealed requests a minute; the app sends at most one a second |
+| a rider's pictures are refused `rate_limited` | one of theirs was still with the model, their session passed 120 sealed requests a minute, or they have held the local picture model for half of this clock hour (#2175; a hosted model on their own key is not counted). The app sends at most one a second, waits longer after each refusal, up to 30 s, and counts the refused pictures on its screen |
 
 ## Analysis jobs
 
