@@ -23,6 +23,7 @@
  * storage port: sound is a property of the machine a rider is sitting at.
  */
 
+import { writeAudioBus, type BusSetting } from '../game/audio-mix';
 import type { PreferenceStorage } from '../game/hud/announce-preference';
 
 export interface MenuSoundPreference {
@@ -64,7 +65,20 @@ export function readMenuSoundPreference(
   };
 }
 
-/** Keep it. `false` when the device refused, so the screen can say so. */
+/**
+ * The effects bus a choice stands for — #2055: muted unless the switch is on,
+ * at the chosen volume. `game/audio-mix.ts` takes the bus from here the first
+ * time, and {@link writeMenuSoundPreference} keeps it in step after that.
+ */
+export function effectsBus(preference: MenuSoundPreference): BusSetting {
+  return { volume: preference.volume, muted: !preference.enabled };
+}
+
+/**
+ * Keep it, and its bus in `game/audio-mix.ts` (#2055) — the graph reads the
+ * volume and the mute from there. `false` when the device refused, so the
+ * screen can say so.
+ */
 export function writeMenuSoundPreference(
   storage: PreferenceStorage | undefined,
   preference: MenuSoundPreference,
@@ -72,10 +86,10 @@ export function writeMenuSoundPreference(
   if (storage === undefined) return false;
   try {
     storage.setItem(MENU_SOUNDS_STORAGE_KEY, JSON.stringify(preference));
-    return true;
   } catch {
     return false;
   }
+  return writeAudioBus(storage, 'effects', effectsBus(preference));
 }
 
 /** A slider's 0–100 as a stored volume, or `undefined` when it is not a tenth. */

@@ -725,6 +725,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         press in the shell goes to it and it alone decides —
                         off by default (`oyl.menuSounds.v1`), never on a ride
                         route, while recording or paused, or while immersive.
+                        Since #2055 its volume is the effects bus's gain in
+                        `game/web-audio.ts`, which its writer keeps in step.
                         ⚠️ Since #1072 `ListDetail.tsx` carries a card into its
                         detail with Motion (ADR 0041), reached only through
                         that lazily loaded chunk

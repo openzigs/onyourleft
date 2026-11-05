@@ -1111,7 +1111,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         names `AudioContext`; `SoundControls.tsx` is the mute and
                         the volume a rider reaches DURING a ride (WCAG 2.2 SC
                         1.4.2). ⚠️ No dependency and no speech engine, and
-                        nothing claims a sound beats the screen
+                        nothing claims a sound beats the screen. Since #2055
+                        `web-audio.ts` builds a master, a duck on music, and
+                        music, effects and cue buses, set from `audio-mix.ts`
+                        (`oyl.audioMix.v1`, taken from the two old keys the
+                        first time): ⚠️ the volume is the BUS's gain and is
+                        multiplied nowhere else, or it would be squared
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from
