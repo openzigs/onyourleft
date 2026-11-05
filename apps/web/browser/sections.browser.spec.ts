@@ -134,6 +134,8 @@ interface SectionsLayout {
   readonly h1: string | null;
   /** Distinct left edges of the children of `.oyl-sections` that span no columns. */
   readonly columns: number;
+  /** #2197: the tracks of `.oyl-sections`' grid, or 0 where it is no grid. */
+  readonly tracks: number;
   /** How many children were counted — a page that rendered none has no columns either. */
   readonly counted: number;
   /** The most of Devices' garage cards that share one row, or `null` with no garage. */
@@ -207,6 +209,11 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
       }
     }
     const rowGap = grid === null ? 0 : Number.parseFloat(getComputedStyle(grid).rowGap) || 0;
+    // The engine resolves the template to one length a track ("371px 371px").
+    const tracks =
+      grid === null || getComputedStyle(grid).display !== 'grid'
+        ? 0
+        : getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
     let garageRow: number | null = null;
     const cards = [...document.querySelectorAll('main .oyl-pairing > li')];
     if (cards.length > 0) {
@@ -221,6 +228,7 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
     return {
       h1: document.querySelector('main > h1')?.textContent ?? null,
       columns: lefts.size,
+      tracks,
       counted,
       garageRow,
       mainRight: main?.getBoundingClientRect().right ?? 0,
@@ -318,6 +326,19 @@ function expectSomethingToCount(seen: SectionsLayout, label: string): void {
   }
 }
 
+/**
+ * #2197: every track of the grid holds a section. Analysis laid out its two
+ * column sections in three tracks at 1280×800 and left the third empty on
+ * every row; a grid with more tracks than sections to put in them is that
+ * page. A section that spans is in every track, so a screen with one is
+ * held only on its column sections: those are the ones a row is made of.
+ */
+function emptyTrackFault(seen: SectionsLayout): string | undefined {
+  return seen.tracks > Math.max(seen.counted, 1)
+    ? `${String(seen.tracks)} tracks for ${String(seen.counted)} sections in a column`
+    : undefined;
+}
+
 function hashOf(route: RouteDefinition): string {
   return `#${route.path}`;
 }
@@ -371,9 +392,11 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       ).toEqual([]);
       report.push(
         `  ${route.id}: ${String(seen.columns)} columns of ${String(seen.counted)} sections` +
+          ` in ${String(seen.tracks)} tracks` +
           `${seen.garageRow === null ? '' : `, garage ${String(seen.garageRow)} a row`}` +
           `, main ends ${String(Math.round(seen.viewportWidth - seen.mainRight))} px from the edge`,
       );
+      expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
       expect(
         seen.viewportWidth - seen.mainRight,
         `${route.id}: main stops short of the viewport's edge`,
@@ -412,8 +435,10 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       ).toEqual([]);
       report.push(
         `  ${route.id}: ${String(seen.columns)} columns of ${String(seen.counted)} sections` +
+          ` in ${String(seen.tracks)} tracks` +
           `${seen.garageRow === null ? '' : `, garage ${String(seen.garageRow)} a row`}`,
       );
+      expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
       if (ONE_COLUMN_UPRIGHT.includes(route.id)) {
         expect(seen.columns, `${route.id}: expected one column upright`).toBeLessThanOrEqual(1);
       } else {
@@ -433,6 +458,21 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       expectSomethingToCount(seen, route.id);
       expect(seen.columns, `${route.id}: columns on a phone`).toBeLessThanOrEqual(1);
     }
+  });
+
+  test('the control — a two-section screen in three tracks fails in landscape (#2197)', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, '&sections=tracks');
+    const failed: string[] = [];
+    for (const route of SECTIONS) {
+      const seen = await layoutAt(page, hashOf(route), 'main');
+      expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expectSomethingToCount(seen, route.id);
+      if (emptyTrackFault(seen) !== undefined) failed.push(route.id);
+    }
+    // The screens #2197 gave two tracks, and only they, have an empty one again.
+    expect(failed.sort()).toEqual(['analysis', 'segments']);
   });
 
   test('the control — switched back to prose, every route fails in landscape', async ({ page }) => {

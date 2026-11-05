@@ -1312,8 +1312,18 @@ html {
   }
 }
 
+/*
+ * Three tracks from 64rem — but not for `.oyl-sections--halves` (#2197): a
+ * screen with two sections that sit in a column, Analysis (its thresholds and
+ * its duration bests, the rest spanning) and Segments. In three tracks those
+ * two filled two thirds of a landscape tablet's row and left the third track
+ * empty; in two they share the row. The view names itself, because how many
+ * of its sections span is decided by what it holds (`:has()` cannot count
+ * them, as it cannot nest), and `sections.browser.spec.ts` holds every screen
+ * to "no track without a section" both ways up.
+ */
 @container oyl-pane (min-width: 64rem) {
-  .oyl-sections:not(.oyl-sections--broad) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--halves) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

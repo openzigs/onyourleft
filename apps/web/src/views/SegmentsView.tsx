@@ -368,7 +368,8 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
 
   return (
     // #1014: the sections flow into columns where `main` is wide enough.
-    <div className="oyl-sections">
+    // #2197: two sections, so two tracks at most (`theme.css` §`--halves`).
+    <div className="oyl-sections oyl-sections--halves">
       {noSegments ? yours : null}
       <section aria-labelledby="segments-make">
         {/* #1031: why a climb and its descent are two segments, and why the

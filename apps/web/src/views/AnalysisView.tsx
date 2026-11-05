@@ -283,8 +283,11 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
         </StatusMessage>
       ) : undefined}
 
-      {/* #1014: the four panels flow into columns where `main` is wide enough. */}
-      <div className="oyl-sections">
+      {/* #1014: the four panels flow into columns where `main` is wide enough.
+          #2197: two tracks at most, because two of them sit in a column (the
+          thresholds and the bests; the zones and fitness span), and a third
+          track was left empty beside them (`theme.css` §`--halves`). */}
+      <div className="oyl-sections oyl-sections--halves">
         <section className="oyl-panel" aria-labelledby="oyl-zones-heading">
           {/* #1013: each section keeps one line, and its explanation is behind its ⓘ. */}
           <SectionHeading
