@@ -1562,6 +1562,120 @@ export function churchStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** One footprint of {@link civicStreetFixture}: its name, corners about its slot, height and tags. */
+export interface CivicFootprint {
+  readonly name: 'hall' | 'flat-hall' | 'school' | 'small-hall' | 'thin-school';
+  readonly corners: readonly (readonly [number, number])[];
+  readonly height: number;
+  readonly buildingType: BuildingType;
+  readonly landmark: Landmark | null;
+}
+
+/**
+ * #1795's civic footprints, each about its slot's middle and its middle 40 m
+ * out, its door's wall toward the road: a town hall 21 m along the road by 14
+ * deep (294 m², under a low hip), whose front `baysOf` counts six bays;
+ * a flat-roofed one 30 by 16 mapped `civic` with the `townhall` landmark; a
+ * school 36 by 12, two storeys, whose front counts ten; and two the block
+ * does not fit: a town hall 9 by 10 m (90 m²) and a school that is an L of
+ * two 6 m arms, 20 m each (rectangularity 0.51).
+ */
+export const CIVIC_FOOTPRINTS: readonly CivicFootprint[] = [
+  {
+    name: 'hall',
+    corners: rectangleBeside(0, 0, 21, 14),
+    height: 7,
+    buildingType: 'townhall',
+    landmark: null,
+  },
+  {
+    name: 'flat-hall',
+    corners: rectangleBeside(0, 0, 30, 16),
+    height: 9,
+    buildingType: 'civic',
+    landmark: 'townhall',
+  },
+  {
+    name: 'school',
+    corners: rectangleBeside(0, 0, 36, 12),
+    height: 7,
+    buildingType: 'school',
+    landmark: null,
+  },
+  {
+    name: 'small-hall',
+    corners: rectangleBeside(0, 0, 9, 10),
+    height: 7,
+    buildingType: 'townhall',
+    landmark: null,
+  },
+  {
+    name: 'thin-school',
+    corners: [
+      [-10, -10],
+      [10, -10],
+      [10, -4],
+      [-4, -4],
+      [-4, 10],
+      [-10, 10],
+    ],
+    height: 7,
+    buildingType: 'school',
+    landmark: null,
+  },
+];
+
+/**
+ * #1795's fixture: a street of mapped town halls and schools, each of
+ * {@link CIVIC_FOOTPRINTS} in turn, for the owner's look pair (`?town=civic`,
+ * whose before is `levers=-landmark-civic`) and for the plans to be asserted
+ * over. Along a level road from 1 000 m, every 70 m, alternately on the right
+ * and the left (`rows`, in order, with each one's side), its middle 40 m out,
+ * on residential land from 26 m out (none nearer the road, so no village lot
+ * stands in front of them). Every tag is synthetic, and nothing here is a
+ * real place.
+ */
+export function civicStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly (readonly [CivicFootprint['name'], side: number])[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: (readonly [CivicFootprint['name'], number])[] = [];
+  CIVIC_FOOTPRINTS.forEach((civic, index) => {
+    const along = 1_000 + index * 70;
+    const side = index % 2 === 0 ? 1 : -1;
+    const ring = civic.corners.map(([a, n]) => [along + a, side * (40 + n)] as const);
+    buildings.push({
+      ...buildingBeside(profile, origin, [side > 0 ? ring : [...ring].reverse()], civic.height),
+      buildingType: civic.buildingType,
+      landmark: civic.landmark,
+    });
+    rows.push([civic.name, side]);
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'civic-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_400, 26, 90),
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_400, -90, -26),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+    rows,
+  };
+}
+
 /** One footprint of an {@link UntaggedRow}: its corners about the slot's middle, and a mapped type. */
 interface UntaggedFootprint {
   readonly corners: readonly (readonly [number, number])[];

@@ -1353,6 +1353,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the ridge, at most 40 m, never under 3 m over the
                         tower; every other one as before
                         (`-landmark-churches`, `town=churches`);
+                        since #1795 a mapped town hall or school
+                        (`civicLandmarkOf`) of ≥ 100 m² and rectangularity
+                        ≥ 0.6 as itself: brick, its front an odd number of
+                        bays (`Windows.oddFront`) so the door is the middle
+                        one; a town hall's entry under a posted canopy and a
+                        cupola (`CUPOLA`, #2021's tower and spire small: 24
+                        triangles, 12 far) on its ridge or roof; a school
+                        none (`-landmark-civic`, `town=civic`);
                         since #2023 an untagged footprint inferred a shed
                         (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
                         rectangularity ≥ 0.9, a house-sized footprint within
@@ -1398,7 +1406,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the mapped landmarks drawn as themselves (#1794): a
                         church's fit (`churchFits`), its steep nave's
                         features (`CHURCH_FEATURES`) and its spire's height
-                        rule (`spireIsMapped`, `spireApexOf`), read by
+                        rule (`spireIsMapped`, `spireApexOf`); since #1795 a
+                        town hall's and a school's (`civicLandmarkOf`,
+                        `civicLandmarkFits`, `CUPOLA`), read by
                         `footprint-buildings.ts`; pure, plan-time, no draw
                         call, byte or shader term
     src/game/mapped-buildings.ts

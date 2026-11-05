@@ -10,7 +10,8 @@
  * `mapped-roof-shape`, since #1791 `building-type`, since #2021 `steeples`,
  * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
  * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
- * `start-year` and since #1794 `landmark-churches`. Its own
+ * `start-year`, since #1794 `landmark-churches` and since #1795 `landmark-civic`.
+ * Its own
  * module so that a test reads the plans the page draws, and a lever parsed
  * but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -37,6 +38,7 @@ import {
   inferredOutbuildingsWithLevers,
   mappedPaintWithLevers,
   landmarkChurchesWithLevers,
+  landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
@@ -81,8 +83,8 @@ export function plannedTown(
     // and storey tags, #1791: the mapped building type, #2021: a place of worship's
     // steeple, #2023: an untagged footprint's inferred garage or shed, #2024: its inferred
     // barn, #2026: its inferred shop, #1792: the mapped colours and materials, #1793: a
-    // mapped house's start year, and #1794: a place of worship's church, unless their lever
-    // is off.
+    // mapped house's start year, #1794: a place of worship's church, and #1795: a town
+    // hall's and a school's block, unless their lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
@@ -99,6 +101,7 @@ export function plannedTown(
       mappedPaint: mappedPaintWithLevers(leversOff),
       mappedStartYear: startYearWithLevers(leversOff),
       landmarkChurches: landmarkChurchesWithLevers(leversOff),
+      landmarkCivic: landmarkCivicWithLevers(leversOff),
     },
   );
   return { land, plans, urban };

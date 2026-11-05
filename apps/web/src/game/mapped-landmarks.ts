@@ -33,11 +33,35 @@
  * its tower to fit the caps; a nave of 1 to 3 rectangles and its steeple are
  * then far inside them.
  *
+ * ## A town hall and a school (#1795)
+ *
+ * A mapped civic footprint ({@link civicLandmarkOf}: the `townhall` or
+ * `school` landmark, or the type `townhall`, `civic`, `government` or
+ * `school`) that holds the block ({@link civicLandmarkFits}) is drawn as one:
+ *
+ * - a **town hall** — a symmetrical brick block, its route-facing front an
+ *   odd number of bays so its door is in the middle one and its windows are
+ *   mirrored about it, the entry under a posted canopy (`footprint-buildings.ts`
+ *   §`porch`, its surround), its roof #1791's low hip or flat behind a
+ *   parapet, and a **cupola** ({@link CUPOLA}) on the ridge or the parapet:
+ *   #2021's tower and spire at a small scale, so a square drum under a
+ *   pyramidal cap with its band, 24 triangles near and 12 far;
+ * - a **school** — a brick block, its front an odd number of bays in the
+ *   same rhythm, one window to a bay on every storey but the door's, and no
+ *   cupola.
+ *
+ * Both keep #1791's plain door (no wreath, no decoration) and its walls'
+ * window kinds. A footprint under `leastArea` or `leastRectangularity`, a
+ * part and a terraced one keep the block they had before #1795, and so does
+ * every one with `?levers=-landmark-civic`.
+ *
  * Plan-time only, built once at the press: no draw call, no byte, and no
  * shader term. Formats no string, so names no vertex (ADR 0004 D).
  */
 
-import { CIVIC_FEATURES } from './building-types';
+import type { BuildingType, Landmark } from '@onyourleft/map-features';
+
+import { CIVIC_FEATURES, WORSHIP_TYPES } from './building-types';
 import { ARCHETYPE_MIN_RECTANGULARITY, type ArchetypeFeatures } from './house-archetypes';
 
 /**
@@ -123,3 +147,56 @@ export function spireApexOf(heights: {
   const ruled = mapped ?? ground + Math.min(CHURCH.ridgeFactor * (ridge - ground), CHURCH.highest);
   return Math.max(ruled, towerTop + CHURCH.leastSpire);
 }
+
+/** #1795: what a mapped civic footprint is drawn as, where it is one of these. */
+export type CivicLandmark = 'townhall' | 'school';
+
+/** #1795: the mapped types that are a town hall; `school` is a school. */
+export const TOWN_HALL_TYPES: ReadonlySet<BuildingType> = new Set([
+  'townhall',
+  'civic',
+  'government',
+]);
+
+/**
+ * Which civic landmark a footprint is — #1795: its `townhall` or `school`
+ * landmark, or else its type ({@link TOWN_HALL_TYPES}, `school`); `undefined`
+ * for any other, a place of worship among them.
+ */
+export function civicLandmarkOf(
+  type: BuildingType | null,
+  landmark: Landmark | null,
+): CivicLandmark | undefined {
+  if (type !== null && WORSHIP_TYPES.has(type)) return undefined;
+  if (landmark === 'townhall' || landmark === 'school') return landmark;
+  if (landmark !== null || type === null) return undefined;
+  if (type === 'school') return 'school';
+  return TOWN_HALL_TYPES.has(type) ? 'townhall' : undefined;
+}
+
+/**
+ * A town hall's and a school's fit — #1795: under `leastArea` m² or
+ * `leastRectangularity` the footprint keeps #1791's block (the issue's 100 m²
+ * and 0.6).
+ */
+export const CIVIC_LANDMARK = { leastArea: 100, leastRectangularity: 0.6 } as const;
+
+/** Whether a civic footprint holds a town hall's or a school's block — #1795. */
+export function civicLandmarkFits(footprint: {
+  readonly area: number;
+  readonly rectangularity: number;
+}): boolean {
+  return (
+    footprint.area >= CIVIC_LANDMARK.leastArea &&
+    footprint.rectangularity >= CIVIC_LANDMARK.leastRectangularity
+  );
+}
+
+/**
+ * A town hall's cupola — #1795: half its drum's side, the drum's height over
+ * the roof's top, and its pyramidal cap's rise, metres; the drum's foot sinks
+ * `half` into a ridge, so no gap shows under it on a slope of up to 45°. A
+ * sketch, tuned on the owner's look pair (`?town=civic` against
+ * `levers=-landmark-civic`).
+ */
+export const CUPOLA = { half: 1.2, drum: 2.4, cap: 2.2 } as const;

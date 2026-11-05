@@ -22,6 +22,7 @@ import {
   inferredOutbuildingsWithLevers,
   mappedPaintWithLevers,
   landmarkChurchesWithLevers,
+  landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   LAYERS,
@@ -592,6 +593,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=churches&levers=-landmark-churches'))).toBe(
       `?levers=${encodeURIComponent('-landmark-churches')}&town=churches`,
     );
+  });
+
+  it('draws each mapped town hall and school as itself, as the product does, unless #1795’s lever takes it out', () => {
+    expect(LEVERS).toContain('landmark-civic');
+    expect(landmarkCivicWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(landmarkCivicWithLevers(LEVERS.filter((lever) => lever !== 'landmark-civic'))).toBe(
+      true,
+    );
+    expect(landmarkCivicWithLevers(parseConfig('?levers=-landmark-civic').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=civic&levers=-landmark-civic'))).toBe(
+      `?levers=${encodeURIComponent('-landmark-civic')}&town=civic`,
+    );
+  });
+
+  it('rides the street of town halls and schools through #1795’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=civic').town).toBe('civic');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'civic'\s*\?\s*civicStreetFixture\(latitude\)/);
   });
 
   it('rides the street of churches through #1794’s fixture, which is where it is wired', () => {
