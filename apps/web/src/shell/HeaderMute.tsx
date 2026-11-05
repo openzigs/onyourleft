@@ -70,8 +70,10 @@ export function HeaderMute({ storage, output }: HeaderMuteProps): JSX.Element {
       className="oyl-header__mute"
       onClick={() => {
         const next = !muted;
+        // The output reads the master back from storage, so a mute the device
+        // refused to keep would show pressed and silence nothing.
+        if (!writeMasterMuted(store(), next)) return;
         setMuted(next);
-        writeMasterMuted(store(), next);
         (output ?? sharedCueOutput()).applyMix();
       }}
     >
