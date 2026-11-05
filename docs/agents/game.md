@@ -1294,6 +1294,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pitch, porch, shutters, picture window, dormers,
                         garage and cladding together, `unknown` planned as
                         before (`-house-archetypes`, `town=houses`);
+                        since #1793 a mapped start year narrowing the ranked
+                        candidates to its era (`ARCHETYPE_ERAS`,
+                        `archetypeCandidates`), one of the era before a
+                        timeless Colonial or farmhouse, never widening and
+                        ignored where it leaves none (`-start-year`,
+                        `town=dated`);
                         since #1785 a gambrel, half-hipped, saltbox or
                         side-hipped roof (`variantRoof`) on a share of the
                         farmhouses, bungalows, Colonials and ranches, on a
@@ -1359,6 +1365,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         painted in `trim`, 6 m over the roof, the spire
                         shaded as a 60° slope and the church roofed in
                         `slate`;
+                        since #1794 one whose footprint holds a nave
+                        (≥ 80 m², rectangularity ≥ 0.6, a rectangle or
+                        #1660's rectangles, its tower standing on it) a
+                        church (`mapped-landmarks.ts`): the nave under a 45°
+                        gable at any size, with that tower and spire, the
+                        spire's top at a mapped height ≥ 1.6 times the
+                        nave's walls (then 2 storeys) or else at 1.8 times
+                        the ridge, at most 40 m, never under 3 m over the
+                        tower; every other one as before
+                        (`-landmark-churches`, `town=churches`);
+                        since #1795 a mapped town hall or school
+                        (`civicLandmarkOf`) of ≥ 100 m² and rectangularity
+                        ≥ 0.6 as itself: brick, its front an odd number of
+                        bays (`Windows.oddFront`) so the door is the middle
+                        one; a town hall's entry under a posted canopy and a
+                        cupola (`CUPOLA`, #2021's tower and spire small: 24
+                        triangles, 12 far) on its ridge or roof; a school
+                        none (`-landmark-civic`, `town=civic`);
                         since #2023 an untagged footprint inferred a shed
                         (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
                         rectangularity ≥ 0.9, a house-sized footprint within
@@ -1382,11 +1406,33 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         tertiary street commercial, drawn as a mapped shop;
                         no parking half (`-inferred-commercial`,
                         `town=untagged` at 400–700 m);
+                        since #1792 a mapped `building:material` and, on a
+                        pitched roof, `roof:material` on the belt's own
+                        surfaces (`MAPPED_WALL_SURFACES`,
+                        `MAPPED_ROOF_SURFACES`: brick, plaster render,
+                        concrete, metal corrugated, wood clapboard, glass a
+                        tower's curtain wall, asphalt shingles, slate,
+                        roof tiles; stone and a concrete roof unread), over
+                        the archetype's cladding, and a mapped colour the
+                        nearest paint its surface already has
+                        (`building-paint.ts` §`MAPPED_PALETTE`,
+                        §`mappedPaintEntry`, linear RGB over the list's
+                        ground), which `paintTown` never moves
+                        (`-mapped-paint`, `town=painted`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/mapped-landmarks.ts
+                        the mapped landmarks drawn as themselves (#1794): a
+                        church's fit (`churchFits`), its steep nave's
+                        features (`CHURCH_FEATURES`) and its spire's height
+                        rule (`spireIsMapped`, `spireApexOf`); since #1795 a
+                        town hall's and a school's (`civicLandmarkOf`,
+                        `civicLandmarkFits`, `CUPOLA`), read by
+                        `footprint-buildings.ts`; pure, plan-time, no draw
+                        call, byte or shader term
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in

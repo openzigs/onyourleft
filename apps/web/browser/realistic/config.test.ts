@@ -20,6 +20,9 @@ import {
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
+  mappedPaintWithLevers,
+  landmarkChurchesWithLevers,
+  landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   LAYERS,
@@ -34,6 +37,7 @@ import {
   roadsideWithLevers,
   treesWithLevers,
   splitRoofsWithLevers,
+  startYearWithLevers,
   steeplesWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
@@ -540,6 +544,94 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=roofs&levers=-mapped-roof-shape'))).toBe(
       `?levers=${encodeURIComponent('-mapped-roof-shape')}&town=roofs`,
     );
+  });
+
+  it('paints and clads the mapped buildings from their tags, as the product does, unless #1792’s lever takes it out', () => {
+    expect(LEVERS).toContain('mapped-paint');
+    expect(mappedPaintWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(mappedPaintWithLevers(LEVERS.filter((lever) => lever !== 'mapped-paint'))).toBe(true);
+    expect(mappedPaintWithLevers(parseConfig('?levers=-mapped-paint').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=painted&levers=-mapped-paint'))).toBe(
+      `?levers=${encodeURIComponent('-mapped-paint')}&town=painted`,
+    );
+  });
+
+  it('rides the painted street through #1792’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=painted').town).toBe('painted');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(
+      /config\.town === 'painted'\s*\?\s*mappedPaintStreetFixture\(latitude\)/,
+    );
+  });
+
+  it('narrows a mapped house’s archetype by its start year, as the product does, unless #1793’s lever takes it out', () => {
+    expect(LEVERS).toContain('start-year');
+    expect(startYearWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(startYearWithLevers(LEVERS.filter((lever) => lever !== 'start-year'))).toBe(true);
+    expect(startYearWithLevers(parseConfig('?levers=-start-year').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=dated&levers=-start-year'))).toBe(
+      `?levers=${encodeURIComponent('-start-year')}&town=dated`,
+    );
+  });
+
+  it('rides the dated road through #1793’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=dated').town).toBe('dated');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'dated'\s*\?\s*datedStreetFixture\(latitude\)/);
+  });
+
+  it('draws each mapped place of worship as a church, as the product does, unless #1794’s lever takes it out', () => {
+    expect(LEVERS).toContain('landmark-churches');
+    expect(landmarkChurchesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      landmarkChurchesWithLevers(LEVERS.filter((lever) => lever !== 'landmark-churches')),
+    ).toBe(true);
+    expect(landmarkChurchesWithLevers(parseConfig('?levers=-landmark-churches').leversOff)).toBe(
+      false,
+    );
+    expect(configQuery(parseConfig('?town=churches&levers=-landmark-churches'))).toBe(
+      `?levers=${encodeURIComponent('-landmark-churches')}&town=churches`,
+    );
+  });
+
+  it('draws each mapped town hall and school as itself, as the product does, unless #1795’s lever takes it out', () => {
+    expect(LEVERS).toContain('landmark-civic');
+    expect(landmarkCivicWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(landmarkCivicWithLevers(LEVERS.filter((lever) => lever !== 'landmark-civic'))).toBe(
+      true,
+    );
+    expect(landmarkCivicWithLevers(parseConfig('?levers=-landmark-civic').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=civic&levers=-landmark-civic'))).toBe(
+      `?levers=${encodeURIComponent('-landmark-civic')}&town=civic`,
+    );
+  });
+
+  it('rides the street of town halls and schools through #1795’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=civic').town).toBe('civic');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'civic'\s*\?\s*civicStreetFixture\(latitude\)/);
+  });
+
+  it('rides the street of churches through #1794’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=churches').town).toBe('churches');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'churches'\s*\?\s*churchStreetFixture\(latitude\)/);
   });
 
   it('rides the tagged street through #1790’s fixture, which is where it is wired', () => {

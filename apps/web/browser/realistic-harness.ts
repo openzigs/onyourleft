@@ -58,12 +58,18 @@ import {
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
 import { mappedTown } from '../src/game/footprint-buildings';
 import {
+  // #1794's street of mapped churches, which `town=churches` rides.
+  churchStreetFixture,
+  // #1795's street of mapped town halls and schools, which `town=civic` rides.
+  civicStreetFixture,
   // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
   cityStreetscapeFixture,
   countrysideFixture,
+  datedStreetFixture,
   houseStreetFixture,
   commercialStreetFixture,
+  mappedPaintStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
@@ -496,7 +502,15 @@ async function run(): Promise<void> {
                         ? mappedRoofStreetFixture(latitude)
                         : config.town === 'untagged'
                           ? untaggedStreetFixture(latitude)
-                          : undefined;
+                          : config.town === 'painted'
+                            ? mappedPaintStreetFixture(latitude)
+                            : config.town === 'dated'
+                              ? datedStreetFixture(latitude)
+                              : config.town === 'churches'
+                                ? churchStreetFixture(latitude)
+                                : config.town === 'civic'
+                                  ? civicStreetFixture(latitude)
+                                  : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

@@ -910,6 +910,76 @@ export function houseStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** One house of {@link datedStreetFixture}: a {@link StreetHouse} and its mapped start year. */
+export interface DatedHouse extends StreetHouse {
+  readonly startYear: number | null;
+}
+
+/**
+ * #1793's rows, in order along the road: a near-square two-storey house 9 m
+ * along by 10.5 m deep — which #1782's bands admit, on a rural stretch, as a
+ * farmhouse and as a Foursquare — dated 1915, 1965 and not at all; and a
+ * one-storey bungalow 7.5 along by 13 deep dated 1960, which its era rules
+ * out and so is ignored.
+ */
+export const DATED_HOUSES: readonly DatedHouse[] = [
+  { corners: rectangleBeside(0, 0, 9, 10.5), height: 6.5, startYear: 1915 },
+  { corners: rectangleBeside(0, 0, 9, 10.5), height: 6.5, startYear: 1965 },
+  { corners: rectangleBeside(0, 0, 9, 10.5), height: 6.5, startYear: null },
+  { corners: rectangleBeside(0, 0, 7.5, 13), height: 3.5, startYear: 1960 },
+];
+
+/**
+ * #1793's fixture: a rural road of houses carrying #1789's `startYear`, for
+ * the owner's look pair (`?town=dated`, whose before is `levers=-start-year`)
+ * and for the plans to be asserted over. From 1 700 m to 2 100 m, on land the
+ * map draws nothing on, a house every 50 m on the right and every 50 m on the
+ * left, 25 m behind, its middle 22 m out, square to the road, each of
+ * {@link DATED_HOUSES} in turn — sparse enough that #1633 reads the stretch
+ * rural, as #1782's farmhouses are. Every year is synthetic, and nothing here
+ * is a real place.
+ */
+export function datedStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  let index = 0;
+  for (let along = 1_700; along < 2_100; along += 50) {
+    for (const side of [1, -1]) {
+      const house = DATED_HOUSES[index % DATED_HOUSES.length] as DatedHouse;
+      const at = along + (side < 0 ? 25 : 0);
+      const ring = house.corners.map(([a, n]) => [at + a, side * 22 + n] as const);
+      buildings.push({
+        ...buildingBeside(profile, origin, [ring], house.height),
+        startYear: house.startYear,
+      });
+      index += 1;
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'dated-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        // The houses' fields, behind them and across the road between them.
+        landBeside(profile, origin, 'landuse', 'farmland', 1_650, 2_150, 32, 300),
+        landBeside(profile, origin, 'landuse', 'farmland', 1_650, 2_150, -300, -32),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /**
  * #1783's fixture: a main street and a commercial strip, for each of
  * `building-archetypes.ts`' archetypes, for the owner's look pair
@@ -1281,6 +1351,328 @@ export function mappedRoofStreetFixture(latitude = FIXTURE_LATITUDE): {
       paths: [],
       streets: [],
     },
+  };
+}
+
+/**
+ * #1792's palette indices the fixture names (`building-paint.ts` §`MAPPED_PALETTE`'s order,
+ * which is the basemap profile's).
+ */
+const PALETTE_INDEX = {
+  white: 0,
+  darkGrey: 3,
+  red: 11,
+  yellow: 14,
+  green: 15,
+  lightBlue: 17,
+  blue: 18,
+} as const;
+
+/**
+ * #1792's fixture: a street of gabled houses each carrying #1789's colour and
+ * material tags, for the owner's look pair (`?town=painted`, whose before is
+ * `levers=-mapped-paint`) and for the plans to be asserted over. Along a level
+ * road from 1 000 m to 1 500 m, both sides, on residential land, a house every
+ * 25 m, its middle 22 m out, square to the road, each 12 m along by 8 m deep,
+ * one storey and `roof:shape=gabled`, tagged in turn: every
+ * `building:material` (`stone`, which no surface reads as, among them), every
+ * `roof:material`, a coloured wall on brick, plaster, wood and metal, a
+ * coloured roof on shingles, slate and metal, and two white clapboard houses
+ * side by side, which the tag paints alike. Every tag is synthetic, and
+ * nothing here is a real place.
+ */
+export function mappedPaintStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const street: readonly Partial<BuildingFields>[] = [
+    { wallMaterial: 'brick' },
+    { wallMaterial: 'wood' },
+    { wallMaterial: 'plaster' },
+    { wallMaterial: 'concrete' },
+    { wallMaterial: 'metal' },
+    { wallMaterial: 'stone' },
+    { roofMaterial: 'asphalt' },
+    { roofMaterial: 'slate' },
+    { roofMaterial: 'roof_tiles' },
+    { roofMaterial: 'metal' },
+    { wallMaterial: 'brick', wallColour: PALETTE_INDEX.white },
+    { wallMaterial: 'plaster', wallColour: PALETTE_INDEX.yellow },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.lightBlue },
+    { wallMaterial: 'metal', wallColour: PALETTE_INDEX.blue, roofMaterial: 'metal' },
+    { roofMaterial: 'asphalt', roofColour: PALETTE_INDEX.darkGrey },
+    { roofMaterial: 'slate', roofColour: PALETTE_INDEX.red },
+    { roofMaterial: 'metal', roofColour: PALETTE_INDEX.green },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.white },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.white },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.red, roofMaterial: 'slate' },
+  ];
+  const buildings: BuildingFeature[] = [];
+  let index = 0;
+  for (let along = 1_000; along < 1_500; along += 25) {
+    for (const side of [1, -1]) {
+      const tags = street[index % street.length] as Partial<BuildingFields>;
+      const ring = rectangleBeside(along, side * 22, 12, 8);
+      buildings.push({
+        ...buildingBeside(profile, origin, [ring], 3.5),
+        roofShape: 'gabled',
+        ...tags,
+      });
+      index += 1;
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'mapped-paint-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, 1_550, -70, 70)],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/** One footprint of {@link churchStreetFixture}: its name, corners about its slot, and height. */
+export interface ChurchFootprint {
+  readonly name: 'rectangle' | 'ell' | 'cross' | 'tall' | 'wide' | 'chapel' | 'notched';
+  readonly corners: readonly (readonly [number, number])[];
+  readonly height: number | null;
+}
+
+/**
+ * #1794's church footprints, each about its slot's middle and its middle 40 m
+ * out, its door's wall toward the road: a rectangular nave 12 m along the road
+ * by 26 deep; an L, that nave with a 9 by 8 m vestry off its back corner; a
+ * cross, a nave 10 by 30 with transepts 20 m across and 8 deep two thirds of
+ * the way back; the rectangle with a mapped height of 35 m, which is its
+ * spire's; a wide nave 30 by 40, whose ridge is high enough that its spire is
+ * held at `CHURCH.highest`; and two a nave does not fit, though #2021's tower
+ * does: a chapel 6 m along by 12 deep (72 m²), and an L of two 6 m wide
+ * arms, 20 m each, 14 by 14 m cut from its back corner (204 m², rectangularity
+ * 0.51).
+ */
+export const CHURCH_FOOTPRINTS: readonly ChurchFootprint[] = [
+  { name: 'rectangle', corners: rectangleBeside(0, 0, 12, 26), height: 7 },
+  {
+    name: 'ell',
+    corners: [
+      [-6, -13],
+      [6, -13],
+      [6, 5],
+      [15, 5],
+      [15, 13],
+      [-6, 13],
+    ],
+    height: 7,
+  },
+  {
+    name: 'cross',
+    corners: [
+      [-5, -15],
+      [5, -15],
+      [5, 1],
+      [10, 1],
+      [10, 9],
+      [5, 9],
+      [5, 15],
+      [-5, 15],
+      [-5, 9],
+      [-10, 9],
+      [-10, 1],
+      [-5, 1],
+    ],
+    height: 7,
+  },
+  { name: 'tall', corners: rectangleBeside(0, 0, 12, 26), height: 35 },
+  { name: 'wide', corners: rectangleBeside(0, 0, 30, 40), height: 9 },
+  { name: 'chapel', corners: rectangleBeside(0, 0, 6, 12), height: 6 },
+  {
+    name: 'notched',
+    corners: [
+      [-10, -10],
+      [10, -10],
+      [10, -4],
+      [-4, -4],
+      [-4, 10],
+      [-10, 10],
+    ],
+    height: 7,
+  },
+];
+
+/**
+ * #1794's fixture: a street of mapped churches, each of {@link CHURCH_FOOTPRINTS}
+ * in turn, for the owner's look pair (`?town=churches`, whose before is
+ * `levers=-landmark-churches`) and for the plans to be asserted over. Along a
+ * level road from 1 000 m, every 70 m, alternately on the right and the left
+ * (`rows`, in order, with each one's side), its middle 40 m out (the wide one
+ * 50 m), on residential land from 26 m out (none nearer the road, so no
+ * village lot stands in front of them), each mapped `church`. Every tag is synthetic,
+ * and nothing here is a real place.
+ */
+export function churchStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly (readonly [ChurchFootprint['name'], side: number])[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: (readonly [ChurchFootprint['name'], number])[] = [];
+  CHURCH_FOOTPRINTS.forEach((church, index) => {
+    const along = 1_000 + index * 70;
+    const side = index % 2 === 0 ? 1 : -1;
+    const out = church.name === 'wide' ? 50 : 40;
+    // Its door's wall toward the road on either side: the corners' depth runs away from it.
+    const ring = church.corners.map(([a, n]) => [along + a, side * (out + n)] as const);
+    buildings.push({
+      ...buildingBeside(profile, origin, [side > 0 ? ring : [...ring].reverse()], church.height),
+      buildingType: 'church',
+    });
+    rows.push([church.name, side]);
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'church-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      // Residential land from 26 m out, which the churches stand on, and none nearer the
+      // road, so no village lot stands between the road and them in the look pair's frames.
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_500, 26, 90),
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_500, -90, -26),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+    rows,
+  };
+}
+
+/** One footprint of {@link civicStreetFixture}: its name, corners about its slot, height and tags. */
+export interface CivicFootprint {
+  readonly name: 'hall' | 'flat-hall' | 'school' | 'small-hall' | 'thin-school';
+  readonly corners: readonly (readonly [number, number])[];
+  readonly height: number;
+  readonly buildingType: BuildingType;
+  readonly landmark: Landmark | null;
+}
+
+/**
+ * #1795's civic footprints, each about its slot's middle and its middle 40 m
+ * out, its door's wall toward the road: a town hall 21 m along the road by 14
+ * deep (294 m², under a low hip), whose front `baysOf` counts six bays;
+ * a flat-roofed one 30 by 16 mapped `civic` with the `townhall` landmark; a
+ * school 36 by 12, two storeys, whose front counts ten; and two the block
+ * does not fit: a town hall 9 by 10 m (90 m²) and a school that is an L of
+ * two 6 m arms, 20 m each (rectangularity 0.51).
+ */
+export const CIVIC_FOOTPRINTS: readonly CivicFootprint[] = [
+  {
+    name: 'hall',
+    corners: rectangleBeside(0, 0, 21, 14),
+    height: 7,
+    buildingType: 'townhall',
+    landmark: null,
+  },
+  {
+    name: 'flat-hall',
+    corners: rectangleBeside(0, 0, 30, 16),
+    height: 9,
+    buildingType: 'civic',
+    landmark: 'townhall',
+  },
+  {
+    name: 'school',
+    corners: rectangleBeside(0, 0, 36, 12),
+    height: 7,
+    buildingType: 'school',
+    landmark: null,
+  },
+  {
+    name: 'small-hall',
+    corners: rectangleBeside(0, 0, 9, 10),
+    height: 7,
+    buildingType: 'townhall',
+    landmark: null,
+  },
+  {
+    name: 'thin-school',
+    corners: [
+      [-10, -10],
+      [10, -10],
+      [10, -4],
+      [-4, -4],
+      [-4, 10],
+      [-10, 10],
+    ],
+    height: 7,
+    buildingType: 'school',
+    landmark: null,
+  },
+];
+
+/**
+ * #1795's fixture: a street of mapped town halls and schools, each of
+ * {@link CIVIC_FOOTPRINTS} in turn, for the owner's look pair (`?town=civic`,
+ * whose before is `levers=-landmark-civic`) and for the plans to be asserted
+ * over. Along a level road from 1 000 m, every 70 m, alternately on the right
+ * and the left (`rows`, in order, with each one's side), its middle 40 m out,
+ * on residential land from 26 m out (none nearer the road, so no village lot
+ * stands in front of them). Every tag is synthetic, and nothing here is a
+ * real place.
+ */
+export function civicStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly (readonly [CivicFootprint['name'], side: number])[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: (readonly [CivicFootprint['name'], number])[] = [];
+  CIVIC_FOOTPRINTS.forEach((civic, index) => {
+    const along = 1_000 + index * 70;
+    const side = index % 2 === 0 ? 1 : -1;
+    const ring = civic.corners.map(([a, n]) => [along + a, side * (40 + n)] as const);
+    buildings.push({
+      ...buildingBeside(profile, origin, [side > 0 ? ring : [...ring].reverse()], civic.height),
+      buildingType: civic.buildingType,
+      landmark: civic.landmark,
+    });
+    rows.push([civic.name, side]);
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'civic-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_400, 26, 90),
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_400, -90, -26),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+    rows,
   };
 }
 

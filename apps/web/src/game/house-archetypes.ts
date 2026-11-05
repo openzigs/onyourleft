@@ -41,6 +41,22 @@
  * the saltbox and the half-hipped and side-hipped roofs are built
  * ({@link ARCHETYPE_FEATURES}' `roofVariant`).
  *
+ * ## A mapped start year (#1793, the owner's ruling D4 of 2026-10-27)
+ *
+ * Where a footprint carries #1789's `startYear`, the year **narrows** the
+ * choice to the archetypes of its era ({@link ARCHETYPE_ERAS}): every
+ * archetype whose cue the footprint fits is a candidate, in
+ * {@link HOUSE_ARCHETYPES}' order ({@link archetypeCandidates}); the year
+ * removes each candidate whose era does not hold it, and of those left an
+ * archetype **of** that era — one whose era is bounded, as the Colonial's and
+ * the farmhouse's are not — is chosen before a timeless one. So a rural
+ * near-square two-storey house of 1915, which #1782's bands admit as a
+ * farmhouse and a Foursquare, is a Foursquare, and one of 1965 a farmhouse.
+ * The choice is always among the candidates, so a year never admits an
+ * archetype the footprint's shape, storeys and use do not; and where it would
+ * remove every one, it is ignored and the first candidate is chosen, as with
+ * no year. It is the building's own tag, not a region, so D3 is unaffected.
+ *
  * Plan-time only, built once at the press: no draw call, no byte, and no
  * shader term. Formats no string, so names no vertex (ADR 0004 D).
  */
@@ -64,7 +80,11 @@ export const HOUSE_ARCHETYPES = [
 /** A footprint's outline: four clean corners, six in an L, or anything else. */
 export type FootprintShape = 'rectangle' | 'L' | 'other';
 
-/** What {@link houseArchetypeOf} reads: only what the plan already has (D3: no region, no era). */
+/**
+ * What {@link houseArchetypeOf} reads: only what the plan already has (D3: no
+ * region, and no era but since #1793 the building's own mapped year, which is
+ * passed beside it).
+ */
 export interface ArchetypeInput {
   /** The footprint's area, m². */
   readonly area: number;
@@ -161,21 +181,64 @@ function fits(input: ArchetypeInput, cue: ArchetypeCue): boolean {
 }
 
 /**
+ * The years each archetype was built in, inclusive — #1793: a sketch, taken
+ * as facts from public US style guides, with no text copied. The Colonial and
+ * the farmhouse were built in every year, so a year never removes them.
+ */
+export const ARCHETYPE_ERAS: Readonly<
+  Record<Exclude<HouseArchetype, 'unknown'>, readonly [from: number, to: number]>
+> = {
+  foursquare: [1895, 1930],
+  bungalow: [1905, 1930],
+  cape: [1930, 1950],
+  ranch: [1945, Number.POSITIVE_INFINITY],
+  colonial: [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY],
+  farmhouse: [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY],
+};
+
+/**
+ * Every archetype a footprint admits — each of `admits` whose cue it fits, in
+ * {@link HOUSE_ARCHETYPES}' order, ranked: the first is its archetype with no
+ * year (#1782). None for a terraced, non-residential or flat one, nor for one
+ * that is no clean rectangle or L.
+ */
+export function archetypeCandidates(
+  input: ArchetypeInput,
+  admits: readonly Exclude<HouseArchetype, 'unknown'>[] = HOUSE_ARCHETYPES,
+): readonly Exclude<HouseArchetype, 'unknown'>[] {
+  if (input.terraced || !input.residential || !input.pitched) return [];
+  if (input.shape === 'rectangle' && input.rectangularity < ARCHETYPE_MIN_RECTANGULARITY) {
+    return [];
+  }
+  return admits.filter((archetype) => fits(input, ARCHETYPE_CUES[archetype]));
+}
+
+/**
  * The archetype a footprint is — the first of {@link HOUSE_ARCHETYPES} whose
  * cue it fits — or `unknown`: always for a terraced, non-residential or flat
  * one, and for one that is no clean rectangle or L. Since #1791 a mapped
  * building type may narrow the archetypes it `admits`: a `bungalow` admits
- * the bungalow alone, where its cue fits.
+ * the bungalow alone, where its cue fits. Since #1793 a mapped `year` narrows
+ * the candidates to its era ({@link ARCHETYPE_ERAS}), one of that era before a
+ * timeless one, and is ignored where it would leave none; `null`, as before.
  */
 export function houseArchetypeOf(
   input: ArchetypeInput,
   admits: readonly Exclude<HouseArchetype, 'unknown'>[] = HOUSE_ARCHETYPES,
+  year: number | null = null,
 ): HouseArchetype {
-  if (input.terraced || !input.residential || !input.pitched) return 'unknown';
-  if (input.shape === 'rectangle' && input.rectangularity < ARCHETYPE_MIN_RECTANGULARITY) {
-    return 'unknown';
-  }
-  return admits.find((archetype) => fits(input, ARCHETYPE_CUES[archetype])) ?? 'unknown';
+  const candidates = archetypeCandidates(input, admits);
+  if (year === null) return candidates[0] ?? 'unknown';
+  const dated = candidates.filter((archetype) => {
+    const [from, to] = ARCHETYPE_ERAS[archetype];
+    return year >= from && year <= to;
+  });
+  // Of the era's own, the first; else the first timeless one; else, the year ignored, as before.
+  const ofTheEra = dated.find((archetype) => {
+    const [from, to] = ARCHETYPE_ERAS[archetype];
+    return Number.isFinite(from) || Number.isFinite(to);
+  });
+  return ofTheEra ?? dated[0] ?? candidates[0] ?? 'unknown';
 }
 
 /**

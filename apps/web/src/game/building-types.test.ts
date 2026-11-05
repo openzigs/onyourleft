@@ -50,6 +50,7 @@ import {
   typedStreetFixture,
 } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
+import { CHURCH } from './mapped-landmarks';
 import { northRoute } from './route-fixtures-testing';
 import { cityCentreFixture } from './testing/urban-fixtures';
 import { corridorOrigin } from './terrain';
@@ -211,10 +212,11 @@ describe('#1791: a church is never a house', () => {
       expect(doorFaces(church)).toBe(0);
       expect(verticesOf(church, 'door')).toHaveLength(6);
       expect(verticesOf(church, 'door').every((vertex) => vertex.top === FACADE_PAINT)).toBe(true);
-      // Brick or render, and on a footprint the gable rule pitches, a low hip.
+      // Brick or render; since #1794 a church's nave under its steep gable
+      // (`mapped-landmarks.ts`), where #1791's block had a low hip.
       expect(['brick', 'render']).toContain(church.surfaces.wall);
-      expect(church.roof).toBe('hip');
-      expect(church.pitchDegrees).toBe(25);
+      expect(church.roof).toBe('gable');
+      expect(church.pitchDegrees).toBe(CHURCH.pitchDegrees);
     }
   });
 
