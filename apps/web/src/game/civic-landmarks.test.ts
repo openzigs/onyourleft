@@ -27,9 +27,11 @@ import {
   type FootprintRole,
 } from './footprint-buildings';
 import {
+  buildingBeside,
   CIVIC_FOOTPRINTS,
   civicStreetFixture,
   mixedTownFixture,
+  rectangleBeside,
   planFingerprint,
   type CivicFootprint,
 } from './footprint-fixtures-testing';
@@ -40,6 +42,9 @@ import { drawnRoadFrame } from './terrain';
 import { urbanClassMap } from './urban-class';
 
 const street = civicStreetFixture();
+
+/** A `length` by `depth` rectangle about the hall's slot, 40 m out from the road. */
+const rectangleOf = (length: number, depth: number) => rectangleBeside(1_000, 40, length, depth);
 
 /** The street planned with its urban class, by each footprint's name. */
 function planStreet(
@@ -180,12 +185,30 @@ describe('#1795: a town hall and a school, read back from the plan', () => {
       if (front === undefined) continue;
       expect(front.bays % 2, name).toBe(1);
       expect(front.skip, name).toBe((front.bays - 1) / 2);
-      // Mirrored: whole bays of one width across the whole front, so bay `i` and bay
-      // `bays − 1 − i` stand as far either side of the middle one.
-      expect(Number.isInteger(front.bays), name).toBe(true);
       // The door's middle is the front's middle: the middle bay's.
       const doors = verticesOf(plan, 'door').filter((vertex) => vertex.y > plan.base);
       expect(doors.length, name).toBeGreaterThan(0);
+      const mid = {
+        x: doors.reduce((sum, vertex) => sum + vertex.x, 0) / doors.length,
+        z: doors.reduce((sum, vertex) => sum + vertex.z, 0) / doors.length,
+      };
+      // The front face is the wall quad whose door bay is skipped; its middle is its corners'.
+      const wall = verticesOf(plan, 'wall').filter((vertex) => vertex.top > 0 && vertex.width > 0);
+      let faceMid: { x: number; z: number } | undefined;
+      for (let at = 0; at + 5 < wall.length; at += 6) {
+        const quad = wall.slice(at, at + 6);
+        if ((quad[0]?.skip ?? -1) < 0) continue;
+        const xs = quad.map((vertex) => vertex.x);
+        const zs = quad.map((vertex) => vertex.z);
+        faceMid = {
+          x: (Math.max(...xs) + Math.min(...xs)) / 2,
+          z: (Math.max(...zs) + Math.min(...zs)) / 2,
+        };
+      }
+      expect(faceMid, name).toBeDefined();
+      expect(Math.hypot(mid.x - (faceMid?.x ?? 0), mid.z - (faceMid?.z ?? 0)), name).toBeLessThan(
+        0.5,
+      );
     }
     // Control: the 21 m hall's front counts six bays before #1795, so no bay holds its door.
     const hall = frontOf(before.get('hall') as FootprintPlan);
@@ -202,6 +225,19 @@ describe('#1795: a town hall and a school, read back from the plan', () => {
       expect(cupola.length, name).toBeGreaterThan(0);
       const apex = apexOf(plan);
       expect(apex.y - roofTopOf(plan), name).toBeCloseTo(CUPOLA.drum + CUPOLA.cap, 3);
+      // Seated: the drum's foot is sunk into the roof, at or below its top and no further
+      // than the drum's half-width, so no gap shows under it.
+      // The drum is the only wall near the apex: the building's own walls stand at its edge.
+      const foot = Math.min(
+        ...verticesOf(plan, 'wall')
+          .filter(
+            (vertex) =>
+              Math.hypot(vertex.x - apex.x, vertex.z - apex.z) <= Math.SQRT2 * CUPOLA.half + 1e-3,
+          )
+          .map((vertex) => vertex.y),
+      );
+      expect(foot, name).toBeLessThanOrEqual(roofTopOf(plan) + 1e-3);
+      expect(foot, name).toBeGreaterThanOrEqual(roofTopOf(plan) - CUPOLA.half - 1e-3);
       // On the roof, at the footprint's middle, the drum no wider than the cupola's.
       for (const vertex of cupola) {
         expect(inside(plan, vertex.x, vertex.z), name).toBe(true);
@@ -286,6 +322,11 @@ describe('#1795: a town hall and a school, read back from the plan', () => {
     }
     expect(civicLandmarkOf('church', null)).toBeUndefined();
     expect(civicLandmarkOf('townhall', 'worship')).toBeUndefined();
+    // A place of worship by type is never a civic landmark, whatever its landmark says.
+    for (const type of ['church', 'chapel', 'cathedral'] as const) {
+      expect(civicLandmarkOf(type, 'townhall'), type).toBeUndefined();
+      expect(civicLandmarkOf(type, 'school'), type).toBeUndefined();
+    }
     expect(civicLandmarkOf(null, null)).toBeUndefined();
   });
 
@@ -312,6 +353,63 @@ describe('#1795: a town hall and a school, read back from the plan', () => {
     // The cupola's drum and cap are wall and roof: 12 triangles more on the far level.
     const hall = civic.get('hall') as FootprintPlan;
     expect(hall.farTriangleCount - (before.get('hall') as FootprintPlan).farTriangleCount).toBe(12);
+  });
+});
+
+/** The street planned with its first footprint (the hall) replaced by `patch` and `corners`. */
+function planHallWith(
+  patch: Partial<(typeof street.corridor.buildings)[number]>,
+  corners?: readonly (readonly [number, number])[],
+  options: FootprintPlanOptions = {},
+): FootprintPlan {
+  const land = landClassMask(street.corridor);
+  const [hall, ...rest] = street.corridor.buildings;
+  const replaced = {
+    ...(hall as (typeof street.corridor.buildings)[number]),
+    ...(corners === undefined
+      ? {}
+      : { rings: buildingBeside(street.profile, street.origin, [corners], 7).rings }),
+    ...patch,
+  };
+  const corridor = { ...street.corridor, buildings: [replaced, ...rest] };
+  const { plans } = footprintPlans(
+    corridor,
+    land,
+    street.profile,
+    street.origin,
+    undefined,
+    urbanClassMap(corridor, land, street.profile),
+    options,
+  );
+  return plans[0] as FootprintPlan;
+}
+
+describe('#1795: where the block is not drawn', () => {
+  it('draws a church-typed footprint tagged townhall as a church, never as a civic block', () => {
+    const church = planHallWith({ buildingType: 'church', landmark: 'townhall' });
+    const plain = planHallWith({ buildingType: 'church', landmark: null });
+    expect(planFingerprint([church])).toBe(planFingerprint([plain]));
+    expect(church.farTriangleCount).toBe(plain.farTriangleCount);
+  });
+
+  it('leaves a cupola off a roof whose ridge is off-centre', () => {
+    for (const roofShape of ['skillion', 'saltbox'] as const) {
+      const plan = planHallWith({ roofShape });
+      // A cupola is 12 far triangles (drum and cap); the lever off draws none.
+      const without = planHallWith({ roofShape }, undefined, { landmarkCivic: false });
+      expect(plan.farTriangleCount, roofShape).toBe(without.farTriangleCount);
+    }
+  });
+
+  it('leaves a cupola off a footprint too thin to hold its drum', () => {
+    const thin = rectangleOf(60, 2);
+    const plan = planHallWith({}, thin);
+    const without = planHallWith({}, thin, { landmarkCivic: false });
+    expect(plan.farTriangleCount).toBe(without.farTriangleCount);
+    // Control: a footprint wide enough for the drum keeps it.
+    const wide = planHallWith({}, rectangleOf(60, 10));
+    const wideWithout = planHallWith({}, rectangleOf(60, 10), { landmarkCivic: false });
+    expect(wide.farTriangleCount - wideWithout.farTriangleCount).toBe(12);
   });
 });
 

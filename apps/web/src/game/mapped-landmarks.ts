@@ -61,7 +61,7 @@
 
 import type { BuildingType, Landmark } from '@onyourleft/map-features';
 
-import { CIVIC_FEATURES } from './building-types';
+import { CIVIC_FEATURES, WORSHIP_TYPES } from './building-types';
 import { ARCHETYPE_MIN_RECTANGULARITY, type ArchetypeFeatures } from './house-archetypes';
 
 /**
@@ -167,6 +167,7 @@ export function civicLandmarkOf(
   type: BuildingType | null,
   landmark: Landmark | null,
 ): CivicLandmark | undefined {
+  if (type !== null && WORSHIP_TYPES.has(type)) return undefined;
   if (landmark === 'townhall' || landmark === 'school') return landmark;
   if (landmark !== null || type === null) return undefined;
   if (type === 'school') return 'school';

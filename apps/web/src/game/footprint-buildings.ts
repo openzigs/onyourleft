@@ -6971,10 +6971,26 @@ function planFootprint(
     };
     // #1795: where a town hall's cupola stands — the highest ridge's middle, or a flat roof's
     // middle where that is on the roof — and its axis.
+    // Its drum's four corners must all stand on the footprint, so a long thin one gets none.
+    const drumOn = (site: SteepleSite): boolean =>
+      [1, -1].every((a) =>
+        [1, -1].every((b) =>
+          insideRing(
+            drawn,
+            site.cx + (a * site.ux - b * site.uz) * site.half,
+            site.cz + (a * site.uz + b * site.ux) * site.half,
+          ),
+        ),
+      );
+    const flatCupola: SteepleSite = {
+      cx: centroid.x,
+      cz: centroid.z,
+      ux: rectangle.ux,
+      uz: rectangle.uz,
+      half: CUPOLA.half,
+    };
     let cupolaAt: SteepleSite | undefined =
-      civicLandmark === 'townhall' && insideRing(drawn, centroid.x, centroid.z)
-        ? { cx: centroid.x, cz: centroid.z, ux: rectangle.ux, uz: rectangle.uz, half: CUPOLA.half }
-        : undefined;
+      civicLandmark === 'townhall' && drumOn(flatCupola) ? flatCupola : undefined;
     // #2021: the top of the roof, which a steeple's tower stands above.
     let roofTop = eaves + PARAPET_METRES;
     // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
@@ -7044,9 +7060,11 @@ function planFootprint(
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
       roofTop = stack.ridge.top;
+      // An off-centre ridge (a skillion's, a saltbox's) has no middle for the drum to stand on.
       if (civicLandmark === 'townhall') {
         const { cx, cz, ux, uz } = stack.rectangle;
-        cupolaAt = { cx, cz, ux, uz, half: CUPOLA.half };
+        const site = { cx, cz, ux, uz, half: CUPOLA.half };
+        cupolaAt = stack.ridge.offset === undefined && drumOn(site) ? site : undefined;
       }
       if (withChimney) {
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], chimneyEnd);
@@ -7200,7 +7218,7 @@ function planFootprint(
   let built = build(holed, true, true);
   if (!fits(built.writing) && built.drew.cornice) built = build(holed, false, true);
   // #2021: a steeple that will not fit is left off before the holes are, and put back once
-  // they are: a civic block has no garage, porch or dormer, so without its holes there is room.
+  // they are: a civic block has no garage, porch or dormer (a town hall's canopy is trim, not a porch), so without its holes there is room.
   if (!fits(built.writing) && (built.drew.steeple || built.drew.cupola)) {
     built = build(holed, false, false);
   }
