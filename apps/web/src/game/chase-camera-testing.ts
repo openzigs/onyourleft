@@ -83,7 +83,7 @@ export function drawnCamera(
     );
     if (!(apart <= SAME_CAMERA)) {
       throw new Error(
-        `at ${String(distance)} m the camera rebuilt for the damping is ${String(apart)} off sceneFrame's`,
+        `the camera rebuilt for the damping is ${String(apart)} off sceneFrame's, ${String(distance)} along the ride`,
       );
     }
     if (last === undefined) {
