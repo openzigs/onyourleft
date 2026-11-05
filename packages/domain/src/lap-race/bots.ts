@@ -31,8 +31,9 @@
  *
  * ## No rubber-banding (D-9, the owner's answer to D-14 Q4)
  *
- * A bot's power is its tier's pacing on the road under it, whatever its
- * place. Nothing here returns a power, and {@link botDecision} decides only
+ * A bot's power is its race plan's (`plan.ts`, #1960, ADR 0061 D-1): its
+ * tier, the road under it, the effort distance it has left and its own
+ * reserve, whatever its place. Nothing here returns a power, and {@link botDecision} decides only
  * when to use the held item and which lane to ride. A bot's catch-up comes
  * from the same position-weighted items a rider gets (D-4.3). US 7,278,913
  * claims computer racers with **target ranks**; a bot with a W/kg tier and no
