@@ -165,6 +165,41 @@ describe('loadTrace — one channel, at chart resolution', () => {
   });
 });
 
+describe('loadTrace — what the power and speed reads carry for #2081', () => {
+  it('computes the power curve from the samples it already decoded, on a four-hour ride', async () => {
+    const port = fourHourRide();
+    const trace = await loadTrace(port, RIDE, 'power', 'metric');
+    expect(port.channelReads).toEqual(['power']);
+    // Five seconds to an hour, from the full series rather than the 600 points:
+    // the best five seconds of 150 + (i mod 100) W is 247 W (245 to 249).
+    expect(trace?.curve?.map((effort) => effort.duration)).toEqual([
+      5, 10, 15, 30, 60, 120, 180, 300, 480, 600, 900, 1200, 1800, 2700, 3600,
+    ]);
+    expect(trace?.curve?.[0]?.power).toBe(247);
+    expect(trace?.points).toHaveLength(CHART_POINTS);
+  });
+
+  it('sums the speed channel to a distance profile in metres, before the display conversion', async () => {
+    const port = stubDetail(ATHLETE, {
+      activity: stubActivity(),
+      channels: { speed: Array.from({ length: 1200 }, () => metresPerSecond(10)) },
+      laps: [],
+    });
+    const trace = await loadTrace(port, RIDE, 'speed', 'imperial', CHART_POINTS, 2);
+    expect(port.channelReads).toEqual(['speed']);
+    // 1 200 samples of 2 s at 10 m/s, in at most 600 steps: 24 km.
+    expect(trace?.distance?.metres).toHaveLength(601);
+    expect(trace?.distance?.metres.at(-1)).toBe(24_000);
+    expect(trace?.distance?.secondsPerStep).toBe(4);
+  });
+
+  it('carries neither on any other channel', async () => {
+    const trace = await loadTrace(fourHourRide(), RIDE, 'heartRate', 'metric');
+    expect(trace?.curve).toBeUndefined();
+    expect(trace?.distance).toBeUndefined();
+  });
+});
+
 describe('the four-hour budget — #50 criterion 7', () => {
   it('costs one decode per enabled series and 600 points each, however long the ride', async () => {
     // The budget stated as work rather than as time. A slow machine cannot

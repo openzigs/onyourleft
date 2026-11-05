@@ -13,8 +13,19 @@
  * - **every filled tile** — a panel, a list item, an empty state, a Settings
  *   card, a Home ride card — is `surfaceRaised` with NO border and the card
  *   radius (`--oyl-radius-card`, 12 px);
+ * - **every tile's fill stands at least ADR 0063 D-3's floor, 1.15:1, off the
+ *   colour actually behind it** (#2064): the nearest painted ancestor, read as
+ *   Chromium paints it, not the token the spec expects there. Elevation is the
+ *   fill step and never a shadow (#307), so a tile that cleared this only by a
+ *   `box-shadow` fails it — the shadow is read and named in the fault;
  * - **every view's title** is the display step, at the heaviest weight, in the
  *   display face (`--oyl-font-family-display`).
+ *
+ * **No outline**, on purpose: ADR 0063 D-3 (accepted 2026-11-04) says direction
+ * A's cards have no edge and adds no outline token. #2064's draft asked for
+ * "the border is the outline token"; the ADR the owner accepted after it
+ * governs, and a tile's border stays 0. The edge a card keeps under
+ * `forced-colors`, where every fill is flattened, is #996's case below.
  *
  * ## The controls
  *
@@ -22,17 +33,21 @@
  * shipping sheet through the CSSOM, and Analysis' panels and title must then
  * FAIL the same reads. Without them a walk that found the right colours on a
  * page where the rules never applied would be indistinguishable from this one.
+ * For the floor, `--oyl-color-surface-raised` is re-pointed to a grey 1.09:1
+ * off the canvas — the teal palette's step, which #2030's audit found and the
+ * owner called flat slabs — and the same tiles must fail the floor.
  *
  * ## What this does NOT prove
  *
  * That the tiles read as tiles to a person: the step from `canvas` to
- * `surfaceRaised` is 1.21:1 (light) and 1.23:1 (dark), inside
- * `tokens.ts` §`MAXIMUM_ELEVATION_STEP`, and whether that is enough without an
- * outline is the owner's look on a real screen.
+ * `surfaceRaised` is 1.36:1 (light) and 1.54:1 (dark) since #2037, and
+ * whether that is enough without an outline is the owner's look on a real
+ * screen.
  */
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { contrastRatio } from '../src/design/contrast';
 import {
   FONT_FAMILY_TOKENS,
   FONT_SIZE_TOKENS,
@@ -55,6 +70,23 @@ const TILES = [
 const CARD_RADIUS = '12px';
 
 /**
+ * ADR 0063 D-3's floor between a tile and what it rests on, written here and
+ * not read from `tokens.ts` §`MINIMUM_ELEVATION_STEP`, the module it checks
+ * (`a11y/elevation.a11y.test.ts` holds that constant to the same number).
+ */
+const ELEVATION_FLOOR = 1.15;
+
+/** A computed `rgb(r, g, b)` as the six-digit hex `contrastRatio` reads. */
+function hexOf(rgb: string): string {
+  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(rgb);
+  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
+  return `#${channels
+    .slice(1)
+    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/**
  * `tokens.ts` §`FONT_FAMILY_TOKENS.display`, as Chromium reports a computed
  * family: a quoted one-word name loses its quotes and a name with a space keeps
  * double ones. Read from the token rather than typed out, so swapping the face
@@ -74,6 +106,9 @@ interface Look {
   readonly tiles: readonly {
     readonly what: string;
     readonly background: string;
+    /** The fill of the nearest painted ancestor: what the tile rests on. */
+    readonly backdrop: string;
+    readonly shadow: string;
     readonly border: number;
     readonly radius: string;
   }[];
@@ -120,9 +155,20 @@ async function lookAt(page: Page, hash: string): Promise<Look> {
           .filter((tile) => tile.checkVisibility())
           .map((tile) => {
             const tileStyle = getComputedStyle(tile);
+            // The page's own fill is on `body`; nothing behind it is painted.
+            let backdrop = 'rgba(0, 0, 0, 0)';
+            for (let at = tile.parentElement; at !== null; at = at.parentElement) {
+              const fill = getComputedStyle(at).backgroundColor;
+              if (fill !== 'rgba(0, 0, 0, 0)') {
+                backdrop = fill;
+                break;
+              }
+            }
             return {
               what: tile.className,
               background: tileStyle.backgroundColor,
+              backdrop,
+              shadow: tileStyle.boxShadow,
               border: Number.parseFloat(tileStyle.borderTopWidth),
               radius: tileStyle.borderTopLeftRadius,
             };
@@ -153,6 +199,18 @@ function lookFaults(where: string, look: Look, theme: Theme): string[] {
   for (const tile of look.tiles) {
     if (tile.background !== rgb(theme, 'surfaceRaised')) {
       faults.push(`${where}: "${tile.what}" is filled ${tile.background}`);
+    }
+    // #2064, ADR 0063 D-3: the fill step carries the elevation, whatever
+    // shadow the tile also wears.
+    const step = [tile.background, tile.backdrop].every((colour) => colour.startsWith('rgb('))
+      ? contrastRatio(hexOf(tile.background), hexOf(tile.backdrop))
+      : Number.NaN;
+    if (!(step >= ELEVATION_FLOOR)) {
+      faults.push(
+        `${where}: "${tile.what}" stands ${step.toFixed(3)}:1 off ${tile.backdrop} behind it, ` +
+          `under the ${String(ELEVATION_FLOOR)}:1 floor` +
+          (tile.shadow === 'none' ? '' : `, carried by a shadow (${tile.shadow}) alone`),
+      );
     }
     if (tile.border !== 0)
       faults.push(`${where}: "${tile.what}" has a ${String(tile.border)} px edge`);
@@ -320,5 +378,24 @@ test.describe('#992 — the controls', () => {
     expect(faults.some((fault) => fault.includes('weight') || fault.includes('display'))).toBe(
       true,
     );
+  });
+
+  test('#2064 — a tile one teal-palette step off the canvas fails the floor', async ({ page }) => {
+    await open(page);
+    // 1.09:1 off the dark canvas: #2030's audit of the teal palette's steps.
+    const FLAT = '#191b1e';
+    const canvas = paletteColours('dark').canvas;
+    expect(contrastRatio(FLAT, canvas)).toBeLessThan(ELEVATION_FLOOR);
+    await page.evaluate((value) => {
+      document.documentElement.style.setProperty('--oyl-color-surface-raised', value);
+    }, FLAT);
+    const analysis = ALL_ROUTES.find((route) => route.id === 'analysis');
+    if (analysis === undefined) throw new Error('no analysis route');
+    const look = await lookAt(page, hrefFor(analysis));
+    expect(look.tiles.length, 'Analysis drew no panel to read').toBeGreaterThan(0);
+    const floor = lookFaults('analysis', look, 'dark').filter((fault) =>
+      fault.includes(`under the ${String(ELEVATION_FLOOR)}:1 floor`),
+    );
+    expect(floor.length, 'no tile failed the floor').toBe(look.tiles.length);
   });
 });

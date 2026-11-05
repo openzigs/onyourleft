@@ -155,7 +155,9 @@ export function createMenuSounds(
       if (cue === undefined) return;
       // Inside the press: the one place a context may be made and resumed.
       output.resume();
-      output.playCue(cue, MENU_CUE_LEVEL * chosen.volume);
+      // At the full level: the rider's volume is the effects bus's gain in
+      // `game/web-audio.ts` (#2055), and multiplying it here would square it.
+      output.playCue(cue, MENU_CUE_LEVEL);
     },
   };
 }

@@ -23,3 +23,5 @@ __pycache__/
 
 # The home deploy's record of what it deployed (#52): a file on the box.
 apps/instance/deploy/home/.deployed
+# The home deploy's secret files (#2146): the Discord bot token. On the box only.
+apps/instance/deploy/home/secrets/

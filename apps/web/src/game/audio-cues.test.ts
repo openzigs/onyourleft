@@ -13,10 +13,27 @@
 import { describe, expect, it } from 'vitest';
 
 import { RideCues, TONE_CENTRE_HZ, TONE_DEAD_BAND, TONE_FULL_SCALE, toneStep } from './audio-cues';
-import { recordingOutput } from './audio-testing';
-import { DEFAULT_CUES, type CuePreference } from './cue-preference';
+import { busOf, fakeAudioContext, recordingOutput } from './audio-testing';
+import {
+  DEFAULT_CUES,
+  readCuePreference,
+  writeCuePreference,
+  type CuePreference,
+} from './cue-preference';
+import type { PreferenceStorage } from './hud/announce-preference';
+import { deviceAudioMix, webAudioOutput } from './web-audio';
 
 const ON: CuePreference = { ...DEFAULT_CUES, enabled: true };
+
+function memoryStore(): PreferenceStorage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => {
+      values.set(key, value);
+    },
+  };
+}
 
 function begun(preference: CuePreference = ON) {
   const output = recordingOutput();
@@ -83,23 +100,41 @@ describe('the mute actually silences — the wrong-layer test', () => {
 });
 
 describe('a volume independent of the system’s', () => {
-  it('scales the tone and the short sounds by the rider’s own volume, mid-ride', () => {
-    const { output, cues } = begun({ ...ON, volume: 1 });
+  it('is the cue bus’s gain, moved mid-ride without restarting the tone — #2055', () => {
+    const store = memoryStore();
+    writeCuePreference(store, { ...ON, volume: 1 });
+    const fake = fakeAudioContext();
+    const output = webAudioOutput(
+      () => fake.context,
+      deviceAudioMix(() => store),
+    );
+    const cues = new RideCues(output, readCuePreference(store));
+    cues.begin();
     cues.tone({ watts: 200, target: 200 });
-    cues.cue('interval');
-    const full = output.calls.filter((call) => call.kind !== 'resume');
+    const bus = busOf(fake, output, 'interval');
+    const made = fake.oscillators.length;
+    expect(bus.gain.value).toBe(1);
 
-    cues.set({ ...ON, volume: 0.2 });
+    // What the ride's own slider does, in its one press.
+    const quieter = { ...ON, volume: 0.2 };
+    writeCuePreference(store, quieter);
+    cues.set(quieter);
+    cues.begin();
+    expect(bus.gain.value).toBe(0.2);
+    // The tone was not restarted, and the same reading moves nothing.
     cues.tone({ watts: 200, target: 200 });
-    cues.cue('interval');
-    const quiet = output.calls.slice(full.length + 1);
+    expect(fake.oscillators).toHaveLength(made);
+  });
 
-    const gain = (call: (typeof output.calls)[number] | undefined): number =>
-      call !== undefined && 'gain' in call ? call.gain : Number.NaN;
-    // Same pitch, a fifth of the level: the tone was MOVED, not restarted.
-    expect(quiet[0]?.kind).toBe('setTone');
-    expect(gain(quiet[0]) / gain(full[0])).toBeCloseTo(0.2);
-    expect(gain(quiet[1]) / gain(full[1])).toBeCloseTo(0.2);
+  it('plays at the full level whatever the volume, so the bus’s gain is not squared', () => {
+    const levels = (volume: number) => {
+      const { output, cues } = begun({ ...ON, volume });
+      cues.tone({ watts: 200, target: 200 });
+      cues.cue('interval');
+      return output.calls.flatMap((call) => ('gain' in call ? [call.gain] : []));
+    };
+    expect(levels(0.2)).toEqual(levels(1));
+    expect(levels(1)).toHaveLength(2);
   });
 });
 

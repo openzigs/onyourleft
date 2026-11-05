@@ -34,6 +34,7 @@ import { TouchLockButton } from '../../design/TouchLockButton';
 
 import {
   CLOCK_KEY,
+  GRADIENT_KEY,
   ELAPSED_TIME_KEY,
   EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
@@ -142,7 +143,7 @@ export const STANDING_NOTICE_ID = 'oyl-hud-standing-notice';
  * named image and its plan says where the rider is (`PlanTrace.tsx`).
  */
 export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
-  primary: 'Power, cadence and heart rate',
+  primary: 'Power, cadence, heart rate and gradient',
   secondary: 'Ride readings',
 };
 
@@ -422,6 +423,10 @@ function fieldClass(reading: HudReading): string {
     'oyl-hud__field',
     ...(reading.stale ? ['oyl-hud__field--stale'] : []),
     ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
+    // #2071: the gradient, which an upright phone with no room for a fourth
+    // primary track draws in the secondary panel (`theme.css`
+    // §"THE GRADIENT, PRIMARY").
+    ...(reading.key === GRADIENT_KEY ? ['oyl-hud__field--gradient'] : []),
     // #2072: the clock row's two (`theme.css` §"THE CLOCK ROW").
     ...(reading.key === ELAPSED_TIME_KEY ? ['oyl-hud__field--elapsed'] : []),
     ...(reading.key === CLOCK_KEY ? ['oyl-hud__field--clock'] : []),
@@ -459,8 +464,14 @@ function FieldList(props: {
               reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
             }
           >
-            {reading.value}
-            {reading.unit === '' ? null : <span className="oyl-hud__unit"> {reading.unit}</span>}
+            <Value reading={reading} />
+            {reading.unit === '' ? null : (
+              <span className="oyl-hud__unit">
+                {' '}
+                {reading.unit}
+                {reading.slope === undefined ? null : <SlopeGlyph slope={reading.slope} />}
+              </span>
+            )}
             {reading.detail === undefined ? null : (
               // ⚠️ Inside the `dd`, not beside it. A screen reader announces
               // one definition per term, so a phrase in a sibling element
@@ -487,6 +498,53 @@ function FieldList(props: {
     </dl>
   );
 }
+
+/**
+ * A reading's value — and, for a signed one (#2071, the gradient's), its sign
+ * in a span of its own: `theme.css` §"THE GRADIENT, PRIMARY" sets the sign
+ * smaller than the digits, which is what lets `+12.5` fit a primary track on
+ * a phone on its side. The text is the value's own, so a reader of the `dd`
+ * reads `+4.5` exactly as `fields.ts` formatted it.
+ */
+function Value(props: { readonly reading: HudReading }): JSX.Element {
+  const { value, slope } = props.reading;
+  const sign = value.charAt(0);
+  if (slope === undefined || (sign !== '+' && sign !== '-')) return <>{value}</>;
+  return (
+    <>
+      <span className="oyl-hud__sign">{sign}</span>
+      {value.slice(1)}
+    </>
+  );
+}
+
+/**
+ * The gradient's slope glyph — #2071: a short stroke beside its unit, rising
+ * for a climb, falling for a descent, flat for level road, so the sign is
+ * read as a shape as well as a character (`fields.ts`
+ * §`HudReading.slope`). ⚠️ `aria-hidden`: the signed value says it in text.
+ */
+function SlopeGlyph(props: { readonly slope: 'up' | 'down' | 'level' }): JSX.Element {
+  const [from, to] = SLOPE_ENDS[props.slope];
+  return (
+    <svg
+      className="oyl-hud__slope"
+      viewBox="0 0 16 12"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-slope={props.slope}
+    >
+      <line x1="1" y1={from} x2="15" y2={to} />
+    </svg>
+  );
+}
+
+/** Where the slope glyph's stroke starts and ends, top-down, in its 16 × 12 box. */
+const SLOPE_ENDS: Readonly<Record<'up' | 'down' | 'level', readonly [number, number]>> = {
+  up: [11, 1],
+  down: [1, 11],
+  level: [6, 6],
+};
 
 /**
  * A field's gauge — #787, the draft's (#327's indicator criteria): a bar

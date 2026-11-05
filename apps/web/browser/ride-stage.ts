@@ -245,15 +245,16 @@ export function named(items: readonly StageItem[], name: string): StageItem {
 }
 
 /**
- * #2072 — the time of day's reading, which is not DRAWN on a short corners
- * phone under 51 rem: `theme.css` §"THE CLOCK ROW" hides it there by clip, as
- * a race's standings are hidden on a phone, and a screen reader still reads
- * it. Every other overlay viewport draws it.
+ * #2072 — the time of day's reading. It is drawn in the primary panel's clock
+ * row on every overlay layout but a short corners phone under 51 rem, where
+ * the row already holds the moving time: there, since #2071, it is a
+ * secondary reading in the grid, in the cell the gradient left (`theme.css`
+ * §"THE CLOCK ROW", §"THE GRADIENT, PRIMARY").
  */
 export const CLOCK_READING = 'reading: Clock';
 
-/** Whether {@link CLOCK_READING} is drawn at this viewport. */
-export function clockDrawn(viewport: Viewport): boolean {
+/** Whether {@link CLOCK_READING} is drawn in the clock row at this viewport. */
+export function clockInTheClockRow(viewport: Viewport): boolean {
   const narrowOnItsSide =
     viewport.width >= 736 &&
     viewport.width < 816 &&
@@ -262,24 +263,30 @@ export function clockDrawn(viewport: Viewport): boolean {
   return !narrowOnItsSide;
 }
 
-/** The stage's items a rider is meant to SEE at this viewport. @see clockDrawn */
-export function drawnItems(seen: StageMeasurement, viewport: Viewport): readonly StageItem[] {
-  return clockDrawn(viewport)
-    ? seen.items
-    : seen.items.filter((each) => each.name !== CLOCK_READING);
+/**
+ * #2071 — whether the gradient is drawn in the PRIMARY panel at this
+ * viewport, at the primary size: every corners layout, and an upright phone at
+ * least 25.5 rem wide and 53 rem tall (`theme.css` §"THE GRADIENT, PRIMARY").
+ * Elsewhere upright it is drawn in the secondary panel's first cell.
+ */
+export function gradientInPrimary(viewport: Viewport): boolean {
+  const corners = viewport.width >= 736 && viewport.height >= 360;
+  const roomyUpright = viewport.width >= 408 && viewport.height >= 848;
+  return corners || roomyUpright;
 }
 
 /**
  * #1120 — how many `@supports (anchor-name: …)` blocks `theme.css` has, and
  * how many `@supports not (anchor-name: …)` fallbacks. One each for #576's
  * side-camera row on a phone on its side, #1111's moving time below 802 px on
- * its side, #1111's moving time upright, and #2072's clock row on every
- * overlay layout. A block added or taken away changes these, and the case
- * that reads them says which.
+ * its side, #1111's moving time upright, #2072's clock row on every overlay
+ * layout, and #2071's gradient in the secondary panel on an upright phone with
+ * no room for four primary tracks. A block added or taken away changes these,
+ * and the case that reads them says which.
  */
-export const ANCHOR_BLOCKS = 4;
+export const ANCHOR_BLOCKS = 5;
 
-export const ANCHOR_FALLBACK_BLOCKS = 4;
+export const ANCHOR_FALLBACK_BLOCKS = 5;
 
 /**
  * #1120 — the stage measured as an engine with NO anchor positioning lays it

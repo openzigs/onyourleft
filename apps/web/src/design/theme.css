@@ -4980,6 +4980,131 @@ select.oyl-input {
 }
 
 /*
+ * #2081: the ride's laps behind each trace — every other lap shaded one
+ * elevation step up from the well (`surfaceRaised` on `surface`, the step
+ * `elevation.a11y.test.ts` holds apart), and an edge where each later lap
+ * begins, so two neighbouring laps are told apart by the line as well as the
+ * tone. Each chart's description says how many laps are marked.
+ */
+.oyl-trace__lap {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-trace__lap-edge {
+  stroke: var(--oyl-color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/*
+ * #2081: a tap or a hover on a trace moves the cursor there, and the chart's
+ * own reading at the cursor sits at the end of its title row, beside the line
+ * it reads. `pan-y`, so a finger dragging up the page still scrolls it.
+ */
+.oyl-trace-chart > .oyl-trace {
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+.oyl-trace-chart__reading {
+  color: var(--oyl-color-ink);
+  grid-area: value-title;
+  justify-self: end;
+}
+
+/*
+ * The ride's power curve — #2081. The trace chart's grid (value title, values
+ * down the left, durations under it), a taller drawing, and a legend under it.
+ * The two lines differ by dash as well as tone (`.oyl-fitness-chart`'s rule),
+ * and the legend names each in words.
+ */
+.oyl-curve-chart {
+  color: var(--oyl-color-ink-muted);
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  grid-template-areas:
+    'value-title value-title'
+    'values curve'
+    '. times'
+    '. time-title'
+    '. legend';
+  grid-template-columns: 10ch minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-curve {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  grid-area: curve;
+  height: 10rem;
+  width: 100%;
+}
+
+.oyl-curve-chart__value-title {
+  grid-area: value-title;
+}
+
+.oyl-curve-chart__values {
+  display: flex;
+  flex-direction: column;
+  grid-area: values;
+  justify-content: space-between;
+  text-align: end;
+}
+
+.oyl-curve-chart__times {
+  display: flex;
+  grid-area: times;
+  justify-content: space-between;
+}
+
+.oyl-curve-chart__time-title {
+  grid-area: time-title;
+  text-align: center;
+}
+
+.oyl-curve-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-md);
+  grid-area: legend;
+  list-style: none;
+  margin: var(--oyl-space-xs) 0 0;
+  padding: 0;
+}
+
+.oyl-curve-chart__key {
+  border-top: 2px solid var(--oyl-color-accent-text);
+  display: inline-block;
+  inline-size: 1.5rem;
+  margin-inline-end: var(--oyl-space-xs);
+  vertical-align: middle;
+}
+
+.oyl-curve-chart__key--all-time {
+  border-top: 2px dashed var(--oyl-color-ink-muted);
+}
+
+.oyl-curve__ride,
+.oyl-curve__all-time {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-curve__ride {
+  stroke: var(--oyl-color-accent-text);
+}
+
+.oyl-curve__all-time {
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 6 4;
+}
+
+/*
  * The ride map (#63).
  *
  * A fixed height and a full-width block, because the map has no intrinsic size:
@@ -6659,9 +6784,10 @@ select.oyl-input {
 /*
  * The three a rider steers the effort by — `hud/fields.ts` §`ReadingTier`.
  *
- * Exactly three tracks rather than `auto-fit`, because the tier is exactly
- * three fields and always will be while that file says so: `auto-fit` in a
- * wide panel would leave them rattling in a row built for five.
+ * Exactly three tracks rather than `auto-fit`, because the tier is a fixed
+ * count of fields (four since #2071; the overlay layouts below widen to four
+ * tracks): `auto-fit` in a wide panel would leave them rattling in a row
+ * built for five.
  *
  * ⚠️ `minmax(0, 1fr)`, where this grid's tracks had a `7rem` floor until #423.
  * Three 7 rem tracks, their gaps, the panel's padding and the stage's come to
@@ -9248,9 +9374,8 @@ select.oyl-input {
  * taller, and that line is what is left between it and the rider's helmet
  * at 360×752 (`ride.browser.spec.ts` publishes the margin). And on a short
  * corners phone narrower than 51 rem the row already holds the moving time,
- * and three figures do not fit 24 rem — so there the CLOCK is not drawn: it
- * is hidden by clip, as a race's standings are on a phone (#1347), and a
- * screen reader still reads it. Every other overlay layout draws it.
+ * and three figures do not fit 24 rem — so there the CLOCK is a secondary
+ * reading in the grid, in the cell the gradient left (#2071, below).
  *
  * With anchor positioning the two hang from the primary panel's own corners;
  * without it (#1120's engines) they are placed in the HUD's `primary` grid
@@ -9336,23 +9461,24 @@ select.oyl-input {
 }
 
 /* A short corners phone under 51 rem: the row holds the moving time at its
-   start edge already, so the clock is hidden there by clip (above), and the
-   moving time's field is as wide as what it holds rather than the row, so it
-   ends before *Elapsed* begins. */
+   start edge already, and the moving time's field is as wide as what it holds
+   rather than the row, so it ends before *Elapsed* begins. The CLOCK is not
+   lifted here: since #2071 it is a secondary reading in the cell the gradient
+   left when it became primary (§"THE GRADIENT, PRIMARY"), so the secondary
+   tier has the cells it had, in the rows it had. Until #2071 it was hidden
+   here by clip, a reviewer who remembers that is reading the old file. */
 @media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
   .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
     right: auto;
   }
 
   .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border: 0;
+    position: static;
+    /* Without anchors the clock row names the HUD's `primary` area, which
+       this grid does not have: an item placed there would add tracks. */
+    grid-area: auto;
+    flex-direction: column;
+    gap: 0;
   }
 }
 
@@ -9493,15 +9619,149 @@ select.oyl-input {
   }
 }
 
+/* ⚠️ The moving time is the THIRD track's reading here since #2071, not the
+   fourth: every corners layout draws the gradient in the primary panel
+   (§"THE GRADIENT, PRIMARY"), so the secondary list starts speed, to go,
+   moving time. The track sized from its content moved with it. */
 @media (min-width: 51rem) and (min-height: 22.5rem) {
   .oyl-game--riding .oyl-hud__fields--secondary {
-    grid-template-columns: repeat(3, minmax(5.5rem, 1fr)) minmax(max-content, 1fr);
+    grid-template-columns:
+      minmax(5.5rem, 1fr) minmax(5.5rem, 1fr) minmax(max-content, 1fr)
+      minmax(5.5rem, 1fr);
   }
 
   /* Here only: in a layout of `auto-fit` 5.5 rem tracks the floor would push
      the field past its track rather than widen it (below). */
   .oyl-game--riding .oyl-hud__field--moving .oyl-hud__value {
     min-inline-size: 6.5ch;
+  }
+}
+
+/*
+ * THE GRADIENT, PRIMARY — #2071.
+ *
+ * The owner, 2026-11-03: *the grade is hard to see*. The gradient is the
+ * fourth primary reading (`fields.ts` §`ReadingTier`), signed, with a slope
+ * glyph beside its unit, and drawn at the primary size wherever four primary
+ * tracks fit:
+ *
+ * - **Every corners layout** — a phone on its side and every tablet — in the
+ *   same 24 rem first column as before, so the secondary panel beside it is
+ *   as wide as it was (at 736×360 it needs its three 5.5 rem tracks, and a
+ *   wider first column made the room's long names wrap to a taller panel).
+ *   Four tracks there are 88.5 px with the primary tier's gap at `xs`: they
+ *   hold `1000` (87 px), `+12.5` with its sign set smaller (85.8 px) and the
+ *   longest label, `HEART RATE`, set in Barlow here (79.9 px) so that its
+ *   width is the same on every machine — the body face is the CI runner's
+ *   DejaVu Sans, wider than a Mac's.
+ * - **An upright phone at least 25.5 rem wide and 53 rem tall** — the
+ *   owner's 412×915 among them: four tracks of 91.5 px.
+ *
+ * In four tracks a unit goes UNDER its number, as it already did on a narrow
+ * phone on its side: `1000 W` beside its unit is wider than any of them.
+ *
+ * ⚠️ **Where four do not fit, the gradient keeps the secondary size — an
+ * upright phone under 25.5 rem wide or 53 rem tall (360×752, 360×800,
+ * 390×844).** There a track is 75 px or less, narrower than `1000` and than
+ * `HEART RATE`, and there is no height to spend on a second primary row:
+ * at 360×752 a Delivery ride's map credit already ends about a pixel above
+ * the leaning rider (§"#2072 — AN UPRIGHT PHONE UNDER 24 REM"). So the
+ * gradient is drawn in the secondary panel's FIRST cell, which an empty
+ * `::before` holds for it: the secondary grid has the same number of cells
+ * as when the gradient was one of its readings, so every row is where it
+ * was, and only speed and the gradient trade places. It is still in the
+ * primary list in the document. With anchor positioning it hangs from the
+ * secondary panel's corner; without, it is placed in the HUD's `secondary`
+ * area, which upright is that panel's box (#1120).
+ */
+.oyl-hud__sign {
+  /* A sign set as wide as a digit is what pushes `+12.5` past an 88.5 px
+     track (95.5 px, measured); at half the digits' size it is still a 20 px
+     glyph at the primary size, and the slope glyph says the same thing as a
+     shape. Raised to the middle of the digits, where a full-size sign sits,
+     so it reads as a sign and not as a mark at their foot. */
+  font-size: 0.5em;
+  vertical-align: 0.35em;
+}
+
+.oyl-hud__slope {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.7em;
+  margin-inline-start: 0.25em;
+  overflow: visible;
+  vertical-align: baseline;
+}
+
+.oyl-hud__slope line {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem),
+  (min-width: 25.5rem) and (width < 46rem) and (min-height: 53rem) {
+  .oyl-game--riding .oyl-hud__fields--primary {
+    column-gap: var(--oyl-space-xs);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+    display: block;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__label {
+    font-family: var(--oyl-font-family-display);
+  }
+}
+
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 22.5rem) and (width < 25.5rem) and (min-height: 47rem),
+    (min-width: 25.5rem) and (width < 46rem) and (min-height: 47rem) and (height < 53rem) {
+    .oyl-game--riding .oyl-hud__fields--secondary {
+      anchor-name: --oyl-hud-secondary;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary::before {
+      content: '';
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient {
+      position: absolute;
+      position-anchor: --oyl-hud-secondary;
+      left: calc(anchor(left) + var(--oyl-space-sm) + 1px);
+      top: calc(anchor(top) + var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 22.5rem) and (width < 25.5rem) and (min-height: 47rem),
+    (min-width: 25.5rem) and (width < 46rem) and (min-height: 47rem) and (height < 53rem) {
+    .oyl-game--riding .oyl-hud__fields--secondary::before {
+      content: '';
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient {
+      position: absolute;
+      grid-area: secondary;
+      left: calc(var(--oyl-space-sm) + 1px);
+      top: calc(var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+/* Drawn in the secondary panel, at its sizes: the value, the unit beside it. */
+@media (min-width: 22.5rem) and (width < 25.5rem) and (min-height: 47rem),
+  (min-width: 25.5rem) and (width < 46rem) and (min-height: 47rem) and (height < 53rem) {
+  .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient .oyl-hud__value {
+    font-size: 1.5rem;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient .oyl-hud__unit {
+    display: inline;
+    font-size: var(--oyl-font-size-sm);
   }
 }
 
