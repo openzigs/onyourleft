@@ -1504,7 +1504,8 @@ html {
     margin-block: 0;
   }
 
-  .oyl-sections--pair > :has(.oyl-scroll-region) {
+  /* Both classes: as specific as the full-width rule's `:not()` (#2195), and later. */
+  .oyl-sections.oyl-sections--pair > :has(.oyl-scroll-region) {
     grid-column: auto;
   }
 }
@@ -6205,12 +6206,12 @@ select.oyl-input {
  * where they went; one tab to another stays the cross-fade above.
  * `shell/route-motion.ts` §`navigationKind` decides which, `AppShell.tsx`'s
  * `<ViewTransition>` sets the class, and these rules name only the keyframes:
- * the duration and the curve are the rule above's, so the 200 ms ceiling and
- * both blocks that collapse motion hold for these too. Deeper slides the new
- * page in from the right and the old out towards the left (physical
- * `translateX`: the app has no RTL, no `dir=` under `apps/web/src`); back is the
- * mirror. Where the WebView has no View Transition API, React swaps the views
- * with no animation at all.
+ * the duration and the curve are THE ROUTE CROSS-FADE's (#945), so the 200 ms
+ * ceiling and both blocks that collapse motion hold for these too. Deeper
+ * slides the new page in from the right and the old out towards the left
+ * (physical `translateX`: the app has no RTL, no `dir=` under `apps/web/src`);
+ * back is the mirror. Where the WebView has no View Transition API, React
+ * swaps the views with no animation at all.
  */
 ::view-transition-old(*.oyl-route-deeper) {
   animation-name: oyl-route-out-to-start;
