@@ -622,6 +622,10 @@ describe('the gradient on the primary row — #2071', () => {
     const value = primaryGradient()?.querySelector('dd');
     expect(value?.querySelector('.oyl-hud__sign')?.textContent).toBe('+');
     expect(value?.querySelector('.oyl-hud__slope')?.getAttribute('aria-hidden')).toBe('true');
+    // A descent's minus is set apart too.
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(-3.2)} />);
+    expect(primaryGradient()?.querySelector('.oyl-hud__sign')?.textContent).toBe('-');
     // Level road: no sign at all, and a flat glyph.
     mounted.unmount();
     mounted = await mount(<HudPanel {...at(0.02)} />);

@@ -1462,6 +1462,10 @@ describe('the gradient, signed and primary — #2071', () => {
       expect(at(grade)).toMatchObject({ value: '0.0', slope: 'level' });
     }
     expect(at(0.05)).toMatchObject({ value: '+0.1', slope: 'up' });
+    // A half rounds away from zero on a descent as on a climb.
+    expect(at(-0.05)).toMatchObject({ value: '-0.1', slope: 'down' });
+    expect(at(2.25)?.value).toBe('+2.3');
+    expect(at(-2.25)?.value).toBe('-2.3');
   });
 
   it('is the fourth primary reading, after heart rate and before speed', () => {

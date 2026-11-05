@@ -6542,9 +6542,10 @@ select.oyl-input {
 /*
  * The three a rider steers the effort by — `hud/fields.ts` §`ReadingTier`.
  *
- * Exactly three tracks rather than `auto-fit`, because the tier is exactly
- * three fields and always will be while that file says so: `auto-fit` in a
- * wide panel would leave them rattling in a row built for five.
+ * Exactly three tracks rather than `auto-fit`, because the tier is a fixed
+ * count of fields (four since #2071; the overlay layouts below widen to four
+ * tracks): `auto-fit` in a wide panel would leave them rattling in a row
+ * built for five.
  *
  * ⚠️ `minmax(0, 1fr)`, where this grid's tracks had a `7rem` floor until #423.
  * Three 7 rem tracks, their gaps, the panel's padding and the stage's come to

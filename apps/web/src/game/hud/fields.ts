@@ -196,10 +196,10 @@ export interface HudReading {
  * first for the one number on the HUD that tells them nothing about the
  * effort.
  *
- * ⚠️ **The order {@link hudReadings} returns is untouched**, and the primary
- * three were already its first three — so a field is still found by position
- * (#94), within a tier and across the pair. The tier decides a size and which
- * corner; it moves no field relative to its neighbours.
+ * ⚠️ **The order {@link hudReadings} returns** puts the four primary
+ * readings first, then the rest; since #2071 the gradient is fourth and speed
+ * fifth. Nothing reads it by position: the view and the announcer look a
+ * reading up by key. The tier decides a size and which corner.
  *
  * ⚠️ **This is NOT a statement about which readings are SPOKEN.**
  * [#395](https://github.com/openzigs/onyourleft/issues/395) asks that question
@@ -583,7 +583,9 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
 function gradientReading(grade: number): HudReading {
   // The state's `GradePercent` is finite by construction
   // (`@onyourleft/domain` §`gradePercent`), so there is no dash to show.
-  const shown = Math.round(grade * 10) / 10;
+  // Round the magnitude, so a half rounds away from zero both ways: Math.round
+  // alone sends -0.05 to level while +0.05 is +0.1.
+  const shown = (Math.sign(grade) * Math.round(Math.abs(grade) * 10)) / 10;
   const slope = shown > 0 ? 'up' : shown < 0 ? 'down' : 'level';
   const magnitude = Math.abs(shown).toFixed(1);
   const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
