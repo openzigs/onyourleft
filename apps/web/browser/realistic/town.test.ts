@@ -14,6 +14,8 @@
  * and none with it — and since #1922, the pair's frames planted alike but on
  * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
  * the tagged street's roofs as tagged without it, and every tag ignored with it.
+ * Since #1792 `-mapped-paint`: the painted street's walls in their tagged
+ * materials without it, and every colour and material ignored with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -30,6 +32,7 @@ import {
 import {
   commercialStreetFixture,
   houseStreetFixture,
+  mappedPaintStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
   planFingerprint,
@@ -134,6 +137,46 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
         expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
       }
     });
+  });
+});
+
+describe('the realistic page’s `mapped-paint` lever — #1792', () => {
+  const street = mappedPaintStreetFixture();
+
+  it('draws every tagged wall in its material on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=painted').leversOff);
+    expect(plans).toHaveLength(street.corridor.buildings.length);
+    const wanted = { brick: 'brick', plaster: 'render', concrete: 'concrete', metal: 'corrugated' };
+    plans.forEach((plan, index) => {
+      const material = street.corridor.buildings[index]?.wallMaterial ?? null;
+      if (material === 'wood') expect(plan.cladding.wall).toBe('clapboard');
+      else if (material !== null && material in wanted) {
+        expect(plan.surfaces.wall).toBe(wanted[material as keyof typeof wanted]);
+        expect(plan.cladding.wall).toBe('photograph');
+      }
+    });
+  });
+
+  it('plans every house as the planner with them off does, with `levers=-mapped-paint`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=painted&levers=-mapped-paint').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { mappedPaint: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.map((plan) => plan.surfaces)).toStrictEqual(off.map((plan) => plan.surfaces));
+    // Not vacuous: with the lever on, the same street plans otherwise.
+    const on = plannedTown(street, parseConfig('?town=painted').leversOff).plans;
+    expect(on.map((plan) => plan.surfaces)).not.toStrictEqual(plans.map((plan) => plan.surfaces));
   });
 });
 

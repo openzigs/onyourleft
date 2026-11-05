@@ -20,6 +20,7 @@ import {
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
+  mappedPaintWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   LAYERS,
@@ -531,6 +532,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(configQuery(parseConfig('?town=roofs&levers=-mapped-roof-shape'))).toBe(
       `?levers=${encodeURIComponent('-mapped-roof-shape')}&town=roofs`,
+    );
+  });
+
+  it('paints and clads the mapped buildings from their tags, as the product does, unless #1792’s lever takes it out', () => {
+    expect(LEVERS).toContain('mapped-paint');
+    expect(mappedPaintWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(mappedPaintWithLevers(LEVERS.filter((lever) => lever !== 'mapped-paint'))).toBe(true);
+    expect(mappedPaintWithLevers(parseConfig('?levers=-mapped-paint').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=painted&levers=-mapped-paint'))).toBe(
+      `?levers=${encodeURIComponent('-mapped-paint')}&town=painted`,
+    );
+  });
+
+  it('rides the painted street through #1792’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=painted').town).toBe('painted');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(
+      /config\.town === 'painted'\s*\?\s*mappedPaintStreetFixture\(latitude\)/,
     );
   });
 

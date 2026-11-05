@@ -1360,6 +1360,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         tertiary street commercial, drawn as a mapped shop;
                         no parking half (`-inferred-commercial`,
                         `town=untagged` at 400–700 m);
+                        since #1792 a mapped `building:material` and, on a
+                        pitched roof, `roof:material` on the belt's own
+                        surfaces (`MAPPED_WALL_SURFACES`,
+                        `MAPPED_ROOF_SURFACES`: brick, plaster render,
+                        concrete, metal corrugated, wood clapboard, glass a
+                        tower's curtain wall, asphalt shingles, slate,
+                        roof tiles; stone and a concrete roof unread), over
+                        the archetype's cladding, and a mapped colour the
+                        nearest paint its surface already has
+                        (`building-paint.ts` §`MAPPED_PALETTE`,
+                        §`mappedPaintEntry`, linear RGB over the list's
+                        ground), which `paintTown` never moves
+                        (`-mapped-paint`, `town=painted`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

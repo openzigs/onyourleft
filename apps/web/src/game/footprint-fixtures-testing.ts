@@ -1284,6 +1284,92 @@ export function mappedRoofStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/**
+ * #1792's palette indices the fixture names (`building-paint.ts` §`MAPPED_PALETTE`'s order,
+ * which is the basemap profile's).
+ */
+const PALETTE_INDEX = {
+  white: 0,
+  darkGrey: 3,
+  red: 11,
+  yellow: 14,
+  green: 15,
+  lightBlue: 17,
+  blue: 18,
+} as const;
+
+/**
+ * #1792's fixture: a street of gabled houses each carrying #1789's colour and
+ * material tags, for the owner's look pair (`?town=painted`, whose before is
+ * `levers=-mapped-paint`) and for the plans to be asserted over. Along a level
+ * road from 1 000 m to 1 500 m, both sides, on residential land, a house every
+ * 25 m, its middle 22 m out, square to the road, each 12 m along by 8 m deep,
+ * one storey and `roof:shape=gabled`, tagged in turn: every
+ * `building:material` (`stone`, which no surface reads as, among them), every
+ * `roof:material`, a coloured wall on brick, plaster, wood and metal, a
+ * coloured roof on shingles, slate and metal, and two white clapboard houses
+ * side by side, which the tag paints alike. Every tag is synthetic, and
+ * nothing here is a real place.
+ */
+export function mappedPaintStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const street: readonly Partial<BuildingFields>[] = [
+    { wallMaterial: 'brick' },
+    { wallMaterial: 'wood' },
+    { wallMaterial: 'plaster' },
+    { wallMaterial: 'concrete' },
+    { wallMaterial: 'metal' },
+    { wallMaterial: 'stone' },
+    { roofMaterial: 'asphalt' },
+    { roofMaterial: 'slate' },
+    { roofMaterial: 'roof_tiles' },
+    { roofMaterial: 'metal' },
+    { wallMaterial: 'brick', wallColour: PALETTE_INDEX.white },
+    { wallMaterial: 'plaster', wallColour: PALETTE_INDEX.yellow },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.lightBlue },
+    { wallMaterial: 'metal', wallColour: PALETTE_INDEX.blue, roofMaterial: 'metal' },
+    { roofMaterial: 'asphalt', roofColour: PALETTE_INDEX.darkGrey },
+    { roofMaterial: 'slate', roofColour: PALETTE_INDEX.red },
+    { roofMaterial: 'metal', roofColour: PALETTE_INDEX.green },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.white },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.white },
+    { wallMaterial: 'wood', wallColour: PALETTE_INDEX.red, roofMaterial: 'slate' },
+  ];
+  const buildings: BuildingFeature[] = [];
+  let index = 0;
+  for (let along = 1_000; along < 1_500; along += 25) {
+    for (const side of [1, -1]) {
+      const tags = street[index % street.length] as Partial<BuildingFields>;
+      const ring = rectangleBeside(along, side * 22, 12, 8);
+      buildings.push({
+        ...buildingBeside(profile, origin, [ring], 3.5),
+        roofShape: 'gabled',
+        ...tags,
+      });
+      index += 1;
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'mapped-paint-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, 1_550, -70, 70)],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /** One footprint of an {@link UntaggedRow}: its corners about the slot's middle, and a mapped type. */
 interface UntaggedFootprint {
   readonly corners: readonly (readonly [number, number])[];
