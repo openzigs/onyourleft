@@ -963,8 +963,10 @@ for (const viewport of VIEWPORTS) {
       const none = deliveryStage(measured, 'none');
       expect(none.fields).toEqual([]);
       expect(none.panel).toBeDefined();
-      // The ordinary ride's panel is the two rows every claim below is against.
-      expect(rows(none)).toBe(2);
+      // The ordinary ride's panel is the two rows every claim below is against
+      // â one on the tablet since #2130, whose six secondary tracks hold the
+      // ordinary ride's six readings in a row.
+      expect(rows(none)).toBe(tablet ? 1 : 2);
       for (const stage of ['start', 'end']) {
         const round = deliveryStage(measured, stage);
         const name = `${viewport.name}/${stage}`;

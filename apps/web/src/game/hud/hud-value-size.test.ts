@@ -297,28 +297,44 @@ describe('a tablet’s HUD numerals clear ADR 0063 D-5’s floor (#2130)', () =>
     return blocks;
   }
 
-  /** The body of the last rule for exactly `selector` in any tablet block. */
-  function tabletRule(selector: string): string | undefined {
+  /** Every rule body for exactly `selector` in `blocks`, in source order. */
+  function rulesIn(blocks: readonly string[], selector: string): string[] {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pattern = new RegExp(`(?<=[{}]\\s*)${escaped}\\s*\\{([^}]*)\\}`, 'g');
-    let found: string | undefined;
-    for (const block of tabletBlocks()) {
-      for (const match of block.matchAll(pattern)) found = match[1];
-    }
-    return found;
+    return blocks.flatMap((block) => [...block.matchAll(pattern)].map((match) => match[1] ?? ''));
   }
 
   /** The `font-size`, in rem, the tablet blocks give `selector`; undefined when they give none. */
   function tabletFontSizeRem(selector: string): number | undefined {
-    const size = /font-size:\s*([\d.]+)rem/.exec(tabletRule(selector) ?? '')?.[1];
+    const size = /font-size:\s*([\d.]+)rem/.exec(
+      rulesIn(tabletBlocks(), selector).at(-1) ?? '',
+    )?.[1];
     return size === undefined ? undefined : Number(size);
   }
 
-  /** The secondary tier's narrowest track floor on a tablet, in CSS px. */
+  /**
+   * The secondary tier's narrowest track floor on any tablet, in CSS px: every
+   * `minmax()` floor of every tablet rule that lays the tier out — those under
+   * {@link TABLET_QUERY} and those a tablet's height or width narrows further
+   * (`(min-width: 46rem) and …`, with a `min-height` of 47 or 50 rem).
+   */
   function narrowestTabletTrackPixels(): number | undefined {
-    const rule = tabletRule('.oyl-game--riding .oyl-hud__fields--secondary');
-    const floors = [...(rule ?? '').matchAll(/minmax\(\s*([\d.]+)rem\s*,/g)].map((match) =>
-      Number(match[1]),
+    const tierBlocks: string[] = [];
+    for (const match of declarations.matchAll(
+      /@media \(min-width: 46rem\)[^{]*\(min-height: (?:47|50)rem\)[^{]*\{/g,
+    )) {
+      let depth = 0;
+      for (let index = match.index + match[0].length - 1; index < declarations.length; index += 1) {
+        if (declarations[index] === '{') depth += 1;
+        if (declarations[index] === '}') depth -= 1;
+        if (depth === 0) {
+          tierBlocks.push(declarations.slice(match.index, index + 1));
+          break;
+        }
+      }
+    }
+    const floors = rulesIn(tierBlocks, '.oyl-game--riding .oyl-hud__fields--secondary').flatMap(
+      (rule) => [...rule.matchAll(/minmax\(\s*([\d.]+)rem\s*,/g)].map((match) => Number(match[1])),
     );
     return floors.length === 0 ? undefined : Math.min(...floors) * ROOT_PIXELS;
   }

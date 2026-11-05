@@ -231,7 +231,7 @@ test.describe('#2041 — the metric numerals', () => {
  * the primary panel gives power the wider track (`theme.css` §"THE TABLET'S
  * READINGS AT ARM'S LENGTH"). The ride's own power reading is set to `1999`
  * and its digits — the text, not the field — measured against the field.
- * **Control:** with the three tracks made equal again, the same digits are
+ * **Control:** with the primary tracks made equal on the owner’s tablet, the same digits are
  * wider than the field.
  */
 async function fourDigitPower(page: Page): Promise<{ digits: number; field: number }> {
@@ -268,7 +268,7 @@ test('#2130 the control — with equal primary tracks, a four-digit power does n
   await page.evaluate(() => {
     const panel = document.querySelector<HTMLElement>('.oyl-hud__fields--primary');
     if (panel === null) throw new Error('no primary panel');
-    panel.style.gridTemplateColumns = 'repeat(3, minmax(0, 1fr))';
+    panel.style.gridTemplateColumns = 'repeat(4, minmax(0, 1fr))';
   });
   const { digits, field } = await fourDigitPower(page);
   expect(digits).toBeGreaterThan(field);

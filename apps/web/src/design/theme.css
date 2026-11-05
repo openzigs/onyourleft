@@ -9999,35 +9999,42 @@ select.oyl-input {
  * primary one at 3.815 rem. D-5's floor is 16 arc-minutes at a 1 m mount, 4.65
  * mm of cap height, which is 27.4 CSS px on a 10.1-inch 1280×800 tablet (one
  * CSS px taken as 0.1700 mm, an assumption: the owner's tablet has not been
- * measured). Barlow's cap is 0.700 em, so a numeral needs 2.45 rem or more;
+ * measured). Barlow's cap is 0.700 em, so a numeral needs 2.45 rem or more:
  * 1.5 rem draws a 17.1 px cap and 2.45 rem a 27.95 px one, measured
- * (`metric-numerals.browser.spec.ts` §"#2130"). The primary is the ride's own `metric` step,
- * 3.815 rem, which keeps #423's tiers at 1.56 to 1 (`hud-value-size.test.ts`
- * holds 1.5).
+ * (`metric-numerals.browser.spec.ts` §"#2130"). The primary is the ride's own
+ * `metric` step, 3.815 rem, which keeps #423's tiers at 1.56 to 1
+ * (`hud-value-size.test.ts` holds 1.5).
  *
  * The tracks are re-cut for the type, and every number below was measured in
  * the pinned Chromium rather than reasoned about:
- * - the primary panel keeps its 24 rem column and gives power the wider track,
- *   1.4 to 1 to 1: a four-digit power is 132.8 px in its 144 px track and a
- *   three-digit heart rate 99 px in 103. Each unit goes UNDER its number, as
- *   on a short corners phone (#1111); the left column has the height;
- * - the secondary tier is FIVE tracks, the moving time's own (#1124) fourth,
- *   with a 6.5 rem floor (`Level`, the widest value not set at #259's word
- *   size, is 93 px), in a panel up to 48 rem wide. Five rather than four
- *   because a room's readings are ten, and three rows of them put a race's
- *   standings over *Pause* at 1024×768; two rows do not;
- * - UPRIGHT (800×1280, under 51 rem) there is no width for five tracks beside
- *   the primary panel, so the secondary panel goes UNDER it, across the
- *   stage, in six. Two columns beside it were five rows, and a race's
- *   standings under them were over the leaning rider;
+ * - from 50 rem tall (1280×800, 800×1280) the primary panel's four readings
+ *   (#2071's gradient the fourth) take a 32 rem column, power and the
+ *   gradient the wider tracks, 1.3 to 1: a four-digit power is 132.8 px in
+ *   its 136 px track, and a three-digit heart rate 99 px in 105. The units
+ *   stay under their numbers, as #2071 has them;
+ * - the secondary tier is six tracks there, the moving time's own (#1124)
+ *   third, in a panel up to 48 rem wide, so a room's nine readings are two
+ *   rows and a race's standings under them clear *Pause*. UPRIGHT (800×1280,
+ *   under 51 rem) there is no width for the tier beside the primary panel,
+ *   so both panels span the stage's width, one under the other: two tracks
+ *   beside it were five rows in a room, and the standings under them were
+ *   over the leaning rider;
+ * - ⚠️ **on a 4:3 tablet (under 50 rem tall, 1024×768) four primary tracks
+ *   at 3.815 rem take the same 32 rem, the secondary tier beside them has
+ *   four tracks, and a room's readings are three rows: the standings ran
+ *   over *Pause*.** So there the gradient keeps the SECONDARY size, 2.45 rem
+ *   (#2071 made it primary at 2.5 rem), and is drawn in the secondary
+ *   panel's first cell exactly as #2071 draws it on an upright phone with no
+ *   room for four primary tracks (§"THE GRADIENT, PRIMARY"): the primary
+ *   panel is three tracks, 1.4 to 1 to 1, in 24 rem, and the secondary five,
+ *   the moving time's the fourth;
+ * - ⚠️ **what gives way, recorded as #419 asks: on the 4:3 tablet, in a
+ *   room's LAP RACE, the room's readings give way to the race's**, exactly as
+ *   #1912 has them give way on a phone (hidden by clip, still read by a
+ *   screen reader): *Place* and *Item* were a third row there, and the
+ *   standings ran 63 px over *Pause*. Nothing else gives way on a tablet;
  * - the clock row's reservation in the primary panel is one line of the new
- *   secondary size, 2.45 × 1.05 rem;
- * - ⚠️ **what gives way, recorded as #419 asks: on a 4:3 tablet (under 50 rem
- *   tall), in a room's LAP RACE, the room's readings give way to the race's**
- *   exactly as #1912 has them give way on a phone (visually hidden by clip,
- *   still read by a screen reader): *Place* and *Item* are a third row there,
- *   and the standings ran 63 px over *Pause*. 1280×800 and 800×1280 give
- *   nothing way.
+ *   secondary size, 2.45 × 1.05 rem.
  *
  * ⚠️ **Phones keep 1.5 and 2.5 rem — what that costs, written down as #419
  * asks.** Every phone layout is measured to within a few pixels of the leaning
@@ -10041,16 +10048,11 @@ select.oyl-input {
  */
 @media (min-width: 46rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud__fields--primary {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
     padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 2.6rem);
   }
 
   .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__value {
     font-size: 3.815rem;
-  }
-
-  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
-    display: block;
   }
 
   .oyl-game--riding .oyl-hud__fields--secondary .oyl-hud__value {
@@ -10065,27 +10067,41 @@ select.oyl-input {
 
   .oyl-game--riding .oyl-hud__fields--secondary {
     width: min(100%, 48rem);
-    grid-template-columns:
-      repeat(3, minmax(6.5rem, 1fr)) minmax(max-content, 1fr)
-      minmax(6.5rem, 1fr);
   }
 }
 
-@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+@media (min-width: 46rem) and (min-height: 50rem) {
   .oyl-game--riding .oyl-hud {
+    grid-template-columns: minmax(0, 32rem) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(5.5rem, 1fr) minmax(5.5rem, 1fr) minmax(max-content, 1fr)
+      repeat(3, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud {
+    /* Three columns, so the primary area is the primary panel's own 32 rem
+       (the clock row is placed in that area without anchor positioning,
+       #1120) and *Pause* keeps the width it has beside the route panel. */
     grid-template-areas:
-      'primary .'
-      'secondary secondary'
-      'notices notices'
-      'route actions';
+      'primary primary .'
+      'secondary secondary secondary'
+      'notices notices notices'
+      'route actions actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 8rem) minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
 
   .oyl-game--riding .oyl-hud__fields--secondary {
     width: 100%;
-    grid-template-columns:
-      repeat(3, minmax(6.5rem, 1fr)) minmax(max-content, 1fr)
-      repeat(2, minmax(6.5rem, 1fr));
   }
 
   /* #1124's floor for the moving time's own track, as from 51 rem. */
@@ -10094,7 +10110,34 @@ select.oyl-input {
   }
 }
 
+/* The 4:3 tablet: the gradient in the secondary panel's first cell. */
 @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: repeat(3, minmax(5.5rem, 1fr)) minmax(max-content, 1fr) minmax(
+        5.5rem,
+        1fr
+      );
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary::before {
+    content: '';
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient .oyl-hud__unit {
+    display: inline;
+    font-size: var(--oyl-font-size-sm);
+  }
+
+  /* A room's LAP RACE: the room's readings give way, as #1912 has them give
+     way on a phone (§"A ROOM RIDE ON A PHONE"). */
   .oyl-game--riding
     .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race)
     > .oyl-hud__field--room {
@@ -10107,6 +10150,32 @@ select.oyl-input {
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
+  }
+}
+
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+    .oyl-game--riding .oyl-hud__fields--secondary {
+      anchor-name: --oyl-hud-secondary;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient {
+      position: absolute;
+      position-anchor: --oyl-hud-secondary;
+      left: calc(anchor(left) + var(--oyl-space-sm) + 1px);
+      top: calc(anchor(top) + var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+    .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient {
+      position: absolute;
+      grid-area: secondary;
+      left: calc(var(--oyl-space-sm) + 1px);
+      top: calc(var(--oyl-space-sm) + 1px);
+    }
   }
 }
 
