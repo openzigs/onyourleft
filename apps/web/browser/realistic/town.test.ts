@@ -15,7 +15,9 @@
  * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
  * the tagged street's roofs as tagged without it, and every tag ignored with it.
  * Since #1794 `-landmark-churches`: the street of churches' naves under their
- * steep gables without it, and every one planned as before with it.
+ * steep gables without it, and every one planned as before with it. Since
+ * #1795 `-landmark-civic`: the town halls' and schools' odd-bayed brick fronts
+ * without it, and every one planned as before with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -31,6 +33,7 @@ import {
 } from '../../src/game/footprint-buildings';
 import {
   churchStreetFixture,
+  civicStreetFixture,
   commercialStreetFixture,
   houseStreetFixture,
   mappedRoofStreetFixture,
@@ -137,6 +140,38 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
         expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
       }
     });
+  });
+});
+
+describe('the realistic page’s `landmark-civic` lever — #1795', () => {
+  const street = civicStreetFixture();
+
+  it('draws the street’s town halls and schools in brick on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=civic').leversOff);
+    const fits = new Set(['hall', 'flat-hall', 'school']);
+    plans.forEach((plan, index) => {
+      if (fits.has(street.rows[index]?.[0] ?? '')) expect(plan.surfaces.wall).toBe('brick');
+    });
+  });
+
+  it('plans the street, with `levers=-landmark-civic`, as the planner with them off does', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=civic&levers=-landmark-civic').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { landmarkCivic: false },
+    ).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    // Not vacuous: on, the street plans otherwise.
+    const on = plannedTown(street, parseConfig('?town=civic').leversOff).plans;
+    expect(planFingerprint(on)).not.toBe(planFingerprint(plans));
   });
 });
 

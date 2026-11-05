@@ -400,6 +400,9 @@ import {
   CHURCH,
   CHURCH_FEATURES,
   churchFits,
+  civicLandmarkFits,
+  civicLandmarkOf,
+  CUPOLA,
   spireApexOf,
   spireIsMapped,
 } from './mapped-landmarks';
@@ -2525,6 +2528,12 @@ interface Windows {
    * then drawn as one too short for a window is: plain, in the walls' style.
    */
   readonly blind?: boolean;
+  /**
+   * #1795: the door's wall an odd number of bays — one more where
+   * {@link baysOf} counts an even number — so the door stands in the middle
+   * bay and the windows are mirrored about it: a town hall's and a school's.
+   */
+  readonly oddFront?: boolean;
 }
 
 /** How near a wall must stand to a rectangle's side to be under its eaves: **0.5 m** (#1660). */
@@ -2744,7 +2753,10 @@ function wallPiece(
     [u1, v1],
     [u0, v1],
   ];
-  const bays = windows === undefined || windows.blind === true ? 0 : baysOf(length);
+  const counted = windows === undefined || windows.blind === true ? 0 : baysOf(length);
+  // #1795: an odd number on a town hall's or a school's front.
+  const bays =
+    front && windows?.oddFront === true && counted > 0 && counted % 2 === 0 ? counted + 1 : counted;
   // #1790: the facade's storeys are the mapped levels' where the plan has them.
   const storey = windows?.storey ?? STOREY_METRES;
   const f0 = (bottom - from) / storey;
@@ -5331,6 +5343,7 @@ export function footprintPlans(
           buildings: options.commercialArchetypes ?? true,
           steeples: options.steeples ?? true,
           churches: options.landmarkChurches ?? true,
+          civicLandmarks: options.landmarkCivic ?? true,
         },
       ),
     );
@@ -6290,6 +6303,14 @@ export interface FootprintPlanOptions {
    * (`?levers=-landmark-churches`).
    */
   readonly landmarkChurches?: boolean;
+  /**
+   * #1795: a mapped town hall or school whose footprint holds one drawn as
+   * itself (`mapped-landmarks.ts`): a symmetrical brick block under a cupola,
+   * its entry under a posted canopy, or a brick school in a regular rhythm;
+   * `true` by default, and only while `buildingTypes` is on. Off, every one is
+   * #1791's civic block, as before (`?levers=-landmark-civic`).
+   */
+  readonly landmarkCivic?: boolean;
 }
 
 /**
@@ -6340,6 +6361,8 @@ interface ArchetypeChoice {
   readonly steeples?: boolean;
   /** #1794: whether a mapped place of worship is drawn as a church (`-landmark-churches` off). */
   readonly churches?: boolean;
+  /** #1795: whether a mapped town hall or school is drawn as one (`-landmark-civic` off). */
+  readonly civicLandmarks?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -6462,6 +6485,15 @@ function planFootprint(
   const eaves = spired ? floor + wallHeight : measured.eaves;
   const storey = spired ? STOREY_METRES : measured.storey;
   const mappedSpire = spired ? lowest + (building.heightMetres ?? 0) : undefined;
+  // #1795: a mapped town hall or school drawn as one, where its footprint holds the block.
+  const civicLandmark =
+    choice.civicLandmarks === true &&
+    family === 'civic' &&
+    !part &&
+    !terraced &&
+    civicLandmarkFits({ area, rectangularity })
+      ? civicLandmarkOf(building.buildingType, building.landmark)
+      : undefined;
   // #1783: the commercial or multi-family building it is, which sets its cladding, roof,
   // ground floor and upper windows together; `unknown` is planned as before.
   // #1791: an untyped or commercial footprint by its cue, an apartment block as a garden
@@ -6619,13 +6651,16 @@ function planFootprint(
   // Which end of the ridge the chimney stands toward; a side-hipped roof hips the other (#1785).
   const chimneyEnd = share(STREAM_CHIMNEY) < chimneyShare / 2 ? 1 : -1;
   // A canopy only where it stands clear of the road's clearance, as the walls do.
+  // #1795: and a town hall's entry under one on posts, its surround.
   const withPorch =
     front !== undefined &&
-    residential &&
     front.length >= PORCH.width &&
     front.distance - PORCH.depth >= ROAD_CLEARANCE_METRES &&
-    share(STREAM_PORCH) < shareOf(features.canopy, PORCH_SHARE);
-  const withPosts = share(STREAM_POSTS) < shareOf(features.canopyPosts, PORCH_POSTS_SHARE);
+    ((residential && share(STREAM_PORCH) < shareOf(features.canopy, PORCH_SHARE)) ||
+      civicLandmark === 'townhall');
+  const withPosts =
+    civicLandmark === 'townhall' ||
+    share(STREAM_POSTS) < shareOf(features.canopyPosts, PORCH_POSTS_SHARE);
 
   // #1588: the US house — its cladding, its windows' style, a garage.
   const clapboard =
@@ -6860,6 +6895,8 @@ function planFootprint(
       : {}),
     // #1791: a mapped garage or shed has no window.
     ...(outbuilding || pole ? { blind: true } : {}),
+    // #1795: a town hall's and a school's front an odd number of bays, its door the middle one.
+    ...(civicLandmark !== undefined ? { oddFront: true } : {}),
   };
   // The slope the gutters' downpipe and the dormers are on: the one facing the front.
   // Since #1785 each rectangle's, for a saltbox's front.
@@ -6900,6 +6937,8 @@ function planFootprint(
     dormers: number;
     cornice: boolean;
     steeple: boolean;
+    /** #1795: a town hall's cupola. */
+    cupola: boolean;
   }
   const build = (
     withHoles: boolean,
@@ -6923,7 +6962,19 @@ function planFootprint(
       'porch-roof': [],
       'porch-trim': [],
     };
-    const drew: Extras = { garage: false, dormers: 0, cornice: false, steeple: false };
+    const drew: Extras = {
+      garage: false,
+      dormers: 0,
+      cornice: false,
+      steeple: false,
+      cupola: false,
+    };
+    // #1795: where a town hall's cupola stands — the highest ridge's middle, or a flat roof's
+    // middle where that is on the roof — and its axis.
+    let cupolaAt: SteepleSite | undefined =
+      civicLandmark === 'townhall' && insideRing(drawn, centroid.x, centroid.z)
+        ? { cx: centroid.x, cz: centroid.z, ux: rectangle.ux, uz: rectangle.uz, half: CUPOLA.half }
+        : undefined;
     // #2021: the top of the roof, which a steeple's tower stands above.
     let roofTop = eaves + PARAPET_METRES;
     // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
@@ -6993,6 +7044,10 @@ function planFootprint(
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
       roofTop = stack.ridge.top;
+      if (civicLandmark === 'townhall') {
+        const { cx, cz, ux, uz } = stack.rectangle;
+        cupolaAt = { cx, cz, ux, uz, half: CUPOLA.half };
+      }
       if (withChimney) {
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], chimneyEnd);
       }
@@ -7061,6 +7116,17 @@ function planFootprint(
           : undefined,
       );
       drew.steeple = true;
+    }
+    // #1795: a town hall's cupola, #2021's tower and spire at a small scale, on the roof's top.
+    if (withSteeple && cupolaAt !== undefined) {
+      steeple(
+        writing,
+        cupolaAt,
+        [roofTop - CUPOLA.half, roofTop + CUPOLA.drum, floor],
+        { wall: wallStyle, roof: roofStyle },
+        CUPOLA.cap,
+      );
+      drew.cupola = true;
     }
     if (frontFrame !== undefined) {
       // #1791: a mapped garage's door is its garage door, and a civic block's and a shed's plain.
@@ -7135,7 +7201,9 @@ function planFootprint(
   if (!fits(built.writing) && built.drew.cornice) built = build(holed, false, true);
   // #2021: a steeple that will not fit is left off before the holes are, and put back once
   // they are: a civic block has no garage, porch or dormer, so without its holes there is room.
-  if (!fits(built.writing) && built.drew.steeple) built = build(holed, false, false);
+  if (!fits(built.writing) && (built.drew.steeple || built.drew.cupola)) {
+    built = build(holed, false, false);
+  }
   if (holed && !fits(built.writing)) built = build(false, false, true);
   // #1785: a roof variant that will not fit falls back to the plain roof, then as before.
   if (variant !== 'plain' && !fits(built.writing)) {
@@ -7222,16 +7290,19 @@ function planFootprint(
         );
   const wallSurface = clapboard
     ? SIDING_SURFACE
-    : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
-      buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+    : // #1795: a town hall's and a school's brick.
+      civicLandmark !== undefined
       ? 'brick'
-      : // #1791: a mapped barn's planks, under any roof.
-        family === 'barn'
-        ? 'planks'
-        : // #2024: a pole building's metal sheet.
-          pole
-          ? 'corrugated'
-          : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+      : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+        buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+        ? 'brick'
+        : // #1791: a mapped barn's planks, under any roof.
+          family === 'barn'
+          ? 'planks'
+          : // #2024: a pole building's metal sheet.
+            pole
+            ? 'corrugated'
+            : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.
