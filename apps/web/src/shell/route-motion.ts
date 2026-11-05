@@ -26,7 +26,7 @@
  * starts, and goes red when either is removed.
  */
 
-import { createContext } from 'react';
+import { createContext, type ViewTransitionClassPerType } from 'react';
 
 import type { RouteId, RouteMatch } from './routes';
 
@@ -66,4 +66,63 @@ export function mayCarryOn(routeId: RouteId, immersive: boolean): boolean {
  */
 export function mayAnimateBetween(from: RouteMatch, to: RouteMatch, immersive: boolean): boolean {
   return !immersive && !isRideRoute(from.route.id) && !isRideRoute(to.route.id);
+}
+
+/**
+ * Which way a navigation goes — #2054, so a rider can tell where they went:
+ *
+ * - `'deeper'`, into a page below the one on screen: Segments to one segment,
+ *   About to its credits, Settings to the instance;
+ * - `'back'`, out of one to a page above it;
+ * - `'across'`, anything else: one tab to another, or between pages neither of
+ *   which is above the other.
+ *
+ * "Below" is read off the route table's paths, segment by segment, so a new
+ * page under an existing one needs no entry here: `/segments/:segment` is
+ * below `/segments`, `/settings/instance/moderation` below `/settings` and
+ * `/settings/instance`. Home's `/` has no segment and is above nothing, or
+ * every navigation from it would be "deeper".
+ */
+export type NavigationKind = 'deeper' | 'back' | 'across';
+
+/** The React transition type each kind is announced as (`addTransitionType`). */
+export const NAVIGATION_TRANSITION_TYPE: Readonly<Record<NavigationKind, string>> = {
+  deeper: 'oyl-deeper',
+  back: 'oyl-back',
+  across: 'oyl-across',
+};
+
+function segments(path: string): readonly string[] {
+  return path.split('/').filter((segment) => segment !== '');
+}
+
+/** Whether `upper`'s path is a proper prefix of `lower`'s, by whole segments. */
+function isAbove(upper: RouteMatch, lower: RouteMatch): boolean {
+  const top = segments(upper.route.path);
+  const bottom = segments(lower.route.path);
+  return (
+    top.length > 0 &&
+    top.length < bottom.length &&
+    top.every((segment, index) => bottom[index] === segment)
+  );
+}
+
+/**
+ * The `view-transition-class` a route's view enters and leaves with, by
+ * {@link NAVIGATION_TRANSITION_TYPE}: a short slide into a page below and back
+ * out of it (`theme.css` §"THE ROUTE SLIDE"), and the cross-fade (#945) for
+ * everything else. `AppShell`'s `<ViewTransition>` takes it as `enter` and
+ * `exit`.
+ */
+export const ROUTE_TRANSITION_CLASS = {
+  [NAVIGATION_TRANSITION_TYPE.deeper]: 'oyl-route-deeper',
+  [NAVIGATION_TRANSITION_TYPE.back]: 'oyl-route-back',
+  default: 'oyl-route',
+} as const satisfies ViewTransitionClassPerType;
+
+/** Which way the navigation from `from` to `to` goes. @see NavigationKind */
+export function navigationKind(from: RouteMatch, to: RouteMatch): NavigationKind {
+  if (isAbove(from, to)) return 'deeper';
+  if (isAbove(to, from)) return 'back';
+  return 'across';
 }

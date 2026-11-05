@@ -112,7 +112,7 @@ import {
 } from './routes';
 import type { MenuSounds } from './menu-sounds';
 import { useAndroidBack } from './android-back';
-import { mayAnimateBetween, RideHasTheScreen } from './route-motion';
+import { mayAnimateBetween, RideHasTheScreen, ROUTE_TRANSITION_CLASS } from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
 
@@ -1060,12 +1060,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
             was not animated is not a first one. ⚠️ A navigation to or from a
             ride route, or while a ride has the screen, is applied outside
             `startTransition` (`route-motion.ts` says why), and React animates
-            no other update.
+            no other update. #2054: the class is by which way the navigation
+            goes (`route-motion.ts` §`ROUTE_TRANSITION_CLASS`), a slide into a
+            page below and back out of it, the cross-fade otherwise.
           */}
           <ViewTransition
             key={route.id}
-            enter="oyl-route"
-            exit="oyl-route"
+            enter={ROUTE_TRANSITION_CLASS}
+            exit={ROUTE_TRANSITION_CLASS}
             update="none"
             default="none"
           >
