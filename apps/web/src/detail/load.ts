@@ -34,6 +34,10 @@ import type {
   UnitSystem,
 } from '@onyourleft/store';
 
+import type { PowerDurationCurve, Watts } from '@onyourleft/domain';
+
+import { distanceProfile, DISTANCE_STEPS, type DistanceProfile } from './axis';
+import { ridePowerCurve } from './curve';
 import { sharedTrack, type SharedTrack } from './privacy';
 import { CHART_POINTS, downsample, gapSamples, seriesFor, type TraceChannel } from './series';
 import type { DetailPort } from './store-port';
@@ -156,6 +160,19 @@ export interface Trace {
    * that is the right trade for the drawing and the wrong one for the total.
    */
   readonly missingSamples: number;
+  /**
+   * #2081: the ride's power curve, on the power trace only — computed here
+   * from the full-resolution samples this read has already decoded, so the
+   * curve costs the page no second inflate of the channel.
+   */
+  readonly curve?: PowerDurationCurve;
+  /**
+   * #2081: how far the rider had gone across the ride, on the speed trace
+   * only — the canonical metres a second summed to {@link DISTANCE_STEPS}
+   * steps before the display conversion, for the distance axis. A profile the
+   * size of a chart, never the samples, and no second read of the channel.
+   */
+  readonly distance?: DistanceProfile;
 }
 
 /**
@@ -181,6 +198,8 @@ export async function loadTrace(
   channel: TraceChannel,
   units: UnitSystem,
   targetPoints: number = CHART_POINTS,
+  /** Seconds one stored sample covers (the stream summary's), for the distance profile. */
+  sampleInterval: number = 1,
 ): Promise<Trace | undefined> {
   const samples = await port.store.getStreamChannel(port.athleteId, id, channel);
   if (samples === undefined) {
@@ -194,6 +213,12 @@ export async function loadTrace(
     secondsPerPoint: reduced.length === 0 ? 0 : samples.length / reduced.length,
     sampleCount: samples.length,
     missingSamples: gapSamples(samples),
+    ...(channel === 'power'
+      ? { curve: ridePowerCurve(samples as readonly (Watts | undefined)[]) }
+      : {}),
+    ...(channel === 'speed'
+      ? { distance: distanceProfile(samples, sampleInterval, DISTANCE_STEPS) }
+      : {}),
   };
 }
 
