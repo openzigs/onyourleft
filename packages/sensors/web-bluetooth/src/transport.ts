@@ -47,7 +47,7 @@
  * reviewed as plumbing.
  */
 
-import { unixSeconds, type Seconds, type UnixSeconds } from '@onyourleft/domain';
+import { unixSeconds, type Percent, type Seconds, type UnixSeconds } from '@onyourleft/domain';
 
 import type { MeasurementCapability, SensorCapability } from '../../src/capability';
 import type { ConnectionState } from '../../src/connection';
@@ -84,6 +84,7 @@ import {
   type SupportedResistanceLevelRange,
 } from '../../protocol/src/fitness-machine';
 import type { FitnessMachineChannel } from '../../protocol/src/fitness-machine-control';
+import { BATTERY_LEVEL, BATTERY_SERVICE, parseBatteryLevel } from '../../protocol/src/battery';
 import { readAvailability } from './availability';
 import { connectionError, discoveryError, missingProfileError } from './errors';
 import {
@@ -165,6 +166,18 @@ export interface WebBluetoothTransportOptions {
   readonly operationTimeout?: Seconds | undefined;
   /** Injected with `operationTimeout`, so a test can bound in milliseconds. */
   readonly schedule?: ((callback: () => void, after: Seconds) => () => void) | undefined;
+  /**
+   * Ask for the Battery Service on every pairing, so
+   * {@link WebBluetoothTransport.readBatteryLevel} can read it — #2047.
+   *
+   * ⚠️ **A widening of the grant, so it is a choice the caller makes.** #132
+   * keeps a request's grant to the services that supply what was asked for,
+   * because `optionalServices` is not shown in Chrome's chooser. The Battery
+   * Service is added beside them, and only it: one read-only `uint8`, with no
+   * control point and nothing about where the rider is. Off by default, so a
+   * transport built without it grants exactly what it did before.
+   */
+  readonly batteryLevel?: boolean | undefined;
 }
 
 /** One profile, with its UUIDs canonicalised once at construction. */
@@ -388,6 +401,24 @@ export interface WebBluetoothTransport extends SensorTransport {
    * with no control point.
    */
   resolvedUuids(id: DeviceId): Promise<readonly GattUuid[]>;
+
+  /**
+   * A **connected** device's Battery Level, read once — #2047, through #2046's
+   * `parseBatteryLevel`.
+   *
+   * `undefined` whenever there is no level to report: no link, a transport
+   * built without `batteryLevel`, a device that serves no Battery Service, a
+   * read that failed or timed out, or a value the parser refused (reported to
+   * `onProtocolError`). ⚠️ **Never a 0 for "unknown"**: a sensor that says
+   * nothing has no level, and an empty battery is a claim a rider acts on.
+   *
+   * A read and nothing else: it writes nothing and subscribes to nothing, and
+   * it waits in the device's queue like every other GATT call.
+   *
+   * @throws {SensorError} `device-not-found` for an id this transport did not
+   * issue, as {@link resolvedUuids} does.
+   */
+  readBatteryLevel(id: DeviceId): Promise<Percent | undefined>;
 }
 
 /**
@@ -1176,17 +1207,23 @@ export function createWebBluetoothTransport(
       );
     }
 
+    // #2047: the Battery Service beside them, when the caller asked for it —
+    // `WebBluetoothTransportOptions.batteryLevel` says why it is a choice.
+    // Never a filter: a device is not chosen for having a battery.
+    const battery: readonly GattUuid[] = options.batteryLevel === true ? [BATTERY_SERVICE] : [];
+
     const namePrefix = request.namePrefix;
     if (services.length === 0) {
       // "Anything this program can use", with no capability named. No filter
       // expresses that, so the chooser is opened wide — which is exactly what
       // the athlete is shown and consents to, and the grant matches it.
+      const wide = [...everyService, ...battery];
       return {
         options:
           namePrefix === undefined
-            ? { acceptAllDevices: true, optionalServices: everyService }
-            : { filters: [{ namePrefix }], optionalServices: everyService },
-        granted: new Set(everyService),
+            ? { acceptAllDevices: true, optionalServices: wide }
+            : { filters: [{ namePrefix }], optionalServices: wide },
+        granted: new Set(wide),
       };
     }
 
@@ -1200,7 +1237,8 @@ export function createWebBluetoothTransport(
     // service would otherwise be unreachable on a trainer that serves both,
     // which is the mistake that makes a trainer's second profile permanently
     // invisible.
-    return { options: { filters, optionalServices: services }, granted: new Set(services) };
+    const optional = [...services, ...battery];
+    return { options: { filters, optionalServices: optional }, granted: new Set(optional) };
   };
 
   // --- Availability ---------------------------------------------------------
@@ -1364,6 +1402,35 @@ export function createWebBluetoothTransport(
         }
       }
       return [...found];
+    },
+
+    async readBatteryLevel(id: DeviceId): Promise<Percent | undefined> {
+      const record = recordFor(id);
+      if (
+        record.session.state !== 'connected' ||
+        record.link === undefined ||
+        !record.granted.has(BATTERY_SERVICE)
+      ) {
+        return undefined;
+      }
+      let value: DataView;
+      try {
+        const service = await queue.run(id, async () =>
+          server(record).getPrimaryService(BATTERY_SERVICE),
+        );
+        value = await queue.run(id, async () =>
+          (await service.getCharacteristic(BATTERY_LEVEL)).readValue(),
+        );
+      } catch {
+        // Not served, not answered, or the link went mid-read: no level.
+        return undefined;
+      }
+      const parsed = parseBatteryLevel(value);
+      if (!parsed.ok) {
+        onProtocolError?.(parsed.error);
+        return undefined;
+      }
+      return parsed.level;
     },
 
     async openFitnessMachine(id: DeviceId): Promise<FitnessMachine> {

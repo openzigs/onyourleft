@@ -91,7 +91,7 @@
  * the Analysis screen uses, and units go through `units/format.ts`.
  */
 
-import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
+import { unixSeconds, type Percent, type UnixSeconds } from '@onyourleft/domain';
 import type { ConnectionState } from '@onyourleft/sensors';
 import { useEffect, useState, type JSX } from 'react';
 
@@ -111,6 +111,13 @@ import {
 } from '../home/home';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { ProgressPanel } from '../progress/ProgressPanel';
+import {
+  batteryWords,
+  isLowBattery,
+  mayBatteryBeRead,
+  useBatteryLevels,
+} from '../ride/battery-level';
+import type { BatteryLevelPort } from '../ride/battery-port';
 import type { PairedSensor, PairingRole, RideController } from '../ride/controller';
 import type { RideMetricId } from '../ride/metrics';
 import { metricSentence, metricText, presentationFor } from '../ride/MetricGrid';
@@ -135,6 +142,12 @@ export interface HomeViewProps {
   readonly routes?: RoutePort | undefined;
   /** The clock "this week" is measured from. A seam for tests. */
   readonly now?: (() => UnixSeconds) | undefined;
+  /**
+   * Each connected sensor's battery, for the sensors module — #2047. Absent
+   * where the platform reads none (the Android shell, today), when no level is
+   * shown at all.
+   */
+  readonly battery?: BatteryLevelPort | undefined;
 }
 
 const wallClock = (): UnixSeconds => unixSeconds(Math.floor(Date.now() / 1000));
@@ -193,7 +206,9 @@ export function HomeView(props: HomeViewProps): JSX.Element {
             the last ride (or, on a first open, the other ways to start), the
             week — and then the rest. `theme.css` §"#2044" lays them out. */}
         <NextUp next={next} />
-        {props.controller === undefined ? null : <SensorsModule controller={props.controller} />}
+        {props.controller === undefined ? null : (
+          <SensorsModule controller={props.controller} battery={props.battery} />
+        )}
         {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
         {data?.lastRide === undefined ? null : <LastRide last={data.lastRide} />}
         {data?.lastRide === undefined ? null : (
@@ -431,9 +446,17 @@ function LeftUnfinished({
  * ⚠️ **One link to Devices** (#1429): the trainer's own while no trainer is
  * paired, and the module's otherwise.
  */
-function SensorsModule({ controller }: { readonly controller: RideController }): JSX.Element {
+function SensorsModule({
+  controller,
+  battery,
+}: {
+  readonly controller: RideController;
+  readonly battery: BatteryLevelPort | undefined;
+}): JSX.Element {
   const snapshot = useRideSnapshot(controller);
   const presentation = presentationFor(useUnits());
+  // #2047: each connected sensor's battery, where it reports one.
+  const levels = useBatteryLevels(battery, snapshot.sensors, mayBatteryBeRead(snapshot));
   const { trainer } = snapshot;
   const trainers = snapshot.sensors.filter((sensor) => sensor.role === 'trainer');
   const others = snapshot.sensors.filter((sensor) => sensor.role !== 'trainer');
@@ -454,7 +477,12 @@ function SensorsModule({ controller }: { readonly controller: RideController }):
           ) : (
             <>
               {trainers.map((sensor) => (
-                <SensorLine key={sensor.id} sensor={sensor} presentation={presentation} />
+                <SensorLine
+                  key={sensor.id}
+                  sensor={sensor}
+                  presentation={presentation}
+                  battery={levels.get(sensor.id)}
+                />
               ))}
               {trainer.paired ? (
                 <p className="tw:m-0">
@@ -473,7 +501,11 @@ function SensorsModule({ controller }: { readonly controller: RideController }):
         </li>
         {others.map((sensor) => (
           <li key={sensor.id}>
-            <SensorLine sensor={sensor} presentation={presentation} />
+            <SensorLine
+              sensor={sensor}
+              presentation={presentation}
+              battery={levels.get(sensor.id)}
+            />
           </li>
         ))}
       </ul>
@@ -517,13 +549,20 @@ function connectedWords(state: ConnectionState): string {
   return state === 'connected' ? 'Connected' : 'Not connected';
 }
 
-/** One device: what it is, its name and state, and its own live reading. */
+/**
+ * One device: what it is, its name and state, its own live reading, and —
+ * since #2047, while it is connected and reports one — its battery
+ * (`ride/battery-level.ts`). A device that reports no level shows no battery
+ * line at all, never `0%`.
+ */
 function SensorLine({
   sensor,
   presentation,
+  battery,
 }: {
   readonly sensor: PairedSensor;
   readonly presentation: ReturnType<typeof presentationFor>;
+  readonly battery: Percent | undefined;
 }): JSX.Element {
   const reading = ROW_READING[sensor.role]
     .map((id) => sensor.readings?.find((each) => each.id === id))
@@ -541,7 +580,37 @@ function SensorLine({
           )}
         </p>
       ) : null}
+      {sensor.state === 'connected' && battery !== undefined ? (
+        <p
+          className={`oyl-home__battery tw:m-0${isLowBattery(battery) ? ' oyl-home__battery--low' : ''}`}
+        >
+          <BatteryGlyph level={battery} />
+          {batteryWords(battery)}
+        </p>
+      ) : null}
     </>
+  );
+}
+
+/**
+ * A battery, filled to its level — #2047. `aria-hidden` and wordless: the
+ * words beside it carry the number and, when it is low, say so.
+ */
+function BatteryGlyph({ level }: { readonly level: Percent }): JSX.Element {
+  const share = Math.max(0, Math.min(1, level / 100));
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      className="oyl-home__battery-glyph"
+      viewBox="0 0 24 12"
+    >
+      <rect x="0.5" y="0.5" width="20" height="11" rx="2" fill="none" stroke="currentColor" />
+      <rect x="21" y="3.5" width="2.5" height="5" rx="1" fill="currentColor" />
+      {share === 0 ? null : (
+        <rect x="2" y="2" width={17 * share} height="8" rx="1" fill="currentColor" />
+      )}
+    </svg>
   );
 }
 
