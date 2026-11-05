@@ -1984,6 +1984,84 @@ describe('a rider’s private room says its voice link in the welcome, and only 
     expect(later.voiceInvite).toBe(`https://discord.gg/${String([...discord.invites.keys()][0])}`);
   });
 
+  it('a room over between the lookup and its channel being made holds no channel, and its socket is told it ended', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const voice = instance.voice();
+    if (voice === undefined) throw new Error('no voice');
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    // The room is over after the lookup read it open and before its channel
+    // is asked for: its close commits, and the close of its voice finds
+    // nothing held yet — `rooms.ts` §`over`, in that order.
+    const inviteFor = voice.inviteFor.bind(voice);
+    voice.inviteFor = async (id, riders) => {
+      const other = openServingStore(path);
+      try {
+        expect(await other.closePrivateRoom(id, Math.floor(Date.now() / 1000))).toBe(true);
+      } finally {
+        await other.close();
+      }
+      await voice.close(id);
+      return inviteFor(id, riders);
+    };
+
+    const client = await joinRoom(
+      wsUrl(instance.url),
+      roomId,
+      await ticket(instance.url, ann.sessionToken, roomId),
+    );
+    clients.push(client);
+    await until(() => client.messages.length > 0, 'an answer');
+    // The sweep deletes every channel of ours that no room holds: one left
+    // after it is one held for a room that is over.
+    await voice.sweep();
+    expect(discord.ourChannels()).toEqual([]);
+    expect(client.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+  });
+
+  it('a room the operator opened is offered no voice: no link, no channel Discord holds', async () => {
+    // A room id of the shape the voice module accepts, or it would refuse for that reason.
+    const OPERATOR_ROOM = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    expect(
+      cli(
+        path,
+        'room-open',
+        OPERATOR_ROOM,
+        '--kind',
+        'ride',
+        '--length',
+        '10000',
+        '--countdown',
+        '0',
+      ).status,
+    ).toBe(0);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const welcome = await welcomeOf(instance.url, ann.sessionToken, OPERATOR_ROOM);
+    expect(welcome).not.toHaveProperty('voiceInvite');
+    // Nothing would ever close such a channel, so none may be made.
+    expect(discord.ourChannels()).toEqual([]);
+    expect(discord.invites.size).toBe(0);
+  });
+
   it('an instance with no bot says no link, and asks Discord nothing', async () => {
     const discord = fakeDiscord();
     const path = join(await freshDirectory(), 'instance.sqlite');
