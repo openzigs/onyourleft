@@ -153,6 +153,7 @@ import {
   type Report,
   type RoomMessage,
   type StandingsRider,
+  VOICE_INVITE_PATTERN,
 } from '@onyourleft/protocol';
 
 import { CeilingWatch } from './ceilings.ts';
@@ -247,6 +248,20 @@ export interface Room {
    * but the bar.
    */
   remove(athleteId: string, nowMs: number): Outbound[];
+  /**
+   * The room's Discord voice link (#875), said in every welcome from now on —
+   * the first and every rejoin — and never in anything else, so a rider the
+   * room refuses is never told it. `undefined` is none. A value that is not a
+   * link on Discord's invite host (`@onyourleft/protocol` §`VOICE_INVITE_PATTERN`)
+   * is taken as none, so a welcome is never one the encoder would refuse.
+   *
+   * #876: when the link CHANGES — the channel replaced after a removal or a
+   * ban — every rider connected now is told the new one in a `voice`
+   * message, except `withheldFrom`: the athlete the change was made about, if
+   * they are still connected (a ban closes no socket). A link set again to
+   * what it was sends nothing.
+   */
+  setVoiceInvite(invite: string | undefined, withheldFrom?: string): Outbound[];
   view(): RoomView;
 }
 
@@ -322,6 +337,14 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   const finishers: Seat[] = [];
   /** Athletes removed from this room (#789): never seated again. */
   const barred = new Set<string>();
+  /** The room's Discord voice link, said in a welcome and nowhere else (#875). */
+  let voiceInvite: string | undefined;
+  /**
+   * Athletes a voice change was made about (#876), for the room's life: a
+   * suspension leaves the socket open (#789), so every later `voice` broadcast
+   * must skip them too, not only the one that named them.
+   */
+  const voiceWithheld = new Set<string>();
   const tickDuration: Seconds = seconds(settings.frameIntervalMs / 1000);
   const lap = settings.lapRace;
   const lapCourse: RaceCourse | undefined =
@@ -379,6 +402,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
               ? {}
               : { lapRace: { laps: lap.laps, items: lap.items ? 'on' : 'off' } }),
           },
+          ...(voiceInvite === undefined ? {} : { voiceInvite }),
         },
       },
     ];
@@ -1033,6 +1057,23 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         ![...seats.values()].some((other) => other.connection !== undefined)
       ) {
         emptySinceMs ??= nowMs;
+      }
+      return out;
+    },
+
+    setVoiceInvite(invite, withheldFrom) {
+      if (withheldFrom !== undefined) voiceWithheld.add(withheldFrom);
+      const next = invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
+      if (next === voiceInvite) return [];
+      voiceInvite = next;
+      const out: Outbound[] = [];
+      for (const seat of seated()) {
+        if (seat.connection === undefined || voiceWithheld.has(seat.athleteId)) continue;
+        out.push({
+          kind: 'send',
+          connection: seat.connection,
+          message: { type: 'voice', ...(next === undefined ? {} : { voiceInvite: next }) },
+        });
       }
       return out;
     },

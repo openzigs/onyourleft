@@ -102,6 +102,23 @@ export interface InstanceProbes {
   ) => Promise<{ readonly athleteId: string; readonly tick: number } | undefined>;
   /** Take a rider out of a room a worker holds, for its life (#789). `false` when none holds it. */
   readonly removeFromRoom?: (roomId: string, athleteId: string) => Promise<boolean>;
+  /**
+   * After a removal from a room is logged and the rider's socket closed
+   * (#876): the room's Discord voice channel rotated and the rotation logged
+   * (`voice/voice-moderation.ts`). Never throws; nothing where voice is off.
+   */
+  readonly afterRoomRemoval?: (removal: {
+    readonly roomId: string;
+    readonly actorId: string;
+    readonly targetId: string;
+    readonly logId: number;
+  }) => Promise<void>;
+  /** After a suspension is logged (#876): every room with voice the athlete is in, rotated. */
+  readonly afterSuspension?: (suspension: {
+    readonly actorId: string;
+    readonly targetId: string;
+    readonly logId: number;
+  }) => Promise<void>;
 }
 
 /** What a route is handed. */
