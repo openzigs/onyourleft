@@ -234,6 +234,53 @@ describe('#1793: a year never widens the choice', () => {
   });
 });
 
+describe('#1793: the era boundaries, and the year that leaves no candidate', () => {
+  const base = {
+    rectangularity: 1,
+    residential: true,
+    terraced: false,
+    pitched: true,
+    shape: 'rectangle',
+    urban: 'rural',
+  } as const;
+  /** Admits the farmhouse and the Foursquare; the Foursquare is built 1895 to 1930, inclusive. */
+  const farmhouseOrFoursquare: ArchetypeInput = {
+    ...base,
+    area: 80,
+    aspect: 1,
+    storeys: 2,
+    deep: true,
+  };
+  /** Admits the ranch (first) and the Cape (built from 1930): the 120 m² edge between them. */
+  const ranchOrCape: ArchetypeInput = {
+    ...base,
+    area: 120,
+    aspect: 1.8,
+    storeys: 1,
+    deep: false,
+  };
+
+  it('treats both ends of an era as inside it', () => {
+    const at = (year: number) => houseArchetypeOf(farmhouseOrFoursquare, HOUSE_ARCHETYPES, year);
+    expect(at(1_894)).toBe('farmhouse');
+    expect(at(1_895)).toBe('foursquare');
+    expect(at(1_930)).toBe('foursquare');
+    expect(at(1_931)).toBe('farmhouse');
+    const capeAt = (year: number) => houseArchetypeOf(ranchOrCape, HOUSE_ARCHETYPES, year);
+    expect(capeAt(1_929)).toBe('ranch');
+    expect(capeAt(1_930)).toBe('cape');
+  });
+
+  it('gives a year that rules out every candidate the untagged result, not another candidate', () => {
+    expect(archetypeCandidates(ranchOrCape)).toEqual(['ranch', 'cape']);
+    const untagged = houseArchetypeOf(ranchOrCape);
+    expect(untagged).toBe('ranch');
+    for (const year of [1_800, 1_900, 1_929]) {
+      expect(houseArchetypeOf(ranchOrCape, HOUSE_ARCHETYPES, year)).toBe(untagged);
+    }
+  });
+});
+
 /**
  * {@link mixedTownFixture}'s plans' fingerprint, paint included, planned with its urban class,
  * measured on `main` at b15b8ce3 — before #1793. No footprint there carries a year.
