@@ -195,9 +195,15 @@ A notice carries what the EU Digital Services Act's Art. 16(2) asks a notice to 
 | Their name and email address | **no**, never, for a notice of illegal content |
 | A statement that they believe in good faith it is accurate and complete | no |
 
-An identifier is one line: `rider:<athlete id>` (a display name), `room:<room id>`, `route:<room id>`
-(the route a room is ridden on), or `result:<room id>:<row>` (one row of a race's published result,
-counted from 1). The app shows a race's route and rows under the result, as *References*.
+An identifier is one line: `room:<room id>`, `route:<room id>` (the route a room is ridden on), or
+`result:<room id>:<row>` (one row of a race's published result, counted from 1). The app shows a
+race's route and rows under the result, as *References*. ⚠️ **A display name has no identifier**
+(#1381, the owner's ruling of 2026-11-04): the app never holds another rider's athlete id, so a
+report about a name names the room or the race row it was seen in, or says where in words. The page
+refuses a line that starts `rider:`. A notice stored before then that named one is still shown on
+the Moderation screen, and you hide the name with *Hide a display name* below. If real reports turn
+out to be ambiguous (anyone can copy a display name), the answer is an opaque per-rider report
+handle that only the moderator can resolve, not the athlete id: look at it at the first review.
 
 The page also offers the UK Online Safety Act's **intimate image content report** (s.20A) as a
 separate choice. That one needs all three of its statements and an email address, because s.20A(2)
@@ -225,7 +231,8 @@ ruling of 2026-10-30), and keeps the same things, so record a decision when you 
 there is no address to confirm receipt to or tell, so do both before then. Migration 0036's schema
 allows that one change to a notice and no other, and `migrate … down` refuses to undo it once a
 notice has been erased. ⚠️ **A backup taken before the erasure still holds what was erased**, until
-you delete that backup.
+you delete that backup. The most you may keep one is 30 days
+([operating an instance](operating-an-instance.md#backup)).
 
 **Record what you do about each notice** (#912). The instance sends no email, so it cannot know when
 you confirmed receipt or told the notifier what you decided. Under each notice the Moderation screen

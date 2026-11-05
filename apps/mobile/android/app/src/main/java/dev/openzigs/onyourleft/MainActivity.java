@@ -26,6 +26,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ThermalPlugin.class);
         registerPlugin(SecureWindowPlugin.class);
         super.onCreate(savedInstanceState);
+        // #2127: AppCompat took the window's background from the launch theme in super.onCreate,
+        // and that is the canvas WITH the logo (drawable/oyl_launch_window.xml). Left there it is
+        // behind everything for the whole session, and shows wherever the WebView does not cover,
+        // as on Capacitor's no_webview screen. The splash is its own window on every API level, so
+        // this changes nothing a rider sees at launch. Unguarded on purpose: no_webview needs it.
+        getWindow().setBackgroundDrawableResource(R.color.oyl_canvas);
         // #672: the WebView draws white until the page paints, which in the device's dark mode is a
         // white frame in a dark room. The page's canvas instead, per palette -- res/values and
         // res/values-night colors.xml. Not capacitor.config.ts's backgroundColor, which is ONE colour

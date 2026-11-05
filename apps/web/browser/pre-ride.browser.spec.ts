@@ -724,7 +724,7 @@ test.describe('#940 — the notices are never hidden while Ride is offered, and 
   }
 });
 
-/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+/** `rgb(16, 18, 21)` → `#101215`, for {@link contrastRatio}. */
 function hexOf(rgb: string): string {
   const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
   if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);

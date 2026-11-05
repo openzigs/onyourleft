@@ -47,6 +47,11 @@
  *    light reads. **Control:** the pin (`theme.css` §`.oyl-hud`) deleted
  *    through the CSSOM, after which the mute toggle and the warning notice
  *    must follow the page, which is what #744's review measured.
+ * 5. **The palette painted is the one the owner chose** (#2037, ADR 0063 D-1):
+ *    Home on the PRODUCT build, in each theme, read for its page, its ink, the
+ *    header and its primary action, against ADR 0063's values written out in
+ *    this file rather than read from `tokens.ts`. **Control:** the old teal
+ *    accent set on the same page, after which the primary action reads teal.
  *
  * ## What this does NOT prove
  *
@@ -65,6 +70,7 @@ import { PRODUCT_ORIGIN } from '../playwright.config';
 import { THEME_STORAGE_KEY } from '../src/design/theme-selection';
 import {
   DARK_COLOUR_TOKENS,
+  THEMES,
   paletteColours,
   type ColourToken,
   type Theme,
@@ -266,6 +272,83 @@ test.describe('#672 — a choice made in Settings survives a reload', () => {
       .poll(() => next.evaluate(() => document.documentElement.dataset['theme']))
       .toBe('light');
   });
+});
+
+/**
+ * #2037 — the Hi-Vis palette, as ADR 0063 D-1 records it, written out here
+ * rather than read from `tokens.ts`: a spec that compared the page with the
+ * token module would pass whatever the module said, and the point is that the
+ * PAINTED page is the direction the owner chose on #2035.
+ */
+const HI_VIS: Readonly<
+  Record<Theme, { canvas: string; ink: string; surfaceOverlay: string; accent: string }>
+> = {
+  dark: {
+    canvas: 'rgb(16, 18, 21)',
+    ink: 'rgb(237, 238, 241)',
+    surfaceOverlay: 'rgb(65, 68, 71)',
+    accent: 'rgb(175, 241, 60)',
+  },
+  light: {
+    canvas: 'rgb(255, 255, 255)',
+    ink: 'rgb(19, 20, 21)',
+    surfaceOverlay: 'rgb(203, 205, 208)',
+    // The FILL since #2118 (ADR 0063 D-1, amended 2026-11-04): a brighter
+    // lime-olive than the label, `#3e6100`, which is `accentText`.
+    accent: 'rgb(81, 125, 0)',
+  },
+};
+
+/** The teal palette #2037 replaced, per theme: the control's accent. */
+const OLD_TEAL_ACCENT: Readonly<Record<Theme, string>> = { dark: '#6cc9bd', light: '#0b5c55' };
+
+/** A `#rrggbb` as Chromium reports a computed colour. */
+function rgbOfHex(hex: string): string {
+  const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
+  return `rgb(${String(channel(1))}, ${String(channel(3))}, ${String(channel(5))})`;
+}
+
+/** What Home paints where the four tokens show: the page, its ink, the header, a primary button. */
+async function readHome(page: Page) {
+  // Home's primary action, *Start a ride*, is a link drawn as the primary
+  // button (`design/Button.tsx` §ButtonLink): an action that goes somewhere.
+  const start = page.getByRole('link', { name: 'Start a ride' });
+  await start.waitFor();
+  const accent = await start.evaluate((link) => getComputedStyle(link).backgroundColor);
+  return page.evaluate((primary) => {
+    const header = document.querySelector('.oyl-header');
+    return {
+      canvas: getComputedStyle(document.body).backgroundColor,
+      ink: getComputedStyle(document.body).color,
+      surfaceOverlay: header === null ? 'no header' : getComputedStyle(header).backgroundColor,
+      accent: primary,
+    };
+  }, accent);
+}
+
+test.describe('#2037 — the product paints ADR 0063’s Hi-Vis palette, in both themes', () => {
+  test.use({ storageState: NOTHING_CHOSEN, viewport: { width: 1280, height: 800 } });
+
+  for (const theme of THEMES) {
+    test(`Home in ${theme}: the page, its ink, the header and a primary button`, async ({
+      page,
+    }) => {
+      await chooseBeforeLoad(page, theme);
+      await page.goto(`${PRODUCT_ORIGIN}/`);
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      expect(await readHome(page)).toEqual(HI_VIS[theme]);
+
+      // The control: the old teal accent put back on the same page. The read
+      // above must see it, or it was not reading the paint. Polled, because
+      // the button eases its fill over `--oyl-motion-short`.
+      await page.evaluate((teal) => {
+        document.documentElement.style.setProperty('--oyl-color-accent', teal);
+      }, OLD_TEAL_ACCENT[theme]);
+      await expect
+        .poll(async () => (await readHome(page)).accent)
+        .toBe(rgbOfHex(OLD_TEAL_ACCENT[theme]));
+    });
+  }
 });
 
 /** What one route paints, read back from the engine. */
@@ -518,7 +601,7 @@ test.describe('#672 — the HUD is the same in both palettes', () => {
     expectThePageSwitched(light, dark);
     expect(light.panels.length).toBeGreaterThan(0);
     // Absolute as well as relative: a panel painted with a PAGE token would
-    // read the same in both palettes now that the pin holds page tokens light.
+    // read the same in both palettes now that the pin holds page tokens dark (#2042).
     for (const panel of light.panels) expect(panel).toBe(rgb('light', 'hudSurface'));
     expect(moved(light, dark)).toEqual([]);
   });
@@ -588,6 +671,9 @@ test.describe('#672 — the HUD is the same in both palettes', () => {
 
       // The control: the pin deleted, the SAME reads must see the mute toggle
       // and the warning notice follow the page — what #744's review measured.
+      // ⚠️ On a LIGHT page since #2042: the pin is the dark palette now, so on a
+      // dark page an unpinned HUD would look the same as a pinned one.
+      await deviceBecomes(page, 'light');
       // Every page colour token and `color-scheme` — counted from the palette
       // rather than written down, so a new token (#936's five, which moved it
       // from 29) does not turn the control red for a reason unrelated to it.
@@ -601,5 +687,131 @@ test.describe('#672 — the HUD is the same in both palettes', () => {
       expect(movedWithoutThePin).toContain('oyl-status--warning');
       expect(unpinnedPixels[0]?.equals(lightPixels[0] ?? Buffer.alloc(0))).toBe(false);
     });
+  });
+});
+
+/**
+ * #2042, ADR 0063 D-2 — ride and HUD screens are dark whatever the page: a
+ * rider who chose LIGHT for the menus still rides on the dark palette. With
+ * the page set to light, a HUD control on the game's HUD (`hud.html`, its
+ * Lock) and, on a ride (`ride.html`), the mute toggle and the warning notice
+ * are read back: each is painted in the dark palette's values. **Control:** the
+ * old pin put back — every page colour token restated on `.oyl-hud` at its
+ * LIGHT value, as `theme.css` did from #672 until #2042 — and the same reads
+ * must then be the light palette's.
+ */
+async function lightPinRestored(page: Page): Promise<void> {
+  await page.evaluate((light) => {
+    for (const hud of document.querySelectorAll<HTMLElement>('.oyl-hud')) {
+      hud.style.setProperty('color-scheme', 'light');
+      for (const [token, value] of Object.entries(light)) {
+        if (token.startsWith('hud')) continue;
+        const kebab = token.replaceAll(/([A-Z])/g, (letter) => `-${letter.toLowerCase()}`);
+        hud.style.setProperty(`--oyl-color-${kebab}`, value);
+      }
+    }
+  }, paletteColours('light'));
+}
+
+/** An element's computed background, once a transition on it has settled. */
+async function backgroundOf(page: Page, selector: string): Promise<string> {
+  const element = page.locator(selector).first();
+  await expect(element, `no ${selector}`).toBeVisible();
+  let last = '';
+  await expect
+    .poll(async () => {
+      const now = await element.evaluate((node) => getComputedStyle(node).backgroundColor);
+      const settled = now === last;
+      last = now;
+      return settled;
+    })
+    .toBe(true);
+  return last;
+}
+
+test.describe('#2042 — a light page, and the ride and HUD stay dark', () => {
+  test('the game HUD’s Lock control is painted from the dark palette', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.goto('/hud.html');
+    await page.waitForFunction(() => window.__oylHudHarness?.ready === true);
+    expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe('light');
+    const lock = '.oyl-hud button:has-text("Lock")';
+    const onLight = await backgroundOf(page, lock);
+    await deviceBecomes(page, 'dark');
+    const onDark = await backgroundOf(page, lock);
+    // The page changed and the control did not: it is the dark palette's.
+    expect(onLight).toBe(onDark);
+    expect(onDark).toBe(rgb('dark', 'surfaceOverlay'));
+    await deviceBecomes(page, 'light');
+    await lightPinRestored(page);
+    expect(
+      await backgroundOf(page, lock),
+      'the light pin restored, and Lock did not follow it',
+    ).not.toBe(onDark);
+  });
+
+  test.describe('on a ride', () => {
+    test.use({ viewport: { width: 844, height: 390 } });
+
+    test('the mute toggle and the warning notice are painted from the dark palette', async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.goto('/ride.html?trainer=workout&sounds=on&side=lost&paused=yes');
+      await page.waitForFunction(
+        () => (window as { __oylRide?: { readonly ready: boolean } }).__oylRide?.ready === true,
+      );
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe('light');
+      const warning = '.oyl-hud__notices .oyl-status--warning';
+      expect(await backgroundOf(page, warning)).toBe(rgb('dark', 'warningSurface'));
+      const mute = await backgroundOf(page, '.oyl-sound__mute');
+      await deviceBecomes(page, 'dark');
+      expect(await backgroundOf(page, '.oyl-sound__mute')).toBe(mute);
+
+      // The control: the old light pin back, on the light page.
+      await deviceBecomes(page, 'light');
+      await lightPinRestored(page);
+      expect(await backgroundOf(page, warning)).toBe(rgb('light', 'warningSurface'));
+      expect(await backgroundOf(page, '.oyl-sound__mute')).not.toBe(mute);
+    });
+  });
+});
+
+/**
+ * #2042: under `forced-colors` the HUD panel's surface flattens to the system
+ * `Canvas`, and its edge is what keeps a panel from being text floating on
+ * nothing (`theme.css` §`.oyl-hud__panel`). Read under emulated forced
+ * colours; **control:** the panel's border removed, and the edge is gone.
+ */
+test.describe('#2042 — under forced colours a HUD panel still has its edge', () => {
+  async function panelEdge(
+    page: Page,
+  ): Promise<{ style: string; width: string; colour: string; background: string }> {
+    return page
+      .locator('.oyl-hud__panel')
+      .first()
+      .evaluate((panel) => {
+        const style = getComputedStyle(panel);
+        return {
+          style: style.borderTopStyle,
+          width: style.borderTopWidth,
+          colour: style.borderTopColor,
+          background: style.backgroundColor,
+        };
+      });
+  }
+
+  test('the panel border survives, in a colour apart from the panel', async ({ page }) => {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await page.goto('/hud.html');
+    await page.waitForFunction(() => window.__oylHudHarness?.ready === true);
+    const edge = await panelEdge(page);
+    expect(edge.style).toBe('solid');
+    expect(edge.width).toBe('1px');
+    expect(edge.colour).not.toBe(edge.background);
+
+    // The control: no border on the panel, and there is no edge to see.
+    await page.addStyleTag({ content: '.oyl-hud__panel { border: none !important; }' });
+    expect((await panelEdge(page)).style).toBe('none');
   });
 });

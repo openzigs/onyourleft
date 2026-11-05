@@ -238,6 +238,67 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         marker's `pedalling` says a reading turns the cranks,
                         and a breath on the RIDE's clock (`rideSeconds`), so a
                         held ride holds it. The stylised rider does not move
+                        ⚠️ **Since #1999 it is not always on the hoods**:
+                        `riderJoints` takes a `RiderStance` (hips, shoulders,
+                        hands, elbows) per `DrawnPosture` — the tops, the
+                        hoods, the drops, the aero tuck, or out of the saddle
+                        — and `riderMotion` scales the rock by effort and
+                        rocks a standing rider's bicycle. Absent a stance it
+                        is the hoods. Exaggerated on the owner's rulings of
+                        2026-11-03 and 2026-11-04 so they read from the chase
+                        camera: the back 64° on the tops, 58° on the hoods,
+                        22° in the drops and 12° tucked, the head turned down
+                        or up (`headPitch`), a 6° trunk rock and the elbows
+                        swinging out with each downstroke (`RiderMotion.elbow`).
+                        ⚠️ **The grip is where the drawn HAND's middle goes,
+                        not the wrist** (2026-11-04, "Fix hands on bars
+                        first"): `RealisticRiderBelt` measures each hand off
+                        the body's rest pose and solves the forearm and hand
+                        as one segment to the grip, across the bar as well as
+                        along it. The wrist on the grip had left the hand on
+                        the hips. Each elbow bends down and back
+                        (`elbowOut`, `elbowBack`), never out to the side. The
+                        minimums are held by tests on the real body.
+                        ⚠️ **PR #2116's second pass** ("Fix again first"):
+                        the bar is 7 cm lower (`HEAD_TUBE_TOP_Y` 0.89 m), so
+                        every grip is under the hips, and the brake hood the
+                        hoods' hand holds is drawn (`bar hood ±1`, a box).
+                        The wrist bends the hand down round the drop
+                        (`wristDown`), the head lifts to look up the road in
+                        the drops and the tuck so the helmet faces the camera
+                        (half of `headPitch` at `neck01`), and a standing
+                        rider's elbows do not swing out.
+                        ⚠️ **PR #2116's third pass** ("Third pass on the
+                        arms"): the left/right difference was the elbow swing,
+                        12°–18° ADDED to each position's turn out (the drops'
+                        12° went to 30° on the left's downstroke, the right's
+                        clamped in) — the model and the pose are mirror images
+                        at rest. `RiderMotion.elbow` is now a SHARE of the
+                        position's own turn (`ELBOW_SWING_SHARE`). The hoods'
+                        back is 58° and the standing one 63°
+                        (`STANDING_BACK_DEGREES`), so the elbow opens from
+                        109° to 150°; the tops' hands are beside the stem
+                        (`TOPS_GRIP_ACROSS` 0.09 m), elbows out; and each hand
+                        lies on its own line in the bicycle's frame
+                        (`handDown`, which replaces `wristDown`), so the
+                        drops' fingers lie forward round the bend.
+    src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
+                        the owner's ruling of 2026-11-02): standing on a climb
+                        (under 65 rpm with 300 W, or over 7 %), the aero tuck
+                        for a hard seated effort on flat or rolling ground
+                        (over 280 W and 90 rpm within ±3 %, at any speed — the
+                        ruling of 2026-11-04, chosen figures), the drops when
+                        fast, the tops when easy or coasting, else the hoods —
+                        each with a gentler threshold to keep it, a 0.75 s
+                        dwell before a change, and a 0.8 s eased move from
+                        wherever the body is. On the RIDE's clock, from
+                        `RiderMarker.riding` (`scene.ts` §`ridingOf`), whose
+                        speed is each rider's OWN — never the drawn speed,
+                        which runs 15 % over it giving a bend's lag back. ⚠️
+                        **Drawn only**: the drag area follows the rider's own
+                        `RidingPosition`, never this. The realistic belt holds
+                        one tracker per body slot; the stylised rider is one
+                        merged posture and does not change
     src/game/bend-easing.ts
                         the drawn rider eases off for a sharp bend (#1998, the
                         owner's ruling of 2026-11-02): each rider is DRAWN at
@@ -964,6 +1025,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         implements it; the game is handed the port, never the
                         client, because the clients write to the controller
                         and so may not be imported under `game/delivery/`
+    src/game/delivery/controller-input.ts, lane-input-port.ts,
+    src/game/hud/ControllerIntents.tsx
+                        a controller's steer buttons, handlebar angle and
+                        throws as Delivery's intents (#1827), handed on once
+                        an animation frame, at most one of each, by the HUD on
+                        a solo round only. ⚠️ The angle SELECTS one of the
+                        three lanes (10° to a side, back to the centre within
+                        5°); it is not a proportional offset, because
+                        `lanes.ts` and ADR 0060 D-6.3 need spike 0030's
+                        reading re-run before any continuous steer
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -1259,7 +1330,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         end away from the front door, stepped onto the
                         footprint, 12 triangles
                         in `wall` and `roof`, left off before holes over a
-                        cap (`STEEPLE`, `-steeples`, `town=typed`);
+                        cap (`STEEPLE`, `-steeples`, `town=typed`); since
+                        #2100 24 (12 far) with a belfry's band 0.8 m deep
+                        painted in `trim`, 6 m over the roof, the spire
+                        shaded as a 60° slope and the church roofed in
+                        `slate`;
                         since #2023 an untagged footprint inferred a shed
                         (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
                         rectangularity ≥ 0.9, a house-sized footprint within
@@ -1564,6 +1639,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         valley, a hairpin, a circuit. Test support, never shipped
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
+    src/game/simulated-rider.ts
+                        the simulated rider (#1992), a developer's debug mode:
+                        `#/game?simulate=<watts>` (with `&speedup=<1–32>` and
+                        `&at=<metres>`) rides a rider's own route at a steady
+                        power with no trainer or sensor, faster than real time
+                        and from a distance if asked. `GameView` §`useSimulatedRide`
+                        builds the ride with NO trainer port, room or rooms and
+                        no Delivery round, so nothing is written to a machine,
+                        recorded, saved or posted; the HUD's `oyl-hud__simulated`
+                        line marks it. `simulated-rider-wiring.test.tsx` holds it.
+                        The picker offers the same ride as *Preview without a
+                        trainer* (PR #2113's ruling; `StageChooser.tsx`
+                        §`PreviewControl`): a power and a 1–8× speed-up, ridden
+                        on a NEW screen `GameView` mounts with none of those
+                        ports; ending it mounts an ordinary picker again.
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

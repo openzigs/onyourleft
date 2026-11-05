@@ -33,6 +33,40 @@ const config = {
     // `usesCleartextTraffic` says what that costs and what limits it.
     allowMixedContent: false,
   },
+  plugins: {
+    // #2050: the launch splash is held until the page has painted, so a rider
+    // never sees the bare canvas between the system splash and Home. The owner
+    // chose the official `@capacitor/splash-screen` plugin (pinned 8.0.2) over
+    // calling `installSplashScreen` in `MainActivity` by hand.
+    //
+    // The plugin's keep-on-screen condition is cleared by whichever comes
+    // first: the page calling `SplashScreen.hide()` once its first frame has
+    // painted (#2051), or `launchShowDuration` passing.
+    //
+    // ⚠️ `launchAutoHide` is TRUE, which the issue's plugin path wrote as
+    // false. In 8.0.2 the duration is only ever applied when auto-hide is on
+    // (`SplashScreen.java`, `showWithAndroid12API`): with it off, a page that
+    // crashed before it could call `hide()` would hold the splash for ever,
+    // which the same issue rules out. With it on, `hide()` still releases the
+    // splash early. `launch-splash.test.ts` reads the installed plugin to hold
+    // both facts.
+    SplashScreen: {
+      launchAutoHide: true,
+      // 3 s, the issue's proposed bound, counted from the window's first
+      // frame: long enough for Home on the tablet, and the most a broken page
+      // can hold a rider at the splash.
+      launchShowDuration: 3000,
+      // #2127: NO exit fade of the plugin's own, and not its implicit 200 ms
+      // (`SplashScreenConfig.java`). A positive value makes 8.0.2 register an
+      // exit-animation listener, and with one Android copies its splash into
+      // the app's own window for the app to fade. The hold cancels that
+      // window's drawing, so on a warm start the copy showed before its logo:
+      // a near-black frame, then the logo fading over Home. With none, the
+      // splash stays in the system's window until Home has drawn, and Android
+      // plays its own exit.
+      launchFadeOutDuration: 0,
+    },
+  },
 };
 
 export default config;

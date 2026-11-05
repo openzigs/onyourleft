@@ -387,16 +387,25 @@ import {
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
   emptyRiderJoints,
+  emptyRiderStance,
   riderKitFor,
   emptyRiderMotion,
   legBones,
   riderJoints,
   riderMotion,
   type RiderMotion,
+  type RiderStance,
   type JointPoint,
   type RiderKit,
   type RiderPart,
 } from './bicycle';
+import {
+  drawnStance,
+  emptyPostureTracker,
+  ridingEffort,
+  trackPosture,
+  type PostureTracker,
+} from './posture';
 import {
   cassetteUv,
   chainringUv,
@@ -12931,10 +12940,24 @@ export class RealisticRiderBelt {
   readonly #unit = new Vector3(1, 1, 1);
   /** #625's scratch: the motion, the head held level, and a world turn. */
   readonly #motion = emptyRiderMotion();
+  /** #1999's scratch: where this frame's body has its hips, shoulders and hands. */
+  readonly #stance = emptyRiderStance();
   readonly #headHeld = new Quaternion();
   readonly #spin = new Quaternion();
   readonly #alongWorld = new Vector3();
   readonly #acrossWorld = new Vector3();
+  /**
+   * The owner's ruling of 2026-11-04, *"Fix hands on bars first"*: each hand,
+   * as the body's own mesh draws it — the middle of the vertices its wrist
+   * bone carries — measured once off the file's rest pose. `#handReach` is
+   * how far that middle is from the wrist, in metres at the body's scale, and
+   * `#handAlong` which way, in the wrist bone's own frame. Index 0 is `+X`.
+   */
+  readonly #handReach: [number, number] = [0, 0];
+  readonly #handAlong: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  readonly #handWanted = new Vector3();
+  readonly #wristAt = new Vector3();
+  readonly #handNow = new Vector3();
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -13001,6 +13024,15 @@ export class RealisticRiderBelt {
           .copy(boneOf(bones, 'head').matrixWorld)
           .invert()
           .multiply(ownHelmet.matrixWorld);
+        // And where each hand is from its wrist, off the same rest pose.
+        for (const index of [0, 1] as const) {
+          const wrist = boneOf(bones, `wrist.${index === 0 ? 'L' : 'R'}`);
+          const middle = handMiddle(skinned, skinned.skeleton.bones.indexOf(wrist), this.#a);
+          const offset = middle.sub(wrist.getWorldPosition(this.#b));
+          this.#handReach[index] = offset.length();
+          wrist.getWorldQuaternion(this.#world);
+          this.#handAlong[index].copy(offset).normalize().applyQuaternion(this.#world.invert());
+        }
       }
       ownHelmet.removeFromParent();
       root.visible = false;
@@ -13016,6 +13048,7 @@ export class RealisticRiderBelt {
         restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
         restPositions: ordered.map((bone) => bone.position.clone()),
         angle: 0,
+        posture: emptyPostureTracker(),
       });
     }
     this.#scale = scale;
@@ -13187,23 +13220,40 @@ export class RealisticRiderBelt {
     rider.root.visible = true;
     rider.root.position.set(marker.x, marker.y, marker.z);
     rider.root.quaternion.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
-    // #499: the MakeHuman rider and its bicycle lean by the BICYCLE's lean
-    // from this root; since #546 the body is then held back toward upright
-    // against it through the shoulders (`#pose`). @see RiderBelt, where the
-    // axis and sign are argued.
-    rider.root.quaternion.multiply(this.#roll.setFromAxisAngle(this.#alongTheBicycle, marker.lean));
     // ⚠️ A frame that carries no angle HOLDS the one this rider had: no
     // cadence is no rotation, which is #349's rule and `advanceCrank`'s.
     rider.angle = marker.crankAngle ?? rider.angle;
+    // #1999: the position this rider is drawn in — standing, the drops, the
+    // tops or the hoods, chosen from what it is doing, on the RIDE's clock —
+    // and how hard it rocks. Before the root's roll, which a standing rider's
+    // bicycle rocks.
+    trackPosture(rider.posture, marker.riding, marker.rideSeconds);
+    const stance = drawnStance(rider.posture, marker.rideSeconds, this.#stance);
+    // #625: how this rider moves on top of the joints — from the crank angle
+    // it is drawn at, how much of the stroke is drawn, and the RIDE's clock.
+    const motion = riderMotion(
+      rider.angle,
+      marker.pedalling,
+      marker.rideSeconds,
+      this.#motion,
+      ridingEffort(marker.riding),
+      stance.standing,
+    );
+    // #499: the MakeHuman rider and its bicycle lean by the BICYCLE's lean
+    // from this root; since #546 the body is then held back toward upright
+    // against it through the shoulders (`#pose`). @see RiderBelt, where the
+    // axis and sign are argued. #1999: a standing rider's bicycle rocks
+    // under them as well, and the shoulders are held against that too, so
+    // the body stays over the bicycle while it swings.
+    rider.root.quaternion.multiply(
+      this.#roll.setFromAxisAngle(this.#alongTheBicycle, marker.lean + motion.bicycleRock),
+    );
     // #623: the kit this kind wears, under its tint. @see RIDER_KITS
     rider.kit.value.setHex(this.#kits[marker.kind].jersey);
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
-    // #625: how this rider moves on top of the joints — from the crank angle
-    // it is drawn at, how much of the stroke is drawn, and the RIDE's clock.
-    const motion = riderMotion(rider.angle, marker.pedalling, marker.rideSeconds, this.#motion);
-    this.#pose(rider, rider.angle, marker.bodyLean, motion);
+    this.#pose(rider, rider.angle, marker.bodyLean - motion.bicycleRock, motion, stance);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -13240,12 +13290,21 @@ export class RealisticRiderBelt {
    *    so the hands stay on the bar: the arms absorb the rock.
    * 4. Each foot turns about the bicycle's `+X` at its own ankle, which is the
    *    point the shin is aimed at, so ankling moves no pedal.
+   *
+   * #1999: every joint is read from `stance` — where the rider's position on
+   * the bicycle puts the hips, the shoulders and the hands — so the same four
+   * steps pose a rider out of the saddle, in the drops or on the tops, and
+   * the head nods last, on top of being held level. Since the owner's ruling
+   * of 2026-11-03 the head is also turned down or up by the position
+   * (`RiderStance.headPitch`) and each elbow swings out with its downstroke
+   * (`RiderMotion.elbow`), so the positions read from behind.
    */
   #pose(
     rider: RealisticRiderSlot,
     crankAngle: number,
     bodyLean: number,
     motion: RiderMotion,
+    stance: Readonly<RiderStance>,
   ): void {
     for (let index = 0; index < rider.ordered.length; index += 1) {
       const bone = rider.ordered[index] as Bone;
@@ -13263,7 +13322,8 @@ export class RealisticRiderBelt {
     this.#turnInWorld(boneOf(rider.bones, 'pelvis.R'), along, motion.pelvisRoll);
     // #546: the shoulders held back toward upright against the bicycle; the
     // back is aimed at them below, so the MakeHuman body rolls about its hips.
-    const joints = riderJoints(crankAngle, this.#joints, bodyLean);
+    // #1999: the hips, shoulders and hands where this rider's position puts them.
+    const joints = riderJoints(crankAngle, this.#joints, bodyLean, stance);
     const toWorld = (point: JointPoint, into: Vector3): Vector3 =>
       into.set(point.x, point.y, point.z).applyMatrix4(rider.root.matrixWorld);
     // The whole body, moved so its hips sit on the saddle.
@@ -13284,7 +13344,7 @@ export class RealisticRiderBelt {
     const head = boneOf(rider.bones, 'head');
     head.getWorldQuaternion(this.#headHeld);
     if (motion.trunkRoll !== 0 || motion.trunkPitch !== 0) {
-      riderJoints(crankAngle, this.#joints, bodyLean + motion.trunkRoll);
+      riderJoints(crankAngle, this.#joints, bodyLean + motion.trunkRoll, stance);
       toWorld(joints.shoulders, this.#c).sub(toWorld(joints.hips, this.#d));
       this.#c.applyQuaternion(this.#spin.setFromAxisAngle(across, motion.trunkPitch));
       this.#aim(rider, 'spine05', 'neck01', this.#c);
@@ -13293,36 +13353,79 @@ export class RealisticRiderBelt {
       head.quaternion.copy(this.#parent.invert().multiply(this.#headHeld));
       head.updateMatrixWorld(true);
     }
+    // #1999: the head turned by the position — up on the tops, and lifted to
+    // look up the road in the drops and the tuck — and at a hard effort
+    // nodding forward with each downstroke. ⚠️ PR #2116's second pass: half
+    // of the turn at the neck and half at the head, so a head lifted from a
+    // flat back bends the neck rather than folding the skull's skin at one
+    // joint. Until then the drops and the tuck turned the head DOWN from a
+    // back near level, the face at the road under the front wheel, and the
+    // chase camera saw the back of the skull over the helmet's rim.
+    const nod = (stance.headPitch + motion.headNod) / 2;
+    this.#turnInWorld(boneOf(rider.bones, 'neck01'), across, nod);
+    this.#turnInWorld(head, across, nod);
     const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
     for (const index of [0, 1] as const) {
-      const suffix = index === 0 ? 'L' : 'R';
-      // The arm: shoulder to the grip, the elbow out and down.
-      const shoulder = boneOf(rider.bones, `upperarm01.${suffix}`).getWorldPosition(this.#a);
+      const limb = LIMB_BONES[index];
+      // The arm: shoulder to the grip. ⚠️ The owner's ruling of 2026-11-04:
+      // the HAND goes on the grip — the middle of the drawn hand, not the
+      // wrist. Putting the WRIST on the grip left the hand hanging 12 cm past
+      // the bar, inward and low, at the hips.
+      //
+      // ⚠️ PR #2116's third pass: the hand lies along its own line in the
+      // BICYCLE's frame — forward, and down by the position's own angle
+      // (`RiderStance.handDown`) — and the wrist is behind the grip on that
+      // line by the hand's own length. Until then the hand was bent down from
+      // the FOREARM's line, so wherever a folded arm's forearm already sloped
+      // down (the drops, the tuck) the fingers hung 6 to 7 cm under the drop
+      // and out past its end. The arm is then solved from the shoulder to
+      // that wrist.
+      const shoulder = boneOf(rider.bones, limb.upperArm).getWorldPosition(this.#a);
       const grip = toWorld(joints.grip[index], this.#b);
-      const upper = this.#length(rider, `upperarm01.${suffix}`, `lowerarm01.${suffix}`);
-      const fore = this.#length(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`);
-      const pole = this.#c
-        .set(index === 0 ? 1 : -1, -1, 0)
+      const upper = this.#length(rider, limb.upperArm, limb.forearm);
+      const fore = this.#length(rider, limb.forearm, limb.wrist);
+      const along = this.#handWanted
+        .set(0, -Math.sin(stance.handDown), Math.cos(stance.handDown))
         .transformDirection(rider.root.matrixWorld);
-      const elbow = twoBoneJoint(shoulder, grip, upper, fore, pole, this.#d);
-      this.#aim(
-        rider,
-        `upperarm01.${suffix}`,
-        `lowerarm01.${suffix}`,
-        this.#c.copy(elbow).sub(shoulder),
+      const wrist = this.#wristAt.copy(grip).addScaledVector(along, -this.#handReach[index]);
+      // The elbow's bend: out from straight down by the position's own angle,
+      // swung with the stroke by a SHARE of that angle (`RiderMotion.elbow`),
+      // and turned back toward the saddle by the position's own angle. ⚠️ PR
+      // #2116's third pass: a share, never an angle added — an added 12° to
+      // 18° turned the drops' 12° elbow out past its shoulder on its own
+      // downstroke and clamped the other one in under the chest, which is the
+      // left/right difference the owner's frames caught (every one of them at
+      // a crank near a quarter turn, `+X`'s downstroke).
+      const out = stance.elbowOut * (1 + motion.elbow[index]);
+      const pole = this.#c
+        .set(
+          (index === 0 ? 1 : -1) * Math.sin(out),
+          -Math.cos(out) * Math.cos(stance.elbowBack),
+          -Math.cos(out) * Math.sin(stance.elbowBack),
+        )
+        .transformDirection(rider.root.matrixWorld);
+      const elbow = twoBoneJoint(shoulder, wrist, upper, fore, pole, this.#d);
+      this.#aim(rider, limb.upperArm, limb.forearm, this.#c.copy(elbow).sub(shoulder));
+      this.#aim(rider, limb.forearm, limb.wrist, this.#c.copy(wrist).sub(elbow));
+      // The hand itself, turned at the wrist onto its line.
+      const wristBone = boneOf(rider.bones, limb.wrist);
+      wristBone.getWorldQuaternion(this.#world);
+      this.#turnBoneTo(
+        wristBone,
+        this.#handNow.copy(this.#handAlong[index]).applyQuaternion(this.#world),
+        along,
       );
-      this.#aim(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`, this.#c.copy(grip).sub(elbow));
       // The leg: hip to the pedal, the knee forward — `bicycle.ts`'s own rule.
-      const hip = boneOf(rider.bones, `upperleg01.${suffix}`).getWorldPosition(this.#a);
+      const hip = boneOf(rider.bones, limb.thigh).getWorldPosition(this.#a);
       const foot = toWorld(joints.foot[index], this.#b);
-      const thigh = this.#length(rider, `upperleg01.${suffix}`, `lowerleg01.${suffix}`);
-      const shin = this.#length(rider, `lowerleg01.${suffix}`, `foot.${suffix}`);
+      const thigh = this.#length(rider, limb.thigh, limb.shin);
+      const shin = this.#length(rider, limb.shin, limb.foot);
       const knee = twoBoneJoint(hip, foot, thigh, shin, forward, this.#d);
-      this.#aim(rider, `upperleg01.${suffix}`, `lowerleg01.${suffix}`, this.#c.copy(knee).sub(hip));
-      this.#aim(rider, `lowerleg01.${suffix}`, `foot.${suffix}`, this.#c.copy(foot).sub(knee));
+      this.#aim(rider, limb.thigh, limb.shin, this.#c.copy(knee).sub(hip));
+      this.#aim(rider, limb.shin, limb.foot, this.#c.copy(foot).sub(knee));
       // 4. #625: ankling. A toe lifted is a turn of MINUS the dorsiflexion
       // about `+X`, which takes `+Z` toward `−Y`.
-      this.#turnInWorld(boneOf(rider.bones, `foot.${suffix}`), across, -motion.ankle[index]);
+      this.#turnInWorld(boneOf(rider.bones, limb.foot), across, -motion.ankle[index]);
     }
   }
 
@@ -13356,9 +13459,19 @@ export class RealisticRiderBelt {
     const bone = boneOf(rider.bones, boneName);
     const child = boneOf(rider.bones, childName);
     bone.getWorldPosition(this.#aimHead);
-    child.getWorldPosition(this.#aimCurrent).sub(this.#aimHead).normalize();
-    this.#aimWanted.copy(direction).normalize();
-    this.#turn.setFromUnitVectors(this.#aimCurrent, this.#aimWanted);
+    child.getWorldPosition(this.#aimCurrent).sub(this.#aimHead);
+    this.#turnBoneTo(bone, this.#aimCurrent, direction);
+  }
+
+  /**
+   * Turns `bone` by the least turn that takes the world direction `from` to
+   * `to`, and updates it and everything under it. Neither need be a unit
+   * vector; `from` is normalised in place. Allocates nothing.
+   */
+  #turnBoneTo(bone: Bone, from: Vector3, to: Vector3): void {
+    from.normalize();
+    this.#aimWanted.copy(to).normalize();
+    this.#turn.setFromUnitVectors(from, this.#aimWanted);
     bone.getWorldQuaternion(this.#world);
     this.#parent.identity();
     bone.parent?.getWorldQuaternion(this.#parent);
@@ -13366,6 +13479,31 @@ export class RealisticRiderBelt {
     bone.updateMatrixWorld(true);
   }
 }
+
+/**
+ * Each side's limb bones, by name, index 0 the rider's `+X` (`.L`) side —
+ * named once here, as the file's names read after three's loader drops the
+ * dot, rather than built from a template string per limb per frame (#2148's
+ * review nit, PR #2116's second pass). @see boneOf
+ */
+const LIMB_BONES = [
+  {
+    upperArm: 'upperarm01L',
+    forearm: 'lowerarm01L',
+    wrist: 'wristL',
+    thigh: 'upperleg01L',
+    shin: 'lowerleg01L',
+    foot: 'footL',
+  },
+  {
+    upperArm: 'upperarm01R',
+    forearm: 'lowerarm01R',
+    wrist: 'wristR',
+    thigh: 'upperleg01R',
+    shin: 'lowerleg01R',
+    foot: 'footR',
+  },
+] as const;
 
 /** One realistic rider: its body, its bones at rest, and its held crank angle. */
 interface RealisticRiderSlot {
@@ -13379,6 +13517,38 @@ interface RealisticRiderSlot {
   readonly restPositions: readonly Vector3[];
   readonly ordered: readonly Bone[];
   angle: number;
+  /** Which position this body is drawn in, over time — #1999. @see trackPosture */
+  readonly posture: PostureTracker;
+}
+
+/**
+ * The middle of the vertices whose heaviest weight is on `bone` — for a wrist,
+ * the hand — in world space, where the skinned mesh draws them now: three's
+ * own CPU skinning, which is the GPU's. Written into `into`. #1999, the
+ * owner's ruling of 2026-11-04; run once, when a belt is built.
+ */
+function handMiddle(mesh: SkinnedMesh, bone: number, into: Vector3): Vector3 {
+  const carried = mesh.geometry.getAttribute('skinIndex');
+  const weights = mesh.geometry.getAttribute('skinWeight');
+  const vertex = new Vector3();
+  into.set(0, 0, 0);
+  let count = 0;
+  for (let at = 0; at < carried.count; at += 1) {
+    let most = 0;
+    let heaviest = -1;
+    for (let slot = 0; slot < 4; slot += 1) {
+      const weight = weights.getComponent(at, slot);
+      if (weight > most) {
+        most = weight;
+        heaviest = carried.getComponent(at, slot);
+      }
+    }
+    if (heaviest !== bone) continue;
+    into.add(mesh.getVertexPosition(at, vertex).applyMatrix4(mesh.matrixWorld));
+    count += 1;
+  }
+  if (count === 0) throw new Error('the rider model carries no hand on its wrist');
+  return into.divideScalar(count);
 }
 
 /**
@@ -14636,7 +14806,8 @@ function realisticBicycle(): {
         ),
       );
     } else if (solid.shape === 'box') {
-      // The saddle: nothing drawn on it, so the rubber's flat bead.
+      // The saddle and, since PR #2116, the two brake hoods: nothing drawn on
+      // them, so the rubber's flat bead.
       const into = softly(part, frame, rubber);
       into.push(
         placedPart(
