@@ -257,6 +257,55 @@ same test file fails if the trigger is added there.
 `main`**: switched on first, every queued pull request waits for a check that never reports. It is
 the owner's step, not a pull request's.
 
+#### The browser install — #2207
+
+⚠️ **Each browser shard's `Install the pinned Chromium` is `playwright install --only-shell
+chromium` since [#2207](https://github.com/openzigs/onyourleft/issues/2207), with no
+`--with-deps`, and a reviewer who remembers `--with-deps chromium` there is reading the old file.**
+On 2026-11-05 the step reached its ten-minute stop three times before any test ran (runs
+[42057183592](https://github.com/openzigs/onyourleft/actions/runs/42057183592) `browser-1`,
+[42056612186](https://github.com/openzigs/onyourleft/actions/runs/42056612186) and
+[42061599294](https://github.com/openzigs/onyourleft/actions/runs/42061599294) `browser-2`, each
+attempt 1), and twice more came within a minute of it (563 s and 575 s). Every one of those logs
+spent its time in apt: `--with-deps` installs nine packages the runner image lacks, all fonts or font tools
+(`fonts-freefont-ttf`, `fonts-ipafont-gothic`, `fonts-wqy-zenhei`, `fonts-unifont` and five more),
+**21.9 MB from the runner's Ubuntu mirror at 30 to 40 kB/s**, after an `apt-get update` that took up
+to three minutes. Playwright's own CDN served the full Chromium, the headless shell and FFmpeg in
+about 6 s on the same runners. Every shared library a headless Chromium needs was already on the
+image — apt reported each one `already the newest version` — so the step now asks apt for nothing.
+
+- **`--only-shell`**: a headless run with no `channel` launches Playwright's headless shell and
+  never the full Chromium, so the full build (the larger download) was fetched for nobody.
+  `nightly-split.test.ts` holds each browser shard to exactly this command, the workflow to no
+  `--with-deps`, `install-deps` or `apt-get`, and the Playwright config to no `channel` and no
+  headed run — a project given either would launch a browser the step did not install.
+- **The fonts were not load-bearing**: the app bundles its own font, Barlow, and every browser shard
+  was green without them on this change's runs below.
+- **A library a future image drops** fails the gate's first launch with Playwright's `Host system is
+  missing dependencies`, red and named, rather than slowly. The answer then is `--with-deps` back on
+  this step, measured, not a longer stop.
+- **Not a cache**: the slow half was apt, never the CDN, and a step-level `if:` to skip a cache hit
+  is something `nightly-split.test.ts` forbids in this workflow. No stop moved: the step keeps its
+  `timeout-minutes: 10`, now only a stop on a hung CDN.
+- `nightly.yml` and `demo-video.yml` still run `--with-deps` and still need the apt-source step;
+  they cannot block a merge, and moving them is a change of their own.
+
+**Measured.** Before: 57 readings of the step over 19 runs of 2026-11-05 (16 completed runs and the
+first attempts of the three that timed out), **13 to 35 s on 50 of them**, a median of 19 s, then
+64, 86, 563 and 575 s, and the three stops at 612 to 613 s. After, on this change's pull request (each shard's
+step, `completed_at` less `started_at`):
+
+| Run | `browser-1` | `browser-2` | `browser-3` |
+|---|--:|--:|--:|
+| [42067675664](https://github.com/openzigs/onyourleft/actions/runs/42067675664) attempt 1 | 5 s | 4 s | 6 s |
+| attempt 2 | 6 s | 5 s | 4 s |
+| attempt 3 | 5 s | 5 s | 5 s |
+
+**4 to 6 s on all nine**, against a median of 19 s before: the step no longer has an apt half,
+which is where all five readings of 563 s and over spent their time. Every shard of all three
+attempts was green. A slow day on Playwright's CDN is still possible and still
+inside the ten-minute stop; nothing here measured one.
+
 #### Where the time comes from next — owed before B9 and B12
 
 ⚠️ **The stop is 30 minutes since #651 and the job on the 7763 is about 1 460–1 520 s; a reviewer
@@ -1556,7 +1605,9 @@ repository uses that source: the browser is the one the lockfile pins, fetched f
 own CDN, and `--with-deps` takes its shared libraries from Ubuntu's archives. Removing it
 therefore makes CI trust **less** than it did, which is why it is a safe answer to an outage and
 not a workaround with a cost. It is a no-op the day Google's index is consistent again, and
-deleting the step is a one-line revert if the trade is ever judged wrong.
+deleting the step is a one-line revert if the trade is ever judged wrong. ⚠️ Since #2207 no step in
+`rules.yml` runs apt (§"The browser install — #2207"), so there it is a no-op kept as a guard;
+`nightly.yml` and `demo-video.yml` still run `--with-deps` and still need it.
 
 From #1231's stop-gap of 2026-10-09 to its GHCR mirror there was a third, `Log in to Docker Hub`
 (with a `Log out of Docker Hub` at the end of the job), reading a read-only Docker Hub token, the
