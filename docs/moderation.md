@@ -401,6 +401,19 @@ them, and the instance refuses them a ticket for it for as long as the room last
 them as not finishing. Nobody may remove a moderator, from any room. The attempt changes nothing and
 is logged, as every attempt to act on a moderator is.
 
+**Voice on Discord follows the same decisions** (#876), where your instance offers voice
+(`docs/operating-an-instance.md`, "Voice on Discord"). A private room's riders join its voice by a
+link, so the instance cannot tell Discord which member a rider is. So after a removal from a room,
+the instance **replaces the room's voice channel**: it deletes the old one, which disconnects
+everybody in it, makes a new one, and gives the new link to the riders still in the room, never to
+the rider you removed, for as long as the room lasts. A **suspension** does the same in every room with voice that the rider is a
+member of, and the suspended rider is not given the new link even while their socket is still open.
+Each is written to the log after the action it followed, as `rotate_voice` with the room, saying
+which entry it followed and what was done. If Discord would not delete the old channel, the entry
+says the rider may still be in it until the instance's next voice sweep, within ten minutes. Your
+removal or suspension stands whatever Discord does. ⚠️ Discord moderates its own service too: a
+ban here bans nobody from Discord, and a Discord ban bans nobody from a room.
+
 **Blocking holds in a room.** In a race, two riders with a block between them, whichever of them made
 it, are never sent each other's name. Each sees the other as a rider with no name, and the race's
 result shows them the same way. A block made during a ride holds from that rider's next join. A group

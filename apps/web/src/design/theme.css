@@ -7735,6 +7735,108 @@ select.oyl-input {
 }
 
 /*
+ * A RACE'S VOICE BUTTON, ON ITS LINE — #875, the owner's ruling of
+ * 2026-11-04: *"Make it a button first."*
+ *
+ * *Join voice on Discord (opens Discord)*, while a race waits on its line
+ * (`game/room-voice.ts`), is a secondary button at the ride-time 48 px
+ * (`.oyl-button--ride`), still a link, beside *Start the race* on a row of
+ * their own, so it costs the race's notice no line of its own. It stands on a
+ * PANEL of the HUD's own opaque surface and edge, never bare on the stage, so
+ * it reads over a bright sky: `hudSurface` is 10.4:1 against the world's
+ * brightest sky, its horizon haze (`game/world.ts` §`HORIZON_HAZE`). Its two
+ * halves are flex items, so where it is narrow it breaks between them, and
+ * its padding and leading are the HUD's tighter ones, so two lines make a
+ * 50 px button beside *Start the race*'s 48 rather than 68: the row is what
+ * an upright phone's rider clearance pays for.
+ *
+ * ⚠️ **Where it is shown, and what that costs, recorded as #419 asks.** Shown
+ * at 47 rem tall or more at any width from 22.5 rem (the tablets and the
+ * column layout of an upright phone), and on a WIDE screen of 64 rem or more
+ * at any height over 30 rem: the laptops, 1280×720, 1366×657 (a 1366×768
+ * laptop under its browser's chrome) and 1024×600, where it fits beside
+ * *Start the race* on one line. **Hidden everywhere else**, which is:
+ * - a phone on its side, the short corners layout up to 30 rem tall (736×360
+ *   to 844×390, and 736×480 at its tallest): the race's notice cell is the
+ *   16 rem one and already ends a few pixels above a 736×360 stage's bottom,
+ *   with no room beside *Start the race* for the button and no line below it;
+ * - a screen narrower than 64 rem and under 47 rem tall, such as 802×600:
+ *   the button breaks each half over two lines there, 89 px tall, and runs
+ *   over the route panel.
+ * Both were measured in the browser gate. Where it is hidden it is
+ * `display: none`, neither drawn nor in the keyboard's order, and a racer
+ * there is offered no voice link until the race is over. A group ride's link
+ * is a notice of its own and is shown at every size.
+ * `ride-room.browser.spec.ts` §"#875" holds the button's size, its panel's
+ * contrast and its place at every overlay viewport and at 1280×720, 1024×600
+ * and 802×600, both ways.
+ *
+ * Its keyboard focus ring sits on the panel, at no offset: the HUD's ring
+ * (`.oyl-hud :focus-visible`, #748) is 3 px wide and 2 px outside a control,
+ * which would put its outer 2 px past this panel's 3 px (padding and edge)
+ * and onto the sky. `hud-focus.browser.spec.ts` holds it inside the panel.
+ */
+.oyl-hud__race-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+/* *Start the race* keeps its one line and its width: the voice button is
+   what gives up width, by breaking its words. */
+.oyl-hud__race-actions > .oyl-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.oyl-hud__voice {
+  display: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.125rem;
+  border: 1px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__voice > .oyl-button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0.25em;
+  box-sizing: border-box;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.oyl-hud__voice > .oyl-button:focus-visible {
+  outline-offset: 0;
+}
+
+@media (min-width: 22.5rem) and (min-height: 47rem), (min-width: 64rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__voice {
+    display: block;
+  }
+}
+
+/* On an upright phone the button's words are a notice's size, as the race's
+   notice above it is set: at the page size, on the CI runner's wider fonts,
+   *Start the race* left 183 px at 360 px wide and "Join voice on Discord"
+   broke over two lines of its own, a 69 px button (the browser gate,
+   §"#875"). The target stays 48 px; only its words and its side padding
+   are smaller. */
+@media (width < 46rem) {
+  .oyl-hud__voice > .oyl-button {
+    padding-inline: var(--oyl-space-xs);
+    font-size: var(--oyl-font-size-sm);
+  }
+}
+
+/*
  * A RACE'S STANDINGS — #1347, ADR 0051.
  *
  * Visually hidden everywhere (by clip, as `.oyl-visually-hidden`, so a screen

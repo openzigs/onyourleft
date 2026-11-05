@@ -62,6 +62,8 @@ export { ANALYSIS_READ_TIMEOUT_MILLISECONDS, capacitorAnalysisPost } from './htt
 export type { AnalysisPostReply, AnalysisPostRequest } from './http/analysis-http';
 export { capacitorThermalPlugin, readCapacitorThermalHeadroom } from './thermal/thermal';
 export type { ThermalPlugin, ThermalReply } from './thermal/thermal';
+export { capacitorSplashScreenPlugin, hideCapacitorSplashScreen } from './launch/splash-screen';
+export type { LaunchSplashPlugin } from './launch/splash-screen';
 export {
   capacitorSecureWindowPlugin,
   setCapacitorSecureWindow,

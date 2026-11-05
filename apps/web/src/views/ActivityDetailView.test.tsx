@@ -558,6 +558,24 @@ describe('#2068 — every recorded channel is a chart, read when it scrolls into
     );
   });
 
+  it('keeps reading the other charts when one channel fails to read', async () => {
+    observers = installFakeIntersectionObserver();
+    const base = indoorRide();
+    const store = Object.create(base.store) as typeof base.store;
+    store.getStreamChannel = async (athlete, id, channel) => {
+      if (channel === 'heartRate') {
+        throw new Error('corrupt blob');
+      }
+      return base.store.getStreamChannel(athlete, id, channel);
+    };
+    mounted = await open({ ...base, store });
+    await observers.reveal([slotOf('power'), slotOf('heartRate'), slotOf('cadence')]);
+    await settle();
+    await settle();
+    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(2);
+    expect(slotOf('cadence').querySelector('svg.oyl-trace')).not.toBeNull();
+  });
+
   it('reads a chart once, however often it scrolls back into view', async () => {
     // The samples do not change, so a second inflate of the same blob is pure
     // cost — and it is the read this whole module is arranged to avoid.

@@ -373,7 +373,15 @@ export function ActivityDetailView({
     const asked = generation.current;
     void (async () => {
       for (const channel of wanted) {
-        const trace = await loadTrace(port, id, channel, units, CHART_POINTS);
+        let trace: Trace | undefined;
+        try {
+          trace = await loadTrace(port, id, channel, units, CHART_POINTS);
+        } catch {
+          // A channel that will not read (a corrupt blob) must not stop the
+          // channels after it, and may be asked for again on a later pass.
+          requested.current.delete(channel);
+          continue;
+        }
         if (trace === undefined || generation.current !== asked) {
           continue;
         }

@@ -344,6 +344,22 @@ export class RoomRouter {
     });
   }
 
+  /**
+   * Tells the riders of a room a live worker holds that its voice link is now
+   * `invite` (#876), all but `withheldFrom`. Nothing when no live worker holds
+   * it: a later socket's lookup carries the link in its plan.
+   */
+  setVoiceInvite(roomId: string, invite: string | undefined, withheldFrom?: string): void {
+    const slot = this.#placement.get(roomId);
+    if (slot === undefined || !slot.alive) return;
+    this.#post(slot, {
+      type: 'voice',
+      roomId,
+      ...(invite === undefined ? {} : { invite }),
+      ...(withheldFrom === undefined ? {} : { withheldFrom }),
+    });
+  }
+
   /** Who sits in `riderId`'s seat of a room a live worker holds, and its tick (#789). */
   seatOf(roomId: string, riderId: number): Promise<RoomSeat | undefined> {
     const slot = this.#placement.get(roomId);
