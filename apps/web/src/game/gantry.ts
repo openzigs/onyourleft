@@ -46,7 +46,10 @@
  * Boxes, as `buildings.ts` builds a barn — not Poly Haven's street furniture,
  * which is the research's N5 and is the owner's to decide. The banner is a
  * quad whose texture is rasterised from the committed Roboto's glyph ranges
- * (`banner-atlas.ts`).
+ * (`banner-atlas.ts`). ⚠️ **Since #1274 the owner has decided it for the
+ * barriers**: the REALISTIC world draws each barrier piece this file places
+ * as Poly Haven's `concrete_road_barrier` (`three-renderer.ts` §`GantryBelt`);
+ * where they stand, and the stylised world's boxes, are still this file's.
  *
  * Pure: names no rendering library.
  */

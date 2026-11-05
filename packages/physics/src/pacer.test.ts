@@ -26,7 +26,7 @@
  * where a numbers-only test would be written.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type {
   GeographicPosition,
@@ -50,11 +50,20 @@ import {
   routeProfile,
   seconds,
   unixSeconds,
+  watts,
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
 import * as botPacerModule from './pacer';
-import { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer, type BotCourse } from './pacer';
+import * as physicsPackage from './index';
+import {
+  advanceBot,
+  advancePlannedBot,
+  BOT_AT_START_LINE,
+  botDemand,
+  createBotPacer,
+  type BotCourse,
+} from './pacer';
 import { advance, START_OF_RIDE, type RideState } from './simulate';
 
 // Wraps the REAL `advance` in a spy: every assertion below runs the genuine
@@ -65,6 +74,13 @@ import { advance, START_OF_RIDE, type RideState } from './simulate';
 vi.mock('./simulate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./simulate')>();
   return { ...actual, advance: vi.fn(actual.advance) };
+});
+
+// Every non-test source file in this package, as text, for the caller scan.
+const PACKAGE_SOURCES = import.meta.glob<string>(['./**/*.ts', '!./**/*.test.ts'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
 });
 
 const AIR = airDensityKilogramsPerCubicMetre(altitudeMetres(0), degreesCelsius(15));
@@ -154,6 +170,19 @@ describe('the bot goes through the same physics as the rider', () => {
     expect(conditions?.totalMass).toBe(75);
   });
 
+  it('rides a lap-race plan’s power through that same tick, on the grade it reads (#1960)', () => {
+    vi.mocked(advance).mockClear();
+
+    const tick = advancePlannedBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321));
+
+    expect(vi.mocked(advance)).toHaveBeenCalledTimes(1);
+    const [, step, conditions] = vi.mocked(advance).mock.calls[0] ?? [];
+    expect(step?.power).toBe(321);
+    expect(step?.grade).toBeCloseTo(5, 4);
+    expect(conditions?.totalMass).toBe(75);
+    expect(tick.power).toBe(321);
+  });
+
   it('rides on whatever that tick returns, so it cannot be on separate maths', () => {
     // The strongest form of the criterion. If the bot computed its own speed,
     // this sentinel would be ignored and the assertion would fail — which is
@@ -217,7 +246,8 @@ describe('the bot completes the route with no rider present', () => {
   it('rides a flat 2 km to the end, driven by nothing but time', () => {
     // #92's sixth criterion, at its word. Nothing in this test is a rider:
     // there is no rider state, no rider speed and no rider distance, and there
-    // is no parameter on `advanceBot` through which one could be passed.
+    // is no parameter on `advanceBot` through which one could be passed, which
+    // the next test holds.
     const course = courseOn(FLAT);
     let state = BOT_AT_START_LINE;
     let ticks = 0;
@@ -229,6 +259,28 @@ describe('the bot completes the route with no rider present', () => {
 
     expect(state.distance).toBeGreaterThanOrEqual(FLAT.totalDistance);
     expect(ticks).toBeLessThan(600);
+  });
+
+  it('gives `advanceBot` no parameter beyond the state, the time and the course', () => {
+    // #92's sixth criterion as a property of the signature (`pacer.ts`'s
+    // header). A fourth parameter, optional or not, is a way for a caller to
+    // drive a bot with a rider's power, and it fails here at both levels.
+    expectTypeOf(advanceBot).parameters.toEqualTypeOf<[RideState, Seconds, BotCourse]>();
+    expect(advanceBot.length).toBe(3);
+    // The tick at a planned power (#1960) is not on the package's surface, so
+    // `apps/` cannot reach it: `package.json` exports `index.ts` alone.
+    expect(Object.keys(physicsPackage)).toContain('advanceBot');
+    expect(Object.keys(physicsPackage)).not.toContain('advancePlannedBot');
+    // And inside the package its one caller is the lap-race bot: the one file
+    // that imports, re-exports (aliased or not) or calls it. A name in a comment's backticks
+    // (`index.ts`, `raw-source.d.ts`) is neither.
+    const callers = Object.entries(PACKAGE_SOURCES)
+      .filter(
+        ([path, source]) =>
+          !path.endsWith('/pacer.ts') && /\badvancePlannedBot(?:\s*[(,}]|\s+as\b)/.test(source),
+      )
+      .map(([path]) => path);
+    expect(callers).toEqual(['./lap-race-bot.ts']);
   });
 
   it('keeps going past the end of a point-to-point route rather than stopping', () => {

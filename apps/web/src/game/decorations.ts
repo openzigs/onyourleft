@@ -435,22 +435,91 @@ const POST_TO = 4.6;
  */
 const POST_WIND = 0.12;
 
-/** A lamp post wound with warm-white bulbs, a spiral up the post. */
-function postLights(): DecorationPart[] {
+/**
+ * Where the winter lights wind the REALISTIC lamp post, metres: from **1.1**
+ * to **2.45** — #1274. The realistic world draws its lamp posts as Poly
+ * Haven's `street_lamp_01` (`three-renderer.ts` §`FurnitureBelt`), 3.87 m
+ * tall, whose shaft rises from its foot's moulding at about 1 m to its ladder
+ * bar at 2.65 m, with the lantern above that; the stylised post's 1.4 m to
+ * 4.6 m would wind the bulbs through the bar and the lantern and on into the
+ * air over it. The same twelve bulbs, closer together.
+ */
+export const REALISTIC_POST_FROM = 1.1;
+export const REALISTIC_POST_TO = 2.45;
+
+/**
+ * How far out the realistic lamp's bulbs wind, at its first bulb and its
+ * last, metres: **0.16** to **0.12** — #1274. The committed lamp's shaft
+ * tapers, 9 cm out at 1 m and 5 cm at 2.4 m, so the winding tapers with it,
+ * each bulb a centimetre clear of it; the stylised post is straight, and its
+ * bulbs wind it at {@link POST_WIND}. `realistic-roadside.test.ts` reads the
+ * committed model and holds every bulb clear of it, with the shaft inside.
+ */
+export const REALISTIC_POST_WIND: readonly [number, number] = [0.16, 0.12];
+
+/**
+ * A lamp post wound with warm-white bulbs, a spiral up the post from `from`
+ * to `to`, `windFrom` out from its axis at the bottom and `windTo` at the top.
+ */
+function postLights(
+  from = POST_FROM,
+  to = POST_TO,
+  windFrom = POST_WIND,
+  windTo = POST_WIND,
+): DecorationPart[] {
   return Array.from({ length: POST_BULBS }, (_, at) => {
     const turn = at * 0.75 * Math.PI;
+    const share = at / (POST_BULBS - 1);
+    const wind = windFrom + (windTo - windFrom) * share;
     return {
       shape: 'bulb',
       size: [BULB_METRES, BULB_METRES, BULB_METRES],
-      at: [
-        Math.sin(turn) * POST_WIND,
-        POST_FROM + ((POST_TO - POST_FROM) * at) / (POST_BULBS - 1),
-        Math.cos(turn) * POST_WIND,
-      ],
+      at: [Math.sin(turn) * wind, from + (to - from) * share, Math.cos(turn) * wind],
       colour: BULB_WARM_WHITE,
       glows: true,
     } satisfies DecorationPart;
   });
+}
+
+/** The item name the winter lights wind a lamp post with. */
+const POST_LIGHTS = 'post-lights';
+
+/** What each table became, fitted to the realistic lamp. @see onRealisticLampPosts */
+const fitted = new WeakMap<ItemTable, ItemTable>();
+
+/**
+ * `kinds` as the REALISTIC world places them — #1274: every kind that winds
+ * a lamp post ({@link POST_LIGHTS}) wound on the realistic lamp's shaft
+ * instead ({@link REALISTIC_POST_FROM} to {@link REALISTIC_POST_TO}, out by
+ * {@link REALISTIC_POST_WIND}), its footprint the widest of those, and every
+ * other kind as it is. The same table for the same `kinds`, so a belt that
+ * rebuilds when its table changes does not rebuild every frame.
+ *
+ * ⚠️ The footprint is 4 cm wider than the stylised post's, so a lamp post
+ * under 0.22 m from a carriageway would carry lights in one world and not the
+ * other. None stands that close: a village's are 1.65 m from the kerb
+ * (`streets.ts` §`LAMP_SETBACK_METRES`).
+ */
+export function onRealisticLampPosts(kinds: ItemTable): ItemTable {
+  const known = fitted.get(kinds);
+  if (known !== undefined) return known;
+  const table: Partial<Record<Holiday, readonly DecorationKind[]>> = {};
+  for (const [holiday, offered] of Object.entries(kinds) as [
+    Holiday,
+    readonly DecorationKind[],
+  ][]) {
+    table[holiday] = offered.map((kind) =>
+      kind.item === POST_LIGHTS
+        ? {
+            ...kind,
+            radius: Math.max(...REALISTIC_POST_WIND) + BULB_METRES / 2,
+            parts: postLights(REALISTIC_POST_FROM, REALISTIC_POST_TO, ...REALISTIC_POST_WIND),
+          }
+        : kind,
+    );
+  }
+  fitted.set(kinds, table);
+  return table;
 }
 
 /**
@@ -618,7 +687,7 @@ function villageTree(): DecorationPart[] {
  */
 const WINTER_LIGHTS: readonly DecorationKind[] = [
   {
-    item: 'post-lights',
+    item: POST_LIGHTS,
     anchors: ['lamp-post'],
     chance: WINTER_CHANCE.post,
     radius: POST_WIND + BULB_METRES / 2,

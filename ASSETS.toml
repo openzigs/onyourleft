@@ -2330,3 +2330,27 @@ inputsha256 = "14af11c877c5ffc3963d2ea8b4b71c748fc1de1e34088b1ad6be79c395ba938a"
 script = "apps/web/tools/realistic/blender/process_house_models.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 
+[[asset]]
+path = "apps/web/public/realistic/street_lamp_01.glb"
+source = "Poly Haven, street_lamp_01 by Josh Dean (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-11-04"
+sha256 = "23e396961a386bee220a6119884c51b33e04bfff523348dfc4482053c84af3c9"
+modified = "collapse-decimated to about 240 triangles and stood on its base; its base colour read through each corner's texture coordinates from its colour map averaged to 32 cells a side (a flat colour where a material has no map) and kept as one colour a vertex; its materials, maps and texture coordinates dropped; edges past 40 degrees creased and the rest shaded smooth; geometry and vertex colour only, no picture"
+input = "https://polyhaven.com/a/street_lamp_01"
+inputsha256 = "4facb6a3309fb2c445fcbeda23a5cc1cc55ea449cc8cc4235ae8becd6d49dd47"
+script = "apps/web/tools/realistic/blender/process_roadside_model.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/concrete_road_barrier.glb"
+source = "Poly Haven, concrete_road_barrier by Amal Kumar (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-11-04"
+sha256 = "af666bbc79123f7368877759b585d4bfb5e8664d8d2fbddfa2b2f8bbc351195b"
+modified = "collapse-decimated to about 48 triangles and stood on its base; its base colour read through each corner's texture coordinates from its colour map averaged to 32 cells a side (a flat colour where a material has no map) and kept as one colour a vertex; its materials, maps and texture coordinates dropped; edges past 40 degrees creased and the rest shaded smooth; geometry and vertex colour only, no picture"
+input = "https://polyhaven.com/a/concrete_road_barrier"
+inputsha256 = "97db415eb62dc2327ac4388ca47307afc638763a97c2352caa3304bce7deb0ae"
+script = "apps/web/tools/realistic/blender/process_roadside_model.py"
+tool = "Blender 4.4.3"
+

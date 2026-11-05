@@ -6,9 +6,9 @@ import { STREAM_CHANNELS, type StreamChannel } from '@onyourleft/store';
 
 import {
   CHART_POINTS,
-  DEFAULT_SERIES,
   downsample,
   gapSamples,
+  pointAt,
   seriesFor,
   TABLE_ROWS,
   traceExtent,
@@ -41,22 +41,16 @@ describe('the series table', () => {
     expect(series).toHaveLength(new Set(series.map((s) => s.channel)).size);
   });
 
-  it('opens with fewer series than it offers, which is what makes the read budget a budget', () => {
-    expect(DEFAULT_SERIES.length).toBeGreaterThan(0);
-    expect(DEFAULT_SERIES.length).toBeLessThan(traceSeries('metric').length);
-    for (const channel of DEFAULT_SERIES) {
-      expect(traceSeries('metric').map((s) => s.channel)).toContain(channel);
-    }
-  });
-
   it('reads a speed in km/h through the domain conversion, not as stored metres per second', () => {
     // 10 m/s is 36 km/h. A series that forgot to convert would show "10.0"
     // beside a "km/h" heading, which is a wrong number that looks like a right
     // one.
     const speed = seriesFor('speed', 'metric');
     expect(speed.unit).toBe('km/h');
-    expect(speed.format(10)).toBe('36.0');
     expect(speed.display(10)).toBeCloseTo(36, 9);
+    // #2068: `format` is handed the displayed number, as the chart and the
+    // table hand it, so it converts nothing more.
+    expect(speed.format(speed.display(10))).toBe('36.0');
   });
 
   it('reads power, heart rate and cadence unchanged and whole', () => {
@@ -197,24 +191,50 @@ describe('the declared sizes', () => {
   });
 });
 
+describe('pointAt \u2014 the shared cursor\u2019s reading (#2068)', () => {
+  const points = [10, 20, undefined, 40];
+
+  it('reads the point whose span holds the time', () => {
+    expect(pointAt(points, 2, 0)).toBe(10);
+    expect(pointAt(points, 2, 1.9)).toBe(10);
+    expect(pointAt(points, 2, 2)).toBe(20);
+    expect(pointAt(points, 2, 7)).toBe(40);
+  });
+
+  it('reads a gap as no reading, never a zero', () => {
+    expect(pointAt(points, 2, 4)).toBeUndefined();
+  });
+
+  it('gives the trace\u2019s own end its last point, and nothing past it', () => {
+    expect(pointAt(points, 2, 8)).toBe(40);
+    expect(pointAt(points, 2, 9)).toBeUndefined();
+    expect(pointAt(points, 2, -1)).toBeUndefined();
+    expect(pointAt(points, 0, 1)).toBeUndefined();
+  });
+});
+
 describe('the traces follow the rider\u2019s units (#238)', () => {
   it('reads a speed in mph and an altitude in feet for an imperial rider', () => {
     const speed = seriesFor('speed', 'imperial');
     expect(speed.unit).toBe('mph');
-    expect(speed.format(10)).toBe('22.4');
+    expect(speed.format(speed.display(10))).toBe('22.4');
 
     const altitude = seriesFor('altitude', 'imperial');
     expect(altitude.unit).toBe('ft');
-    expect(altitude.format(100)).toBe('328');
+    expect(altitude.format(altitude.display(100))).toBe('328');
   });
 
-  it('plots and labels the same value, so the axis cannot disagree with the table', () => {
-    // ⚠️ `display` and `format` are separate fields and both take the STORED
-    // value. Composing them — `format(display(x))` — would convert twice, which
-    // is a 3.3x error on an altitude and reads as a plausible mountain.
+  it('converts once: `format` is handed what `display` returned — #2068', () => {
+    // ⚠️ The chart's axis and the table format a trace's points, which have
+    // been through `display` already. A `format` that converted again showed
+    // 10 m/s as 129.6 km/h and 100 m as 1 076 ft.
+    expect(seriesFor('speed', 'metric').format(36)).toBe('36.0');
+    expect(seriesFor('speed', 'imperial').format(22.37)).toBe('22.4');
     for (const units of ['metric', 'imperial'] as const) {
       const altitude = seriesFor('altitude', units);
-      expect(altitude.format(100)).toBe(String(Math.round(altitude.display(100))));
+      expect(altitude.format(altitude.display(100))).toBe(
+        String(Math.round(altitude.display(100))),
+      );
     }
   });
 
