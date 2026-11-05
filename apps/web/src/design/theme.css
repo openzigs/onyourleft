@@ -10034,7 +10034,24 @@ select.oyl-input {
  *   screen reader): *Place* and *Item* were a third row there, and the
  *   standings ran 63 px over *Pause*. Nothing else gives way on a tablet;
  * - the clock row's reservation in the primary panel is one line of the new
- *   secondary size, 2.45 × 1.05 rem.
+ *   secondary size, 2.45 × 1.05 rem;
+ * - ⚠️ **every unit on its number's line — the owner's screenshot review of
+ *   2026-11-05.** In six equal tracks *To go*'s ` km` fell under `39.94` at
+ *   1280×800: at 2.45 rem the number is 95.9 px and the unit 17.5, in 108.
+ *   So the tracks that hold *Speed* and *To go* have floors cut for their
+ *   widest ordinary values with the unit beside them: `99.9 km/h` is 107.6 px
+ *   (6.875 rem, 110 px), `99.99 km` 113.4 (7.25 rem, 116). On the 4:3 tablet
+ *   that leaves the last track 81 px with an 8 px gap, under the 5.5 rem
+ *   floor, so there the gap is the primary panel's 4 px and the gradient's
+ *   cell is 7.25 rem too, for `-19.9 %` and its glyph: the last track is then
+ *   97 px. No track is added or lost, so no panel gains a row. `metric-numerals.browser.spec.ts`
+ *   §"every unit is on its number's line" sets the widest values and reads
+ *   every unit against its digits at every overlay viewport. A speed of 100
+ *   km/h or more, or 100 km or more to go, is wider still and is not held
+ *   (the number alone is then wider than its old track as well). The primary
+ *   units stay a row of their own under the numbers, as #2071 draws them:
+ *   that is a layout, all four together, not a wrap, and four primary units
+ *   beside a four-digit power at 3.815 rem would need a 38 rem column.
  *
  * ⚠️ **Phones keep 1.5 and 2.5 rem — what that costs, written down as #419
  * asks.** Every phone layout is measured to within a few pixels of the leaning
@@ -10079,9 +10096,10 @@ select.oyl-input {
     grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
   }
 
+  /* The owner's review of 2026-11-05: every unit on its number's line. */
   .oyl-game--riding .oyl-hud__fields--secondary {
     grid-template-columns:
-      minmax(5.5rem, 1fr) minmax(5.5rem, 1fr) minmax(max-content, 1fr)
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
       repeat(3, minmax(5.5rem, 1fr));
   }
 }
@@ -10117,10 +10135,10 @@ select.oyl-input {
   }
 
   .oyl-game--riding .oyl-hud__fields--secondary {
-    grid-template-columns: repeat(3, minmax(5.5rem, 1fr)) minmax(max-content, 1fr) minmax(
-        5.5rem,
-        1fr
-      );
+    column-gap: var(--oyl-space-xs);
+    grid-template-columns:
+      minmax(7.25rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
+      minmax(5.5rem, 1fr);
   }
 
   .oyl-game--riding .oyl-hud__fields--secondary::before {

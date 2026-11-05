@@ -27,7 +27,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { openRide, TABLET_VIEWPORTS } from './ride-stage';
+import { OVERLAY_VIEWPORTS, openRide, TABLET_VIEWPORTS, type Viewport } from './ride-stage';
 
 /** ADR 0063 D-5: a primary ride numeral's cap height, in CSS px at 1280×800. */
 const PRIMARY_CAP_FLOOR_PX = 27.4;
@@ -272,4 +272,148 @@ test('#2130 the control — with equal primary tracks, a four-digit power does n
   });
   const { digits, field } = await fourDigitPower(page);
   expect(digits).toBeGreaterThan(field);
+});
+
+/**
+ * #2130, the owner's screenshot review of 2026-11-05 — **every unit on its
+ * number's line.** At 1280×800 *To go*'s `km` fell onto a line of its own
+ * under `39.94`: at 2.45 rem the number is 95.9 px and ` km` 17.5 px, in a
+ * 108 px track. A unit is read with its number, and one dropped under it reads
+ * as a different field's.
+ *
+ * Each reading is first set to the widest it shows in ordinary riding — a
+ * speed under 100 km/h (`99.9`), a distance to go under 100 km (`99.99`, #2130's
+ * case at two decimals), a gradient of `-19.9`, a four-digit power and
+ * three-digit heart rate and cadence — by writing the digits into the
+ * reading's own text node, so the measurement is the stylesheet's layout of
+ * the widest value rather than of whatever the ride happened to read. Then
+ * every unit drawn BESIDE its number (computed `display: inline`) must sit
+ * inside its number's line: its box within the digits' box, top and bottom. A
+ * unit on the next line is below the digits' box.
+ *
+ * ⚠️ **A primary unit set `display: block` is not a wrap: it is #2071's
+ * layout,** the four primary units drawn under their numbers as a row of their
+ * own wherever four primary tracks share the panel. That layout is read
+ * too: a block unit anywhere but the primary panel, or a primary panel with
+ * some units beside and some under, fails. A field is counted in the panel it
+ * is DRAWN in: #2071's gradient, positioned into the secondary panel's first
+ * cell on the 4:3 tablet and on an upright phone, is a secondary reading there.
+ *
+ * **Control:** the 1280×800 secondary tier set back to six equal 5.5 rem
+ * tracks with the 8 px gap it had, the layout of the screenshot, drops *To
+ * go*'s unit under its number.
+ */
+const WIDEST_ORDINARY_VALUES: Readonly<Record<string, string>> = {
+  Power: '1999',
+  Cadence: '199',
+  'Heart rate': '199',
+  Gradient: '19.9',
+  Speed: '99.9',
+  'To go': '99.99',
+};
+
+interface UnitLine {
+  readonly label: string;
+  readonly panel: 'primary' | 'secondary';
+  readonly display: string;
+  readonly beside: boolean;
+}
+
+/** Sets the widest values, then reads each unit's place against its digits. */
+async function unitLines(page: Page): Promise<readonly UnitLine[]> {
+  return page.evaluate((widest) => {
+    const lines: UnitLine[] = [];
+    for (const field of document.querySelectorAll<HTMLElement>('.oyl-hud .oyl-hud__field')) {
+      const value = field.querySelector<HTMLElement>(':scope > .oyl-hud__value');
+      const unit = value?.querySelector<HTMLElement>(':scope > .oyl-hud__unit');
+      if (value === null || value === undefined || unit === null || unit === undefined) continue;
+      // A reading a layout clips out of sight (#1912's give-way) is not drawn.
+      if (field.getBoundingClientRect().width < 2) continue;
+      const label = field.querySelector('.oyl-hud__label')?.textContent ?? '';
+      const digits = [...value.childNodes].findLast(
+        (node): node is Text => node instanceof Text && node.compareDocumentPosition(unit) === 4,
+      );
+      const wide = widest[label];
+      if (digits !== undefined && wide !== undefined) {
+        digits.data = wide;
+        const sign = value.querySelector(':scope > .oyl-hud__sign');
+        if (sign !== null) sign.textContent = '-';
+      }
+      const range = document.createRange();
+      range.setStart(value, 0);
+      range.setEndBefore(unit);
+      const number = range.getBoundingClientRect();
+      const box = unit.getClientRects()[0] ?? unit.getBoundingClientRect();
+      lines.push({
+        label,
+        // Where it is DRAWN: #2071's gradient drawn in the secondary panel's
+        // first cell is in the primary list and at the secondary size there.
+        panel:
+          field.closest('.oyl-hud__fields--primary') === null ||
+          getComputedStyle(field).position === 'absolute'
+            ? 'secondary'
+            : 'primary',
+        display: getComputedStyle(unit).display,
+        beside: box.top >= number.top - 1 && box.bottom <= number.bottom + 1,
+      });
+    }
+    return lines;
+  }, WIDEST_ORDINARY_VALUES);
+}
+
+/** What is wrong with the units' lines, or nothing. */
+function unitLineFaults(lines: readonly UnitLine[]): string[] {
+  const faults: string[] = [];
+  const primaryBlocks = lines.filter(
+    (each) => each.panel === 'primary' && each.display === 'block',
+  );
+  const primary = lines.filter((each) => each.panel === 'primary');
+  if (primaryBlocks.length > 0 && primaryBlocks.length !== primary.length) {
+    faults.push(
+      `the primary panel mixes units beside and under their numbers: ${primaryBlocks.map((each) => each.label).join(', ')} under`,
+    );
+  }
+  for (const each of lines) {
+    if (each.display === 'block') {
+      if (each.panel !== 'primary') faults.push(`${each.label}'s unit is a block of its own`);
+    } else if (!each.beside) {
+      faults.push(`${each.label}'s unit wrapped under its number`);
+    }
+  }
+  return faults;
+}
+
+async function expectUnitsOnTheirLines(
+  page: Page,
+  viewport: Viewport,
+  query: string,
+): Promise<void> {
+  await openRide(page, viewport, query);
+  const lines = await unitLines(page);
+  expect(lines.some((each) => each.label === 'To go')).toBe(true);
+  expect(unitLineFaults(lines), `${viewport.name} ${query}`).toEqual([]);
+}
+
+for (const viewport of OVERLAY_VIEWPORTS) {
+  for (const query of ['', '?room=following']) {
+    test(`#2130 every unit is on its number's line — ${viewport.name}${query === '' ? '' : ', in a room'}`, async ({
+      page,
+    }) => {
+      await expectUnitsOnTheirLines(page, viewport, query);
+    });
+  }
+}
+
+test("#2130 the control — six equal tracks drop To go's unit under its number", async ({
+  page,
+}) => {
+  await openRide(page, OWNERS_TABLET);
+  await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('.oyl-hud__fields--secondary');
+    if (panel === null) throw new Error('no secondary panel');
+    panel.style.gridTemplateColumns = 'repeat(6, minmax(5.5rem, 1fr))';
+    panel.style.columnGap = '8px';
+  });
+  const faults = unitLineFaults(await unitLines(page));
+  expect(faults).toContain("To go's unit wrapped under its number");
 });
