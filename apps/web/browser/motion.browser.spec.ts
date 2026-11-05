@@ -41,7 +41,9 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { PRODUCT_ORIGIN } from '../playwright.config';
 import { MOTION_DURATION_MS } from '../src/design/tokens';
+import { INTRO_ID } from '../src/shell/intro';
 import { hrefFor, routeById, type RouteId } from '../src/shell/routes';
 
 import { NIGHTLY } from './nightly';
@@ -681,5 +683,121 @@ test.describe('the route cross-fade — #945', () => {
     console.log(
       `#945: a failed chunk started ${String(started)} transition(s), ${String(settled)} settled`,
     );
+  });
+});
+
+/** What the first-paint intro did on one cold load, recorded by {@link recordIntro}. */
+interface IntroLog {
+  /** Whether `#oyl-intro` was in the document as it loaded. */
+  present: boolean;
+  /** Every animation on the intro or inside it once its way out began, by name, with its duration in ms. */
+  animations: { name: string; ms: number }[];
+}
+
+declare global {
+  interface Window {
+    __oylIntro?: IntroLog;
+  }
+}
+
+/**
+ * Runs before any page script: when anything sets the intro's
+ * `data-oyl-intro`, reads every animation on it and inside it from
+ * `getAnimations()`. Read there, in the observer's microtask straight after
+ * the attribute is set, rather than from `animationstart`: an animation the
+ * reduced-motion block collapses to 0.01 ms finishes, and the intro is
+ * removed, before the browser dispatches that event, so a listener would see
+ * nothing and pass. With `slowerMs`, also lays a rule over the intro's that
+ * runs its way out at that duration: the control that says a slow intro is
+ * seen.
+ */
+function recordIntro({ id, slowerMs }: { id: string; slowerMs: number | null }): void {
+  const log: IntroLog = { present: false, animations: [] };
+  window.__oylIntro = log;
+  document.addEventListener('DOMContentLoaded', () => {
+    log.present = document.getElementById(id) !== null;
+    if (slowerMs !== null) {
+      const style = document.createElement('style');
+      style.textContent = `#${id}[data-oyl-intro], #${id}[data-oyl-intro] * { animation-duration: ${String(slowerMs)}ms !important; }`;
+      document.head.append(style);
+    }
+  });
+  new MutationObserver((records) => {
+    for (const record of records) {
+      const target = record.target;
+      if (!(target instanceof HTMLElement) || target.id !== id) continue;
+      for (const animation of target.getAnimations({ subtree: true })) {
+        const duration = animation.effect?.getComputedTiming().duration;
+        log.animations.push({
+          name: animation instanceof CSSAnimation ? animation.animationName : 'not a CSS animation',
+          ms: typeof duration === 'number' ? duration : Number.NaN,
+        });
+      }
+    }
+  }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-oyl-intro'] });
+}
+
+/** A cold load of the product on `id`, through to the intro having left the page. */
+async function coldLoad(
+  page: Page,
+  id: RouteId,
+  slowerMs: number | null = null,
+): Promise<IntroLog> {
+  await page.addInitScript(recordIntro, { id: INTRO_ID, slowerMs });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const response = await page.goto(`${PRODUCT_ORIGIN}/${hrefFor(routeById(id))}`);
+  expect(response?.status()).toBe(200);
+  await page.waitForFunction((intro) => document.getElementById(intro) === null, INTRO_ID);
+  const read = await page.evaluate(() => window.__oylIntro);
+  if (read === undefined) throw new Error('the init script did not run: no intro log on the page');
+  // ⚠️ Every case below needs the intro to have been THERE: a page without
+  // one animates nothing, and would pass the "none runs" cases for that reason.
+  expect(read.present, 'index.html carried no intro').toBe(true);
+  return read;
+}
+
+/** The intro's animations that ran longer than the motion ceiling. */
+function overCeiling(log: IntroLog): { name: string; ms: number }[] {
+  return log.animations.filter((animation) => !(animation.ms <= MOTION_DURATION_MS.medium));
+}
+
+/*
+ * The first-paint intro — #2053. Against the PRODUCT build: the intro is in
+ * `index.html`, which no harness page carries. `shell/intro.ts` and
+ * `theme.css` §"THE FIRST-PAINT INTRO" are the code; these read what the
+ * browser actually ran, from `getAnimations()` as each animation started.
+ */
+test.describe('the first-paint intro — #2053', () => {
+  test('a cold load of Home runs it, and every animation is at most 200 ms', async ({ page }) => {
+    const log = await coldLoad(page, 'home');
+    console.log('#2053: the intro ran', log.animations);
+    // The canvas fading and the mark growing: both, so neither goes unmeasured.
+    expect(log.animations.map((animation) => animation.name).sort()).toEqual([
+      'oyl-intro-mark-out',
+      'oyl-intro-out',
+    ]);
+    expect(log.animations.every((animation) => animation.ms > 0)).toBe(true);
+    expect(overCeiling(log)).toEqual([]);
+    await expect(page.locator('h1')).toHaveText(routeById('home').title);
+  });
+
+  test('control: run at 400 ms, the same reading finds it over the ceiling', async ({ page }) => {
+    const log = await coldLoad(page, 'home', 400);
+    expect(overCeiling(log).map((animation) => animation.ms)).toEqual([400, 400]);
+  });
+
+  test('a cold load of a ride route runs none', async ({ page }) => {
+    // The intro was there (`coldLoad`) and has gone, and nothing animated it out.
+    expect((await coldLoad(page, 'ride')).animations).toEqual([]);
+  });
+
+  test('a cold load of the game runs none', async ({ page }) => {
+    expect((await coldLoad(page, 'game')).animations).toEqual([]);
+  });
+
+  test('under prefers-reduced-motion: reduce, none runs', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect((await coldLoad(page, 'home')).animations).toEqual([]);
+    await expect(page.locator('h1')).toHaveText(routeById('home').title);
   });
 });
