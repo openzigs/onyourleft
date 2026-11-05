@@ -1639,8 +1639,8 @@ html {
  * rail takes a different share of each window.
  *
  * ⚠️ **The DOM order is the reading order, the visual order and the tab order
- * on every layout**: Next up (the quick-launch), the sensors (the Trainer
- * card, #2045's slot), the last ride (#2048's; on a first open the other ways
+ * on every layout**: Next up (the quick-launch), the sensors (#2045's
+ * module, in the Trainer card's old slot), the last ride (#2048's; on a first open the other ways
  * to start), the week (#2049's), then the ride cards, fitness and the badges.
  * Every module is placed by its columns alone and the rows are auto, so none
  * can jump ahead of one it follows.
@@ -1681,7 +1681,7 @@ html {
   }
 
   .oyl-next-up,
-  .oyl-home__trainer {
+  .oyl-home__sensors {
     grid-column: 1 / -1;
   }
 }
@@ -1697,7 +1697,7 @@ html {
     grid-column: 1 / 3;
   }
 
-  .oyl-home__trainer,
+  .oyl-home__sensors,
   .oyl-home__week {
     grid-column: 3;
   }
@@ -1894,12 +1894,23 @@ html {
   stroke-linecap: round;
 }
 
-/* The Trainer card's glyph — a medium drawing, 3rem, like the ring above and
-   the cards' pictures (the owner's ruling of 2026-10-01 on #935). */
+/* The sensors module's glyph (the Trainer card's until #2045) — a medium
+   drawing, 3rem, like the ring above and the cards' pictures (the owner's
+   ruling of 2026-10-01 on #935). */
 .oyl-home__glyph {
   flex: none;
   width: 3rem;
   height: 3rem;
+}
+
+/* #2045: one device to a row, the trainer first, each row its words and its
+   own reading under them — no marker, as the Devices screen's list. */
+.oyl-home__sensor-list {
+  display: grid;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 /*

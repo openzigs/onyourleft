@@ -284,7 +284,7 @@ function measure(): HomeMeasurement {
     fold: foldLine(),
     nextUp: measureNextUp(),
     week: boxOrNothing(document.querySelector('.oyl-home__week')),
-    trainer: boxOrNothing(document.querySelector('.oyl-home__trainer')),
+    trainer: boxOrNothing(document.querySelector('.oyl-home__sensors')),
     lastRide: boxOrNothing(document.querySelector('.oyl-home__last')),
     modules: modules.map((module) => ({
       name: (module.querySelector('h2')?.textContent ?? module.textContent ?? '')
