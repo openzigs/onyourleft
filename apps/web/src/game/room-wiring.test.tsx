@@ -732,6 +732,41 @@ describe('the room’s voice link on the HUD — #875', () => {
     expect(voiceLinks()).toEqual([]);
   });
 
+  it('a new link from the room — the channel replaced after a removal or a ban — is shown again, for a span of its own (#876)', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'ride', INVITE);
+    for (let tick = 1; tick <= 22; tick += 1) {
+      room.frame(tick, [frameRider(1, 10 + tick * 8)]);
+      await pump(4);
+    }
+    expect(voiceLinks()).toEqual([]);
+    const NEWER = 'https://discord.gg/inv2abc';
+    room.send({ type: 'voice', voiceInvite: NEWER });
+    room.frame(23, [frameRider(1, 200)]);
+    await pump(4);
+    expect(voiceLinks().map((link) => link.getAttribute('href'))).toEqual([NEWER]);
+    // And the room saying it has no voice now takes it away at once.
+    room.send({ type: 'voice' });
+    room.frame(24, [frameRider(1, 208)]);
+    await pump(4);
+    expect(voiceLinks()).toEqual([]);
+  });
+
+  it('a race on its line shows the new link in place of the old (#876)', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'race', INVITE);
+    await pump(8);
+    room.send({ type: 'voice', voiceInvite: 'https://discord.gg/inv2abc' });
+    await pump(4);
+    expect(voiceLinks().map((link) => link.getAttribute('href'))).toEqual([
+      'https://discord.gg/inv2abc',
+    ]);
+  });
+
   it('a race shows it inside its own notice for as long as it holds the rider on its line, and not once it runs', async () => {
     const room = new ScriptedRoom();
     await rideInRoom(room);

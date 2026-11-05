@@ -46,6 +46,7 @@ export type {
   RoomMessage,
   Standings,
   StandingsRider,
+  VoiceLink,
   Welcome,
 } from './messages';
 export {

@@ -668,6 +668,20 @@ export class RoomSession {
             this.#finish = message;
             this.#options.onChange?.();
             return;
+          case 'voice': {
+            // #876: the room's voice link changed under this rider — the
+            // channel was replaced after a removal or a ban. Only a rider the
+            // room has welcomed is told; absent is no voice any more.
+            const status = this.#status;
+            if (status.kind !== 'joined') return;
+            this.#setStatus({
+              kind: 'joined',
+              riderId: status.riderId,
+              config: status.config,
+              ...(message.voiceInvite === undefined ? {} : { voiceInvite: message.voiceInvite }),
+            });
+            return;
+          }
         }
       },
       onClose: (code) => {

@@ -254,9 +254,14 @@ export interface Room {
    * room refuses is never told it. `undefined` is none. A value that is not a
    * link on Discord's invite host (`@onyourleft/protocol` §`VOICE_INVITE_PATTERN`)
    * is taken as none, so a welcome is never one the encoder would refuse.
-   * Sends nothing: a rider already welcomed is not told of a new link here.
+   *
+   * #876: when the link CHANGES — the channel replaced after a removal or a
+   * ban — every rider connected now is told the new one in a `voice`
+   * message, except `withheldFrom`: the athlete the change was made about, if
+   * they are still connected (a ban closes no socket). A link set again to
+   * what it was sends nothing.
    */
-  setVoiceInvite(invite: string | undefined): void;
+  setVoiceInvite(invite: string | undefined, withheldFrom?: string): Outbound[];
   view(): RoomView;
 }
 
@@ -334,6 +339,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   const barred = new Set<string>();
   /** The room's Discord voice link, said in a welcome and nowhere else (#875). */
   let voiceInvite: string | undefined;
+  /**
+   * Athletes a voice change was made about (#876), for the room's life: a
+   * suspension leaves the socket open (#789), so every later `voice` broadcast
+   * must skip them too, not only the one that named them.
+   */
+  const voiceWithheld = new Set<string>();
   const tickDuration: Seconds = seconds(settings.frameIntervalMs / 1000);
   const lap = settings.lapRace;
   const lapCourse: RaceCourse | undefined =
@@ -1050,8 +1061,21 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       return out;
     },
 
-    setVoiceInvite(invite) {
-      voiceInvite = invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
+    setVoiceInvite(invite, withheldFrom) {
+      if (withheldFrom !== undefined) voiceWithheld.add(withheldFrom);
+      const next = invite !== undefined && VOICE_INVITE_PATTERN.test(invite) ? invite : undefined;
+      if (next === voiceInvite) return [];
+      voiceInvite = next;
+      const out: Outbound[] = [];
+      for (const seat of seated()) {
+        if (seat.connection === undefined || voiceWithheld.has(seat.athleteId)) continue;
+        out.push({
+          kind: 'send',
+          connection: seat.connection,
+          message: { type: 'voice', ...(next === undefined ? {} : { voiceInvite: next }) },
+        });
+      }
+      return out;
     },
 
     view() {

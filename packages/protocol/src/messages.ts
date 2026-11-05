@@ -20,6 +20,7 @@
  * room → client   name    { riderId, displayName }                           a race only
  * room → client   standings { tick, riders: [[id, gap ds, W/kg ×10, flags]] }  a race only, every 1 s
  * room → client   finish  { order: [riderId, …] }                            a race only
+ * room → client   voice   { voiceInvite? }                                    the room's voice link changed
  * ```
  *
  * ## Three things that are decisions
@@ -68,7 +69,9 @@
  * room's Discord voice link ({@link Welcome.voiceInvite}). The decoder refuses
  * a key it does not know (`codec.ts`, `unknown-key`), so a version-3 build
  * would refuse every welcome from a room with voice; it is refused
- * `protocol-mismatch` at its hello instead, and told to update.
+ * `protocol-mismatch` at its hello instead, and told to update. In the same
+ * unreleased version, #876 added {@link VoiceLink}: the room's link changed
+ * under riders it had already welcomed.
  */
 export const PROTOCOL_VERSION = 4;
 
@@ -394,11 +397,25 @@ export interface Finish {
   readonly order: readonly number[];
 }
 
+/**
+ * The room's Discord voice link changed — #876: a rider was removed from the
+ * room or banned, so its channel was replaced (spike 0017 §3.3) and the riders
+ * still in the room are given the new link. Absent `voiceInvite` is no voice
+ * any more. Sent only to riders the room has already welcomed, and never to
+ * the rider who was removed or banned; held to `schema.ts`
+ * §`VOICE_INVITE_PATTERN` as a welcome's link is.
+ */
+export interface VoiceLink {
+  readonly type: 'voice';
+  readonly voiceInvite?: string;
+}
+
 /** What a client may send. */
 export type ClientMessage = Hello | Report | ItemUse | LaneChange;
 
 /** What a room may send. */
-export type RoomMessage = Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish;
+export type RoomMessage =
+  Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish | VoiceLink;
 
 /** Every message. */
 export type ProtocolMessage = ClientMessage | RoomMessage;

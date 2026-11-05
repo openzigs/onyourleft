@@ -57,6 +57,7 @@ import type { SqlStore } from './store/sql-store.ts';
 import { createSync, type Sync } from './sync/sync.ts';
 import { createDiscordClient } from './voice/discord.ts';
 import { createRoomVoice, type RoomVoice } from './voice/room-voice.ts';
+import { createVoiceModeration, type VoiceModeration } from './voice/voice-moderation.ts';
 
 /**
  * The running instance, put together (#780, #791): the store opened (never
@@ -274,6 +275,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
   let voice: RoomVoice | undefined;
+  let voiceModeration: VoiceModeration | undefined;
   let voiceReady: Promise<void> = Promise.resolve();
   let sync: Sync | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
@@ -407,6 +409,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       (await router.startRoom(roomId, athleteId)) ? 'started' : 'not_found',
     seatOf: (roomId, riderId) => router.seatOf(roomId, riderId),
     removeFromRoom: (roomId, athleteId) => router.removeFromRoom(roomId, athleteId),
+    // #876: a removal and a ban reach the room's Discord voice, where there is any.
+    afterRoomRemoval: async (removal) => {
+      await voiceModeration?.afterRemoval(removal);
+    },
+    afterSuspension: async (suspension) => {
+      await voiceModeration?.afterSuspension(suspension);
+    },
   };
 
   const handlerOptions = {
@@ -594,6 +603,20 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
               log,
             });
       const roomsVoice = voice;
+      const voiceStore = store;
+      voiceModeration =
+        voice === undefined
+          ? undefined
+          : createVoiceModeration({
+              voice,
+              tell: (roomId, invite, withheldFrom) => {
+                router.setVoiceInvite(roomId, invite, withheldFrom);
+              },
+              isMember: (roomId, athleteId) => voiceStore.isRoomMember(roomId, athleteId),
+              record: (entry) => voiceStore.logVoiceAction(entry),
+              now,
+              log,
+            });
       // #784, #785: riders' rooms. Their routes are kept apart from the
       // synced files — under the blob directory's `rooms/` — and live only as
       // long as their room (`rooms/rooms.ts`), so a backup does not carry them.

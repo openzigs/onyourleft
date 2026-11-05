@@ -96,6 +96,8 @@ const MESSAGES: readonly ProtocolMessage[] = [
     voiceInvite: 'https://discord.gg/Ab3-xyz9',
   },
   { type: 'refuse', reason: 'physics-mismatch' },
+  { type: 'voice', voiceInvite: 'https://discord.gg/Ab3-new2' },
+  { type: 'voice' },
   { type: 'frame', tick: 0, riders: [] },
   {
     type: 'frame',
@@ -195,6 +197,7 @@ describe('decode(encode(m)) ≡ m', () => {
         'name',
         'standings',
         'finish',
+        'voice',
       ]),
     );
   });
@@ -786,6 +789,26 @@ describe('the lap race — #1908', () => {
     ]) {
       expect(welcome(bad), JSON.stringify(bad)).toBe('bad-value');
     }
+  });
+
+  it('takes a changed voice link on Discord’s invite host only, or none — #876', () => {
+    const voice = (fields: Record<string, unknown>) =>
+      refusalOf(decodeRoomMessage(JSON.stringify({ type: 'voice', ...fields })));
+    expect(voice({})).toBe('accepted');
+    expect(voice({ voiceInvite: 'https://discord.gg/abc123' })).toBe('accepted');
+    for (const bad of [
+      'http://discord.gg/abc123',
+      'https://evil.example/abc123',
+      'javascript:x',
+      7,
+    ]) {
+      expect(voice({ voiceInvite: bad }), JSON.stringify(bad)).toBe('bad-value');
+    }
+    expect(voice({ voiceInvite: 'https://discord.gg/abc123', riderId: 1 })).toBe('unknown-key');
+    // A room's message: a client may not send one.
+    expect(refusalOf(decodeClientMessage(JSON.stringify({ type: 'voice' }), PHYSICS))).toBe(
+      'unknown-type',
+    );
   });
 
   it('refuses a lap race’s settings out of bounds, or one without the other', () => {
