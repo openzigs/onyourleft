@@ -43,8 +43,22 @@ name: Repository rules
 # not covered by the fork-approval gate at all -- is banned by CLAUDE.md section
 # 8 and enforced by rule WF001 in scripts/check-repo-rules.sh. That rule greps
 # this directory for the name, so the name cannot appear here even in a comment.
+#
+# `merge_group` since #2198: `main` merges through GitHub's merge queue, and the
+# queue merges a pull request only once the required "Repository rules" check
+# has reported on the queue's own `gh-readonly-queue/main/...` ref -- the
+# pull request merged with main and with every entry ahead of it. Without this
+# trigger that check never reports there and every queued pull request waits
+# until the queue's timeout removes it. No job or step here reads a field of
+# the pull_request payload (a base SHA, a label, a number), so every one runs
+# unchanged under it, against the merge group's commit. Unlike `pull_request`,
+# a queue run is in this repository's own context, as a push to `main` is: it
+# holds what the push after the merge would, and only a reviewed pull request
+# that someone with write access queued reaches it. Nothing below references a
+# secret, and the token stays `contents: read`.
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 
@@ -61,6 +75,11 @@ permissions:
 # commit was green, and two merges in quick succession would otherwise cancel
 # the first -- leaving a commit on the default branch with no completed run
 # against it, which is the one place the history matters.
+#
+# Never a merge-queue run either (#2198): each queue entry has a ref of its own,
+# so the group never collides, and a cancelled run there is a required check
+# that reports `cancelled` and drops the pull request from the queue. The
+# queue removes an entry it no longer needs by itself.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
