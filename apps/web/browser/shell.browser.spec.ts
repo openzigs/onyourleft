@@ -663,6 +663,8 @@ const BEFORE_671 = `
 
 interface HeaderReading {
   readonly height: number;
+  /** #2056's mute in the header, 0 tall where there is none. */
+  readonly mute: number;
   readonly top: number;
   readonly atLoad: string;
   readonly afterScroll: string;
@@ -688,7 +690,8 @@ async function readHeader(
     const header = document.querySelector('.oyl-header');
     if (header === null) throw new Error('no .oyl-header');
     const measured = header.getBoundingClientRect();
-    return { height: measured.height, top: measured.top };
+    const mute = header.querySelector('.oyl-header__mute')?.getBoundingClientRect().height ?? 0;
+    return { height: measured.height, mute, top: measured.top };
   });
   const pixel = async (name: string): Promise<string> => {
     const file = path(name);
@@ -744,7 +747,13 @@ for (const viewport of HEADER_VIEWPORTS) {
           `${String(WORDMARK_BAR_PIXELS)} px`,
       ).toBeLessThan(WORDMARK_BAR_PIXELS);
       if (viewport.width < 600) {
-        expect(read.height, 'below the rail breakpoint the wordmark bar is folded away').toBe(0);
+        // #2056: the wordmark is still folded away; what is left on a menu
+        // route is the one-press mute, and the header is that row and no more.
+        expect(read.mute, 'no header mute on Home').toBeGreaterThan(0);
+        expect(
+          read.height,
+          'below the rail breakpoint the wordmark bar is folded away, leaving only the mute',
+        ).toBeLessThanOrEqual(read.mute + 0.5);
       }
       expect(
         read.atLoad,
@@ -3775,5 +3784,147 @@ test.describe('#944 — under forced colours the current destination keeps a sha
     }
     // The padding took the border back: the pill is the height it was.
     expect(current[0]?.height).toBeCloseTo(plain.find((each) => each.current)?.height ?? 0, 1);
+  });
+});
+
+/**
+ * #2056 — the header's one-press mute, in a real engine.
+ *
+ * ## What is measured
+ *
+ * - **Its target**, at a landscape tablet and an upright phone: 44 px in both
+ *   axes, and the topmost thing at its own centre. Below the rail breakpoint
+ *   the wordmark is folded away (#671) and the mute is the header's one row,
+ *   so there the header is no taller than the mute.
+ * - **What it does to the sound**, read from the PAGE'S OWN AUDIO GRAPH: a
+ *   probe installed before the app loads ({@link AUDIO_GRAPH_PROBE}) records
+ *   every gain the platform's `AudioContext` makes and where each is
+ *   connected, and reads the master — the one gain on the destination — from
+ *   the node itself. The press is a real one, the context is Chromium's, and
+ *   the graph is the one `game/web-audio.ts` builds; nothing here asks the
+ *   button what it did.
+ *
+ * ⚠️ **The control** is a button that only flips its own state: the PR that
+ * added this ran the spec with `HeaderMute.tsx`'s write and `applyMix` call
+ * deleted, and the master read 1 after the press. A press is what builds the
+ * graph (a context is made only inside a gesture), so the spec first turns the
+ * menus' sounds on in storage and presses the skip link with the keyboard —
+ * a press on a control that navigates nowhere, which sounds a *select*.
+ *
+ * ## What this does NOT prove
+ *
+ * That anything is heard. Headless Chromium has no speaker to listen to; the
+ * level the master is set to is the claim, and a person with headphones is the
+ * check (`docs/validation/0003-screen-reader-and-assistive-technology.md`
+ * Part I).
+ */
+const AUDIO_GRAPH_PROBE = `(() => {
+  localStorage.setItem('oyl.menuSounds.v1', JSON.stringify({ enabled: true, volume: 0.5 }));
+  const edges = new WeakMap();
+  const gains = [];
+  const createGain = BaseAudioContext.prototype.createGain;
+  BaseAudioContext.prototype.createGain = function (...args) {
+    const node = createGain.apply(this, args);
+    gains.push(node);
+    return node;
+  };
+  const connect = AudioNode.prototype.connect;
+  AudioNode.prototype.connect = function (to, ...rest) {
+    const list = edges.get(this) ?? [];
+    list.push(to);
+    edges.set(this, list);
+    return connect.call(this, to, ...rest);
+  };
+  window.__oylMaster = () => {
+    const master = gains.filter((node) => (edges.get(node) ?? []).includes(node.context.destination));
+    if (master.length !== 1) return { masters: master.length, gain: null, state: null };
+    return { masters: 1, gain: master[0].gain.value, state: master[0].context.state };
+  };
+})();`;
+
+interface MasterReading {
+  readonly masters: number;
+  readonly gain: number | null;
+  readonly state: string | null;
+}
+
+async function readMaster(page: Page): Promise<MasterReading> {
+  return page.evaluate(() =>
+    (window as unknown as { __oylMaster: () => MasterReading }).__oylMaster(),
+  );
+}
+
+/** A press that builds the graph: the skip link, by keyboard, which sounds a *select*. */
+async function pressSomethingElse(page: Page): Promise<void> {
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.oyl-skip-link')).toBeFocused();
+  await page.keyboard.press('Enter');
+}
+
+const MUTE_VIEWPORTS = [
+  { name: 'tablet 1280×800', width: 1280, height: 800 },
+  { name: 'phone 412×915', width: 412, height: 915 },
+] as const;
+
+test.describe('#2056 — the header mute', () => {
+  for (const viewport of MUTE_VIEWPORTS) {
+    test(`is a 44 px target in the header, on top, at ${viewport.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await openShell(page);
+      const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
+      await expect(mute).toBeVisible();
+      const read = await mute.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const header = document.querySelector('.oyl-header')?.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return {
+          width: box.width,
+          height: box.height,
+          onTop: hit !== null && element.contains(hit),
+          header: header?.height ?? Number.NaN,
+        };
+      });
+      console.log(
+        `#2056 ${viewport.name}: mute ${read.width.toFixed(1)}×${read.height.toFixed(1)}, ` +
+          `header ${read.header.toFixed(1)} px`,
+      );
+      expect(read.width).toBeGreaterThanOrEqual(44);
+      expect(read.height).toBeGreaterThanOrEqual(44);
+      expect(read.onTop, 'something covers the mute').toBe(true);
+      if (viewport.width < 600) {
+        expect(read.header, 'on a phone the header is the mute’s one row').toBeLessThanOrEqual(
+          read.height + 1,
+        );
+      }
+    });
+  }
+
+  test('silences the master on the page’s own audio graph, and keeps it across a reload', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?sounds=on');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
+    await expect(mute).toHaveAttribute('aria-pressed', 'false');
+
+    await pressSomethingElse(page);
+    await expect.poll(async () => (await readMaster(page)).gain).toBe(1);
+    expect((await readMaster(page)).state).toBe('running');
+
+    await mute.click();
+    await expect(mute).toHaveAttribute('aria-pressed', 'true');
+    // The master glides to 0 (a time constant of 20 ms), so it is polled.
+    await expect.poll(async () => (await readMaster(page)).gain ?? 1).toBeLessThan(0.001);
+
+    await page.reload();
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    await expect(mute).toHaveAttribute('aria-pressed', 'true');
+    // A fresh graph, built at the next press from what was kept.
+    expect((await readMaster(page)).masters).toBe(0);
+    await pressSomethingElse(page);
+    await expect.poll(async () => (await readMaster(page)).masters).toBe(1);
+    expect((await readMaster(page)).gain).toBe(0);
   });
 });

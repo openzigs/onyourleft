@@ -626,6 +626,20 @@ html {
 }
 
 /*
+ * The one-press mute — #2056 (`shell/HeaderMute.tsx`), at the header's far
+ * end. It is `.oyl-button`'s 44 px target, inside the header's declared 48 px
+ * where the header has a height. Below the rail breakpoint, where the wordmark
+ * is folded away and the header is otherwise zero tall, it is the header's
+ * one row on a menu route: `shell.browser.spec.ts` §"#2056" measures both.
+ */
+.oyl-header__mute {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+/*
  * The owner's wordmark and logo — #965 (`brand/Brand.tsx`).
  *
  * Each picture comes in a light-palette and a dark-palette variant, and the
@@ -715,7 +729,8 @@ html {
  * wordmark is taken off the SCREEN only — the visually-hidden pattern this
  * stylesheet already uses, which is safe for a paragraph because it is not a
  * control and so cannot mislead the tab-order model (docs/agents/accessibility.md §4e). The
- * header's box is then zero tall: its band above still paints the inset.
+ * header's box is then zero tall on a ride route, and on a menu route as tall
+ * as #2056's mute, its one row: its band above still paints the inset.
  */
 @media (max-width: 37.49rem) {
   :root {
@@ -2019,12 +2034,14 @@ html {
  * under WCAG 2.2 SC 2.5.8's 24×24 (Level AA — the MINIMUM criterion; 44×44 is
  * SC 2.5.5, AAA). Declared, and `shell.browser.spec.ts` measures it with a
  * control that strips it. #1813's Delivery assist switches take the same
- * size, and since #1905 the lap race's; their sections are not
- * `.oyl-announce`, whose tests find the announcements' own controls by it.
+ * size, and since #1905 the lap race's, and since #2056 the music's; their
+ * sections are not `.oyl-announce`, whose tests find the announcements' own
+ * controls by it.
  */
 .oyl-announce input[type='checkbox'],
 .oyl-delivery-assist input[type='checkbox'],
-.oyl-lap-race-assist input[type='checkbox'] {
+.oyl-lap-race-assist input[type='checkbox'],
+.oyl-music input[type='checkbox'] {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
@@ -7620,7 +7637,8 @@ select.oyl-input {
 
 .oyl-sound input[type='range'],
 .oyl-sounds input[type='range'],
-.oyl-menu-sounds input[type='range'] {
+.oyl-menu-sounds input[type='range'],
+.oyl-music input[type='range'] {
   min-height: 2.75rem;
   min-width: 2.75rem;
   margin: 0;

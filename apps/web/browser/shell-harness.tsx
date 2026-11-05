@@ -72,6 +72,10 @@ import {
 } from '../src/design/illustration/specimens-testing';
 import { StatusMessage, type StatusTone } from '../src/design/StatusMessage';
 import { AppShell } from '../src/shell/AppShell';
+import { createMenuSounds } from '../src/shell/menu-sounds';
+import { readMenuSoundPreference } from '../src/shell/menu-sound-preference';
+import { deviceStorage } from '../src/game/hud/announce-preference';
+import { sharedCueOutput } from '../src/game/web-audio';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -667,6 +671,16 @@ const CAMERA_LIVE = 'live';
  */
 const PAIRING_ON = 'on';
 
+/**
+ * `?sounds=on` hands the shell the menus' sounds over the app's SHARED audio
+ * output, as `main.tsx` builds them — #2056 — so a press on this page makes
+ * and resumes a real `AudioContext` and the graph `game/web-audio.ts` builds,
+ * which `shell.browser.spec.ts` §"#2056" reads back. Opt-in for
+ * `CAMERA_LIVE`'s reason: every pre-existing case goes on loading the page it
+ * was written against, with no audio at all.
+ */
+const SOUNDS_ON = 'on';
+
 /** The `z-index` the ride stage declares — `theme.css` §"THE STAGE". */
 const PRODUCT_MAXIMUM_STACKING = 20;
 
@@ -807,6 +821,7 @@ function main(): void {
   const wantsCamera = new URLSearchParams(globalThis.location.search).get('camera') === CAMERA_LIVE;
   const wantsPairing =
     new URLSearchParams(globalThis.location.search).get('pairing') === PAIRING_ON;
+  const wantsSounds = params.get('sounds') === SOUNDS_ON;
   const wantsLinkSpecimens =
     new URLSearchParams(globalThis.location.search).get('links') === LINK_SPECIMENS;
   const camera = new CameraController({
@@ -841,6 +856,13 @@ function main(): void {
           capabilities={NO_BLUETOOTH}
           camera={camera}
           {...(wantsPairing ? { sidePairing: sidePairingPort({ peer: () => undefined }) } : {})}
+          {...(wantsSounds
+            ? {
+                menuSounds: createMenuSounds(sharedCueOutput(), () =>
+                  readMenuSoundPreference(deviceStorage()),
+                ),
+              }
+            : {})}
         />
       </StrictMode>,
     );
