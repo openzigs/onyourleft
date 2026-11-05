@@ -47,7 +47,14 @@ import {
   type RiderKit,
 } from './bicycle';
 import { WOOD_SWAY_SHARE } from './foliage-light';
-import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from './decorations';
+import {
+  decorationsFor,
+  HOLIDAY_DECORATIONS,
+  onRealisticLampPosts,
+  REALISTIC_POST_FROM,
+  REALISTIC_POST_TO,
+  VILLAGE_TREE,
+} from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
 import { mixedTownFixture } from './footprint-fixtures-testing';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
@@ -93,6 +100,7 @@ import {
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_ROADSIDE_MODELS,
   REALISTIC_BROADLEAVES,
   REALISTIC_CONIFERS,
   REALISTIC_SURFACES,
@@ -103,7 +111,7 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
-import { modelFacts } from './realistic-bytes-testing';
+import { modelFacts, roadsideFacts } from './realistic-bytes-testing';
 
 /* ============================================================================
  * Running three's `KTX2Loader` under Vitest, for real
@@ -2769,6 +2777,127 @@ describe('the village-square tree, in the realistic world: no depth pre-pass —
         (mesh.onAfterRender as () => void)();
         expect(mesh.children.length, mode).toBe(0);
       }
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+describe('the roadside models, loaded by the product’s own loader — #1274', () => {
+  it('stands the committed lamp and barrier, as their bytes say, in the drawing a view builds', async () => {
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const shipped = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
+      const lamp = roadsideFacts(join(shipped, REALISTIC_ROADSIDE_MODELS.lamp));
+      const barrier = roadsideFacts(join(shipped, REALISTIC_ROADSIDE_MODELS.barrier));
+      // The loaded world carries both, so the lights wind the lamp's shaft.
+      expect(drawing.lampModelled).toBe(true);
+      // The lamp post the street draws: `GLTFLoader`'s reading of the file,
+      // vertex for vertex the same as the bytes read without it.
+      const shape = drawing.furniture.shapeOf('lamp-post');
+      const position = shape.getAttribute('position');
+      const colour = shape.getAttribute('color');
+      expect(position.count).toBe(lamp.triangles * 3);
+      for (let at = 0; at < position.count; at += 1) {
+        expect(position.getY(at), String(at)).toBeCloseTo(lamp.position[at * 3 + 1] as number, 5);
+        expect(colour.getX(at), String(at)).toBeCloseTo(lamp.colour[at * 3] as number, 3);
+      }
+      // The gantries' one instanced shape: the unit box and the barrier.
+      const boxes = drawing.gantries.meshes.boxes.geometry;
+      expect(boxes.getAttribute('position').count).toBe(36 + barrier.triangles * 3);
+      expect(boxes.getAttribute(renderer.GANTRY_PART_ATTRIBUTE)).toBeDefined();
+      // The winter lights the drawing hangs on a lamp post wind Poly Haven's
+      // shaft, under its ladder bar — not the stylised post's 4.6 m.
+      const corner = plannerCornerRoute(150);
+      const streets = streetsAt(corner, corridorOrigin(corner), 2, 0, corner.totalDistance);
+      const lit = decorationsFor(
+        streets,
+        'winter-lights',
+        onRealisticLampPosts(HOLIDAY_DECORATIONS),
+      ).find((item) => item.item === 'post-lights');
+      if (lit === undefined) throw new Error('the fixture lights no lamp post');
+      const heightsAt = (kinds: typeof HOLIDAY_DECORATIONS): number[] => {
+        drawing.updateDecorations(
+          streets,
+          { x: lit.anchor.x, z: lit.anchor.z },
+          'winter-lights',
+          kinds,
+        );
+        const position = drawing.decorations.mesh.geometry.getAttribute('position');
+        const heights: number[] = [];
+        for (let vertex = 0; vertex < position.count; vertex += 1) {
+          const dx = position.getX(vertex) - lit.anchor.x;
+          const dz = position.getZ(vertex) - lit.anchor.z;
+          if (Math.hypot(dx, dz) < 0.3) heights.push(position.getY(vertex) - lit.anchor.y);
+        }
+        return heights;
+      };
+      const heights = heightsAt(HOLIDAY_DECORATIONS);
+      // Non-vacuity: the lamp post's bulbs are in the belt.
+      expect(heights.length).toBeGreaterThan(0);
+      expect(Math.max(...heights)).toBeLessThan(REALISTIC_POST_TO + 0.1);
+      expect(Math.min(...heights)).toBeGreaterThan(REALISTIC_POST_FROM - 0.1);
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+
+  it('CONTROL: with the owner’s lever off, fetches neither and draws the shapes before them', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    renderer.setRealisticRoadside(false);
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const asked: string[] = [];
+    const at = (url: string): string => {
+      asked.push(url);
+      return `${ORIGIN}${url}`;
+    };
+    const outcome = await renderer.loadRealisticWorld({
+      model: (url) => inner.model(at(url)),
+      texture: (url) => inner.texture(at(url)),
+      sky: (url) => inner.sky(at(url)),
+      dispose: inner.dispose,
+    });
+    expect(outcome).toEqual({ loaded: true });
+    for (const file of Object.values(REALISTIC_ROADSIDE_MODELS)) {
+      expect(
+        asked.some((url) => url.endsWith(file)),
+        file,
+      ).toBe(false);
+    }
+    // Non-vacuity: the load asked for models, the house models among them.
+    expect(asked.some((url) => url.endsWith('.glb'))).toBe(true);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      expect(drawing.lampModelled).toBe(false);
+      // And the lights wind the post the stylised world stands, to 4.6 m.
+      const corner = plannerCornerRoute(150);
+      const streets = streetsAt(corner, corridorOrigin(corner), 2, 0, corner.totalDistance);
+      const lit = decorationsFor(streets, 'winter-lights', HOLIDAY_DECORATIONS).find(
+        (item) => item.item === 'post-lights',
+      );
+      if (lit === undefined) throw new Error('the fixture lights no lamp post');
+      drawing.updateDecorations(
+        streets,
+        { x: lit.anchor.x, z: lit.anchor.z },
+        'winter-lights',
+        HOLIDAY_DECORATIONS,
+      );
+      const position = drawing.decorations.mesh.geometry.getAttribute('position');
+      let top = Number.NEGATIVE_INFINITY;
+      for (let vertex = 0; vertex < position.count; vertex += 1) {
+        const dx = position.getX(vertex) - lit.anchor.x;
+        const dz = position.getZ(vertex) - lit.anchor.z;
+        if (Math.hypot(dx, dz) < 0.3) top = Math.max(top, position.getY(vertex) - lit.anchor.y);
+      }
+      expect(top).toBeGreaterThan(4);
+      expect(drawing.furniture.shapeOf('lamp-post').getAttribute('position').count).toBe(88 * 3);
+      expect(
+        drawing.gantries.meshes.boxes.geometry.getAttribute(renderer.GANTRY_PART_ATTRIBUTE),
+      ).toBeUndefined();
     } finally {
       drawing.dispose();
     }

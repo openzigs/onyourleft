@@ -389,6 +389,8 @@ export function DemoPage(props: DemoPageProps) {
                   touchLock={false}
                   // The demo has no pacer: no *Pacer —* (owner, 2026-10-25).
                   withoutPacer
+                  // Nor an elapsed time apart from that clock (#2072).
+                  withoutElapsed
                   withoutEnd={withoutStop}
                   paused={!playing}
                   onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}

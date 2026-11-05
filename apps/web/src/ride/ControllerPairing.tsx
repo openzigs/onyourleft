@@ -43,6 +43,20 @@ export function connectedWords(name: string | undefined): string {
   return name === undefined ? words : `${name}: ${words}`;
 }
 
+/**
+ * The advertised name the row shows: none where the controller advertised
+ * none, an empty one or one of only whitespace (#2133), which would otherwise
+ * read ": Connected" and "Forget ". Any other name is shown as advertised.
+ */
+function shownName(advertised: string | undefined): string | undefined {
+  return advertised === undefined || advertised.trim() === '' ? undefined : advertised;
+}
+
+/** The Forget button's words, for a name {@link shownName} has already read. */
+function forgetWords(name: string | undefined): string {
+  return name === undefined ? FORGET_UNNAMED_CONTROLLER : `Forget ${name}`;
+}
+
 export const CONTROLLER_LOOKING =
   'Looking for a controller. Choose it in the list that opens, and press one of its buttons if it is asleep.';
 
@@ -117,7 +131,7 @@ export function ControllerPairing({
             {state.kind === 'connected' ? (
               <ul className="oyl-sensor-list">
                 <li>
-                  <p className="oyl-pairing__state">{connectedWords(state.name)}</p>
+                  <p className="oyl-pairing__state">{connectedWords(shownName(state.name))}</p>
                   <Button
                     ref={button}
                     variant="secondary"
@@ -125,7 +139,7 @@ export function ControllerPairing({
                       controller.forget();
                     }}
                   >
-                    {state.name === undefined ? FORGET_UNNAMED_CONTROLLER : `Forget ${state.name}`}
+                    {forgetWords(shownName(state.name))}
                   </Button>
                 </li>
               </ul>

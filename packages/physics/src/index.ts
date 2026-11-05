@@ -115,9 +115,11 @@ export { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer } from './pace
 
 // --- Bots in a solo lap race (#1900, ADR 0060 D-7, D-9) ----------------------
 //
-// The #92 bot, racing: a W/kg tier's pace through `advanceBot`, and the
-// race's items and lanes through `@onyourleft/domain` §`stepRace`. No recorded
-// ride, no rubber-banding, no instance.
+// The #92 bot, racing: a W/kg tier's race plan (#1960, ADR 0061) through
+// `advanceBot`'s tick, and the race's items and lanes through
+// `@onyourleft/domain` §`stepRace`. No recorded ride, no rubber-banding, no
+// instance. That tick at a planned power, `pacer.ts` §`advancePlannedBot`, is
+// deliberately not exported here: see `pacer.ts`'s header.
 
 export type { BotRaceStep, LapRaceBot, LapRaceBotConditions } from './lap-race-bot';
 export { lapRaceBot, stepBotRace } from './lap-race-bot';

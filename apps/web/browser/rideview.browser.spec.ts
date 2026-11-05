@@ -2151,7 +2151,9 @@ async function nothingPaired(page: Page): Promise<NothingPaired> {
       other: box(document.querySelector('.oyl-ride__group--other')),
       clock: [
         ...document.querySelectorAll(
-          '.oyl-ride__clock .oyl-ride__time:not(.oyl-ride__time--recorded)',
+          // #2072: the small-type terms — the time of day and the seconds
+          // recorded — are not readings.
+          '.oyl-ride__clock .oyl-ride__time:not(.oyl-ride__time--small)',
         ),
       ].map((pair) => {
         const value = pair.querySelector('.oyl-reading__value');

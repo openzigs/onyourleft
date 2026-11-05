@@ -279,6 +279,7 @@
  * footprint too narrow or too short for a tower beside a nave has none, and so
  * has every one with `?levers=-steeples` ({@link FootprintPlanOptions}'
  * `steeples`).
+ *
  * ## Inferred types (#2023, spike 0033, the owner's ruling of 2026-11-02)
  *
  * A footprint with no mapped type or landmark may be **inferred** one
@@ -6339,7 +6340,7 @@ export interface FootprintPlanOptions {
   /**
    * #2021: a mapped place of worship — the `worship` landmark, or a church, a
    * chapel or a cathedral — given a steeple ({@link STEEPLE}) at the end of
-   * its long axis facing the street; `true` by default, and only while
+   * its long axis away from its front door; `true` by default, and only while
    * `buildingTypes` is on. Off, every one is #1791's plain civic block, as
    * before (`?levers=-steeples`).
    */

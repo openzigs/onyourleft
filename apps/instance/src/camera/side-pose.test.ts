@@ -29,6 +29,8 @@ import { base64Of, PICTURE_MARKER, pictureWithExif, testPicture } from './pictur
 import { SIDE_POSE_PATH } from './routes.ts';
 import {
   createSidePose,
+  LOCAL_PICTURE_MODEL_MS_PER_HOUR,
+  LOCAL_PICTURE_WINDOW_MS,
   MAXIMUM_SIDE_POSE_ANSWER,
   SIDE_POSE_MODEL_TIMEOUT_MS,
 } from './side-pose.ts';
@@ -460,5 +462,97 @@ describe('the look itself (#1106)', () => {
     expect(asked[1]!.timeoutMilliseconds).toBe(SIDE_POSE_MODEL_TIMEOUT_MS);
     expect(asked[1]!.signal).toBe(signal);
     expect(asked[1]!.picture).toStrictEqual(PICTURE);
+  });
+});
+
+describe('half of any hour of the local picture model, an athlete (#2175)', () => {
+  const rider = { athleteId: 'a1' } as Parameters<ReturnType<typeof createSidePose>['look']>[0];
+  const other = { athleteId: 'a2' } as Parameters<ReturnType<typeof createSidePose>['look']>[0];
+  const MINUTE = 60_000;
+  const signal = new AbortController().signal;
+
+  /** A side pose whose local model takes `minutes` of a hand-moved clock over each picture. */
+  function timed(minutes: number, options: { fails?: boolean; budget?: number } = {}) {
+    const clock = { ms: 0 };
+    let asked = 0;
+    const answer: PictureConnection = {
+      look: () => {
+        asked += 1;
+        clock.ms += minutes * MINUTE;
+        return options.fails === true
+          ? Promise.reject(new Error('the model threw'))
+          : Promise.resolve({ ok: true, text: NOBODY });
+      },
+    };
+    const pose = createSidePose({
+      local: answer,
+      hostedKey: () =>
+        Promise.resolve({
+          kind: 'held',
+          athleteId: 'a1',
+          url: HOSTED_URL,
+          model: 'm',
+          key: MARKER_KEY,
+        }),
+      hosted: () => answer,
+      now: () => clock.ms,
+      ...(options.budget === undefined ? {} : { localModelMsPerHour: options.budget }),
+    });
+    return { pose, clock, asked: () => asked };
+  }
+
+  it('is thirty minutes of the model’s time in a clock hour', () => {
+    expect(LOCAL_PICTURE_MODEL_MS_PER_HOUR).toBe(30 * MINUTE);
+    expect(LOCAL_PICTURE_WINDOW_MS).toBe(60 * MINUTE);
+  });
+
+  it('refuses the rider rate_limited, unread, once they have held it that long, and not another rider', async () => {
+    const { pose, asked } = timed(10);
+    for (let picture = 0; picture < 3; picture += 1) {
+      expect(await pose.look(rider, local(), signal)).toStrictEqual({
+        ok: true,
+        value: { answer: NOBODY },
+      });
+    }
+    // Thirty minutes held: the next is refused and the model is not asked.
+    expect(await pose.look(rider, local(), signal)).toStrictEqual({
+      ok: false,
+      code: 'rate_limited',
+    });
+    expect(asked()).toBe(3);
+    // Another rider's time is their own.
+    expect((await pose.look(other, local(), signal)).ok).toBe(true);
+    expect(asked()).toBe(4);
+  });
+
+  it('takes the rider again when the hour ends, and forgets them on the sweep', async () => {
+    const { pose, clock } = timed(10);
+    for (let picture = 0; picture < 3; picture += 1) await pose.look(rider, local(), signal);
+    expect((await pose.look(rider, local(), signal)).ok).toBe(false);
+    expect(pose.sweep()).toBe(1);
+    clock.ms = LOCAL_PICTURE_WINDOW_MS;
+    expect(pose.sweep()).toBe(0);
+    expect((await pose.look(rider, local(), signal)).ok).toBe(true);
+  });
+
+  it('counts a look that threw, which held the model too', async () => {
+    const { pose, asked } = timed(30, { fails: true });
+    await expect(pose.look(rider, local(), signal)).rejects.toThrow('the model threw');
+    expect(await pose.look(rider, local(), signal)).toStrictEqual({
+      ok: false,
+      code: 'rate_limited',
+    });
+    expect(asked()).toBe(1);
+  });
+
+  it('does not count a hosted model, which is the rider’s own key and not this machine', async () => {
+    const { pose, asked } = timed(10, { budget: 0 });
+    expect(await pose.look(rider, local(), signal)).toStrictEqual({
+      ok: false,
+      code: 'rate_limited',
+    });
+    expect((await pose.look(rider, hosted(), signal)).ok).toBe(true);
+    expect((await pose.look(rider, hosted(), signal)).ok).toBe(true);
+    expect(asked()).toBe(2);
   });
 });

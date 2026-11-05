@@ -297,13 +297,20 @@ export const SIDE_INSTANCE_STOPPED_TEXT: Readonly<Record<SideUnavailableReason, 
  * The same, when the rider switched the side camera over to their instance
  * (#1106). ⚠️ **Every sentence says the pictures go to the instance**, because
  * that is the promise the switch changed; none says what the model found.
+ *
+ * Since #2175 two more: with the hosted switch on, the sentence after the
+ * first NAMES the service the instance sends each picture on to, as the
+ * hosted consent does ({@link sideInstanceOnToText}); and pictures the
+ * instance turned away for coming too often are counted on their own, not as
+ * failures ({@link instanceRateLimitedText}).
  */
 function instancePicturesText(state: SideAnalysisState, looked: number): string {
+  const onTo = sideInstanceOnToText(state.hostedService);
   switch (state.model) {
     case 'waiting':
-      return 'The phone’s pictures are sealed and sent on to your instance, about one a second, and not kept on this tablet. None has arrived yet.';
+      return `The phone’s pictures are sealed and sent on to your instance, about one a second, and not kept on this tablet.${onTo} None has arrived yet.`;
     case 'loading':
-      return 'Sending the first picture to your instance, sealed. Pictures arriving meanwhile wait, one at a time.';
+      return `Sending the first picture to your instance, sealed.${onTo} Pictures arriving meanwhile wait, one at a time.`;
     case 'unavailable':
       return (
         `${SIDE_INSTANCE_STOPPED_TEXT[state.unavailableBecause ?? 'not-answering']} ` +
@@ -312,10 +319,34 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
     case 'ready':
       return (
         `Pictures sealed and sent to your instance, and not kept here: ${String(looked)}, ` +
-        `with you in ${String(state.posed)} of them. ` +
-        `Not sent, because one was already with your instance: ${String(state.skipped)}.`
+        `with you in ${String(state.posed)} of them.` +
+        onTo +
+        ` Not sent, because one was already with your instance: ${String(state.skipped)}.` +
+        instanceRateLimitedText(state.rateLimited)
       );
   }
+}
+
+/**
+ * The sentence naming the hosted service the instance sends each picture on
+ * to, with its leading space, or nothing when the instance's own model looks
+ * at them (#2175). `host` is the host the rider's hosted consent named
+ * (`camera/instance-pose.ts` §`sideInstanceHostedService`).
+ */
+function sideInstanceOnToText(host: string | undefined): string {
+  return host === undefined
+    ? ''
+    : ` Your instance sends each one on to ${host}, the service your own key is for.`;
+}
+
+/**
+ * How many pictures the instance turned away unread for coming too often,
+ * with its leading space, or nothing when none was (#2175).
+ */
+function instanceRateLimitedText(count: number): string {
+  return count === 0
+    ? ''
+    : ` Turned away by your instance unread, because it was asked too often: ${String(count)}.`;
 }
 
 /**

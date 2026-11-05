@@ -32,6 +32,7 @@ import {
   decorationsWithConfig,
   PROBE_DECORATIONS,
   surfacesWithLevers,
+  roadsideWithLevers,
   treesWithLevers,
   splitRoofsWithLevers,
   steeplesWithLevers,
@@ -643,6 +644,15 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?levers=-near-tree-fade'))).toBe(
       `?levers=${encodeURIComponent('-near-tree-fade')}`,
     );
+  });
+
+  it('loads the roadside models unless they are switched off — #1274', () => {
+    // No lever is the product, and another lever leaves them as they are.
+    expect(roadsideWithLevers([])).toBe(true);
+    expect(roadsideWithLevers(parseConfig('?levers=-air,-crag').leversOff)).toBe(true);
+    expect(roadsideWithLevers(parseConfig('?levers=-roadside-models').leversOff)).toBe(false);
+    expect(LEVERS).toContain('roadside-models');
+    expect(configQuery(parseConfig('?levers=-roadside-models'))).toBe('?levers=-roadside-models');
   });
 
   it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {

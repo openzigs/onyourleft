@@ -97,6 +97,19 @@ export function formatDuration(totalSeconds: number, hours: DurationHours = 'whe
  */
 export type DurationHours = 'when-some' | 'always';
 
+/**
+ * The time of day — #2072: `HH:MM`, 24-hour, in the device's own zone, which
+ * is what "the time" means to a rider looking at a screen mid-ride (unlike
+ * {@link formatStartedAt}, a STORED ride's instant, which keeps the zone it
+ * was ridden in). Zero-padded, so `09:05` and `21:05` are one width and the
+ * figure never shifts as the hour turns. The ride HUD's clock and the Ride
+ * screen's say it with this, so the two cannot read differently.
+ */
+export function formatTimeOfDay(at: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
 /** An average power as whole watts. A fractional watt is not a thing a rider reads. */
 export function formatPowerValue(power: Watts): string {
   return String(Math.round(power));
