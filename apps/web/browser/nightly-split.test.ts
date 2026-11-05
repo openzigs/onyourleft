@@ -268,6 +268,10 @@ function selects(filter: string, spec: string): boolean {
   return pattern.test(join(BROWSER, spec));
 }
 
+/** Each browser shard's install: the headless shell, with no `--with-deps` (#2207). */
+const BROWSER_INSTALL =
+  'pnpm --filter @onyourleft/web exec playwright install --only-shell chromium';
+
 /** The command a browser shard's `Browser gate` step runs, wrapper and all. */
 const gateCommand = (script: string): string =>
   `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run ${script}`;
@@ -919,7 +923,8 @@ describe('the required check is one job over every shard — #1285', () => {
       'pnpm run check:notices',
       // #2154: the one Vitest command is a command per Vitest shard.
       ...requiredShardScripts().map((name) => `pnpm run ${name}`),
-      'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium',
+      // #2207: the headless shell and nothing from apt, @see the case below.
+      BROWSER_INSTALL,
       // #1362: the one gate command is a command per browser shard.
       ...shardScripts().map(([name]) => gateCommand(name)),
     ];
@@ -954,6 +959,34 @@ describe('the required check is one job over every shard — #1285', () => {
     expect(vitest.filter(([, commands]) => commands.includes('pnpm run test:a11y'))).toHaveLength(
       1,
     );
+  });
+
+  it('installs only the browser the gate launches, and nothing from Ubuntu’s archives — #2207', () => {
+    // Every timed-out `Install the pinned Chromium` (three on 2026-11-05) spent
+    // its ten minutes in apt: `--with-deps` downloads 21.9 MB of fonts the
+    // runner image lacks from its Ubuntu mirror, at 30 to 40 kB/s on a bad
+    // day, while Playwright's CDN served the browsers in about 6 s. The image
+    // already carries every shared library a headless Chromium needs, so
+    // the step asks apt for nothing, and a library the image ever drops is
+    // Playwright's "Host system is missing dependencies" at launch, red and
+    // named. docs/agents/ci.md section 4c "The browser install -- #2207".
+    const browserShards = [...shards].filter(([, job]) => job.includes('playwright'));
+    expect(browserShards).toHaveLength(shardScripts().length);
+    for (const [id, job] of browserShards) {
+      expect(
+        commandsOf(job).filter((command) => command.includes('playwright install')),
+        id,
+      ).toEqual([BROWSER_INSTALL]);
+    }
+    const uncommented = workflow.replace(/^\s*#.*\n/gm, '');
+    expect(uncommented).not.toMatch(/--with-deps|install-deps|apt-get|apt install/);
+    // `--only-shell` is the browser the gate launches: a headless run with no
+    // `channel` is Playwright's headless shell. A project given a channel or a
+    // headed run would launch a browser this step did not install.
+    for (const use of [config.use, ...PROJECTS.map((project) => project.use)]) {
+      expect(use?.channel).toBeUndefined();
+      expect(use?.headless).not.toBe(false);
+    }
   });
 
   it('runs every job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {

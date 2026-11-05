@@ -716,7 +716,10 @@ jobs:
       # Both spellings, because the image names it `.list` today and apt's
       # deb822 format would name it `.sources`; `rm -f` because a missing file
       # is this step's desired outcome rather than an error. It runs before
-      # the step that installs the browser.
+      # the step that installs the browser. ⚠️ Since #2207 nothing in this
+      # workflow runs apt, so here it is a no-op kept as a guard; it is still
+      # load-bearing in nightly.yml and demo-video.yml, whose installs keep
+      # `--with-deps` and which point at this comment for the reason.
       - name: Drop the unrelated Chrome apt source
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
@@ -726,21 +729,30 @@ jobs:
       # ships Chromium revision 1243 and `playwright install` fetches exactly
       # that. (#206 took this from 1.56.0/1194; docs/agents/ci.md section 4c
       # requires these two numbers to move together and to be updated in the
-      # same pull request as the bump.) `--with-deps` installs the shared
-      # libraries a headless Chromium needs on a bare runner, with the
-      # passwordless sudo ubuntu-latest grants. It is mostly a ~170 MB
-      # download, the one step here whose duration depends on somebody else's
-      # CDN -- and on Ubuntu's mirror. ⚠️ A step of its own since #1285 (it was
-      # one of `Checks, concurrently`'s commands, where it had three CPUs'
+      # same pull request as the bump.) ⚠️ A step of its own since #1285 (it
+      # was one of `Checks, concurrently`'s commands, where it had three CPUs'
       # worth of company), with a stop of its own, so the latest the gate can
-      # start is a number this file states. Ten minutes and not five: on
-      # #1285's first measuring run (38261783717) the runner's Ubuntu mirror
-      # served 22 MB of fonts at about 40 kB/s, and a five-minute stop turned
-      # a slow mirror into a red pull request, which the one job never did.
-      # Alone it takes about 25 s.
+      # start is a number this file states.
+      #
+      # ⚠️ No `--with-deps` since #2207, and `--only-shell`. Every timed-out
+      # install (three on 2026-11-05, each at this step's ten minutes) spent
+      # its time in apt: `--with-deps` downloaded 21.9 MB of fonts the image
+      # lacks from the runner's Ubuntu mirror at 30 to 40 kB/s, while
+      # Playwright's CDN served all three browser archives in about 6 s. The
+      # image already has every shared library a headless Chromium needs (apt
+      # reported each one "already the newest version"), and the app bundles
+      # its own font, Barlow, so the step now asks apt for nothing; a library
+      # a future image drops fails the gate's first launch with Playwright's
+      # "Host system is missing dependencies", red and named. `--only-shell`
+      # because a headless run with no `channel` launches the headless shell,
+      # never the full Chromium (nightly-split.test.ts holds both). Not a
+      # cache: the CDN half was never slow, and a restore costs what the
+      # download does. docs/agents/ci.md section 4c "The browser install --
+      # #2207" has the times before and after. The ten-minute stop is
+      # unchanged; it is now only a stop on a hung CDN.
       - name: Install the pinned Chromium
         timeout-minutes: 10
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       # Builds the harness and drives it; docs/agents/commands.md section 4a documents both
       # halves as one command. The two `vite build`s are its own, so this shard
@@ -813,7 +825,7 @@ jobs:
 
       - name: Install the pinned Chromium
         timeout-minutes: 10
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Browser gate
         timeout-minutes: 14
@@ -861,7 +873,7 @@ jobs:
 
       - name: Install the pinned Chromium
         timeout-minutes: 10
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Browser gate
         timeout-minutes: 14

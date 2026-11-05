@@ -362,10 +362,13 @@ OYL_HOSTED_BASEMAP_URL=https://…/basemap.pmtiles pnpm run test:browser
 
 # Fetch the browser the lockfile pins. @playwright/test 1.63.0 ships Chromium
 # revision 1243 and this fetches exactly that, so the browser is as
-# reproducible as the toolchain. ~170 MB, and `--with-deps` uses sudo to add
-# the shared libraries a headless Chromium needs. Skip it where a matching
-# browser is already installed.
-pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+# reproducible as the toolchain. `--only-shell` because the gate runs headless
+# with no `channel`, which launches the headless shell and never the full
+# Chromium. No `--with-deps` since #2207: CI's runner image already has every
+# shared library it needs, and apt's mirror is what timed the step out. On a
+# bare Linux machine without them, add `--with-deps` once (it uses sudo). Skip
+# it where a matching browser is already installed.
+pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
 # One package at a time, which is how you check a single package's harness.
 # `@onyourleft/sensors`' and `@onyourleft/fit`'s typechecks each run TWO
