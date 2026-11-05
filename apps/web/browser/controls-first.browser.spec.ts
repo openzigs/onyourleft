@@ -321,6 +321,9 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.
   'activity-detail': ['A write-up by your model'],
+  // #2007: where a place on the route is and what stays; the editor has
+  // sections only over a route it read, which the populated ports hold.
+  'route-editor': ['Change part of the route'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {

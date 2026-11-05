@@ -1006,6 +1006,14 @@
     "Save this route",
     "A route needs two waypoints before it can be saved."
   ],
+  "route-editor empty": [
+    "Edit a route",
+    "Redraw part of a saved route and keep the rest of its line.",
+    "Help with Edit a route",
+    "Every control works from the keyboard, and undo goes back through every change.",
+    "No route with that address is saved on this device.",
+    "It may have been deleted."
+  ],
   "activity-detail empty": [
     "Ride details",
     "Everything this device holds about one ride.",
@@ -1962,6 +1970,7 @@
     "Download GPX — Box Hill, Leith Hill and every lane between them the long way round",
     "Download TCX — Box Hill, Leith Hill and every lane between them the long way round",
     "Change",
+    "Edit in planner",
     "Name",
     "Only me",
     "People who follow me",
@@ -2985,6 +2994,34 @@
     "Save this route",
     "Name",
     "Save to your routes"
+  ],
+  "route-editor populated": [
+    "Edit a route",
+    "Redraw part of a saved route and keep the rest of its line.",
+    "Help with Edit a route",
+    "Every control works from the keyboard, and undo goes back through every change.",
+    "Box Hill, Leith Hill and every lane between them the long way round",
+    "!No routing service: Nothing can work out the roads until a routing service is configured, so a redrawn stretch is a straight line, and its heights are an even slope between its two ends.",
+    "3.0 km · climb 30 m · point to point.",
+    "Change part of the route",
+    "Help with Change part of the route",
+    "A place on the route is a distance from its start, in km.",
+    "Everything outside the stretch you change stays exactly as it was.",
+    "What to change",
+    "A stretch of it",
+    "Its start",
+    "Its end",
+    "Stretch starts at (km)",
+    "Stretch ends at (km)",
+    "Redraw this stretch",
+    "Change the whole route",
+    "Out and back",
+    "Reverse",
+    "Return to start",
+    "Save the edit",
+    "Name of the new route",
+    "Save as a new route",
+    "Save over “Box Hill, Leith Hill and every lane between them the long way round”"
   ],
   "activity-detail populated": [
     "Ride details",

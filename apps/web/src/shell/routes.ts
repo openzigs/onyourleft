@@ -42,6 +42,7 @@ export type RouteId =
   | 'segment-detail'
   | 'routes'
   | 'route-builder'
+  | 'route-editor'
   | 'workouts'
   | 'game'
   | 'camera'
@@ -459,6 +460,26 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Editing a saved route, keeping its line — #2007.
+ *
+ * **Not in {@link ROUTES}**, for {@link ROUTE_BUILDER_ROUTE}'s reason: it is
+ * reached from a saved route's page (*Edit in planner*), and the parameter is
+ * the route's id. In {@link ALL_ROUTES}, so the accessibility suite audits it
+ * unasked. Three segments, two of them literal, so neither `/routes/new` nor a
+ * route's own selection can capture it.
+ */
+export const ROUTE_EDITOR_ROUTE: RouteDefinition = {
+  id: 'route-editor',
+  group: 'routes',
+  layout: 'prose',
+  path: '/routes/edit/:route',
+  navLabel: 'Edit a route',
+  title: 'Edit a route',
+  summary: 'Redraw part of a saved route and keep the rest of its line.',
+  help: ['Every control works from the keyboard, and undo goes back through every change.'],
+};
+
+/**
  * The More tab's own page — #1429: a menu of every page under it.
  *
  * Before #1429 the tab labelled "More" opened Devices, the first page of its
@@ -667,6 +688,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   MORE_ROUTE,
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
+  ROUTE_EDITOR_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
   SEGMENT_DETAIL_ROUTE,
   NOT_FOUND_ROUTE,
