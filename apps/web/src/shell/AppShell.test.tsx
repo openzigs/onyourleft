@@ -499,8 +499,10 @@ describe('the line under the title, its help and its notes (#993)', () => {
     const route = routeById('workouts');
     await open(route.path);
     const main = document.querySelector('main');
-    expect(main?.querySelector(':scope > h1 + p')?.textContent).toBe(route.summary);
-    const help = main?.querySelector(':scope > h1 + p + details.oyl-help');
+    expect(main?.querySelector(':scope > .oyl-view-head > h1 + p')?.textContent).toBe(
+      route.summary,
+    );
+    const help = main?.querySelector(':scope > .oyl-view-head > h1 + p + details.oyl-help');
     expect(help, 'the help disclosure is not straight after the line').not.toBeNull();
     expect(help?.hasAttribute('open')).toBe(false);
     const summary = help?.querySelector('summary');
@@ -515,7 +517,9 @@ describe('the line under the title, its help and its notes (#993)', () => {
 
   it('opens from the keyboard', async () => {
     await open(routeById('segments').path);
-    const help = document.querySelector<HTMLDetailsElement>('main > details.oyl-help');
+    const help = document.querySelector<HTMLDetailsElement>(
+      'main > .oyl-view-head > details.oyl-help',
+    );
     const summary = help?.querySelector('summary');
     if (summary === null || summary === undefined) throw new Error('no help summary');
     await activateWithKeyboard(summary);
@@ -540,7 +544,9 @@ describe('the line under the title, its help and its notes (#993)', () => {
     expect(main?.lastElementChild).toBe(notes);
     expect(notes?.closest('details')).toBeNull();
     // And not in the line under the title any more.
-    expect(main?.querySelector(':scope > h1 + p')?.textContent).not.toContain(route.notes?.[0]);
+    expect(main?.querySelector(':scope > .oyl-view-head > h1 + p')?.textContent).not.toContain(
+      route.notes?.[0],
+    );
   });
 });
 

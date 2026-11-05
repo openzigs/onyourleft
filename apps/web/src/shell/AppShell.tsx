@@ -1031,19 +1031,31 @@ export function AppShell(props: AppShellProps): JSX.Element {
           tabIndex={-1}
           aria-labelledby={VIEW_TITLE_ID}
         >
-          <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
-            {route.title}
-          </h1>
-          {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
           {/*
-            #993: one line under the title, and the rest one press away. AFTER
-            the summary rather than inside the heading, so the `h1` is the
-            title alone and `main > h1 + p` is still the line under it;
-            `theme.css` §`.oyl-help` draws the ⓘ beside the title.
+            #2065: the title block — the `h1`, the line under it and the
+            screen's ⓘ in one box, which `theme.css` §"THE TITLE BLOCK" lays
+            out as a row that wraps: the line sits beside the title where it
+            fits and under it where it does not. The `h1` is still `main`'s
+            first heading, `.oyl-view-head > h1 + p` is still the line under
+            it, and the order is still title, line, help. No class while a
+            ride has the screen (#423): the box then holds only the hidden
+            title and takes no room.
           */}
-          {immersive || route.help === undefined ? null : (
-            <ScreenHelp title={route.title} paragraphs={route.help} />
-          )}
+          <div className={immersive ? undefined : 'oyl-view-head'}>
+            <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
+              {route.title}
+            </h1>
+            {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
+            {/*
+              #993: one line under the title, and the rest one press away.
+              AFTER the line rather than inside the heading, so the `h1` is
+              the title alone; `theme.css` §`.oyl-help` draws the ⓘ at the end
+              of the title's row, and the panel opens under the row.
+            */}
+            {immersive || route.help === undefined ? null : (
+              <ScreenHelp title={route.title} paragraphs={route.help} />
+            )}
+          </div>
           {/*
             #674: a view in a lazy group is not in the entry chunk, so on its
             first visit it suspends and the fallback stands under the `h1` until

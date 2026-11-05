@@ -644,14 +644,17 @@ export const FONT_SIZE_TOKENS = {
   /**
    * Step 3. A reading's numerals (#992): a time, a distance, a power, a climb
    * or a count, set large and tabular by `design/Reading.tsx`. Until #992 this
-   * was the view title, which is `display` now.
+   * was the view title, which was `display` from then until #2065 set the
+   * title back to this step beside its line (`lg` on a phone).
    */
   xxl: '1.953125rem',
   /**
-   * Step 4 (#936). The title of every view since #992 — the one line on a
-   * screen that says what the screen is for — at a heavier weight and, since
-   * #991, in {@link FONT_FAMILY_TOKENS}' display face; `theme.css`
-   * §`h1, .oyl-display` is the rule that sets all three.
+   * Step 4 (#936). The title of every view from #992 until #2065 — the one
+   * line on a screen that says what the screen is for — at a heavier weight
+   * and, since #991, in {@link FONT_FAMILY_TOKENS}' display face; `theme.css`
+   * §`h1, .oyl-display` is the rule that sets all three. Since #2065 a view's
+   * title is a step down beside its line (§"THE TITLE BLOCK"), and this step
+   * is a hero's: `.oyl-display`.
    */
   display: '2.44140625rem',
   /**

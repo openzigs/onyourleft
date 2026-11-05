@@ -217,9 +217,9 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
       }
       garageRow = Math.max(...rows.values());
     }
-    const summary = document.querySelector('main > h1 + p');
+    const summary = document.querySelector('main > .oyl-view-head > h1 + p');
     return {
-      h1: document.querySelector('main > h1')?.textContent ?? null,
+      h1: document.querySelector('main > .oyl-view-head > h1')?.textContent ?? null,
       columns: lefts.size,
       counted,
       garageRow,
