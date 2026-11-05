@@ -32,6 +32,9 @@ import {
   PROBE_DECORATIONS,
   surfacesWithLevers,
   roadsideWithLevers,
+  litterWithLevers,
+  chainLinkWithLevers,
+  townWithChainLink,
   treesWithLevers,
   splitRoofsWithLevers,
   steeplesWithLevers,
@@ -630,6 +633,36 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(roadsideWithLevers(parseConfig('?levers=-roadside-models').leversOff)).toBe(false);
     expect(LEVERS).toContain('roadside-models');
     expect(configQuery(parseConfig('?levers=-roadside-models'))).toBe('?levers=-roadside-models');
+  });
+
+  it('loads the litter and the chain-link unless each is switched off — #1274, the ruling of 2026-11-05', () => {
+    // No lever is the product, and another lever leaves them as they are.
+    expect(litterWithLevers([])).toBe(true);
+    expect(chainLinkWithLevers([])).toBe(true);
+    const roadside = parseConfig('?levers=-roadside-models').leversOff;
+    expect(litterWithLevers(roadside)).toBe(true);
+    expect(chainLinkWithLevers(roadside)).toBe(true);
+    expect(litterWithLevers(parseConfig('?levers=-litter').leversOff)).toBe(false);
+    expect(chainLinkWithLevers(parseConfig('?levers=-litter').leversOff)).toBe(true);
+    expect(chainLinkWithLevers(parseConfig('?levers=-chain-link').leversOff)).toBe(false);
+    expect(LEVERS).toContain('litter');
+    expect(LEVERS).toContain('chain-link');
+    // The town's pieces go with the lever, and nothing else of it does.
+    const town = { overlaps: () => false, chainLinkAt: () => [] };
+    expect(townWithChainLink(town, [])).toBe(town);
+    const before = townWithChainLink(town, parseConfig('?levers=-chain-link').leversOff);
+    expect('chainLinkAt' in before).toBe(false);
+    expect(before.overlaps).toBe(town.overlaps);
+    // And the grounds town is ridden through #1274's fixture, which is where it is wired.
+    expect(parseConfig('?town=grounds').town).toBe('grounds');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'grounds'\s*\?\s*fencedGroundsFixture\(latitude\)/);
+    expect(harness).toMatch(/setRealisticLitter\(litterWithLevers\(config\.leversOff\)\)/);
+    expect(harness).toMatch(/setRealisticChainLink\(chainLinkWithLevers\(config\.leversOff\)\)/);
+    expect(harness).toMatch(/townWithChainLink\(mappedTown\(/);
   });
 
   it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {

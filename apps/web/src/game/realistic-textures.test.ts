@@ -101,6 +101,7 @@ import {
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
   REALISTIC_ROADSIDE_MODELS,
+  REALISTIC_CHAIN_LINK,
   REALISTIC_BROADLEAVES,
   REALISTIC_CONIFERS,
   REALISTIC_SURFACES,
@@ -111,7 +112,7 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
-import { modelFacts, roadsideFacts } from './realistic-bytes-testing';
+import { chainLinkFacts, modelFacts, roadsideFacts } from './realistic-bytes-testing';
 
 /* ============================================================================
  * Running three's `KTX2Loader` under Vitest, for real
@@ -2861,7 +2862,8 @@ describe('the roadside models, loaded by the product’s own loader — #1274', 
       dispose: inner.dispose,
     });
     expect(outcome).toEqual({ loaded: true });
-    for (const file of Object.values(REALISTIC_ROADSIDE_MODELS)) {
+    // The lamp and the barrier: the litter has a lever of its own (below).
+    for (const file of [REALISTIC_ROADSIDE_MODELS.lamp, REALISTIC_ROADSIDE_MODELS.barrier]) {
       expect(
         asked.some((url) => url.endsWith(file)),
         file,
@@ -2898,6 +2900,95 @@ describe('the roadside models, loaded by the product’s own loader — #1274', 
       expect(
         drawing.gantries.meshes.boxes.geometry.getAttribute(renderer.GANTRY_PART_ATTRIBUTE),
       ).toBeUndefined();
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+describe('the litter and the chain-link, loaded by the product’s own loader — #1274, the ruling of 2026-11-05', () => {
+  it('lays the committed litter and folds the committed chain-link into the fence, as their bytes say', async () => {
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const shipped = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
+      const bag = roadsideFacts(join(shipped, REALISTIC_ROADSIDE_MODELS.bag));
+      const tyre = roadsideFacts(join(shipped, REALISTIC_ROADSIDE_MODELS.tyre));
+      const piece = chainLinkFacts(join(shipped, REALISTIC_CHAIN_LINK.model));
+      // The litter the street lays: `GLTFLoader`'s reading of each file.
+      for (const [kind, facts] of [
+        ['bag', bag],
+        ['tyre', tyre],
+      ] as const) {
+        const shape = drawing.furniture.litterShapeOf(kind);
+        if (shape === undefined) throw new Error(`${kind}: no litter shape`);
+        expect(shape.getAttribute('position').count, kind).toBe(facts.triangles * 3);
+        const colour = shape.getAttribute('color');
+        for (let at = 0; at < colour.count; at += 1) {
+          expect(colour.getX(at), `${kind} ${String(at)}`).toBeCloseTo(
+            facts.colour[at * 3] as number,
+            3,
+          );
+        }
+      }
+      // The field fence's ONE mesh, folded with the committed piece and taught it.
+      const meshes = drawing.structures.beltOf('planks')?.meshesOf('fence') ?? [];
+      expect(meshes).toHaveLength(1);
+      const mesh = meshes[0] as (typeof meshes)[number];
+      const parts = Array.from(
+        mesh.geometry.getAttribute(renderer.CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array,
+      );
+      expect(parts.filter((part) => part === 1)).toHaveLength(piece.frame.triangles * 3);
+      expect(parts.filter((part) => part === 2)).toHaveLength(piece.wire.triangles * 3);
+      expect(renderer.drawsChainLink(mesh.material as never)).toBe(true);
+      // The wire's coordinates, as the file holds them.
+      const uv = mesh.geometry.getAttribute('uv');
+      const firstWire = parts.indexOf(2);
+      expect(uv.getX(firstWire)).toBeCloseTo(piece.wire.uv[0] as number, 5);
+      expect(uv.getY(firstWire)).toBeCloseTo(piece.wire.uv[1] as number, 5);
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+
+  it('CONTROL: with the owner’s levers off, fetches none of them, and lays and folds none', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    renderer.setRealisticLitter(false);
+    renderer.setRealisticChainLink(false);
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const asked: string[] = [];
+    const at = (url: string): string => {
+      asked.push(url);
+      return `${ORIGIN}${url}`;
+    };
+    const outcome = await renderer.loadRealisticWorld({
+      model: (url) => inner.model(at(url)),
+      texture: (url) => inner.texture(at(url)),
+      sky: (url) => inner.sky(at(url)),
+      dispose: inner.dispose,
+    });
+    expect(outcome).toEqual({ loaded: true });
+    for (const file of [
+      REALISTIC_ROADSIDE_MODELS.bag,
+      REALISTIC_ROADSIDE_MODELS.tyre,
+      REALISTIC_CHAIN_LINK.model,
+      REALISTIC_CHAIN_LINK.wire,
+    ]) {
+      expect(
+        asked.some((url) => url.endsWith(file)),
+        file,
+      ).toBe(false);
+    }
+    // Non-vacuity: the lamp, under its own lever, still is.
+    expect(asked.some((url) => url.endsWith(REALISTIC_ROADSIDE_MODELS.lamp))).toBe(true);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      expect(drawing.furniture.litterShapeOf('bag')).toBeUndefined();
+      const mesh = drawing.structures.beltOf('planks')?.meshesOf('fence')[0];
+      expect(mesh?.geometry.getAttribute(renderer.CHAIN_LINK_PART_ATTRIBUTE)).toBeUndefined();
     } finally {
       drawing.dispose();
     }

@@ -39,6 +39,7 @@ import {
   type DecorationKind,
 } from './decorations';
 import { GlslProgram } from './glsl-program-testing';
+import { LITTER_CAPACITY, LITTER_KINDS } from './litter';
 import { REALISTIC_ROADSIDE_MODELS } from './realistic-assets';
 import { REALISTIC_STREET_TRIANGLES } from './realistic-budget';
 import { roadsideFacts, type RoadsideFacts } from './realistic-bytes-testing';
@@ -57,6 +58,23 @@ import {
   type VillageStreet,
 } from './streets';
 import { corridorOrigin, ROAD_WIDTH_METRES } from './terrain';
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
+import { litterOf, type LitterItem } from './litter';
+import type { CameraPose } from './port';
+import { REALISTIC_CHAIN_LINK } from './realistic-assets';
+import { chainLinkFacts } from './realistic-bytes-testing';
+import type { ScatterItem } from './scatter';
+import {
+  CHAIN_LINK_CUT_GLSL,
+  CHAIN_LINK_FOLD_GLSL,
+  CHAIN_LINK_PART_ATTRIBUTE,
+  CHAIN_LINK_SHAPE_ATTRIBUTE,
+  CHAIN_LINK_SINK_METRES,
+  chainLinkFenceGeometry,
+  drawsChainLink,
+  RealisticStructureBelts,
+  realisticStructureGeometry,
+} from './three-renderer';
 import {
   FURNITURE_CAPACITY,
   FurnitureBelt,
@@ -71,6 +89,8 @@ import {
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const lamp: RoadsideFacts = roadsideFacts(join(SHIPPED, REALISTIC_ROADSIDE_MODELS.lamp));
 const barrier: RoadsideFacts = roadsideFacts(join(SHIPPED, REALISTIC_ROADSIDE_MODELS.barrier));
+const bag: RoadsideFacts = roadsideFacts(join(SHIPPED, REALISTIC_ROADSIDE_MODELS.bag));
+const tyre: RoadsideFacts = roadsideFacts(join(SHIPPED, REALISTIC_ROADSIDE_MODELS.tyre));
 
 /** A texture three would have loaded: the fields a material and a release read. */
 function aTexture(): never {
@@ -192,14 +212,23 @@ describe('the realistic lamp post is Poly Haven’s street lamp — #1274', () =
   });
 
   it('holds the streets inside their stated triangles in each world', () => {
-    const realistic = new FurnitureBelt('realistic', planks, lamp);
+    const realistic = new FurnitureBelt('realistic', planks, lamp, { bag, tyre });
     const stylised = new FurnitureBelt('stylised');
     const streetsOf = (belt: FurnitureBelt): number =>
       2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) +
       FURNITURE_KINDS.reduce(
         (sum, kind) => sum + FURNITURE_CAPACITY * trianglesOf(belt.shapeOf(kind)),
         0,
-      );
+      ) +
+      // The owner's ruling of 2026-11-05: the litter, at its capacity and the heavier model.
+      LITTER_CAPACITY *
+        Math.max(
+          0,
+          ...LITTER_KINDS.map((kind) => {
+            const shape = belt.litterShapeOf(kind);
+            return shape === undefined ? 0 : trianglesOf(shape);
+          }),
+        );
     expect(streetsOf(realistic)).toBe(REALISTIC_STREET_TRIANGLES);
     // The stylised street is #1536's, unmoved.
     expect(streetsOf(stylised)).toBe(25_024);
@@ -502,5 +531,290 @@ describe('reading a roadside model out of the loader’s scene — #1274', () =>
     expect(copied?.position.buffer).not.toBe(source.getAttribute('position').array.buffer);
     const bare = { traverse: (visit: (node: unknown) => void): void => visit({ isMesh: false }) };
     expect(roadsideGeometryOf(bare as never)).toBeUndefined();
+  });
+});
+
+describe('a village’s litter is Poly Haven’s, in the painted mesh — #1274, the ruling of 2026-11-05', () => {
+  const route = northRoute(6_000, () => 40);
+  const streets = streetsAt(
+    route,
+    corridorOrigin(route),
+    scatterSeed(route),
+    0,
+    route.totalDistance,
+  );
+  const litter = { bag, tyre };
+  /** A street with litter, and its first piece. */
+  const littered = streets.find((street) => litterOf(street).length > 0) as VillageStreet;
+  const piece = litterOf(littered)[0] as LitterItem;
+
+  it('lays it in the painted mesh beside the anchor it was placed from: still two meshes', () => {
+    const belt = new FurnitureBelt('realistic', planks, lamp, litter);
+    const added: unknown[] = [];
+    belt.addTo({ add: (object: unknown) => added.push(object) } as never);
+    expect(added).toHaveLength(FURNITURE_SURFACES.length);
+    belt.update(streets, { x: piece.x, z: piece.z });
+    const drawn = belt.litterDrawnOf('bag') + belt.litterDrawnOf('tyre');
+    // Non-vacuity: this village has litter, and the frame draws it.
+    expect(drawn).toBeGreaterThan(0);
+    const painted = belt.meshOf('painted');
+    const furniture = (['lamp-post', 'bollard', 'bin'] as const).reduce(
+      (sum, kind) => sum + belt.drawnOf(kind) * trianglesOf(belt.shapeOf(kind)),
+      0,
+    );
+    const pieces = LITTER_KINDS.reduce(
+      (sum, kind) =>
+        sum + belt.litterDrawnOf(kind) * trianglesOf(belt.litterShapeOf(kind) as never),
+      0,
+    );
+    expect(trianglesOf(painted.geometry)).toBe(furniture + pieces);
+    expect(pieces).toBeGreaterThan(0);
+    belt.dispose();
+  });
+
+  it('draws a piece only on a frame that draws its anchor, so it never draws the painted mesh alone', () => {
+    const belt = new FurnitureBelt('realistic', planks, lamp, litter);
+    // The camera further out along the line from the anchor through the piece:
+    // the piece is in reach and its anchor just past it.
+    const dx = piece.x - piece.anchor.x;
+    const dz = piece.z - piece.anchor.z;
+    const length = Math.hypot(dx, dz);
+    const beyond = (metres: number): { x: number; z: number } => ({
+      x: piece.anchor.x + (dx / length) * metres,
+      z: piece.anchor.z + (dz / length) * metres,
+    });
+    const reach = (camera: { x: number; z: number }, x: number, z: number): boolean =>
+      Math.hypot(x - camera.x, z - camera.z) <= FURNITURE_DRAW_METRES;
+    const drawnAt = (camera: { x: number; z: number }): number => {
+      belt.update([littered], camera);
+      return belt.litterDrawnOf('bag') + belt.litterDrawnOf('tyre');
+    };
+    const out = beyond(FURNITURE_DRAW_METRES + length / 2);
+    // The piece is in reach and its anchor is not.
+    expect(reach(out, piece.x, piece.z)).toBe(true);
+    expect(reach(out, piece.anchor.x, piece.anchor.z)).toBe(false);
+    const pieces = litterOf(littered);
+    const byAnchor = (camera: { x: number; z: number }): number =>
+      pieces.filter((each) => reach(camera, each.anchor.x, each.anchor.z)).length;
+    const byPlace = (camera: { x: number; z: number }): number =>
+      pieces.filter((each) => reach(camera, each.x, each.z)).length;
+    // What is drawn is what has its anchor drawn, which leaves this piece out.
+    expect(drawnAt(out)).toBe(byAnchor(out));
+    expect(byPlace(out)).toBe(byAnchor(out) + 1);
+    const back = beyond(FURNITURE_DRAW_METRES - length / 2);
+    expect(drawnAt(back)).toBe(byAnchor(back));
+    expect(byAnchor(back)).toBe(byAnchor(out) + 1);
+    belt.dispose();
+  });
+
+  it('draws no more than its capacity, however many villages are in reach', () => {
+    const belt = new FurnitureBelt('realistic', planks, lamp, litter);
+    // The littered village, laid again and again in one place: each copy is a
+    // street of its own, with this piece's anchor in reach in every one.
+    const crowded = Array.from({ length: LITTER_CAPACITY + 1 }, () => ({ ...littered }));
+    belt.update(crowded, { x: piece.x, z: piece.z });
+    const drawn = LITTER_KINDS.reduce((sum, kind) => sum + belt.litterDrawnOf(kind), 0);
+    expect(drawn).toBe(LITTER_CAPACITY);
+    belt.dispose();
+  });
+
+  it('lays the tyre flat and stands the bag, each the committed model’s triangles and colours', () => {
+    const belt = new FurnitureBelt('realistic', planks, lamp, litter);
+    const box = (kind: 'bag' | 'tyre'): { min: number[]; max: number[] } => {
+      const position = (
+        belt.litterShapeOf(kind) as never as {
+          getAttribute(name: string): {
+            count: number;
+            getX(i: number): number;
+            getY(i: number): number;
+            getZ(i: number): number;
+          };
+        }
+      ).getAttribute('position');
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let at = 0; at < position.count; at += 1) {
+        const v = [position.getX(at), position.getY(at), position.getZ(at)];
+        for (let axis = 0; axis < 3; axis += 1) {
+          min[axis] = Math.min(min[axis] as number, v[axis] as number);
+          max[axis] = Math.max(max[axis] as number, v[axis] as number);
+        }
+      }
+      return { min, max };
+    };
+    const lying = box('tyre');
+    // Flat: as tall as the tyre is deep, its 0.6 m across the ground.
+    expect((lying.max[1] as number) - (lying.min[1] as number)).toBeCloseTo(extent(tyre, 2), 3);
+    expect((lying.max[2] as number) - (lying.min[2] as number)).toBeCloseTo(extent(tyre, 1), 3);
+    expect(lying.min[1]).toBeCloseTo(0, 5);
+    const standing = box('bag');
+    expect((standing.max[1] as number) - (standing.min[1] as number)).toBeCloseTo(
+      extent(bag, 1),
+      3,
+    );
+    expect(trianglesOf(belt.litterShapeOf('bag') as never)).toBe(bag.triangles);
+    expect(trianglesOf(belt.litterShapeOf('tyre') as never)).toBe(tyre.triangles);
+    // Its own colour: a black bag, not the white the painted mesh leaves a
+    // shape with none.
+    const colour = (
+      belt.litterShapeOf('bag') as never as {
+        getAttribute(name: string): { getX(i: number): number };
+      }
+    ).getAttribute('color');
+    expect(colour.getX(0)).toBeCloseTo(bag.colour[0] as number, 5);
+    expect(bag.colour[0]).toBeLessThan(0.1);
+    belt.dispose();
+  });
+
+  it('CONTROL: the stylised world, handed the same litter, lays none', () => {
+    const belt = new FurnitureBelt('stylised', undefined, lamp, litter);
+    expect(belt.litterShapeOf('bag')).toBeUndefined();
+    belt.update(streets, { x: piece.x, z: piece.z });
+    expect(belt.litterDrawnOf('bag') + belt.litterDrawnOf('tyre')).toBe(0);
+    belt.dispose();
+  });
+});
+
+describe('the chain-link fence is drawn inside the field fence’s own draw — #1274, the ruling of 2026-11-05', () => {
+  const facts = chainLinkFacts(join(SHIPPED, REALISTIC_CHAIN_LINK.model));
+  const chainLink = { geometry: facts, wire: aTexture() };
+  const POSE: CameraPose = {
+    x: 0,
+    y: 0,
+    z: 0,
+    headingX: 0,
+    headingZ: 1,
+    eyeRoadY: 0,
+    targetRoadY: 0,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
+  const fence = (z: number, chain: boolean): ScatterItem => ({
+    kind: 'fence',
+    x: 8,
+    y: 0,
+    z,
+    rotation: 0,
+    scale: 1,
+    variant: 0,
+    ...(chain ? { chainLink: true as const } : {}),
+  });
+
+  it('folds the piece into the field fence’s one shape, each vertex marked with its part', () => {
+    const plain = realisticStructureGeometry('fence', 'planks');
+    if (plain === undefined) throw new Error('a realistic fence wears planks');
+    const folded = chainLinkFenceGeometry(plain, facts);
+    const plainVertices = plain.getAttribute('position').count;
+    const parts = Array.from(folded.getAttribute(CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array);
+    expect(parts.filter((part) => part === 0)).toHaveLength(plainVertices);
+    expect(parts.filter((part) => part === 1)).toHaveLength(facts.frame.triangles * 3);
+    expect(parts.filter((part) => part === 2)).toHaveLength(facts.wire.triangles * 3);
+    // Every attribute the field fence carries, the same size on both shapes.
+    expect(Object.keys(folded.attributes).sort()).toEqual(
+      [...Object.keys(plain.attributes), CHAIN_LINK_PART_ATTRIBUTE].sort(),
+    );
+    const position = folded.getAttribute('position');
+    // The piece's length along z, as a field boundary's, and set into the ground.
+    let zLow = Infinity;
+    let zHigh = -Infinity;
+    let xLow = Infinity;
+    let xHigh = -Infinity;
+    let yLow = Infinity;
+    for (let at = plainVertices; at < position.count; at += 1) {
+      zLow = Math.min(zLow, position.getZ(at));
+      zHigh = Math.max(zHigh, position.getZ(at));
+      xLow = Math.min(xLow, position.getX(at));
+      xHigh = Math.max(xHigh, position.getX(at));
+      yLow = Math.min(yLow, position.getY(at));
+    }
+    expect(zHigh - zLow).toBeCloseTo(extent(facts.frame, 0), 3);
+    // Across it, only the posts' own depth: the field fence's line.
+    expect(xHigh - xLow).toBeCloseTo(Math.max(extent(facts.frame, 2), extent(facts.wire, 2)), 3);
+    expect(xHigh - xLow).toBeLessThan(0.2);
+    expect(yLow).toBeCloseTo(
+      -CHAIN_LINK_SINK_METRES +
+        Math.min(
+          ...Array.from(facts.frame.position).filter((_, at) => at % 3 === 1),
+          ...Array.from(facts.wire.position).filter((_, at) => at % 3 === 1),
+        ),
+      4,
+    );
+    // The wire's coordinates are its own; the frame's colour is its own.
+    const uv = folded.getAttribute('uv');
+    const firstWire = plainVertices + facts.frame.triangles * 3;
+    expect(uv.getX(firstWire)).toBeCloseTo(facts.wire.uv[0] as number, 5);
+    expect(uv.getY(firstWire)).toBeCloseTo(facts.wire.uv[1] as number, 5);
+    expect(folded.getAttribute('color').getX(plainVertices)).toBeCloseTo(
+      facts.frame.colour[0] as number,
+      5,
+    );
+    plain.dispose();
+    folded.dispose();
+  });
+
+  it('draws both fences in the planks’ ONE fence mesh, each instance its own shape', () => {
+    const belts = new RealisticStructureBelts(new Map(), chainLink);
+    const plainBelts = new RealisticStructureBelts(new Map());
+    const meshes = belts.beltOf('planks')?.meshesOf('fence') ?? [];
+    expect(meshes).toHaveLength(1);
+    // The same meshes, so the same calls, as a world with no chain-link.
+    expect(meshes).toHaveLength(plainBelts.beltOf('planks')?.meshesOf('fence').length ?? -1);
+    belts.update([fence(20, false), fence(30, true), fence(40, false)], POSE);
+    const mesh = meshes[0] as (typeof meshes)[number];
+    expect(mesh.count).toBe(3);
+    const shapes = mesh.geometry.getAttribute(CHAIN_LINK_SHAPE_ATTRIBUTE);
+    expect([shapes.getX(0), shapes.getX(1), shapes.getX(2)]).toEqual([0, 1, 0]);
+    expect(drawsChainLink(mesh.material as never)).toBe(true);
+    // Its one shape carries both fences: the chain-link's every vertex is in it.
+    const parts = Array.from(
+      mesh.geometry.getAttribute(CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array,
+    );
+    expect(parts.filter((part) => part > 0)).toHaveLength(
+      (facts.frame.triangles + facts.wire.triangles) * 3,
+    );
+    // It shades as every belt does, with its own pair.
+    belts.beltOf('planks')?.setShading('flat');
+    expect(drawsChainLink(mesh.material as never)).toBe(true);
+    belts.dispose();
+    plainBelts.dispose();
+  });
+
+  it('folds away, in the vertex shader, the fence an instance is not', () => {
+    const program = new GlslProgram(
+      `vec3 fold(float ${CHAIN_LINK_PART_ATTRIBUTE}, float ${CHAIN_LINK_SHAPE_ATTRIBUTE}, vec3 transformed) { float vOylChain = 0.0; ${CHAIN_LINK_FOLD_GLSL} return transformed; }`,
+    );
+    const at = [0.3, 0.8, -1.2];
+    expect(program.call('fold', 0, 0, at)).toEqual(at);
+    expect(program.call('fold', 1, 1, at)).toEqual(at);
+    expect(program.call('fold', 2, 1, at)).toEqual(at);
+    expect(program.call('fold', 1, 0, at)).toEqual([0, 0, 0]);
+    expect(program.call('fold', 2, 0, at)).toEqual([0, 0, 0]);
+    expect(program.call('fold', 0, 1, at)).toEqual([0, 0, 0]);
+  });
+
+  it('cuts the wire out where its opacity says there is none, and keeps the planks and the frame', () => {
+    const program = new GlslProgram(CHAIN_LINK_CUT_GLSL);
+    // Near, where a texel covers a pixel: a fixed half, whatever the noise.
+    expect(program.call('oylChainCut', 0.5, 0.9)).toBe(0.5);
+    expect(program.call('oylChainCut', 1, 0.1)).toBe(0.5);
+    // Far, where the mipmap's mean is the wire's share: the noise.
+    expect(program.call('oylChainCut', 3, 0.1)).toBeCloseTo(0.1, 9);
+    expect(program.call('oylChainKeeps', 2, 0.4, 0.5)).toBe(0);
+    expect(program.call('oylChainKeeps', 2, 0.6, 0.5)).toBe(1);
+    // The planks and the frame are kept whatever the wire's map says there.
+    expect(program.call('oylChainKeeps', 0, 0, 0.5)).toBe(1);
+    expect(program.call('oylChainKeeps', 1, 0, 0.5)).toBe(1);
+  });
+
+  it('CONTROL: with no chain-link, the fence mesh is the field fence alone, untaught', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const mesh = belts.beltOf('planks')?.meshesOf('fence')[0];
+    if (mesh === undefined) throw new Error('a realistic fence wears planks');
+    expect(mesh.geometry.getAttribute(CHAIN_LINK_SHAPE_ATTRIBUTE)).toBeUndefined();
+    expect(mesh.geometry.getAttribute(CHAIN_LINK_PART_ATTRIBUTE)).toBeUndefined();
+    expect(drawsChainLink(mesh.material as never)).toBe(false);
+    // And a chain-link piece is drawn there as the field fence it is placed as.
+    belts.update([fence(30, true)], POSE);
+    expect(mesh.count).toBe(1);
+    belts.dispose();
   });
 });

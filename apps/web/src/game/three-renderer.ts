@@ -492,6 +492,7 @@ import {
   houseModelFile,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
+  REALISTIC_CHAIN_LINK,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_MAP_NAMES,
@@ -515,6 +516,7 @@ import {
   type RoadsideModel,
   type StructureSurface,
 } from './realistic-assets';
+import { LITTER_CAPACITY, LITTER_KINDS, litterOf, type LitterKind } from './litter';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
 import { LABEL_FONT } from '../map/basemap';
 import {
@@ -2614,6 +2616,37 @@ function paintedPrimitive(kind: SceneryKind, variant = 0): BufferGeometry {
   return geometry;
 }
 
+/**
+ * One kind a {@link ScatterBelt} draws as TWO shapes in one instanced mesh —
+ * #1274: the realistic field fence, which beside an industrial, school or
+ * sports ground is the chain-link fence instead. Its mesh wears `materials`,
+ * which are taught to fold away, in the vertex shader, the shape an instance
+ * is not; the belt writes which shape each instance is, `shapeOf(item)`, into
+ * the instance attribute `attribute`. Still one mesh, so still one draw.
+ */
+export interface ScatterFold {
+  readonly kind: SceneryKind;
+  readonly materials: ShadedMaterials;
+  readonly attribute: string;
+  readonly shapeOf: (item: ScatterItem) => number;
+}
+
+/**
+ * Makes room in `mesh`'s instance attribute `name` for as many instances as
+ * its matrices hold — #1274, {@link tintChannels}' rule for a
+ * {@link ScatterFold}'s shape: replaced only when {@link reserve} grew the
+ * matrices, so each growth strands one buffer, and the doubling bounds them.
+ */
+function foldChannel(mesh: InstancedMesh, name: string): InstancedBufferAttribute {
+  const needed = mesh.instanceMatrix.count;
+  const held = mesh.geometry.getAttribute(name) as InstancedBufferAttribute | undefined;
+  if (held !== undefined && held.count >= needed) return held;
+  const channel = new InstancedBufferAttribute(new Float32Array(needed), 1);
+  channel.setUsage(DynamicDrawUsage);
+  mesh.geometry.setAttribute(name, channel);
+  return channel;
+}
+
 export class ScatterBelt {
   /**
    * One mesh per kind **per variant** — #367.
@@ -2701,6 +2734,10 @@ export class ScatterBelt {
   /** #621: which bound this belt's tints are drawn inside, if it tints at all. */
   readonly #tint: RealisticTintClass | undefined;
 
+  /** #1274: the kind drawn as two shapes, and the meshes it is drawn by. @see ScatterFold */
+  readonly #fold: ScatterFold | undefined;
+  readonly #folded = new Set<InstancedMesh>();
+
   /**
    * @param models the shapes to draw, by kind, in variant order. Defaults to
    * whatever {@link loadSceneryModels} has loaded, which is what the shipped
@@ -2734,6 +2771,11 @@ export class ScatterBelt {
        * colour at all.
        */
       readonly tint?: RealisticTintClass;
+      /**
+       * #1274: one kind drawn as two shapes in its one mesh, wearing its own
+       * pair, which the belt then owns and releases. @see ScatterFold
+       */
+      readonly fold?: ScatterFold;
     } = {},
   ) {
     this.#materials =
@@ -2741,6 +2783,7 @@ export class ScatterBelt {
       (options.physical === true ? physicalMaterials() : vertexColouredMaterials());
     this.#skip = options.skip ?? new Set();
     this.#tint = options.tint;
+    this.#fold = options.fold;
     for (const kind of SCENERY_KINDS) {
       if (options.skip?.has(kind) === true) {
         continue;
@@ -2774,13 +2817,18 @@ export class ScatterBelt {
           //
           // ⚠️ **It takes its colour from the vertices since #366**, which is
           // why it is one material for the whole belt rather than one a kind.
-          this.#materials.lit,
+          this.#fold?.kind === kind ? this.#fold.materials.lit : this.#materials.lit,
           SCATTER_INSTANCE_CAPACITY,
         );
         // The buffer is rewritten every frame, so tell the driver that rather
         // than letting it hint STATIC_DRAW for something that never is.
         mesh.instanceMatrix.setUsage(DynamicDrawUsage);
         if (this.#tint !== undefined) tintChannels(mesh);
+        // #1274: a folded kind's mesh carries which shape each instance is.
+        if (this.#fold?.kind === kind) {
+          foldChannel(mesh, this.#fold.attribute);
+          this.#folded.add(mesh);
+        }
         // three's constructor fills every slot with the identity matrix and
         // sets `count` to the capacity. A belt that drew before its first frame
         // would draw the whole capacity stacked at the origin.
@@ -2865,7 +2913,10 @@ export class ScatterBelt {
    */
   setShading(shading: QualitySettings['shading']): void {
     for (const mesh of this.#meshes.values()) {
-      mesh.material = this.#materials[shading];
+      mesh.material =
+        this.#fold !== undefined && this.#folded.has(mesh)
+          ? this.#fold.materials[shading]
+          : this.#materials[shading];
     }
   }
 
@@ -2988,6 +3039,9 @@ export class ScatterBelt {
     for (const [key, mesh] of this.#meshes) {
       reserve(mesh, this.#counts.get(key) ?? 0);
       if (this.#tint !== undefined) tintChannels(mesh);
+      if (this.#fold !== undefined && this.#folded.has(mesh)) {
+        foldChannel(mesh, this.#fold.attribute);
+      }
       // Rewound here rather than tracked in a second map: the next loop uses
       // `mesh.count` as its write cursor and this is where it starts.
       mesh.count = 0;
@@ -3023,6 +3077,13 @@ export class ScatterBelt {
           realisticTints[this.#tint],
         );
       }
+      // #1274: which of the folded kind's two shapes this one is.
+      if (this.#fold !== undefined && this.#folded.has(mesh)) {
+        (mesh.geometry.getAttribute(this.#fold.attribute) as InstancedBufferAttribute).setX(
+          mesh.count,
+          this.#fold.shapeOf(item),
+        );
+      }
       mesh.count += 1;
     }
     for (const mesh of this.#meshes.values()) {
@@ -3032,6 +3093,9 @@ export class ScatterBelt {
         // instance to sometimes skip this would cost more than the upload.
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+        if (this.#fold !== undefined && this.#folded.has(mesh)) {
+          mesh.geometry.getAttribute(this.#fold.attribute).needsUpdate = true;
+        }
         // three caches a bounding sphere until it is asked to recompute one,
         // and the instances move every frame. Without this the belt is culled
         // against where it stood when the sphere was first needed, and the
@@ -3058,6 +3122,8 @@ export class ScatterBelt {
     // of the context. The belt owns the pair, so the belt releases it.
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#fold?.materials.lit.dispose();
+    this.#fold?.materials.flat.dispose();
   }
 
   /**
@@ -6064,6 +6130,19 @@ interface RealisticWorld {
    * the lamp post and the barrier are the stylised world's shapes.
    */
   readonly roadside?: RealisticRoadside;
+  /**
+   * A village's litter — #1274, the owner's ruling of 2026-11-05: the bag and
+   * the tyre the street furniture's painted mesh lays beside its bins and
+   * lamp posts (`litter.ts`). Absent, none is drawn.
+   */
+  readonly litter?: RealisticLitter;
+  /**
+   * The chain-link fence — #1274, the owner's ruling of 2026-11-05: its piece
+   * and its wire's opacity, which the field fence's own instanced draw wears
+   * beside industrial, school and sports grounds (`chain-link.ts`). Absent, a
+   * chain-link piece is drawn as the field fence it is placed as.
+   */
+  readonly chainLink?: RealisticChainLink;
 }
 
 /**
@@ -6078,8 +6157,36 @@ export interface RoadsideGeometry {
   readonly triangles: number;
 }
 
-/** The roadside models, by name — #1274. @see REALISTIC_ROADSIDE_MODELS */
-export type RealisticRoadside = Readonly<Record<RoadsideModel, RoadsideGeometry>>;
+/** The lamp and the barrier, by name — #1274. @see REALISTIC_ROADSIDE_MODELS */
+export type RealisticRoadside = Readonly<Record<StreetModel, RoadsideGeometry>>;
+
+/** The roadside models a street and a gantry wear — #1274. */
+type StreetModel = Exclude<RoadsideModel, LitterKind>;
+
+/** The lamp and the barrier, in a fixed order. */
+const STREET_MODEL_NAMES = REALISTIC_ROADSIDE_MODEL_NAMES.filter(
+  (name): name is StreetModel => !(LITTER_KINDS as readonly string[]).includes(name),
+);
+
+/** The litter, by kind — #1274. @see litter.ts */
+export type RealisticLitter = Readonly<Record<LitterKind, RoadsideGeometry>>;
+
+/**
+ * The chain-link fence's piece as the structures' belt copies it — #1274:
+ * its `frame`, a colour a vertex, and its `wire`, with the texture
+ * coordinates its opacity is read at. Both not indexed, in the piece's own
+ * frame: metres, `y` up, its 8 m length along `x`, standing on the origin.
+ */
+export interface ChainLinkGeometry {
+  readonly frame: RoadsideGeometry;
+  readonly wire: RoadsideGeometry & { readonly uv: Float32Array };
+}
+
+/** The chain-link fence: its piece and its wire's opacity map — #1274. */
+export interface RealisticChainLink {
+  readonly geometry: ChainLinkGeometry;
+  readonly wire: Texture;
+}
 
 /**
  * A roadside model's GLB as the belts copy it — #1274: its one mesh's
@@ -6091,6 +6198,40 @@ export function roadsideGeometryOf(scene: Object3D): RoadsideGeometry | undefine
   scene.traverse((node) => {
     if (found === undefined && (node as Partial<Mesh>).isMesh === true) found = node as Mesh;
   });
+  return meshGeometryOf(found);
+}
+
+/**
+ * The chain-link fence's GLB as the structures' belt copies it — #1274: its
+ * mesh named `frame` and its mesh named `wire`, or `undefined` where either
+ * is missing or the wire has no texture coordinates.
+ */
+export function chainLinkGeometryOf(scene: Object3D): ChainLinkGeometry | undefined {
+  const named = (name: string): Mesh | undefined => {
+    let found: Mesh | undefined;
+    scene.traverse((node) => {
+      if (found === undefined && node.name === name && (node as Partial<Mesh>).isMesh === true) {
+        found = node as Mesh;
+      }
+    });
+    return found;
+  };
+  const frame = meshGeometryOf(named('frame'));
+  const wireMesh = named('wire');
+  const wire = meshGeometryOf(wireMesh);
+  const uvs = wireMesh?.geometry.getAttribute('uv');
+  if (frame === undefined || wire === undefined || wireMesh === undefined || uvs === undefined) {
+    return undefined;
+  }
+  const flat =
+    wireMesh.geometry.index === null ? wireMesh.geometry : wireMesh.geometry.toNonIndexed();
+  const uv = Float32Array.from(flat.getAttribute('uv').array as ArrayLike<number>);
+  if (flat !== wireMesh.geometry) flat.dispose();
+  return { frame, wire: { ...wire, uv } };
+}
+
+/** One mesh's triangles as {@link RoadsideGeometry}, or none. @see roadsideGeometryOf */
+function meshGeometryOf(found: Mesh | undefined): RoadsideGeometry | undefined {
   const geometry = found?.geometry;
   if (
     geometry?.getAttribute('position') === undefined ||
@@ -6647,12 +6788,23 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const houseAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_HOUSE_ATLAS)));
     // #1274: the roadside models, loaded and settled with everything else.
     // Or none, on the owner's page with that lever off. @see setRealisticRoadside
-    const roadsideScenes = (realisticRoadside ? REALISTIC_ROADSIDE_MODEL_NAMES : []).map(
-      (name) => ({
-        name,
-        scene: model(() => loaders.model(realisticUrl(REALISTIC_ROADSIDE_MODELS[name]))),
-      }),
-    );
+    const roadsideScenes = (realisticRoadside ? STREET_MODEL_NAMES : []).map((name) => ({
+      name,
+      scene: model(() => loaders.model(realisticUrl(REALISTIC_ROADSIDE_MODELS[name]))),
+    }));
+    // #1274: a village's litter, and the chain-link fence and its wire, loaded
+    // and settled with everything else. Or none, on the owner's page with
+    // that lever off. @see setRealisticLitter, setRealisticChainLink
+    const litterScenes = (realisticLitter ? LITTER_KINDS : []).map((name) => ({
+      name,
+      scene: model(() => loaders.model(realisticUrl(REALISTIC_ROADSIDE_MODELS[name]))),
+    }));
+    const chainLinkScene = realisticChainLink
+      ? model(() => loaders.model(realisticUrl(REALISTIC_CHAIN_LINK.model)))
+      : Promise.resolve(undefined);
+    const chainLinkWire = realisticChainLink
+      ? texture(() => loaders.texture(realisticUrl(REALISTIC_CHAIN_LINK.wire)))
+      : Promise.resolve(undefined);
     // #475: the structures' surfaces, loaded with everything else and settled
     // with it — a world whose buildings could not load is half a world.
     const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
@@ -6715,6 +6867,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...houseScenes,
       houseAtlas,
       ...roadsideScenes.map((each) => each.scene),
+      ...litterScenes.map((each) => each.scene),
+      chainLinkScene,
+      chainLinkWire,
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) =>
         each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
@@ -6879,6 +7034,34 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
             roadsideGeometries.map((each) => [each.name, each.geometry]),
           ) as RealisticRoadside)
         : undefined;
+    // #1274: the litter's triangles, copied once, or none of them.
+    const litterGeometries = await Promise.all(
+      litterScenes.map(async (each) => ({
+        name: each.name,
+        geometry: roadsideGeometryOf(await each.scene),
+      })),
+    );
+    const litter: RealisticLitter | undefined =
+      litterGeometries.length > 0 && litterGeometries.every((each) => each.geometry !== undefined)
+        ? (Object.fromEntries(
+            litterGeometries.map((each) => [each.name, each.geometry]),
+          ) as RealisticLitter)
+        : undefined;
+    // #1274: the chain-link's piece, copied once, and its wire's opacity: a
+    // number a texel, tiled along the fence, read at the GLB's own coordinates.
+    const chainLinkModel = await chainLinkScene;
+    const chainLinkPiece =
+      chainLinkModel === undefined ? undefined : chainLinkGeometryOf(chainLinkModel);
+    const wireTexture = await chainLinkWire;
+    if (wireTexture !== undefined) {
+      wireTexture.wrapS = RepeatWrapping;
+      wireTexture.wrapT = RepeatWrapping;
+      wireTexture.minFilter = LinearMipmapLinearFilter;
+    }
+    const chainLink: RealisticChainLink | undefined =
+      chainLinkPiece === undefined || wireTexture === undefined
+        ? undefined
+        : { geometry: chainLinkPiece, wire: wireTexture };
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
@@ -6896,6 +7079,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       wordmark: wordmarkTexture,
       ...(houses === undefined ? {} : { houses }),
       ...(roadside === undefined ? {} : { roadside }),
+      ...(litter === undefined ? {} : { litter }),
+      ...(chainLink === undefined ? {} : { chainLink }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -6982,6 +7167,39 @@ let realisticRoadside = true;
  */
 export function setRealisticRoadside(on: boolean): void {
   realisticRoadside = on;
+}
+
+/** Whether the next realistic load reads the litter. @see setRealisticLitter */
+let realisticLitter = true;
+
+/**
+ * Makes the NEXT realistic load leave out a village's litter (`false`), so
+ * its pavements are as they were before the owner's ruling of 2026-11-05 on
+ * #1274 — or read it again (`true`), as the product always does. Neither file
+ * is fetched with it off.
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts` loads without it for
+ * the owner's by-eye pair (`?levers=-litter`); the product never calls it
+ */
+export function setRealisticLitter(on: boolean): void {
+  realisticLitter = on;
+}
+
+/** Whether the next realistic load reads the chain-link fence. @see setRealisticChainLink */
+let realisticChainLink = true;
+
+/**
+ * Makes the NEXT realistic load leave out the chain-link fence (`false`) —
+ * its piece and its wire — or read it again (`true`), as the product always
+ * does. With it off a chain-link piece is drawn as the field fence it is
+ * placed as; the owner's page's before leaves the pieces out as well
+ * (`?levers=-chain-link`, `browser/realistic/config.ts`).
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts`; the product never
+ * calls it
+ */
+export function setRealisticChainLink(on: boolean): void {
+  realisticChainLink = on;
 }
 
 /** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
@@ -7089,6 +7307,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   world.wordmark.dispose();
   // #1585: the house models' atlas; their triangles are plain arrays.
   world.houses?.atlas.dispose();
+  // #1274: the chain-link's wire; its piece's triangles are plain arrays.
+  world.chainLink?.wire.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) releaseRealisticShape(shape);
@@ -9847,14 +10067,70 @@ function roadsideFurnitureGeometry(model: RoadsideGeometry): BufferGeometry {
 }
 
 /**
+ * A model laid on its side — #1274: an old tyre lies flat. Turned a quarter
+ * about `x`, so what stood up its `y` lies along `z` and its depth stands up,
+ * then stood on the origin again: its footprint's middle at `x = z = 0` and
+ * its lowest point at `y = 0`. A proper rotation, so nothing is inside out.
+ */
+export function laidFlat(model: RoadsideGeometry): RoadsideGeometry {
+  const position = new Float32Array(model.position.length);
+  const normal = new Float32Array(model.normal.length);
+  for (let at = 0; at < position.length; at += 3) {
+    for (const [source, target] of [
+      [model.position, position],
+      [model.normal, normal],
+    ] as const) {
+      // (x, y, z) → (x, −z, y): a quarter turn about x.
+      target[at] = source[at] as number;
+      target[at + 1] = -(source[at + 2] as number);
+      target[at + 2] = source[at + 1] as number;
+    }
+  }
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  for (let at = 0; at < position.length; at += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      low[axis] = Math.min(low[axis] as number, position[at + axis] as number);
+      high[axis] = Math.max(high[axis] as number, position[at + axis] as number);
+    }
+  }
+  const shift = [
+    ((low[0] as number) + (high[0] as number)) / 2,
+    low[1] as number,
+    ((low[2] as number) + (high[2] as number)) / 2,
+  ];
+  for (let at = 0; at < position.length; at += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      position[at + axis] = (position[at + axis] as number) - (shift[axis] as number);
+    }
+  }
+  return { position, normal, colour: model.colour.slice(), triangles: model.triangles };
+}
+
+/** One piece the street furniture's meshes are built from: a piece of furniture, or of litter. */
+type StreetPiece = FurnitureItem | LitterPiece;
+
+/** A piece of litter as the furniture's meshes hold it — #1274. @see litter.ts */
+interface LitterPiece {
+  readonly kind: `litter-${LitterKind}`;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly rotation: number;
+}
+
+/** What a street piece is drawn as: a furniture kind, or a kind of litter. */
+type StreetShape = StreetPiece['kind'];
+
+/**
  * Every piece in `items` as one geometry: `shapes`' own, each piece's turned
  * by its yaw as three's `makeRotationY` turns it and stood where it stands —
  * the transform the instanced draw made on the GPU until #1689, made here
  * once. Every shape carries the same attributes, unindexed.
  */
 function furnitureSurfaceGeometry(
-  items: readonly FurnitureItem[],
-  shapes: ReadonlyMap<FurnitureKind, BufferGeometry>,
+  items: readonly StreetPiece[],
+  shapes: ReadonlyMap<StreetShape, BufferGeometry>,
 ): BufferGeometry {
   const [first] = shapes.values();
   const names = first === undefined ? [] : Object.keys(first.attributes);
@@ -9925,6 +10201,15 @@ function furnitureSurfaceGeometry(
  * the street still draws in the same two calls (the village frame is frozen,
  * `realistic-budget.ts` §`REALISTIC_VILLAGE_DRAW_CALLS`); what it costs is
  * triangles, which `realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES` counts.
+ *
+ * ⚠️ **Since the owner's ruling of 2026-11-05 on #1274 the realistic painted
+ * mesh carries a village's litter too** (`litter.ts`): Poly Haven's
+ * `trashbag` beside a bin and `old_tyre` laid flat by a lamp post, coloured a
+ * vertex at a time, merged as the lamp is. A piece is admitted only on a
+ * frame that draws its anchor — the bin or the post it was placed from, both
+ * painted — so the painted mesh is drawn on every frame a piece is: no call
+ * of its own, and none on an open verge or in the wooded hold, which have no
+ * street. At most `litter.ts` §`LITTER_CAPACITY` a frame.
  */
 export class FurnitureBelt {
   readonly #meshes = new Map<FurnitureSurface, Mesh>();
@@ -9932,14 +10217,25 @@ export class FurnitureBelt {
     FurnitureSurface,
     { readonly lit: Material; readonly flat: Material }
   >();
-  /** Each surface's kinds' shapes, one piece's, unindexed. */
-  readonly #shapes = new Map<FurnitureSurface, Map<FurnitureKind, BufferGeometry>>();
+  /** Each surface's kinds' shapes, one piece's, unindexed — and the litter's, in the painted. */
+  readonly #shapes = new Map<FurnitureSurface, Map<StreetShape, BufferGeometry>>();
   /** The pieces each surface's mesh holds, in the order it holds them. */
-  readonly #held = new Map<FurnitureSurface, readonly FurnitureItem[]>();
+  readonly #held = new Map<FurnitureSurface, readonly StreetPiece[]>();
   /** This frame's pieces in reach, a surface's — reused, so a frame allocates nothing. */
-  readonly #inReach = new Map<FurnitureSurface, FurnitureItem[]>();
+  readonly #inReach = new Map<FurnitureSurface, StreetPiece[]>();
   /** How many of each kind the last frame drew. @see drawnOf */
   readonly #drawn = new Map<FurnitureKind, number>();
+  /** Whether the belt draws litter: the realistic world, handed the models. */
+  readonly #litters: boolean;
+  /** How many pieces of litter of each kind the last frame drew. @see litterDrawnOf */
+  readonly #litterDrawn = new Map<LitterKind, number>();
+  /** This frame's anchors drawn — reused. @see update */
+  readonly #anchors = new Set<FurnitureItem>();
+  /** Each street's litter as the meshes hold it, built once a street. */
+  readonly #litterPieces = new WeakMap<
+    VillageStreet,
+    readonly (readonly [LitterPiece, FurnitureItem])[]
+  >();
   #shown = true;
   /** Whether the browser gate has turned the furniture off — its control. */
   #switchedOn = true;
@@ -9949,7 +10245,10 @@ export class FurnitureBelt {
     planks?: { readonly colour: Texture; readonly normal: Texture },
     /** #1274: the lamp the realistic world draws its lamp posts as. */
     lamp?: RoadsideGeometry,
+    /** #1274: the litter the realistic world lays on a village's pavements. */
+    litter?: RealisticLitter,
   ) {
+    this.#litters = world === 'realistic' && litter !== undefined;
     for (const surface of FURNITURE_SURFACES) {
       let materials: { readonly lit: Material; readonly flat: Material };
       if (world === 'realistic') {
@@ -9977,7 +10276,7 @@ export class FurnitureBelt {
         };
       }
       this.#materials.set(surface, materials);
-      const shapes = new Map<FurnitureKind, BufferGeometry>();
+      const shapes = new Map<StreetShape, BufferGeometry>();
       for (const kind of FURNITURE_KINDS) {
         if (FURNITURE_STYLE[kind].surface !== surface) continue;
         const built =
@@ -9986,6 +10285,11 @@ export class FurnitureBelt {
             : furnitureGeometry(kind, world);
         shapes.set(kind, built.index === null ? built : built.toNonIndexed());
         if (built.index !== null) built.dispose();
+      }
+      // #1274: the litter, painted in its own vertices, beside the bins.
+      if (surface === 'painted' && this.#litters && litter !== undefined) {
+        shapes.set('litter-bag', roadsideFurnitureGeometry(litter.bag));
+        shapes.set('litter-tyre', roadsideFurnitureGeometry(laidFlat(litter.tyre)));
       }
       this.#shapes.set(surface, shapes);
       this.#held.set(surface, []);
@@ -9998,10 +10302,21 @@ export class FurnitureBelt {
       this.#meshes.set(surface, mesh);
     }
     for (const kind of FURNITURE_KINDS) this.#drawn.set(kind, 0);
+    for (const kind of LITTER_KINDS) this.#litterDrawn.set(kind, 0);
   }
 
   addTo(scene: Scene): void {
     for (const mesh of this.#meshes.values()) scene.add(mesh);
+  }
+
+  /** One piece of litter of `kind`, in its own frame, or none: the belt draws no litter. */
+  litterShapeOf(kind: LitterKind): BufferGeometry | undefined {
+    return this.#shapes.get('painted')?.get(`litter-${kind}`);
+  }
+
+  /** How many pieces of litter of `kind` the last frame drew — #1274. */
+  litterDrawnOf(kind: LitterKind): number {
+    return this.#litterDrawn.get(kind) ?? 0;
   }
 
   /** One surface's mesh. For the jsdom suite. */
@@ -10012,6 +10327,27 @@ export class FurnitureBelt {
   /** One piece of `kind`, in its own frame: the shape every piece of it is drawn from. */
   shapeOf(kind: FurnitureKind): BufferGeometry {
     return this.#shapes.get(FURNITURE_STYLE[kind].surface)?.get(kind) as BufferGeometry;
+  }
+
+  /** `street`'s litter as the painted mesh holds it, each with its anchor, built once. */
+  #litterOf(street: VillageStreet): readonly (readonly [LitterPiece, FurnitureItem])[] {
+    const known = this.#litterPieces.get(street);
+    if (known !== undefined) return known;
+    const made = litterOf(street).map(
+      (item) =>
+        [
+          {
+            kind: `litter-${item.kind}`,
+            x: item.x,
+            y: item.y,
+            z: item.z,
+            rotation: item.rotation,
+          } as const,
+          item.anchor,
+        ] as const,
+    );
+    this.#litterPieces.set(street, made);
+    return made;
   }
 
   /** How many pieces of `kind` the last frame drew. @see furnitureCountsOf */
@@ -10042,7 +10378,9 @@ export class FurnitureBelt {
     camera: { readonly x: number; readonly z: number },
   ): void {
     for (const kind of FURNITURE_KINDS) this.#drawn.set(kind, 0);
+    for (const kind of LITTER_KINDS) this.#litterDrawn.set(kind, 0);
     for (const reach of this.#inReach.values()) reach.length = 0;
+    this.#anchors.clear();
     if (this.#shown && this.#switchedOn) {
       for (const street of streets) {
         for (const item of street.furniture) {
@@ -10051,17 +10389,33 @@ export class FurnitureBelt {
           if (drawn >= FURNITURE_CAPACITY) continue;
           this.#drawn.set(item.kind, drawn + 1);
           this.#inReach.get(FURNITURE_STYLE[item.kind].surface)?.push(item);
+          this.#anchors.add(item);
+        }
+      }
+      // #1274: the litter, only beside an anchor this frame draws, in the
+      // painted mesh that anchor is drawn in. @see the header
+      if (this.#litters) {
+        const painted = this.#inReach.get('painted') as StreetPiece[];
+        let litter = 0;
+        for (const street of streets) {
+          for (const [piece, anchor] of this.#litterOf(street)) {
+            if (litter >= LITTER_CAPACITY || !this.#anchors.has(anchor)) continue;
+            litter += 1;
+            const kind = piece.kind === 'litter-bag' ? 'bag' : 'tyre';
+            this.#litterDrawn.set(kind, (this.#litterDrawn.get(kind) ?? 0) + 1);
+            painted.push(piece);
+          }
         }
       }
     }
     for (const [surface, mesh] of this.#meshes) {
-      const reach = this.#inReach.get(surface) as FurnitureItem[];
-      if (!sameFurniture(reach, this.#held.get(surface) as readonly FurnitureItem[])) {
+      const reach = this.#inReach.get(surface) as StreetPiece[];
+      if (!sameFurniture(reach, this.#held.get(surface) as readonly StreetPiece[])) {
         this.#held.set(surface, [...reach]);
         mesh.geometry.dispose();
         mesh.geometry = furnitureSurfaceGeometry(
           reach,
-          this.#shapes.get(surface) as ReadonlyMap<FurnitureKind, BufferGeometry>,
+          this.#shapes.get(surface) as ReadonlyMap<StreetShape, BufferGeometry>,
         );
       }
       mesh.visible = this.#shown && reach.length > 0;
@@ -10080,7 +10434,7 @@ export class FurnitureBelt {
 }
 
 /** Whether two lists hold the same pieces, by identity, in the same order. */
-function sameFurniture(first: readonly FurnitureItem[], second: readonly FurnitureItem[]): boolean {
+function sameFurniture(first: readonly StreetPiece[], second: readonly StreetPiece[]): boolean {
   return first.length === second.length && first.every((item, index) => item === second[index]);
 }
 
@@ -15745,6 +16099,19 @@ function structureMaterials(
   };
 }
 
+/**
+ * The realistic fence's own pair — #1274: its surface's, constructed afresh,
+ * each taught the chain-link ({@link withChainLink}).
+ */
+function chainLinkMaterials(
+  surface: StructureSurface,
+  textures: RealisticWorld['structures'],
+  wire: Texture,
+): ShadedMaterials {
+  const made = structureMaterials(surface, textures);
+  return { lit: withChainLink(made.lit, wire), flat: withChainLink(made.flat, wire) };
+}
+
 /** The materials {@link withLotPaint} has taught, and the channel each reads. */
 const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof' | 'trim'>();
 
@@ -16037,6 +16404,197 @@ function withLotPorch<M extends Material>(material: M): M {
 }
 
 /**
+ * The vertex attribute that says which part of the realistic fence's folded
+ * mesh a vertex is — #1274: 0 the field fence's planks, 1 the chain-link's
+ * frame, 2 its wire. @see withChainLink
+ */
+export const CHAIN_LINK_PART_ATTRIBUTE = 'oylChain';
+
+/**
+ * The instance attribute that says which fence an instance is — #1274: 0 the
+ * field fence, 1 the chain-link. @see ScatterFold
+ */
+export const CHAIN_LINK_SHAPE_ATTRIBUTE = 'oylChainShape';
+
+/**
+ * How far into the ground the chain-link piece is set, in metres: **0.3** —
+ * #1274: the kit stands on its posts' feet, and a field boundary is set into
+ * the ground (`BOUNDARY_STYLE`) so a slope under its 8 m shows no gap. Its
+ * 2.5 m posts stand 2.2 m out of the ground.
+ */
+export const CHAIN_LINK_SINK_METRES = 0.3;
+
+/**
+ * The vertex rule {@link withChainLink} splices after `begin_vertex` — #1274:
+ * a vertex of the fence its instance is not is folded to the instance's
+ * origin, every corner of its triangles to one point, which draws nothing —
+ * the gantry's fold (`GANTRY_FOLD_GLSL`) and #1589's lot porch.
+ *
+ * Exported for `realistic-roadside.test.ts`, which runs it.
+ */
+export const CHAIN_LINK_FOLD_GLSL = `vOylChain = ${CHAIN_LINK_PART_ATTRIBUTE};
+if (abs(step(0.5, ${CHAIN_LINK_PART_ATTRIBUTE}) - ${CHAIN_LINK_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
+
+/**
+ * The wire's cut-out — #1274, two functions {@link withChainLink} declares in
+ * the fragment program. `oylChainCut` is the opacity below which a fragment
+ * of wire is dropped: one half where a texel of the map covers a pixel or
+ * more, and further off — where the mipmap's mean is how much of a pixel is
+ * wire — a threshold that varies pixel to pixel (`noise`, interleaved
+ * gradient noise), so a distant fence keeps its share of wire as a fine
+ * stipple rather than vanishing under a fixed half. `oylChainKeeps` is
+ * whether a fragment is kept: every fragment of the planks and the frame,
+ * and a fragment of wire whose opacity reaches the cut.
+ *
+ * Exported for `realistic-roadside.test.ts`, which runs it.
+ */
+export const CHAIN_LINK_CUT_GLSL = `float oylChainCut(float texels, float noise) {
+  return mix(0.5, noise, clamp(texels - 1.0, 0.0, 1.0));
+}
+float oylChainKeeps(float part, float wire, float cut) {
+  return part < 1.5 || wire >= cut ? 1.0 : 0.0;
+}`;
+
+/**
+ * The fragment rule {@link withChainLink} splices after `color_fragment` —
+ * #1274. The chain-link's frame and wire are their vertices' colour, not the
+ * planks' photograph, and the wire is cut out ({@link CHAIN_LINK_CUT_GLSL}).
+ * The derivatives and the sample are taken out of every branch, for GLSL
+ * ES's rule on derivatives in non-uniform control flow.
+ */
+export const CHAIN_LINK_FRAGMENT_GLSL = `float oylChainTexels = max(fwidth(vMapUv.x), fwidth(vMapUv.y)) * oylWireTexels;
+float oylChainNoise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+float oylWire = texture2D(oylWireMap, vMapUv).g;
+if (vOylChain > 0.5) diffuseColor.rgb = vColor.rgb;
+if (oylChainKeeps(vOylChain, oylWire, oylChainCut(oylChainTexels, oylChainNoise)) < 0.5) discard;`;
+
+/** The materials {@link withChainLink} has taught. */
+const CHAIN_LINK_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material draws the chain-link fence folded into the field fence.
+ *
+ * @test-facing held by `realistic-roadside.test.ts`
+ */
+export function drawsChainLink(material: Material): boolean {
+  return CHAIN_LINK_TAUGHT.has(material);
+}
+
+/**
+ * Teaches the realistic fence's material the chain-link — #1274: the fold
+ * ({@link CHAIN_LINK_FOLD_GLSL}), the wire's cut-out and the parts' own
+ * colour ({@link CHAIN_LINK_FRAGMENT_GLSL}), reading `wire` — and, lit, the
+ * planks' relief taken off the chain-link's parts. Throws, as every splice
+ * here does, if three's program no longer holds an include it is spliced at.
+ */
+function withChainLink<M extends Material>(material: M, wire: Texture): M {
+  CHAIN_LINK_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1274's chain-link";
+  const texels = glslFloat((wire.image as { width?: number } | null)?.width ?? 1024);
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms.oylWireMap = { value: wire };
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${CHAIN_LINK_PART_ATTRIBUTE};\nattribute float ${CHAIN_LINK_SHAPE_ATTRIBUTE};\nvarying float vOylChain;`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n${CHAIN_LINK_FOLD_GLSL}`,
+      'vertex',
+      spliced,
+    );
+    let fragment = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>\nuniform sampler2D oylWireMap;\nvarying float vOylChain;\nconst float oylWireTexels = ${texels};\n${CHAIN_LINK_CUT_GLSL}`,
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      `#include <color_fragment>\n${CHAIN_LINK_FRAGMENT_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    if (fragment.includes('#include <normal_fragment_maps>')) {
+      fragment = fragment.replace(
+        '#include <normal_fragment_maps>',
+        '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, step(0.5, vOylChain)));',
+      );
+    }
+    shader.fragmentShader = fragment;
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-chain-link`;
+  return material;
+}
+
+/**
+ * The realistic fence's one instanced shape — #1274: the field fence `fence`
+ * (`realisticStructureGeometry('fence', 'planks')`) and the chain-link piece
+ * together, each vertex marked with its part ({@link CHAIN_LINK_PART_ATTRIBUTE}).
+ * The piece is turned a quarter about `y`, a proper rotation, so its 8 m
+ * length runs along `z` as a field boundary's does, and set
+ * {@link CHAIN_LINK_SINK_METRES} into the ground; its texture coordinates
+ * are the wire's own and nought on the frame, its colour its own, and every
+ * other attribute the fence carries is nought on it.
+ */
+export function chainLinkFenceGeometry(
+  fence: BufferGeometry,
+  piece: ChainLinkGeometry,
+): BufferGeometry {
+  const plain = fence.index === null ? fence : fence.toNonIndexed();
+  const fenceVertices = plain.getAttribute('position').count;
+  const frameVertices = piece.frame.position.length / 3;
+  const wireVertices = piece.wire.position.length / 3;
+  const vertices = fenceVertices + frameVertices + wireVertices;
+  const geometry = new BufferGeometry();
+  for (const name of Object.keys(plain.attributes)) {
+    const source = plain.getAttribute(name);
+    const size = source.itemSize;
+    const out = new Float32Array(vertices * size);
+    for (let at = 0; at < fenceVertices; at += 1) {
+      for (let k = 0; k < size; k += 1) out[at * size + k] = source.getComponent(at, k);
+    }
+    const parts: readonly [RoadsideGeometry, number][] = [
+      [piece.frame, fenceVertices],
+      [piece.wire, fenceVertices + frameVertices],
+    ];
+    for (const [part, first] of parts) {
+      const count = part.position.length / 3;
+      for (let at = 0; at < count; at += 1) {
+        const to = (first + at) * size;
+        if (name === 'position' || name === 'normal') {
+          const from = part[name];
+          // (x, y, z) → (z, y, −x): the piece's length, along x, along z.
+          out[to] = from[at * 3 + 2] as number;
+          out[to + 1] =
+            (from[at * 3 + 1] as number) - (name === 'position' ? CHAIN_LINK_SINK_METRES : 0);
+          out[to + 2] = -(from[at * 3] as number);
+        } else if (name === 'color') {
+          out.set(part.colour.subarray(at * 3, at * 3 + 3), to);
+        } else if (name === 'uv' && part === piece.wire) {
+          out.set(piece.wire.uv.subarray(at * 2, at * 2 + 2), to);
+        }
+      }
+    }
+    geometry.setAttribute(name, new BufferAttribute(out, size));
+  }
+  const parts = new Float32Array(vertices);
+  parts.fill(1, fenceVertices, fenceVertices + frameVertices);
+  parts.fill(2, fenceVertices + frameVertices);
+  geometry.setAttribute(CHAIN_LINK_PART_ATTRIBUTE, new BufferAttribute(parts, 1));
+  if (plain !== fence) plain.dispose();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The realistic world's structures, one {@link ScatterBelt} per surface — #475.
  *
  * ## Why a belt a surface, and why every belt counts every item
@@ -16050,6 +16608,19 @@ function withLotPorch<M extends Material>(material: M): M {
  * `skip` list, which is what makes it spend the budget without being drawn
  * (#478): each belt admits exactly the items the stylised belt would, so a
  * house can never be drawn with its walls and without its roof.
+ *
+ * ## The chain-link fence is the field fence's mesh — #1274
+ *
+ * By the owner's ruling of 2026-11-05 a fence beside an industrial, school or
+ * sports ground (`chain-link.ts`, {@link ScatterItem.chainLink}) is Poly
+ * Haven's chain-link, with **no new draw call**: the planks' belt's fence
+ * mesh carries both shapes ({@link chainLinkFenceGeometry}) and wears a pair
+ * of its own taught the fold and the wire's cut-out ({@link withChainLink}),
+ * and each instance says which it is ({@link ScatterFold}). A field fence
+ * keeps its planks. What it costs is triangles: every realistic fence
+ * instance submits both shapes, under the heaviest structure the frame's
+ * structures term prices a slot at (`realistic-budget.ts`
+ * §`REALISTIC_TRIANGLES`' `chain-link`).
  */
 export class RealisticStructureBelts {
   readonly #belts: readonly { readonly surface: StructureSurface; readonly belt: ScatterBelt }[];
@@ -16058,8 +16629,12 @@ export class RealisticStructureBelts {
   /** How tall each kind is built, at scale 1, over every surface and shape — #620. */
   readonly #heights = new Map<StructureKind, number>();
 
-  /** @param textures the world's structure surfaces. @see RealisticWorld.structures */
-  constructor(textures: RealisticWorld['structures']) {
+  /**
+   * @param textures the world's structure surfaces. @see RealisticWorld.structures
+   * @param chainLink #1274: the chain-link fence, folded into the field fence's
+   * mesh in the planks' belt, which a chain-link piece is drawn as. @see ScatterFold
+   */
+  constructor(textures: RealisticWorld['structures'], chainLink?: RealisticChainLink) {
     for (const kind of STRUCTURE_KINDS) {
       const [first] = realisticStructureSurfaces(kind);
       if (first !== undefined) this.#first.set(kind, first);
@@ -16091,12 +16666,30 @@ export class RealisticStructureBelts {
           const top = shape.boundingBox?.max.y ?? 0;
           this.#heights.set(kind, Math.max(this.#heights.get(kind) ?? 0, top));
         }
+        // #1274: the chain-link folded into the field fence, after its height
+        // is read — a field fence's ground blob is the field fence's.
+        if (kind === 'fence' && chainLink !== undefined) {
+          const folded = chainLinkFenceGeometry(shapes[0] as BufferGeometry, chainLink.geometry);
+          (shapes[0] as BufferGeometry).dispose();
+          shapes[0] = folded;
+        }
         models.set(kind, shapes);
       }
+      const folds = chainLink !== undefined && models.has('fence');
       const belt = new ScatterBelt(models, {
         skip: new Set(SCENERY_KINDS.filter((kind) => !models.has(kind))),
         materials: structureMaterials(surface, textures),
         tint: 'masonry',
+        ...(folds
+          ? {
+              fold: {
+                kind: 'fence',
+                materials: chainLinkMaterials(surface, textures, chainLink.wire),
+                attribute: CHAIN_LINK_SHAPE_ATTRIBUTE,
+                shapeOf: (item: ScatterItem) => (item.chainLink === true ? 1 : 0),
+              },
+            }
+          : {}),
       });
       // The belt wears copies. @see ScatterBelt's constructor
       for (const shapes of models.values()) for (const geometry of shapes) geometry.dispose();
@@ -19857,7 +20450,7 @@ class RealisticDrawing {
     const anisotropy = Math.min(REALISTIC_ANISOTROPY, maxAnisotropy);
     for (const texture of surfaceMapsOf(world)) texture.anisotropy = anisotropy;
     this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
-    this.structures = new RealisticStructureBelts(world.structures);
+    this.structures = new RealisticStructureBelts(world.structures, world.chainLink);
     this.primitives = new ScatterBelt(new Map(), {
       skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
@@ -19874,6 +20467,7 @@ class RealisticDrawing {
       'realistic',
       world.structures.get('planks'),
       world.roadside?.lamp,
+      world.litter,
     );
     this.lampModelled = world.roadside !== undefined;
     this.people = new PeopleBelt(world.body);

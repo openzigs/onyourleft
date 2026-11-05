@@ -72,6 +72,8 @@ import {
   typedStreetFixture,
   // #2023's street of untagged garages and sheds, which `town=untagged` rides.
   untaggedStreetFixture,
+  // #1274's industrial estate, school and pitches, which `town=grounds` rides.
+  fencedGroundsFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -102,6 +104,8 @@ import {
   realisticSurfacesOf,
   realisticTextureReport,
   setRealisticRoadside,
+  setRealisticLitter,
+  setRealisticChainLink,
   setRealisticTrees,
   threeGameRenderer,
   villageHouseStatsOf,
@@ -124,6 +128,9 @@ import {
   nearTreeFadeWithLevers,
   surfacesWithLevers,
   roadsideWithLevers,
+  litterWithLevers,
+  chainLinkWithLevers,
+  townWithChainLink,
   treesWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
@@ -461,6 +468,9 @@ async function run(): Promise<void> {
     setRealisticTrees(treesWithLevers(config.leversOff));
     // #1274: the roadside models, or the shapes before them, likewise.
     setRealisticRoadside(roadsideWithLevers(config.leversOff));
+    // #1274: a village's litter and the chain-link fence, or neither, likewise.
+    setRealisticLitter(litterWithLevers(config.leversOff));
+    setRealisticChainLink(chainLinkWithLevers(config.leversOff));
     outcome = await loadRealisticWorld();
   }
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
@@ -495,7 +505,9 @@ async function run(): Promise<void> {
                         ? mappedRoofStreetFixture(latitude)
                         : config.town === 'untagged'
                           ? untaggedStreetFixture(latitude)
-                          : undefined;
+                          : config.town === 'grounds'
+                            ? fencedGroundsFixture(latitude)
+                            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -512,7 +524,8 @@ async function run(): Promise<void> {
       corridor: mixed.corridor,
       land,
       buildings: mappedBuildingsOf(plans),
-      lots: mappedTown(mixed.corridor, plans, urban),
+      // #1274: and its chain-link fence, unless that lever is off.
+      lots: townWithChainLink(mappedTown(mixed.corridor, plans, urban), config.leversOff),
     };
   })();
   const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;

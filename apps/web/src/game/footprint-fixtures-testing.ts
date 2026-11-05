@@ -766,6 +766,65 @@ export function countrysideFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/**
+ * #1274's fixture: the grounds a chain-link fence stands beside, along 3 km
+ * of level road, and a field that keeps its own fence.
+ *
+ * - **Right, 950–1 250 m**: an industrial estate mapped to 2 m from the
+ *   road's line, as OpenStreetMap often draws one, with two sheds well back.
+ *   Its frontage is fenced on the field verge's line (`chain-link.ts`).
+ * - **Left, 1 300–1 550 m**: a school from 6 m back, its building 135 m in,
+ *   and a pitch inside it from 1 380 m to 1 480 m.
+ * - **Right, 1 600–1 750 m**: a pitch of its own, from 10 m back.
+ * - **Left, 1 600–2 100 m**: farmland from the verge, and a wood beside it
+ *   from 1 800 m — the field fence between them keeps its planks.
+ */
+export function fencedGroundsFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  const shed = (along: number, lateral: number, length: number, depth: number) =>
+    buildingBeside(
+      profile,
+      origin,
+      [
+        [
+          [along - length / 2, lateral - depth / 2],
+          [along + length / 2, lateral - depth / 2],
+          [along + length / 2, lateral + depth / 2],
+          [along - length / 2, lateral + depth / 2],
+        ],
+      ],
+      8,
+    );
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'fenced-grounds',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('industrial', 950, 1_250, 2, 160),
+        land('school', 1_300, 1_550, -6, -160),
+        land('pitch', 1_380, 1_480, -40, -110),
+        land('pitch', 1_600, 1_750, 10, 90),
+        land('farmland', 1_600, 2_100, -4, -300),
+        land('wood', 1_800, 2_100, -60, -300),
+      ],
+      buildings: [shed(1_050, 70, 50, 30), shed(1_170, 90, 40, 40), shed(1_420, -135, 50, 20)],
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
 export const INSIDE_CLEARANCE_METRES = 2;
 

@@ -3319,6 +3319,10 @@ published figures (its run predates `oyl.txt`).
 | #1274 | after (ambientCG's rock face on a steep bank) | #1274's merge | — | | | | | | | | |
 | #1274 | roadside before (the stylised lamp posts and barrier boxes) | the roadside models' merge | — ; `route=village&at=820`, `levers=-roadside-models` | | | | | | | | |
 | #1274 | roadside after (Poly Haven's lamp and barrier) | the same build | — ; `route=village&at=820` | | | | | | | | |
+| #1274 | litter before (no litter) | the litter and chain-link merge | — ; `route=village&at=820`, `levers=-litter` | | | | | | | | |
+| #1274 | litter after (bags and a tyre) | the same build | — ; `route=village&at=820` | | | | | | | | |
+| #1274 | chain-link before (no chain-link) | the same build | — ; `town=grounds&at=1100`, `levers=-chain-link` | | | | | | | | |
+| #1274 | chain-link after (the industrial estate fenced) | the same build | — ; `town=grounds&at=1100` | | | | | | | | |
 | #1283 | before (the scanned broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-trees` | | | | | | | | |
 | #1283 | after (the generated broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
 | #1294 | before (the scanned firs, beside the generated broadleaves) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
@@ -3696,6 +3700,44 @@ gantry instance submits the barrier's 48 triangles, folded or not.
 |---|---|
 | Do the village's lamp posts read as cast-iron lamps, and is 3.87 m the right height beside the houses? | |
 | Do the gantries' barriers read as concrete barriers, or as brown wedges? | |
+
+### #1274's rows — a village's litter and the chain-link fence
+
+By the owner's ruling of 2026-11-05: Poly Haven's `trashbag` and `old_tyre` lie on a village's
+pavements, beside some bins and by one lamp post (`apps/web/src/game/litter.ts`), merged into the
+street furniture's painted mesh; and Poly Haven's `modular_chainlink_fence` stands beside mapped
+industrial, school and sports grounds (`apps/web/src/game/chain-link.ts`), drawn inside the field
+fence's one instanced mesh, whose vertex shader folds away the fence an instance is not and whose
+wire is cut out by the kit's own opacity map. Field fences keep their planks, and the stylised
+world draws neither.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-11-05, on the owner's page at
+1280 × 800, each before with its lever off on the same build:
+
+| Frame | Calls before | Calls after | Triangles before | Triangles after |
+|---|--:|--:|--:|--:|
+| Village hold, `route=village&at=820` (`-litter`) | 49 | **49** | 167 874 | 168 054 |
+| Wooded hold, `at=2550` (`-litter,-chain-link`) | 34 | **34** | 150 946 | 153 490 |
+| Industrial estate, `town=grounds&at=1100` (`-chain-link`) | 43 | **42** | 153 006 | 154 030 |
+| School, `town=grounds&at=1330` (`-chain-link`) | 39 | **38** | 147 162 | 148 972 |
+
+The wooded hold's 2 544 are the fold's cost: its sixteen field fences each submit the chain-link's
+159 triangles, folded away. A town frame's calls fell by one because the chain-link pieces spend
+the structures' budget a hedge or a wall spent before. Texture memory **77.1 → 78.4 MiB**
+estimated (the wire's 1K opacity map, 1.3 MiB); the build **47 601 549 → 47 894 829 bytes** of
+the 46 MiB ceiling, transcoder included (`realistic-budget.test.ts`).
+
+| Step | What to do |
+|---|---|
+| AH-1274-10 | **Before**: with the owner's page staged, AH1–AH7 with AH4's URL plus `&route=village&at=820&levers=-litter`, then `&town=grounds&at=1100&levers=-chain-link`. `RUN=1274-litter-before`, `RUN=1274-chain-before` |
+| AH-1274-11 | **Cool again (AH3, 25–26 °C)**, then **after**: the same two without the levers. `RUN=1274-litter-after`, `RUN=1274-chain-after` |
+| AH-1274-12 | Write the four rows into the table above. **Draw calls** should not rise |
+| AH-1274-13 | **By eye, on the page**: the same URLs, and `town=grounds&at=1330` for the school |
+
+| #1274 litter and chain-link by eye | Answer |
+|---|---|
+| Does the litter read as a bag and a tyre, and is it sparse enough? | |
+| Does the chain-link read as wire, near and far, and is its diamond the right size? | |
 
 ### #1283's rows — the broadleaf trees, generated to their budget
 
