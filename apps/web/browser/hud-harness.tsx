@@ -159,6 +159,7 @@ import {
 import type { GhostOutcome } from '../src/game/ghost-outcome';
 import type { ChasedGap } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
+import { RIDER_MARK_MINIMUM_PIXELS } from '../src/game/hud/plan';
 import { SoundControls } from '../src/game/SoundControls';
 import type { GameState } from '../src/game/simulation';
 
@@ -201,8 +202,9 @@ export interface ValueMeasurement {
  * The plan view's box, and the box of the road drawn inside it — #285.
  *
  * ⚠️ **Only a browser can answer either.** The panel's height comes from
- * `theme.css` (`8rem`) inside `.oyl-hud`'s flex column, and the road's box comes
- * from `preserveAspectRatio` resolving a 100×100 viewBox into that. jsdom
+ * `theme.css` (5 rem; 8 rem on a landscape tablet, #2070) inside `.oyl-hud`'s
+ * flex column, and the road's box comes from `preserveAspectRatio` resolving a
+ * 100×100 viewBox into that. jsdom
  * performs no layout and lays out no SVG at all, so both are zero there and the
  * jsdom suite cannot tell a drawn route from a collapsed one.
  */
@@ -215,6 +217,20 @@ export interface PlanMeasurement {
   readonly roadHeight: number;
   /** How many `<path>` elements the road was drawn as. */
   readonly roads: number;
+  /**
+   * #2070 — the rider's mark as the engine drew it: the disc's own box, which
+   * for an SVG shape is its geometry and leaves the ring out.
+   */
+  readonly mark: { readonly width: number; readonly height: number } | undefined;
+  /** #2070 — `plan.ts` §RIDER_MARK_MINIMUM_PIXELS, published so the spec need not mirror it. */
+  readonly minimumMarkPixels: number;
+  /** #2070 — each line of the road as the engine resolved it, by which part it is. */
+  readonly lines: readonly {
+    readonly part: string;
+    readonly strokeWidth: string;
+    readonly dash: string;
+    readonly stroke: string;
+  }[];
 }
 
 /**
@@ -1005,12 +1021,24 @@ function measurePlan(): PlanMeasurement | undefined {
     boxes.length === 0
       ? 0
       : Math.max(...boxes.map((r) => r.bottom)) - Math.min(...boxes.map((r) => r.top));
+  const mark = svg.querySelector('.oyl-hud__plan-here')?.getBoundingClientRect();
   return {
     width: box.width,
     height: box.height,
     roadWidth: width,
     roadHeight: height,
     roads: roads.length,
+    mark: mark === undefined ? undefined : { width: mark.width, height: mark.height },
+    minimumMarkPixels: RIDER_MARK_MINIMUM_PIXELS,
+    lines: roads.map((road) => {
+      const style = window.getComputedStyle(road);
+      return {
+        part: road.getAttribute('data-oyl-plan-part') ?? '',
+        strokeWidth: style.strokeWidth,
+        dash: style.strokeDasharray,
+        stroke: style.stroke,
+      };
+    }),
   };
 }
 
