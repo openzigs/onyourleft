@@ -63,6 +63,8 @@ import { readMenuSoundPreference } from './shell/menu-sound-preference';
 import { sharedCueOutput } from './game/web-audio';
 import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
+import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
+import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
@@ -291,6 +293,11 @@ interface ClientPlatform {
   readonly bluetoothAsk: BluetoothAskPort | undefined;
   readonly systemSettings: SystemSettingsPort | undefined;
   /**
+   * #2051: the shell's launch splash, released once the first route has
+   * painted. {@link NO_LAUNCH} in a browser, which holds no splash.
+   */
+  readonly launch: LaunchPort;
+  /**
    * The steering controller paired on Devices — #1826. Its own client beside
    * the transport, on the same platform choice: the shell's on the same
    * `plugin`, a browser's on the same `navigator.bluetooth`.
@@ -432,6 +439,12 @@ async function buildPlatform(
     const systemSettings: SystemSettingsPort = {
       openSystemSettings: async (page) => mobile.openCapacitorSettings(plugin, page),
     };
+    // #2051. `@capacitor/splash-screen`'s own plugin, which #2050 configured
+    // to hold the launch splash until this is called or 3 s pass.
+    const splashScreen = mobile.capacitorSplashScreenPlugin();
+    const launch: LaunchPort = {
+      releaseSplash: async () => mobile.hideCapacitorSplashScreen(splashScreen),
+    };
     // #1826. The same `plugin`, so the controller's link is one of the
     // links this object holds, against the same connection budget.
     const steering = createSteeringController(
@@ -444,6 +457,7 @@ async function buildPlatform(
       signal,
       bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
       systemSettings,
+      launch,
       steering,
     };
   }
@@ -456,6 +470,7 @@ async function buildPlatform(
       signal: undefined,
       bluetoothAsk: undefined,
       systemSettings: undefined,
+      launch: NO_LAUNCH,
       steering: undefined,
     };
   }
@@ -477,6 +492,7 @@ async function buildPlatform(
     signal: undefined,
     bluetoothAsk: undefined,
     systemSettings: undefined,
+    launch: NO_LAUNCH,
     // #1826. Its own client on the same `navigator.bluetooth`: each pairing
     // is the rider's press, as every device's is in a browser.
     steering: createSteeringController(
@@ -1567,7 +1583,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const menuSounds = createMenuSounds(sharedCueOutput(), () =>
     readMenuSoundPreference(deviceStorage()),
   );
-  const root = createRoot(container);
+  // #2051: the Android launch splash is released two frames after the first
+  // route commits, or at once if the first render throws (`shell/launch.tsx`).
+  const launch = launchRelease(platform.launch, (callback) => {
+    window.requestAnimationFrame(() => {
+      callback();
+    });
+  });
+  const root = createRoot(container, launchRootOptions(launch));
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
       <StrictMode>
@@ -1632,6 +1655,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           map={loadMapPort}
           basemap={browserBasemapConfig()}
         />
+        {/* #2051: after `AppShell`, so its effect runs once the route has committed. */}
+        <FirstRender onRendered={launch.rendered} />
       </StrictMode>,
     );
   };

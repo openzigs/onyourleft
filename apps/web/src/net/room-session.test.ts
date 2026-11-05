@@ -428,8 +428,8 @@ describe('a race’s standings, as the room sends them — #1347', () => {
     session(room, clock);
     await flush();
     room.accept();
-    expect(PROTOCOL_VERSION).toBe(3);
-    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 3 });
+    expect(PROTOCOL_VERSION).toBe(4);
+    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 4 });
   });
 });
 
