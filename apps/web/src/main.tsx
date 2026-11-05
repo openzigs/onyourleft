@@ -751,6 +751,9 @@ function buildGamePort(
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
     riderGhostOffered: () => ghosts?.offered() === true,
+    // #2077: the rider's own threshold, for the HUD's zone indicator — the
+    // local athlete's row, and only theirs.
+    ownThresholdPower: async () => (await store.getAthlete(LOCAL_ATHLETE))?.thresholdPower,
     loadRiderGhost: async (route: string): Promise<RiderGhostLoad> => {
       if (ghosts === undefined) return { kind: 'unavailable' };
       const saved = await store.getRoute(LOCAL_ATHLETE, routeId(route));

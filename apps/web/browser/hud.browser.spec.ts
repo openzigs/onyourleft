@@ -957,8 +957,10 @@ for (const viewport of VIEWPORTS) {
       const none = deliveryStage(measured, 'none');
       expect(none.fields).toEqual([]);
       expect(none.panel).toBeDefined();
-      // The ordinary ride's panel is the two rows every claim below is against.
-      expect(rows(none)).toBe(2);
+      // The ordinary ride's panel is the two rows every claim below is against
+      // on a phone. On the tablet the ride so far and the rider's effort, which
+      // a phone's overlay gives way (#2076, #2077), are a third.
+      expect(rows(none)).toBe(tablet ? 3 : 2);
       for (const stage of ['start', 'end']) {
         const round = deliveryStage(measured, stage);
         const name = `${viewport.name}/${stage}`;

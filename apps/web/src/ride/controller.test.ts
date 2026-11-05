@@ -28,6 +28,7 @@ import {
   gradePercent,
   metres,
   metresPerSecond,
+  powerZones,
   routeProfile,
   revolutionsPerMinute,
   beatsPerMinute,
@@ -37,6 +38,7 @@ import {
   HOLD_SILENCE_FALLBACK_SECONDS,
   seconds,
   thresholdShare,
+  timeInZones,
   unixSeconds,
   watts,
   type RouteProfile,
@@ -13099,6 +13101,47 @@ describe('#2076 — the HUD’s ride so far is the saved ride’s', () => {
     expect(riding?.climbed).toBe(atTheEnd.climbed);
     expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeGreaterThanOrEqual(0);
     expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeLessThan(30);
+    rig.controller.dispose();
+  });
+});
+
+describe('#2077 — the HUD’s time in each power zone is the saved ride’s', () => {
+  it('works it out over the recorder’s power, as the saved power channel reads, and holds one object between reads', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeUndefined();
+    await rig.controller.start();
+    rig.bench.rider.set({ power: watts(150) });
+    await ride(rig, 4);
+    rig.bench.rider.set({ power: watts(340) });
+    await ride(rig, 3);
+    const riding = hud.ridePowerZoneTime?.(watts(250));
+    expect(riding?.covered).toBeGreaterThan(0);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks…
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBe(riding);
+    // …and another threshold is another answer.
+    expect(hud.ridePowerZoneTime?.(watts(400))).not.toBe(riding);
+    const atTheEnd = rig.controller.powerZoneTime(watts(250));
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeUndefined();
+
+    // What the Analysis screen reads a saved ride's zones from: its power channel.
+    const streams = await harness.read(async (store) =>
+      store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+    );
+    if (streams === undefined) throw new Error('the ride was not saved');
+    const saved = timeInZones(
+      powerZones(watts(250)),
+      streams.channels.power ?? [],
+      streams.sampleInterval,
+    );
+    expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
+    // While riding it was the same figures, short only of what sealed at the stop.
+    expect(saved.covered - (riding?.covered ?? Number.NaN)).toBeGreaterThanOrEqual(0);
+    expect(atTheEnd?.perZone[1]).toBeGreaterThan(0);
     rig.controller.dispose();
   });
 });

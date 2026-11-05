@@ -201,6 +201,9 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       'Distance',
       'Climbed',
       'Avg power',
+      // #2077: the rider's effort.
+      'W/kg',
+      'Zone',
       'Pacer',
       'Your best',
       'Wind',

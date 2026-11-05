@@ -57,6 +57,7 @@ import {
   routeProfile,
   seconds,
   thresholdShare,
+  watts,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -255,6 +256,8 @@ describe('the HUD is four panels (#423)', () => {
       'Distance',
       'Climbed',
       'Avg power',
+      // #2077: the rider's W/kg (no threshold here, so no zone).
+      'W/kg',
       'Pacer',
     ]);
     // #2076: marked, so a phone's overlay can leave them out (`theme.css`
@@ -283,6 +286,7 @@ describe('the HUD is four panels (#423)', () => {
       'Distance',
       'Climbed',
       'Avg power',
+      'W/kg',
       'Pacer',
       'Following',
       'Nearby',
@@ -651,5 +655,64 @@ describe('the gradient on the primary row — #2071', () => {
     expect(
       mounted.container.querySelector('.oyl-hud__fields--primary')?.getAttribute('aria-label'),
     ).toBe('Power, cadence, heart rate and gradient');
+  });
+});
+
+/** #2077: the zone indicator as the HUD draws it — the swatch and the bar. */
+describe('the zone indicator on the HUD — #2077', () => {
+  const profile = route();
+  const state = atStartLine(profile);
+  const base = {
+    profile,
+    state: { ...state, input: { power: watts(342), live: true } },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    thresholdPower: watts(250),
+    powerZoneTime: {
+      perZone: [0, 600, 0, 300, 100, 0, 0].map((spent) => seconds(spent)),
+      covered: seconds(1000),
+    },
+  };
+
+  it('draws the number beside its zone’s swatch, the name under it, and the time in each zone', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    const field = mounted.container.querySelector(
+      '.oyl-hud__field--effort:has(.oyl-hud__zone-bar)',
+    );
+    expect(field?.querySelector('dt')?.textContent).toBe('Zone');
+    // The number and the name, in words — never the colour alone.
+    expect(field?.querySelector('dd')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '6 Anaerobic',
+    );
+    const swatch = field?.querySelector('.oyl-hud__zone-swatch');
+    expect(swatch?.classList).toContain('oyl-hud__zone-swatch--6');
+    expect(swatch?.getAttribute('aria-hidden')).toBe('true');
+    const bar = field?.querySelector('.oyl-hud__zone-bar');
+    expect(bar?.getAttribute('aria-hidden')).toBe('true');
+    expect(bar?.getAttribute('data-oyl-zone-shares')).toBe(
+      '0.000,0.600,0.000,0.300,0.100,0.000,0.000',
+    );
+    // A segment only for a zone the ride has spent time in, each its own zone's.
+    expect(
+      queryAll(bar ?? document, '.oyl-hud__zone-bar-part').map((part) => [
+        part.getAttribute('class'),
+        part.getAttribute('width'),
+      ]),
+    ).toEqual([
+      ['oyl-hud__zone-bar-part oyl-hud__zone-bar-part--2', '60'],
+      ['oyl-hud__zone-bar-part oyl-hud__zone-bar-part--4', '30'],
+      ['oyl-hud__zone-bar-part oyl-hud__zone-bar-part--5', '10'],
+    ]);
+  });
+
+  it('draws no swatch with the power reading lost', async () => {
+    mounted = await mount(
+      <HudPanel {...base} state={{ ...state, input: { power: watts(342), live: false } }} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__zone-swatch')).toBeNull();
   });
 });

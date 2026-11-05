@@ -183,6 +183,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Distance',
         'Climbed',
         'Avg power',
+        // #2077: the rider's effort, after the ride so far.
+        'W/kg',
+        'Zone',
         'Pacer',
         'Your best',
         'Wind',
@@ -191,7 +194,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // Twelve readings, the strip, the plan view, the trainer line, two
       // controls and, since #1482, the touch lock — and since #2076 the ride
       // so far, where it is drawn.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 21 : 18);
+      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 23 : 18);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -744,7 +747,8 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
 }
 
 /**
- * #2076 — the ride so far: DRAWN on a tablet and where the HUD stacks, inside
+ * #2076 — the ride so far, and since #2077 the rider's W/kg and zone after it:
+ * DRAWN on a tablet and where the HUD stacks, inside
  * the secondary panel, uncovered and over no other reading; GIVEN WAY by clip
  * on a phone's overlay, and still in the secondary list in #94's order, where
  * a screen reader meets it (`theme.css` §"THE RIDE SO FAR"). Both ways (#1120).
@@ -763,6 +767,17 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
       ),
     );
     expect(values).toEqual(['199.9 km', '4850 m', '425 W']);
+    // #2077: the zone of the harness's 342 W over the rider's own 250 W
+    // threshold, its number and name, and this ride's time in all seven zones.
+    const zone = await page.evaluate(() => {
+      const field = document.querySelector('.oyl-hud__field--effort:has(.oyl-hud__zone-bar)');
+      return {
+        value: field?.querySelector('.oyl-hud__zone-chip')?.textContent ?? '',
+        name: (field?.querySelector('.oyl-hud__detail')?.textContent ?? '').trim(),
+        parts: field?.querySelectorAll('.oyl-hud__zone-bar-part').length ?? 0,
+      };
+    });
+    expect(zone).toEqual({ value: '6', name: 'Anaerobic', parts: 7 });
     for (const [how, seen] of await bothWays(page)) {
       expect(seen.secondary, how).toEqual(
         expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
@@ -821,7 +836,7 @@ for (const viewport of STACKED_VIEWPORTS) {
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Twelve readings since #2072's elapsed time and clock, and the rest as
       // above — and the ride so far (#2076), drawn where the HUD stacks.
-      expect(seen.items).toHaveLength(21);
+      expect(seen.items).toHaveLength(23);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.

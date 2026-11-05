@@ -78,7 +78,7 @@
  * drives the second one only, and the first belongs to the workout session.
  */
 
-import type { WorkoutRescue } from '@onyourleft/domain';
+import type { TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
 import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
@@ -446,6 +446,14 @@ export interface GameTrainerPort {
    */
   rideTotals?(): RideTotals | undefined;
   /**
+   * How long the ride being recorded has spent in each power zone of
+   * `threshold`, or `undefined` when no ride is in progress — #2077's
+   * time-in-zone bar. The recorder's own, `RideController.powerZoneTime`:
+   * `timeInZones` over the power channel the saved ride stores, which is what
+   * the Analysis screen's zone chart reads it by. Read through {@link watchRide}.
+   */
+  ridePowerZoneTime?(threshold: Watts): TimeInZones | undefined;
+  /**
    * Be told whenever the ride controller's state changes — #1111's review.
    * Returns the call that stops telling.
    *
@@ -556,6 +564,8 @@ interface GameTrainerSource {
   requestTrainerControl(): Promise<void>;
   /** #1111. @see GameTrainerPort.watchRide */
   subscribe(listener: () => void): () => void;
+  /** #2077. @see GameTrainerPort.ridePowerZoneTime. Optional for a source with no recording. */
+  powerZoneTime?(threshold: Watts): TimeInZones | undefined;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
   /**
@@ -700,6 +710,14 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       const snapshot = controller?.getSnapshot();
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? snapshot.elapsedSeconds
+        : undefined;
+    },
+    ridePowerZoneTime: (threshold) => {
+      // #2077: the phase from the snapshot, the time from the controller's
+      // memo, so both are of one moment and the object is held between reads.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? controller?.powerZoneTime?.(threshold)
         : undefined;
     },
     rideTotals: () => {

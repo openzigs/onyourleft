@@ -60,11 +60,14 @@ import {
   holdEligible,
   type HeartRateHoldContext,
   type WorkoutTimeline,
+  powerZones,
   seconds,
+  timeInZones,
   unixSeconds,
   type PlayerStatus,
   type ReplanRecord,
   type Seconds,
+  type TimeInZones,
   type UnixSeconds,
   type Watts,
   type WorkoutBlock,
@@ -1043,6 +1046,15 @@ export interface RideController {
   /** Stable between changes, so `useSyncExternalStore` does not loop. */
   getSnapshot(): RideSnapshot;
   subscribe(listener: () => void): Unsubscribe;
+  /**
+   * How long the ride being recorded has spent in each power zone of
+   * `threshold` — #2077's time-in-zone bar. `@onyourleft/domain`
+   * §`timeInZones` over the recorder's own power channel, the function and
+   * the samples the Analysis screen's zone chart reads a saved ride by.
+   * `undefined` with no recorder. The same object until the recording moves
+   * on or the threshold changes, as `useSyncExternalStore` requires.
+   */
+  powerZoneTime(threshold: Watts): TimeInZones | undefined;
 
   /**
    * Pair one device. **Must be called from a user gesture** — one per device.
@@ -2353,6 +2365,38 @@ export function createRideController(options: RideControllerOptions): RideContro
     return totalsMemo.totals;
   };
 
+  /** #2077: `powerZoneTime`, worked out again only when the recording or the threshold moves on. */
+  let zoneTimeMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly samples: number;
+        readonly threshold: Watts;
+        readonly time: TimeInZones;
+      }
+    | undefined;
+  const zoneTimeOf = (current: Recorder | undefined, threshold: Watts): TimeInZones | undefined => {
+    if (current === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    if (
+      zoneTimeMemo?.recorder !== current ||
+      zoneTimeMemo.samples !== samples ||
+      zoneTimeMemo.threshold !== threshold
+    ) {
+      const series = current.session.series();
+      zoneTimeMemo = {
+        recorder: current,
+        samples,
+        threshold,
+        time: timeInZones(
+          powerZones(threshold),
+          series.channels.power ?? [],
+          series.sampleInterval,
+        ),
+      };
+    }
+    return zoneTimeMemo.time;
+  };
+
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
     const paired = pairedTrainerEntry();
@@ -3458,6 +3502,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     getSnapshot(): RideSnapshot {
       snapshot ??= buildSnapshot();
       return snapshot;
+    },
+
+    powerZoneTime(threshold: Watts): TimeInZones | undefined {
+      return zoneTimeOf(recorder, threshold);
     },
 
     subscribe(listener): Unsubscribe {
