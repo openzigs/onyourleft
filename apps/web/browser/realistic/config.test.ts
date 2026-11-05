@@ -90,6 +90,14 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(() => parseConfig('?town=richmond&route=village')).toThrow(/route and town/);
     // The village road turns to the sun as the default one does.
     expect(parseConfig('?route=village&facing=sun').facing).toBe('sun');
+    // #1996: the out-and-back, for the turning point's frames, and no
+    // nearer spelling of it.
+    expect(parseConfig('?route=out-and-back').route).toBe('out-and-back');
+    expect(configQuery(parseConfig('?route=out-and-back&at=1475'))).toBe(
+      '?at=1475&route=out-and-back',
+    );
+    expect(() => parseConfig('?route=out-back')).toThrow(/route is one of village, out-and-back/);
+    expect(() => parseConfig('?route=out-and-back&town=mixed')).toThrow(/route and town/);
   });
 
   it('rides through the mixed town only when asked, and refuses any other — #1581', () => {

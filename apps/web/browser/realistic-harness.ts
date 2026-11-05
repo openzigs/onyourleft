@@ -147,6 +147,7 @@ import {
   routeDigest,
   villageRoute,
 } from '../src/demo/synthetic-road';
+import { outAndBackRoute } from '../src/game/route-fixtures-testing';
 import { plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
@@ -497,7 +498,10 @@ async function run(): Promise<void> {
     mixed?.profile ??
     (config.route === 'village'
       ? villageRoute(config.facing, config.place)
-      : realisticRoute(config.facing, config.place));
+      : // #1996: the turning point the owner's course showed, for its frames.
+        config.route === 'out-and-back'
+        ? outAndBackRoute()
+        : realisticRoute(config.facing, config.place));
   const origin = mixed?.origin ?? corridorOrigin(profile);
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
