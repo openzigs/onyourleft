@@ -132,9 +132,9 @@ import {
   easedCollisions,
   EASED_RIDER_CLEARANCE_PIXELS,
   noticeText,
-  drawnItems,
   CLOCK_READING,
-  clockDrawn,
+  clockInTheClockRow,
+  gradientInPrimary,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -166,13 +166,13 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       expect(seen.viewport).toEqual({ width: viewport.width, height: viewport.height });
       // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate']);
+      // #2071: the gradient is the fourth primary reading.
+      expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
       // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
       // and since #1111 the moving time, beside the distance to go; and since
       // #2072 the elapsed time and the clock, beside the moving time.
       expect(seen.secondary).toEqual([
         'Speed',
-        'Gradient',
         'To go',
         'Moving',
         'Elapsed',
@@ -225,9 +225,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         expect(seen.scrollY, how).toBe(0);
         expect(seen.stageScrollTop, how).toBe(0);
         expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
-        const lost = drawnItems(seen, viewport).filter(
-          (each) => !inside(each.box, viewport) || !each.onTop,
-        );
+        const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
         expect(lost.map(describeItem), how).toEqual([]);
       }
     });
@@ -314,9 +312,10 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * #2072: the clock row — *Elapsed* at its widest (9:59:59, as the moving
      * time) and the time of day — drawn inside the PRIMARY panel's box, on
      * top, clear of each other and of the moving time, both ways (#1120).
-     * The clock is drawn at every overlay viewport but a short corners phone
-     * under 51 rem, where it is hidden by clip (`theme.css`
-     * §"THE CLOCK ROW") and still in the list a screen reader reads.
+     * The clock is in that row at every overlay viewport but a short corners
+     * phone under 51 rem, where since #2071 it is a secondary reading in the
+     * cell the gradient left — inside the secondary panel, uncovered (`theme.css`
+     * §"THE CLOCK ROW").
      */
     test('the clock row is inside the primary panel, uncovered, clear of the moving time — #2072', async ({
       browser,
@@ -333,8 +332,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         const elapsed = named(seen.items, 'reading: Elapsed');
         const clock = named(seen.items, CLOCK_READING);
         const moving = named(seen.items, 'reading: Moving');
-        const drawn = clockDrawn(viewport) ? [elapsed, clock] : [elapsed];
-        for (const each of drawn) {
+        const inTheRow = clockInTheClockRow(viewport) ? [elapsed, clock] : [elapsed];
+        for (const each of inTheRow) {
           expect(
             within(each.box),
             `${how}: ${describeItem(each)} in ${describeItem(primary)}`,
@@ -344,16 +343,63 @@ for (const viewport of OVERLAY_VIEWPORTS) {
             false,
           );
         }
-        if (clockDrawn(viewport)) {
-          expect(overlap(elapsed.box, clock.box), `${how}: Elapsed × Clock`).toBe(false);
-        } else {
+        expect(overlap(elapsed.box, clock.box), `${how}: Elapsed × Clock`).toBe(false);
+        if (!clockInTheClockRow(viewport)) {
+          const secondary = seen.panels.find((each) =>
+            each.name.includes('oyl-hud__fields--secondary'),
+          );
+          if (secondary === undefined) throw new Error(`${how}: no secondary panel`);
           expect(
-            clock.box.width * clock.box.height,
-            `${how}: ${describeItem(clock)}`,
-          ).toBeLessThanOrEqual(1);
+            clock.box.left >= secondary.box.left - SUBPIXEL_TOLERANCE &&
+              clock.box.right <= secondary.box.right + SUBPIXEL_TOLERANCE &&
+              clock.box.bottom <= secondary.box.bottom + SUBPIXEL_TOLERANCE,
+            `${how}: ${describeItem(clock)} in ${describeItem(secondary)}`,
+          ).toBe(true);
+          expect(clock.onTop, `${how}: ${describeItem(clock)}`).toBe(true);
         }
         // And the readings a screen reader meets, in #94's order.
-        expect(seen.secondary.slice(3, 6), how).toEqual(['Moving', 'Elapsed', 'Clock']);
+        expect(seen.secondary.slice(2, 5), how).toEqual(['Moving', 'Elapsed', 'Clock']);
+      }
+    });
+
+    /**
+     * #2071: the gradient — in the PRIMARY panel at the primary size where
+     * four primary tracks fit, and otherwise in the secondary panel's first
+     * cell (`theme.css` §"THE GRADIENT, PRIMARY"). Either way inside its
+     * panel, uncovered, over no other reading, both ways (#1120).
+     */
+    test('the gradient is inside its panel, uncovered, over no other reading — #2071', async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport);
+      for (const [how, seen] of await bothWays(page)) {
+        const where = gradientInPrimary(viewport)
+          ? 'oyl-hud__fields--primary'
+          : 'oyl-hud__fields--secondary';
+        const panel = seen.panels.find((each) => each.name.includes(where));
+        if (panel === undefined) throw new Error(`${how}: no ${where} panel`);
+        const gradient = named(seen.items, 'reading: Gradient');
+        expect(
+          gradient.box.left >= panel.box.left - SUBPIXEL_TOLERANCE &&
+            gradient.box.right <= panel.box.right + SUBPIXEL_TOLERANCE &&
+            gradient.box.top >= panel.box.top - SUBPIXEL_TOLERANCE &&
+            gradient.box.bottom <= panel.box.bottom + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(gradient)} in ${describeItem(panel)}`,
+        ).toBe(true);
+        expect(gradient.onTop, `${how}: ${describeItem(gradient)}`).toBe(true);
+        expect(
+          seen.items
+            .filter(
+              (each) =>
+                each !== gradient &&
+                each.name.startsWith('reading: ') &&
+                overlap(each.box, gradient.box),
+            )
+            .map(describeItem),
+          how,
+        ).toEqual([]);
+        // In the primary list in the document, wherever it is drawn.
+        expect(seen.primary, how).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
       }
     });
 
@@ -1456,6 +1502,15 @@ test.describe('a ride with a side camera paired — #551', () => {
    * other that the cases above hold there. Not at 736×480, where `main`'s
    * panels ended within a pixel of the stage's edge: a control that passes or
    * fails on a sub-pixel is no control.
+   *
+   * ⚠️ **At 844×390 the ride is a WORKOUT since #2071.** The gradient left the
+   * secondary panel for the primary one, the secondary panel lost a row, and
+   * the actions panel holding both rows ended 5 px inside the stage on the
+   * plain widest ride (it ended 61 px past it on `main`). A running workout
+   * adds the trainer notice's row to the same panel, so without the fallback
+   * it runs 42 px off the stage there, and with it the panel ends inside the
+   * stage. The anchored and the fallback layouts of that same page are
+   * measured first, so the pair still says it is the fallback that holds it.
    */
   for (const viewport of OVERLAY_VIEWPORTS.filter(
     (each) => each.width >= 736 && each.height <= 390,
@@ -1463,7 +1518,15 @@ test.describe('a ride with a side camera paired — #551', () => {
     test(`the control — without anchors and without the fallback, the rows do not fit — ${viewport.name}`, async ({
       page,
     }) => {
-      await openRide(page, viewport, '?side=filming&sounds=on');
+      const workout = viewport.height === 390;
+      await openRide(page, viewport, `?side=filming&sounds=on${workout ? '&trainer=workout' : ''}`);
+      if (workout) {
+        // The same page fits as it ships, both ways (#1120): the overflow
+        // below is the fallback's to prevent, not the workout's own.
+        for (const [how, seen] of await bothWays(page)) {
+          expect(sideCameraCollisions(seen, viewport), how).toEqual([]);
+        }
+      }
       const before = await withoutAnchors(page, 'none');
       // The apparatus: the row is back inside the panel, not a panel of its own.
       expect(before.panels.some((each) => each.name.includes('side-camera-row'))).toBe(false);
