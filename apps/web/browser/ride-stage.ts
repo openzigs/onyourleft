@@ -293,7 +293,7 @@ export function gradientInPrimary(viewport: Viewport): boolean {
  * title on a phone, on a menu route only. Without anchor positioning it is the
  * header's own row, which is what the stylesheet lays out with no rule at all.
  */
-export const ANCHOR_BLOCKS = 6;
+export const ANCHOR_BLOCKS = 7;
 
 export const ANCHOR_FALLBACK_BLOCKS = 6;
 
