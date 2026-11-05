@@ -177,7 +177,10 @@ function nearest(items: readonly FurnitureItem[], to: FurnitureItem): FurnitureI
   return best;
 }
 
-/** Whether `(x, z)` is within {@link LITTER_DOOR_CLEARANCE_METRES} of any front path's line. */
+/**
+ * Whether `(x, z)` is within {@link LITTER_DOOR_CLEARANCE_METRES} of any front
+ * path's vertices — its walk's points, not the segments between them.
+ */
 function nearAPath(street: VillageStreet, x: number, z: number): boolean {
   for (const path of street.doorPaths) {
     const walk = path.walk;

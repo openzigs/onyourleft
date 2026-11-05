@@ -18,6 +18,7 @@ import {
 import { footprintPlans, mappedTown } from './footprint-buildings';
 import { fencedGroundsFixture, landBeside } from './footprint-fixtures-testing';
 import { kindAt, landClassMask, NO_LAND_CLASS } from './land-class';
+import { circuitRoute, valleyRoute } from './route-fixtures-testing';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { scatterSeed } from './scatter';
 import {
@@ -28,8 +29,9 @@ import {
   structuresAt,
   type MappedTown,
 } from './settlements';
-import { drawnRoadFrame } from './terrain';
-import { NO_URBAN_CLASS, urbanClassMap } from './urban-class';
+import { corridorOrigin, drawnRoadFrame } from './terrain';
+import { NO_URBAN_CLASS, urbanClassMap, type UrbanClassMap } from './urban-class';
+import { CHANNEL_BANK_METRES, inWater, waterways } from './waterways';
 
 const grounds = fencedGroundsFixture();
 const { profile, origin, corridor } = grounds;
@@ -162,6 +164,65 @@ describe('the chain-link fence’s grounds — #1274', () => {
     // With no class, the same as the town's.
     expect(NO_URBAN_CLASS.classAt(1_100)).not.toBe('city-centre');
   });
+
+  it('wires the town’s urban class: a city-centre road has none through mappedTown', () => {
+    const centre: UrbanClassMap = { classAt: () => 'city-centre' };
+    const downtown = mappedTown(corridor, plans, centre);
+    // Non-vacuity: the same grounds with the real class do stand pieces.
+    expect(pieces.length).toBeGreaterThan(60);
+    expect(downtown.chainLinkAt?.(profile, origin, seed, land)).toEqual([]);
+  });
+
+  it('drops a side edge that meets the road, keeping the frontage along it', () => {
+    // An estate mapped to the road's own line: its two sides run straight out
+    // from the road, so their first pieces stand inside the verge, across it.
+    const flush = landBeside(profile, origin, 'landuse', 'industrial', 950, 1_250, 0, 160);
+    const made = chainLinkPieces(fencedGrounds([flush]), {
+      profile,
+      origin,
+      seed,
+      land,
+      roadside: FIELD_EDGE_LATERAL_METRES,
+      piece: BOUNDARY_PIECE_METRES,
+      cityCentre: () => false,
+    });
+    // Non-vacuity: the frontage is fenced, from its first piece to its last.
+    expect(made.filter((piece) => piece.along > 952 && piece.along < 1_248).length).toBeGreaterThan(
+      30,
+    );
+    // A side's piece would be moved onto the verge at its own end of the
+    // frontage, 950 m or 1 250 m; the frontage's own stand 4 m in.
+    const onVerge = made.filter((piece) => Math.abs(piece.item.x) < FIELD_EDGE_LATERAL_METRES + 1);
+    expect(onVerge.filter((piece) => Math.abs(piece.along - 950) < 2)).toEqual([]);
+    expect(onVerge.filter((piece) => Math.abs(piece.along - 1_250) < 2)).toEqual([]);
+  });
+
+  it('stands none in a stream’s channel', () => {
+    const valley = valleyRoute();
+    const valleyOrigin = corridorOrigin(valley);
+    const valleySeed = scatterSeed(valley);
+    const stream = waterways(valley, valleySeed).crossings[0];
+    if (stream === undefined) throw new Error('the valley fixture has no stream');
+    const estate = landBeside(valley, valleyOrigin, 'landuse', 'industrial', 800, 1_200, 2, 160);
+    const made = chainLinkPieces(fencedGrounds([estate]), {
+      profile: valley,
+      origin: valleyOrigin,
+      seed: valleySeed,
+      land: NO_LAND_CLASS,
+      roadside: FIELD_EDGE_LATERAL_METRES,
+      piece: BOUNDARY_PIECE_METRES,
+      cityCentre: () => false,
+    });
+    const ways = waterways(valley, valleySeed);
+    // Non-vacuity: the estate is fenced either side of the stream, and the
+    // stream's channel lies across its frontage.
+    expect(made.filter((piece) => piece.along < stream.distance - 40).length).toBeGreaterThan(5);
+    expect(made.filter((piece) => piece.along > stream.distance + 40).length).toBeGreaterThan(5);
+    expect(inWater(ways, valley, stream.distance, FIELD_EDGE_LATERAL_METRES)).toBe(true);
+    for (const piece of made) {
+      expect(Math.abs(piece.along - stream.distance)).toBeGreaterThan(CHANNEL_BANK_METRES);
+    }
+  });
 });
 
 describe('the chain-link fence among the structures — #1274', () => {
@@ -234,6 +295,29 @@ describe('the chain-link fence among the structures — #1274', () => {
     const crossing: MappedTown = { ...town, chainLinkAt: () => [through, clear] };
     const carried = structuresAt(profile, origin, seed, 900, 2_100, budget, [], land, crossing);
     expect(carried.filter((item) => item.chainLink === true)).toEqual([clear.item]);
+  });
+
+  it('stands a loop’s chain-link on every lap, not only the first', () => {
+    const lap = circuitRoute(100);
+    const lapOrigin = corridorOrigin(lap);
+    const piece: ChainLinkPiece = { item: chain[0] as (typeof chain)[number], along: 300 };
+    const looped: MappedTown = { ...town, chainLinkAt: () => [piece] };
+    const onLap = (lapNumber: number) =>
+      structuresAt(
+        lap,
+        lapOrigin,
+        seed,
+        lapNumber * lap.totalDistance + 250,
+        lapNumber * lap.totalDistance + 350,
+        budget,
+        [],
+        land,
+        looped,
+      ).filter((item) => item.chainLink === true);
+    // Non-vacuity: the first lap carries it, so a later lap's absence is the lap's.
+    expect(onLap(0)).toHaveLength(1);
+    expect(onLap(1)).toHaveLength(1);
+    expect(onLap(3)).toHaveLength(1);
   });
 
   it('CONTROL: a ride with no corridor — the stylised world’s — has no chain-link', () => {
