@@ -570,7 +570,13 @@ export function terrainCorridor(
   const reach = clearReach(
     centre,
     normals2d,
-    tapered(centre, steadied(foldReach(centre, normals2d, lent.reach, retraced), lent.steadied)),
+    tapered(
+      centre,
+      keptFolds(
+        steadied(foldReach(centre, normals2d, lent.reach, retraced), lent.steadied),
+        lent.folds,
+      ),
+    ),
     retraced,
   );
   // #2101: where another leg of this road takes over each side, from the
@@ -709,6 +715,10 @@ export function terrainCorridor(
       }
     }
   }
+
+  // #2149: and the inside of a sharp bend closed where the fold stops it
+  // short of the bend's centre. @see closeFans
+  closeFans(centre, normals2d, reach, lent.folds, vertices, fields);
 
   // #1996: and the other pass's points, sunk out of sight, and the ground
   // round the turning point.
@@ -1307,6 +1317,8 @@ let terrainScratch:
       readonly capAnchor: Int32Array;
       readonly capAngle: Float64Array;
       readonly capWay: Int8Array;
+      /** The fold's own reach, steadied, before the taper: {@link closeFans}'. */
+      readonly folds: Float64Array;
     }
   | undefined;
 
@@ -1337,6 +1349,7 @@ function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
     capAnchor: new Int32Array(rows),
     capAngle: new Float64Array(rows),
     capWay: new Int8Array(rows),
+    folds: new Float64Array(rows * 2),
   };
   return terrainScratch;
 }
@@ -1385,9 +1398,10 @@ export function standingOnGround<
   T extends { readonly x: number; readonly y: number; readonly z: number },
 >(items: readonly T[], mesh: TerrainMesh): readonly T[] {
   const across = rowCrossings(mesh);
+  const fanned = fannedPairs(mesh);
   const kept: T[] = [];
   for (const item of items) {
-    const y = groundTop(mesh, across, item.x, item.z);
+    const y = groundTop(mesh, across, fanned, item.x, item.z);
     if (Number.isNaN(y)) continue;
     kept.push(y === item.y ? item : { ...item, y });
   }
@@ -1431,6 +1445,40 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
 }
 
 /**
+ * Which pairs of rows have a triangle {@link closeFan} drew, by the pair's
+ * first row: 1 if so. Lent, like {@link crossings}.
+ *
+ * ⚠️ **A fan's triangles lie off the cross-sections of their rows** — #2149:
+ * its point is not between the cross-sections of every pair it closes on, so
+ * asking only the pairs a point lies between never reaches them, and scenery
+ * over a fan stood on the ground of another leg, or was dropped. A pair is a
+ * fan's when a side's outermost column is one point on a row and its
+ * neighbour, which a fold alone never does: it collapses a row's columns onto
+ * that row's own end. The pair before a fan's first row and the one after
+ * its last are its, too: their quads end on the point.
+ */
+let fannedRows = new Uint8Array(0);
+
+function fannedPairs(mesh: TerrainMesh): Uint8Array {
+  const { vertices, rows } = mesh;
+  if (fannedRows.length !== rows) fannedRows = new Uint8Array(rows);
+  fannedRows.fill(0);
+  for (let side = 0; side < 2; side += 1) {
+    for (let row = 0; row + 1 < rows; row += 1) {
+      const a = ((row * 2 + side) * COLUMNS + COLUMNS - 1) * 3;
+      const b = a + COLUMNS * 2 * 3;
+      if (vertices[a] !== vertices[b] || vertices[a + 2] !== vertices[b + 2]) continue;
+      // Rows `row` and `row + 1` share the point: the pair between them, the
+      // one before `row` and the one after `row + 1` are the fan's.
+      fannedRows[row] = 1;
+      if (row > 0) fannedRows[row - 1] = 1;
+      if (row + 2 < rows) fannedRows[row + 1] = 1;
+    }
+  }
+  return fannedRows;
+}
+
+/**
  * How far past a cross-section, in metres, a point still counts as between
  * two rows: **1 cm**, for Float32 vertices a kilometre from the origin. Only
  * which triangles are asked depends on it; the triangles decide.
@@ -1438,7 +1486,13 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
 const CROSSING_SLACK_METRES = 1e-2;
 
 /** The highest ground triangle's height over a point in plan, or `NaN` where there is none. */
-function groundTop(mesh: TerrainMesh, across: Float64Array, x: number, z: number): number {
+function groundTop(
+  mesh: TerrainMesh,
+  across: Float64Array,
+  fanned: Uint8Array,
+  x: number,
+  z: number,
+): number {
   const along = (row: number): number =>
     (x - (across[row * 4] as number)) * (across[row * 4 + 2] as number) +
     (z - (across[row * 4 + 1] as number)) * (across[row * 4 + 3] as number);
@@ -1446,7 +1500,7 @@ function groundTop(mesh: TerrainMesh, across: Float64Array, x: number, z: number
   let behind = along(0);
   for (let row = 0; row + 1 < mesh.rows; row += 1) {
     const ahead = along(row + 1);
-    if (behind >= -CROSSING_SLACK_METRES && ahead <= CROSSING_SLACK_METRES) {
+    if ((behind >= -CROSSING_SLACK_METRES && ahead <= CROSSING_SLACK_METRES) || fanned[row] === 1) {
       top = topOfRowPair(mesh.vertices, row, x, z, top);
     }
     behind = ahead;
@@ -2076,6 +2130,423 @@ function foldReach(
 const UNFOLDED_NEAR_TURN_ROWS = 8;
 
 /**
+ * How near the point where two neighbouring rows' cross-sections meet a side
+ * must reach, on both rows, for {@link closeFan} to start a fan from that
+ * pair: at least **0.75** of the way. {@link BEND_FOLD_SHARE} stops a folded
+ * side at 0.9 of it, and {@link steadied} at the least of three rows'.
+ * Measured: at 1 the pocket stays open on 18 of `landform.test.ts`' 24
+ * corners; 0.5 passes too, so it is held from above only.
+ */
+const FAN_SHARE = 0.75;
+
+/**
+ * How far either way of where a fan's first pair of rows meet
+ * {@link closeFan} may close it, in metres: **2**. Measured: at 0.2 one of
+ * `landform.test.ts`' 24 corners keeps its pocket; 10 passes too, so it is
+ * held from below only.
+ */
+const FAN_BOX_METRES = 2;
+
+/**
+ * Twice the area in plan, in square metres, that every triangle
+ * {@link closeFan} makes is held to at least: **1e-3**, so none is left on
+ * its edge by the point's rounding to a `Float32Array`. ⚠️ A guard, not a
+ * measured bound: nought passes every test.
+ */
+const FAN_MARGIN = 1e-3;
+
+/**
+ * How steep a triangle {@link closeFan} makes may stand, as the upward share
+ * of its normal: |ny| no less than **0.5**, 60° — the bound `landform.test.ts`
+ * holds the ground a rider sees to on a level road or at 3 %
+ * (`GENTLE_STEEPEST`). A row whose end is sunk past a seam, under another
+ * leg's ground, stands at another height from its neighbours', and gathering
+ * it would stand a wall between them. Measured without it: 25 more triangles
+ * near the apex steeper than this on the 140° bends of 6 m climbing at 10 %
+ * (`landform.test.ts` §"closes the apex on one point").
+ */
+const FAN_STEEPEST = 0.5;
+
+/**
+ * Closes the inside of every bend whose fold stops the ground short of the
+ * bend's centre, near the road — #2149 — in place, on the columns of each
+ * side that the reach collapsed onto the side's end.
+ *
+ * ⚠️ **What left the pocket at a very sharp bend's apex.** {@link foldReach}
+ * stops each row's inside short of where its cross-section meets the next
+ * row's, so the rows round a bend end on a ring short of the bend's centre,
+ * and inside that ring no ground lay at all. The legs' ground, square to the
+ * straights, covers its own side of the centre and not the bend's. On the
+ * owner's 143° bend the inside reach fell to 4.3–5.1 m and the ring left a
+ * pocket about 0.3 × 1.3 m, where the horizon ring, drawn first and writing
+ * no depth, showed as a flat grey shape. `landform.test.ts` reproduces it on
+ * a corner sampled every 10 m, as the owner's course is.
+ *
+ * So every run of neighbouring rows whose side the fold stops — its reach is
+ * `folds`', the fold's own, steadied, and nothing nearer stopped it — is
+ * handed to {@link closeFan}, which moves those columns of as many of them as
+ * it can to one point, closing their quads on it as a fan. Nothing else
+ * moves, so nothing the ground covered is uncovered, and no triangle or draw
+ * call is added.
+ *
+ * ⚠️ **Only within the clear band** ({@link RELIEF_CLEAR_METRES}), where the
+ * ground has no relief and every end a fan gathers stands at about one
+ * height. A bend whose centre lies further out keeps its pocket there, and
+ * that is stated rather than closed. Measured without that bound: the ground
+ * `landform-levelling.test.ts` holds to main's digests moved, and on a
+ * planner's route `standingOnGround` disagreed with the triangles and a
+ * side's reach stepped faster than {@link REACH_TAPER_PER_METRE} allows.
+ */
+function closeFans(
+  centre: readonly CorridorPoint[],
+  normals: Float64Array,
+  reach: Float64Array,
+  folds: Float64Array,
+  vertices: Float32Array,
+  fields: Float32Array,
+): void {
+  const rows = centre.length;
+  const outermost = TERRAIN_COLUMN_OFFSETS[COLUMNS - 1] as number;
+  for (let side = 0; side < 2; side += 1) {
+    let first = -1;
+    for (let row = 0; row <= rows; row += 1) {
+      const limit = row < rows ? (reach[row * 2 + side] as number) : Number.POSITIVE_INFINITY;
+      if (limit < outermost && limit >= (folds[row * 2 + side] as number)) {
+        if (first < 0) first = row;
+        continue;
+      }
+      if (first >= 0 && row - 1 > first) {
+        closeFan(centre, normals, reach, vertices, fields, side, first, row - 1);
+      }
+      first = -1;
+    }
+  }
+}
+
+/**
+ * {@link closeFans}' one run of rows, `start` to `stop`: as many of them as
+ * can be closed on one point, grown out a row at a time from the pair whose
+ * cross-sections meet nearest the road for as long as {@link fanFits} finds
+ * a point for them.
+ *
+ * ⚠️ **Every column a row's reach collapsed onto its end moves, not only the
+ * outermost**, so the fan is drawn in the band just past that end, which
+ * every rung draws, and not in the outermost band, which `quality.ts`' rungs
+ * below level 0 leave out: they draw ten bands or fewer of the twelve.
+ * `landform.test.ts` holds the pocket at the fewest bands any rung draws, and
+ * with the outermost column alone moved it is red on 19 of its 24 corners.
+ */
+function closeFan(
+  centre: readonly CorridorPoint[],
+  normals: Float64Array,
+  reach: Float64Array,
+  vertices: Float32Array,
+  fields: Float32Array,
+  side: number,
+  start: number,
+  stop: number,
+): void {
+  const sign = side === 0 ? 1 : -1;
+  // The seed: the pair whose cross-sections meet nearest the road, of the
+  // pairs that reach {@link FAN_SHARE} of the way there.
+  let seed = -1;
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let row = start; row < stop; row += 1) {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
+    // `from + a·t = to − b·u`, `a` and `−b` the two rows' normals on this side.
+    const ax = sign * (normals[row * 2] as number);
+    const az = sign * (normals[row * 2 + 1] as number);
+    const bx = -sign * (normals[(row + 1) * 2] as number);
+    const bz = -sign * (normals[(row + 1) * 2 + 1] as number);
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const det = ax * bz - az * bx;
+    if (!(Math.abs(det) > SEAM_EPSILON)) continue;
+    const t = (dx * bz - dz * bx) / det;
+    const u = (ax * dz - az * dx) / det;
+    if (!(t > 0 && u > 0 && t < nearest)) continue;
+    if ((reach[row * 2 + side] as number) < FAN_SHARE * t) continue;
+    if ((reach[(row + 1) * 2 + side] as number) < FAN_SHARE * u) continue;
+    nearest = t;
+    seed = row;
+    FAN_SEED[0] = from.x + ax * t;
+    FAN_SEED[1] = from.z + az * t;
+  }
+  if (seed < 0) return;
+  // Each row's first column to move: the one after the first that its
+  // reach collapsed onto its end, or the outermost if none did.
+  if (fanFrom.length < centre.length) fanFrom = new Int32Array(centre.length);
+  for (let row = start; row <= stop; row += 1) {
+    const outer = groundVertex(side, row, COLUMNS - 1);
+    let from = COLUMNS - 1;
+    for (let column = COLUMNS - 2; column >= 2; column -= 1) {
+      const at = groundVertex(side, row, column);
+      if (vertices[at] !== vertices[outer] || vertices[at + 2] !== vertices[outer + 2]) break;
+      from = column + 1;
+    }
+    fanFrom[row] = from;
+  }
+  let first = seed;
+  let end = seed + 1;
+  if (!fanFits(centre, normals, vertices, side, first, end)) return;
+  for (let grown = true; grown;) {
+    grown = false;
+    if (end < stop && fanFits(centre, normals, vertices, side, first, end + 1)) {
+      end += 1;
+      grown = true;
+    }
+    if (first > start && fanFits(centre, normals, vertices, side, first - 1, end)) {
+      first -= 1;
+      grown = true;
+    }
+  }
+  // `FAN_POINT` holds the point of the last `(first, end)` that fitted, which
+  // is the current one: a call that fails returns before it writes.
+  const x = FAN_POINT[0] as number;
+  const y = FAN_POINT[1] as number;
+  const z = FAN_POINT[2] as number;
+  for (let row = first; row <= end; row += 1) {
+    const point = centre[row] as CorridorPoint;
+    const lateral = sign * Math.hypot(x - point.x, z - point.z);
+    for (let column = fanFrom[row] as number; column < COLUMNS; column += 1) {
+      const at = groundVertex(side, row, column);
+      vertices[at] = x;
+      vertices[at + 1] = y;
+      vertices[at + 2] = z;
+      fields[(at / 3) * 2 + 1] = lateral;
+    }
+  }
+}
+
+/**
+ * Whether rows `first` to `end` of a side can close on one point, and where,
+ * into {@link FAN_POINT}: `x`, height, `z` — each row's columns from
+ * {@link fanFrom} on standing at it.
+ *
+ * Each triangle that the point is one corner of faces up on one side of the
+ * line through its other two, so the points that turn none over are the
+ * inside of a convex polygon. It is clipped from a box {@link FAN_BOX_METRES}
+ * either way of {@link FAN_SEED} by those lines, and by each moved row's own:
+ * no further out along its cross-section than {@link RELIEF_CLEAR_METRES}.
+ * The point is the mean of the polygon's corners, inside it, at the mean
+ * height of the rows' ends; and no triangle it makes may stand steeper than
+ * {@link FAN_STEEPEST}. Only columns at or past a row's end move, so nothing
+ * the ground covered is uncovered.
+ */
+function fanFits(
+  centre: readonly CorridorPoint[],
+  normals: Float64Array,
+  vertices: Float32Array,
+  side: number,
+  first: number,
+  end: number,
+): boolean {
+  const rows = centre.length;
+  const sign = side === 0 ? 1 : -1;
+  const seedX = FAN_SEED[0] as number;
+  const seedZ = FAN_SEED[1] as number;
+  // A box's four corners, and at most one more for each line: two for each
+  // band of each quad, and one for each row.
+  const most = 4 + (end - first + 2) * TERRAIN_BANDS * 2 + (end - first + 1);
+  if (fanPolygon.length < most * 2) {
+    fanPolygon = new Float64Array(most * 2);
+    fanClipped = new Float64Array(most * 2);
+  }
+  fanPolygon[0] = seedX - FAN_BOX_METRES;
+  fanPolygon[1] = seedZ - FAN_BOX_METRES;
+  fanPolygon[2] = seedX + FAN_BOX_METRES;
+  fanPolygon[3] = seedZ - FAN_BOX_METRES;
+  fanPolygon[4] = seedX + FAN_BOX_METRES;
+  fanPolygon[5] = seedZ + FAN_BOX_METRES;
+  fanPolygon[6] = seedX - FAN_BOX_METRES;
+  fanPolygon[7] = seedZ + FAN_BOX_METRES;
+  let count = 4;
+  // Each quad from the row before the run to its last row, band by band, as
+  // its two triangles (`a b c` and `b d c`), a moved column standing for the
+  // point: `-1`.
+  for (let row = Math.max(0, first - 1); row <= end && row + 1 < rows; row += 1) {
+    for (let band = 0; band < TERRAIN_BANDS; band += 1) {
+      const a = fanCorner(side, first, end, row, band);
+      const b = fanCorner(side, first, end, row, band + 1);
+      const c = fanCorner(side, first, end, row + 1, band);
+      const d = fanCorner(side, first, end, row + 1, band + 1);
+      for (let half = 0; half < 2; half += 1) {
+        const p = half === 0 ? a : b;
+        const q = half === 0 ? b : d;
+        // A triangle with the point at two corners, or none, has no say.
+        if ((p < 0 ? 1 : 0) + (q < 0 ? 1 : 0) + (c < 0 ? 1 : 0) !== 1) continue;
+        const at = fanTurn(vertices, side, p, q, c, 0, 0);
+        const alongX = fanTurn(vertices, side, p, q, c, 1, 0) - at;
+        const alongZ = fanTurn(vertices, side, p, q, c, 0, 1) - at;
+        // Nor does one whose other two corners are one point: it has no area
+        // wherever the point is.
+        if (!(Math.abs(alongX) + Math.abs(alongZ) > SEAM_EPSILON)) continue;
+        count = clipped(count, alongX, alongZ, at - FAN_MARGIN);
+        if (count === 0) return false;
+      }
+    }
+  }
+  for (let row = first; row <= end; row += 1) {
+    const point = centre[row] as CorridorPoint;
+    const nx = sign * (normals[row * 2] as number);
+    const nz = sign * (normals[row * 2 + 1] as number);
+    const out = nx * point.x + nz * point.z;
+    count = clipped(count, -nx, -nz, RELIEF_CLEAR_METRES + out);
+    if (count === 0) return false;
+  }
+  let x = 0;
+  let z = 0;
+  for (let k = 0; k < count; k += 1) {
+    x += fanPolygon[k * 2] as number;
+    z += fanPolygon[k * 2 + 1] as number;
+  }
+  x /= count;
+  z /= count;
+  let y = 0;
+  for (let row = first; row <= end; row += 1) {
+    y += vertices[groundVertex(side, row, COLUMNS - 1) + 1] as number;
+  }
+  y /= end - first + 1;
+  // The same triangles, each with its other two corners and the point.
+  for (let row = Math.max(0, first - 1); row <= end && row + 1 < rows; row += 1) {
+    for (let band = 0; band < TERRAIN_BANDS; band += 1) {
+      const a = fanCorner(side, first, end, row, band);
+      const b = fanCorner(side, first, end, row, band + 1);
+      const c = fanCorner(side, first, end, row + 1, band);
+      const d = fanCorner(side, first, end, row + 1, band + 1);
+      for (let half = 0; half < 2; half += 1) {
+        const p = half === 0 ? a : b;
+        const q = half === 0 ? b : d;
+        if ((p < 0 ? 1 : 0) + (q < 0 ? 1 : 0) + (c < 0 ? 1 : 0) !== 1) continue;
+        const one = p < 0 ? q : p;
+        const two = p < 0 || q < 0 ? c : q;
+        if (!fanGentle(vertices, one, two, x, y, z)) return false;
+      }
+    }
+  }
+  FAN_POINT[0] = x;
+  FAN_POINT[1] = y;
+  FAN_POINT[2] = z;
+  return true;
+}
+
+/** The index into `vertices` of a row's column on a side. */
+function groundVertex(side: number, row: number, column: number): number {
+  return (row * COLUMNS * 2 + side * COLUMNS + column) * 3;
+}
+
+/**
+ * {@link groundVertex}, or `-1` for a column that rows `first` to `end` of a
+ * fan move to its point ({@link fanFrom}).
+ */
+function fanCorner(side: number, first: number, end: number, row: number, column: number): number {
+  return row >= first && row <= end && column >= (fanFrom[row] as number)
+    ? -1
+    : groundVertex(side, row, column);
+}
+
+/**
+ * Twice a triangle's signed area in plan, its corners indices into
+ * `vertices` and `-1` for `(x, z)`, wound as {@link terrainIndices} winds this
+ * side's: positive faces up.
+ */
+function fanTurn(
+  vertices: Float32Array,
+  side: number,
+  p: number,
+  q: number,
+  r: number,
+  x: number,
+  z: number,
+): number {
+  const second = side === 0 ? q : r;
+  const third = side === 0 ? r : q;
+  const ax = p < 0 ? x : (vertices[p] as number);
+  const az = p < 0 ? z : (vertices[p + 2] as number);
+  const bx = second < 0 ? x : (vertices[second] as number);
+  const bz = second < 0 ? z : (vertices[second + 2] as number);
+  const cx = third < 0 ? x : (vertices[third] as number);
+  const cz = third < 0 ? z : (vertices[third + 2] as number);
+  return (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+}
+
+/**
+ * Whether the triangle between two vertices and `(x, y, z)` stands no
+ * steeper than {@link FAN_STEEPEST}: one with no area stands no way.
+ */
+function fanGentle(
+  vertices: Float32Array,
+  p: number,
+  q: number,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const e1x = (vertices[p] as number) - x;
+  const e1y = (vertices[p + 1] as number) - y;
+  const e1z = (vertices[p + 2] as number) - z;
+  const e2x = (vertices[q] as number) - x;
+  const e2y = (vertices[q + 1] as number) - y;
+  const e2z = (vertices[q + 2] as number) - z;
+  const nx = e1y * e2z - e1z * e2y;
+  const ny = e1z * e2x - e1x * e2z;
+  const nz = e1x * e2y - e1y * e2x;
+  const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  return !(length > FAN_MARGIN) || Math.abs(ny) / length >= FAN_STEEPEST;
+}
+
+/** Where a fan's first pair of rows meet, `x` then `z`: {@link closeFan}'s, for {@link fanFits}. */
+const FAN_SEED = new Float64Array(2);
+
+/** {@link fanFits}' point: `x`, height, `z`. */
+const FAN_POINT = new Float64Array(3);
+
+/**
+ * Each row's first column {@link closeFan} moves, by row. Lent, like
+ * {@link terrainScratch}: grown to the row count, never shrunk.
+ */
+let fanFrom = new Int32Array(0);
+
+/**
+ * {@link fanFits}' polygon, two numbers a corner, and the one {@link clipped}
+ * clips it into: a box's four corners, and at most one more for each line.
+ * Lent, like {@link terrainScratch}: grown to the most a run needs, never shrunk.
+ */
+let fanPolygon = new Float64Array(0);
+let fanClipped = new Float64Array(0);
+
+/**
+ * {@link fanPolygon}'s first `count` corners, clipped IN PLACE to where
+ * `a·x + b·z + c` is no less than nought: how many corners are left.
+ */
+function clipped(count: number, a: number, b: number, c: number): number {
+  let kept = 0;
+  for (let k = 0; k < count; k += 1) {
+    const x1 = fanPolygon[k * 2] as number;
+    const z1 = fanPolygon[k * 2 + 1] as number;
+    const next = k + 1 === count ? 0 : k + 1;
+    const x2 = fanPolygon[next * 2] as number;
+    const z2 = fanPolygon[next * 2 + 1] as number;
+    const v1 = a * x1 + b * z1 + c;
+    const v2 = a * x2 + b * z2 + c;
+    if (v1 >= 0) {
+      fanClipped[kept * 2] = x1;
+      fanClipped[kept * 2 + 1] = z1;
+      kept += 1;
+    }
+    if (v1 >= 0 !== v2 >= 0) {
+      const share = v1 / (v1 - v2);
+      fanClipped[kept * 2] = x1 + (x2 - x1) * share;
+      fanClipped[kept * 2 + 1] = z1 + (z2 - z1) * share;
+      kept += 1;
+    }
+  }
+  for (let k = 0; k < kept * 2; k += 1) fanPolygon[k] = fanClipped[k] as number;
+  return kept;
+}
+
+/**
  * How far from the road the ground must stop short of ANY stretch of it, in
  * metres: the road's half-width and its verge, **4.1**.
  *
@@ -2658,6 +3129,12 @@ function tapered(centre: readonly CorridorPoint[], reach: Float64Array): Float64
       reach[at] = Math.min(reach[at] as number, (reach[at + 2] as number) + most);
     }
   }
+  return reach;
+}
+
+/** `reach`, copied into `out`, and `reach` returned. */
+function keptFolds(reach: Float64Array, out: Float64Array): Float64Array {
+  out.set(reach);
   return reach;
 }
 

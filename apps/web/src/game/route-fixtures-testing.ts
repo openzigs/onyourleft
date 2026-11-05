@@ -167,6 +167,58 @@ export function plannerCornerRoute(
 }
 
 /**
+ * A very sharp corner as a course sampled every 10 m draws it — #2149: 1 500 m
+ * north, a bend of `radius` through `degrees` to the `hand` side with a sample
+ * about every 10 m round its arc, and 1 500 m on along the new heading;
+ * climbing at `grade` to the bend and level after it.
+ *
+ * ⚠️ **Not {@link plannerCornerRoute}, which turns at one sample.** Its
+ * corridor rounds the corner over `terrain.ts` §`BEND_SMOOTHING_METRES` and
+ * the legs' ground covers the bend's inside; spread over several samples, as
+ * on the owner's course, the rows round the bend fan about a centre near the
+ * road, which is where the pocket of #2149 lay.
+ */
+export function sampledCornerRoute(
+  degrees: number,
+  hand: 'right' | 'left',
+  radius: number,
+  grade = 0,
+): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const turn = (degrees * Math.PI) / 180;
+  const mirror = hand === 'right' ? 1 : -1;
+  const points: RoutePoint[] = [];
+  let along = 0;
+  let lastEast = 0;
+  let lastNorth = 0;
+  const push = (east: number, north: number): void => {
+    along += Math.hypot(east - lastEast, north - lastNorth);
+    lastEast = east;
+    lastNorth = north;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(grade * Math.min(along, 1_500)),
+    });
+  };
+  for (let north = 0; north < 1_500; north += 10) push(0, north);
+  const steps = Math.max(1, Math.round((turn * radius) / 10));
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = (step / steps) * turn;
+    push(radius * (1 - Math.cos(angle)), 1_500 + radius * Math.sin(angle));
+  }
+  const endEast = radius * (1 - Math.cos(turn));
+  const endNorth = 1_500 + radius * Math.sin(turn);
+  for (let leg = 10; leg <= 1_500; leg += 10) {
+    push(endEast + leg * Math.sin(turn), endNorth + leg * Math.cos(turn));
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/**
  * A valley with a level floor 40 m wide and 12 % walls — #501's review. Its
  * floor meets its walls 20 m either side of the stream, inside a bridge's
  * approach (`waterways.ts` §`BRIDGE_HALF_SPAN_METRES` to

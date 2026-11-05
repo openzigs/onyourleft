@@ -1188,6 +1188,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pass's ground is sunk out of sight with the turning
                         point closed round the road's end (§`retracedRoles`),
                         or drawn a metre under where it only lies alongside
+                        ⚠️ Since #2149 a sharp bend's inside, where the fold
+                        stops the rows short of the bend's centre, is closed
+                        on one point (`closeFans`): within the clear band
+                        only, and in the band just past each row's end, which
+                        every quality rung draws
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
