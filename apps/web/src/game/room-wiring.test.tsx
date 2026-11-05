@@ -652,3 +652,139 @@ describe('reporting a rider from inside the ride — #789', () => {
     expect(hudText()).not.toContain('Reported.');
   });
 });
+
+describe('the room’s voice link on the HUD — #875', () => {
+  const INVITE = 'https://discord.gg/inv1abc';
+
+  function welcomeWithVoice(room: ScriptedRoom, kind: 'ride' | 'race', voiceInvite?: string) {
+    room.send({
+      type: 'welcome',
+      riderId: 0,
+      routeRef: { sha256: 'a'.repeat(64) },
+      roomConfig: {
+        kind,
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+      },
+      ...(voiceInvite === undefined ? {} : { voiceInvite }),
+    });
+  }
+
+  const voiceLinks = (): HTMLAnchorElement[] =>
+    queryAll<HTMLAnchorElement>(mounted?.container ?? document.body, 'a').filter(
+      (link) => link.textContent === 'Join voice on Discord',
+    );
+
+  it('shows the link the welcome carried, opening Discord in the system’s hands, and says it opens Discord', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'ride', INVITE);
+    await pump(4);
+    const [link] = voiceLinks();
+    expect(voiceLinks()).toHaveLength(1);
+    expect(link?.getAttribute('href')).toBe(INVITE);
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toBe('noreferrer');
+    expect(link?.closest('.oyl-status')?.textContent).toContain(
+      'Join voice on Discord (opens Discord)',
+    );
+  });
+
+  it('is never shown before the room admits the rider, nor to a rider it refuses', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    await pump(8);
+    expect(voiceLinks()).toEqual([]);
+    room.send({ type: 'refuse', reason: 'room-full' });
+    await pump(8);
+    expect(voiceLinks()).toEqual([]);
+    expect(hudText()).not.toContain('Discord');
+  });
+
+  it('shows nothing in a room whose welcome carries no link', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'ride');
+    await pump(8);
+    expect(voiceLinks()).toEqual([]);
+    expect(hudText()).not.toContain('Discord');
+  });
+
+  it('a group ride shows it for a standing notice’s span of ride, then puts it away', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'ride', INVITE);
+    for (let tick = 1; tick <= 12; tick += 1) {
+      room.frame(tick, [frameRider(1, 10 + tick * 8)]);
+      await pump(4);
+    }
+    expect(voiceLinks()).toHaveLength(1);
+    for (let tick = 13; tick <= 22; tick += 1) {
+      room.frame(tick, [frameRider(1, 10 + tick * 8)]);
+      await pump(4);
+    }
+    expect(voiceLinks()).toEqual([]);
+  });
+
+  it('a new link from the room — the channel replaced after a removal or a ban — is shown again, for a span of its own (#876)', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'ride', INVITE);
+    for (let tick = 1; tick <= 22; tick += 1) {
+      room.frame(tick, [frameRider(1, 10 + tick * 8)]);
+      await pump(4);
+    }
+    expect(voiceLinks()).toEqual([]);
+    const NEWER = 'https://discord.gg/inv2abc';
+    room.send({ type: 'voice', voiceInvite: NEWER });
+    room.frame(23, [frameRider(1, 200)]);
+    await pump(4);
+    expect(voiceLinks().map((link) => link.getAttribute('href'))).toEqual([NEWER]);
+    // And the room saying it has no voice now takes it away at once.
+    room.send({ type: 'voice' });
+    room.frame(24, [frameRider(1, 208)]);
+    await pump(4);
+    expect(voiceLinks()).toEqual([]);
+  });
+
+  it('a race on its line shows the new link in place of the old (#876)', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'race', INVITE);
+    await pump(8);
+    room.send({ type: 'voice', voiceInvite: 'https://discord.gg/inv2abc' });
+    await pump(4);
+    expect(voiceLinks().map((link) => link.getAttribute('href'))).toEqual([
+      'https://discord.gg/inv2abc',
+    ]);
+  });
+
+  it('a race shows it inside its own notice for as long as it holds the rider on its line, and not once it runs', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    welcomeWithVoice(room, 'race', INVITE);
+    // Thirty seconds on the line: past a standing notice's span of ride.
+    await pump(120);
+    expect(voiceLinks()).toHaveLength(1);
+    expect(voiceLinks()[0]?.closest('.oyl-hud__race')).not.toBeNull();
+    // No notice of its own beside the race's.
+    expect(
+      queryAll(mounted?.container ?? document.body, '.oyl-hud__notices > .oyl-status').some(
+        (each) => (each.textContent ?? '').includes('Join voice'),
+      ),
+    ).toBe(false);
+    // The race starts: the room's first frame. A racer is offered no link.
+    room.frame(1, [frameRider(0, 0)]);
+    await pump(4);
+    expect(voiceLinks()).toEqual([]);
+  });
+});

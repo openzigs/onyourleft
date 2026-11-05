@@ -449,6 +449,7 @@ describe('the moderation log — #891, #955', () => {
     expect(actionLabel('refused_dismiss_report')).toBe(
       'Refused, and changed nothing: dismissed a report',
     );
+    expect(actionLabel('rotate_voice')).toBe('Replaced a room’s Discord voice channel');
     expect(actionLabel('something_new')).toBe('something_new');
   });
 });
