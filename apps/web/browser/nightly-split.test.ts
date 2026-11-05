@@ -746,6 +746,14 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(report).toContain('${steps:-(the steps could not be read; open the run)}');
   });
 
+  it('does not run on the merge queue, where it could not block and would report as a red night — #2198', () => {
+    // Not a required check, so a queue run of it decides nothing; and its
+    // `report` job runs on every event but `pull_request`, so a red queue run
+    // would open the nightly issue for a pull request that has not merged.
+    expect(nightly).not.toMatch(/^ {2}merge_group:/m);
+    expect(nightly).toMatch(/^ {2}pull_request:\s*$/m);
+  });
+
   it('reports under a name that is not the required check, on a schedule', () => {
     expect(nightly).not.toMatch(/^\s*name: Repository rules\s*$/m);
     expect(nightly).toMatch(/^\s+schedule:\s*$/m);
@@ -798,6 +806,27 @@ describe('the required check is one job over every shard — #1285', () => {
     const on = /^on:\n((?: {2}.+\n|\n)+)/m.exec(workflow)?.[1] ?? '';
     expect(on).toMatch(/^ {2}pull_request:\s*$/m);
     expect(on).not.toMatch(/paths(-ignore)?:|branches-ignore:/);
+  });
+
+  it('triggers on the merge queue too, and runs there as it does on a pull request — #2198', () => {
+    // The queue merges only once the required check has reported on its own
+    // ref. Without the event it never reports there, and every queued pull
+    // request waits until the queue times it out. Nothing under it either: a
+    // `branches:` filter that left `main` out is the same failure, and the
+    // bare event cannot be narrowed by mistake.
+    const on = /^on:\n((?: {2}.+\n| *#.*\n|\n)+)/m.exec(workflow)?.[1] ?? '';
+    expect(on).toMatch(/^ {2}merge_group:\s*$/m);
+    expect(on).not.toMatch(/^ {2}merge_group:\s*\n {4}\S/m);
+    // A queue run is never cancelled by the next one: cancelled, the required
+    // check fails and the pull request leaves the queue.
+    expect(workflow).toMatch(
+      /^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+    );
+    // Under `merge_group` the pull request's payload is absent, so a step that
+    // read it would run on an empty value in the queue alone.
+    expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toMatch(
+      /github\.event\.pull_request|github\.(base|head)_ref|GITHUB_(BASE|HEAD)_REF/,
+    );
   });
 
   it('waits for every shard: a job it does not need cannot block a merge', () => {

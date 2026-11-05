@@ -22,8 +22,9 @@ and "a second job could not block a merge" in the dated sections below: each was
 written and is kept as the record. §"Shards — #1285" is what is true now — which step runs where,
 every stop and its arithmetic, and what was measured.
 
-[`.github/workflows/rules.yml`](../../.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
+[`.github/workflows/rules.yml`](../../.github/workflows/rules.yml) runs on every pull request, on every
+push to `main` and, since [#2198](https://github.com/openzigs/onyourleft/issues/2198), on every
+merge-queue entry (`merge_group`; §"The merge queue — #2198"). It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
@@ -213,6 +214,48 @@ same 25 % the first 9V74 sample on #833's own pull request showed, and in the tw
 touch; the image check itself took **12 s and 15 s** inside the concurrent step. So "EPYC 9V74" is
 not one speed (the tag is the CPU model, not the VM's share of it), and one job can land anywhere
 from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
+
+#### The merge queue — #2198
+
+⚠️ **`main` merges through GitHub's merge queue, and the update-branch-then-merge procedure is
+replaced.** That procedure (the 2026-09-29 rule, after pull requests green on stale bases broke
+`main`) was: update the pull request with `main`, wait for a fresh `Repository rules` run, merge —
+and every merge put the next pull request behind again, so about twenty took eight to ten hours. The
+queue tests the merged result itself: it builds a `gh-readonly-queue/main/...` ref holding `main`,
+every entry ahead and this pull request, runs the required check there, and merges only if it is
+green. A pull request that goes red there leaves the queue and `main` never sees it.
+
+- **To add a reviewed pull request:** `gh pr merge N --merge`, or the **Merge when ready** button.
+  With its checks still running, `gh` turns on auto-merge and the pull request joins the queue when
+  they pass; with them green, it joins at once. **Never `--admin`**: it merges past the queue, which
+  is the stale-base merge the queue exists to stop. Pass the number — a bare `gh pr merge` in a
+  shared checkout acts on whatever branch is checked out.
+- **Do not update a queued pull request with `main`**, or wait for a fresh run before queuing it:
+  the queue's own run is that fresh run, on the result that will land. A push to a queued pull
+  request removes it from the queue.
+- **Combined batches.** Reviewed pull requests may still be merged into one combined pull request
+  to save CI (the owner's ruling of 2026-10-19); the combined one is queued like any other. How many
+  entries the queue groups into one run is a repository setting, not this file.
+
+What makes the queue work is in `rules.yml`, and
+[`apps/web/browser/nightly-split.test.ts`](../../apps/web/browser/nightly-split.test.ts) fails on
+the loss of each: the `merge_group:` trigger with no filter under it, because the queue merges
+nothing until `Repository rules` has reported on its ref and without the trigger every queued pull
+request waits until the queue's timeout removes it; `cancel-in-progress` true for `pull_request`
+alone, because a cancelled queue run is a failed required check; and no step reading the pull
+request's payload (`github.event.pull_request.*`, `github.base_ref`, `github.head_ref`), which is
+absent under `merge_group`. No step read it when the trigger was added, so every job runs there
+unchanged.
+
+**`nightly.yml` does not run on `merge_group`, by decision.** It is not a required check, so a
+queue run of it could not hold a pull request back; its `report` job runs on every event but
+`pull_request`, so a red queue run would open the nightly issue for a change that has not merged;
+and the pull requests that change what it runs already run it, through its `paths:` filter. The
+same test file fails if the trigger is added there.
+
+⚠️ **Turning the queue on is a repository setting, and it comes after `merge_group` is on
+`main`**: switched on first, every queued pull request waits for a check that never reports. It is
+the owner's step, not a pull request's.
 
 #### Where the time comes from next — owed before B9 and B12
 
