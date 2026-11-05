@@ -97,6 +97,18 @@ describe('the notice page (#907)', () => {
   });
 });
 
+describe('the notice page says how long a notifier’s details are kept (#1381)', () => {
+  // The owner's ruling of 2026-11-04 (GDPR Art. 13(2)(a)): the period, told where the details are typed.
+  it('says it in the owner’s words, beside the promise about who reads what is typed', () => {
+    const html = noticePage({ kind: 'form' }, null);
+    expect(html).toContain(
+      'What you type here is kept with the report and shown only to the person who moderates this instance. ' +
+        'Your name, your email address and the words you type are erased 6 months after the moderator records a decision on the report, ' +
+        'or 12 months after it arrives if they record none.',
+    );
+  });
+});
+
 describe('a notice sent from the page (#907)', () => {
   it('reaches the moderators’ queue with the time it arrived and everything the notifier chose to give', async () => {
     world = await startModerationWorld();
@@ -358,6 +370,16 @@ describe('the form, read (#907)', () => {
       ok: false,
       problems: [{ field: 'items' }],
     });
+  });
+
+  it('refuses a display name as an item: the app never shows one, so a notice cannot name one (#1381)', () => {
+    expect(
+      read({
+        kind: 'illegal_content',
+        explanation: 'why',
+        items: `room:${ROOM}\nrider:athlete_A-1`,
+      }),
+    ).toMatchObject({ ok: false, problems: [{ field: 'items' }] });
   });
 
   it('refuses an unknown kind, an email that is not one, and more items than one notice may name', () => {

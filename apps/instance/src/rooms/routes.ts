@@ -396,7 +396,16 @@ export const ROOM_ROUTES: readonly Route[] = [
         found.seat.athleteId,
         { reason: context.json.reason },
       );
-      if (removed.ok) await context.probes?.removeFromRoom?.(found.roomId, found.seat.athleteId);
+      if (removed.ok) {
+        await context.probes?.removeFromRoom?.(found.roomId, found.seat.athleteId);
+        // #876: and its Discord voice, once the rider is out of the room.
+        await context.probes?.afterRoomRemoval?.({
+          roomId: found.roomId,
+          actorId: caller.athleteId,
+          targetId: found.seat.athleteId,
+          logId: removed.value.logId,
+        });
+      }
       return moderationAnswer(removed, (value) => json(value));
     },
   },

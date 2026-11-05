@@ -575,6 +575,53 @@ address, and a mailed code is refused `address_unbound` at redemption if its add
 cleared. Clearing an established address (`POST /v1/auth/recovery-email/clear`) and the full reset
 (`POST /v1/auth/recovery/reset`) each need a recovery code or a code mailed to an established address.
 
+## Voice on Discord
+
+With `OYL_INSTANCE_DISCORD_BOT_TOKEN` and `OYL_INSTANCE_DISCORD_GUILD_ID` set, the instance's bot
+makes a temporary voice channel in your Discord server for a private room, and deletes it when the
+room is over (#874; [spike 0017](spikes/0017-voice-chat-for-rooms.md),
+[spike 0018](spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md)). It is REST only, through
+Node's own `fetch`, with no gateway connection and no dependency. Leave both empty and there is no
+voice: nothing else changes.
+
+- **You are the developer under Discord's terms.** Register your own Application in the Discord
+  Developer Portal, add its bot to a server of its own, and give it **Manage Channels** and **Create
+  Instant Invite**. Turn **Membership Screening off** in that server: with it on, riders would join
+  unable to speak, so the instance turns voice off.
+- **Who is given the link.** A rider a **private** room admits, in the room's welcome (#875), and
+  nobody else: a rider the room refuses is never told it. A public room has no voice until account
+  linking exists (#877), because a link alone cannot remove a banned rider from a channel they are
+  already in. The app shows it while a race waits on its line (on a tablet) and for the first
+  seconds of a group ride.
+- **What reaches Discord.** A channel named `oyl-ride-` and the first twelve hex digits of the
+  room's random id; a temporary, single-room invite for at most the room's riders, for a day. No
+  topic, no category, no audit-log reason, no ride data and nothing a rider typed.
+- **What the instance keeps.** Which channel is which room's is held in memory only: nothing about
+  Discord is in the database or a backup. After a restart, or when Discord refused a delete, the
+  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel this instance
+  process does not hold. That is why the bot needs a server of its own.
+- **Keep the token encrypted at rest.** Discord's terms treat the bot token as API Data that must be
+  encrypted at rest (Developer Terms §5(c), §13). The instance reads it from
+  `OYL_INSTANCE_DISCORD_BOT_TOKEN` and does not encrypt it itself, so the duty is yours: keep the
+  `.env` that holds it on an encrypted disk or volume, or supply it from a Docker secret or your
+  operating system's secret store, and keep it out of backups that are not encrypted.
+- **The token** is sent only to `discord.com`, in the `Authorization` header, and is never logged:
+  an error is logged by its name alone. Rate limits are honoured from Discord's headers, as its
+  terms require; a `401` turns voice off until the next start, so a dead token never loops.
+
+| You see | It means |
+|---|---|
+| `"event":"voice","state":"on"` at start | the bot's token and server answered; rooms may have voice |
+| `"event":"voice","state":"off","code":"token-refused"` | Discord refused the token, at start or later. Nothing more is sent. Reset the token in the Developer Portal, set it, and restart |
+| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it (a `403` or `404`), or Discord or the network was briefly down (no status, or a `5xx`). A `voice-failed` line before it has the status. A brief failure is retried by the room sweep every ten minutes; a refusal is not, so fix the id or the bot's membership and restart |
+| `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
+| `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
+| `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
+| `"event":"voice-failed","code":"log"` (or `"member"`) | after a removal or a suspension, writing the `rotate_voice` log entry (or reading who is in a room) failed. The removal or suspension itself was applied |
+
+**A removal or a ban replaces the room's channel** (#876): see `docs/moderation.md`, "Moderation
+in a room". What was done is a `rotate_voice` entry in the moderation log, not a line here.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),
@@ -610,6 +657,18 @@ the blob count, and the database's SHA-256). `--keep N` removes all but the newe
 copies the snapshot to a second place — the off-box copy. The home deployment runs this on a
 schedule (the `backup` service: every six hours, fourteen kept, into `OYL_BACKUP_DIR` with a copy in
 `OYL_OFFBOX_DIR`).
+
+⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
+the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
+account that was erased. The privacy policy tells riders and notifiers that the project's own
+instance keeps no backup for longer than 30 days, so that is the limit. The home deployment's
+defaults keep the newest fourteen of one every six hours, which is 3.5 days, and are well inside it.
+If you change `OYL_BACKUP_KEEP` or `OYL_BACKUP_INTERVAL_SECONDS`, keep their product under 30 days
+(`OYL_BACKUP_KEEP` × `OYL_BACKUP_INTERVAL_SECONDS` ≤ 2 592 000 seconds). Nothing enforces that: it is
+yours to check. Count the other places a snapshot lands too: `OYL_OFFBOX_DIR` keeps the same number,
+the `pre-deploy` folder keeps the last three deploys' snapshots however old they are, and a copy you
+make by hand or with `rclone` is yours to delete. Restoring one needs no extra step for notifier
+details: the instance erases whatever is due again when it starts.
 
 ⚠️ **A backup kept only on the box it backs up is not a backup** of the box. `OYL_OFFBOX_DIR` is a
 drive or a share that survives the machine: a USB drive that is unplugged and kept elsewhere, or a

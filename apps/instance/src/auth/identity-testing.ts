@@ -55,6 +55,7 @@ import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import type { InstanceProbes } from '../route-kit.ts';
 import { createRooms, type RoomLimits, type Rooms } from '../rooms/rooms.ts';
+import type { RoomVoice } from '../voice/room-voice.ts';
 import { NO_LEGAL_SETTINGS } from '../legal.ts';
 import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts';
 import { secretBytes } from '../keys/instance-keys-testing.ts';
@@ -303,6 +304,8 @@ export async function startIdentityInstance(
     hostedFetch?: typeof globalThis.fetch;
     /** What `/metrics` would count of each response. */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
+    /** The rooms' Discord voice (#874), as `instance.ts` hands it to them: none unless a test's. */
+    voice?: RoomVoice;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -331,6 +334,7 @@ export async function startIdentityInstance(
     pictures,
     hostedFetch,
     observe,
+    voice,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
@@ -418,6 +422,7 @@ export async function startIdentityInstance(
       const held = await people.identity?.account(caller);
       return held?.ok === true && held.value.publicRooms.eligible;
     },
+    ...(voice === undefined ? {} : { voice }),
   });
   const keysFor = async (origin: string): Promise<InstanceKeys> => {
     const keys = createInstanceKeys({

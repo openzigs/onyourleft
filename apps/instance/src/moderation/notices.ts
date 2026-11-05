@@ -41,6 +41,10 @@
 import { parseModerationItem } from '@onyourleft/domain';
 import { escapeHtml, htmlPage } from '../html.ts';
 import type { NewNotice } from '../store/sql-store.ts';
+import {
+  NOTICE_DETAILS_RETENTION_MONTHS,
+  UNDECIDED_NOTICE_DETAILS_RETENTION_MONTHS,
+} from './notice-retention.ts';
 
 /** The longest explanation a notice may give, in characters. */
 export const MAXIMUM_EXPLANATION_LENGTH = 5000;
@@ -358,6 +362,6 @@ ${box('declare_true', 'I am making this report in good faith, and what it says i
 
 <button type="submit">Send the report</button>
 </form>
-<p>A person reads every report. No automated means are used to decide. What you type here is kept with the report and shown only to the person who moderates this instance.</p>`,
+<p>A person reads every report. No automated means are used to decide. What you type here is kept with the report and shown only to the person who moderates this instance. Your name, your email address and the words you type are erased ${String(NOTICE_DETAILS_RETENTION_MONTHS)} months after the moderator records a decision on the report, or ${String(UNDECIDED_NOTICE_DETAILS_RETENTION_MONTHS)} months after it arrives if they record none.</p>`,
   );
 }
