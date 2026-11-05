@@ -721,7 +721,12 @@ export function terrainCorridor(
   closeFans(centre, normals2d, reach, lent.folds, vertices, fields);
 
   // #1996: and the other pass's points, sunk out of sight, and the ground
-  // round the turning point.
+  // round the turning point. ⚠️ **Last, after `closeFans`** (#2205): it is
+  // the one writer of a row another pass takes, and writes the whole row.
+  // The two touch no row in common today only because no quad within
+  // `UNFOLDED_NEAR_TURN_ROWS` of a taken row folds, so no fan reaches one;
+  // `landform-passes.test.ts` §"the passes' order" holds the order itself,
+  // which no drawn ground can tell apart while that holds.
   if (roles !== undefined) {
     retracedGround(profile, origin, seed, land, centre, normals2d, roles, lent);
   }
@@ -1448,6 +1453,10 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
  * Which pairs of rows have a triangle {@link closeFan} drew, by the pair's
  * first row: 1 if so. Lent, like {@link crossings}.
  *
+ * Exported for `landform-passes.test.ts` §"fannedPairs", which holds that it
+ * flags a fan and nothing at a turning point (#2205); the product's one
+ * caller is {@link standingOnGround}, in this module.
+ *
  * ⚠️ **A fan's triangles lie off the cross-sections of their rows** — #2149:
  * its point is not between the cross-sections of every pair it closes on, so
  * asking only the pairs a point lies between never reaches them, and scenery
@@ -1456,10 +1465,19 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
  * neighbour, which a fold alone never does: it collapses a row's columns onto
  * that row's own end. The pair before a fan's first row and the one after
  * its last are its, too: their quads end on the point.
+ *
+ * ⚠️ **And only while the side's column 0 is NOT one point too** — #2205. A
+ * row turned round a turning point carries its anchor's left side whole
+ * (@see retracedGround), and a sunk row is one point, so neighbouring rows
+ * of either share every column of a side, the outermost included: on
+ * `outAndBackRoute` seven pairs a frame near the turn were flagged, asked of
+ * every item and placing none differently. A fan never moves column 0, the
+ * road's edge ({@link closeFan} moves from column 3 out), so two rows whose
+ * road edges are one point are not a fan's.
  */
 let fannedRows = new Uint8Array(0);
 
-function fannedPairs(mesh: TerrainMesh): Uint8Array {
+export function fannedPairs(mesh: TerrainMesh): Uint8Array {
   const { vertices, rows } = mesh;
   if (fannedRows.length !== rows) fannedRows = new Uint8Array(rows);
   fannedRows.fill(0);
@@ -1468,6 +1486,10 @@ function fannedPairs(mesh: TerrainMesh): Uint8Array {
       const a = ((row * 2 + side) * COLUMNS + COLUMNS - 1) * 3;
       const b = a + COLUMNS * 2 * 3;
       if (vertices[a] !== vertices[b] || vertices[a + 2] !== vertices[b + 2]) continue;
+      // #2205: a side copied whole, or sunk to a point, is no fan.
+      const edge = (row * 2 + side) * COLUMNS * 3;
+      const next = edge + COLUMNS * 2 * 3;
+      if (vertices[edge] === vertices[next] && vertices[edge + 2] === vertices[next + 2]) continue;
       // Rows `row` and `row + 1` share the point: the pair between them, the
       // one before `row` and the one after `row + 1` are the fan's.
       fannedRows[row] = 1;
@@ -2592,8 +2614,16 @@ const clearListPool: number[][] = [];
  *
  * About 60 000 point-to-segment distances a frame at the corridor's usual 47
  * rows, and none once every column is clear, which is almost every row.
+ *
+ * Exported for `landform-passes.test.ts` §"clearReach", which holds its
+ * contract on a taken pass directly (#2205). Through {@link terrainCorridor} nothing can: a pass
+ * is taken only within `terrain.ts` §`RETRACE_OVERLAP_METRES` (3.5 m) of the
+ * road, and the first column probed is 8 m out, 4.5 m from it and past the
+ * 4.1 m clearance, so the taken road never stops a kept side, and a taken
+ * row's own reach is overwritten by `retracedGround`. The product's one
+ * caller is {@link terrainCorridor}.
  */
-function clearReach(
+export function clearReach(
   centre: readonly CorridorPoint[],
   normals: Float64Array,
   reach: Float64Array,
