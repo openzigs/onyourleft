@@ -18,11 +18,12 @@
  * ## The read budget is the design, not a later optimisation
  *
  * The panel at the top is rendered from the activity record and the **stream
- * summary**, which decodes nothing. A trace is read only when its series is
- * switched on. So opening a four-hour ride inflates two channels, not eight,
- * and hands the DOM {@link CHART_POINTS} points rather than 14 400 —
- * `detail/load.ts` is where that is enforced and `detail/load.test.ts` counts
- * it.
+ * summary**, which decodes nothing. Since #2068 every recorded channel has its
+ * own small chart, stacked on one time axis, and a chart's channel is read only
+ * once its slot scrolls into view (`detail/visibility.ts`). So opening a
+ * four-hour ride inflates the channels on screen, not eight, and hands the DOM
+ * {@link CHART_POINTS} points a chart rather than 14 400 — `detail/load.ts` is
+ * where that is enforced and `detail/load.test.ts` counts it.
  *
  * ## The side camera (#388)
  *
@@ -57,7 +58,7 @@
  * the renderer.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import type { Metres } from '@onyourleft/domain';
 import { activityId as toActivityId, type ActivityId } from '@onyourleft/store';
@@ -100,13 +101,15 @@ import { NOTE_WORDS } from '../rider-text/words';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import {
   CHART_POINTS,
-  DEFAULT_SERIES,
   downsample,
   TABLE_ROWS,
+  pointAt,
   traceSeries,
   type TraceChannel,
+  type TraceSeriesDefinition,
 } from '../detail/series';
 import type { DetailPort } from '../detail/store-port';
+import { watchUntilSeen } from '../detail/visibility';
 import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
 import { readMapTilesChoice } from '../map/tiles-preference';
@@ -234,8 +237,15 @@ export function ActivityDetailView({
   // it cannot change while this one is showing.
   const [tiles] = useState(() => readMapTilesChoice(preferences ?? deviceStorage()));
   const [state, setState] = useState<OverviewState>({ kind: 'loading' });
-  const [enabled, setEnabled] = useState<readonly TraceChannel[]>(DEFAULT_SERIES);
+  // #2068: the channels whose chart has been in view, and the slots that say so.
+  const [seen, setSeen] = useState<ReadonlySet<TraceChannel>>(new Set());
+  const slots = useRef(new Map<TraceChannel, Element>());
   const [traces, setTraces] = useState<ReadonlyMap<TraceChannel, Trace>>(new Map());
+  // #2068: the shared cursor, in seconds into the ride.
+  const [cursor, setCursor] = useState(0);
+  // The channels a read has been started for, and which units' reads count.
+  const requested = useRef(new Set<TraceChannel>());
+  const generation = useRef(0);
   const [shared, setShared] = useState<SharedTrack | undefined>(undefined);
   const [showShared, setShowShared] = useState(false);
   const [mapPort, setMapPort] = useState<MapPort | undefined>(undefined);
@@ -270,37 +280,6 @@ export function ActivityDetailView({
   }, [port, id]);
 
   /**
-   * Load the traces that are switched on and not already held.
-   *
-   * Keyed on the channel, so switching a series off and on again does not
-   * re-read it — the samples do not change, and a second inflate of the same
-   * blob is the read this whole module is arranged to avoid.
-   */
-  useEffect(() => {
-    if (port === undefined || id === undefined || state.kind !== 'ready') {
-      return;
-    }
-    const available = state.overview.streams?.channels ?? [];
-    const wanted = enabled.filter((channel) => available.includes(channel) && !traces.has(channel));
-    if (wanted.length === 0) {
-      return;
-    }
-    let live = true;
-    void (async () => {
-      for (const channel of wanted) {
-        const trace = await loadTrace(port, id, channel, units, CHART_POINTS);
-        if (!live || trace === undefined) {
-          continue;
-        }
-        setTraces((held) => new Map(held).set(channel, trace));
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [port, id, state, enabled, traces, units]);
-
-  /**
    * Throw away every cached trace when the rider changes units (#238).
    *
    * ⚠️ **Without this the charts are a stale conversion and nothing says so.**
@@ -310,10 +289,78 @@ export function ActivityDetailView({
    * system's axis label, which is a wrong number wearing a correct unit. That
    * is the worst of the shapes this issue is about, and it is invisible: the
    * chart redraws, the label changes, and the line does not move.
+   *
+   * Declared before the read below, so a change of units clears what has been
+   * asked for before that effect asks again; and a read still in flight in the
+   * old units is dropped by its generation.
    */
   useEffect(() => {
+    generation.current += 1;
+    requested.current.clear();
     setTraces(new Map());
   }, [units]);
+
+  /**
+   * Watch every chart's slot, and note each channel once it is in view — #2068.
+   *
+   * The slots are drawn as soon as the overview is ready, one per chartable
+   * channel and kept across the read, so the elements watched here are the ones
+   * the charts arrive in.
+   */
+  useEffect(() => {
+    if (state.kind !== 'ready') {
+      return;
+    }
+    return watchUntilSeen(new Map(slots.current), (channels) => {
+      setSeen((held) => new Set([...held, ...channels]));
+    });
+  }, [state]);
+
+  /**
+   * Load the traces that have been in view and not yet asked for.
+   *
+   * Keyed on the channel, so a chart scrolled away and back is not re-read —
+   * the samples do not change, and a second inflate of the same blob is the
+   * read this whole module is arranged to avoid. Marked as asked for before the
+   * read starts, so a second channel coming into view while the first is still
+   * reading does not start the first again.
+   */
+  useEffect(() => {
+    if (port === undefined || id === undefined || state.kind !== 'ready') {
+      return;
+    }
+    const available = state.overview.streams?.channels ?? [];
+    const wanted = traceSeries(units)
+      .map((series) => series.channel)
+      .filter(
+        (channel) =>
+          seen.has(channel) && available.includes(channel) && !requested.current.has(channel),
+      );
+    if (wanted.length === 0) {
+      return;
+    }
+    for (const channel of wanted) {
+      requested.current.add(channel);
+    }
+    const asked = generation.current;
+    void (async () => {
+      for (const channel of wanted) {
+        let trace: Trace | undefined;
+        try {
+          trace = await loadTrace(port, id, channel, units, CHART_POINTS);
+        } catch {
+          // A channel that will not read (a corrupt blob) must not stop the
+          // channels after it, and may be asked for again on a later pass.
+          requested.current.delete(channel);
+          continue;
+        }
+        if (trace === undefined || generation.current !== asked) {
+          continue;
+        }
+        setTraces((held) => new Map(held).set(channel, trace));
+      }
+    })();
+  }, [port, id, state, seen, units]);
 
   /**
    * Load the map engine and the rider's own track, for a ride that has one.
@@ -344,14 +391,6 @@ export function ActivityDetailView({
       live = false;
     };
   }, [port, id, state, map]);
-
-  const toggle = useCallback((channel: TraceChannel): void => {
-    setEnabled((current) =>
-      current.includes(channel)
-        ? current.filter((entry) => entry !== channel)
-        : [...current, channel],
-    );
-  }, []);
 
   const revealShared = useCallback(async (): Promise<void> => {
     if (port === undefined || id === undefined) {
@@ -419,6 +458,10 @@ export function ActivityDetailView({
   const { activity, streams, laps, sideCamera, writeUp: savedWriteUp } = state.overview;
   const available = streams?.channels ?? [];
   const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
+  // #2068: the one time axis every chart is drawn on — the whole ride, from
+  // the summary, so no chart's own length decides where a minute is.
+  const rideSeconds =
+    streams === undefined ? 0 : streams.sampleCount * Number(streams.sampleInterval);
   // #1054: a stored average that shows as 0 W says nothing was measured.
   const averagePower = shownAveragePower(activity.averagePower);
   // #1070: a stored 0 m says no distance is known (`units/format.ts` §`shownDistance`).
@@ -507,83 +550,56 @@ export function ActivityDetailView({
             {String(streams.sampleCount)} readings a second apart, drawn at up to{' '}
             {String(CHART_POINTS)} points a trace.
           </p>
-          <div className="oyl-library-controls">
-            {chartable.map((series) => (
-              // #668: showing a trace changes what is drawn, not the ride, so
-              // it is a toggle. It was a PRIMARY when on, which put one filled
-              // button per trace on this screen. The name is stable — "Show
-              // power" — and `aria-pressed` says whether it is shown.
-              <Button
-                key={series.channel}
-                variant="toggle"
-                pressed={enabled.includes(series.channel)}
-                onClick={() => {
-                  toggle(series.channel);
-                }}
-              >
-                Show {series.label.toLowerCase()}
-              </Button>
-            ))}
-          </div>
 
           {chartable.length === 0 ? (
             <StatusMessage tone="info">
               This ride stored a track and no sensor channels, so there is nothing to chart.
             </StatusMessage>
-          ) : undefined}
+          ) : (
+            <TraceCursor
+              seconds={cursor}
+              rideSeconds={rideSeconds}
+              onChange={setCursor}
+              readings={chartable.flatMap((series) => {
+                const trace = traces.get(series.channel);
+                return trace === undefined ? [] : [{ series, trace }];
+              })}
+            />
+          )}
 
-          {chartable
-            .filter((series) => enabled.includes(series.channel))
-            .map((series) => {
-              const trace = traces.get(series.channel);
-              if (trace === undefined) {
-                return (
-                  <p className="oyl-muted" key={series.channel}>
-                    Reading {series.label.toLowerCase()}…
-                  </p>
-                );
-              }
-              // The table is the same trace at reading resolution rather than
-              // at drawing resolution — `series.ts` records why six hundred
-              // rows is not an equivalent of anything. Derived from the points
-              // the chart already holds, so it costs no further read.
-              const tableRows = downsample(trace.points, TABLE_ROWS);
-              const secondsPerRow =
-                tableRows.length === 0
-                  ? 0
-                  : (trace.points.length * trace.secondsPerPoint) / tableRows.length;
-              const rows = tableRows.map((value, index) => [
-                formatDuration(index * secondsPerRow),
-                // Named rather than an em dash. A gap and a zero reading are
-                // different facts and the table is where a reader who cannot
-                // see the broken line finds that out.
-                value === undefined ? 'no reading' : series.format(value),
-              ]);
-              return (
-                <ChartSlot
-                  key={series.channel}
-                  caption={`${series.label} (${series.unit})`}
-                  columns={['From', `${series.label} (${series.unit})`]}
-                  rows={rows}
-                  emptyMessage="No readings in this ride."
-                  // #1439: the table is the chart's alternative, not a second
-                  // screen of numbers open under it by default.
-                  tablePosition="disclosed"
-                  chart={
-                    <Suspense fallback={null}>
-                      <TraceChart
-                        label={series.label}
-                        unit={series.unit}
-                        points={trace.points}
-                        secondsPerPoint={trace.secondsPerPoint}
-                        format={series.format}
-                        missingSamples={trace.missingSamples}
-                      />
-                    </Suspense>
+          {/*
+            #2068: every recorded channel, stacked, on one time axis — no
+            toggles. Each slot is drawn now and watched; its channel is read
+            when it scrolls into view, so the slot keeps its place meanwhile.
+          */}
+          {chartable.map((series) => {
+            const trace = traces.get(series.channel);
+            return (
+              <div
+                key={series.channel}
+                className="oyl-trace-slot"
+                data-oyl-trace-slot={series.channel}
+                ref={(element) => {
+                  if (element === null) {
+                    slots.current.delete(series.channel);
+                  } else {
+                    slots.current.set(series.channel, element);
                   }
-                />
-              );
-            })}
+                }}
+              >
+                {trace === undefined ? (
+                  <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
+                ) : (
+                  <TraceSlot
+                    series={series}
+                    trace={trace}
+                    rideSeconds={rideSeconds}
+                    cursor={cursor}
+                  />
+                )}
+              </div>
+            );
+          })}
         </>
       )}
 
@@ -689,6 +705,115 @@ export function ActivityDetailView({
 
       {embedded ? null : <WayOut />}
     </>
+  );
+}
+
+/** The shared cursor's control: its `id`, for the label (#2068). */
+const TRACE_CURSOR_ID = 'oyl-trace-cursor';
+
+/**
+ * The shared cursor — #2068. A native range input, so it is keyboard-operable
+ * by the platform (arrows, Page Up and Down, Home and End), moving one line
+ * across every chart in the stack; what each drawn chart reads at that moment
+ * is said in words beside it, in an `<output>`, so the reading is text and
+ * not only a position on a picture.
+ *
+ * One step is one drawn point (the ride over {@link CHART_POINTS}), at least a
+ * second, so the arrow keys move the line by a point and no further.
+ */
+function TraceCursor({
+  seconds,
+  rideSeconds,
+  onChange,
+  readings,
+}: {
+  readonly seconds: number;
+  readonly rideSeconds: number;
+  readonly onChange: (seconds: number) => void;
+  /** The charts drawn so far, in stack order. A chart still to be read says nothing yet. */
+  readonly readings: readonly { readonly series: TraceSeriesDefinition; readonly trace: Trace }[];
+}): JSX.Element {
+  const step = Math.max(1, Math.ceil(rideSeconds / CHART_POINTS));
+  const at = formatDuration(seconds);
+  const said = readings.map(({ series, trace }) => {
+    const value = pointAt(trace.points, trace.secondsPerPoint, seconds);
+    return `${series.label} ${value === undefined ? 'no reading' : `${series.format(value)} ${series.unit}`}`;
+  });
+  return (
+    <div className="oyl-trace-cursor">
+      <label htmlFor={TRACE_CURSOR_ID}>Read every chart at</label>
+      <input
+        id={TRACE_CURSOR_ID}
+        type="range"
+        min={0}
+        max={rideSeconds}
+        step={step}
+        value={seconds}
+        aria-valuetext={at}
+        onChange={(event) => {
+          onChange(Number(event.currentTarget.value));
+        }}
+      />
+      <output htmlFor={TRACE_CURSOR_ID} className="oyl-trace-cursor__reading">
+        {at}
+        {said.length === 0 ? '' : `: ${said.join(', ')}`}
+      </output>
+    </div>
+  );
+}
+
+/** One channel's chart and its table, once its trace has been read. */
+function TraceSlot({
+  series,
+  trace,
+  rideSeconds,
+  cursor,
+}: {
+  readonly series: TraceSeriesDefinition;
+  readonly trace: Trace;
+  /** The shared time axis' span, in seconds (#2068). */
+  readonly rideSeconds: number;
+  /** The shared cursor, in seconds (#2068). */
+  readonly cursor: number;
+}): JSX.Element {
+  // The table is the same trace at reading resolution rather than at drawing
+  // resolution — `series.ts` records why six hundred rows is not an equivalent
+  // of anything. Derived from the points the chart already holds, so it costs
+  // no further read.
+  const tableRows = downsample(trace.points, TABLE_ROWS);
+  const secondsPerRow =
+    tableRows.length === 0 ? 0 : (trace.points.length * trace.secondsPerPoint) / tableRows.length;
+  const rows = tableRows.map((value, index) => [
+    formatDuration(index * secondsPerRow),
+    // Named rather than an em dash. A gap and a zero reading are different
+    // facts and the table is where a reader who cannot see the broken line
+    // finds that out.
+    value === undefined ? 'no reading' : series.format(value),
+  ]);
+  return (
+    <ChartSlot
+      caption={`${series.label} (${series.unit})`}
+      columns={['From', `${series.label} (${series.unit})`]}
+      rows={rows}
+      emptyMessage="No readings in this ride."
+      // #1439: the table is the chart's alternative, not a second screen of
+      // numbers open under it by default.
+      tablePosition="disclosed"
+      chart={
+        <Suspense fallback={null}>
+          <TraceChart
+            label={series.label}
+            unit={series.unit}
+            points={trace.points}
+            secondsPerPoint={trace.secondsPerPoint}
+            format={series.format}
+            missingSamples={trace.missingSamples}
+            timeSpan={rideSeconds}
+            cursor={cursor}
+          />
+        </Suspense>
+      }
+    />
   );
 }
 

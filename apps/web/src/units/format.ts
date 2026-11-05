@@ -125,7 +125,7 @@ export interface Measurement {
 const METRES_PER_KILOMETRE = 1000;
 
 /** How many decimals a speed is shown to. @see the module note on rounding. */
-const SPEED_DECIMALS = 1;
+export const SPEED_DECIMALS = 1;
 
 /** How many decimals a distance is shown to, unless a caller asks otherwise. */
 export const DISTANCE_DECIMALS = 1;
