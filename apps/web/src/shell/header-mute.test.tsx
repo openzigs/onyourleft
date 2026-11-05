@@ -26,13 +26,13 @@ import {
   type FakeAudio,
 } from '../game/audio-testing';
 import type { CueOutput } from '../game/audio-port';
-import { deviceStorage } from '../game/hud/announce-preference';
+import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
 import { deviceAudioMix, webAudioOutput } from '../game/web-audio';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
 
 import { AppShell } from './AppShell';
-import { HEADER_MUTE_NAME } from './HeaderMute';
+import { HEADER_MUTE_NAME, HeaderMute } from './HeaderMute';
 import { isRideRoute } from './route-motion';
 import { ALL_ROUTES } from './routes';
 
@@ -123,6 +123,30 @@ describe('the header mute silences the master, across a reload — #2056', () =>
     await settle();
     expect(quiet.made, 'a mute pressed first made an audio context').toBe(0);
     expect(localStorage.getItem(AUDIO_MIX_STORAGE_KEY)).toContain('"masterMuted":true');
+  });
+
+  it('does not claim a mute the device refused to keep', async () => {
+    // The master is read back from storage by the output, so a refused write
+    // mutes nothing: the button must not say it did.
+    const refusing: PreferenceStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('quota');
+      },
+    };
+    const fake = fakeAudioContext();
+    const output = webAudioOutput(
+      () => fake.context,
+      deviceAudioMix(() => refusing),
+    );
+    output.resume();
+    mounted = await mount(<HeaderMute storage={refusing} output={output} />);
+    await settle();
+    const button = document.querySelector('button');
+    button?.click();
+    await settle();
+    expect(musicPath(fake).master.gain.value).toBe(1);
+    expect(button?.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('asks the output to apply the mix inside the press', async () => {
