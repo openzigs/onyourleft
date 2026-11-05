@@ -1132,6 +1132,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/recent-trace.ts, RecentGraph.tsx
+                        the last ten minutes of power and heart rate (#2078):
+                        a fixed ring of 600 one-second slots, written from the
+                        frame loop only when the ride's clock crosses a whole
+                        second, a dropped reading a gap (`NaN`), never a
+                        zero; the SVG is memoised on the count written, so it
+                        is redrawn at most once a second
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's

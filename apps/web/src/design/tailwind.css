@@ -92,6 +92,13 @@
   --color-hud-zone5: var(--oyl-color-hud-zone5);
   --color-hud-zone6: var(--oyl-color-hud-zone6);
   --color-hud-zone7: var(--oyl-color-hud-zone7);
+  --color-hud-zone-band1: var(--oyl-color-hud-zone-band1);
+  --color-hud-zone-band2: var(--oyl-color-hud-zone-band2);
+  --color-hud-zone-band3: var(--oyl-color-hud-zone-band3);
+  --color-hud-zone-band4: var(--oyl-color-hud-zone-band4);
+  --color-hud-zone-band5: var(--oyl-color-hud-zone-band5);
+  --color-hud-zone-band6: var(--oyl-color-hud-zone-band6);
+  --color-hud-zone-band7: var(--oyl-color-hud-zone-band7);
 
   /* Spacing — `p-md`, `gap-sm`, `mb-lg`. `0` is the one length that is not a
      token, because nobody chooses it: `mt-0` has to exist to undo a margin. */

@@ -1066,11 +1066,17 @@ function measure(): StageMeasurement {
     ['the plan change', '.oyl-hud__plan-change'],
     // #1552: the OpenStreetMap credit, on a ride with map data in its world.
     ['the map credit', '.oyl-hud__attribution'],
+    // #2078: the last ten minutes, where it is drawn (`givenWay` where not).
+    ['the recent graph', '.oyl-hud__recent'],
   ] as const) {
     const element = document.querySelector(selector);
-    if (element !== null) {
-      items.push(item(name, element));
+    if (element === null) continue;
+    const box = element.getBoundingClientRect();
+    if (selector === '.oyl-hud__recent' && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
     }
+    items.push(item(name, element));
   }
   // #1482: and the touch lock, which is the design system's toggle rather
   // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.

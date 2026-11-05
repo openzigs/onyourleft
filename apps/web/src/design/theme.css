@@ -111,6 +111,13 @@
   --oyl-color-hud-zone5: #f59441;
   --oyl-color-hud-zone6: #cb574d;
   --oyl-color-hud-zone7: #cf91f3;
+  --oyl-color-hud-zone-band1: #383b3f;
+  --oyl-color-hud-zone-band2: #192f4b;
+  --oyl-color-hud-zone-band3: #284731;
+  --oyl-color-hud-zone-band4: #564f2b;
+  --oyl-color-hud-zone-band5: #553922;
+  --oyl-color-hud-zone-band6: #482726;
+  --oyl-color-hud-zone-band7: #493858;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -10172,6 +10179,82 @@ select.oyl-input {
 
 .oyl-hud__zone-bar-part--7 {
   fill: var(--oyl-color-hud-zone7);
+}
+
+/*
+ * THE LAST TEN MINUTES — #2078: power and heart rate, under the route plan.
+ *
+ * In the route panel, its full width, 4 rem tall: the power line solid in the
+ * HUD's ink, the heart-rate line dashed in the label's colour (told apart by
+ * pattern as well as colour), over the power zones' bands dimmed onto the
+ * panel. Every line is 2 px whatever box it is given.
+ *
+ * ⚠️ **Not drawn on a phone's overlay** — the column layout upright and the
+ * corners layouts under 47 rem tall — recorded as #419 asks, and as #2078
+ * itself allows (*"hidden on phone portrait if it does not fit the layout
+ * rules"*): a phone's route panel is measured to within a few pixels of the
+ * leaning rider and of the primary panel above it, and 4 rem more does not
+ * fit. `display: none`, because the graph is `aria-hidden` and carries
+ * nothing a reading on the HUD does not say in numbers. Drawn on a tablet and
+ * wherever the HUD stacks.
+ */
+.oyl-hud__recent {
+  display: block;
+  width: 100%;
+  height: 4rem;
+}
+
+.oyl-hud__recent-power,
+.oyl-hud__recent-heart {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__recent-power {
+  stroke: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__recent-heart {
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-dasharray: 4 3;
+}
+
+.oyl-hud__recent-band--1 {
+  fill: var(--oyl-color-hud-zone-band1);
+}
+
+.oyl-hud__recent-band--2 {
+  fill: var(--oyl-color-hud-zone-band2);
+}
+
+.oyl-hud__recent-band--3 {
+  fill: var(--oyl-color-hud-zone-band3);
+}
+
+.oyl-hud__recent-band--4 {
+  fill: var(--oyl-color-hud-zone-band4);
+}
+
+.oyl-hud__recent-band--5 {
+  fill: var(--oyl-color-hud-zone-band5);
+}
+
+.oyl-hud__recent-band--6 {
+  fill: var(--oyl-color-hud-zone-band6);
+}
+
+.oyl-hud__recent-band--7 {
+  fill: var(--oyl-color-hud-zone-band7);
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (height < 47rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__recent {
+    display: none;
+  }
 }
 
 /* --- Capability queries (#307) --------------------------------------------- */

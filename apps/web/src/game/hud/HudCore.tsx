@@ -57,6 +57,7 @@ import { isLapRaceReading, riderHolds } from './lap-race-hud';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
+import { RecentGraph } from './RecentGraph';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -203,6 +204,15 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         <ElevationStrip reading={elevation} profile={props.profile} />
 
         {props.routeFigure}
+
+        {/* #2078: the last ten minutes of power and heart rate. */}
+        {props.recent === undefined ? null : (
+          <RecentGraph
+            samples={props.recent.samples}
+            written={props.recent.written}
+            threshold={props.thresholdPower}
+          />
+        )}
       </div>
 
       <div className="oyl-hud__panel oyl-hud__actions">

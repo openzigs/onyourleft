@@ -2185,3 +2185,31 @@ describe('the rider’s W/kg and zone on the HUD — #2077', () => {
     expect(hudField('W/kg')).toBe(NO_READING);
   });
 });
+
+/**
+ * #2078 — the recent graph, wired: written from the frame loop once a second
+ * of the ride's clock, from the readings the HUD shows, and drawn in the
+ * route panel. `recent-trace.test.ts` holds the ring; `RecentGraph.test.tsx`
+ * the drawing.
+ */
+describe('the last ten minutes on the HUD — #2078', () => {
+  it('writes one second of power and heart rate per second ridden, however many frames', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    // 40 frames at 250 ms: ten seconds of ride, and 40 frames that could each
+    // have drawn the graph.
+    await pump(40);
+    const graph = mounted.container.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]');
+    expect(graph).not.toBeNull();
+    const written = Number(graph?.getAttribute('data-oyl-graph-written'));
+    expect(written).toBeGreaterThanOrEqual(8);
+    expect(written).toBeLessThanOrEqual(11);
+    // The port's live 220 W and 142 bpm, as one unbroken run each.
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-power')).toHaveLength(1);
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-heart')).toHaveLength(1);
+  });
+});

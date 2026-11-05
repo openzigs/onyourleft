@@ -194,7 +194,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // Twelve readings, the strip, the plan view, the trainer line, two
       // controls and, since #1482, the touch lock — and since #2076 the ride
       // so far, where it is drawn.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 23 : 18);
+      // And since #2078 the recent graph, where it is drawn.
+      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 24 : 18);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -753,6 +754,46 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
  * on a phone's overlay, and still in the secondary list in #94's order, where
  * a screen reader meets it (`theme.css` §"THE RIDE SO FAR"). Both ways (#1120).
  */
+/**
+ * #2078 — the last ten minutes of power and heart rate: in the route panel at
+ * its full width, uncovered and on the stage on a tablet, drawn where the HUD
+ * stacks, and not drawn on a phone's overlay (`theme.css` §"THE LAST TEN
+ * MINUTES"). Both ways (#1120). Every other case here holds the route panel
+ * clear of the leaning rider and of every other panel with the graph in it.
+ */
+for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+  test(`#2078 the recent graph is in the route panel where there is room for it — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    for (const [how, seen] of await bothWays(page)) {
+      if (!rideTotalsDrawn(viewport)) {
+        expect(seen.givenWay, how).toContain('the recent graph');
+        expect(
+          seen.items.map((each) => each.name),
+          how,
+        ).not.toContain('the recent graph');
+        continue;
+      }
+      const graph = named(seen.items, 'the recent graph');
+      const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+      if (route === undefined) throw new Error(`${how}: no route panel`);
+      expect(graph.box.height, `${how}: ${describeItem(graph)}`).toBeGreaterThan(40);
+      expect(
+        graph.box.left >= route.box.left - SUBPIXEL_TOLERANCE &&
+          graph.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+          graph.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+        `${how}: ${describeItem(graph)} in ${describeItem(route)}`,
+      ).toBe(true);
+      if (!STACKED_VIEWPORTS.includes(viewport)) {
+        expect(inside(graph.box, viewport) && graph.onTop, `${how}: ${describeItem(graph)}`).toBe(
+          true,
+        );
+      }
+    }
+  });
+}
+
 for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
   test(`#2076 the ride so far is drawn where there is a row for it — ${viewport.name}`, async ({
     browser,
@@ -783,7 +824,8 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
       );
       if (!rideTotalsDrawn(viewport)) {
-        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS]);
+        // #2078: and the recent graph, not drawn on a phone's overlay either.
+        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS, 'the recent graph']);
         continue;
       }
       expect(seen.givenWay, how).toEqual([]);
@@ -836,7 +878,7 @@ for (const viewport of STACKED_VIEWPORTS) {
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Twelve readings since #2072's elapsed time and clock, and the rest as
       // above — and the ride so far (#2076), drawn where the HUD stacks.
-      expect(seen.items).toHaveLength(23);
+      expect(seen.items).toHaveLength(24);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
