@@ -25,6 +25,7 @@ import {
 } from '@onyourleft/domain';
 
 import { NO_LAND_CLASS } from './land-class';
+import { QUALITY_LADDER } from './quality';
 import {
   BEND_FOLD_SHARE,
   HORIZON_RISE_METRES,
@@ -51,6 +52,7 @@ import {
   plannerCornerRoute,
   plannerRoute,
   rollingRoute,
+  sampledCornerRoute,
   steadyClimb,
 } from './route-fixtures-testing';
 import { cameraRig, horizontalSpread, projectToFrame } from './camera';
@@ -1613,6 +1615,273 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
     },
     120_000,
   );
+
+  describe('no pocket at the apex shows the horizon — #2149', () => {
+    // The owner's ruling of 2026-11-04, filed from #2117: on a very sharp
+    // bend, a pocket on the inside of the apex, about 0.3 × 1.3 m, where no
+    // ground triangle lay at all, so the horizon ring, drawn first and writing
+    // no depth, showed through it as a flat grey shape. It lay between the
+    // outer edges of the apex rows, whose inside reach the fold had brought
+    // down to 4.3–5.1 m, and nothing else covered it. No planner's corner
+    // sampled every 25 m has it, so these are corners sampled every 10 m, the
+    // turn spread over several samples, as on the owner's course.
+    const pockets: readonly (readonly [string, RouteProfile, number])[] = [140, 145, 150].flatMap(
+      (degrees) =>
+        (['right', 'left'] as const).flatMap((hand) =>
+          [6, 10].flatMap((radius) =>
+            [0, 0.1].map(
+              (grade) =>
+                [
+                  `${String(degrees)}° to the ${hand} of ${String(radius)} m, ${grade === 0 ? 'level' : `climbing at ${String(grade * 100)} % to it`}`,
+                  sampledCornerRoute(degrees, hand, radius, grade),
+                  bend + ((degrees * Math.PI) / 180) * radius * 0.5,
+                ] as const,
+            ),
+          ),
+        ),
+    );
+
+    /**
+     * The fewest bands of ground any rung draws: a pocket closed only in a
+     * band a lower rung leaves out is open on that rung — `landform.ts`
+     * §`closeFan` was, measured, before it moved every collapsed column.
+     */
+    const FEWEST_BANDS = Math.min(...QUALITY_LADDER.map((rung) => rung.terrainBands));
+    /** The side of {@link surfaceCells}' buckets, in metres. */
+    const POCKET_CELL_METRES = 4;
+    /**
+     * Every triangle of a surface that `keep` keeps, bucketed by the cells of
+     * {@link POCKET_CELL_METRES} its box covers in plan: three corners each.
+     */
+    const surfaceCells = (
+      vertices: Float32Array,
+      indices: ArrayLike<number>,
+      keep: (a: number, b: number, c: number) => boolean,
+    ): Map<number, number[]> => {
+      const cells = new Map<number, number[]>();
+      for (let at = 0; at + 2 < indices.length; at += 3) {
+        const a = (indices[at] as number) * 3;
+        const b = (indices[at + 1] as number) * 3;
+        const c = (indices[at + 2] as number) * 3;
+        if (!keep(a, b, c)) continue;
+        const xs = [vertices[a], vertices[b], vertices[c]] as [number, number, number];
+        const zs = [vertices[a + 2], vertices[b + 2], vertices[c + 2]] as [number, number, number];
+        for (
+          let cx = Math.floor(Math.min(...xs) / POCKET_CELL_METRES);
+          cx <= Math.floor(Math.max(...xs) / POCKET_CELL_METRES);
+          cx += 1
+        ) {
+          for (
+            let cz = Math.floor(Math.min(...zs) / POCKET_CELL_METRES);
+            cz <= Math.floor(Math.max(...zs) / POCKET_CELL_METRES);
+            cz += 1
+          ) {
+            const key = cx * 100_003 + cz;
+            const list = cells.get(key) ?? [];
+            if (list.length === 0) cells.set(key, list);
+            list.push(a, b, c);
+          }
+        }
+      }
+      return cells;
+    };
+    /**
+     * The highest of `cells`' triangles over a point in plan, or `-Infinity`;
+     * with `any`, the first found.
+     */
+    const surfaceTop = (
+      vertices: Float32Array,
+      cells: Map<number, number[]>,
+      x: number,
+      z: number,
+      any = false,
+    ): number => {
+      const key = Math.floor(x / POCKET_CELL_METRES) * 100_003 + Math.floor(z / POCKET_CELL_METRES);
+      const list = cells.get(key) ?? [];
+      let top = Number.NEGATIVE_INFINITY;
+      for (let at = 0; at + 2 < list.length && !(any && Number.isFinite(top)); at += 3) {
+        const [a, b, c] = [list[at], list[at + 1], list[at + 2]] as [number, number, number];
+        const [ax, az, bx, bz, cx, cz] = [a, a + 2, b, b + 2, c, c + 2].map(
+          (index) => vertices[index] as number,
+        ) as [number, number, number, number, number, number];
+        const area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+        if (Math.abs(area) < 1e-9) continue;
+        const u = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / area;
+        const w = ((cx - x) * (az - z) - (ax - x) * (cz - z)) / area;
+        if (u < -1e-6 || w < -1e-6 || 1 - u - w < -1e-6) continue;
+        top = Math.max(
+          top,
+          u * (vertices[a + 1] as number) +
+            w * (vertices[b + 1] as number) +
+            (1 - u - w) * (vertices[c + 1] as number),
+        );
+      }
+      return top;
+    };
+
+    it.each(pockets)(
+      'leaves no ray from the chase eye that meets no ground at the apex, %s',
+      (_name, profile, apex) => {
+        // From the chase camera's eye, every 10 m from 120 m before the apex
+        // to 20 m past it: a ray through every point of plan, every 10 cm
+        // within 20 m of the apex, where no triangle of the ground lies at
+        // all and the road is not, aimed at the height of the highest surface
+        // a metre round it, and on 40 m past it. Where that ray meets no
+        // drawn surface from above — no triangle of the ground that faces the
+        // eye, as three draws it, and none of the road, drawn from both sides
+        // — before or after, it shows the horizon ring through the pocket.
+        // None may.
+        //
+        // Measured before this change: 19 of these 24 corners red, with up
+        // to 46 such points a frame on the 6 m bends and 84 on the 10 m
+        // ones; the 145° and 150° bends of 6 m on the level, and the 150° to
+        // the left climbing, showed none.
+        //
+        // ⚠️ Not held, stated, both measured with this test after the change:
+        // 170 to 200 m before the apex of the 6 m bends, where the corridor's
+        // rows at the bend are 10 m apart rather than 2 (`terrain.ts`
+        // §`CORRIDOR_DENSE_AHEAD_METRES`), up to 200 such points a frame
+        // (none on the 10 m bends); and bends of 15 and
+        // 20 m, whose centre lies past the clear band (`landform.ts`
+        // §`closeFans`), up to 359 a frame, as many as before the change.
+        let probed = 0;
+        const seen: string[] = [];
+        for (let at = apex - 120; at <= apex + 20; at += 10) {
+          const frame = sceneAt(profile, at);
+          const rig = cameraRig(frame.camera);
+          const ground = frame.terrain.mesh;
+          const road = frame.corridor;
+          const v = ground.vertices;
+          // Only the bands every rung draws: `quality.ts` §`QUALITY_LADDER`'s fewest.
+          const drawnBands = ground.indices.subarray(0, ground.indicesPerBand * FEWEST_BANDS);
+          const anyGround = surfaceCells(v, drawnBands, () => true);
+          const facingGround = surfaceCells(v, drawnBands, (a, b, c) => {
+            const e1 = [0, 1, 2].map((k) => (v[b + k] as number) - (v[a + k] as number));
+            const e2 = [0, 1, 2].map((k) => (v[c + k] as number) - (v[a + k] as number));
+            const nx =
+              (e1[1] as number) * (e2[2] as number) - (e1[2] as number) * (e2[1] as number);
+            const ny =
+              (e1[2] as number) * (e2[0] as number) - (e1[0] as number) * (e2[2] as number);
+            const nz =
+              (e1[0] as number) * (e2[1] as number) - (e1[1] as number) * (e2[0] as number);
+            return (
+              (rig.eye.x - (v[a] as number)) * nx +
+                (rig.eye.y - (v[a + 1] as number)) * ny +
+                (rig.eye.z - (v[a + 2] as number)) * nz >
+              0
+            );
+          });
+          const roadCells = surfaceCells(road.vertices, road.indices, () => true);
+          /** The highest drawn surface over a point in plan, or `-Infinity`. */
+          const drawn = (x: number, z: number): number =>
+            Math.max(surfaceTop(v, facingGround, x, z), surfaceTop(road.vertices, roadCells, x, z));
+          let middle = road.centre[0] as RoadCorridor['centre'][number];
+          for (const point of road.centre) {
+            if (Math.abs(point.distance - apex) < Math.abs(middle.distance - apex)) middle = point;
+          }
+          let pocket = 0;
+          for (let step = 0; step <= 400; step += 1) {
+            for (let across = 0; across <= 400; across += 1) {
+              const x = middle.x - 20 + step / 10;
+              const z = middle.z - 20 + across / 10;
+              // Non-vacuity, every metre: the apex really is in the frame.
+              if (step % 10 === 0 && across % 10 === 0 && framed(rig, { x, y: middle.y, z })) {
+                probed += 1;
+              }
+              if (Number.isFinite(surfaceTop(v, anyGround, x, z, true))) continue;
+              if (Number.isFinite(surfaceTop(road.vertices, roadCells, x, z, true))) continue;
+              const around = Math.max(
+                drawn(x + 1, z),
+                drawn(x - 1, z),
+                drawn(x, z + 1),
+                drawn(x, z - 1),
+              );
+              const target = { x, y: Number.isFinite(around) ? around : middle.y, z };
+              if (framed(rig, target) === undefined) continue;
+              // Marched every 25 cm; met from above where the ray passes
+              // under a surface it was over, or that was over no surface
+              // and is under this one, a step before.
+              const span = Math.hypot(x - rig.eye.x, z - rig.eye.z);
+              let met = false;
+              let before = Number.NEGATIVE_INFINITY;
+              let was = rig.eye.y;
+              for (let along = 1; along < span + 40 && !met; along += 0.25) {
+                const share = along / span;
+                const height = rig.eye.y + (target.y - rig.eye.y) * share;
+                const top = drawn(
+                  rig.eye.x + (x - rig.eye.x) * share,
+                  rig.eye.z + (z - rig.eye.z) * share,
+                );
+                met = top > height && was >= (Number.isFinite(before) ? before : top);
+                before = top;
+                was = height;
+              }
+              if (!met) pocket += 1;
+            }
+          }
+          if (pocket > 0) seen.push(`${String(pocket)} points at ${at.toFixed(0)}`);
+        }
+        expect(seen).toEqual([]);
+        expect(probed).toBeGreaterThan(1_000);
+      },
+      120_000,
+    );
+
+    it.each(pockets)(
+      'closes the apex on one point and stands nothing there on end, %s',
+      (_name, profile, apex) => {
+        // Where the pocket was, `landform.ts` §`closeFan` moves the collapsed
+        // columns of a run of rows to one point: a vertex that more than one
+        // row has. Every triangle the drawn bands make with one at a corner
+        // must stand no steeper than |ny| 0.5 (`GENTLE_STEEPEST`): a row sunk
+        // past a seam, gathered with its neighbours, stands a wall between
+        // them. Measured without that bound (§`FAN_STEEPEST`): 25 more
+        // triangles near the apex steeper than it on the 140° bends of 6 m
+        // climbing at 10 %, and as many as before this change with it.
+        let fans = 0;
+        const steep: string[] = [];
+        for (let at = apex - 120; at <= apex + 20; at += 10) {
+          const ground = sceneAt(profile, at).terrain.mesh;
+          const v = ground.vertices;
+          const rowsAt = new Map<string, Set<number>>();
+          for (let vertex = 0; vertex < v.length / 3; vertex += 1) {
+            const key = `${String(v[vertex * 3])},${String(v[vertex * 3 + 2])}`;
+            const rows = rowsAt.get(key) ?? new Set<number>();
+            rowsAt.set(key, rows.add(Math.floor(vertex / (COLUMNS * 2))));
+          }
+          const shared = (index: number): boolean =>
+            (rowsAt.get(`${String(v[index])},${String(v[index + 2])}`)?.size ?? 0) > 1;
+          const drawn = ground.indicesPerBand * FEWEST_BANDS;
+          for (let index = 0; index + 2 < drawn; index += 3) {
+            const [a, b, c] = [0, 1, 2].map((k) => (ground.indices[index + k] as number) * 3) as [
+              number,
+              number,
+              number,
+            ];
+            if (!shared(a) && !shared(b) && !shared(c)) continue;
+            const e1 = [0, 1, 2].map((k) => (v[b + k] as number) - (v[a + k] as number));
+            const e2 = [0, 1, 2].map((k) => (v[c + k] as number) - (v[a + k] as number));
+            const nx =
+              (e1[1] as number) * (e2[2] as number) - (e1[2] as number) * (e2[1] as number);
+            const ny =
+              (e1[2] as number) * (e2[0] as number) - (e1[0] as number) * (e2[2] as number);
+            const nz =
+              (e1[0] as number) * (e2[1] as number) - (e1[1] as number) * (e2[0] as number);
+            const length = Math.hypot(nx, ny, nz);
+            if (length < 1e-3) continue;
+            fans += 1;
+            if (Math.abs(ny) / length < GENTLE_STEEPEST) {
+              steep.push(`|ny| ${(Math.abs(ny) / length).toFixed(3)} at ${at.toFixed(0)}`);
+            }
+          }
+        }
+        expect(steep).toEqual([]);
+        // Non-vacuity: the apex really is closed on a point, in every case.
+        expect(fans).toBeGreaterThan(10);
+      },
+      120_000,
+    );
+  });
 });
 
 /**

@@ -1168,7 +1168,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         built-up land (`land-class.ts` §`builtUpDistances`),
                         so a mapped town is level with the road; the mask is
                         a REQUIRED argument of `terrainCorridor` and
-                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly.
+                        ⚠️ Since #2149 a sharp bend's inside, where the fold
+                        stops the rows short of the bend's centre, is closed
+                        on one point (`closeFans`): within the clear band
+                        only, and in the band just past each row's end, which
+                        every quality rung draws
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
