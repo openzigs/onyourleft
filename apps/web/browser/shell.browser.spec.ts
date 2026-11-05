@@ -72,6 +72,8 @@ import {
   type Insets,
 } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
+import { isRideRoute } from '../src/shell/route-motion';
+import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
 /**
  * The viewports measured, and why each is here.
@@ -455,15 +457,18 @@ for (const viewport of VIEWPORTS) {
         // there it is the far end of the `h1`'s box that has to hit the `h1`
         // — the same proof that hit-testing sees this page, on the one thing
         // every route is sure to have, and clear of the link, which on a
-        // phone sits over the heading's start.
+        // phone sits over the heading's start. Since #2056 the far end of its
+        // CONTENT box: the padding past it is where the header's mute is drawn.
         const headerBox = header.getBoundingClientRect();
         const heading = document.querySelector('h1');
         if (heading === null) throw new Error('no h1');
         const headingBox = heading.getBoundingClientRect();
+        const contentRight =
+          headingBox.right - Number.parseFloat(getComputedStyle(heading).paddingInlineEnd);
         const [target, x, y] =
           headerBox.height > 0
             ? [header, headerBox.right - 4, headerBox.top + headerBox.height / 2]
-            : [heading, headingBox.right - 4, headingBox.top + headingBox.height / 2];
+            : [heading, contentRight - 4, headingBox.top + headingBox.height / 2];
         const elsewhere = document.elementFromPoint(x, y);
 
         return {
@@ -663,8 +668,6 @@ const BEFORE_671 = `
 
 interface HeaderReading {
   readonly height: number;
-  /** #2056's mute in the header, 0 tall where there is none. */
-  readonly mute: number;
   readonly top: number;
   readonly atLoad: string;
   readonly afterScroll: string;
@@ -690,8 +693,7 @@ async function readHeader(
     const header = document.querySelector('.oyl-header');
     if (header === null) throw new Error('no .oyl-header');
     const measured = header.getBoundingClientRect();
-    const mute = header.querySelector('.oyl-header__mute')?.getBoundingClientRect().height ?? 0;
-    return { height: measured.height, mute, top: measured.top };
+    return { height: measured.height, top: measured.top };
   });
   const pixel = async (name: string): Promise<string> => {
     const file = path(name);
@@ -747,13 +749,7 @@ for (const viewport of HEADER_VIEWPORTS) {
           `${String(WORDMARK_BAR_PIXELS)} px`,
       ).toBeLessThan(WORDMARK_BAR_PIXELS);
       if (viewport.width < 600) {
-        // #2056: the wordmark is still folded away; what is left on a menu
-        // route is the one-press mute, and the header is that row and no more.
-        expect(read.mute, 'no header mute on Home').toBeGreaterThan(0);
-        expect(
-          read.height,
-          'below the rail breakpoint the wordmark bar is folded away, leaving only the mute',
-        ).toBeLessThanOrEqual(read.mute + 0.5);
+        expect(read.height, 'below the rail breakpoint the wordmark bar is folded away').toBe(0);
       }
       expect(
         read.atLoad,
@@ -3861,41 +3857,102 @@ async function pressSomethingElse(page: Page): Promise<void> {
   await page.keyboard.press('Enter');
 }
 
+/**
+ * The viewports the mute is measured at, and why: the owner's tablet, where it
+ * is in the header's row, and two phones, where the header is zero tall and
+ * the mute is drawn at the end of the title's first line (`theme.css`
+ * §"#2056"). 390×844 is where a header row of its own pushed Ride details'
+ * first control under the bar on CI; 320×256 is SC 1.4.10's viewport.
+ */
 const MUTE_VIEWPORTS = [
   { name: 'tablet 1280×800', width: 1280, height: 800 },
   { name: 'phone 412×915', width: 412, height: 915 },
+  { name: 'phone 390×844', width: 390, height: 844 },
+  { name: '320×256', width: 320, height: 256 },
 ] as const;
+
+/** What the mute's box is, and what it is drawn over, on the page as it is now. */
+interface MuteReading {
+  readonly width: number;
+  readonly height: number;
+  readonly onTop: boolean;
+  /** What is drawn at the mute's centre when it is not the mute — the failure's diagnostic. */
+  readonly coveredBy: string;
+  readonly header: number;
+  /** How far the title's text runs into the mute, in px; 0 or less is clear. */
+  readonly intoTitle: number;
+  /** How far the mute runs into the screen's ⓘ where there is one; 0 or less is clear. */
+  readonly intoHelp: number;
+}
+
+async function readMute(page: Page): Promise<MuteReading> {
+  return page.evaluate(() => {
+    const mute = document.querySelector('.oyl-header__mute');
+    const h1 = document.querySelector('.oyl-main > h1');
+    if (mute === null || h1 === null) throw new Error('no mute, or no title');
+    const box = mute.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    const overlap = (other: DOMRect): number =>
+      other.bottom <= box.top || other.top >= box.bottom || other.width === 0
+        ? Number.NEGATIVE_INFINITY
+        : Math.min(other.right, box.right) - Math.max(other.left, box.left);
+    const range = document.createRange();
+    range.selectNodeContents(h1);
+    const words = [...range.getClientRects()].map(overlap);
+    const help = document.querySelector('.oyl-help > summary')?.getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      onTop: hit !== null && mute.contains(hit),
+      coveredBy:
+        hit === null
+          ? `nothing at (${box.x.toFixed(0)}, ${box.y.toFixed(0)})`
+          : `${hit.tagName.toLowerCase()}.${[...hit.classList].join('.')}`,
+      header: document.querySelector('.oyl-header')?.getBoundingClientRect().height ?? Number.NaN,
+      intoTitle: Math.max(Number.NEGATIVE_INFINITY, ...words),
+      intoHelp: help === undefined ? Number.NEGATIVE_INFINITY : overlap(help),
+    };
+  });
+}
 
 test.describe('#2056 — the header mute', () => {
   for (const viewport of MUTE_VIEWPORTS) {
-    test(`is a 44 px target in the header, on top, at ${viewport.name}`, async ({ page }) => {
+    test(`is a 44 px target, on top, clear of the title, on every menu route at ${viewport.name}`, async ({
+      page,
+    }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await openShell(page);
-      const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
-      await expect(mute).toBeVisible();
-      const read = await mute.evaluate((element) => {
-        const box = element.getBoundingClientRect();
-        const header = document.querySelector('.oyl-header')?.getBoundingClientRect();
-        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-        return {
-          width: box.width,
-          height: box.height,
-          onTop: hit !== null && element.contains(hit),
-          header: header?.height ?? Number.NaN,
-        };
-      });
-      console.log(
-        `#2056 ${viewport.name}: mute ${read.width.toFixed(1)}×${read.height.toFixed(1)}, ` +
-          `header ${read.header.toFixed(1)} px`,
-      );
-      expect(read.width).toBeGreaterThanOrEqual(44);
-      expect(read.height).toBeGreaterThanOrEqual(44);
-      expect(read.onTop, 'something covers the mute').toBe(true);
-      if (viewport.width < 600) {
-        expect(read.header, 'on a phone the header is the mute’s one row').toBeLessThanOrEqual(
-          read.height + 1,
+      const menu = ALL_ROUTES.filter((route) => !isRideRoute(route.id));
+      const lines: string[] = [];
+      for (const route of menu) {
+        await page.evaluate((hash) => {
+          window.location.hash = hash;
+        }, hrefFor(route));
+        await expect(page.locator('.oyl-main > h1')).toHaveText(route.title);
+        // At the top of the page, where a rider arriving there sees the title:
+        // below the rail breakpoint the mute scrolls with it, as the header does.
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        await settled(page);
+        const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
+        await expect(mute).toHaveCount(1);
+        const read = await readMute(page);
+        lines.push(
+          `${route.id}: ${read.width.toFixed(1)}×${read.height.toFixed(1)}, header ` +
+            `${read.header.toFixed(1)}, into title ${read.intoTitle.toFixed(1)}, into ⓘ ` +
+            `${read.intoHelp.toFixed(1)}`,
         );
+        expect(read.width, route.id).toBeGreaterThanOrEqual(44);
+        expect(read.height, route.id).toBeGreaterThanOrEqual(44);
+        expect(read.onTop, `${route.id}: the mute is covered by ${read.coveredBy}`).toBe(true);
+        expect(read.intoTitle, `${route.id}: the title runs under the mute`).toBeLessThanOrEqual(0);
+        expect(read.intoHelp, `${route.id}: the mute covers the screen’s ⓘ`).toBeLessThanOrEqual(0);
+        if (viewport.width < 600) {
+          expect(read.header, `${route.id}: the phone’s header grew a row`).toBe(0);
+        }
       }
+      console.log(`#2056 ${viewport.name}\n  ${lines.join('\n  ')}`);
     });
   }
 

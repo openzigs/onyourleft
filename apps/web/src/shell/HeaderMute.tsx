@@ -19,6 +19,13 @@
  * and volume (`game/SoundControls.tsx`) stay as they are, and nothing on a
  * ride-time screen moves (`design/ride-time-controls.ts`).
  *
+ * ## On a phone, an icon at the end of the title's line
+ *
+ * Below the rail breakpoint the header is zero tall (#671), and a row of its
+ * own pushed a page's first control under the bar. So there `theme.css` draws
+ * it beside the `h1`, as the screen's ⓘ is drawn, with its words clipped —
+ * never removed, so the name is still *Mute all sound*.
+ *
  * ## One name, and a state
  *
  * *Mute all sound* keeps its name and says which way it stands with
@@ -68,7 +75,9 @@ export function HeaderMute({ storage, output }: HeaderMuteProps): JSX.Element {
         (output ?? sharedCueOutput()).applyMix();
       }}
     >
-      <Icon aria-hidden="true" focusable="false" size={20} /> {HEADER_MUTE_NAME}
+      <Icon aria-hidden="true" focusable="false" size={20} />{' '}
+      {/* Clipped on a phone, never removed: still the button's name (theme.css). */}
+      <span className="oyl-header__mute-words">{HEADER_MUTE_NAME}</span>
     </Button>
   );
 }
