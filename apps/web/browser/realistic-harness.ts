@@ -101,6 +101,7 @@ import {
   overhangShadowsOf,
   realisticSurfacesOf,
   realisticTextureReport,
+  setRealisticRoadside,
   setRealisticTrees,
   threeGameRenderer,
   villageHouseStatsOf,
@@ -122,6 +123,7 @@ import {
   firPrepassWithLevers,
   nearTreeFadeWithLevers,
   surfacesWithLevers,
+  roadsideWithLevers,
   treesWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
@@ -457,6 +459,8 @@ async function run(): Promise<void> {
     // #1283: the generated broadleaves, or the scans with that lever off —
     // chosen before the load, because it decides which files are fetched.
     setRealisticTrees(treesWithLevers(config.leversOff));
+    // #1274: the roadside models, or the shapes before them, likewise.
+    setRealisticRoadside(roadsideWithLevers(config.leversOff));
     outcome = await loadRealisticWorld();
   }
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
