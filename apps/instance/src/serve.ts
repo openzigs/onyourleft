@@ -76,6 +76,8 @@ const server = readServerConfig(
     metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
     secretKey: process.env.OYL_INSTANCE_SECRET_KEY,
     analysisHeartbeatMs: process.env.OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS,
+    discordBotToken: process.env.OYL_INSTANCE_DISCORD_BOT_TOKEN,
+    discordGuildId: process.env.OYL_INSTANCE_DISCORD_GUILD_ID,
   },
   availableParallelism(),
 );

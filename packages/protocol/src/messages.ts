@@ -11,7 +11,7 @@
  *
  * ```text
  * client → room   hello   { protocol, physicsVersion, ticket }
- * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig } | refuse { reason }
+ * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig, voiceInvite? } | refuse { reason }
  * client → room   report  { sequence, atMs, powerWatts, cadenceRpm? }        every 500 ms
  * client → room   item-use { sequence, atMs }                               a lap race only
  * client → room   lane    { sequence, atMs, lane }                           a lap race only
@@ -20,6 +20,7 @@
  * room → client   name    { riderId, displayName }                           a race only
  * room → client   standings { tick, riders: [[id, gap ds, W/kg ×10, flags]] }  a race only, every 1 s
  * room → client   finish  { order: [riderId, …] }                            a race only
+ * room → client   voice   { voiceInvite? }                                    the room's voice link changed
  * ```
  *
  * ## Three things that are decisions
@@ -63,8 +64,16 @@
  * lane, held item and laps ({@link FrameRider}) and the tick's
  * {@link ItemEvent}s. A version-2 build is refused `protocol-mismatch` at its
  * hello, as a version-1 build was by version 2.
+ *
+ * **4** since #875 (spike 0017 option A, #794): a welcome may carry the
+ * room's Discord voice link ({@link Welcome.voiceInvite}). The decoder refuses
+ * a key it does not know (`codec.ts`, `unknown-key`), so a version-3 build
+ * would refuse every welcome from a room with voice; it is refused
+ * `protocol-mismatch` at its hello instead, and told to update. In the same
+ * unreleased version, #876 added {@link VoiceLink}: the room's link changed
+ * under riders it had already welcomed.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Where a rider's hands are, fixed by the race — `@onyourleft/physics`' `RidingPosition`. */
 export type RidingPosition = 'upright' | 'hoods' | 'drops';
@@ -180,6 +189,20 @@ export interface Welcome {
   /** The route, by the SHA-256 of its content, lower-case hex. Never its geometry. */
   readonly routeRef: { readonly sha256: string };
   readonly roomConfig: RoomConfig;
+  /**
+   * The room's Discord voice channel, as an invite link — #875, spike 0017
+   * option A. Present only where the instance's operator turned voice on and
+   * the room has a channel (a rider's private room, `apps/instance`
+   * §`voice/room-voice.ts`), and absent everywhere else: a room works exactly
+   * as it does without it.
+   *
+   * ⚠️ **In the welcome, and so only after admission**: a hello that is
+   * refused is answered by a {@link Refuse}, which carries no link, so a
+   * rider the room does not admit never receives one. Held to
+   * `schema.ts` §`VOICE_INVITE_PATTERN`, so a client can put it in an `href`
+   * knowing it opens Discord's invite host and nothing else.
+   */
+  readonly voiceInvite?: string;
 }
 
 /**
@@ -374,11 +397,25 @@ export interface Finish {
   readonly order: readonly number[];
 }
 
+/**
+ * The room's Discord voice link changed — #876: a rider was removed from the
+ * room or banned, so its channel was replaced (spike 0017 §3.3) and the riders
+ * still in the room are given the new link. Absent `voiceInvite` is no voice
+ * any more. Sent only to riders the room has already welcomed, and never to
+ * the rider who was removed or banned; held to `schema.ts`
+ * §`VOICE_INVITE_PATTERN` as a welcome's link is.
+ */
+export interface VoiceLink {
+  readonly type: 'voice';
+  readonly voiceInvite?: string;
+}
+
 /** What a client may send. */
 export type ClientMessage = Hello | Report | ItemUse | LaneChange;
 
 /** What a room may send. */
-export type RoomMessage = Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish;
+export type RoomMessage =
+  Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish | VoiceLink;
 
 /** Every message. */
 export type ProtocolMessage = ClientMessage | RoomMessage;

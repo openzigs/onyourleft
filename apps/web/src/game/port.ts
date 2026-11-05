@@ -115,6 +115,26 @@ export interface CameraPose {
   readonly targetRoadY: number;
 }
 
+/**
+ * What a rider is doing, as far as anyone can tell — #1999's inputs to
+ * `posture.ts`. Each rider carries what it has: the rider their sensors, the
+ * pacer its simulated power, the ghost and a room's riders their speed alone.
+ */
+export interface RidingInputs {
+  /**
+   * The cadence turning the cranks, in rpm — `bicycle.ts` §`turningCadence`,
+   * so `undefined` exactly when the HUD shows none, and always on a rider with
+   * no cadence sensor.
+   */
+  readonly cadence: number | undefined;
+  /** The live power, in watts; `undefined` when there is no live reading. */
+  readonly power: number | undefined;
+  /** The grade under the rider, in per cent. */
+  readonly grade: number;
+  /** How fast the rider is going, in metres per second. */
+  readonly speed: number;
+}
+
 /** A marker on the road: the rider, the bot (#92), the ghost (#93), or another real rider in a room (#783). */
 export interface RiderMarker {
   /**
@@ -245,6 +265,18 @@ export interface RiderMarker {
    * {@link pedalling}'s reason.
    */
   readonly rideSeconds: number;
+  /**
+   * What this rider is doing, which their drawn position on the bicycle is
+   * chosen from — #1999 (`posture.ts`): standing, the drops, the tops or the
+   * hoods, and how hard the body rocks.
+   *
+   * ⚠️ **Optional, and absent draws the rider as before #1999: seated on the
+   * hoods, at an ordinary effort.** That is the UNSAFE way round
+   * `check-wiring.mjs` §Limits names, so `scene.test.ts` reads it back off
+   * every kind of marker `sceneFrame` builds. Absent where nothing is riding:
+   * a harness frame, a test's literal marker.
+   */
+  readonly riding?: RidingInputs | undefined;
   /**
    * How far the cranks have turned, in radians — #349, #368.
    *

@@ -56,9 +56,15 @@ const config = {
       // frame: long enough for Home on the tablet, and the most a broken page
       // can hold a rider at the splash.
       launchShowDuration: 3000,
-      // The exit fade, stated rather than left to the plugin's implicit 200 ms
-      // (`SplashScreenConfig.java`), which is the lane's motion ceiling itself.
-      launchFadeOutDuration: 150,
+      // #2127: NO exit fade of the plugin's own, and not its implicit 200 ms
+      // (`SplashScreenConfig.java`). A positive value makes 8.0.2 register an
+      // exit-animation listener, and with one Android copies its splash into
+      // the app's own window for the app to fade. The hold cancels that
+      // window's drawing, so on a warm start the copy showed before its logo:
+      // a near-black frame, then the logo fading over Home. With none, the
+      // splash stays in the system's window until Home has drawn, and Android
+      // plays its own exit.
+      launchFadeOutDuration: 0,
     },
   },
 };

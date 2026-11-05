@@ -173,6 +173,8 @@ export class ScriptedRoom {
     kind: 'ride' | 'race' = 'ride',
     drafting: 'on' | 'off' = 'on',
     lapRace?: LapRaceConfig,
+    /** The room's Discord voice link (#875), as a room with voice says it. */
+    voiceInvite?: string,
   ): void {
     this.send({
       type: 'welcome',
@@ -186,6 +188,7 @@ export class ScriptedRoom {
         drafting,
         ...(lapRace === undefined ? {} : { lapRace }),
       },
+      ...(voiceInvite === undefined ? {} : { voiceInvite }),
     });
   }
 

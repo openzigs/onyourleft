@@ -1003,6 +1003,36 @@ describe('the notices — #907', () => {
     expect(send.mock.calls.length).toBe(sent);
   });
 
+  it('still reads a notice stored before the instance stopped accepting a display name as an item (#1381)', async () => {
+    const world = await moderatedWorld();
+    const read = asModerator(
+      await answeredAt(world, '/v1/moderation/notices', () =>
+        Response.json({
+          notices: [
+            {
+              noticeId: 1,
+              receivedAt: 1,
+              kind: 'illegal_content',
+              explanation: 'x',
+              items: [`route:${ROOM}`, 'rider:athlete_A-1'],
+              location: null,
+              notifierName: null,
+              notifierEmail: null,
+              bonaFide: false,
+              detailsErasedAt: null,
+              acknowledgedAt: null,
+              decidedAt: null,
+              decision: null,
+              logId: null,
+              notifierToldAt: null,
+            },
+          ],
+        }),
+      ).read(),
+    );
+    expect(read.notices?.[0]?.items).toEqual([`route:${ROOM}`, 'rider:athlete_A-1']);
+  });
+
   it('still gives the queues when the notices cannot be read, or hold a row this client does not accept', async () => {
     const world = await moderatedWorld();
     const read = asModerator(
@@ -1019,6 +1049,12 @@ describe('the notices — #907', () => {
               notifierName: null,
               notifierEmail: null,
               bonaFide: false,
+              detailsErasedAt: null,
+              acknowledgedAt: null,
+              decidedAt: null,
+              decision: null,
+              logId: null,
+              notifierToldAt: null,
             },
           ],
         }),
