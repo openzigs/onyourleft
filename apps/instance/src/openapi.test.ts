@@ -737,6 +737,11 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   ...SYNC_HAPPY_CALLS,
   ...SEGMENT_HAPPY_CALLS,
+  // #69: the moderators' integrity log, with an entry in it.
+  listSegmentIntegrityLog: async (world) => {
+    await SEGMENT_HAPPY_CALLS.flagSegmentHazard!(world);
+    return send(world, 'GET', '/v1/moderation/segment-log', await moderatorToken(world));
+  },
   // #1199: a rider's own hosted key and consent — each with both set, so the
   // nullable objects are read as objects.
   getHostedModelSettings: async (world) => {

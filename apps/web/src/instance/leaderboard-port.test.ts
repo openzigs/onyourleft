@@ -266,7 +266,17 @@ describe('a board across two riders, through the instance (#68)', () => {
     expect(board).toEqual({
       scope: 'instance',
       period: 'all-time',
-      rows: [{ rank: 1, rider: 'Bea', yours: false, elapsedSeconds: 95 }],
+      hazardous: false,
+      rows: [
+        {
+          rank: 1,
+          rider: 'Bea',
+          yours: false,
+          elapsedSeconds: 95,
+          effortId: expect.stringMatching(/^[0-9a-f]{32}$/) as string,
+          excluded: null,
+        },
+      ],
     });
     // Sealed, like every instance call: no segment, ride or name leaves in the clear.
     expect(new Set(seen)).toEqual(new Set(['GET /v1/instance/keys', 'POST /v1/sealed']));
@@ -312,7 +322,67 @@ describe('a board across two riders, through the instance (#68)', () => {
     const anna = await connected(send, w, 'Anna');
     expect((await anna.boards.board(segmentId, 'instance', 'all-time'))?.rows).toEqual([]);
     expect((await bea.boards.board(segmentId, 'personal', 'all-time'))?.rows).toEqual([
-      { rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 },
+      expect.objectContaining({ rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 }),
+    ]);
+  }, 30_000);
+});
+
+describe('integrity, through the instance (#69)', () => {
+  it('flags another rider’s time off the board, and a segment as hazardous, from the device', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const beaRide = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    await bea.boards.share(segmentId, [effortOn(segment, beaRide, 95)]);
+
+    const anna = await connected(send, w, 'Anna');
+    const annaRide = await syncedRide(anna);
+    expect(await anna.boards.addSegment(segmentId)).toBe('added');
+    // Before Anna has an effort of her own there, her flag is refused.
+    const beaEffort = (await anna.boards.board(segmentId, 'instance', 'all-time'))?.rows[0]
+      ?.effortId;
+    expect(await anna.boards.flagEffort(segmentId, beaEffort ?? '', 'vehicle')).toBe('refused');
+    const added = await anna.store().getSegment(LOCAL_ATHLETE, toSegmentId(segmentId));
+    await anna.boards.share(segmentId, [effortOn(added!, annaRide, 100)]);
+
+    expect(await anna.boards.flagEffort(segmentId, beaEffort ?? '', 'vehicle')).toBe('flagged');
+    expect(await anna.boards.flagEffort(segmentId, beaEffort ?? '', 'vehicle')).toBe('already');
+    expect(
+      (await anna.boards.board(segmentId, 'instance', 'all-time'))?.rows.map((row) => row.rider),
+    ).toEqual(['Anna']);
+    const own = await bea.boards.board(segmentId, 'personal', 'all-time');
+    expect(own?.rows).toEqual([
+      expect.objectContaining({
+        rank: null,
+        excluded: expect.stringMatching(/^Flagged/) as string,
+      }),
+    ]);
+
+    expect(await anna.boards.flagHazard(segmentId, 'junction')).toBe('flagged');
+    const hazardous = await bea.boards.board(segmentId, 'instance', 'all-time');
+    expect(hazardous).toMatchObject({ hazardous: true, rows: [] });
+  }, 30_000);
+
+  it('excludes an impossible time a device sent as public, and tells only its rider why', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    // Five seconds over about 555 m: more than 100 m/s, sent as though it counted.
+    expect(await bea.boards.share(segmentId, [effortOn(segment, ride, 5)])).toMatchObject({
+      rides: 1,
+    });
+    const anna = await connected(send, w, 'Anna');
+    expect((await anna.boards.board(segmentId, 'instance', 'all-time'))?.rows).toEqual([]);
+    expect((await bea.boards.board(segmentId, 'personal', 'all-time'))?.rows).toEqual([
+      expect.objectContaining({
+        rank: null,
+        excluded: expect.stringMatching(/^Excluded automatically/) as string,
+      }),
     ]);
   }, 30_000);
 });
@@ -370,15 +440,34 @@ describe('what is never offered, and sends nothing (#68)', () => {
 });
 
 describe('what is taken as a board (#68)', () => {
-  const row = { rank: 1, rider: 'Bea', yours: false, elapsedSeconds: 95 };
-  const good = { scope: 'instance', period: 'all-time', rankedBy: 'elapsed', rows: [row] };
+  const row = {
+    rank: 1,
+    rider: 'Bea',
+    yours: false,
+    elapsedSeconds: 95,
+    effortId: 'e'.repeat(32),
+    excluded: null,
+  };
+  const good = {
+    scope: 'instance',
+    period: 'all-time',
+    rankedBy: 'elapsed',
+    hazardous: false,
+    rows: [row],
+  };
 
   it('takes a board', () => {
     expect(parseBoard({ ...good, segment: {} })).toEqual({
       scope: 'instance',
       period: 'all-time',
+      hazardous: false,
       rows: [row],
     });
+    // The rider's own effort that is not counted: a reason, and no place (#69).
+    const mine = { ...row, yours: true, rank: null, excluded: 'Flagged by another rider.' };
+    expect(
+      parseBoard({ ...good, scope: 'personal', rows: [mine, { ...row, yours: true }] })?.rows,
+    ).toEqual([mine, { ...row, yours: true }]);
   });
 
   it('refuses anything that is not one', () => {
@@ -392,6 +481,13 @@ describe('what is taken as a board (#68)', () => {
       { ...good, rows: [{ ...row, rank: 2 }] },
       { ...good, rows: [{ ...row, rider: 'Bea\u202e' }] },
       { ...good, rows: [{ ...row, elapsedSeconds: -1 }] },
+      // #69: a board must say whether it is hazardous; an uncounted row is the
+      // rider's own, with a reason and no place; an effort id is opaque hex.
+      { ...good, hazardous: undefined },
+      { ...good, rows: [{ ...row, excluded: 'Flagged.', rank: null }] },
+      { ...good, rows: [{ ...row, yours: true, excluded: 'Flagged.' }] },
+      { ...good, rows: [{ ...row, rank: null }] },
+      { ...good, rows: [{ ...row, effortId: 'athlete-a' }] },
       { ...good, rows: Array.from({ length: 51 }, (_, index) => ({ ...row, rank: index + 1 })) },
     ]) {
       expect(parseBoard(body), JSON.stringify(body).slice(0, 80)).toBeUndefined();

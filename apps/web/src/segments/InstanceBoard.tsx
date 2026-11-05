@@ -33,9 +33,17 @@ import { Button } from '../design/Button';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration } from '../format';
+import {
+  EFFORT_FLAG_REASONS,
+  HAZARD_REASONS,
+  type EffortFlagReason,
+  type HazardReason,
+} from '@onyourleft/domain';
+
 import type {
   BoardPeriod,
   BoardScope,
+  FlagOutcome,
   InstanceBoard as Board,
   LeaderboardPort,
   SegmentStanding,
@@ -53,6 +61,49 @@ export const SHARE_SENTENCE =
 /** What withdrawing a segment the rider published does, said before the press. */
 export const WITHDRAW_SENTENCE =
   'You published this segment. Withdrawing it deletes it from your instance, with every effort any rider shared on it; their own copies stay on their devices.';
+
+/** What flagging a time does, said before the press (#69). */
+export const FLAG_SENTENCE =
+  'If a time on this board cannot be a real effort, flag it. It comes off the board at once, its rider still sees it, and their ride is unchanged. You may flag only on a segment you have an effort of your own on, and at most 10 times a day.';
+
+/** What flagging the segment does, said before the press (#69). */
+export const HAZARD_SENTENCE =
+  'If riding this segment fast is dangerous — through a junction, down steps, in traffic — flag it. Nothing on it is ranked any more, for anybody, and no personal best is awarded on it.';
+
+/** What the board says of a segment flagged hazardous (#69). */
+export const HAZARDOUS_BOARD_SENTENCE =
+  'A rider flagged this segment as hazardous, so nothing on it is ranked and no personal best is awarded on it.';
+
+const EFFORT_REASON_LABELS: Readonly<Record<EffortFlagReason, string>> = {
+  vehicle: 'Ridden in a vehicle',
+  'gps-error': 'A GPS error',
+  'wrong-sport': 'The wrong sport',
+  'impossible-time': 'An impossible time',
+  other: 'Something else',
+};
+
+const HAZARD_REASON_LABELS: Readonly<Record<HazardReason, string>> = {
+  traffic: 'In traffic',
+  junction: 'Through a junction',
+  'unsuitable-path': 'On a path that is not for riding fast',
+  other: 'Something else',
+};
+
+/** What a flag came to, in a sentence. */
+export function flagSentence(outcome: FlagOutcome, instance: string): string {
+  switch (outcome) {
+    case 'flagged':
+      return 'Flagged. It is off the board.';
+    case 'already':
+      return 'You had flagged it already.';
+    case 'rate-limited':
+      return 'You have flagged as many as you may today, so nothing was flagged.';
+    case 'refused':
+      return `${instance} did not take the flag: you may flag only on a segment you have shared an effort of your own on.`;
+    case 'unavailable':
+      return `${instance} could not be reached, so nothing was flagged.`;
+  }
+}
 
 /** Whose board it is, in words: #68's last criterion. */
 export function scopeSentence(scope: BoardScope, instance: string): string {
@@ -90,9 +141,19 @@ export interface InstanceBoardProps {
   readonly segment: SegmentRecord;
   /** The rider's own efforts on it, as this device holds them. */
   readonly efforts: readonly SegmentEffortRecord[];
+  /**
+   * Told whether the instance says the segment is hazardous (#69), so the
+   * screen above awards no personal best on it either.
+   */
+  readonly onHazardous?: ((hazardous: boolean) => void) | undefined;
 }
 
-export function InstanceBoard({ port, segment, efforts }: InstanceBoardProps): JSX.Element {
+export function InstanceBoard({
+  port,
+  segment,
+  efforts,
+  onHazardous,
+}: InstanceBoardProps): JSX.Element {
   const instance = port.instanceName() ?? 'your instance';
   const [standing, setStanding] = useState<SegmentStanding | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
@@ -105,6 +166,7 @@ export function InstanceBoard({ port, segment, efforts }: InstanceBoardProps): J
   );
   const scopeId = useId();
   const periodId = useId();
+  const flagId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -131,6 +193,34 @@ export function InstanceBoard({ port, segment, efforts }: InstanceBoardProps): J
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (board !== undefined && board !== 'unavailable') onHazardous?.(board.hazardous);
+  }, [board, onHazardous]);
+
+  async function flag(kind: 'effort' | 'hazard', form: HTMLFormElement): Promise<void> {
+    if (published === undefined) return;
+    const fields = new FormData(form);
+    setBusy(true);
+    try {
+      const field = (name: string): string => {
+        const value = fields.get(name);
+        return typeof value === 'string' ? value : '';
+      };
+      // The select's own options are the closed lists: the instance refuses any other word.
+      const outcome =
+        kind === 'effort'
+          ? await port.flagEffort(published, field('effort'), field('reason') as EffortFlagReason)
+          : await port.flagHazard(published, field('reason') as HazardReason);
+      setSaid({
+        tone: outcome === 'flagged' ? 'success' : 'warning',
+        text: flagSentence(outcome, instance),
+      });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function publish(): Promise<void> {
     setBusy(true);
@@ -247,6 +337,9 @@ export function InstanceBoard({ port, segment, efforts }: InstanceBoardProps): J
               Efforts ridden before this segment was published on {instance} are not counted here.
             </p>
           )}
+          {board !== undefined && board !== 'unavailable' && board.hazardous ? (
+            <StatusMessage tone="info">{HAZARDOUS_BOARD_SENTENCE}</StatusMessage>
+          ) : null}
           {board === undefined ? (
             <p className="oyl-muted">Reading the board…</p>
           ) : board === 'unavailable' ? (
@@ -268,14 +361,16 @@ export function InstanceBoard({ port, segment, efforts }: InstanceBoardProps): J
                   <th scope="col">Place</th>
                   <th scope="col">Rider</th>
                   <th scope="col">Time</th>
+                  {board.scope === 'personal' ? <th scope="col">Counted</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {board.rows.map((row) => (
-                  <tr key={row.rank}>
-                    <td>{row.rank}</td>
+                  <tr key={row.effortId}>
+                    <td>{row.rank ?? '—'}</td>
                     <td>{row.yours ? `${row.rider} (you)` : row.rider}</td>
                     <td>{formatDuration(row.elapsedSeconds)}</td>
+                    {board.scope === 'personal' ? <td>{row.excluded ?? 'Yes'}</td> : null}
                   </tr>
                 ))}
               </tbody>
@@ -290,6 +385,75 @@ export function InstanceBoard({ port, segment, efforts }: InstanceBoardProps): J
               <Button variant="tertiary" onClick={() => void send('withdraw')} disabled={busy}>
                 Take my efforts off this board
               </Button>
+            </>
+          )}
+          {efforts.length === 0 ||
+          board === undefined ||
+          board === 'unavailable' ||
+          board.hazardous ? null : (
+            <>
+              {board.scope === 'instance' && board.rows.some((row) => !row.yours) ? (
+                <form
+                  className="oyl-form"
+                  aria-labelledby={`${flagId}-effort`}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void flag('effort', event.currentTarget);
+                  }}
+                >
+                  <h4 id={`${flagId}-effort`}>Flag a time</h4>
+                  <p className="oyl-muted">{FLAG_SENTENCE}</p>
+                  <p className="oyl-field">
+                    <label htmlFor={`${flagId}-which`}>Which time</label>
+                    <select id={`${flagId}-which`} name="effort">
+                      {board.rows
+                        .filter((row) => !row.yours)
+                        .map((row) => (
+                          <option key={row.effortId} value={row.effortId}>
+                            {row.rider}, {formatDuration(row.elapsedSeconds)}
+                          </option>
+                        ))}
+                    </select>
+                  </p>
+                  <p className="oyl-field">
+                    <label htmlFor={`${flagId}-why`}>Why</label>
+                    <select id={`${flagId}-why`} name="reason">
+                      {EFFORT_FLAG_REASONS.map((reason) => (
+                        <option key={reason} value={reason}>
+                          {EFFORT_REASON_LABELS[reason]}
+                        </option>
+                      ))}
+                    </select>
+                  </p>
+                  <Button variant="secondary" type="submit" disabled={busy}>
+                    Flag this time
+                  </Button>
+                </form>
+              ) : null}
+              <form
+                className="oyl-form"
+                aria-labelledby={`${flagId}-hazard`}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void flag('hazard', event.currentTarget);
+                }}
+              >
+                <h4 id={`${flagId}-hazard`}>Flag the segment as hazardous</h4>
+                <p className="oyl-muted">{HAZARD_SENTENCE}</p>
+                <p className="oyl-field">
+                  <label htmlFor={`${flagId}-hazard-why`}>Why</label>
+                  <select id={`${flagId}-hazard-why`} name="reason">
+                    {HAZARD_REASONS.map((reason) => (
+                      <option key={reason} value={reason}>
+                        {HAZARD_REASON_LABELS[reason]}
+                      </option>
+                    ))}
+                  </select>
+                </p>
+                <Button variant="secondary" type="submit" disabled={busy}>
+                  Flag it as hazardous
+                </Button>
+              </form>
             </>
           )}
           {standing.yours ? (

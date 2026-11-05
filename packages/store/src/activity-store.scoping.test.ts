@@ -112,7 +112,7 @@ import type {
   SegmentEffortRecord,
 } from './records';
 import type { AthleteId } from './ids';
-import { privacyZoneId } from './ids';
+import { privacyZoneId, segmentEffortId } from './ids';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -288,7 +288,11 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putStreamSet(streams);
     await store.putLap(lap);
     await store.putPrivacyZone(zone);
-    await store.putActivityEfforts(owner, ride.id, [effort]);
+    // #69: and one the rule excluded, for `listExcludedEfforts` to be tempted by.
+    await store.putActivityEfforts(owner, ride.id, [
+      effort,
+      { ...effort, id: segmentEffortId(`${effort.id}-excluded`), visibility: 'excluded' },
+    ]);
     await store.putRecordingSession(recording);
     for (const chunk of chunks) {
       await store.appendRecordingChunk(chunk);
@@ -576,6 +580,17 @@ const PROBES: readonly ScopingProbe[] = [
     async run(store, mine, theirs) {
       await expect(store.listEfforts(mine.owner, theirs.segment.id)).resolves.toStrictEqual([]);
       everyRowBelongsTo(await store.listEfforts(mine.owner, mine.segment.id), mine.owner);
+    },
+  },
+  {
+    member: 'listExcludedEfforts',
+    leaks:
+      "another athlete's excluded efforts on a segment — the times the rule said they could not have ridden (#69)",
+    async run(store, mine, theirs) {
+      await expect(store.listExcludedEfforts(mine.owner, theirs.segment.id)).resolves.toStrictEqual(
+        [],
+      );
+      everyRowBelongsTo(await store.listExcludedEfforts(mine.owner, mine.segment.id), mine.owner);
     },
   },
   {

@@ -26,7 +26,14 @@
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 import type { Outcome } from '../auth/identity.ts';
-import { BOARD_PERIODS, BOARD_SCOPES, type Segments } from './segments.ts';
+import {
+  BOARD_PERIODS,
+  BOARD_SCOPES,
+  EFFORT_FLAG_REASONS,
+  FLAG_LIMIT,
+  HAZARD_REASONS,
+  type Segments,
+} from './segments.ts';
 
 function segmentsOf(context: RouteContext): Segments {
   // The handler answers `unavailable` before calling a `segments` route without them.
@@ -194,7 +201,7 @@ export const SEGMENT_ROUTES: readonly Route[] = [
       exempt:
         'a board ranks other riders’ shared efforts: each row’s athlete is held to the choke point’s rule inside the one read (`sql-store.ts` §`seenBy`), with the ride and the effort both public, so a rider the caller may not see is left out rather than refused',
     },
-    summary: `A board on a published segment: ?scope= (${BOARD_SCOPES.join(', ')}; default instance) and ?period= (${BOARD_PERIODS.join(', ')}; default all-time). THIS instance only — never every instance. One row per rider, their best, fastest first by elapsed time, at most 50: a rank, a display name, whether it is yours, and the time. Never a position, a date or a ride. A rolling window starts no earlier than the segment’s publication here.`,
+    summary: `A board on a published segment: ?scope= (${BOARD_SCOPES.join(', ')}; default instance) and ?period= (${BOARD_PERIODS.join(', ')}; default all-time). THIS instance only — never every instance. One row per rider, their best, fastest first by elapsed time, at most 50: a rank, a display name, whether it is yours, the time, and the effort’s opaque id a flag names. Never a position, a date or a ride. A rolling window starts no earlier than the segment’s publication here. An effort the instance’s rule excluded, or another rider flagged, is on no shared board; on your own it is listed with the reason and no rank. A segment flagged hazardous ranks nobody (#69).`,
     ...SESSION,
     errors: ['unauthenticated', 'validation_failed', 'not_found'],
     response: {
@@ -204,9 +211,17 @@ export const SEGMENT_ROUTES: readonly Route[] = [
         scope: { type: 'string', enum: [...BOARD_SCOPES] },
         period: { type: 'string', enum: [...BOARD_PERIODS] },
         rankedBy: { type: 'string', enum: ['elapsed'] },
+        hazardous: boolean,
         rows: {
           type: 'array',
-          items: object({ rank: integer, rider: string, yours: boolean, elapsedSeconds: number }),
+          items: object({
+            rank: { type: ['integer', 'null'] },
+            rider: string,
+            yours: boolean,
+            elapsedSeconds: number,
+            effortId: string,
+            excluded: { type: ['string', 'null'] },
+          }),
         },
       }),
     },
@@ -218,5 +233,81 @@ export const SEGMENT_ROUTES: readonly Route[] = [
           context.url.searchParams,
         ),
       ),
+  },
+  {
+    method: 'POST',
+    path: '/v1/segments/{segmentId}/efforts/{effortId}/flag',
+    operationId: 'flagSegmentEffort',
+    reaches: {
+      exempt:
+        'a flag is about another rider’s effort: it must be on this segment, somebody else’s, and by a rider the caller may see — the choke point’s rule, in the same transaction as the flag (`sql-store.ts` §`flagSegment`) — so one the caller may not see is `not_found`, as for none',
+    },
+    summary: `Flag another rider’s effort on a segment you have an effort of your own on (#69), with a reason: ${EFFORT_FLAG_REASONS.join(', ')}. It leaves every shared board at once; its ride is unchanged, and its rider still sees it on their own board, with the reason. At most ${String(FLAG_LIMIT.limit)} flags a day, by any rider. Recorded, with you and the time, in the append-only integrity log the moderators read.`,
+    ...SESSION,
+    request: object({ reason: { type: 'string', enum: [...EFFORT_FLAG_REASONS] } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'rate_limited'],
+    response: { contentType: 'application/json', schema: object({ flagged: boolean }) },
+    handle: async (context) =>
+      answer(
+        await segmentsOf(context).flagEffort(
+          callerOf(context),
+          context.params.segmentId ?? '',
+          context.params.effortId ?? '',
+          context.json,
+        ),
+      ),
+  },
+  {
+    method: 'POST',
+    path: '/v1/segments/{segmentId}/hazard',
+    operationId: 'flagSegmentHazard',
+    reaches: {
+      exempt:
+        'a hazard flag is about a segment another rider published, and takes every rider’s ranks on it away: the segment must be one the caller may see (the choke point’s rule on its publisher) and one they have an effort of their own on',
+    },
+    summary: `Flag a segment you have an effort of your own on as hazardous (#69): ${HAZARD_REASONS.join(', ')}. Nothing on it is ranked any more and no personal best is awarded on it, for anybody. Counts toward the same ${String(FLAG_LIMIT.limit)} flags a day, and is recorded in the integrity log.`,
+    ...SESSION,
+    request: object({ reason: { type: 'string', enum: [...HAZARD_REASONS] } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'rate_limited'],
+    response: { contentType: 'application/json', schema: object({ flagged: boolean }) },
+    handle: async (context) =>
+      answer(
+        await segmentsOf(context).flagHazard(
+          callerOf(context),
+          context.params.segmentId ?? '',
+          context.json,
+        ),
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/v1/moderation/segment-log',
+    operationId: 'listSegmentIntegrityLog',
+    reaches: 'moderation',
+    summary:
+      'The leaderboard integrity log (#69), oldest first, `?limit=` and `?cursor=`: every effort the instance’s rule excluded and every flag a rider raised — who, whose, which segment and effort, why, and when. Append-only; the moderators’ only.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        items: {
+          type: 'array',
+          items: object({
+            id: integer,
+            at: integer,
+            action: { type: 'string', enum: ['excluded', 'flagged_effort', 'flagged_hazardous'] },
+            actorAthleteId: { type: ['string', 'null'] },
+            subjectAthleteId: { type: ['string', 'null'] },
+            segmentId: string,
+            effortId: { type: ['string', 'null'] },
+            reason: string,
+          }),
+        },
+        next: { type: ['string', 'null'] },
+      }),
+    },
+    handle: async (context) =>
+      answer(await segmentsOf(context).integrityLog(context.url.searchParams)),
   },
 ];

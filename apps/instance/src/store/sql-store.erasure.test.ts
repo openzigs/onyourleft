@@ -127,6 +127,12 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
+  'segment_integrity_log.actor_athlete_id': {
+    kept: 'the leaderboard integrity log is append-only: who flagged what stays, so a flag can be judged after its flagger has gone (#69)',
+  },
+  'segment_integrity_log.subject_athlete_id': {
+    kept: 'the leaderboard integrity log is append-only: what was excluded or flagged, and whose it was, is the record an appeal reads (#69)',
+  },
 };
 
 /** Every `table.column` ending `athlete_id` that has no foreign key, from the database. */

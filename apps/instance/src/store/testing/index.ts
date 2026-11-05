@@ -489,11 +489,38 @@ export async function seedWorld(store: SqlStore): Promise<void> {
             startedAt: 1_790_000_100,
             elapsedSeconds: 300,
             visibility: 'public',
+            excludedReason: null,
           },
+          // Migration 0039's (#69): one the instance's rule excluded, which
+          // the integrity log records with this athlete as its subject.
+          ...(owner === athlete
+            ? [
+                {
+                  id: `excluded-of-${athlete}`,
+                  startedAt: 1_790_000_120,
+                  elapsedSeconds: 1,
+                  visibility: 'public' as const,
+                  excludedReason: 'Seeded: impossible',
+                },
+              ]
+            : []),
         ],
         1_790_000_160,
       );
     }
+  }
+  // And each flagged their own segment hazardous: a flag of their own, and a
+  // log entry with them as its actor.
+  for (const athlete of ATHLETES) {
+    await store.flagSegment({
+      athleteId: athlete,
+      segmentId: publishedSegmentFixture(athlete).id,
+      effortId: null,
+      reason: 'traffic',
+      at: 1_790_000_170,
+      limit: 10,
+      windowSeconds: 86_400,
+    });
   }
   // Migration 0013's (#784): ATHLETE_A made a room, and the other two joined it.
   await store.createPrivateRoom({

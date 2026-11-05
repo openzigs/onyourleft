@@ -7130,6 +7130,127 @@
         }
       }
     },
+    "/v1/moderation/segment-log": {
+      "get": {
+        "operationId": "listSegmentIntegrityLog",
+        "summary": "The leaderboard integrity log (#69), oldest first, `?limit=` and `?cursor=`: every effort the instance’s rule excluded and every flag a rider raised — who, whose, which segment and effort, why, and when. Append-only; the moderators’ only.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "integer"
+                          },
+                          "action": {
+                            "type": "string",
+                            "enum": [
+                              "excluded",
+                              "flagged_effort",
+                              "flagged_hazardous"
+                            ]
+                          },
+                          "actorAthleteId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "subjectAthleteId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "segmentId": {
+                            "type": "string"
+                          },
+                          "effortId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "action",
+                          "actorAthleteId",
+                          "subjectAthleteId",
+                          "segmentId",
+                          "effortId",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/moderation/suspended": {
       "get": {
         "operationId": "listSuspendedAthletes",
@@ -9062,10 +9183,212 @@
         }
       }
     },
+    "/v1/segments/{segmentId}/efforts/{effortId}/flag": {
+      "post": {
+        "operationId": "flagSegmentEffort",
+        "summary": "Flag another rider’s effort on a segment you have an effort of your own on (#69), with a reason: vehicle, gps-error, wrong-sport, impossible-time, other. It leaves every shared board at once; its ride is unchanged, and its rider still sees it on their own board, with the reason. At most 10 flags a day, by any rider. Recorded, with you and the time, in the append-only integrity log the moderators read.",
+        "parameters": [
+          {
+            "name": "segmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "effortId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "vehicle",
+                      "gps-error",
+                      "wrong-sport",
+                      "impossible-time",
+                      "other"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flagged": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "flagged"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/segments/{segmentId}/hazard": {
+      "post": {
+        "operationId": "flagSegmentHazard",
+        "summary": "Flag a segment you have an effort of your own on as hazardous (#69): traffic, junction, unsuitable-path, other. Nothing on it is ranked any more and no personal best is awarded on it, for anybody. Counts toward the same 10 flags a day, and is recorded in the integrity log.",
+        "parameters": [
+          {
+            "name": "segmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "traffic",
+                      "junction",
+                      "unsuitable-path",
+                      "other"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flagged": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "flagged"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/segments/{segmentId}/leaderboard": {
       "get": {
         "operationId": "getSegmentLeaderboard",
-        "summary": "A board on a published segment: ?scope= (instance, personal; default instance) and ?period= (all-time, last-90-days, last-30-days; default all-time). THIS instance only — never every instance. One row per rider, their best, fastest first by elapsed time, at most 50: a rank, a display name, whether it is yours, and the time. Never a position, a date or a ride. A rolling window starts no earlier than the segment’s publication here.",
+        "summary": "A board on a published segment: ?scope= (instance, personal; default instance) and ?period= (all-time, last-90-days, last-30-days; default all-time). THIS instance only — never every instance. One row per rider, their best, fastest first by elapsed time, at most 50: a rank, a display name, whether it is yours, the time, and the effort’s opaque id a flag names. Never a position, a date or a ride. A rolling window starts no earlier than the segment’s publication here. An effort the instance’s rule excluded, or another rider flagged, is on no shared board; on your own it is listed with the reason and no rank. A segment flagged hazardous ranks nobody (#69).",
         "parameters": [
           {
             "name": "segmentId",
@@ -9148,13 +9471,19 @@
                         "elapsed"
                       ]
                     },
+                    "hazardous": {
+                      "type": "boolean"
+                    },
                     "rows": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
                           "rank": {
-                            "type": "integer"
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
                           },
                           "rider": {
                             "type": "string"
@@ -9164,13 +9493,24 @@
                           },
                           "elapsedSeconds": {
                             "type": "number"
+                          },
+                          "effortId": {
+                            "type": "string"
+                          },
+                          "excluded": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
                           "rank",
                           "rider",
                           "yours",
-                          "elapsedSeconds"
+                          "elapsedSeconds",
+                          "effortId",
+                          "excluded"
                         ],
                         "additionalProperties": false
                       }
@@ -9181,6 +9521,7 @@
                     "scope",
                     "period",
                     "rankedBy",
+                    "hazardous",
                     "rows"
                   ],
                   "additionalProperties": false

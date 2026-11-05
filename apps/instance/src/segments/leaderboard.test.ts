@@ -137,6 +137,14 @@ async function board(who: Rider, segmentId: string, query = ''): Promise<Board> 
 
 const names = (shown: Board): string[] => shown.rows.map((row) => row.rider);
 
+/** A row as a rider reads it: the effort's opaque id and the exclusion are #69's. */
+const shown = (row: Board['rows'][number]) => ({
+  rank: row.rank,
+  rider: row.rider,
+  yours: row.yours,
+  elapsedSeconds: row.elapsedSeconds,
+});
+
 let segmentNumber = 0;
 /** A segment of its own for each test, published by `who`. */
 async function segmentBy(who: Rider): Promise<string> {
@@ -221,7 +229,9 @@ describe('who is on a board (#68’s first and second criteria)', () => {
     expect(names(await board(cy, segmentId))).toEqual(['Bea']);
     const own = await board(cy, segmentId, '?scope=personal');
     expect(own.scope).toBe('personal');
-    expect(own.rows).toEqual([{ rank: 1, rider: 'Cy', yours: true, elapsedSeconds: 200 }]);
+    expect(own.rows.map(shown)).toEqual([
+      { rank: 1, rider: 'Cy', yours: true, elapsedSeconds: 200 },
+    ]);
 
     // The control: the same effort shared `public` is ranked.
     await share(cy, segmentId, cyRide, [{ elapsedSeconds: 200, visibility: 'public' }]);
@@ -243,7 +253,7 @@ describe('who is on a board (#68’s first and second criteria)', () => {
     await share(cy, segmentId, cyRide, [{ startedAt: RIDE_STARTED_AT + 600, elapsedSeconds: 290 }]);
 
     const seen = await board(ann, segmentId);
-    expect(seen.rows).toEqual([
+    expect(seen.rows.map(shown)).toEqual([
       { rank: 1, rider: 'Cy', yours: false, elapsedSeconds: 290 },
       { rank: 2, rider: 'Bea', yours: false, elapsedSeconds: 290 },
     ]);
@@ -723,12 +733,14 @@ describe('one statement a board, whatever its length (#68’s third and fourth c
               startedAt: 1_790_000_000,
               elapsedSeconds: 300 + index,
               visibility: 'public',
+              excludedReason: null,
             },
             {
               id: `e-${athleteId}-2`,
               startedAt: 1_790_000_600,
               elapsedSeconds: 400 + index,
               visibility: 'public',
+              excludedReason: null,
             },
           ],
           1_790_000_700,
@@ -852,7 +864,15 @@ describe('an effort’s ride, deleted from the instance', () => {
           'athlete-a',
           'c'.repeat(32),
           content,
-          [{ id: 'e1', startedAt: 10, elapsedSeconds: 60, visibility: 'public' }],
+          [
+            {
+              id: 'e1',
+              startedAt: 10,
+              elapsedSeconds: 60,
+              visibility: 'public',
+              excludedReason: null,
+            },
+          ],
           20,
         ),
       ).toBe('replaced');

@@ -196,7 +196,13 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         §`seenBy`), held to `canSee` pair by pair in
                         `segments/leaderboard.test.ts`;
                         docs/architecture.md §"Segments and leaderboards
-                        (#68)" says what it keeps.
+                        (#68)" says what it keeps. Since #69 an impossible
+                        implied speed is excluded when shared and a rider
+                        with an effort there may flag (migration 0039's
+                        `segment_flag`, and `segment_integrity_log`,
+                        append-only by trigger, `down` refused while it holds
+                        an entry); docs/leaderboard-integrity.md states the
+                        rule and its measured detection.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

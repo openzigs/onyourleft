@@ -2971,6 +2971,29 @@ export class ActivityStore {
   }
 
   /**
+   * This athlete's **excluded** efforts on one segment, fastest first — the
+   * other half of {@link listEfforts} (#69).
+   *
+   * An effort whose implied speed is impossible for its sport is no personal
+   * best and goes on no board, but it is still the rider's: #69's second
+   * criterion is that it stays visible to them, with the reason. This is the
+   * read that shows it, so {@link listEfforts}' callers — the personal best
+   * among them — keep never seeing one.
+   */
+  async listExcludedEfforts(
+    owner: AthleteId,
+    segment: SegmentId,
+    limit?: number,
+  ): Promise<SegmentEffortRecord[]> {
+    const rows = await this.#segmentEfforts
+      .where(INDEX.effortByAthleteAndSegment)
+      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true)
+      .filter((row) => row.visibility === 'excluded')
+      .toArray();
+    return limit === undefined ? rows : rows.slice(0, limit);
+  }
+
+  /**
    * The efforts on one segment that may be shown to **somebody else**.
    *
    * `public` only. A `private-match` effort has an endpoint inside one of the

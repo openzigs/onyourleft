@@ -190,6 +190,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     putActivityEfforts: async (owner, activityId, efforts) =>
       real.putActivityEfforts(owner, activityId, efforts),
     listEfforts: async (owner, segment, limit) => real.listEfforts(owner, segment, limit),
+    listExcludedEfforts: async (owner, segment, limit) =>
+      real.listExcludedEfforts(owner, segment, limit),
     listSharedEfforts: async (owner, segment, limit) =>
       real.listSharedEfforts(owner, segment, limit),
     listActivityEfforts: async (owner, activityId) => real.listActivityEfforts(owner, activityId),

@@ -126,7 +126,10 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   hidden_item: `INSERT INTO hidden_item VALUES (1, 'room:0123456789abcdef0123456789abcdef', 'b', 31, NULL)`,
   // #68: after `activity_record`, which an effort's ride is a foreign key to.
   segment: `INSERT INTO segment VALUES ('${'a'.repeat(32)}', 'a', 'S', 'ride', 555.5, '{}', 33)`,
-  segment_effort: `INSERT INTO segment_effort VALUES ('effort-a', 'a', '${'a'.repeat(32)}', '${'1'.repeat(64)}', 34, 60.5, 'public', 35)`,
+  // The columns named, so migration 0039's `excluded_reason` is NULL (#69).
+  segment_effort: `INSERT INTO segment_effort (id, athlete_id, segment_id, content_sha256, started_at, elapsed_seconds, visibility, received_at) VALUES ('effort-a', 'a', '${'a'.repeat(32)}', '${'1'.repeat(64)}', 34, 60.5, 'public', 35)`,
+  segment_flag: `INSERT INTO segment_flag VALUES (1, 'a', '${'a'.repeat(32)}', 'effort-a', 'vehicle', 36)`,
+  segment_integrity_log: `INSERT INTO segment_integrity_log VALUES (1, 37, 'flagged_effort', 'a', 'a', '${'a'.repeat(32)}', 'effort-a', 'vehicle')`,
 };
 
 /**
@@ -143,6 +146,7 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0029-notice-steps': 'notice_step',
   '0030-hidden-items': 'hidden_item',
   '0036-notice-erasure': 'notice_erasure',
+  '0039-leaderboard-integrity': 'segment_integrity_log',
 };
 
 interface Snapshot {
@@ -407,6 +411,33 @@ describe('the migrations (#769)', () => {
     await withKysely(path, async (db) => {
       expect((await appliedMigrations(db)).at(-1)).toBe('0007-moderation');
     });
+  });
+
+  it('refuses to undo 0039 while the leaderboard integrity log holds an entry, and changes nothing (#69)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0039-leaderboard-integrity') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const before = snapshot(path);
+    expect(before.rows.segment_integrity_log).toBe(1);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /integrity log holds entries/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    // And the log is append-only in the schema: no UPDATE, no DELETE.
+    const database = openDatabase(path);
+    try {
+      expect(() => database.exec('UPDATE segment_integrity_log SET reason = 1')).toThrow(
+        /append-only/,
+      );
+      expect(() => database.exec('DELETE FROM segment_integrity_log')).toThrow(/append-only/);
+    } finally {
+      database.close();
+    }
   });
 
   it('refuses to undo 0026 while a notice has been received, and changes nothing (#907)', async () => {

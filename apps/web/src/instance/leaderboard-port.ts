@@ -51,6 +51,8 @@
 
 import {
   checkDisplayName,
+  type EffortFlagReason,
+  type HazardReason,
   PUBLISHED_SEGMENT_ID,
   parsePublishedDefinition,
   publishedDefinitionOf,
@@ -87,18 +89,37 @@ export type BoardPeriod = 'all-time' | 'last-90-days' | 'last-30-days';
 
 /** One row, as it arrived. */
 export interface BoardRow {
-  readonly rank: number;
+  /** `null` for one of the rider's own efforts that is not counted (#69). */
+  readonly rank: number | null;
   readonly rider: string;
   readonly yours: boolean;
   readonly elapsedSeconds: number;
+  /** The effort's opaque id, which a flag names (#69). */
+  readonly effortId: string;
+  /** Why it is not counted, in the instance's words, or `null` (#69). Only ever the rider's own. */
+  readonly excluded: string | null;
 }
 
 /** A board, as it arrived. */
 export interface InstanceBoard {
   readonly scope: BoardScope;
   readonly period: BoardPeriod;
+  /** A rider flagged the segment hazardous (#69): nothing on it is ranked. */
+  readonly hazardous: boolean;
   readonly rows: readonly BoardRow[];
 }
+
+/** What a flag came to. */
+export type FlagOutcome =
+  /** Taken. */
+  | 'flagged'
+  /** This rider had already raised it. */
+  | 'already'
+  /** Refused: no effort of the rider's own on the segment, or not there. */
+  | 'refused'
+  /** Past the rider's limit for the day. */
+  | 'rate-limited'
+  | 'unavailable';
 
 /** A published segment as the instance lists it. */
 export interface InstanceSegment {
@@ -143,6 +164,10 @@ export interface LeaderboardPort {
     scope: BoardScope,
     period: BoardPeriod,
   ): Promise<InstanceBoard | undefined>;
+  /** Flag another rider's effort on a segment the rider has an effort of their own on (#69). */
+  flagEffort(segmentId: string, effortId: string, reason: EffortFlagReason): Promise<FlagOutcome>;
+  /** Flag the segment as hazardous (#69): nothing on it is ranked any more, for anybody. */
+  flagHazard(segmentId: string, reason: HazardReason): Promise<FlagOutcome>;
   /** Share the rider's efforts on a published segment, ride by ride. */
   share(segmentId: string, efforts: readonly SegmentEffortRecord[]): Promise<ShareOutcome>;
   /** Take them off again, and make their rides private here and there. */
@@ -201,22 +226,32 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /** A board's body, or `undefined` when it is not one. */
 export function parseBoard(body: unknown): InstanceBoard | undefined {
   if (!isRecord(body)) return undefined;
-  const { scope, period, rows, rankedBy } = body;
+  const { scope, period, rows, rankedBy, hazardous } = body;
   if (!SCOPES.includes(scope as BoardScope) || !PERIODS.includes(period as BoardPeriod)) {
     return undefined;
   }
-  if (rankedBy !== 'elapsed') return undefined;
+  if (rankedBy !== 'elapsed' || typeof hazardous !== 'boolean') return undefined;
   if (!Array.isArray(rows) || rows.length > MAXIMUM_BOARD_ROWS) return undefined;
   const parsed: BoardRow[] = [];
+  let place = 0;
   for (const row of rows as unknown[]) {
-    if (!isRecord(row) || Object.keys(row).sort().join() !== 'elapsedSeconds,rank,rider,yours') {
+    if (
+      !isRecord(row) ||
+      Object.keys(row).sort().join() !== 'effortId,elapsedSeconds,excluded,rank,rider,yours'
+    ) {
       return undefined;
     }
-    const { rank, rider, yours, elapsedSeconds } = row;
-    if (typeof rank !== 'number' || !Number.isInteger(rank) || rank !== parsed.length + 1) {
-      return undefined;
-    }
+    const { rank, rider, yours, elapsedSeconds, effortId, excluded } = row;
     if (typeof rider !== 'string' || typeof yours !== 'boolean') return undefined;
+    if (typeof effortId !== 'string' || !/^[0-9a-f]{32}$/.test(effortId)) return undefined;
+    // Not counted is the rider's own only, says why, and holds no rank; every
+    // counted row holds the next one.
+    if (excluded !== null) {
+      if (typeof excluded !== 'string' || !yours || rank !== null) return undefined;
+    } else {
+      place += 1;
+      if (rank !== place) return undefined;
+    }
     const name = checkDisplayName(rider);
     if (!name.ok) return undefined;
     if (
@@ -226,9 +261,16 @@ export function parseBoard(body: unknown): InstanceBoard | undefined {
     ) {
       return undefined;
     }
-    parsed.push({ rank, rider: name.name, yours, elapsedSeconds });
+    parsed.push({
+      rank: excluded === null ? place : null,
+      rider: name.name,
+      yours,
+      elapsedSeconds,
+      effortId,
+      excluded,
+    });
   }
-  return { scope: scope as BoardScope, period: period as BoardPeriod, rows: parsed };
+  return { scope: scope as BoardScope, period: period as BoardPeriod, hazardous, rows: parsed };
 }
 
 /** A list page's segments, or `undefined` when it is not one. */
@@ -245,6 +287,14 @@ export function parseSegmentList(body: unknown): InstanceSegment[] | undefined {
     segments.push({ segmentId, name, sport, distanceMetres, yours });
   }
   return segments;
+}
+
+/** A flag's answer as what it came to. */
+function flagOutcome(answer: { status: number; body: unknown } | undefined): FlagOutcome {
+  if (answer === undefined) return 'unavailable';
+  if (answer.status === 429) return 'rate-limited';
+  if (answer.status !== 200) return answer.status >= 500 ? 'unavailable' : 'refused';
+  return isRecord(answer.body) && answer.body.flagged === true ? 'flagged' : 'already';
 }
 
 /** The production {@link LeaderboardPort}: `main.tsx` builds it, and nothing else in the client. */
@@ -402,6 +452,20 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
       });
       if (answer?.status !== 200) return undefined;
       return parseBoard(answer.body);
+    },
+
+    flagEffort: async (segmentId, effortId, reason) => {
+      if (!PUBLISHED_SEGMENT_ID.test(segmentId) || !/^[0-9a-f]{32}$/.test(effortId)) {
+        return 'refused';
+      }
+      return flagOutcome(
+        await call('POST', `/v1/segments/${segmentId}/efforts/${effortId}/flag`, { reason }),
+      );
+    },
+
+    flagHazard: async (segmentId, reason) => {
+      if (!PUBLISHED_SEGMENT_ID.test(segmentId)) return 'refused';
+      return flagOutcome(await call('POST', `/v1/segments/${segmentId}/hazard`, { reason }));
     },
 
     share: (segmentId, efforts) => sendRides(segmentId, efforts, 'public'),
