@@ -56,7 +56,12 @@ import { PHASE_ONE_SEALED_ROUTES, SEALED_FAMILIES } from './sealed/phase-one.ts'
 import { sealedAt } from './sealed/sealed-testing.ts';
 import { openDatabase } from './store/node-sqlite.ts';
 import { corpusFile, uploadBody } from './sync/sync-testing.ts';
-import { fakeDiscord, TEST_BOT_TOKEN, TEST_GUILD_ID } from './voice/discord-testing.ts';
+import {
+  fakeDiscord,
+  TEST_BOT_TOKEN,
+  TEST_GUILD_ID,
+  type SentRequest,
+} from './voice/discord-testing.ts';
 import { TEST_STATEMENT } from './moderation/moderation-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
@@ -1887,6 +1892,10 @@ describe('a rider’s private room says its voice link in the welcome, and only 
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   }
 
+  /** Discord was asked for an invite: the channel it is for was made. */
+  const madeInvite = (request: SentRequest): boolean =>
+    request.method === 'POST' && /^\/channels\/[0-9]+\/invites$/.test(request.path);
+
   async function welcomeOf(url: string, token: string, roomId: string) {
     const client = await joinRoom(wsUrl(url), roomId, await ticket(url, token, roomId));
     clients.push(client);
@@ -2029,6 +2038,103 @@ describe('a rider’s private room says its voice link in the welcome, and only 
     await voice.sweep();
     expect(discord.ourChannels()).toEqual([]);
     expect(client.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+  });
+
+  it('a room over before its channel is made, whose socket stopped waiting for Discord, holds no channel and welcomes nobody (#2168)', async () => {
+    const discord = fakeDiscord();
+    let letDiscordAnswer = (): void => undefined;
+    const held = new Promise<void>((resolve) => (letDiscordAnswer = resolve));
+    const slowed = ((input: string | URL, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? held.then(() => discord.fetch(input, init))
+        : discord.fetch(input, init)) as typeof globalThis.fetch;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: slowed, voiceInviteWaitMs: 100 },
+    });
+    await instance.voiceReady;
+    const voice = instance.voice();
+    if (voice === undefined) throw new Error('no voice');
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    // As above — the room is over, and its voice closed with nothing held,
+    // before its channel is asked for — but Discord answers only after the
+    // socket's wait has given up: the order where the wait times out first.
+    const inviteFor = voice.inviteFor.bind(voice);
+    voice.inviteFor = async (id, riders) => {
+      const other = openServingStore(path);
+      try {
+        expect(await other.closePrivateRoom(id, Math.floor(Date.now() / 1000))).toBe(true);
+      } finally {
+        await other.close();
+      }
+      await voice.close(id);
+      return inviteFor(id, riders);
+    };
+
+    const client = await joinRoom(
+      wsUrl(instance.url),
+      roomId,
+      await ticket(instance.url, ann.sessionToken, roomId),
+    );
+    clients.push(client);
+    await until(() => client.messages.length > 0, 'an answer');
+    expect(client.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+
+    letDiscordAnswer();
+    await until(() => discord.requests.some(madeInvite), 'the late channel made');
+    // Nobody waits for this channel now: unless the lookup closes it, it is
+    // held for good, and the sweep skips a held channel.
+    await until(() => discord.ourChannels().length === 0, 'the late channel deleted', 2000);
+    expect(voice.rooms()).toEqual([]);
+  });
+
+  it('a room whose read after Discord answered failed holds no channel (#2168)', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const voice = instance.voice();
+    if (voice === undefined) throw new Error('no voice');
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    const roomTicket = await ticket(instance.url, ann.sessionToken, roomId);
+    // The channel is made, and then the room cannot be read: its table is
+    // out of reach until the test puts it back.
+    const database = openDatabase(path);
+    const inviteFor = voice.inviteFor.bind(voice);
+    voice.inviteFor = async (id, riders) => {
+      const link = await inviteFor(id, riders);
+      database.exec('ALTER TABLE private_room RENAME TO private_room_away');
+      return link;
+    };
+    try {
+      await expect(joinRoom(wsUrl(instance.url), roomId, roomTicket)).rejects.toThrow(
+        'upgrade answered 500',
+      );
+      expect(discord.requests.filter(madeInvite)).toHaveLength(1);
+      expect(voice.rooms()).toEqual([]);
+      expect(discord.ourChannels()).toEqual([]);
+    } finally {
+      database.exec('ALTER TABLE private_room_away RENAME TO private_room');
+      database.close();
+    }
   });
 
   it('a room the operator opened is offered no voice: no link, no channel Discord holds', async () => {
