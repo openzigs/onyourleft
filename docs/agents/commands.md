@@ -151,6 +151,15 @@ pnpm run test:coverage
 # slower runner. `check:test-split` fails the two if their excludes differ.
 pnpm run test:required
 
+# The same run as CI runs it since #2154, in two parts (§4c §"Two Vitest
+# shards"): each is `test:required` with a `--project` filter, the `web`
+# project in the first and every other project in the second, one per job.
+# `check:test-split` fails a part that is not that shape, a part over no
+# file, and a file in no part or in two; a NEW Vitest project is in the
+# second part without an edit. Locally `test:required` is the whole of both.
+pnpm run test:required:shard-1
+pnpm run test:required:shard-2
+
 # The files `test:coverage` excludes, with NO coverage (#852): the #545
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
 # about three times. They gate exactly as before; the coverage report stops
@@ -174,7 +183,7 @@ pnpm run test:uninstrumented
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 60 cases on 2026-10-12 (51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 80 cases on 2026-11-04 (60 before #2154, 51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 

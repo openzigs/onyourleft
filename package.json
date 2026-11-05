@@ -17,6 +17,8 @@
     "typecheck": "tsc --noEmit --project tsconfig.json && pnpm --recursive run typecheck",
     "test": "vitest run",
     "test:required": "vitest run --exclude src/game/near-field.test.ts --exclude tools/fuzz/decode-fuzz.test.ts --exclude src/game/realistic-textures.test.ts --exclude '**/*.a11y.test.*'",
+    "test:required:shard-1": "pnpm run test:required --project web",
+    "test:required:shard-2": "pnpm run test:required --project '!web'",
     "test:coverage": "vitest run --coverage --exclude src/game/near-field.test.ts --exclude tools/fuzz/decode-fuzz.test.ts --exclude src/game/realistic-textures.test.ts --exclude '**/*.a11y.test.*'",
     "test:uninstrumented": "vitest run apps/web/src/game/near-field.test.ts packages/fit/tools/fuzz/decode-fuzz.test.ts apps/web/src/game/realistic-textures.test.ts",
     "test:a11y": "vitest run --project web .a11y.test.",
