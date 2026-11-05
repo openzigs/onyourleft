@@ -5893,6 +5893,59 @@ select.oyl-input {
 }
 
 /*
+ * THE FIRST-PAINT INTRO — #2053.
+ *
+ * `index.html`'s `#oyl-intro`: the page's first frame is the Android 12+
+ * splash's picture (#2052), the mark on the canvas at the 288 dp the system
+ * draws it, centred in the window. A CSS pixel is a dp in the WebView, so the
+ * size is in px and does not follow the rider's text size, as the splash does
+ * not. Above every layer but the live camera indicator's 30, which ADR 0029
+ * D-5 keeps strictly highest (`camera/indicator-style.test.ts`), and never
+ * under the pointer, so a press reaches the route as it shows through.
+ *
+ * `shell/intro.ts` sets `data-oyl-intro='leaving'` once the first route has
+ * painted: the canvas fades and the mark grows a little as it goes, both on
+ * the medium motion token, and the element is removed when they end. It never
+ * sets it on a ride route or for a rider who asked for less motion, and the
+ * two blocks below collapse it anyway.
+ */
+.oyl-intro {
+  align-items: center;
+  background-color: var(--oyl-color-canvas);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: fixed;
+  z-index: 29;
+}
+
+.oyl-intro__mark {
+  height: 288px;
+  width: 288px;
+}
+
+.oyl-intro[data-oyl-intro='leaving'] {
+  animation: oyl-intro-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard) forwards;
+}
+
+.oyl-intro[data-oyl-intro='leaving'] .oyl-intro__mark {
+  animation: oyl-intro-mark-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard) forwards;
+}
+
+@keyframes oyl-intro-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes oyl-intro-mark-out {
+  to {
+    transform: scale(1.08);
+  }
+}
+
+/*
  * Motion is opt-in. Every duration in this file is a `--oyl-motion-*` token
  * (#936), and this block collapses every one of them for a reader who asked
  * for less motion.
