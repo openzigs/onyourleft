@@ -638,7 +638,9 @@ html {
  * screen's ⓘ already uses (`.oyl-help` below), and just before it where there
  * is one — as an icon, its words clipped and still its name. It stays first
  * in the DOM, so it stays first in the tab order. A browser without anchor
- * positioning keeps the row: a taller page, never a hidden mute.
+ * positioning keeps the row: a taller page, never a hidden mute — which is why
+ * this `@supports` block has no `@supports not` twin (`browser/ride-stage.ts`
+ * §`ANCHOR_BLOCKS` counts it).
  */
 .oyl-header__mute {
   margin-inline-start: auto;
@@ -649,11 +651,8 @@ html {
 
 @media (max-width: 37.49rem) {
   @supports (anchor-name: --oyl-view-title) {
-    .oyl-main > h1 {
-      anchor-name: --oyl-view-title;
-    }
-
     .oyl-shell:has(.oyl-header__mute) .oyl-main > h1 {
+      anchor-name: --oyl-view-title;
       padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
     }
 
