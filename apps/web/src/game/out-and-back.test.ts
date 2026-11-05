@@ -16,7 +16,16 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { metres, type RouteProfile } from '@onyourleft/domain';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  type RouteProfile,
+  type RoutePoint,
+} from '@onyourleft/domain';
 
 import { CAMERA_TARGET_AHEAD_METRES, horizontalSpread } from './camera';
 import { NO_LAND_CLASS } from './land-class';
@@ -408,6 +417,33 @@ describe('one ground beside a road ridden twice — #1996', () => {
     }
     expect(worst).toBeLessThan(0.1);
   });
+
+  it('bounds the work a route that never leaves one place can ask for', () => {
+    // `landform.ts` §`RETRACE_CELL_LIMIT`. The route is the rider's own file
+    // (SECURITY.md: untrusted), and finding where it rides a road again
+    // measured every segment against every earlier one in the same twenty
+    // metres. 5 000 shuttles up and down 40 m — 20 000 segments in one place
+    // — took 3.4 s on the first frame without the limit and 0.14 s with it,
+    // measured; the bound is ten times the second and under half the first.
+    const points: RoutePoint[] = [];
+    for (let pass = 0; pass < 5_000; pass += 1) {
+      for (let step = 0; step <= 4; step += 1) {
+        const north = pass % 2 === 0 ? step * 10 : 40 - step * 10;
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + north / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(30 + 0.01 * pass),
+        });
+      }
+    }
+    const shuttle = routeProfile(points, { loop: false });
+    const started = performance.now();
+    const height = terrainHeightAt(shuttle, corridorOrigin(shuttle), 1, 20, 50, NO_LAND_CLASS);
+    expect(Number.isFinite(height)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(1_500);
+  }, 60_000);
 
   it('blends a later pass into the road it joins, with no step in the ground', () => {
     // `landform.ts` §`RETRACE_BLEND_METRES`. Where the way back JOINS the way

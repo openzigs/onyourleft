@@ -1702,6 +1702,16 @@ export const RETRACE_BLEND_METRES = RELIEF_SPAN_METRES;
 /** The side of one cell of {@link retraceOf}'s grid, in metres. */
 const RETRACE_CELL_METRES = 20;
 
+/**
+ * The most earlier segments one cell of {@link retraceOf}'s grid holds:
+ * **256** — #1996. A road through a cell twenty metres across leaves a few
+ * segments in it each pass, so this is dozens of passes of one place; it
+ * bounds the work a route that never leaves a few metres of ground could ask
+ * of a frame — the route is the rider's own file, untrusted (SECURITY.md) —
+ * to 256 distances a segment, where it was every earlier segment.
+ */
+const RETRACE_CELL_LIMIT = 256;
+
 function retraceOf(profile: RouteProfile): Retrace | undefined {
   const known = retraces.get(profile);
   if (known !== undefined) return known ?? undefined;
@@ -1786,7 +1796,7 @@ function foundRetrace(profile: RouteProfile): Retrace | undefined {
       for (let row = lowZ; row <= highZ; row += 1) {
         const list = cells.get(key(column, row));
         if (list === undefined) cells.set(key(column, row), [segment]);
-        else list.push(segment);
+        else if (list.length < RETRACE_CELL_LIMIT) list.push(segment);
       }
     }
   }
