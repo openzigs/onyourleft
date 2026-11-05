@@ -90,6 +90,7 @@ import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/
 import type { WorldStyle } from '../src/game/world';
 
 import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
+import { drawnCamera } from '../src/game/chase-camera-testing';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
@@ -1727,10 +1728,15 @@ function nearFieldProbe(
     origin,
     state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
   });
-  let chosen: { distance: number; pivot: number; cut: readonly string[] } | undefined;
+  let chosen:
+    { distance: number; pivot: number; cut: readonly string[]; camera: CameraPose } | undefined;
+  // #545: the camera `GameView` draws, its heading damped from frame to frame
+  // (#1994), so the closest pass is the one a screen shows. @see drawnCamera
+  const drawnAt = drawnCamera(inputAt, 8);
   for (let distance = 0; distance < profile.totalDistance; distance += 1) {
     const lent = lentSceneFrame(inputAt(distance));
-    const rig = cameraRig(lent.camera);
+    const camera = drawnAt(distance, lent.camera);
+    const rig = cameraRig(camera);
     const kept = new Set(clearOfTheCamera(lent.scatter, rig, width / height, world, shapes));
     const dropped = lent.scatter.filter((item) => !kept.has(item));
     if (dropped.length === 0) continue;
@@ -1738,7 +1744,7 @@ function nearFieldProbe(
       ...dropped.map((item) => Math.hypot(item.x - rig.eye.x, item.z - rig.eye.z)),
     );
     if (chosen === undefined || pivot < chosen.pivot) {
-      chosen = { distance, pivot, cut: dropped.map((item) => item.kind) };
+      chosen = { distance, pivot, cut: dropped.map((item) => item.kind), camera };
     }
   }
   if (chosen === undefined) {
@@ -1751,7 +1757,7 @@ function nearFieldProbe(
   // to this measure: moving the near plane moves the depth buffer's precision
   // everywhere, and a far tree's foot against the ground changes by a few
   // pixels — eight, on the frame this probe picks, with nothing near the eye.
-  const built = sceneFrame(inputAt(chosen.distance));
+  const built = { ...sceneFrame(inputAt(chosen.distance)), camera: chosen.camera };
   const rig = cameraRig(built.camera);
   const pyramid = nearPyramid(rig, width / height);
   const frame: SceneFrame = {
@@ -1951,25 +1957,35 @@ function nearFieldStreetProbe(
     return { cut, pivot };
   };
   let chosen:
-    { ride: StreetRide; distance: number; pivot: number; cut: readonly string[] } | undefined;
+    | {
+        ride: StreetRide;
+        distance: number;
+        pivot: number;
+        cut: readonly string[];
+        camera: CameraPose;
+      }
+    | undefined;
   for (const ride of streetRides(pass)) {
+    // #545: the camera `GameView` draws, as {@link nearFieldProbe} rides it.
+    const drawnAt = drawnCamera((distance) => inputAt(ride, distance), 8);
     for (let distance = 0; distance < ride.profile.totalDistance; distance += 1) {
       const lent = lentSceneFrame(inputAt(ride, distance));
-      const dropped = droppedFrom(ride, lent, nearPyramid(cameraRig(lent.camera), aspect));
+      const camera = drawnAt(distance, lent.camera);
+      const dropped = droppedFrom(ride, lent, nearPyramid(cameraRig(camera), aspect));
       if (dropped.cut.length === 0) continue;
       // A person's closest pass is the nearest; a wall's, the frame that drops
       // the most, since a building's middle says little of where its wall is.
       const closer =
         chosen === undefined ||
         (pass === 'person' ? dropped.pivot < chosen.pivot : dropped.cut.length > chosen.cut.length);
-      if (closer) chosen = { ride, distance, ...dropped };
+      if (closer) chosen = { ride, distance, ...dropped, camera };
     }
   }
   if (chosen === undefined) {
     view.destroy();
     return NO_STREET_NEAR_FIELD;
   }
-  const built = sceneFrame(inputAt(chosen.ride, chosen.distance));
+  const built = { ...sceneFrame(inputAt(chosen.ride, chosen.distance)), camera: chosen.camera };
   const rig = cameraRig(built.camera);
   const pyramid = nearPyramid(rig, aspect);
   const { buildings } = chosen.ride;

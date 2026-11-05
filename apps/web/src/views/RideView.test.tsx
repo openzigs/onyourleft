@@ -16,7 +16,7 @@
  * `/\\d+\\s*W/` would pass against every one of the four states.
  */
 
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 
 import {
   beatsPerMinute,
@@ -1091,11 +1091,29 @@ describe('the ride clock', () => {
     expect(times).toEqual([
       { term: 'Elapsed', reading: '1:02:05' },
       { term: 'Moving', reading: '1:00:00' },
+      // #2072: the time of day, in small type as the seconds recorded are.
+      { term: 'Clock', reading: undefined },
       { term: 'Recorded', reading: undefined },
     ]);
     expect(document.querySelector('.oyl-ride__time--recorded dd')?.textContent).toBe(
       '3725 seconds',
     );
+  });
+
+  it('shows the device’s time of day beside them, HH:MM, as the HUD does (#2072)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 4, 18, 42, 10));
+      await show(stubRideController(ridingSnapshot()));
+
+      const clock = queryAll(document, '.oyl-ride__clock > .oyl-ride__time').find(
+        (pair) => pair.querySelector('dt')?.textContent === 'Clock',
+      );
+      expect(clock?.querySelector('dd')?.textContent).toBe('18:42');
+      expect(clock?.classList.contains('oyl-ride__time--small')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

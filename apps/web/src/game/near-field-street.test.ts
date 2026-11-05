@@ -22,11 +22,13 @@
  * - the **pavements** themselves and their front paths (#1535, #1564).
  *
  * Each is ridden here a metre at a time with the camera on the racing line,
- * through the real `sceneFrame`, on twelve rides — the villages' road, three
+ * through the real `sceneFrame` — with the camera `GameView` draws, its
+ * heading damped between those metres (`chase-camera-testing.ts`, since
+ * #1994) — on thirteen rides: the villages' road, three
  * bends each ridden both ways, #1637's city centre, #1581's mixed town,
- * #1585's street of house models, and a town whose mapped walls stand at the
+ * #1585's street of house models, a town whose mapped walls stand at the
  * press's least clearance round the planner route's bends, both ways
- * ({@link kerbsideFixture}) — at every aspect a device draws, and held to
+ * ({@link kerbsideFixture}), and a turnaround in a village — at every aspect a device draws, and held to
  * the pyramid by a measure of its own: the
  * separating-axis test on each box ({@link boxMeets}, written here and sharing
  * no code with `near-field.ts`), and `near-field.ts` §`triangleMeets` on each
@@ -77,6 +79,7 @@ import { describe, expect, it } from 'vitest';
 import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft/domain';
 
 import { WORST_CASE_ASPECT, cameraRig, type CameraRig, type RigPoint } from './camera';
+import { drawnCamera } from './chase-camera-testing';
 import {
   HOLIDAY_DECORATIONS,
   decorationsFor,
@@ -113,7 +116,13 @@ import {
 import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES, type Person } from './people';
 import type { SceneFrame } from './port';
 import { distanceToDrawnRoad } from './road-grid';
-import { hairpinRoute, northRoute, plannerRoute, sBendRoute } from './route-fixtures-testing';
+import {
+  hairpinRoute,
+  levelHairpinRoute,
+  northRoute,
+  plannerRoute,
+  sBendRoute,
+} from './route-fixtures-testing';
 import { sceneFrame, type SceneInput } from './scene';
 import type { MappedTown } from './settlements';
 import { atStartLine } from './simulation';
@@ -491,6 +500,14 @@ const RIDES: Readonly<Record<string, () => Ride>> = {
   'an S-bend of 30 m, left first': () => plainRide(sBendRoute(30, 'left')),
   "a planner's route": () => plainRide(plannerRoute()),
   "a planner's route, mirrored": () => plainRide(plannerRoute({ mirrored: true })),
+  // #1994: the far end of an out-and-back course, in a village — its street
+  // runs from 823 m out to 1 019 m back, past the U-turn at 900 m — where
+  // `GameView`'s damped camera swings round the rider (`camera.ts`
+  // §`turnedPose`) and its eye leaves the line `scene.ts` keeps it on.
+  'a turnaround in a village': () => {
+    const profile = levelHairpinRoute(2, 900);
+    return { profile, origin: corridorOrigin(profile), from: 750, to: 1_100, input: {} };
+  },
   // #1637's city centre: 3.5 m pavements, a lamp post every 16 m, people.
   'a city centre': () => townRide(pressed(cityStreetscapeFixture()), 950, 2_050),
   // #1581's mixed town: mapped houses and a high street, models among them.
@@ -953,20 +970,24 @@ function ride(name: string): void {
   const taken = (RIDES[name] as () => Ride)();
   const start = atStartLine(taken.profile);
   let frames = 0;
+  const inputAt = (distance: number): SceneInput => ({
+    profile: taken.profile,
+    origin: taken.origin,
+    // The ride's clock moves with it, so the people walk.
+    state: {
+      ...start,
+      ridden: seconds(start.ridden + distance / 8),
+      ride: { speed: metresPerSecond(8), distance: metres(distance) },
+    },
+    people: PEOPLE_NEAR_MAX,
+    ...taken.input,
+  });
+  // Since #1994 the camera drawn is `GameView`'s, its heading damped from
+  // frame to frame, and not the undamped one `sceneFrame` builds.
+  const drawn = drawnCamera(inputAt, 8);
   for (let distance = taken.from; distance < taken.to; distance += 1) {
-    const frame = sceneFrame({
-      profile: taken.profile,
-      origin: taken.origin,
-      // The ride's clock moves with it, so the people walk.
-      state: {
-        ...start,
-        ridden: seconds(start.ridden + distance / 8),
-        ride: { speed: metresPerSecond(8), distance: metres(distance) },
-      },
-      people: PEOPLE_NEAR_MAX,
-      ...taken.input,
-    });
-    const rig: CameraRig = cameraRig(frame.camera);
+    const frame = sceneFrame(inputAt(distance));
+    const rig: CameraRig = cameraRig(drawn(distance, frame.camera));
     const subjects = subjectsOf(frame, rig.eye);
     for (const subject of subjects) {
       found.asked.set(subject.what, (found.asked.get(subject.what) ?? 0) + 1);
@@ -1137,10 +1158,13 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       // drop cannot pass over nothing, and a change to the camera, the line
       // or the placement that brings more to the plane shows here. Re-pinned
       // by #1994, whose camera looks at the road through a bend from the eye
-      // it always had: 23 people and 282 mapped buildings until then.
+      // it always had: 23 people and 282 mapped buildings until then. Re-pinned
+      // again by #545 when the rides took `GameView`'s damped camera rather
+      // than `sceneFrame`'s undamped one (`chase-camera-testing.ts`): 22 and
+      // 289 on the undamped camera.
       expect(Object.fromEntries(met.get(WIDEST_LABEL) ?? [])).toEqual({
-        person: 22,
-        'mapped building': 289,
+        person: 21,
+        'mapped building': 298,
       });
     },
     ALL_RIDES_TIMEOUT,

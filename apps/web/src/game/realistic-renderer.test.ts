@@ -3815,10 +3815,14 @@ describe('the street furniture — #1536', () => {
       (sum, kind) => sum + FURNITURE_CAPACITY * (triangles[kind] as number),
       0,
     );
+    // #1274: the stylised street. The realistic one stands Poly Haven's lamp
+    // and is `REALISTIC_STREET_TRIANGLES` (`realistic-roadside.test.ts`); a
+    // realistic world loaded with no lamp model, as this one, draws these.
     expect(2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + furniture).toBe(
-      REALISTIC_STREET_TRIANGLES,
+      25_024,
     );
-    // The SAME triangles in both worlds: why the frame's figure leaves them out.
+    expect(REALISTIC_STREET_TRIANGLES).toBeGreaterThan(25_024);
+    // The same shapes in both worlds but the lamp: what the frame's figure leaves out.
     const stylised = new FurnitureBelt('stylised');
     for (const kind of FURNITURE_KINDS) {
       expect(trianglesOf({ geometry: stylised.shapeOf(kind) }), kind).toBe(triangles[kind]);

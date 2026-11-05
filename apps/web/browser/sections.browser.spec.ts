@@ -323,6 +323,21 @@ function hashOf(route: RouteDefinition): string {
 }
 
 /*
+ * `.oyl-sections__fits-column` promises that the section's table fits one grid
+ * track (#2195). Nothing else measures that: a table that gained a column would
+ * scroll sideways in its column with every count above still green.
+ */
+async function fitsColumnOverflow(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>('.oyl-sections__fits-column .oyl-scroll-region'),
+    )
+      .filter((region) => region.scrollWidth > region.clientWidth)
+      .map((region) => `${String(region.scrollWidth)} > ${String(region.clientWidth)}`),
+  );
+}
+
+/*
  * The two #1014 describes below run NIGHTLY since #1137, on the owner's ruling
  * of 2026-10-05 (`nightly.ts`). What stays required on these screens: #1014's
  * detail panes and #1026's row balance (below them), the first control above
@@ -350,6 +365,10 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
     for (const route of SECTIONS) {
       const seen = await layoutAt(page, hashOf(route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expect(
+        await fitsColumnOverflow(page),
+        `${route.id}: a section kept in one column scrolls sideways`,
+      ).toEqual([]);
       report.push(
         `  ${route.id}: ${String(seen.columns)} columns of ${String(seen.counted)} sections` +
           `${seen.garageRow === null ? '' : `, garage ${String(seen.garageRow)} a row`}` +
@@ -387,6 +406,10 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
     for (const route of SECTIONS) {
       const seen = await layoutAt(page, hashOf(route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expect(
+        await fitsColumnOverflow(page),
+        `${route.id}: a section kept in one column scrolls sideways`,
+      ).toEqual([]);
       report.push(
         `  ${route.id}: ${String(seen.columns)} columns of ${String(seen.counted)} sections` +
           `${seen.garageRow === null ? '' : `, garage ${String(seen.garageRow)} a row`}`,

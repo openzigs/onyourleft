@@ -490,6 +490,8 @@ import {
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
   houseModelFile,
+  REALISTIC_ROADSIDE_MODEL_NAMES,
+  REALISTIC_ROADSIDE_MODELS,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_MAP_NAMES,
@@ -510,6 +512,7 @@ import {
   type RealisticVegetationKind,
   type PhotographicSurface,
   type RealisticWorldOutcome,
+  type RoadsideModel,
   type StructureSurface,
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
@@ -716,6 +719,7 @@ import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
   HOLIDAY_DECORATIONS,
+  onRealisticLampPosts,
   PUMPKIN,
   WREATH_BERRY,
   WREATH_GREEN,
@@ -2123,6 +2127,12 @@ const BIN_GREEN = 0x2f4a3a;
  * the stylised world could not draw. So the shapes are this repository's own,
  * and what is photographic is the bench's slats: Poly Haven's `dark_planks`,
  * already committed (`realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`).
+ *
+ * ⚠️ **Since #1274 the REALISTIC lamp post is `street_lamp_01`**, by the
+ * owner's ruling of 2026-11-04: cut to 223 triangles and coloured a vertex at
+ * a time by the pipeline, so it is merged into the painted mesh with no
+ * texture and no call of its own ({@link FurnitureBelt}). The stylised world,
+ * and a realistic world loaded without the model, draw the post below.
  *
  * | kind | triangles | height |
  * |---|--:|--:|
@@ -6047,6 +6057,64 @@ interface RealisticWorld {
    * its extrusion.
    */
   readonly houses?: RealisticHouses;
+  /**
+   * The roadside models — #1274: the street lamp a realistic lamp post is
+   * drawn as, and the barrier a realistic gantry's barriers are. Absent where
+   * a loader gave a scene with no coloured mesh in it (a test's), and then
+   * the lamp post and the barrier are the stylised world's shapes.
+   */
+  readonly roadside?: RealisticRoadside;
+}
+
+/**
+ * One roadside model's triangles as the belts copy them — #1274: not indexed,
+ * three floats a vertex each, its colour linear RGB, in the model's own frame
+ * (metres, `y` up, standing on the origin).
+ */
+export interface RoadsideGeometry {
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  readonly colour: Float32Array;
+  readonly triangles: number;
+}
+
+/** The roadside models, by name — #1274. @see REALISTIC_ROADSIDE_MODELS */
+export type RealisticRoadside = Readonly<Record<RoadsideModel, RoadsideGeometry>>;
+
+/**
+ * A roadside model's GLB as the belts copy it — #1274: its one mesh's
+ * triangles, not indexed, with its vertex colour as RGB, or `undefined` where
+ * the scene holds no mesh with positions, normals and a colour.
+ */
+export function roadsideGeometryOf(scene: Object3D): RoadsideGeometry | undefined {
+  let found: Mesh | undefined;
+  scene.traverse((node) => {
+    if (found === undefined && (node as Partial<Mesh>).isMesh === true) found = node as Mesh;
+  });
+  const geometry = found?.geometry;
+  if (
+    geometry?.getAttribute('position') === undefined ||
+    geometry.getAttribute('normal') === undefined ||
+    geometry.getAttribute('color') === undefined
+  ) {
+    return undefined;
+  }
+  const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
+  const copy = (name: string): Float32Array =>
+    Float32Array.from(flat.getAttribute(name).array as ArrayLike<number>);
+  const position = copy('position');
+  // The exporter writes the colour as a normalized four-channel integer;
+  // `getX` and its kin read it back as the fraction it stands for.
+  const colours = flat.getAttribute('color');
+  const colour = new Float32Array(colours.count * 3);
+  for (let at = 0; at < colours.count; at += 1) {
+    colour[at * 3] = colours.getX(at);
+    colour[at * 3 + 1] = colours.getY(at);
+    colour[at * 3 + 2] = colours.getZ(at);
+  }
+  const result = { position, normal: copy('normal'), colour, triangles: position.length / 9 };
+  if (flat !== geometry) flat.dispose();
+  return result;
 }
 
 /** One house model's triangles, as the belt copies them: not indexed, three floats a vertex. */
@@ -6577,6 +6645,14 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       model(() => loaders.model(realisticUrl(houseModelFile(id)))),
     );
     const houseAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_HOUSE_ATLAS)));
+    // #1274: the roadside models, loaded and settled with everything else.
+    // Or none, on the owner's page with that lever off. @see setRealisticRoadside
+    const roadsideScenes = (realisticRoadside ? REALISTIC_ROADSIDE_MODEL_NAMES : []).map(
+      (name) => ({
+        name,
+        scene: model(() => loaders.model(realisticUrl(REALISTIC_ROADSIDE_MODELS[name]))),
+      }),
+    );
     // #475: the structures' surfaces, loaded with everything else and settled
     // with it — a world whose buildings could not load is half a world.
     const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
@@ -6638,6 +6714,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...bicycleMaps.map((each) => each.texture),
       ...houseScenes,
       houseAtlas,
+      ...roadsideScenes.map((each) => each.scene),
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) =>
         each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
@@ -6788,6 +6865,20 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
           triangles: houseGeometries.map((each) => each.triangles),
         }
       : undefined;
+    // #1274: the roadside models' triangles, copied once, or none of them.
+    const roadsideGeometries = await Promise.all(
+      roadsideScenes.map(async (each) => ({
+        name: each.name,
+        geometry: roadsideGeometryOf(await each.scene),
+      })),
+    );
+    const roadside: RealisticRoadside | undefined =
+      roadsideGeometries.length > 0 &&
+      roadsideGeometries.every((each) => each.geometry !== undefined)
+        ? (Object.fromEntries(
+            roadsideGeometries.map((each) => [each.name, each.geometry]),
+          ) as RealisticRoadside)
+        : undefined;
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
@@ -6804,6 +6895,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...(banners === undefined ? {} : { banners }),
       wordmark: wordmarkTexture,
       ...(houses === undefined ? {} : { houses }),
+      ...(roadside === undefined ? {} : { roadside }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -6873,6 +6965,23 @@ let realisticTrees: RealisticTrees = REALISTIC_TREES_DEFAULT;
  */
 export function setRealisticTrees(trees: RealisticTrees): void {
   realisticTrees = trees;
+}
+
+/** Whether the next realistic load reads the roadside models. @see setRealisticRoadside */
+let realisticRoadside = true;
+
+/**
+ * Makes the NEXT realistic load leave out the roadside models (`false`), so its
+ * lamp posts and its gantries' barriers are the shapes they were before #1274
+ * — or read them again (`true`), as the product always does. Neither file is
+ * fetched with it off.
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts` loads without them for
+ * the owner's by-eye pair (`?levers=-roadside-models`); the product never
+ * calls it
+ */
+export function setRealisticRoadside(on: boolean): void {
+  realisticRoadside = on;
 }
 
 /** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
@@ -8632,6 +8741,141 @@ const GANTRY_BARRIER = 0xe4e6e3;
 const BANNER_GROUND = 0x1f3b5c;
 const BANNER_LETTERING = 0xf4f4f0;
 
+/**
+ * The vertex attribute that says which of the realistic gantry's two shapes a
+ * vertex belongs to — #1274: 0 the unit box, 1 the barrier model.
+ * @see GantryBelt
+ */
+export const GANTRY_PART_ATTRIBUTE = 'oylGantryPart';
+
+/**
+ * The instance attribute that says which shape a realistic gantry instance
+ * is — #1274: 0 a box, 1 a barrier piece. @see GANTRY_PART_ATTRIBUTE
+ */
+export const GANTRY_SHAPE_ATTRIBUTE = 'oylGantryShape';
+
+/**
+ * The vertex rule {@link withGantryFold} splices after `begin_vertex` — #1274:
+ * a vertex of the shape its instance is not is folded to the instance's
+ * origin, every corner of its triangles to one point, which draws nothing.
+ *
+ * Exported for `realistic-renderer.test.ts`, which holds its program text.
+ */
+export const GANTRY_FOLD_GLSL = `if (abs(${GANTRY_PART_ATTRIBUTE} - ${GANTRY_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
+
+/**
+ * Teaches the realistic gantry's material to draw each instance as its own
+ * shape alone — #1274. @see GANTRY_FOLD_GLSL. Throws, as every splice here
+ * does, if three's program no longer holds the include it is spliced at.
+ */
+function withGantryFold<M extends Material>(material: M): M {
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1274's gantry fold";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${GANTRY_PART_ATTRIBUTE};\nattribute float ${GANTRY_SHAPE_ATTRIBUTE};`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n${GANTRY_FOLD_GLSL}`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-gantry-fold`;
+  return material;
+}
+
+/**
+ * The barrier model's extent along one of its own axes, metres: `x` (0), its
+ * length, or `z` (2), its thickness.
+ */
+function gantryBarrierExtent(barrier: RoadsideGeometry, axis: 0 | 2): number {
+  let low = Number.POSITIVE_INFINITY;
+  let high = Number.NEGATIVE_INFINITY;
+  for (let at = axis; at < barrier.position.length; at += 3) {
+    const value = barrier.position[at] as number;
+    low = Math.min(low, value);
+    high = Math.max(high, value);
+  }
+  return high > low ? high - low : 1;
+}
+
+/**
+ * Where across the road a barrier model `thickness` thick stands its middle,
+ * for a barrier piece whose box is `width` thick about `across` — #1274: moved
+ * out from the road by half the difference, so its face to the road is where
+ * the stylised box's is (`gantry.ts` §`BARRIER_OFFSET_METRES` less half
+ * §`BARRIER_THICKNESS_METRES`, 0.31 m off the carriageway's edge) and the
+ * whole of its extra thickness is on the verge. Centred on the box's own
+ * middle, Poly Haven's 0.67 m would reach to 1.5 cm of the carriageway.
+ */
+export function gantryBarrierAcross(across: number, width: number, thickness: number): number {
+  return across + Math.sign(across) * ((thickness - width) / 2);
+}
+
+/**
+ * How far a barrier model of `length` is stretched along the road to fill a
+ * barrier piece `depth` long — #1274: `gantry.ts` §`BARRIER_LENGTH_METRES`
+ * less its gap, 2.4 m, over Poly Haven's 1.54 m, about 1.56. The line of
+ * pieces is the one both worlds draw, so the model fills the piece rather
+ * than the pieces moving.
+ */
+export function gantryBarrierScale(depth: number, length: number): number {
+  return depth / length;
+}
+
+/**
+ * The realistic gantry's one instanced shape — #1274: the unit box the legs,
+ * the beam and the board's post are drawn as, white, and the barrier model
+ * turned so that its long axis runs along the box's `z` (the road), each
+ * vertex marked with its shape ({@link GANTRY_PART_ATTRIBUTE}).
+ */
+function gantryBoxAndBarrier(barrier: RoadsideGeometry): BufferGeometry {
+  const box = new BoxGeometry(1, 1, 1).toNonIndexed();
+  const boxPositions = box.getAttribute('position').array as Float32Array;
+  const boxNormals = box.getAttribute('normal').array as Float32Array;
+  const boxVertices = boxPositions.length / 3;
+  const barrierVertices = barrier.position.length / 3;
+  const vertices = boxVertices + barrierVertices;
+  const position = new Float32Array(vertices * 3);
+  const normal = new Float32Array(vertices * 3);
+  const colour = new Float32Array(vertices * 3).fill(1);
+  const part = new Float32Array(vertices);
+  position.set(boxPositions);
+  normal.set(boxNormals);
+  // A quarter turn about `y`, a proper rotation, so nothing is inside out:
+  // the model's long `x` becomes the box's `z`, its `z` the box's `x`.
+  for (let at = 0; at < barrierVertices; at += 1) {
+    const from = at * 3;
+    const to = (boxVertices + at) * 3;
+    for (const [source, target] of [
+      [barrier.position, position],
+      [barrier.normal, normal],
+    ] as const) {
+      target[to] = source[from + 2] as number;
+      target[to + 1] = source[from + 1] as number;
+      target[to + 2] = -(source[from] as number);
+    }
+    colour.set(barrier.colour.subarray(from, from + 3), to);
+    part[boxVertices + at] = 1;
+  }
+  box.dispose();
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(position, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normal, 3));
+  geometry.setAttribute('color', new BufferAttribute(colour, 3));
+  geometry.setAttribute(GANTRY_PART_ATTRIBUTE, new BufferAttribute(part, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
 /** The most boxes and banners the belt draws: two gantries and a board, with room. */
 const GANTRY_BOX_CAPACITY = 96;
 const GANTRY_BANNER_CAPACITY = 4;
@@ -8659,6 +8903,27 @@ const GANTRY_BANNER_CAPACITY = 4;
  * AGAINST the heading, toward a rider riding at it: a proper rotation, so the
  * quad's front face is toward the rider and `u` runs to their right.
  * `gantry.test.ts` holds that from the camera.
+ *
+ * ## The realistic barriers are Poly Haven's — #1274, in the SAME two calls
+ *
+ * Handed the world's {@link RealisticRoadside} barrier, the realistic belt
+ * draws each barrier piece as `concrete_road_barrier`, its colour in its
+ * vertices, where the stylised belt draws a white box. **Still two calls**,
+ * by the owner's ruling of 2026-11-04 that no draw-call ceiling moves: the
+ * boxes' one instanced mesh carries BOTH shapes, the unit box and the
+ * barrier ({@link GANTRY_PART_ATTRIBUTE}), and each instance says which it is
+ * ({@link GANTRY_SHAPE_ATTRIBUTE}); the vertex shader folds the other shape's
+ * every corner to one point ({@link GANTRY_FOLD_GLSL}), which draws nothing —
+ * #1589's lot porch is the same rule. Its cost is triangles, and every
+ * instance submits both shapes: `realistic-budget.ts`
+ * §`REALISTIC_GANTRY_TRIANGLES` counts them so.
+ *
+ * A barrier stands on the road's surface at its piece's place, its own
+ * thickness across the verge and its own height, and stretched along the road
+ * to the piece's length ({@link gantryBarrierScale}), so the line of pieces is
+ * the stylised world's line and `gantry.ts` places both; its face to the road
+ * is the stylised box's, and its extra thickness is on the verge
+ * ({@link gantryBarrierAcross}).
  */
 export class GantryBelt {
   readonly #boxes: InstancedMesh;
@@ -8669,6 +8934,15 @@ export class GantryBelt {
   readonly #boxMaterials: { readonly lit: Material; readonly flat: Material };
   readonly #banners: InstancedMesh;
   readonly #cells: InstancedBufferAttribute;
+  /**
+   * Which shape each box instance is — #1274: 0 the unit box, 1 the barrier.
+   * Only where the belt was handed a barrier model.
+   */
+  readonly #shapes: InstancedBufferAttribute | undefined;
+  /** The barrier's own length, metres, where the belt draws one. @see gantryBarrierScale */
+  readonly #barrierLength: number;
+  /** And its own thickness, across the verge. @see gantryBarrierAcross */
+  readonly #barrierThickness: number;
   readonly #atlas: BannerAtlas | undefined;
   readonly #matrix = new Matrix4();
   readonly #colour = new Color();
@@ -8679,16 +8953,28 @@ export class GantryBelt {
   constructor(
     banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture },
     world: 'stylised' | 'realistic' = 'realistic',
+    /** #1274: the barrier the realistic world draws each barrier piece as. */
+    barrier?: RoadsideGeometry,
   ) {
     this.#atlas = banners?.atlas;
+    // #1274: the stylised world draws its own barriers, whatever it is handed.
+    const model = world === 'realistic' ? barrier : undefined;
     // #966: the stylised world's gantry breathes three's own fog, not the
     // realistic air, whose uniforms only a realistic frame writes; and is
     // Lambert, for `logoMaterial`'s reason — no DFG texture.
     const boxMaterial =
       world === 'realistic'
         ? withAtmosphere(
-            constructed(
-              new MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 }),
+            (model === undefined ? (made: Material): Material => made : withGantryFold)(
+              constructed(
+                new MeshStandardMaterial({
+                  color: 0xffffff,
+                  roughness: 0.6,
+                  metalness: 0.2,
+                  // #1274: the barrier's colour is in its vertices, the box's white.
+                  vertexColors: model !== undefined,
+                }),
+              ),
             ),
           )
         : constructed(new MeshLambertMaterial({ color: 0xffffff }));
@@ -8699,7 +8985,20 @@ export class GantryBelt {
           ? constructed(new MeshBasicMaterial({ color: 0xffffff }))
           : boxMaterial,
     };
-    this.#boxes = new InstancedMesh(new BoxGeometry(1, 1, 1), boxMaterial, GANTRY_BOX_CAPACITY);
+    this.#barrierLength = model === undefined ? 1 : gantryBarrierExtent(model, 0);
+    this.#barrierThickness = model === undefined ? 0 : gantryBarrierExtent(model, 2);
+    this.#boxes = new InstancedMesh(
+      model === undefined ? new BoxGeometry(1, 1, 1) : gantryBoxAndBarrier(model),
+      boxMaterial,
+      GANTRY_BOX_CAPACITY,
+    );
+    if (model === undefined) {
+      this.#shapes = undefined;
+    } else {
+      this.#shapes = new InstancedBufferAttribute(new Float32Array(GANTRY_BOX_CAPACITY), 1);
+      this.#shapes.setUsage(DynamicDrawUsage);
+      this.#boxes.geometry.setAttribute(GANTRY_SHAPE_ATTRIBUTE, this.#shapes);
+    }
     this.#boxes.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#boxes.count = 0;
     this.#boxes.frustumCulled = false;
@@ -8766,8 +9065,15 @@ export class GantryBelt {
         for (const placed of line.boxes) {
           const box = placed.box;
           if (boxes >= GANTRY_BOX_CAPACITY) break;
-          this.#placeBox(boxes, placed);
-          this.#colour.setHex(box.role === 'barrier' ? GANTRY_BARRIER : GANTRY_METAL);
+          // #1274: a barrier piece is the barrier model where the belt has one.
+          const modelled = this.#shapes !== undefined && box.role === 'barrier';
+          if (modelled) this.#placeBarrier(boxes, placed);
+          else this.#placeBox(boxes, placed);
+          this.#shapes?.setX(boxes, modelled ? 1 : 0);
+          // The model's colour is its own: the instance's white leaves it so.
+          this.#colour.setHex(
+            modelled ? 0xffffff : box.role === 'barrier' ? GANTRY_BARRIER : GANTRY_METAL,
+          );
           this.#boxes.setColorAt(boxes, this.#colour);
           boxes += 1;
         }
@@ -8800,6 +9106,7 @@ export class GantryBelt {
     }
     this.#boxes.count = boxes;
     this.#banners.count = banners;
+    if (this.#shapes !== undefined) this.#shapes.needsUpdate = boxes > 0;
     this.#boxes.instanceMatrix.needsUpdate = boxes > 0;
     if (this.#boxes.instanceColor !== null) this.#boxes.instanceColor.needsUpdate = boxes > 0;
     this.#banners.instanceMatrix.needsUpdate = banners > 0;
@@ -8826,6 +9133,42 @@ export class GantryBelt {
       line.headingX * box.width,
       0,
       -line.headingZ * box.depth,
+      at.z,
+      0,
+      0,
+      0,
+      1,
+    );
+    this.#boxes.setMatrixAt(slot, this.#matrix);
+  }
+
+  /**
+   * One barrier piece as the barrier model — #1274: the box's frame, its
+   * base on the road's surface rather than its middle, and the model's own
+   * thickness and height, stretched along the road to the piece's length.
+   */
+  #placeBarrier(slot: number, line: PlacedBox): void {
+    const box = line.box;
+    const at = boxPoint(
+      line,
+      gantryBarrierAcross(box.across, box.width, this.#barrierThickness),
+      box.up - box.height / 2,
+    );
+    const along = gantryBarrierScale(box.depth, this.#barrierLength);
+    // The box's right-handed frame — right, up, toward the rider — unscaled
+    // across and up: the model is the size Poly Haven measured.
+    this.#matrix.set(
+      -line.headingZ,
+      0,
+      -line.headingX * along,
+      at.x,
+      0,
+      1,
+      0,
+      at.y,
+      line.headingX,
+      0,
+      -line.headingZ * along,
       at.z,
       0,
       0,
@@ -9481,6 +9824,29 @@ function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic')
 }
 
 /**
+ * The realistic lamp post as the street furniture's painted mesh wears it —
+ * #1274: Poly Haven's `street_lamp_01` ({@link RealisticRoadside}), its
+ * colour its own vertices', with the texture coordinates and the part every
+ * other painted piece carries (`projectedInMetres`), so it merges into the
+ * same geometry and the same call. Its coordinates are all nought: the painted
+ * material reads no map.
+ */
+function roadsideFurnitureGeometry(model: RoadsideGeometry): BufferGeometry {
+  const vertices = model.position.length / 3;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(model.position.slice(), 3));
+  geometry.setAttribute('normal', new BufferAttribute(model.normal.slice(), 3));
+  geometry.setAttribute('uv', new BufferAttribute(new Float32Array(vertices * 2), 2));
+  geometry.setAttribute('color', new BufferAttribute(model.colour.slice(), 3));
+  geometry.setAttribute(
+    'oylPart',
+    new BufferAttribute(new Float32Array(vertices).fill(LOT_PART.other), 1),
+  );
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * Every piece in `items` as one geometry: `shapes`' own, each piece's turned
  * by its yaw as three's `makeRotationY` turns it and stood where it stands —
  * the transform the instanced draw made on the GPU until #1689, made here
@@ -9551,8 +9917,14 @@ function furnitureSurfaceGeometry(
  *
  * A belt per world, as {@link PavementBelt} is: the stylised view's is
  * painted by {@link FURNITURE_STYLE}, lit or flat by the rung; the realistic
- * world's is the same triangles, physically based, the bench's slats in
- * Poly Haven's `dark_planks`, breathing the realistic air.
+ * world's is physically based, the bench's slats in Poly Haven's
+ * `dark_planks`, breathing the realistic air — and since #1274 its lamp post
+ * is Poly Haven's `street_lamp_01`, 223 triangles coloured a vertex at a time
+ * ({@link roadsideFurnitureGeometry}), where the stylised world's is 88 of
+ * its own. It is merged into the painted mesh with the bollards and bins, so
+ * the street still draws in the same two calls (the village frame is frozen,
+ * `realistic-budget.ts` §`REALISTIC_VILLAGE_DRAW_CALLS`); what it costs is
+ * triangles, which `realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES` counts.
  */
 export class FurnitureBelt {
   readonly #meshes = new Map<FurnitureSurface, Mesh>();
@@ -9575,6 +9947,8 @@ export class FurnitureBelt {
   constructor(
     world: 'stylised' | 'realistic',
     planks?: { readonly colour: Texture; readonly normal: Texture },
+    /** #1274: the lamp the realistic world draws its lamp posts as. */
+    lamp?: RoadsideGeometry,
   ) {
     for (const surface of FURNITURE_SURFACES) {
       let materials: { readonly lit: Material; readonly flat: Material };
@@ -9606,7 +9980,10 @@ export class FurnitureBelt {
       const shapes = new Map<FurnitureKind, BufferGeometry>();
       for (const kind of FURNITURE_KINDS) {
         if (FURNITURE_STYLE[kind].surface !== surface) continue;
-        const built = furnitureGeometry(kind, world);
+        const built =
+          world === 'realistic' && kind === 'lamp-post' && lamp !== undefined
+            ? roadsideFurnitureGeometry(lamp)
+            : furnitureGeometry(kind, world);
         shapes.set(kind, built.index === null ? built : built.toNonIndexed());
         if (built.index !== null) built.dispose();
       }
@@ -19393,6 +19770,12 @@ class RealisticDrawing {
   readonly pavements: PavementBelt;
   /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
   readonly furniture: FurnitureBelt;
+  /**
+   * Whether the lamp posts are Poly Haven's lamp — #1274: the world was
+   * loaded with its roadside models. The winter lights wind its shaft then
+   * (`decorations.ts` §`onRealisticLampPosts`).
+   */
+  readonly lampModelled: boolean;
   /** Who walks them, and the footways — #1541. */
   readonly people: PeopleBelt;
   /** The holiday's decorations on the villages in reach — #1624. */
@@ -19484,10 +19867,15 @@ class RealisticDrawing {
     this.silhouette = this.riders.silhouette();
     this.shadows = new RiderSilhouetteBelt(this.silhouette);
     this.grounding = new GroundBlobBelt();
-    this.gantries = new GantryBelt(world.banners);
+    this.gantries = new GantryBelt(world.banners, 'realistic', world.roadside?.barrier);
     this.logos = new LogoBelt(world.wordmark, 'realistic');
     this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
-    this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
+    this.furniture = new FurnitureBelt(
+      'realistic',
+      world.structures.get('planks'),
+      world.roadside?.lamp,
+    );
+    this.lampModelled = world.roadside !== undefined;
     this.people = new PeopleBelt(world.body);
     this.decorations = new DecorationBelt('realistic');
     this.villageHouses = new VillageHouseBelt(world.houses);
@@ -19495,6 +19883,25 @@ class RealisticDrawing {
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
     this.environment = environment;
+  }
+
+  /**
+   * This frame's decorations on the villages in reach — #1624 — with, since
+   * #1274, the lamp posts' lights wound on Poly Haven's lamp where the world
+   * stands it ({@link lampModelled}; `decorations.ts` §`onRealisticLampPosts`).
+   */
+  updateDecorations(
+    streets: readonly VillageStreet[],
+    camera: { readonly x: number; readonly z: number },
+    holiday: Holiday | undefined,
+    kinds: ItemTable,
+  ): void {
+    this.decorations.update(
+      streets,
+      camera,
+      holiday,
+      this.lampModelled ? onRealisticLampPosts(kinds) : kinds,
+    );
   }
 
   get road(): MeshStandardMaterial {
@@ -21313,12 +21720,7 @@ class ThreeGameView implements GameView {
     // #1624: the holiday's decorations on the villages in reach, in ONE call;
     // none with no holiday. The hidden world's draw nothing.
     const holiday = this.#season.holiday;
-    this.#realistic?.decorations.update(
-      frame.streets,
-      frame.camera,
-      holiday,
-      this.#decorationKinds,
-    );
+    this.#realistic?.updateDecorations(frame.streets, frame.camera, holiday, this.#decorationKinds);
     this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
     // #1835: and none the near plane would cut, at a frame wide enough to.

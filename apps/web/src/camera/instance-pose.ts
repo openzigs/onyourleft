@@ -32,7 +32,9 @@
  *   clean JPEG, one carrying location or device metadata included, is
  *   `unreadable` and **is not sent** (`frame.ts` §`capturedFrame`).
  * - **One at a time, and no faster than one a second**
- *   ({@link INSTANCE_POSE_INTERVAL_MILLISECONDS}).
+ *   ({@link INSTANCE_POSE_INTERVAL_MILLISECONDS}), and slower after the
+ *   instance refuses pictures for coming too often
+ *   ({@link INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS}).
  *
  * ## Two consents, both off until the rider turns them on
  *
@@ -93,9 +95,29 @@ export const INSTANCE_POSE_DEADLINE_MILLISECONDS = 30_000;
 export const INSTANCE_POSE_INTERVAL_MILLISECONDS = 1_000;
 
 /**
- * How many pictures in a row may fail — no answer, a model that failed, a
- * refusal for being too many — before nothing more is sent this session:
- * three.
+ * The longest the next picture waits after the instance refused pictures for
+ * coming too often (#2175): thirty seconds. Each `rate_limited` in a row
+ * doubles the wait from {@link INSTANCE_POSE_INTERVAL_MILLISECONDS} — two,
+ * four, eight, sixteen seconds — up to this, and any other answer brings it
+ * back to one second.
+ *
+ * ## Provenance — ⚠️ the author's choice, not a measurement
+ *
+ * `rate_limited` is the instance's answer to a session over its 120 sealed
+ * requests a minute, which sync and a write-up's stream share (spike 0025), to
+ * a second picture while one is still with the model, and to a rider past
+ * their half hour of its local model in a clock hour (`apps/instance`
+ * §`camera/side-pose.ts`). None is a failure of the picture, and the last
+ * lasts until the hour ends: thirty seconds is two sealed requests a minute
+ * for that time, and a picture again within half a minute of it ending.
+ */
+export const INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS = 30_000;
+
+/**
+ * How many pictures in a row may fail — no answer, a model that failed —
+ * before nothing more is sent this session: three. A refusal for coming too
+ * often is not one of them (#2175): it is counted on its own, and the next
+ * picture waits longer ({@link INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS}).
  *
  * ## Provenance — ⚠️ the author's choice, not a measurement
  *
@@ -213,6 +235,18 @@ export function readSideInstanceChoice(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The host of the hosted service `choice` sends pictures on to, or `undefined`
+ * when it sends none on (#2175): what the side-camera screen names, as the
+ * hosted consent does, because each place a picture goes is a different
+ * promise (`views/SideCameraControl.tsx`).
+ */
+export function sideInstanceHostedService(
+  choice: InstancePictureChoice | undefined,
+): string | undefined {
+  return choice?.source === 'instance-hosted' ? hostedServiceHost(choice.endpoint) : undefined;
 }
 
 /**
@@ -406,6 +440,8 @@ export function instancePoseEstimator(
   let failuresInARow = 0;
   let session: Promise<SidePictureSession> | undefined;
   let lastSentAt: number | undefined;
+  /** How many answers in a row were `rate_limited`: the next picture waits longer for each. */
+  let rateLimitedInARow = 0;
 
   const unavailable = (why: SideUnavailableReason): SidePoseOutcome => {
     stopped ??= why;
@@ -434,7 +470,11 @@ export function instancePoseEstimator(
         return { kind: 'unreadable' };
       }
       if (lastSentAt !== undefined) {
-        const early = lastSentAt + INSTANCE_POSE_INTERVAL_MILLISECONDS - timers.now();
+        const interval = Math.min(
+          INSTANCE_POSE_INTERVAL_MILLISECONDS * 2 ** rateLimitedInARow,
+          INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS,
+        );
+        const early = lastSentAt + interval - timers.now();
         if (early > 0) {
           await timers.wait(early);
         }
@@ -469,8 +509,15 @@ export function instancePoseEstimator(
       if (closed) {
         return { kind: 'unavailable', why: 'switched-off' };
       }
+      const code = answer.status === 200 ? undefined : codeOf(answer.body);
+      if (code === 'rate_limited') {
+        // Refused unread for coming too often: not a failure, and the next waits longer.
+        rateLimitedInARow += 1;
+        return { kind: 'rate-limited' };
+      }
+      rateLimitedInARow = 0;
       if (answer.status !== 200) {
-        const stop = REFUSALS_THAT_STOP[codeOf(answer.body) ?? ''];
+        const stop = REFUSALS_THAT_STOP[code ?? ''];
         return stop === undefined ? failed() : unavailable(stop);
       }
       const said = (answer.body as { answer?: unknown } | null)?.answer;

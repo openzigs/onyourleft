@@ -640,7 +640,7 @@ export function terrainCorridor(
         // And no higher than the road within it, near a seam, while past it
         // the relief may fall as it did before #2101: the owner's ruling of
         // 2026-11-04. @see SEAM_CREST_FADE_METRES
-        const crest = crestShare < 1 ? flat * crestShare : flat;
+        const crest = flat * crestShare;
         const fall = Math.min(hold, RELIEF_SLOPE * Math.abs(line - lateral));
         const met = Math.min(
           shaping.ceiling,

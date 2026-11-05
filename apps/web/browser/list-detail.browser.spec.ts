@@ -1810,6 +1810,81 @@ test.describe('#1072 — a card is not carried under reduced motion', () => {
 });
 
 /**
+ * #2068 — the ride page stacks one chart per recorded channel, and reads a
+ * chart's channel only when its slot scrolls into view.
+ *
+ * jsdom has no `IntersectionObserver`, so the unit suite proves the budget
+ * against a fake (`detail/testing.ts`); this is the one place the real
+ * observer is asked. On a phone the last of the populated ride's charts is
+ * well below the fold: it must not be drawn on arrival, and must be once it is
+ * scrolled to. ⚠️ The control is the first half: a page that read every channel
+ * on mount draws the last chart before anything is scrolled.
+ */
+test.describe('#2068 — a stacked chart is read when it scrolls into view', () => {
+  test(`at ${PHONE.name}, the last chart is drawn only once it is scrolled to`, async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await page.evaluate(() => {
+      window.location.hash = '#/activities/ride-0';
+    });
+    const slots = page.locator('[data-oyl-trace-slot]');
+    await expect(slots.first()).toBeVisible();
+    const count = await slots.count();
+    expect(count, 'the populated ride has several charts').toBeGreaterThan(2);
+    const last = slots.nth(count - 1);
+    // The first chart in view and drawn, so the page has had its chance to
+    // read; the last is three or more slots further down, off screen.
+    await slots.first().scrollIntoViewIfNeeded();
+    await expect(slots.first().locator('.oyl-trace-chart')).toHaveCount(1);
+    // Half a second more: a page that read every channel on mount has drawn
+    // the last by now — each read is milliseconds against the in-memory ports.
+    await page.waitForTimeout(500);
+    expect(await last.locator('.oyl-trace-chart').count(), 'read before it was in view').toBe(0);
+
+    await last.scrollIntoViewIfNeeded();
+    await expect(last.locator('.oyl-trace-chart')).toHaveCount(1);
+    // One time axis: every drawn chart ends where the ride does.
+    const ends = await page
+      .locator('.oyl-trace-chart__times')
+      .evaluateAll((axes) => axes.map((axis) => axis.lastElementChild?.textContent ?? ''));
+    expect(new Set(ends).size, `the charts end at ${ends.join(', ')}`).toBe(1);
+  });
+
+  // ⚠️ A layout claim, so measured here: one time axis means every drawing in
+  // the stack starts and ends at the same x. The value column used to be
+  // sized to each chart's own labels, so "151 bpm" pushed heart rate's 0:00
+  // right of power's.
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, every chart’s drawing spans the same x`, async ({ page }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const slots = page.locator('[data-oyl-trace-slot]');
+      await expect(slots.first()).toBeVisible();
+      const count = await slots.count();
+      for (let index = 0; index < count; index += 1) {
+        await slots.nth(index).scrollIntoViewIfNeeded();
+        await expect(slots.nth(index).locator('svg.oyl-trace')).toHaveCount(1);
+      }
+      const spans = await page.locator('svg.oyl-trace').evaluateAll((drawings) =>
+        drawings.map((drawing) => {
+          const box = drawing.getBoundingClientRect();
+          return { left: box.left, right: box.right };
+        }),
+      );
+      expect(spans).toHaveLength(count);
+      const [first] = spans;
+      for (const span of spans) {
+        expect(Math.abs(span.left - (first?.left ?? 0)), JSON.stringify(spans)).toBeLessThan(0.5);
+        expect(Math.abs(span.right - (first?.right ?? 0)), JSON.stringify(spans)).toBeLessThan(0.5);
+      }
+    });
+  }
+});
+
+/**
  * #1312 — the ride page's lap table, scrolled to its last column.
  *
  * A ride with every figure a lap can state has eleven columns, which is wider
@@ -1848,12 +1923,20 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         // 4 and 5 were read off the bottom of the screen — a reading of a
         // layout shift, not of the sticky column. So: every chart drawn
         // first, and the table scrolled to inside the same task that reads
-        // it (`measure`), where nothing can move it in between.
-        const shown = await page
-          .locator('button[aria-pressed="true"]', { hasText: /^Show / })
-          .count();
+        // it (`measure`), where nothing can move it in between. Since #2068
+        // each chart is read when its slot scrolls into view, so every slot
+        // is scrolled to first.
+        const slots = page.locator('[data-oyl-trace-slot]');
+        const shown = await slots.count();
         expect(shown, 'the ride’s page shows no trace').toBeGreaterThan(0);
+        for (let index = 0; index < shown; index += 1) {
+          await slots.nth(index).scrollIntoViewIfNeeded();
+          await expect(slots.nth(index).locator('.oyl-trace-chart')).toHaveCount(1);
+        }
         await expect(page.locator('.oyl-trace-chart')).toHaveCount(shown);
+        // #2069: and the ride's time in zone above the laps, read the same way.
+        await page.locator('[data-oyl-zones-slot]').scrollIntoViewIfNeeded();
+        await expect(page.locator('[data-oyl-zones-slot] .oyl-zone-chart')).toHaveCount(2);
 
         const measure = async () =>
           table.evaluate((element) => {
@@ -1929,22 +2012,22 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
           `#1312 lap table, ${theme} — ${TABLET_IN_THE_SHELL.name} — ${String(seen.wider)} px wider than its region`,
         );
 
-        // The control: without the class the Lap column scrolls away.
+        // The control: without the class the Lap column scrolls away. The
+        // same table, marked before its class goes: since #2069 the ride's
+        // zone tables are `table.oyl-table` too, and come before the laps.
         await table.evaluate((element) => {
+          element.setAttribute('data-oyl-lap-control', '');
           element.classList.remove('oyl-table--laps');
         });
-        const control = await page
-          .locator('table.oyl-table')
-          .first()
-          .evaluate((element) => {
-            const region = element.closest<HTMLElement>('.oyl-scroll-region');
-            if (region === null) return [];
-            region.scrollLeft = region.scrollWidth;
-            const frame = region.getBoundingClientRect();
-            return [...element.querySelectorAll('tbody th')].map(
-              (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
-            );
-          });
+        const control = await page.locator('table[data-oyl-lap-control]').evaluate((element) => {
+          const region = element.closest<HTMLElement>('.oyl-scroll-region');
+          if (region === null) return [];
+          region.scrollLeft = region.scrollWidth;
+          const frame = region.getBoundingClientRect();
+          return [...element.querySelectorAll('tbody th')].map(
+            (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
+          );
+        });
         expect(control).toEqual([false, false, false, false, false]);
       });
     });
