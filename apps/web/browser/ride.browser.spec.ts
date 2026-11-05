@@ -1502,6 +1502,15 @@ test.describe('a ride with a side camera paired — #551', () => {
    * other that the cases above hold there. Not at 736×480, where `main`'s
    * panels ended within a pixel of the stage's edge: a control that passes or
    * fails on a sub-pixel is no control.
+   *
+   * ⚠️ **At 844×390 the ride is a WORKOUT since #2071.** The gradient left the
+   * secondary panel for the primary one, the secondary panel lost a row, and
+   * the actions panel holding both rows ended 5 px inside the stage on the
+   * plain widest ride (it ended 61 px past it on `main`). A running workout
+   * adds the trainer notice's row to the same panel, so without the fallback
+   * it runs 42 px off the stage there, and with it the panel ends inside the
+   * stage. The anchored and the fallback layouts of that same page are
+   * measured first, so the pair still says it is the fallback that holds it.
    */
   for (const viewport of OVERLAY_VIEWPORTS.filter(
     (each) => each.width >= 736 && each.height <= 390,
@@ -1509,7 +1518,15 @@ test.describe('a ride with a side camera paired — #551', () => {
     test(`the control — without anchors and without the fallback, the rows do not fit — ${viewport.name}`, async ({
       page,
     }) => {
-      await openRide(page, viewport, '?side=filming&sounds=on');
+      const workout = viewport.height === 390;
+      await openRide(page, viewport, `?side=filming&sounds=on${workout ? '&trainer=workout' : ''}`);
+      if (workout) {
+        // The same page fits as it ships, both ways (#1120): the overflow
+        // below is the fallback's to prevent, not the workout's own.
+        for (const [how, seen] of await bothWays(page)) {
+          expect(sideCameraCollisions(seen, viewport), how).toEqual([]);
+        }
+      }
       const before = await withoutAnchors(page, 'none');
       // The apparatus: the row is back inside the panel, not a panel of its own.
       expect(before.panels.some((each) => each.name.includes('side-camera-row'))).toBe(false);
