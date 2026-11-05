@@ -58,12 +58,18 @@ import {
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
 import { mappedTown } from '../src/game/footprint-buildings';
 import {
+  // #1794's street of mapped churches, which `town=churches` rides.
+  churchStreetFixture,
+  // #1795's street of mapped town halls and schools, which `town=civic` rides.
+  civicStreetFixture,
   // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
   cityStreetscapeFixture,
   countrysideFixture,
+  datedStreetFixture,
   houseStreetFixture,
   commercialStreetFixture,
+  mappedPaintStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
@@ -156,6 +162,7 @@ import {
   routeDigest,
   villageRoute,
 } from '../src/demo/synthetic-road';
+import { outAndBackRoute } from '../src/game/route-fixtures-testing';
 import { plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
@@ -505,15 +512,26 @@ async function run(): Promise<void> {
                         ? mappedRoofStreetFixture(latitude)
                         : config.town === 'untagged'
                           ? untaggedStreetFixture(latitude)
-                          : config.town === 'grounds'
-                            ? fencedGroundsFixture(latitude)
-                            : undefined;
+                          : config.town === 'painted'
+                            ? mappedPaintStreetFixture(latitude)
+                            : config.town === 'dated'
+                              ? datedStreetFixture(latitude)
+                              : config.town === 'churches'
+                                ? churchStreetFixture(latitude)
+                                : config.town === 'civic'
+                                  ? civicStreetFixture(latitude)
+                                  : config.town === 'grounds'
+                                    ? fencedGroundsFixture(latitude)
+                                    : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
     (config.route === 'village'
       ? villageRoute(config.facing, config.place)
-      : realisticRoute(config.facing, config.place));
+      : // #1996: the turning point the owner's course showed, for its frames.
+        config.route === 'out-and-back'
+        ? outAndBackRoute()
+        : realisticRoute(config.facing, config.place));
   const origin = mixed?.origin ?? corridorOrigin(profile);
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {

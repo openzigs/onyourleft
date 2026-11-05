@@ -6,8 +6,9 @@
  * #1656; until one lands, a corridor plans exactly as it did before #1789,
  * whether its archive carries the fields (#1557's) or not (Protomaps' own, or
  * a self-hoster's). Since #1790 the roof and storey fields draw, and since
- * #1791 the building type; with both levers off (`mappedRoofShape: false`,
- * `buildingTypes: false`) nothing does.
+ * #1791 the building type, and since #1792 the colours and materials; with the
+ * three levers off (`mappedRoofShape: false`, `buildingTypes: false`,
+ * `mappedPaint: false`) nothing does.
  *
  * Each corridor here goes through the store's own pack and unpack
  * (`world-data/corridor.ts`), and each assertion reads `footprintPlans`'
@@ -110,19 +111,26 @@ describe('#1789: an archive without the building fields plans as before', () => 
     expect(plansDigest(corridor)).toStrictEqual({ plans: 12, digest: PLANS_BEFORE_1789 });
   });
 
-  // Since #1790 the roof and storey fields draw, and since #1791 the building type
-  // (`building-types.ts`) — every footprint here is set a church with a roof:shape and levels.
-  it('nothing draws from the fields with #1790’s and #1791’s levers off: every field set plans the same as none', () => {
+  // Since #1790 the roof and storey fields draw, since #1791 the building type
+  // (`building-types.ts`) and since #1792 the colours and materials — every footprint here is
+  // set a church with a roof:shape, levels, colours and materials.
+  it('nothing draws from the fields with #1790’s, #1791’s and #1792’s levers off: every field set plans the same as none', () => {
     const corridor = throughTheStore(withEveryField(footprintFixture().corridor));
     // Not vacuous: the fields survived the store's pack.
     expect(corridor.buildings[0]?.roofShape).toBe(BUILDING_FIELDS_DECODED.roofShape);
-    expect(plansDigest(corridor, { mappedRoofShape: false, buildingTypes: false })).toStrictEqual({
+    const off = { mappedRoofShape: false, buildingTypes: false, mappedPaint: false } as const;
+    expect(plansDigest(corridor, off)).toStrictEqual({
       plans: 12,
       digest: PLANS_BEFORE_1789,
     });
     // Control: each lever alone draws from its own fields, read through the store's pack.
-    expect(plansDigest(corridor, { buildingTypes: false }).digest).not.toBe(PLANS_BEFORE_1789);
-    expect(plansDigest(corridor, { mappedRoofShape: false }).digest).not.toBe(PLANS_BEFORE_1789);
+    expect(plansDigest(corridor, { ...off, buildingTypes: true }).digest).not.toBe(
+      PLANS_BEFORE_1789,
+    );
+    expect(plansDigest(corridor, { ...off, mappedRoofShape: true }).digest).not.toBe(
+      PLANS_BEFORE_1789,
+    );
+    expect(plansDigest(corridor, { ...off, mappedPaint: true }).digest).not.toBe(PLANS_BEFORE_1789);
     expect(plansDigest(corridor).digest).not.toBe(PLANS_BEFORE_1789);
   });
 

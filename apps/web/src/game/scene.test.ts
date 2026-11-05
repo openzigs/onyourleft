@@ -424,6 +424,7 @@ describe('the chase camera', () => {
       colours: new Float32Array(6),
       indices: new Uint32Array(0),
       quadCount: 0,
+      retraced: new Uint8Array(1),
     };
     const pose = cameraPose(corridor, 0, 0);
 

@@ -855,7 +855,11 @@ describe('the realistic rider moves like a rider — #625', () => {
       `#625: the shoulders half a stroke apart — ${(Math.abs(rocked) * 100).toFixed(2)} cm ` +
         `pedalling, ${(Math.abs(still) * 100).toFixed(3)} cm with no cadence`,
     );
-    expect(Math.abs(rocked)).toBeGreaterThan(0.025);
+    // #2153: 6 cm, between the 8.9 cm `bicycle.ts`'s 6° rock puts there on
+    // the hoods' 58° back and the 4.5 cm a rock put back to 3° would, so that
+    // undoing the owner's 6° goes red. 2.5 cm until then, which a 3° rock
+    // passed. `game.browser.spec.ts` holds the same floor on a live context.
+    expect(Math.abs(rocked)).toBeGreaterThan(0.06);
     // Toward the downstroke: +X's pedal is going down at a quarter turn.
     expect(rocked).toBeGreaterThan(0);
     expect(Math.abs(still)).toBeLessThan(1e-9);
@@ -1203,6 +1207,14 @@ describe('the realistic rider moves like a rider — #625', () => {
     expect(hoods.back - drops.back).toBeGreaterThan(18);
     // ⚠️ 10° until PR #2116's third pass raised the hoods' back so the arm
     // reaches the hood; the tops read by their hands beside the stem.
+    // #2153 (F5), decided: the bound KEEPS 5°, and the gap is not widened.
+    // The tops draw 62.0° against the hoods' 56.2°, 0.8° over the bound, and
+    // the owner approved PR #2116's frames at those backs (64° and 58°) on
+    // 2026-11-04. What tells the tops from the hoods is the hands beside the
+    // stem, which "puts each drawn hand on its grip" holds at 0.06 to 0.12 m
+    // across. The 0.8° is a tripwire on purpose: any further lift of the
+    // hoods' back, or a lowering of the tops', goes red here and comes back
+    // to the owner with frames rather than closing the gap unseen.
     expect(tops.back - hoods.back).toBeGreaterThan(5);
     expect(drops.back).toBeLessThan(25);
     expect(hoods.head - drops.head).toBeGreaterThan(0.2);
@@ -1662,25 +1674,43 @@ describe('the realistic rider moves like a rider — #625', () => {
     // right was clamped at straight down, and every one of the owner's frames
     // caught the cranks near a quarter turn. Now the swing is a share of the
     // position's own turn (`ELBOW_SWING_SHARE`).
+    //
+    // #2153 (F7): every 30° of the stroke, not only the two quarter turns
+    // this test once took, so "all round the stroke" is what it reads. The
+    // two sides differ most at the quarter turns, which are among the twelve.
+    //
+    // #2153 (F6): the drops' allowance is 8.5 cm, not 10. In the drops the
+    // two elbows still differ by 7.6 cm at a quarter turn, and that is the
+    // stroke's swing and nothing else: with `ELBOW_SWING_SHARE` at nought
+    // the difference is 0.4 cm. The swing shows in a frame from behind at a
+    // quarter turn (the owner's frames of 2026-11-05, #2153), one elbow out
+    // and the other in, so the allowance now sits just over what is drawn
+    // and a larger swing goes red. The hoods' 1.0 cm keeps its 7 cm.
     const renderer = await loadedOn(TABLET);
     const riders = renderer.realisticRidersOfLoadedWorld();
     if (riders === undefined) throw new Error('no world');
     const lines: string[] = [];
     for (const [name, riding, most] of [
-      ['drops', FAST, 0.1],
+      ['drops', FAST, 0.085],
       ['hoods', ORDINARY, 0.07],
     ] as const) {
       let apart = 0;
+      let apartAt = 0;
       let furthest = Number.NEGATIVE_INFINITY;
-      for (const crank of [HALF_PI, 3 * HALF_PI]) {
+      for (let step = 0; step < 12; step += 1) {
+        const crank = (step * Math.PI) / 6;
         const pose = ridden(riders, riding, crank);
         const left = outPast(riders, pose, 'L');
         const right = outPast(riders, pose, 'R');
-        apart = Math.max(apart, Math.abs(left - right));
+        if (Math.abs(left - right) > apart) {
+          apart = Math.abs(left - right);
+          apartAt = step * 30;
+        }
         furthest = Math.max(furthest, left, right);
       }
       lines.push(
-        `${name} ${(apart * 100).toFixed(1)} cm between the two, the further ${(furthest * 100).toFixed(1)} cm out`,
+        `${name} ${(apart * 100).toFixed(1)} cm between the two (at ${String(apartAt)}°), ` +
+          `the further ${(furthest * 100).toFixed(1)} cm out`,
       );
       // Half a stroke on, the other side is the one out: what differs between
       // them is the stroke, and the rest is mirrored.
@@ -1688,7 +1718,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(furthest, name).toBeLessThan(0.1);
     }
     console.log(
-      `PR #2116: at a quarter turn, each elbow out past its shoulder — ${lines.join('; ')}`,
+      `PR #2116: every 30° of the stroke, each elbow out past its shoulder — ${lines.join('; ')}`,
     );
   }, 120_000);
 

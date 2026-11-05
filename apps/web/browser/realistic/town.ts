@@ -8,8 +8,10 @@
  * `roof-variants`, since #1786 `dormer-variants`, since #1784
  * `archetype-porches`, since #1783 `commercial-archetypes`, since #1790
  * `mapped-roof-shape`, since #1791 `building-type`, since #2021 `steeples`,
- * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns` and since
- * #2026 `inferred-commercial`. Its own
+ * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
+ * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
+ * `start-year`, since #1794 `landmark-churches` and since #1795 `landmark-civic`.
+ * Its own
  * module so that a test reads the plans the page draws, and a lever parsed
  * but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -34,9 +36,13 @@ import {
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
+  mappedPaintWithLevers,
+  landmarkChurchesWithLevers,
+  landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
+  startYearWithLevers,
   steeplesWithLevers,
   urbanClassWithLevers,
   type Lever,
@@ -76,7 +82,9 @@ export function plannedTown(
     // and eaves, #1783: the commercial and multi-family archetypes, #1790: the mapped roof
     // and storey tags, #1791: the mapped building type, #2021: a place of worship's
     // steeple, #2023: an untagged footprint's inferred garage or shed, #2024: its inferred
-    // barn, and #2026: its inferred shop, unless their lever is off.
+    // barn, #2026: its inferred shop, #1792: the mapped colours and materials, #1793: a
+    // mapped house's start year, #1794: a place of worship's church, and #1795: a town
+    // hall's and a school's block, unless their lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
@@ -90,6 +98,10 @@ export function plannedTown(
       inferredOutbuildings: inferredOutbuildingsWithLevers(leversOff),
       inferredBarns: inferredBarnsWithLevers(leversOff),
       inferredCommercial: inferredCommercialWithLevers(leversOff),
+      mappedPaint: mappedPaintWithLevers(leversOff),
+      mappedStartYear: startYearWithLevers(leversOff),
+      landmarkChurches: landmarkChurchesWithLevers(leversOff),
+      landmarkCivic: landmarkCivicWithLevers(leversOff),
     },
   );
   return { land, plans, urban };

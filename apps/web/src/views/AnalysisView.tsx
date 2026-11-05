@@ -477,7 +477,13 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           )}
         </section>
 
-        <section className="oyl-panel" aria-labelledby="oyl-bests-heading">
+        {/* #2195: its two-column table fits a column, so it sits beside the
+            thresholds rather than across the page (`theme.css` §"Across every
+            column"). */}
+        <section
+          className="oyl-panel oyl-sections__fits-column"
+          aria-labelledby="oyl-bests-heading"
+        >
           <SectionHeading
             level={2}
             id="oyl-bests-heading"

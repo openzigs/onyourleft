@@ -592,6 +592,7 @@ describe('what the tablet says about the pictures — #530', () => {
   async function analysing(
     outcome: SidePoseOutcome = { kind: 'no-rider', cause: 'said-nobody' },
     place?: 'tablet' | 'computer' | 'instance',
+    hostedService?: () => string | undefined,
   ) {
     const context = await tablet({
       analyse: (control) =>
@@ -602,6 +603,7 @@ describe('what the tablet says about the pictures — #530', () => {
             closeSidePoseModel: () => undefined,
           }),
           place,
+          hostedService,
         }),
     });
     await press('Pair a phone');
@@ -651,6 +653,7 @@ describe('what the tablet says about the pictures — #530', () => {
         noRiderBecause: { 'said-nobody': 3, 'too-few-points': 0, implausible: 0 },
         unreadable: 0,
         skipped: 0,
+        rateLimited: 0,
         framing: 'no-reference',
         finished: false,
       }),
@@ -677,6 +680,7 @@ describe('what the tablet says about the pictures — #530', () => {
         noRiderBecause: { 'said-nobody': 2, 'too-few-points': 0, implausible: 0 },
         unreadable: 0,
         skipped: 0,
+        rateLimited: 0,
         framing: 'no-reference',
         finished: false,
       }),
@@ -704,6 +708,7 @@ describe('what the tablet says about the pictures — #530', () => {
       noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
       unreadable: 0,
       skipped: 0,
+      rateLimited: 0,
       framing: 'no-reference',
       finished: false,
     } as const;
@@ -753,6 +758,77 @@ describe('what the tablet says about the pictures — #530', () => {
     },
   );
 
+  const pictures = (): string =>
+    document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
+  const ON_TO =
+    'Your instance sends each one on to models.example, the service your own key is for.';
+
+  it('names the hosted service the instance sends each picture on to, before any and after — #2175', async () => {
+    const { send } = await analysing(
+      { kind: 'no-rider', cause: 'said-nobody' },
+      'instance',
+      () => 'models.example',
+    );
+    expect(pictures()).toBe(
+      `The phone’s pictures are sealed and sent on to your instance, about one a second, and not kept on this tablet. ${ON_TO} None has arrived yet.`,
+    );
+    await send(2);
+    expect(pictures()).toBe(
+      `Pictures sealed and sent to your instance, and not kept here: 2, with you in 0 of them. ${ON_TO} Not sent, because one was already with your instance: 0.`,
+    );
+  });
+
+  it('names no service when the instance’s own model looks at the pictures, and follows a switch at the next picture — #2175', async () => {
+    let host: string | undefined;
+    const { send } = await analysing(
+      { kind: 'no-rider', cause: 'said-nobody' },
+      'instance',
+      () => host,
+    );
+    await send(1);
+    expect(pictures()).not.toContain('sends each one on to');
+    host = 'models.example';
+    await send(1);
+    expect(pictures()).toContain(ON_TO);
+    host = undefined;
+    await send(1);
+    expect(pictures()).not.toContain('sends each one on to');
+  });
+
+  it('names the service while the first picture is with the instance — #2175', () => {
+    expect(
+      sidePicturesText({
+        place: 'instance',
+        model: 'loading',
+        posed: 0,
+        noRider: 0,
+        noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
+        unreadable: 0,
+        skipped: 0,
+        rateLimited: 0,
+        hostedService: 'models.example',
+        framing: 'no-reference',
+        finished: false,
+      }),
+    ).toBe(
+      `Sending the first picture to your instance, sealed. ${ON_TO} Pictures arriving meanwhile wait, one at a time.`,
+    );
+  });
+
+  it('counts pictures the instance turned away for coming too often apart, and does not stop — #2175', async () => {
+    const { send } = await analysing({ kind: 'rate-limited' }, 'instance');
+    await send(2);
+    expect(pictures()).toBe(
+      'Pictures sealed and sent to your instance, and not kept here: 0, with you in 0 of them. Not sent, because one was already with your instance: 0. Turned away by your instance unread, because it was asked too often: 2.',
+    );
+  });
+
+  it('says nothing of pictures turned away when none was — #2175', async () => {
+    const { send } = await analysing({ kind: 'no-rider', cause: 'said-nobody' }, 'instance');
+    await send(1);
+    expect(pictures()).not.toContain('Turned away');
+  });
+
   it('says a model that takes no pictures does not, in those words — #1106, ruling 3', () => {
     expect(SIDE_INSTANCE_STOPPED_TEXT['model-without-pictures']).toContain(
       'The model answered that it does not take pictures',
@@ -767,6 +843,7 @@ describe('what the tablet says about the pictures — #530', () => {
         noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
         unreadable: 0,
         skipped: 0,
+        rateLimited: 0,
         framing: 'no-reference',
         finished: false,
       }),
