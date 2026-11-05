@@ -69,8 +69,17 @@ describe('which way a navigation goes (#2054)', () => {
     expect(navigationKind(at('home'), at('activities'))).toBe('across');
     expect(navigationKind(at('activities'), at('routes'))).toBe('across');
     expect(navigationKind(by('#/segments/s-1'), by('#/activities/a-1'))).toBe('across');
-    // `/settings` is not above `/segments/…` because both begin with "/se".
     expect(navigationKind(by('#/settings'), by('#/segments/s-1'))).toBe('across');
+  });
+
+  it('compares whole segments, never a character prefix', () => {
+    // `/about` is a character prefix of `/about-x/y` but not a segment of it.
+    const page = (path: string): ReturnType<typeof matchHash> => ({
+      route: { ...routeById('about'), path },
+    });
+    expect(navigationKind(page('/about'), page('/about-x/y'))).toBe('across');
+    expect(navigationKind(page('/about-x/y'), page('/about'))).toBe('across');
+    expect(navigationKind(page('/about'), page('/about/y'))).toBe('deeper');
   });
 
   it('never counts Home as above anything, or every navigation from it would be deeper', () => {

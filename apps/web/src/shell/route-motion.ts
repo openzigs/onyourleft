@@ -86,11 +86,11 @@ export function mayAnimateBetween(from: RouteMatch, to: RouteMatch, immersive: b
 export type NavigationKind = 'deeper' | 'back' | 'across';
 
 /** The React transition type each kind is announced as (`addTransitionType`). */
-export const NAVIGATION_TRANSITION_TYPE: Readonly<Record<NavigationKind, string>> = {
+export const NAVIGATION_TRANSITION_TYPE = {
   deeper: 'oyl-deeper',
   back: 'oyl-back',
   across: 'oyl-across',
-};
+} as const satisfies Readonly<Record<NavigationKind, string>>;
 
 function segments(path: string): readonly string[] {
   return path.split('/').filter((segment) => segment !== '');
