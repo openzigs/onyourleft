@@ -1252,6 +1252,35 @@ describe('#2081 — the ride’s power curve, beside the all-time one', () => {
     ]);
   });
 
+  it('says the all-time line rests on the most recent rides only, when the library is longer than the read', async () => {
+    const power = sprintPower();
+    const activity = stubActivity({ hasPosition: false });
+    const rides = Array.from({ length: 201 }, (_, index) => ({
+      activity: stubActivity({ id: activityId(`old-${String(index)}`), hasPosition: false }),
+      power: Array.from({ length: 10 }, () => watts(100)),
+    }));
+    await openBoth(
+      stubDetail(ATHLETE, { activity, channels: { power }, laps: [] }),
+      stubAnalysis(ATHLETE, [{ activity, power }, ...rides]),
+    );
+    const slot = document.querySelector('[data-oyl-curve-slot]');
+    expect(slot?.textContent).toContain(
+      'The all-time line is your best across the 200 most recent rides',
+    );
+  });
+
+  it('says nothing of a cut-short library when every ride was read', async () => {
+    const power = sprintPower();
+    const activity = stubActivity({ hasPosition: false });
+    await openBoth(
+      stubDetail(ATHLETE, { activity, channels: { power }, laps: [] }),
+      stubAnalysis(ATHLETE, [{ activity, power }]),
+    );
+    expect(document.querySelector('[data-oyl-curve-slot]')?.textContent).not.toContain(
+      'most recent rides',
+    );
+  });
+
   it('asks for the power chart too when the curve is scrolled to first', async () => {
     observers = installFakeIntersectionObserver();
     const detail = stubDetail(ATHLETE, {
@@ -1520,6 +1549,21 @@ describe('#2081 — the tap and hover read-out', () => {
     expect(
       queryAll(document, '.oyl-trace-chart__reading').map((reading) => reading.textContent),
     ).toEqual(['153 W', '142 bpm', '88 rpm']);
+  });
+
+  it('snaps a tap between two steps to the slider’s step, so the slider and the line agree', async () => {
+    mounted = await open(indoorRide());
+    const [, heartRate] = queryAll(document, 'svg.oyl-trace');
+    laidOut(heartRate as Element);
+    await act(async () => {
+      heartRate?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 150.6, pointerType: 'touch' }),
+      );
+      await Promise.resolve();
+    });
+    await settle();
+    // 150.6 of 600 units is 301.2 s of 1 200; the nearest 2 s step is 302.
+    expect(document.querySelector<HTMLInputElement>('#oyl-trace-cursor')?.value).toBe('302');
   });
 
   it('announces the read-out politely and whole, so a keyboard or screen-reader user hears it', async () => {
