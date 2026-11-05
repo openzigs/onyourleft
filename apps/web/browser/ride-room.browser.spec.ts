@@ -924,8 +924,10 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
  *
  * ## What is held
  *
- * At every overlay viewport 47 rem tall or more — the tablets and the
- * upright phones — both ways (#1120):
+ * Where `theme.css` shows it — 47 rem tall or more (the tablets and the
+ * upright phones), and 64 rem wide or more at any height over 30 rem (the
+ * laptops: 1280×720 and 1024×600, measured here though neither is an overlay
+ * viewport of the other specs) — both ways (#1120):
  *
  * - **a target**: the link's box at least 48 × 48 (the owner's ride-time
  *   size, `design/ride-time-controls.ts` §`RIDE_TIME_TARGET_PIXELS`), drawn
@@ -944,8 +946,9 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
  *   nor *Start the race*, over no other panel, and not over the leaning
  *   rider's box (`game/camera.ts` §`riderFrameBox`).
  *
- * On a phone on its side (736×360, 844×390, 736×480) it is laid out at no
- * size: the recorded trade.
+ * On a phone on its side (736×360, 844×390, 736×480) and at 802×600, under
+ * 64 rem wide and under 47 rem tall, it is laid out at no size: the recorded
+ * trade.
  *
  * ## The controls
  *
@@ -968,10 +971,30 @@ const VOICE_INVITE = 'https://discord.gg/example';
  */
 const VOICE_ROW_SLACK = 1.1;
 
-/** Where the button is shown: 47 rem tall or more (`theme.css`). */
+/**
+ * Where the button is shown (`theme.css`): 47 rem tall or more, or 64 rem
+ * wide or more and over 30 rem tall.
+ */
 function voiceShown(viewport: Viewport): boolean {
-  return viewport.height >= 752;
+  return viewport.height >= 752 || (viewport.width >= 1024 && viewport.height > 480);
 }
+
+/**
+ * The overlay viewports, and the band between 30 and 47 rem tall that none of
+ * them is in (review 5777449216 on #2141): the two edges of the wide screens
+ * the button is shown on there, and 802×600, which it is not.
+ */
+const VOICE_VIEWPORTS: readonly Viewport[] = [
+  ...OVERLAY_VIEWPORTS,
+  { name: 'a laptop — 1280×720', width: 1280, height: 720, unstagedFails: true },
+  { name: 'the narrowest wide screen — 1024×600', width: 1024, height: 600, unstagedFails: true },
+  {
+    name: 'under 64 rem wide and under 47 rem tall — 802×600',
+    width: 802,
+    height: 600,
+    unstagedFails: true,
+  },
+];
 
 /** The colour a computed `rgb()`/`rgba()` names, as hex, and its alpha. */
 function hexOf(computed: string): { readonly hex: string; readonly alpha: number } {
@@ -1082,8 +1105,8 @@ function voicePlaceFailures(
 }
 
 test.describe('a race’s voice button on its line — #875', () => {
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`${voiceShown(viewport) ? 'a 48 px secondary button on an opaque panel, beside Start the race, over nothing' : 'laid out at no size on a phone on its side'} — ${viewport.name}`, async ({
+  for (const viewport of VOICE_VIEWPORTS) {
+    test(`${voiceShown(viewport) ? 'a 48 px secondary button on an opaque panel, beside Start the race, over nothing' : 'laid out at no size where it does not fit'} — ${viewport.name}`, async ({
       browser,
     }) => {
       const page = await sharedRide(browser, viewport, RACE_VOICE_WITH_SOUNDS);
@@ -1107,7 +1130,7 @@ test.describe('a race’s voice button on its line — #875', () => {
   }
 
   const at = (size: string): Viewport =>
-    OVERLAY_VIEWPORTS.find(
+    VOICE_VIEWPORTS.find(
       (each) => `${String(each.width)}×${String(each.height)}` === size,
     ) as Viewport;
 
@@ -1150,6 +1173,21 @@ test.describe('a race’s voice button on its line — #875', () => {
     const voice = voiceOf(seen, ANCHORED);
     const failures = [...voiceTargetFailures(voice), ...voicePlaceFailures(seen, voice, viewport)];
     console.log(`#875 control, a phone on its side: ${failures.join('; ')}`);
+    expect(failures).not.toEqual([]);
+  });
+
+  test('the control — shown under 64 rem wide and under 47 rem tall, it does not fit — 802×600', async ({
+    page,
+  }) => {
+    const viewport = at('802×600');
+    await openRide(page, viewport, RACE_VOICE_WITH_SOUNDS);
+    await page.addStyleTag({
+      content: '.oyl-game--riding .oyl-hud .oyl-hud__voice { display: block !important; }',
+    });
+    const seen = await measure(page);
+    const voice = voiceOf(seen, ANCHORED);
+    const failures = [...voiceTargetFailures(voice), ...voicePlaceFailures(seen, voice, viewport)];
+    console.log(`#875 control, 802×600: ${failures.join('; ')}`);
     expect(failures).not.toEqual([]);
   });
 

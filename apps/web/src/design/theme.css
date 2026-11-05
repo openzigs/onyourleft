@@ -7649,17 +7649,30 @@ select.oyl-input {
  * an upright phone's rider clearance pays for.
  *
  * ⚠️ **Where it is shown, and what that costs, recorded as #419 asks.** Shown
- * on a tablet and on an upright phone: the column layout and the tablets, at
- * 47 rem tall or more. **Not on a phone on its side** (the short corners
- * layout, 736×360 to 844×390 and up to 30 rem tall): there the race's notice
- * cell is the 16 rem one and already ends a few pixels above a 736×360
- * stage's bottom, with no room beside *Start the race* for the button and no
- * line below it — measured in the browser gate. There it is `display: none`,
- * neither drawn nor in the keyboard's order, and a racer on a phone on its
- * side is offered no voice link until the race is over. A group ride's link
+ * at 47 rem tall or more at any width from 22.5 rem (the tablets and the
+ * column layout of an upright phone), and on a WIDE screen of 64 rem or more
+ * at any height over 30 rem: the laptops, 1280×720, 1366×657 (a 1366×768
+ * laptop under its browser's chrome) and 1024×600, where it fits beside
+ * *Start the race* on one line. **Hidden everywhere else**, which is:
+ * - a phone on its side, the short corners layout up to 30 rem tall (736×360
+ *   to 844×390, and 736×480 at its tallest): the race's notice cell is the
+ *   16 rem one and already ends a few pixels above a 736×360 stage's bottom,
+ *   with no room beside *Start the race* for the button and no line below it;
+ * - a screen narrower than 64 rem and under 47 rem tall, such as 802×600:
+ *   the button breaks each half over two lines there, 89 px tall, and runs
+ *   over the route panel.
+ * Both were measured in the browser gate. Where it is hidden it is
+ * `display: none`, neither drawn nor in the keyboard's order, and a racer
+ * there is offered no voice link until the race is over. A group ride's link
  * is a notice of its own and is shown at every size.
  * `ride-room.browser.spec.ts` §"#875" holds the button's size, its panel's
- * contrast and its place at every overlay viewport, both ways.
+ * contrast and its place at every overlay viewport and at 1280×720, 1024×600
+ * and 802×600, both ways.
+ *
+ * Its keyboard focus ring sits on the panel, at no offset: the HUD's ring
+ * (`.oyl-hud :focus-visible`, #748) is 3 px wide and 2 px outside a control,
+ * which would put its outer 2 px past this panel's 3 px (padding and edge)
+ * and onto the sky. `hud-focus.browser.spec.ts` holds it inside the panel.
  */
 .oyl-hud__race-actions {
   display: flex;
@@ -7698,7 +7711,11 @@ select.oyl-input {
   text-align: center;
 }
 
-@media (min-width: 22.5rem) and (min-height: 47rem) {
+.oyl-hud__voice > .oyl-button:focus-visible {
+  outline-offset: 0;
+}
+
+@media (min-width: 22.5rem) and (min-height: 47rem), (min-width: 64rem) and (height > 30rem) {
   .oyl-game--riding .oyl-hud__voice {
     display: block;
   }
