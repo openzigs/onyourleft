@@ -62,6 +62,13 @@ export type ToWorker =
       readonly roomId: string;
       readonly athleteId: string;
     }
+  /** The room's voice link changed (#876): its riders are told, but `withheldFrom`. No answer. */
+  | {
+      readonly type: 'voice';
+      readonly roomId: string;
+      readonly invite?: string;
+      readonly withheldFrom?: string;
+    }
   /** Who sits in a seat of a room, and the room's tick (#789): a report from the room names them. */
   | {
       readonly type: 'seat';

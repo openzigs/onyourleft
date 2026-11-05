@@ -12,7 +12,8 @@
  * this is the browser half and the workflows.
  *
  * Since #1285 the required check is one job over several shards (five since
- * #1720, which split the browser gate in three by spec file), and the same
+ * #1720, which split the browser gate in three by spec file; six since #2154,
+ * which split the Vitest suite in two by project), and the same
  * thing must not happen there by another road: a shard the aggregating job
  * does not wait for, that job renamed, or its verdict weakened. Those are the
  * last describe in this file.
@@ -190,6 +191,18 @@ function measuredShards(table = 'shard-measurements'): (column: string) => numbe
  * #1280's margin criterion is written with it.
  */
 const AFTER_GATE_S = 4;
+
+/**
+ * The scripts CI runs the required Vitest run as, one per Vitest shard —
+ * #2154. `test:required:shard-1`, `test:required:shard-2`, …, in their order,
+ * from the root package; `check:test-split` holds what each selects.
+ */
+function requiredShardScripts(): string[] {
+  const { scripts } = JSON.parse(read(ROOT, 'package.json')) as { scripts: Record<string, string> };
+  return Object.keys(scripts)
+    .filter((name) => /^test:required:shard-\d+$/.test(name))
+    .sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
+}
 
 /** The web package's scripts. */
 const webScripts = (): Record<string, string> =>
@@ -646,7 +659,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     const commands = runCommands(rules);
     expect(commands).toEqual(
       expect.arrayContaining([
-        'pnpm run test:required',
+        ...requiredShardScripts().map((name) => `pnpm run ${name}`),
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-3',
@@ -875,7 +888,8 @@ describe('the required check is one job over every shard — #1285', () => {
       'bash scripts/check-capacitor-generated.test.sh',
       'bash scripts/check-third-party-notices.test.sh',
       'pnpm run check:notices',
-      'pnpm run test:required',
+      // #2154: the one Vitest command is a command per Vitest shard.
+      ...requiredShardScripts().map((name) => `pnpm run ${name}`),
       'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium',
       // #1362: the one gate command is a command per browser shard.
       ...shardScripts().map(([name]) => gateCommand(name)),
@@ -893,12 +907,24 @@ describe('the required check is one job over every shard — #1285', () => {
             : 1;
       expect(where, command).toHaveLength(expected);
     }
-    // The Vitest halves `check:test-split` reasons about share a runner with
-    // nothing that would slow a case past its timeout: the same shard, and no
-    // concurrent step in it.
-    const vitest = [...ran].filter(([, commands]) => commands.includes('pnpm run test:required'));
-    expect(vitest[0]?.[1]).toContain('pnpm run test:a11y');
-    expect(vitest[0]?.[1].join('\n')).not.toContain('run-concurrently');
+    // The Vitest runs `check:test-split` reasons about share a runner with
+    // nothing that would slow a case past its timeout: no concurrent step and
+    // no browser in a Vitest shard, one part of the required run to a shard,
+    // and the accessibility gate beside one of them (#2154).
+    const parts = requiredShardScripts().map((name) => `pnpm run ${name}`);
+    expect(parts.length, 'parts of the required run').toBeGreaterThanOrEqual(2);
+    const vitest = [...ran].filter(([, commands]) => parts.some((part) => commands.includes(part)));
+    expect(vitest).toHaveLength(parts.length);
+    for (const [id, commands] of vitest) {
+      expect(
+        commands.filter((command) => parts.includes(command)),
+        id,
+      ).toHaveLength(1);
+      expect(commands.join('\n'), id).not.toMatch(/run-concurrently|playwright|test:browser/);
+    }
+    expect(vitest.filter(([, commands]) => commands.includes('pnpm run test:a11y'))).toHaveLength(
+      1,
+    );
   });
 
   it('runs every job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {

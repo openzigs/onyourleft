@@ -58,6 +58,14 @@ export const MAXIMUM_RIDERS = 100;
  */
 export const MAXIMUM_REPORTED_POWER_WATTS = 2500;
 
+/**
+ * What a welcome's `voiceInvite` may be (#875): an `https:` invite on
+ * Discord's own invite host, `discord.gg`, and its code — and nothing else, so
+ * no scheme, host, path, query or fragment of anybody else's choosing reaches
+ * a link a rider presses.
+ */
+export const VOICE_INVITE_PATTERN = /^https:\/\/discord\.gg\/[A-Za-z0-9-]{2,32}$/;
+
 /** The longest admission ticket, in characters. */
 export const MAXIMUM_TICKET_LENGTH = 1024;
 
@@ -222,6 +230,11 @@ export const MESSAGE_FIELDS = {
         },
       },
     },
+    // #875: the room's Discord voice link, and only Discord's ({@link VOICE_INVITE_PATTERN}).
+    voiceInvite: {
+      shape: { kind: 'string', pattern: VOICE_INVITE_PATTERN, maximumLength: 51 },
+      optional: true,
+    },
   },
   refuse: {
     reason: {
@@ -331,6 +344,13 @@ export const MESSAGE_FIELDS = {
       shape: { kind: 'array', items: RIDER_ID, maximumLength: MAXIMUM_RIDERS, distinct: true },
     },
   },
+  // #876: the room's voice link changed under riders already welcomed.
+  voice: {
+    voiceInvite: {
+      shape: { kind: 'string', pattern: VOICE_INVITE_PATTERN, maximumLength: 51 },
+      optional: true,
+    },
+  },
 } as const satisfies Record<ProtocolMessage['type'], Readonly<Record<string, Field>>>;
 
 /** The types a room may receive. A room refuses a `frame` from a client as an unknown type. */
@@ -382,4 +402,5 @@ export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
   'name',
   'standings',
   'finish',
+  'voice',
 ];

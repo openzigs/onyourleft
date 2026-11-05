@@ -371,6 +371,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putReport: { notAScopedRead: 'a write' },
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
   logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },
+  logVoiceAction: {
+    notAScopedRead: 'a write to the moderators’ log (#876); sql-store.moderation.test.ts',
+  },
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
   listLoadAthletes: {
     notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',
