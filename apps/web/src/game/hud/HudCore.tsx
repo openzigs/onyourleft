@@ -33,6 +33,8 @@ import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
 
 import {
+  CLOCK_KEY,
+  ELAPSED_TIME_KEY,
   EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
   givesWayToTheRoom,
@@ -87,6 +89,11 @@ export interface HudCoreProps extends SharedProps {
    */
   readonly units: UnitSystem;
   /**
+   * The time of day — #2072, `fields.ts` §`HudInput.timeOfDay`. `HudPanel`
+   * reads it from the device; the demo passes none, and has no clock.
+   */
+  readonly timeOfDay?: Date | undefined;
+  /**
    * Whether the HUD offers #1482's touch lock: a rider's every ride does; the
    * demo, which nobody rides with wet gloves, does not.
    */
@@ -116,6 +123,13 @@ export interface HudCoreProps extends SharedProps {
    * demo meets WCAG 2.2 SC 2.2.2 on its own. A rider's ride never passes it.
    */
   readonly withoutEnd?: boolean;
+  /**
+   * Leaves out *Elapsed* (#2072). The demo's: its clock stops while it is
+   * paused, so it has no elapsed time apart from the moving time it shows,
+   * and the same figure under two labels would say it had never paused. A
+   * rider's ride keeps it.
+   */
+  readonly withoutElapsed?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -135,8 +149,11 @@ export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
-  const readings =
-    props.withoutPacer === true ? all.filter((reading) => reading.key !== EMPTY_GAP_KEY) : all;
+  const readings = all.filter(
+    (reading) =>
+      !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
+      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY),
+  );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
   // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
@@ -405,6 +422,9 @@ function fieldClass(reading: HudReading): string {
     'oyl-hud__field',
     ...(reading.stale ? ['oyl-hud__field--stale'] : []),
     ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
+    // #2072: the clock row's two (`theme.css` §"THE CLOCK ROW").
+    ...(reading.key === ELAPSED_TIME_KEY ? ['oyl-hud__field--elapsed'] : []),
+    ...(reading.key === CLOCK_KEY ? ['oyl-hud__field--clock'] : []),
     // #1356: on a phone a room's readings take the places of these.
     ...(isRoomReading(reading) ? ['oyl-hud__field--room'] : []),
     // #1812: and a Delivery round's, the same way (`theme.css` §"A ROOM RIDE ON A PHONE").
