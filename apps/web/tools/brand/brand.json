@@ -179,6 +179,36 @@
       "family": "icon",
       "kind": "foreground",
       "size": 432
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-mdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 288
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-hdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 432
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-xhdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 576
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-xxhdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 864
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-xxxhdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 1152
     }
   ]
 }
