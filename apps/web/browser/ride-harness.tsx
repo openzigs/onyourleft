@@ -204,6 +204,86 @@ export interface StageMeasurement {
      */
     readonly secondaryOverflow: number;
   };
+  /**
+   * #875: a race's *Join voice on Discord* button on its start line, and what
+   * is beside it, or `undefined` where the HUD renders none. Here rather than
+   * read by the spec so a measurement taken without anchor positioning (#1120)
+   * carries it too.
+   */
+  readonly voice: VoiceMeasurement | undefined;
+}
+
+/** @see StageMeasurement.voice */
+export interface VoiceMeasurement {
+  /** The link drawn as a button, hit-tested at its centre. */
+  readonly button: StageItem;
+  /** Whether a point 2 px inside each of its four corners hits it too. */
+  readonly cornersOnTop: boolean;
+  readonly classes: string;
+  /** Its text, which is its accessible name. */
+  readonly text: string;
+  /** How far its words run past its own box: `scrollWidth − clientWidth`. */
+  readonly overflow: number;
+  /** On how many lines each of its two halves is set: it breaks between them, not inside one. */
+  readonly halfLines: readonly number[];
+  readonly href: string;
+  /** The panel it stands on, and that panel's computed background. */
+  readonly panel: Box;
+  readonly panelBackground: string;
+  /** The button's own computed fill and label. */
+  readonly fill: string;
+  readonly label: string;
+  /** The race's notice, *Start the race* (if offered) and the notice cell. */
+  readonly notice: Box | undefined;
+  readonly start: Box | undefined;
+  readonly cell: Box | undefined;
+}
+
+/** @see StageMeasurement.voice */
+function voiceOf(): VoiceMeasurement | undefined {
+  const panel = document.querySelector('.oyl-hud__race .oyl-hud__voice');
+  const link = panel?.querySelector('a');
+  if (panel === null || panel === undefined || link === null || link === undefined) {
+    return undefined;
+  }
+  const box = boxOf(link);
+  const hits = (x: number, y: number): boolean => {
+    const hit = document.elementFromPoint(x, y);
+    return hit !== null && (hit === link || link.contains(hit));
+  };
+  const start = [...document.querySelectorAll('.oyl-hud__race button')].find(
+    (each) => textOf(each) === 'Start the race',
+  );
+  const notice = document.querySelector('.oyl-hud__race > .oyl-status');
+  const cell = document.querySelector('.oyl-hud__notices');
+  const style = window.getComputedStyle(link);
+  return {
+    button: item(`voice: ${textOf(link)}`, link),
+    cornersOnTop:
+      box.width > 4 &&
+      box.height > 4 &&
+      hits(box.left + 2, box.top + 2) &&
+      hits(box.right - 2, box.top + 2) &&
+      hits(box.left + 2, box.bottom - 2) &&
+      hits(box.right - 2, box.bottom - 2),
+    classes: link.className,
+    text: link.textContent ?? '',
+    overflow: link.scrollWidth - link.clientWidth,
+    halfLines: [...link.querySelectorAll('.oyl-hud__voice-words')].map((each) =>
+      Math.round(
+        each.getBoundingClientRect().height /
+          Number.parseFloat(window.getComputedStyle(each).lineHeight),
+      ),
+    ),
+    href: link.getAttribute('href') ?? '',
+    panel: boxOf(panel),
+    panelBackground: window.getComputedStyle(panel).backgroundColor,
+    fill: style.backgroundColor,
+    label: style.color,
+    notice: notice === null ? undefined : boxOf(notice),
+    start: start === undefined ? undefined : boxOf(start),
+    cell: cell === null ? undefined : boxOf(cell),
+  };
 }
 
 /** @see StageMeasurement.moving */
@@ -603,7 +683,17 @@ const LAP_RACE =
   ROOM_QUERY === 'lap-race-following' ||
   ROOM_QUERY === 'lap-race-report';
 const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING || LAP_RACE;
-const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
+/**
+ * `ride.html?room=race-voice` — #875: `?room=race`'s race waiting on its line,
+ * its welcome carrying the room's Discord voice link, so the notice slot holds
+ * the race's notice, and *Start the race* and *Join voice on Discord* on one
+ * row beside each other (the owner's ruling of 2026-11-04: a button). A race
+ * holds the link for as long as it waits, so it is there however long the
+ * page takes to measure. `ride-room.browser.spec.ts` §"#1407" measures it,
+ * with sounds on, as it does `?room=race`, and §"#875" the button itself.
+ */
+const RACE_VOICE = ROOM_QUERY === 'race-voice';
+const IN_A_RACE = ROOM_QUERY === 'race' || RACE_VOICE || WITH_STANDINGS;
 /**
  * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
  * group ride in a room whose notice slot carries a room sentence, measured by
@@ -1008,6 +1098,7 @@ function measure(): StageMeasurement {
       lines:
         movingText === null || movingText === undefined ? 0 : movingRange.getClientRects().length,
     },
+    voice: voiceOf(),
   };
 }
 
@@ -1284,7 +1375,15 @@ async function run(): Promise<void> {
       IN_A_RACE ? 'race' : 'ride',
       'on',
       LAP_RACE ? { laps: 3, items: 'on' } : undefined,
+      RACE_VOICE ? 'https://discord.gg/example' : undefined,
     );
+    if (RACE_VOICE) {
+      await until('the voice link', () =>
+        [...document.querySelectorAll('.oyl-hud__race a')].find(
+          (each) => each.textContent === 'Join voice on Discord (opens Discord)',
+        ),
+      );
+    }
     if (ROOM_NOTICE !== undefined) {
       if (ROOM_NOTICE === 'lost') {
         // Lost, and kept lost: no ticket comes back for the rejoin.
