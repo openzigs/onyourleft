@@ -30,6 +30,7 @@ import { describe, expect, it } from 'vitest';
 import { metres, metresPerSecond, type RouteProfile } from '@onyourleft/domain';
 
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES, cameraRig } from './camera';
+import { drawnCamera } from './chase-camera-testing';
 import { clearOfTheCamera, type ShapeTriangles, type ShapesOf } from './near-field';
 import { fittedRealistic, modelTriangles } from './near-field-testing';
 import { NEAR_TREE_FADE_METRES, nearTreeKeep, type NearTreeFade } from './near-tree-fade';
@@ -43,7 +44,7 @@ import {
   sBendRoute,
 } from './route-fixtures-testing';
 import type { ScatterItem, SceneryKind } from './scatter';
-import { sceneFrame } from './scene';
+import { sceneFrame, type SceneInput } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
 import {
@@ -394,18 +395,23 @@ interface RideFrame {
   readonly scatter: readonly ScatterItem[];
 }
 
-/** A ride a metre at a time, at 8 m/s. */
+/**
+ * A ride a metre at a time, at 8 m/s, with the camera `GameView` draws: since
+ * #1994 `sceneFrame`'s, turned to the heading damped from frame to frame.
+ */
 function ride(profile: RouteProfile): readonly RideFrame[] {
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
   const frames: RideFrame[] = [];
+  const inputAt = (distance: number): SceneInput => ({
+    profile,
+    origin,
+    state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+  });
+  const drawn = drawnCamera(inputAt, 8);
   for (let distance = 0; distance < profile.totalDistance; distance += 1) {
-    const frame = sceneFrame({
-      profile,
-      origin,
-      state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
-    });
-    frames.push({ pose: frame.camera, scatter: frame.scatter });
+    const frame = sceneFrame(inputAt(distance));
+    frames.push({ pose: drawn(distance, frame.camera), scatter: frame.scatter });
   }
   return frames;
 }
