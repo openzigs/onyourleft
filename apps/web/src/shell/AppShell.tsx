@@ -1137,7 +1137,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * decoration and is hidden from assistive technology twice over (`alt=""`
  * and `aria-hidden`): the header's wordmark and its `aria-label` already name
  * the app once, and a second name would read it twice. `theme.css`
- * §"NAVIGATION" draws it only on a rail with the height to spare; whether a
+ * §"THE MARK" draws it only on a rail with the height to spare; whether a
  * phone's bar carries one is the owner's open question on #2030.
  */
 function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
