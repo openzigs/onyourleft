@@ -20,9 +20,10 @@
  *   sections lie in at least two columns, and Devices' garage (#942) holds at
  *   least three cards in a row — two was all the measure left it.
  * - **Upright, two columns where content allows.** Every `sections` route but
- *   two: Settings, whose broad cards keep one column there so a segmented
- *   choice keeps its one row (`theme.css` §"Broad sections"), and Devices,
- *   whose garage was already two cards wide upright.
+ *   these: Settings, whose broad cards keep one column there so a segmented
+ *   choice keeps its one row (`theme.css` §"Broad sections"), Devices,
+ *   whose garage was already two cards wide upright, and the screens #2190
+ *   made a pair ({@link PAIRED_BY_2190}), one column upright by design.
  * - **The line under the title keeps the reading measure** wherever `main`
  *   dropped it.
  * - **A phone is unchanged**: one column on every one of these routes.
@@ -105,8 +106,16 @@ const PHONE: Viewport = { name: 'phone 390×844', width: 390, height: 844, inset
 
 const SECTIONS = ALL_ROUTES.filter((route) => route.layout === 'sections');
 
+/**
+ * The screens #2190 made a pair (`.oyl-sections--pair`, `theme.css`), which
+ * are one column upright by design: `RouteBuilderView` and, unembedded,
+ * `ActivityDetailView` are the only views that render the class. The upright
+ * case below checks the page against this list both ways.
+ */
+const PAIRED_BY_2190: readonly string[] = ['route-builder', 'activity-detail'];
+
 /** Upright, these keep one column of sections — and why is in the file header. */
-const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices'];
+const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices', ...PAIRED_BY_2190];
 
 /** Within this of the viewport's right edge counts as reaching it: `main`'s own padding. */
 const EDGE_SLACK_PIXELS = 32;
@@ -438,6 +447,12 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
           2,
         );
       }
+      // The exemption is a pair only where the page is one, so it cannot hide a
+      // route that collapsed for another reason.
+      expect(
+        (await page.locator('main .oyl-sections--pair').count()) > 0,
+        `${route.id}: a pair on the page and in PAIRED_BY_2190 disagree`,
+      ).toBe(PAIRED_BY_2190.includes(route.id));
     }
     console.log(`[#1014] ${TABLET_UPRIGHT.name}\n${report.join('\n')}`);
   });
