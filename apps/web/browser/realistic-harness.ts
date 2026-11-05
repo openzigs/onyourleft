@@ -62,6 +62,7 @@ import {
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
   cityStreetscapeFixture,
   countrysideFixture,
+  datedStreetFixture,
   houseStreetFixture,
   commercialStreetFixture,
   mappedPaintStreetFixture,
@@ -498,7 +499,9 @@ async function run(): Promise<void> {
                           ? untaggedStreetFixture(latitude)
                           : config.town === 'painted'
                             ? mappedPaintStreetFixture(latitude)
-                            : undefined;
+                            : config.town === 'dated'
+                              ? datedStreetFixture(latitude)
+                              : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

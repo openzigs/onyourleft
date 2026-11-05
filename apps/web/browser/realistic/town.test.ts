@@ -16,6 +16,8 @@
  * the tagged street's roofs as tagged without it, and every tag ignored with it.
  * Since #1792 `-mapped-paint`: the painted street's walls in their tagged
  * materials without it, and every colour and material ignored with it.
+ * Since #1793 `-start-year`: the dated road's 1915 houses Foursquares without
+ * it, and every year ignored with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -31,6 +33,7 @@ import {
 } from '../../src/game/footprint-buildings';
 import {
   commercialStreetFixture,
+  datedStreetFixture,
   houseStreetFixture,
   mappedPaintStreetFixture,
   mappedRoofStreetFixture,
@@ -177,6 +180,29 @@ describe('the realistic page’s `mapped-paint` lever — #1792', () => {
     // Not vacuous: with the lever on, the same street plans otherwise.
     const on = plannedTown(street, parseConfig('?town=painted').leversOff).plans;
     expect(on.map((plan) => plan.surfaces)).not.toStrictEqual(plans.map((plan) => plan.surfaces));
+  });
+});
+
+describe('the realistic page’s `start-year` lever — #1793', () => {
+  const road = datedStreetFixture();
+
+  it('draws the dated road’s 1915 houses as Foursquares on the product’s page', () => {
+    const { plans } = plannedTown(road, parseConfig('?town=dated').leversOff);
+    const of1915 = plans.filter((_, index) => road.corridor.buildings[index]?.startYear === 1915);
+    expect(of1915.length).toBeGreaterThan(0);
+    expect(of1915.every((plan) => plan.archetype === 'foursquare')).toBe(true);
+  });
+
+  it('plans the dated road, with `levers=-start-year`, as the planner with the years off does', () => {
+    const { land, plans, urban } = plannedTown(
+      road,
+      parseConfig('?town=dated&levers=-start-year').leversOff,
+    );
+    const off = footprintPlans(road.corridor, land, road.profile, road.origin, undefined, urban, {
+      mappedStartYear: false,
+    }).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
   });
 });
 

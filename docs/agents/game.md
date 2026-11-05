@@ -1272,6 +1272,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pitch, porch, shutters, picture window, dormers,
                         garage and cladding together, `unknown` planned as
                         before (`-house-archetypes`, `town=houses`);
+                        since #1793 a mapped start year narrowing the ranked
+                        candidates to its era (`ARCHETYPE_ERAS`,
+                        `archetypeCandidates`), one of the era before a
+                        timeless Colonial or farmhouse, never widening and
+                        ignored where it leaves none (`-start-year`,
+                        `town=dated`);
                         since #1785 a gambrel, half-hipped, saltbox or
                         side-hipped roof (`variantRoof`) on a share of the
                         farmhouses, bungalows, Colonials and ranches, on a

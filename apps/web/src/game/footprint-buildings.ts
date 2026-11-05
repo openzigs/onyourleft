@@ -5372,6 +5372,7 @@ export function footprintPlans(
         buildings: options.commercialArchetypes ?? true,
         steeples: options.steeples ?? true,
         mappedPaint,
+        startYear: options.mappedStartYear ?? true,
       },
     );
     plans.push(plan);
@@ -6379,6 +6380,14 @@ export interface FootprintPlanOptions {
    * tags are ignored and every plan is as before (`?levers=-mapped-paint`).
    */
   readonly mappedPaint?: boolean;
+  /**
+   * #1793: a mapped house's `startYear`, where #1789 carries it, narrowing its
+   * archetype to those of its era (`house-archetypes.ts` §`ARCHETYPE_ERAS`),
+   * and ignored where it would leave none; `true` by default, and only while
+   * `houseArchetypes` is on. Off, the year is ignored and every plan is as
+   * before (`?levers=-start-year`).
+   */
+  readonly mappedStartYear?: boolean;
 }
 
 /**
@@ -6429,6 +6438,8 @@ interface ArchetypeChoice {
   readonly steeples?: boolean;
   /** #1792: whether its mapped colours and materials paint and clad it (`-mapped-paint` off). */
   readonly mappedPaint?: boolean;
+  /** #1793: whether its mapped start year narrows its archetype (`-start-year` off). */
+  readonly startYear?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -6575,6 +6586,8 @@ function planFootprint(
             pitched,
           },
           family === 'bungalow' ? BUNGALOW_ONLY : undefined,
+          // #1793: its mapped year, which only narrows the candidates.
+          choice.startYear === true ? building.startYear : null,
         )
       : 'unknown';
   const features = droppedFeatures(
