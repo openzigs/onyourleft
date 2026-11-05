@@ -1096,6 +1096,59 @@ test.describe('#993 — the help control beside a title', () => {
   });
 });
 
+/**
+ * #2065 review: opening the help must not move its ⓘ. The title block is as
+ * wide as its words from the rail's breakpoint, and an open panel is words
+ * too — unless the help is contained, the box grows to its cap and the ⓘ
+ * (drawn at the box's end edge) jumps to the shell's far side.
+ */
+const HELP_VIEWPORTS = [
+  { name: 'tablet 1280×800', width: 1280, height: 800 },
+  { name: 'narrow 640×900', width: 640, height: 900 },
+  { name: 'phone 412×915', width: 412, height: 915 },
+] as const;
+
+test.describe('#993 — opening the help does not move its control (#2065)', () => {
+  for (const viewport of HELP_VIEWPORTS) {
+    test(`on every route with a help, at ${viewport.name}`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await open(
+        page,
+        { ...viewport, margin: 0, consentBelowFold: [], summaryLines: 2 },
+        'data=empty',
+      );
+      const moved: string[] = [];
+      let checked = 0;
+      for (const route of ALL_ROUTES) {
+        await visit(page, route);
+        const details = page.locator('main > .oyl-view-head > details.oyl-help');
+        if ((await details.count()) === 0) continue;
+        const summary = details.locator('> summary');
+        const box = async (): Promise<{ left: number; top: number }> =>
+          summary.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, top: rect.top };
+          });
+        const closed = await box();
+        await summary.click();
+        await expect(details).toHaveAttribute('open', '');
+        const opened = await box();
+        await summary.click();
+        await expect(details).not.toHaveAttribute('open');
+        checked += 1;
+        if (Math.abs(opened.left - closed.left) > 0.5 || Math.abs(opened.top - closed.top) > 0.5) {
+          moved.push(
+            `${route.id}: ${closed.left.toFixed(1)},${closed.top.toFixed(1)} → ` +
+              `${opened.left.toFixed(1)},${opened.top.toFixed(1)}`,
+          );
+        }
+      }
+      expect(checked, 'routes with a help opened').toBeGreaterThan(3);
+      expect(moved, 'routes whose ⓘ moved when its help opened').toEqual([]);
+    });
+  }
+});
+
 test.describe('#1013 — the help control beside a section heading', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

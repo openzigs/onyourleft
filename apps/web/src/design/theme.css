@@ -368,12 +368,14 @@ h3 {
 }
 
 /*
- * ⚠️ **A page title is the display step since #992** — the owner's ruling of
- * 2026-10-02 on epic #935 ("a bold type scale"): every view's `h1` is
- * `--oyl-font-size-display` at the heaviest weight, in the display face, and
- * shares its declarations with `.oyl-display` below. A reviewer who remembers
- * the `h1` at `xxl` is reading the old file. Section headings step down from
- * it, `h2` at `xl` and `h3` at `lg`, both bold.
+ * ⚠️ **A page title was the display step from #992 to #2065.** #992 (the
+ * owner's ruling of 2026-10-02 on epic #935, "a bold type scale") set every
+ * view's `h1` at `--oyl-font-size-display`, heaviest weight, display face,
+ * sharing its declarations with `.oyl-display` below. Since #2065 a view's
+ * title is `.oyl-view-head > h1`, which sets the size — `lg` on a phone, `xxl`
+ * from 40rem — and keeps the weight and the face from here. A reviewer who
+ * remembers the display step on a title is reading the old file. Section
+ * headings step down from `h1`, `h2` at `xl` and `h3` at `lg`, both bold.
  */
 h1 {
   font-family: var(--oyl-font-family-display);
@@ -1180,6 +1182,12 @@ html {
    wherever the row is wider than the measure, and squeeze the line. */
 .oyl-view-head > .oyl-help {
   flex-basis: 100%;
+  /* The box is as wide as its words (#2065), and an open panel is words: left
+     to contribute, one click widens the box to its cap and the ⓘ, drawn at the
+     box's end edge, jumps to the shell's far side. Contained, the help adds
+     nothing to the box's width and the panel takes the width the title row
+     gave it. */
+  contain: inline-size;
 }
 
 .oyl-help > summary {
@@ -2280,9 +2288,9 @@ html {
  * than merely bigger: the target scroll position is `main`'s offset minus the
  * margin, which comes out negative, so the browser clamps it to the top of the
  * document and `main` is never tucked under the header at all. Measured by
- * `shell.browser.spec.ts`: `scrollY` 0, the `h1` 24px clear of the header —
- * which is `.oyl-main`'s own top padding (1.5rem then, 1rem here since
- * #2065), the same gap the layout has with no sticky header. The 5rem this
+ * `shell.browser.spec.ts`: `scrollY` 0, the `h1` 24px clear of the header then —
+ * which is `.oyl-main`'s own top padding (1.5rem then, `md` + `xs` = 1.25rem,
+ * 20px, since #2065), the same gap the layout has with no sticky header. The 5rem this
  * replaces lands `scrollY` at 17 and the
  * `h1` 7px clear, flush against the chrome.
  *
