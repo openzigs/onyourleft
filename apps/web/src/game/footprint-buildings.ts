@@ -6671,8 +6671,15 @@ function planFootprint(
   // #1792: the mapped `building:material` and, on a pitched roof, `roof:material`, while
   // the lever is on — over the archetype's cladding and every seeded share.
   const wallMaterial = choice.mappedPaint === true ? building.wallMaterial : null;
+  // A material nothing draws (`concrete`) is unread, as on the wall side: it leaves the seeded draw.
   const roofMaterial =
-    choice.mappedPaint === true && roof !== 'flat' ? building.roofMaterial : null;
+    choice.mappedPaint === true &&
+    roof !== 'flat' &&
+    building.roofMaterial !== null &&
+    (building.roofMaterial === 'asphalt' ||
+      MAPPED_ROOF_SURFACES[building.roofMaterial] !== undefined)
+      ? building.roofMaterial
+      : null;
   // #1792: `wood` is clapboard wherever clapboard is drawn, but on a barn, whose planks are wood.
   const woodSiding =
     wallMaterial === 'wood' && !part && storeys <= TOWER_STOREYS && family !== 'barn';

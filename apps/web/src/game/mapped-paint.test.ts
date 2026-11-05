@@ -191,17 +191,24 @@ describe('#1792: a mapped material, read back from the plan', () => {
     expect(cladCodes(asphalt, 'roof').has(CLAD_SHINGLE)).toBe(true);
   });
 
-  it('reads no stone, no concrete roof and no roof material on a flat roof: the plan is as untagged', () => {
+  it('reads no stone and no concrete roof: the plan is as untagged, at the places the seeded draw would clad', () => {
+    const clapboard = placeWhere((plan) => plan.cladding.wall === 'clapboard');
+    const stone = planHouse(clapboard, { wallMaterial: 'stone' });
+    const untaggedWall = planHouse(clapboard, {});
+    expect(untaggedWall.cladding.wall).toBe('clapboard');
+    expect(planFingerprint([stone])).toBe(planFingerprint([untaggedWall]));
+    expect(stone.surfaces).toStrictEqual(untaggedWall.surfaces);
+    const shingled = placeWhere((plan) => plan.cladding.roof === 'shingle');
+    const concrete = planHouse(shingled, { roofMaterial: 'concrete' });
+    const untaggedRoof = planHouse(shingled, {});
+    expect(untaggedRoof.cladding.roof).toBe('shingle');
+    expect(planFingerprint([concrete])).toBe(planFingerprint([untaggedRoof]));
+    expect(concrete.surfaces).toStrictEqual(untaggedRoof.surfaces);
+    expect(concrete.cladding.roof).toBe('shingle');
+  });
+
+  it('reads no roof material on a flat roof: the plan is as untagged', () => {
     const along = 1_100;
-    const untagged = planHouse(along, {});
-    for (const tags of [
-      { wallMaterial: 'stone' },
-      { roofMaterial: 'concrete' },
-    ] as const satisfies readonly Partial<BuildingFields>[]) {
-      const plan = planHouse(along, tags);
-      expect(planFingerprint([plan])).toBe(planFingerprint([untagged]));
-      expect(plan.surfaces).toStrictEqual(untagged.surfaces);
-    }
     const flat = planHouse(along, { roofShape: 'flat' });
     expect(flat.roof).toBe('flat');
     const flatMetal = planHouse(along, { roofShape: 'flat', roofMaterial: 'metal' });

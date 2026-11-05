@@ -272,7 +272,7 @@ export function paintsOf(surface: StructureSurface): readonly Rgb[] | undefined 
  * linear, in its index order. That order is the archive's schema: a mapped
  * `building:colour` or `roof:colour` reaches the plan as an index into it
  * (#1789, `@onyourleft/map-features` §`BUILDING_PALETTE_SIZE`), never as a
- * colour, and the profile appends and never reorders. `building-paint.test.ts`
+ * colour, and the profile appends and never reorders. `mapped-paint.test.ts`
  * holds this list to the Java one, entry for entry.
  */
 export const MAPPED_PALETTE: readonly Rgb[] = [
