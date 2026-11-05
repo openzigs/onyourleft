@@ -700,7 +700,9 @@ test.describe('a room ride with sounds on — #1398', () => {
  * #1407 — the two room rides with sounds on that §"#1398" left over:
  * *Report*'s reasons open (`?room=report&sounds=on`) and a race waiting on
  * its start line (`?room=race&sounds=on`: the room's maker's notice, with
- * *Start the race*, and no room row).
+ * *Start the race*, and no room row) — and, since #875, that race with the
+ * room's Discord voice link as its notice's last line
+ * (`?room=race-voice&sounds=on`, {@link RACE_VOICE_WITH_SOUNDS}).
  *
  * ## What is held
  *
@@ -730,6 +732,34 @@ const REPORT_WITH_SOUNDS = `${REPORT_OPEN}&sounds=on`;
 
 const RACE_WITH_SOUNDS = '?room=race&sounds=on';
 
+/**
+ * #875: the same race on its line, its welcome carrying the room's Discord
+ * voice link, which `GameView` puts as the race notice's last line
+ * (`game/room-voice.ts`). Held to everything `?room=race&sounds=on` is, both
+ * ways; and the link pressable where it is drawn on a tablet, and laid out at
+ * no size on a phone (`theme.css` §"A RACE'S VOICE LINK, ON ITS LINE").
+ */
+const RACE_VOICE_WITH_SOUNDS = '?room=race-voice&sounds=on';
+
+/** Whether the voice link is the topmost element at its own centre, and wholly on screen. */
+async function voiceLinkHit(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const link = [...document.querySelectorAll('.oyl-hud__race a')].find(
+      (each) => each.textContent === 'Join voice on Discord',
+    );
+    if (link === undefined) return 'no link';
+    const box = link.getBoundingClientRect();
+    if (box.width * box.height === 0) return 'laid out at no size';
+    if (box.top < 0 || box.left < 0 || box.bottom > innerHeight || box.right > innerWidth) {
+      return 'off screen';
+    }
+    const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return at !== null && link.contains(at)
+      ? 'the link'
+      : `covered by ${at?.className ?? 'nothing'}`;
+  });
+}
+
 const VOLUME = 'sound: Sound volume';
 
 /** `REPORT_REASONS_MS` in `RoomReport.tsx`: the reasons close by themselves. */
@@ -740,7 +770,9 @@ const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
 /** What `theme.css` records as giving way in this state at this viewport. */
 function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
   const phone = !TABLET_VIEWPORTS.includes(viewport);
-  if (query === RACE_WITH_SOUNDS) return phone ? ROUTE_READINGS : [];
+  if (query === RACE_WITH_SOUNDS || query === RACE_VOICE_WITH_SOUNDS) {
+    return phone ? ROUTE_READINGS : [];
+  }
   if (!phone) return [];
   return onItsSide(viewport)
     ? ROOM_REPORT_CONTROLS.slice(0, 2)
@@ -791,16 +823,22 @@ async function reasonsClipped(page: Page): Promise<string[]> {
 }
 
 test.describe('Report’s reasons open, and a race on its start line, with sounds on — #1407', () => {
-  for (const query of [REPORT_WITH_SOUNDS, RACE_WITH_SOUNDS]) {
+  for (const query of [REPORT_WITH_SOUNDS, RACE_WITH_SOUNDS, RACE_VOICE_WITH_SOUNDS]) {
     for (const viewport of OVERLAY_VIEWPORTS) {
       test(`${query}: every panel whole and clear of the rider, every reading and control on the stage — ${viewport.name}`, async ({
         browser,
       }) => {
         const page = await sharedRide(browser, viewport, query);
         const clippedAnchored = query === REPORT_WITH_SOUNDS ? await reasonsClipped(page) : [];
+        const voiceAnchored = query === RACE_VOICE_WITH_SOUNDS ? await voiceLinkHit(page) : '';
         const ways = await bothWays(page);
         // After `bothWays` the page is laid out without anchor positioning.
         const clippedUnanchored = query === REPORT_WITH_SOUNDS ? await reasonsClipped(page) : [];
+        if (query === RACE_VOICE_WITH_SOUNDS) {
+          const expected = TABLET_VIEWPORTS.includes(viewport) ? 'the link' : 'laid out at no size';
+          expect(voiceAnchored, ANCHORED).toBe(expected);
+          expect(await voiceLinkHit(page), UNANCHORED).toBe(expected);
+        }
         expect(clippedAnchored, ANCHORED).toEqual([]);
         expect(clippedUnanchored, UNANCHORED).toEqual([]);
         for (const [how, seen] of ways) {

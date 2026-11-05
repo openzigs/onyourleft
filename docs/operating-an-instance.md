@@ -588,6 +588,11 @@ voice: nothing else changes.
   Developer Portal, add its bot to a server of its own, and give it **Manage Channels** and **Create
   Instant Invite**. Turn **Membership Screening off** in that server: with it on, riders would join
   unable to speak, so the instance turns voice off.
+- **Who is given the link.** A rider a **private** room admits, in the room's welcome (#875), and
+  nobody else: a rider the room refuses is never told it. A public room has no voice until account
+  linking exists (#877), because a link alone cannot remove a banned rider from a channel they are
+  already in. The app shows it while a race waits on its line (on a tablet) and for the first
+  seconds of a group ride.
 - **What reaches Discord.** A channel named `oyl-ride-` and the first twelve hex digits of the
   room's random id; a temporary, single-room invite for at most the room's riders, for a day. No
   topic, no category, no audit-log reason, no ride data and nothing a rider typed.
@@ -612,6 +617,10 @@ voice: nothing else changes.
 | `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
 | `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
 | `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
+| `"event":"voice-failed","code":"log"` (or `"member"`) | after a removal or a suspension, writing the `rotate_voice` log entry (or reading who is in a room) failed. The removal or suspension itself was applied |
+
+**A removal or a ban replaces the room's channel** (#876): see `docs/moderation.md`, "Moderation
+in a room". What was done is a `rotate_voice` entry in the moderation log, not a line here.
 
 ## Room close codes
 

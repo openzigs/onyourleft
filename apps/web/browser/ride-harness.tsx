@@ -603,7 +603,16 @@ const LAP_RACE =
   ROOM_QUERY === 'lap-race-following' ||
   ROOM_QUERY === 'lap-race-report';
 const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING || LAP_RACE;
-const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
+/**
+ * `ride.html?room=race-voice` — #875: `?room=race`'s race waiting on its line,
+ * its welcome carrying the room's Discord voice link, so the notice slot holds
+ * the race's notice, *Start the race* and *Join voice on Discord* together —
+ * the tallest the slot is with the link. A race holds the link for as long as
+ * it waits, so it is there however long the page takes to measure.
+ * `ride-room.browser.spec.ts` §"#1407" measures it, with sounds on, as it does `?room=race`.
+ */
+const RACE_VOICE = ROOM_QUERY === 'race-voice';
+const IN_A_RACE = ROOM_QUERY === 'race' || RACE_VOICE || WITH_STANDINGS;
 /**
  * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
  * group ride in a room whose notice slot carries a room sentence, measured by
@@ -1284,7 +1293,15 @@ async function run(): Promise<void> {
       IN_A_RACE ? 'race' : 'ride',
       'on',
       LAP_RACE ? { laps: 3, items: 'on' } : undefined,
+      RACE_VOICE ? 'https://discord.gg/harness-voice-1' : undefined,
     );
+    if (RACE_VOICE) {
+      await until('the voice link', () =>
+        [...document.querySelectorAll('.oyl-hud__race a')].find(
+          (each) => each.textContent === 'Join voice on Discord',
+        ),
+      );
+    }
     if (ROOM_NOTICE !== undefined) {
       if (ROOM_NOTICE === 'lost') {
         // Lost, and kept lost: no ticket comes back for the rejoin.

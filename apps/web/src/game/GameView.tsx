@@ -106,6 +106,12 @@ import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
 import { RoomPanel } from '../rooms/RoomPanel';
 import {
+  voiceLinkShown,
+  voiceNoticeAfter,
+  type VoiceNotice as RoomVoiceNotice,
+} from './room-voice';
+import { VoiceLine, VoiceNotice } from './hud/VoiceNotice';
+import {
   acrossTheRoomsLine,
   heldOnTheLine,
   nextToFollow,
@@ -1463,6 +1469,15 @@ function GameScreen({
   const roomRef = useRef<RoomConnection | undefined>(undefined);
   /** What the room frame remembers between frames. @see room-ride.ts */
   const roomStateRef = useRef<RoomRideState>(roomRideState());
+  /**
+   * The room's Discord voice link and when it came (#875), as the tick last
+   * read it. ⚠️ **Mirrored in {@link voiceNotice}, state**, because a race
+   * holding its rider on the line renders nothing new from the tick (the
+   * simulation's state does not change), so a link the room replaced there
+   * (#876) would never be drawn from a ref alone. `room-voice.ts`.
+   */
+  const voiceNoticeRef = useRef<RoomVoiceNotice | undefined>(undefined);
+  const [voiceNotice, setVoiceNotice] = useState<RoomVoiceNotice | undefined>(undefined);
   /** The last room frame, for the render the tick schedules. */
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
@@ -1956,6 +1971,8 @@ function GameScreen({
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
+        voiceNoticeRef.current = undefined;
+        setVoiceNotice(undefined);
         roomRef.current = props.room.join({
           roomId,
           // #784: the room's `welcome.routeRef` must be the route this device
@@ -2352,6 +2369,17 @@ function GameScreen({
       if (room !== undefined && !roomRecordAskedRef.current && room.status().kind === 'joined') {
         roomRecordAskedRef.current = true;
         void trainerPortRef.current?.recordRoomRide?.();
+      }
+      // #875: the room's voice link, from its welcome, and when it came — a
+      // render scheduled whenever it changes (#876), held on the line or not.
+      const voiceNow = voiceNoticeAfter(
+        voiceNoticeRef.current,
+        room?.status(),
+        simulation.state.elapsed,
+      );
+      if (voiceNow !== voiceNoticeRef.current) {
+        voiceNoticeRef.current = voiceNow;
+        setVoiceNotice(voiceNow);
       }
       const roomNow =
         room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
@@ -3203,6 +3231,8 @@ function GameScreen({
   // #785: where the race is, read during render like `sensors` — the tick's
   // `setState` is what schedules this render.
   const race = roomRef.current?.race();
+  // #875: the room's voice link, while it is shown (`room-voice.ts`).
+  const voiceLink = voiceLinkShown(voiceNotice, race, state?.elapsed ?? 0, STANDING_NOTICE_SECONDS);
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
@@ -3630,8 +3660,18 @@ function GameScreen({
                   Start the race
                 </Button>
               ) : undefined}
+              {/* #875: the room's voice link, while the race waits on its line. */}
+              {voiceLink?.place === 'race' ? <VoiceLine invite={voiceLink.invite} /> : undefined}
             </div>
           ),
+          // #875: the room's Discord voice link, only after the room let the
+          // rider in (its welcome), while a race holds them on the line and
+          // for a standing notice's span of ride (`room-voice.ts`). Not
+          // `live`: a link to press, not a fault to hear. It says it opens
+          // Discord; `target="_blank"` hands it to the system in the shell.
+          voiceLink?.place === 'notice' ? (
+            <VoiceNotice key="voice" invite={voiceLink.invite} />
+          ) : undefined,
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.
