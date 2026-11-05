@@ -1639,6 +1639,7 @@ function frameWithScatter(): SceneFrame {
       indices: new Uint32Array([0, 1, 2, 3, 4, 5]),
       centre: [],
       quadCount: 1,
+      retraced: new Uint8Array(0),
     },
     camera: POSE,
     markers: [

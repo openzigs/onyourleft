@@ -332,6 +332,7 @@ describe('which patches can reach each triangle of the road — #1523', () => {
       centre: [],
       colours: new Float32Array(0),
       quadCount: 0,
+      retraced: new Uint8Array(0),
       // Inside the corner, 2.1 m from the centre — past the half length,
       // inside the half diagonal; then past the end and past the side, each
       // beyond the half diagonal and the margin. (A point inside the circle

@@ -473,7 +473,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         named 225° where it was 135°: the same light, which
                         under the mirror stood in the south-west — and
                         nothing measured along the road can move, because none
-                        of it is read off `x`
+                        of it is read off `x`. ⚠️ **Since #1996 a road ridden
+                        twice is drawn once**: `RoadCorridor.retraced` marks
+                        the points of the pass further from where the camera
+                        looks (§`retracedRows`: within half a road of another
+                        pass, along it, much further apart along the road than
+                        across), and their road quads and marks are folded to
+                        nothing in a fresh index list. A point where the road
+                        doubles back keeps the arriving normal
+                        (§`ribbonNormals`). `out-and-back.test.ts` holds it on
+                        `route-fixtures-testing.ts` §`outAndBackRoute`, which
+                        the realistic page rides as `route=out-and-back`
     src/game/world.ts   the ground, the sky and the depth cue (#241), and since
                         #286 the one light direction — the two axes a route is
                         read on, the one number that is physics rather than
@@ -1170,7 +1180,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         built-up land (`land-class.ts` §`builtUpDistances`),
                         so a mapped town is level with the road; the mask is
                         a REQUIRED argument of `terrainCorridor` and
-                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly.
+                        ⚠️ **Since #1996 a later pass of a road reads its
+                        earlier pass's relief** (§`reliefFields`, sides swapped
+                        where it runs the other way), so changing pass at an
+                        out-and-back's turn changes no hill in view; the other
+                        pass's ground is sunk out of sight with the turning
+                        point closed round the road's end (§`retracedRoles`),
+                        or drawn a metre under where it only lies alongside
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
