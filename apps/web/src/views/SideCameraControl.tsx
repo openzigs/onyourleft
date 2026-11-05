@@ -302,7 +302,8 @@ export const SIDE_INSTANCE_STOPPED_TEXT: Readonly<Record<SideUnavailableReason, 
  * first NAMES the service the instance sends each picture on to, as the
  * hosted consent does ({@link sideInstanceOnToText}); and pictures the
  * instance turned away for coming too often are counted on their own, not as
- * failures ({@link instanceRateLimitedText}).
+ * failures ({@link instanceRateLimitedText}) — as a part of the pictures sent,
+ * since #2192.
  */
 function instancePicturesText(state: SideAnalysisState, looked: number): string {
   const onTo = sideInstanceOnToText(state.hostedService);
@@ -317,12 +318,16 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
         'Pictures are still thrown away here as they arrive.'
       );
     case 'ready':
+      // #2192: a picture the instance turned away was still sealed and sent,
+      // so it is counted among the sent, and the turned-away count is told as
+      // a part OF that count, straight after it — never beside a sent count
+      // that leaves it out, which read as a contradiction.
       return (
-        `Pictures sealed and sent to your instance, and not kept here: ${String(looked)}, ` +
+        `Pictures sealed and sent to your instance, and not kept here: ${String(looked + state.rateLimited)}, ` +
         `with you in ${String(state.posed)} of them.` +
+        instanceRateLimitedText(state.rateLimited) +
         onTo +
-        ` Not sent, because one was already with your instance: ${String(state.skipped)}.` +
-        instanceRateLimitedText(state.rateLimited)
+        ` Not sent, because one was already with your instance: ${String(state.skipped)}.`
       );
   }
 }
@@ -340,13 +345,14 @@ function sideInstanceOnToText(host: string | undefined): string {
 }
 
 /**
- * How many pictures the instance turned away unread for coming too often,
- * with its leading space, or nothing when none was (#2175).
+ * How many of the pictures sent the instance turned away unread for coming
+ * too often, with its leading space, or nothing when none was (#2175). Since
+ * #2192 these are a part of the sent count it follows, not apart from it.
  */
 function instanceRateLimitedText(count: number): string {
   return count === 0
     ? ''
-    : ` Turned away by your instance unread, because it was asked too often: ${String(count)}.`;
+    : ` Of those, turned away by your instance unread, because it was asked too often: ${String(count)}.`;
 }
 
 /**

@@ -818,8 +818,37 @@ describe('what the tablet says about the pictures — #530', () => {
   it('counts pictures the instance turned away for coming too often apart, and does not stop — #2175', async () => {
     const { send } = await analysing({ kind: 'rate-limited' }, 'instance');
     await send(2);
+    // #2192: they were sealed and sent, so the sent count has them in it.
     expect(pictures()).toBe(
-      'Pictures sealed and sent to your instance, and not kept here: 0, with you in 0 of them. Not sent, because one was already with your instance: 0. Turned away by your instance unread, because it was asked too often: 2.',
+      'Pictures sealed and sent to your instance, and not kept here: 2, with you in 0 of them. Of those, turned away by your instance unread, because it was asked too often: 2. Not sent, because one was already with your instance: 0.',
+    );
+  });
+
+  it('counts a picture turned away among the pictures sent, so the two counts agree — #2192', () => {
+    const state = {
+      place: 'instance',
+      model: 'ready',
+      posed: 1,
+      noRider: 1,
+      noRiderBecause: { 'said-nobody': 1, 'too-few-points': 0, implausible: 0 },
+      unreadable: 1,
+      skipped: 4,
+      rateLimited: 3,
+      hostedService: 'models.example',
+      framing: 'no-reference',
+      finished: false,
+    } as const;
+    // Three looked at and three turned away: six sent, and the three turned
+    // away are said as a part of those six, straight after them.
+    expect(sidePicturesText(state)).toBe(
+      'Pictures sealed and sent to your instance, and not kept here: 6, with you in 1 of them. ' +
+        'Of those, turned away by your instance unread, because it was asked too often: 3. ' +
+        `${ON_TO} Not sent, because one was already with your instance: 4.`,
+    );
+    // None turned away: the sent count is the looked-at count, and no sentence about it.
+    expect(sidePicturesText({ ...state, rateLimited: 0 })).toBe(
+      'Pictures sealed and sent to your instance, and not kept here: 3, with you in 1 of them. ' +
+        `${ON_TO} Not sent, because one was already with your instance: 4.`,
     );
   });
 
