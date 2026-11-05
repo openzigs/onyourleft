@@ -1885,6 +1885,108 @@ test.describe('#2068 — a stacked chart is read when it scrolls into view', () 
 });
 
 /**
+ * #2081 — a tap on a chart moves the ride page's one cursor to the moment
+ * under it, the laps are bands at one x down the stack, and the power curve
+ * is drawn inside the page's column.
+ *
+ * Layout and pointer claims, so measured here: jsdom lays nothing out, so the
+ * unit suite can only hand the drawing a box by hand
+ * (`views/ActivityDetailView.test.tsx` §"#2081 — the tap and hover read-out").
+ * The populated ride is 30:00 with laps starting at 0:00, 10:00 and 20:00.
+ */
+test.describe('#2081 — the tap read-out, the laps and the power curve', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, a tap halfway across a chart moves the cursor halfway through the ride`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const drawing = page.locator('[data-oyl-trace-slot="heartRate"] svg.oyl-trace');
+      await page.locator('[data-oyl-trace-slot="heartRate"]').scrollIntoViewIfNeeded();
+      await expect(drawing).toHaveCount(1);
+      const box = await drawing.boundingBox();
+      if (box === null) throw new Error('the heart-rate chart has no box');
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+      // 1 800 s drawn at 600 points: a step of 3 s, so halfway is 900 s.
+      await expect(page.locator('#oyl-trace-cursor')).toHaveValue('900');
+      await expect(page.locator('output[for="oyl-trace-cursor"]')).toContainText('15:00');
+      // The line is drawn where the tap was, on this chart and every other.
+      const line = await drawing.locator('line.oyl-trace__cursor').boundingBox();
+      expect(Math.abs((line?.x ?? 0) - (box.x + box.width / 2)), JSON.stringify(line)).toBeLessThan(
+        2,
+      );
+      // The control: a tap a quarter of the way across lands a quarter through.
+      await page.mouse.click(box.x + box.width / 4, box.y + box.height / 2);
+      await expect(page.locator('#oyl-trace-cursor')).toHaveValue('450');
+    });
+  }
+
+  test(`at ${TABLET_IN_THE_SHELL.name}, every lap starts at one x down the stack`, async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    await page.evaluate(() => {
+      window.location.hash = '#/activities/ride-0';
+    });
+    const slots = page.locator('[data-oyl-trace-slot]');
+    await expect(slots.first()).toBeVisible();
+    const count = await slots.count();
+    for (let index = 0; index < count; index += 1) {
+      await slots.nth(index).scrollIntoViewIfNeeded();
+      await expect(slots.nth(index).locator('svg.oyl-trace')).toHaveCount(1);
+    }
+    const edges = await page.locator('svg.oyl-trace').evaluateAll((drawings) =>
+      drawings.map((drawing) => {
+        const frame = drawing.getBoundingClientRect();
+        return [...drawing.querySelectorAll('line.oyl-trace__lap-edge')].map(
+          (edge) => (edge.getBoundingClientRect().left - frame.left) / frame.width,
+        );
+      }),
+    );
+    expect(edges).toHaveLength(count);
+    const [first] = edges;
+    // Laps 2 and 3 start at 10:00 and 20:00 of 30:00.
+    expect(first?.map((at) => Math.round(at * 100))).toEqual([33, 67]);
+    for (const chart of edges) {
+      expect(chart, JSON.stringify(edges)).toEqual(first);
+    }
+  });
+
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, the power curve is drawn inside the page’s column`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const slot = page.locator('[data-oyl-curve-slot]');
+      await slot.scrollIntoViewIfNeeded();
+      const curve = slot.locator('svg.oyl-curve');
+      await expect(curve).toHaveCount(1);
+      await expect(slot.locator('path.oyl-curve__all-time')).toHaveCount(1);
+      const [drawing, column] = await Promise.all([
+        curve.boundingBox(),
+        slot.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return { left: box.left, right: box.right };
+        }),
+      ]);
+      expect(drawing?.height ?? 0, 'the curve has no height').toBeGreaterThan(100);
+      expect(drawing?.x ?? -1).toBeGreaterThanOrEqual(column.left - 0.5);
+      expect((drawing?.x ?? 0) + (drawing?.width ?? 0)).toBeLessThanOrEqual(column.right + 0.5);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        'the page scrolls sideways',
+      ).toBe(true);
+    });
+  }
+});
+
+/**
  * #1312 — the ride page's lap table, scrolled to its last column.
  *
  * A ride with every figure a lap can state has eleven columns, which is wider
@@ -1937,6 +2039,10 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         // #2069: and the ride's time in zone above the laps, read the same way.
         await page.locator('[data-oyl-zones-slot]').scrollIntoViewIfNeeded();
         await expect(page.locator('[data-oyl-zones-slot] .oyl-zone-chart')).toHaveCount(2);
+        // #2081: and the power curve between them, drawn before anything is measured.
+        await page.locator('[data-oyl-curve-slot]').scrollIntoViewIfNeeded();
+        await expect(page.locator('[data-oyl-curve-slot] svg.oyl-curve')).toHaveCount(1);
+        await page.locator('[data-oyl-zones-slot]').scrollIntoViewIfNeeded();
 
         const measure = async () =>
           table.evaluate((element) => {

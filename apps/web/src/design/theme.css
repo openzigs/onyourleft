@@ -4974,6 +4974,131 @@ select.oyl-input {
 }
 
 /*
+ * #2081: the ride's laps behind each trace — every other lap shaded one
+ * elevation step up from the well (`surfaceRaised` on `surface`, the step
+ * `elevation.a11y.test.ts` holds apart), and an edge where each later lap
+ * begins, so two neighbouring laps are told apart by the line as well as the
+ * tone. Each chart's description says how many laps are marked.
+ */
+.oyl-trace__lap {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-trace__lap-edge {
+  stroke: var(--oyl-color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/*
+ * #2081: a tap or a hover on a trace moves the cursor there, and the chart's
+ * own reading at the cursor sits at the end of its title row, beside the line
+ * it reads. `pan-y`, so a finger dragging up the page still scrolls it.
+ */
+.oyl-trace-chart > .oyl-trace {
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+.oyl-trace-chart__reading {
+  color: var(--oyl-color-ink);
+  grid-area: value-title;
+  justify-self: end;
+}
+
+/*
+ * The ride's power curve — #2081. The trace chart's grid (value title, values
+ * down the left, durations under it), a taller drawing, and a legend under it.
+ * The two lines differ by dash as well as tone (`.oyl-fitness-chart`'s rule),
+ * and the legend names each in words.
+ */
+.oyl-curve-chart {
+  color: var(--oyl-color-ink-muted);
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  grid-template-areas:
+    'value-title value-title'
+    'values curve'
+    '. times'
+    '. time-title'
+    '. legend';
+  grid-template-columns: 10ch minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-curve {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  grid-area: curve;
+  height: 10rem;
+  width: 100%;
+}
+
+.oyl-curve-chart__value-title {
+  grid-area: value-title;
+}
+
+.oyl-curve-chart__values {
+  display: flex;
+  flex-direction: column;
+  grid-area: values;
+  justify-content: space-between;
+  text-align: end;
+}
+
+.oyl-curve-chart__times {
+  display: flex;
+  grid-area: times;
+  justify-content: space-between;
+}
+
+.oyl-curve-chart__time-title {
+  grid-area: time-title;
+  text-align: center;
+}
+
+.oyl-curve-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-md);
+  grid-area: legend;
+  list-style: none;
+  margin: var(--oyl-space-xs) 0 0;
+  padding: 0;
+}
+
+.oyl-curve-chart__key {
+  border-top: 2px solid var(--oyl-color-accent-text);
+  display: inline-block;
+  inline-size: 1.5rem;
+  margin-inline-end: var(--oyl-space-xs);
+  vertical-align: middle;
+}
+
+.oyl-curve-chart__key--all-time {
+  border-top: 2px dashed var(--oyl-color-ink-muted);
+}
+
+.oyl-curve__ride,
+.oyl-curve__all-time {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-curve__ride {
+  stroke: var(--oyl-color-accent-text);
+}
+
+.oyl-curve__all-time {
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 6 4;
+}
+
+/*
  * The ride map (#63).
  *
  * A fixed height and a full-width block, because the map has no intrinsic size:
