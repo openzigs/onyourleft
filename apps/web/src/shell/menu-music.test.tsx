@@ -264,72 +264,85 @@ describe('the menus’ music starts at the first press, never at load — #2058'
   });
 });
 
-describe('the menus’ music is never heard on a ride — #2058', () => {
-  it('pauses with its bus at 0 on the Ride screen and the game, and comes back on a menu', async () => {
-    const music = rig(disk());
-    await shell(music);
-    await pressWithoutLeaving(homeControl());
-    const [element] = music.made;
+/**
+ * These cases open the Ride screen and the game, whose views are lazy chunks
+ * jsdom loads and transforms on first use: 0.7 s alone, and past the 5 s
+ * default on a loaded machine, where a case that timed out left its hash
+ * change to the next one. A stop on a hung load, not a budget — the
+ * `DemoPage.test.tsx` §`RIDE_TIMEOUT_MS` reasoning; the assertions are unchanged.
+ */
+const RIDE_VIEWS_TIMEOUT_MS = 15_000;
 
-    for (const ride of ['#/ride', '#/game']) {
-      await go(ride);
-      // The fade first — a ramp on the bus — and the pause once it is over.
-      expect(musicBus(music), ride).toBe(0);
+describe(
+  'the menus’ music is never heard on a ride — #2058',
+  { timeout: RIDE_VIEWS_TIMEOUT_MS },
+  () => {
+    it('pauses with its bus at 0 on the Ride screen and the game, and comes back on a menu', async () => {
+      const music = rig(disk());
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+
+      for (const ride of ['#/ride', '#/game']) {
+        await go(ride);
+        // The fade first — a ramp on the bus — and the pause once it is over.
+        expect(musicBus(music), ride).toBe(0);
+        music.endFades();
+        expect(element?.paused, ride).toBe(true);
+
+        await go('#/');
+        expect(element?.paused, `back on Home from ${ride}`).toBe(false);
+        expect(musicBus(music)).toBe(0.5);
+      }
+      // One element and one source for the whole visit.
+      expect(music.made).toHaveLength(1);
+      expect(music.fake.media).toHaveLength(1);
+    });
+
+    it('pauses while a ride is recording, on a menu route too', async () => {
+      const stub = stubRideController(idleSnapshot());
+      const music = rig(disk());
+      await shell(music, stub.controller);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      expect(element?.paused).toBe(false);
+
+      await act(async () => {
+        stub.set({ phase: ridingSnapshot().phase });
+        await Promise.resolve();
+      });
+      expect(musicBus(music)).toBe(0);
       music.endFades();
-      expect(element?.paused, ride).toBe(true);
+      expect(element?.paused).toBe(true);
 
+      await act(async () => {
+        stub.set({ phase: 'idle' });
+        await Promise.resolve();
+      });
+      expect(element?.paused).toBe(false);
+    });
+
+    it('a press on a ride route starts nothing', async () => {
+      const music = rig(disk());
+      window.location.hash = '#/ride';
+      await shell(music);
+      await pressWithoutLeaving(document.querySelector('main button, main a[href]'));
+      expect(music.made).toEqual([]);
+    });
+
+    it('a rider back on a menu before the fade ends hears it carry on, and it is not paused late', async () => {
+      const music = rig(disk());
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      await go('#/ride');
       await go('#/');
-      expect(element?.paused, `back on Home from ${ride}`).toBe(false);
+      music.endFades();
+      expect(element?.paused).toBe(false);
       expect(musicBus(music)).toBe(0.5);
-    }
-    // One element and one source for the whole visit.
-    expect(music.made).toHaveLength(1);
-    expect(music.fake.media).toHaveLength(1);
-  });
-
-  it('pauses while a ride is recording, on a menu route too', async () => {
-    const stub = stubRideController(idleSnapshot());
-    const music = rig(disk());
-    await shell(music, stub.controller);
-    await pressWithoutLeaving(homeControl());
-    const [element] = music.made;
-    expect(element?.paused).toBe(false);
-
-    await act(async () => {
-      stub.set({ phase: ridingSnapshot().phase });
-      await Promise.resolve();
     });
-    expect(musicBus(music)).toBe(0);
-    music.endFades();
-    expect(element?.paused).toBe(true);
-
-    await act(async () => {
-      stub.set({ phase: 'idle' });
-      await Promise.resolve();
-    });
-    expect(element?.paused).toBe(false);
-  });
-
-  it('a press on a ride route starts nothing', async () => {
-    const music = rig(disk());
-    window.location.hash = '#/ride';
-    await shell(music);
-    await pressWithoutLeaving(document.querySelector('main button, main a[href]'));
-    expect(music.made).toEqual([]);
-  });
-
-  it('a rider back on a menu before the fade ends hears it carry on, and it is not paused late', async () => {
-    const music = rig(disk());
-    await shell(music);
-    await pressWithoutLeaving(homeControl());
-    const [element] = music.made;
-    await go('#/ride');
-    await go('#/');
-    music.endFades();
-    expect(element?.paused).toBe(false);
-    expect(musicBus(music)).toBe(0.5);
-  });
-});
+  },
+);
 
 describe('the menus’ music and the page’s visibility — #2058', () => {
   it('pauses when the page is hidden, and resumes when it is shown on a menu route', async () => {
