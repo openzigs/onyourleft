@@ -263,6 +263,25 @@ export function clockInTheClockRow(viewport: Viewport): boolean {
   return !narrowOnItsSide;
 }
 
+/** #2076 — the ride so far, as the harness names the three readings. */
+export const RIDE_TOTAL_READINGS = [
+  'reading: Distance',
+  'reading: Climbed',
+  'reading: Avg power',
+] as const;
+
+/**
+ * #2076 — whether the ride so far is DRAWN at this viewport: on a tablet's
+ * corners layout (47 rem tall or more) and wherever the HUD stacks; given way
+ * by clip on a phone's overlay — the corners layouts under 47 rem tall and the
+ * column layout upright (`theme.css` §"THE RIDE SO FAR").
+ */
+export function rideTotalsDrawn(viewport: Viewport): boolean {
+  const corners = viewport.width >= 736 && viewport.height >= 360;
+  const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
+  return (corners && viewport.height >= 752) || (!corners && !column);
+}
+
 /**
  * #2071 — whether the gradient is drawn in the PRIMARY panel at this
  * viewport, at the primary size: every corners layout, and an upright phone at

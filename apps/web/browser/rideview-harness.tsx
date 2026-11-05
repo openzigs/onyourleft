@@ -650,6 +650,9 @@ function snapshot(): RideSnapshot {
     notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
     storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
     manualLap: { available: true, last: LAP_ENDED ? WIDEST_LAP : undefined },
+    // #2076: the ride's distance on the grid, at a three-digit figure, so the
+    // grid is laid out and measured with its fifth reading in it.
+    totals: { distance: metres(123_456), climbed: undefined, averagePower: undefined },
   };
   if (WIDEST_READINGS) {
     const at = unixSeconds(1_800_000_000);
@@ -693,6 +696,7 @@ function snapshot(): RideSnapshot {
       elapsedSeconds: 0,
       movingSeconds: 0,
       sampleCount: 0,
+      totals: undefined,
       trainer: { ...riding.trainer, hasControl: false, target: { kind: 'none' } },
     };
   }

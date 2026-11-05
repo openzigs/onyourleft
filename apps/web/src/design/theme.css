@@ -3146,9 +3146,10 @@ a.oyl-button {
 
 @container oyl-live (min-width: 40rem) {
   /* #2072: the time of day a column of its own, beside the seconds
-     recorded, so the Live group is no taller for it. */
+     recorded, so the Live group is no taller for it — and since #2076 the
+     ride's distance a third, before them. */
   .oyl-ride__clock {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto auto;
   }
 
   .oyl-ride__clock .oyl-reading__value {
@@ -9988,6 +9989,62 @@ select.oyl-input {
       grid-area: auto;
       width: auto;
     }
+  }
+}
+
+/*
+ * THE RIDE SO FAR — #2076: *Distance*, *Climbed* and *Avg power*.
+ *
+ * Three secondary readings after the clock (`fields.ts` §`hudReadings`),
+ * drawn where the secondary tier has the rows for them: a TABLET's corners
+ * layout (47 rem tall or more) and every stacked layout, which scrolls.
+ *
+ * ⚠️ **What gives way, recorded as #419 asks: on a phone's overlay — the
+ * column layout upright and the corners layouts under 47 rem tall — the three
+ * are visually hidden by clip**, as a room's give-way readings are
+ * (§"A ROOM RIDE ON A PHONE"), and a screen reader still reads them in their
+ * place in #94's order. Those layouts are measured to within a few pixels of
+ * the leaning rider at the rows they have (§"THE CLOCK ROW", §"THE MOVING
+ * TIME ON AN UPRIGHT PHONE"), and three more readings are a third secondary
+ * row on every one of them. The saved ride states all three, and the Ride
+ * screen shows the distance in its clock row (`views/RideView.tsx`
+ * §`RideClock`).
+ *
+ * ⚠️ **And on a tablet, in a room's LAP RACE, they give way too** — the one
+ * tablet state with no row for them: the room's three readings and the
+ * race's two already make the tier four tracks by three rows, and a fourth
+ * row put the race's standings over *Pause* at 1280×800 and 1024×768
+ * (`ride-room.browser.spec.ts` §"#1912"). In a room's lap race what a racer
+ * rides against is the field, as #1912 has it on a phone.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race):has(> .oyl-hud__field--room)
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (height < 47rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

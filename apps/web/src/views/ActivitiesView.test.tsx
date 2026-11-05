@@ -744,7 +744,7 @@ describe('#1041 — every ride a card, at every width', () => {
 
   it('invents no distance for a ride that stored none: no position, no power, no speed', async () => {
     // A ride recorded with no speed channel stores `metres(0)`
-    // (`recording/finish.ts` §`distanceOf`) — no distance known, not 0.0 km.
+    // (`recording/totals.ts` §`rideDistance`) — no distance known, not 0.0 km.
     const nothing = summary('no-speed', {
       name: 'Trainer, power meter off',
       hasPosition: false,
@@ -775,7 +775,7 @@ describe('#1041 — every ride a card, at every width', () => {
 
   it('invents no 0 W for a ride whose power readings were all 0 — #1054', async () => {
     // A ride recorded with power readings that were every one 0 stores an
-    // average of 0 (`recording/finish.ts` §`averagePowerOf`, asserted in
+    // average of 0 (`recording/totals.ts` §`rideAveragePower`, asserted in
     // `finish.test.ts` §"#1054"). That says nothing was measured, and "0 W"
     // drawn large reads as a measurement: no reading on the card, and an em
     // dash in the selected ride's summary, as distance has since #1041.

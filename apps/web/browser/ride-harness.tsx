@@ -99,6 +99,7 @@ import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
+import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
@@ -163,6 +164,15 @@ export interface StageMeasurement {
   readonly panels: readonly StageItem[];
   /** Every reading, the strip, the plan view, the trainer line and both controls. */
   readonly items: readonly StageItem[];
+  /**
+   * #2076: the ride-so-far readings a phone's overlay hides by clip
+   * (`theme.css` §"THE RIDE SO FAR") — set apart from {@link items} rather
+   * than listed as readings off the stage, so every case that holds the
+   * readings on the stage holds the ones that ARE drawn. Where they are drawn
+   * they are {@link items} like any reading; `ride.browser.spec.ts` §"#2076"
+   * holds which viewports give them way.
+   */
+  readonly givenWay: readonly string[];
   /** The labels of the readings, in document order, per tier. */
   readonly primary: readonly string[];
   readonly secondary: readonly string[];
@@ -622,6 +632,17 @@ const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') ==
 const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
 
 /**
+ * #2076: the ride so far, at the widest figures a ride under ten hours
+ * plausibly reaches — `199.9 km`, `4850 m` and a three-digit average power —
+ * the same object every read, as `useSyncExternalStore` requires.
+ */
+const RIDE_TOTALS: RideTotals = {
+  distance: metres(199_900),
+  climbed: metres(4850),
+  averagePower: watts(425),
+};
+
+/**
  * `ride.html?gradient=refused` — a trainer that refuses every gradient, so the
  * HUD carries the *Trainer* fault in its notice cell (#693's re-review: the
  * cell stacks every notice that is never put away, and keep-the-screen-on is
@@ -913,6 +934,9 @@ const TRAINER: GameTrainerPort = {
   // #2072: the elapsed time at the same widest figure, so the clock row is
   // laid out and measured with its widest time in it.
   rideElapsedSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
+  // #2076: the ride so far at its widest plausible figures, so where the
+  // three are drawn they are laid out and measured at their widest.
+  rideTotals: () => (ALL_NOTICES ? undefined : RIDE_TOTALS),
   recordGameRide: () => Promise.resolve(false),
   watchRide: () => () => undefined,
   readTrainer: () =>
@@ -1008,8 +1032,15 @@ function measure(): StageMeasurement {
   const stage = document.querySelector(`.${STAGE_CLASS}`);
   const world = document.querySelector('.oyl-game__world');
   const items: StageItem[] = [];
+  const givenWay: string[] = [];
   for (const field of document.querySelectorAll('.oyl-hud__field')) {
-    items.push(item(`reading: ${textOf(field.querySelector('dt'))}`, field));
+    const name = `reading: ${textOf(field.querySelector('dt'))}`;
+    const box = field.getBoundingClientRect();
+    if (field.classList.contains('oyl-hud__field--total') && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
+    }
+    items.push(item(name, field));
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
@@ -1075,6 +1106,7 @@ function measure(): StageMeasurement {
       ].filter((each) => window.getComputedStyle(each).position === 'absolute'),
     ].map((each) => item(each.className, each)),
     items,
+    givenWay,
     primary: labels('.oyl-hud__fields--primary'),
     secondary: labels('.oyl-hud__fields--secondary'),
     primaryValuePixels: fontPixels('.oyl-hud__fields--primary .oyl-hud__value'),

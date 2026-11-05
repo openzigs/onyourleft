@@ -251,8 +251,15 @@ describe('the HUD is four panels (#423)', () => {
       // #2072: the elapsed time and the clock, after the moving time.
       'Elapsed',
       'Clock',
+      // #2076: the ride so far, after the clock and before every gap.
+      'Distance',
+      'Climbed',
+      'Avg power',
       'Pacer',
     ]);
+    // #2076: marked, so a phone's overlay can leave them out (`theme.css`
+    // §"THE RIDE SO FAR").
+    expect(labelsIn('.oyl-hud__field--total')).toEqual(['Distance', 'Climbed', 'Avg power']);
     // Document order is the order a screen reader meets them in, and it is
     // the order `hudReadings` returns: primary first.
     expect(labelsIn('.oyl-hud')).toEqual([
@@ -273,6 +280,9 @@ describe('the HUD is four panels (#423)', () => {
       'Moving',
       'Elapsed',
       'Clock',
+      'Distance',
+      'Climbed',
+      'Avg power',
       'Pacer',
       'Following',
       'Nearby',

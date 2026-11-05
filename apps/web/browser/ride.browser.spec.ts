@@ -135,6 +135,8 @@ import {
   CLOCK_READING,
   clockInTheClockRow,
   gradientInPrimary,
+  RIDE_TOTAL_READINGS,
+  rideTotalsDrawn,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -177,14 +179,19 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Moving',
         'Elapsed',
         'Clock',
+        // #2076: the ride so far, in the document wherever it is drawn.
+        'Distance',
+        'Climbed',
+        'Avg power',
         'Pacer',
         'Your best',
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
       // Twelve readings, the strip, the plan view, the trainer line, two
-      // controls and, since #1482, the touch lock.
-      expect(seen.items).toHaveLength(18);
+      // controls and, since #1482, the touch lock — and since #2076 the ride
+      // so far, where it is drawn.
+      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 21 : 18);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -736,6 +743,75 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
   });
 }
 
+/**
+ * #2076 — the ride so far: DRAWN on a tablet and where the HUD stacks, inside
+ * the secondary panel, uncovered and over no other reading; GIVEN WAY by clip
+ * on a phone's overlay, and still in the secondary list in #94's order, where
+ * a screen reader meets it (`theme.css` §"THE RIDE SO FAR"). Both ways (#1120).
+ */
+for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+  test(`#2076 the ride so far is drawn where there is a row for it — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    // The recorder's figures, through the port and `GameView` to the fields
+    // (`ride-harness.tsx` §`RIDE_TOTALS`) — read from the document, where they
+    // are whether drawn or given way.
+    const values = await page.evaluate(() =>
+      [...document.querySelectorAll('.oyl-hud__field--total .oyl-hud__value')].map((each) =>
+        (each.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      ),
+    );
+    expect(values).toEqual(['199.9 km', '4850 m', '425 W']);
+    for (const [how, seen] of await bothWays(page)) {
+      expect(seen.secondary, how).toEqual(
+        expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
+      );
+      if (!rideTotalsDrawn(viewport)) {
+        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS]);
+        continue;
+      }
+      expect(seen.givenWay, how).toEqual([]);
+      const panel = seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'));
+      if (panel === undefined) throw new Error(`${how}: no secondary panel`);
+      // Stacked, the readings scroll: drawn, in their panel and over no other
+      // reading is what holds there; on a tablet they are on the stage too.
+      const stacked = STACKED_VIEWPORTS.includes(viewport);
+      for (const name of RIDE_TOTAL_READINGS) {
+        const reading = named(seen.items, name);
+        expect(
+          reading.box.width * reading.box.height,
+          `${how}: ${describeItem(reading)}`,
+        ).toBeGreaterThan(1);
+        if (!stacked) {
+          expect(
+            inside(reading.box, viewport) && reading.onTop,
+            `${how}: ${describeItem(reading)}`,
+          ).toBe(true);
+        }
+        expect(
+          reading.box.left >= panel.box.left - SUBPIXEL_TOLERANCE &&
+            reading.box.right <= panel.box.right + SUBPIXEL_TOLERANCE &&
+            reading.box.top >= panel.box.top - SUBPIXEL_TOLERANCE &&
+            reading.box.bottom <= panel.box.bottom + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(reading)} in ${describeItem(panel)}`,
+        ).toBe(true);
+        expect(
+          seen.items
+            .filter(
+              (each) =>
+                each !== reading &&
+                each.name.startsWith('reading: ') &&
+                overlap(each.box, reading.box),
+            )
+            .map(describeItem),
+          how,
+        ).toEqual([]);
+      }
+    }
+  });
+}
+
 for (const viewport of STACKED_VIEWPORTS) {
   test.describe(viewport.name, () => {
     test('the harness is on the stage, stacked', async ({ browser }) => {
@@ -743,8 +819,9 @@ for (const viewport of STACKED_VIEWPORTS) {
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      // Twelve readings since #2072's elapsed time and clock, and the rest as above.
-      expect(seen.items).toHaveLength(18);
+      // Twelve readings since #2072's elapsed time and clock, and the rest as
+      // above — and the ride so far (#2076), drawn where the HUD stacks.
+      expect(seen.items).toHaveLength(21);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.

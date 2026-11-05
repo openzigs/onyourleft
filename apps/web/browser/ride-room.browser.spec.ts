@@ -400,6 +400,10 @@ test.describe('a room ride’s HUD — #1356', () => {
             // #2072: in the primary panel's clock row on the stage.
             'Elapsed',
             'Clock',
+            // #2076: the ride so far, given way on a phone's overlay.
+            'Distance',
+            'Climbed',
+            'Avg power',
             'Pacer',
             'Your best',
             'Wilhelmina Vandersteen-Oduya Mbe',

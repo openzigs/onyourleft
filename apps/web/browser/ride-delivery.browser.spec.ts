@@ -197,6 +197,10 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       // #2072: drawn in the primary panel's clock row.
       'Elapsed',
       'Clock',
+      // #2076: the ride so far, given way on a phone's overlay.
+      'Distance',
+      'Climbed',
+      'Avg power',
       'Pacer',
       'Your best',
       'Wind',

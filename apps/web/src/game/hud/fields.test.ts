@@ -19,10 +19,12 @@ import {
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  RIDE_TOTAL_KEYS,
   gapAgainst,
   givesWayToTheRoom,
   hudReadings,
   isDeliveryReading,
+  isRideTotalReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -967,6 +969,10 @@ describe('which readings are drawn large (#423)', () => {
       'movingTime',
       // #2072: and the elapsed time beside it (this ride has no clock).
       'elapsedTime',
+      // #2076: the ride so far, after the times and before every gap.
+      'distance',
+      'climbed',
+      'averagePower',
       'gap-bot',
       'gap-ghost',
       'wind',
@@ -1276,12 +1282,15 @@ describe('the lap in progress — #1312', () => {
  * What a phone draws OUTSIDE the secondary grid: the moving time beside the
  * controls upright, or in the primary panel's clock row on its side (#1111),
  * and the elapsed time and the clock in that row (#2072, `theme.css`
- * §"THE CLOCK ROW").
+ * §"THE CLOCK ROW") — and, since #2076, what a phone does not draw at all:
+ * the ride so far, hidden by clip on a phone's overlay (`theme.css`
+ * §"THE RIDE SO FAR").
  */
 const LIFTED_ON_A_PHONE: ReadonlySet<string> = new Set([
   MOVING_TIME_KEY,
   ELAPSED_TIME_KEY,
   CLOCK_KEY,
+  ...RIDE_TOTAL_KEYS,
 ]);
 
 describe('what gives way to a room’s readings on a phone — #1356', () => {
@@ -1488,5 +1497,72 @@ describe('the gradient, signed and primary — #2071', () => {
       state: { ...base.state, grade: gradePercent(3), input: { ...base.state.input, live: false } },
     };
     expect(hudReadings(dropped).find((reading) => reading.key === GRADIENT_KEY)?.stale).toBe(false);
+  });
+});
+
+/**
+ * #2076: *Distance*, *Climbed* and *Avg power* — formats of the recorder's
+ * figures and nothing else. That they ARE the recorder's, and equal the saved
+ * ride's, is `ride/controller.test.ts` §"#2076".
+ */
+describe('the ride so far — #2076', () => {
+  const totals = {
+    distance: metres(12_345),
+    climbed: metres(212.6),
+    averagePower: watts(187),
+  };
+  const shown = (input: Partial<HudInput>) =>
+    hudReadings({ ...baseInput(), ...input }).filter(isRideTotalReading);
+
+  it('shows the three after the times and before every gap, in this order', () => {
+    const keys = hudReadings({ ...baseInput(), rideTotals: totals }).map((each) => each.key);
+    const at = keys.indexOf('distance');
+    expect(keys.slice(at, at + 3)).toEqual(['distance', 'climbed', 'averagePower']);
+    expect(keys[at - 1]).toBe(ELAPSED_TIME_KEY);
+    expect([...RIDE_TOTAL_KEYS]).toEqual(['distance', 'climbed', 'averagePower']);
+    // Secondary, every one: a reading added here lands in the cheaper tier.
+    expect(shown({ rideTotals: totals }).map(readingTier)).toEqual([
+      'secondary',
+      'secondary',
+      'secondary',
+    ]);
+  });
+
+  it('formats the recorder’s figures in the rider’s units', () => {
+    expect(shown({ rideTotals: totals })).toEqual([
+      { key: 'distance', label: 'Distance', value: '12.3', unit: 'km', stale: false },
+      { key: 'climbed', label: 'Climbed', value: '213', unit: 'm', stale: false },
+      { key: 'averagePower', label: 'Avg power', value: '187', unit: 'W', stale: false },
+    ]);
+    expect(
+      shown({ rideTotals: totals, units: 'imperial' }).map((each) => [each.value, each.unit]),
+    ).toEqual([
+      ['7.7', 'mi'],
+      ['698', 'ft'],
+      ['187', 'W'],
+    ]);
+  });
+
+  it('shows a dash for each with nothing recorded, and never a zero', () => {
+    expect(shown({}).map((each) => [each.value, each.stale])).toEqual([
+      [NO_READING, false],
+      [NO_READING, false],
+      [NO_READING, false],
+    ]);
+  });
+
+  it('shows a dash for a climb nobody measured and a ride with no power, and the rest as they are', () => {
+    const indoor = { distance: metres(5_000), climbed: undefined, averagePower: undefined };
+    expect(shown({ rideTotals: indoor }).map((each) => each.value)).toEqual([
+      '5.0',
+      NO_READING,
+      NO_READING,
+    ]);
+  });
+
+  it('is never named a load metric', () => {
+    for (const reading of shown({ rideTotals: totals })) {
+      expect(reading.label).not.toMatch(/\b(NP|TSS|IF|CTL|ATL|TSB)\b/);
+    }
   });
 });
