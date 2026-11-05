@@ -37,10 +37,9 @@ import { POWER_UNIT } from '../format';
 import {
   smallDistanceIn,
   smallDistanceUnit,
+  SPEED_DECIMALS,
   speedIn,
   speedUnit,
-  formatSpeed,
-  formatSmallDistance,
 } from '../units/format';
 
 /**
@@ -68,8 +67,17 @@ export interface TraceSeriesDefinition {
    * the one place in this client that decides a unit (#238).
    */
   readonly display: (value: number) => number;
-  /** The displayed number as digits, without its unit. */
-  readonly format: (value: number) => string;
+  /**
+   * The **displayed** number — what {@link display} returned — as digits,
+   * without its unit.
+   *
+   * ⚠️ Displayed, not stored (#2068). A trace's points have been through
+   * `display` already (`load.ts` §`loadTrace`), and the chart's axis and the
+   * table format those points. This took the stored value until #2068, so a
+   * speed was converted twice — 8.2 m/s shown as 106.3 km/h — on every
+   * speed chart, and an imperial altitude was 3.3 times too high.
+   */
+  readonly format: (shown: number) => string;
 }
 
 const whole = (value: number): string => String(Math.round(value));
@@ -109,20 +117,18 @@ export function traceSeries(units: UnitSystem): readonly TraceSeriesDefinition[]
       label: 'Speed',
       unit: speedUnit(units),
       display: (value) => speedIn(value as MetresPerSecond, units),
-      format: (value) => formatSpeed(value as MetresPerSecond, units).value,
+      // Already in the rider's units: digits only, at the speed's precision.
+      format: (shown) => shown.toFixed(SPEED_DECIMALS),
     },
     {
       channel: 'altitude',
       label: 'Altitude',
-      // ⚠️ `display` and `format` do **not** compose here, and that is why the
-      // two are separate fields: `display` converts a stored value for the
-      // chart's geometry, `format` converts a stored value for the table's
-      // text. Both take the canonical metres. Feeding one the other's output
-      // would convert twice, which is a 3.3× error in the direction nobody
-      // checks.
+      // ⚠️ `display` converts and `format` does not: `format` is handed what
+      // `display` returned. Converting in both would convert twice, which is a
+      // 3.3× error in the direction nobody checks.
       unit: smallDistanceUnit(units),
       display: (value) => smallDistanceIn(value, units),
-      format: (value) => formatSmallDistance(value, units).value,
+      format: whole,
     },
     {
       channel: 'temperature',
@@ -148,19 +154,6 @@ export function seriesFor(channel: TraceChannel, units: UnitSystem): TraceSeries
   }
   return found;
 }
-
-/**
- * The traces switched on when the view opens.
- *
- * Two rather than six, and this is the read budget rather than a taste
- * decision: each enabled series costs one `getStreamChannel`, which inflates
- * and decodes that channel's blob. Opening every series by default would
- * decode the whole set, which is the read the port exists to make impossible.
- *
- * Power and heart rate because between them they cover the indoor and the
- * outdoor case. Everything else is one press away.
- */
-export const DEFAULT_SERIES: readonly TraceChannel[] = ['power', 'heartRate'];
 
 /**
  * How many points a trace is reduced to before it is drawn.
@@ -319,4 +312,25 @@ export function traceMean(points: readonly (number | undefined)[]): number | und
     }
   }
   return count === 0 ? undefined : total / count;
+}
+
+/**
+ * The drawn point a trace has at `seconds` into the ride — the shared
+ * cursor's reading (#2068). `undefined` in a gap, and past the end of a trace
+ * that stops before the ride does: no reading, never the last one repeated.
+ */
+export function pointAt(
+  points: readonly (number | undefined)[],
+  secondsPerPoint: number,
+  seconds: number,
+): number | undefined {
+  if (secondsPerPoint <= 0 || seconds < 0) {
+    return undefined;
+  }
+  const index = Math.floor(seconds / secondsPerPoint);
+  // The trace's own end belongs to its last point, not to one past it.
+  if (index === points.length && seconds === points.length * secondsPerPoint) {
+    return points[index - 1];
+  }
+  return points[index];
 }

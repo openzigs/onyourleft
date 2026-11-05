@@ -4841,15 +4841,68 @@ select.oyl-input {
  * is `none` on the element, so the drawing stretches horizontally and keeps its
  * vertical scale. That is right for a time series and wrong for a map, which is
  * one more reason #63's track is not drawn with this.
+ *
+ * Since #2068 the ride page stacks one trace per recorded channel, so each is
+ * a small chart: 6rem, room for its three value labels.
  */
 .oyl-trace {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   display: block;
-  height: 10rem;
+  height: 6rem;
   margin-top: var(--oyl-space-sm);
   width: 100%;
+}
+
+/*
+ * The place one stacked chart is drawn in — #2068. Its channel is read when
+ * the slot scrolls into view (`detail/visibility.ts`), so the slot holds about
+ * a drawn chart's height meanwhile, and the page below it moves little when
+ * the chart arrives.
+ */
+.oyl-trace-slot {
+  min-height: 12rem;
+}
+
+/*
+ * The shared cursor (#2068): a native range across the stack's width, with
+ * the readings at its time in words under it. The input is given the 44 px
+ * row a thumb lands on (SC 2.5.5), as a checkbox's label row is (#667).
+ */
+.oyl-trace-cursor {
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  /* The charts' own columns (`.oyl-trace-chart`), in the same font size so
+     `10ch` is the same width: the slider runs across the drawings' width. */
+  font-size: var(--oyl-font-size-sm);
+  grid-template-columns: 10ch minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-trace-cursor > label,
+.oyl-trace-cursor__reading {
+  grid-column: 1 / -1;
+}
+
+.oyl-trace-cursor input[type='range'] {
+  grid-column: 2;
+  margin: 0;
+  min-height: 2.75rem;
+  width: 100%;
+}
+
+.oyl-trace-cursor__reading {
+  color: var(--oyl-color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The cursor's line, across every chart at one time. */
+.oyl-trace__cursor {
+  stroke: var(--oyl-color-ink);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 /*
@@ -4870,7 +4923,10 @@ select.oyl-input {
     'values trace'
     '. times'
     '. time-title';
-  grid-template-columns: auto minmax(0, 1fr);
+  /* #2068: a fixed value column, so every chart in the stack starts and ends
+     at the same x and a minute is at one place down the page. `auto` sized it
+     to each chart's own labels ("151 bpm" is wider than "88 rpm"). */
+  grid-template-columns: 10ch minmax(0, 1fr);
   margin-top: var(--oyl-space-sm);
 }
 
@@ -5922,32 +5978,78 @@ select.oyl-input {
 }
 
 /*
- * The zone bar (#78).
+ * THE ZONE CHART (#2069) — `analysis/ZoneChart.tsx`.
  *
- * A length, and nothing else. It carries no colour meaning: which zone a row
- * is, what range it covers, how long was spent in it and what share that is are
- * all words in the same row, and the bar repeats the share. It is `aria-hidden`
- * in the markup for that reason — see `views/AnalysisView.tsx`.
- *
- * `inline-block` with a fixed width rather than a table-cell fill, so the
- * percentage text stays readable beside it at every column width.
+ * Time in zone as one bar per zone, above the zone table: the zone's number
+ * and name (with its swatch) in the first column, the bar in the second, the
+ * share in the third. One grid for the list, so every bar starts at the same
+ * x and their lengths compare. The list sits on `surface`, the well the zone
+ * colours declare their 3:1 against (`tokens.ts` §`BAND_ON_SURFACE_MEASURED`),
+ * as the zone key does. It replaced #78's single-accent bar in the Share cell.
  */
-.oyl-zone-bar {
+.oyl-zone-chart {
+  align-items: center;
   background: var(--oyl-color-surface);
-  border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
-  display: inline-block;
-  height: 0.6rem;
-  margin-left: var(--oyl-space-sm);
-  overflow: hidden;
-  vertical-align: middle;
-  width: 6rem;
+  color: var(--oyl-color-ink);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  gap: var(--oyl-space-xs) var(--oyl-space-sm);
+  grid-template-columns: max-content minmax(0, 1fr) 4ch;
+  list-style: none;
+  margin: var(--oyl-space-sm) 0;
+  padding: var(--oyl-space-sm);
 }
 
-.oyl-zone-bar__fill {
-  background: var(--oyl-color-accent);
+.oyl-zone-chart__row {
+  display: contents;
+}
+
+.oyl-zone-chart__label {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-zone-chart__bar {
+  border: 1px solid var(--oyl-color-border);
+  border-radius: 2px;
   display: block;
-  height: 100%;
+  height: 0.875rem;
+  width: 100%;
+}
+
+.oyl-zone-chart__share {
+  text-align: end;
+}
+
+.oyl-zone-chart__fill--band-recovery {
+  fill: var(--oyl-color-band-recovery);
+}
+
+.oyl-zone-chart__fill--band-endurance {
+  fill: var(--oyl-color-band-endurance);
+}
+
+.oyl-zone-chart__fill--band-tempo {
+  fill: var(--oyl-color-band-tempo);
+}
+
+.oyl-zone-chart__fill--band-threshold {
+  fill: var(--oyl-color-band-threshold);
+}
+
+.oyl-zone-chart__fill--band-vo2 {
+  fill: var(--oyl-color-band-vo2);
+}
+
+.oyl-zone-chart__fill--band-anaerobic {
+  fill: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-zone-chart__fill--band-sprint {
+  fill: var(--oyl-color-band-sprint);
 }
 
 /*
