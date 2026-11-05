@@ -203,6 +203,7 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   mint_invite: 'Made an invitation',
   uphold_appeal: 'Upheld a decision on appeal',
   reverse_appeal: 'Reversed a decision on appeal',
+  rotate_voice: 'Replaced a room’s Discord voice channel',
 };
 
 /** A logged action as a phrase — an unknown one as the instance's own word. */

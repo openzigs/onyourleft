@@ -1297,6 +1297,32 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: { light: 4.9, dark: 13.82 },
     where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
   },
+  /*
+   * #2152: the same fill is drawn on `surface` and on `surfaceRaised`. #2118
+   * moved the TEXT on both to `accentText`, and the fill stayed: the zone bar's
+   * fill on its `surface` track, and the checked checkboxes, radios and switch
+   * tracks inside a `.oyl-panel`, a Settings card and a chooser tile, all
+   * `surfaceRaised`. Each is a non-text pair, 3:1 (SC 1.4.11), declared so a
+   * brighter fill cannot drop under it unnoticed — `surfaceRaised` in the
+   * light palette is the tightest, at 3.60.
+   */
+  {
+    foreground: 'accent',
+    background: 'surface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 4.21, dark: 11.07 },
+    where: "the zone bar's fill on its `surface` track (SC 1.4.11, #2152)",
+  },
+  {
+    foreground: 'accent',
+    background: 'surfaceRaised',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    // 3.60:1, written as a quotient: a bare `3.6` is the m/s-to-km/h factor
+    // to `units/no-inline-units.ts` (#238), and this ratio is not a conversion.
+    measured: { light: 36 / 10, dark: 8.96 },
+    where:
+      'a checked checkbox, radio or switch track on a raised panel, card or chooser tile (SC 1.4.11, #2152)',
+  },
   {
     foreground: 'hudInk',
     background: 'hudSurface',

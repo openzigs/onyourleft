@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-10-30.** This is the policy for the On Your Left Android app
+**Last updated: 2026-11-04.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -332,7 +332,11 @@ the moderator's decision with when they confirmed receipt, decided and told you.
 named you in the reasons they gave the person the report was about, your name stays with those
 reasons. If the moderator has recorded no decision twelve months after the report was received, the
 instance erases the same details then, and keeps the same rest
-([#1923](https://github.com/openzigs/onyourleft/issues/1923)). The project's own
+([#1923](https://github.com/openzigs/onyourleft/issues/1923)). **A backup of the instance
+taken before that erasure still holds what was erased, for a limited time.** The project's own
+instance keeps no backup for longer than 30 days; a backup is read only to restore the instance,
+and the instance erases whatever is due again when it starts after a restore
+([#1381](https://github.com/openzigs/onyourleft/issues/1381)). The project's own
 instance does not store your internet address with it: it counts reports from one address in memory
 only, for at most an hour.
 

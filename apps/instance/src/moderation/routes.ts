@@ -203,15 +203,23 @@ function athleteAction(
     request: object({ reason: string, reportId: integer, statement: statementInput }, ['reason']),
     errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
     response: actionResponse,
-    handle: async (context) =>
-      answer(
-        await moderationOf(context).act(callerId(context), action, context.params.athleteId ?? '', {
-          reason: context.json.reason,
-          reportId: context.json.reportId,
-          statement: context.json.statement,
-        }),
-        (value) => json(value),
-      ),
+    handle: async (context) => {
+      const target = context.params.athleteId ?? '';
+      const acted = await moderationOf(context).act(callerId(context), action, target, {
+        reason: context.json.reason,
+        reportId: context.json.reportId,
+        statement: context.json.statement,
+      });
+      // #876: a ban reaches the Discord voice of every room the rider is in.
+      if (acted.ok && action === 'suspend') {
+        await context.probes?.afterSuspension?.({
+          actorId: callerId(context),
+          targetId: target,
+          logId: acted.value.logId,
+        });
+      }
+      return answer(acted, (value) => json(value));
+    },
   };
 }
 
@@ -760,7 +768,16 @@ export const MODERATION_ROUTES: readonly Route[] = [
           statement: context.json.statement,
         },
       );
-      if (removed.ok) await context.probes?.removeFromRoom?.(roomId, athleteId);
+      if (removed.ok) {
+        await context.probes?.removeFromRoom?.(roomId, athleteId);
+        // #876: and its Discord voice, once the rider is out of the room.
+        await context.probes?.afterRoomRemoval?.({
+          roomId,
+          actorId: callerId(context),
+          targetId: athleteId,
+          logId: removed.value.logId,
+        });
+      }
       return answer(removed, (value) => json(value));
     },
   },

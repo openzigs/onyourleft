@@ -82,4 +82,42 @@ describe('readServerConfig (#780, #791)', () => {
     const on = readServerConfig({ metrics: 'on', metricsToken: 'a'.repeat(32) }, 1);
     expect(on.ok && on.config.metricsToken).toBe('a'.repeat(32));
   });
+
+  describe('Discord voice (#874)', () => {
+    const TOKEN = 'test-bot-token.not-real.oyl-874-fixture-0123456789';
+    const GUILD = '100000000000000001';
+
+    it('is off — not a problem — with neither variable set', () => {
+      expect(readServerConfig({}, 1)).toMatchObject({ ok: true, config: { discord: undefined } });
+      expect(readServerConfig({ discordBotToken: ' ', discordGuildId: '' }, 1)).toMatchObject({
+        ok: true,
+        config: { discord: undefined },
+      });
+    });
+
+    it('is on with both, trimmed', () => {
+      expect(
+        readServerConfig({ discordBotToken: ` ${TOKEN} `, discordGuildId: ` ${GUILD}\n` }, 1),
+      ).toMatchObject({ ok: true, config: { discord: { botToken: TOKEN, guildId: GUILD } } });
+    });
+
+    it('refuses half of it, or a malformed one, naming the variable and never the value', () => {
+      const cases = [
+        { discordBotToken: TOKEN },
+        { discordGuildId: GUILD },
+        { discordBotToken: 'short', discordGuildId: GUILD },
+        { discordBotToken: `${TOKEN} with spaces`, discordGuildId: GUILD },
+        { discordBotToken: TOKEN, discordGuildId: 'my-server' },
+      ];
+      for (const raw of cases) {
+        const read = readServerConfig(raw, 1);
+        expect(read.ok, JSON.stringify(Object.keys(raw))).toBe(false);
+        const problems = (read.ok ? [] : read.problems).join(' ');
+        expect(problems).toMatch(/OYL_INSTANCE_DISCORD_(BOT_TOKEN|GUILD_ID)/);
+        expect(problems).not.toContain(TOKEN);
+        expect(problems).not.toContain('with spaces');
+        expect(problems).not.toContain('my-server');
+      }
+    });
+  });
 });

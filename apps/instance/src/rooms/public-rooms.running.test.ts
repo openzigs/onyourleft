@@ -23,6 +23,12 @@ import { joinRoom, type RoomClient } from '../room/node/router-testing.ts';
 import { until } from '../room/node/node-room-testing.ts';
 import { readServerConfig } from '../server-config.ts';
 import { migrateForDeploy } from '../store/serving.ts';
+import {
+  fakeDiscord,
+  TEST_BOT_TOKEN,
+  TEST_GUILD_ID,
+  type FakeDiscord,
+} from '../voice/discord-testing.ts';
 import { roomBody } from './rooms-testing.ts';
 
 let directory: string | undefined;
@@ -41,7 +47,7 @@ interface Rider {
   readonly athleteId: string;
 }
 
-async function world(publicRooms: boolean | undefined) {
+async function world(publicRooms: boolean | undefined, discord?: FakeDiscord) {
   directory = await mkdtemp(join(tmpdir(), 'oyl-public-rooms-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
@@ -58,13 +64,22 @@ async function world(publicRooms: boolean | undefined) {
       clientAddressHeader: 'x-test-address',
       trustedProxies: ['127.0.0.1', '::1', '::ffff:127.0.0.1'],
     }),
-    server: { ...server.config, blobsPath: join(directory, 'blobs') },
+    server: {
+      ...server.config,
+      blobsPath: join(directory, 'blobs'),
+      // #875: voice on, where a test hands a Discord double.
+      ...(discord === undefined
+        ? {}
+        : { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } }),
+    },
+    ...(discord === undefined ? {} : { discordFetch: discord.fetch }),
     version: '9.8.7',
     notices: 'notices',
     log: () => undefined,
     defaultCountdownMs: 0,
   });
   await running.opened;
+  await running.voiceReady;
   const url = running.url;
   const call = async (method: string, route: string, token: string, body?: unknown) => {
     const response = await fetch(`${url}${route}`, {
@@ -139,6 +154,34 @@ describe('public rooms on the running instance — #788', () => {
     );
     clients.push(client);
     await until(() => client.messages.some((m) => m.type === 'welcome'), 'a welcome');
+  });
+
+  it('a public room has no voice link, even where the operator turned voice on — #875, spike 0018 Q1', async () => {
+    // Public rooms get voice only with account linking (#877), so a ban can
+    // reach a rider already in the channel; until then, none.
+    const discord = fakeDiscord();
+    const w = await world(true, discord);
+    const ann = await w.signIn(true);
+    const made = await w.call(
+      'POST',
+      '/v1/rooms',
+      ann.token,
+      roomBody({ kind: 'group', visibility: 'public', startsAt: startsSoon() }),
+    );
+    const { roomId } = made.body as { roomId: string };
+    const ticket = await w.call('POST', `/v1/rooms/${roomId}/ticket`, ann.token, {
+      declaredMassKilograms: 72,
+    });
+    const client = await joinRoom(
+      w.url.replace('http://', 'ws://'),
+      roomId,
+      (ticket.body as { ticket: string }).ticket,
+    );
+    clients.push(client);
+    await until(() => client.messages.some((m) => m.type === 'welcome'), 'a welcome');
+    expect(client.messages.find((m) => m.type === 'welcome')).not.toHaveProperty('voiceInvite');
+    expect(discord.ourChannels()).toEqual([]);
+    expect(discord.requests.filter((each) => each.method === 'POST')).toEqual([]);
   });
 
   it('left at its default: no public room is made or listed, and a private one is made as ever', async () => {
