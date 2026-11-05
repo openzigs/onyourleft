@@ -56,7 +56,16 @@
  * rider present, i.e. it is not driven by rider state"* — and here it is a
  * property of the signatures rather than of the tests: there is no parameter
  * through which rider state could arrive. `pacer.test.ts` rides a whole route
- * with nothing else constructed, which is the criterion's own wording.
+ * with nothing else constructed, which is the criterion's own wording, and it
+ * holds {@link advanceBot} to its three parameters.
+ *
+ * A lap-race bot's plan (#1960) chooses its own power, so it rides through
+ * {@link advancePlannedBot}: the same tick, with the power handed in. That
+ * function is **not** exported from this package's `index.ts`, so nothing
+ * outside `packages/physics/src` can call it, and `pacer.test.ts` holds
+ * `lap-race-bot.ts` to being its one caller there. `lap-race-bot.test.ts`
+ * holds that caller's inputs to a tier, the course, the race's seed and the
+ * bot's own ride.
  *
  * ⚠️ **And no recorded ride, which is the patent-posture criterion.** ADR 0007
  * D4 and `pacer/pacing.ts`'s header carry the argument in full; the part that
@@ -120,7 +129,7 @@ export interface BotTick {
   readonly distanceOnRoute: Metres;
   /** The gradient the bot is on, interpolated from the profile. Signed. */
   readonly grade: GradePercent;
-  /** What the pacing rule asked for there. */
+  /** What the bot rode there: the pacing rule's power, or the lap-race plan's (#1960). */
   readonly power: Watts;
 }
 
@@ -193,18 +202,49 @@ export function botDemand(
  * stop reporting a position for the rest of the ride.
  */
 export function advanceBot(state: RideState, elapsed: Seconds, course: BotCourse): BotTick {
+  return rideTick(state, elapsed, course, undefined);
+}
+
+/**
+ * {@link advanceBot}, at a power a lap-race bot's plan chose (#1960, ADR 0061).
+ *
+ * ⚠️ **Internal to this package**: `index.ts` does not export it, and
+ * `lap-race-bot.ts` is its one caller (`pacer.test.ts` holds both). The power is
+ * `@onyourleft/domain` §`botPlanStep`'s, from the grade {@link botDemand} reads
+ * here, and it is ridden through {@link advance}: a plan changes how hard a bot
+ * pedals, never the physics it pedals through.
+ *
+ * @throws {PhysicsError} as {@link advanceBot}.
+ */
+export function advancePlannedBot(
+  state: RideState,
+  elapsed: Seconds,
+  course: BotCourse,
+  power: Watts,
+): BotTick {
+  return rideTick(state, elapsed, course, power);
+}
+
+/** The one bot tick: the pacing rule's power, or the plan's where one is handed in. */
+function rideTick(
+  state: RideState,
+  elapsed: Seconds,
+  course: BotCourse,
+  power: Watts | undefined,
+): BotTick {
   if (!Number.isFinite(elapsed)) {
     throw new PhysicsError(
       `a bot tick must cover a finite number of seconds, received ${String(elapsed)}`,
     );
   }
   const demand = botDemand(state, course);
+  const ridden = power ?? demand.power;
   const next = advance(
     state,
-    { power: demand.power, grade: demand.grade, duration: elapsed },
+    { power: ridden, grade: demand.grade, duration: elapsed },
     conditionsFor(course),
   );
-  return { state: next, ...demand };
+  return { state: next, ...demand, power: ridden };
 }
 
 /**

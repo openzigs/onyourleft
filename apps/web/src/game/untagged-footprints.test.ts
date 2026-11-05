@@ -915,6 +915,34 @@ describe('#2023: the neighbours the rule reads', () => {
     }
   });
 
+  it('counts no dropped house that comes before the garage in the corridor (#2132)', () => {
+    const street = untaggedStreetFixture();
+    const planned = (corridor: WorldCorridor) => {
+      const land = landClassMask(corridor);
+      return footprintPlans(
+        corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        urbanClassMap(corridor, land, street.profile),
+      );
+    };
+    // The house first: its verdict is the planner's own, set before the garage asks for it.
+    for (const side of [1, -1]) {
+      const dropped = planned(ownCorridor([[FRONT], [GARAGE]], side, [[0, 22, 8, 6]]));
+      expect(dropped.verdicts['on-excluded-land']).toBe(1);
+      expect(dropped.plans).toHaveLength(1);
+      expect(dropped.plans[0]?.family).toBeUndefined();
+      expect(dropped.plans[0]?.inferred).toBe(false);
+      expect(garageDoorVertices(dropped.plans[0] as FootprintPlan)).toBe(0);
+      // Control: with no park the house comes first and is kept, and the garage is one.
+      const kept = planned(ownCorridor([[FRONT], [GARAGE]], side));
+      expect(kept.plans).toHaveLength(2);
+      expect(kept.plans[1]?.family).toBe('garage');
+    }
+  });
+
   it('counts no part as the house a garage stands behind', () => {
     // A house-sized part in front of the garage, and no building: no garage.
     const plans = plannedOwn([[GARAGE], [FRONT, undefined, { minHeightMetres: 0 }]]);

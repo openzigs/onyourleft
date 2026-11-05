@@ -245,15 +245,41 @@ export function named(items: readonly StageItem[], name: string): StageItem {
 }
 
 /**
+ * #2072 — the time of day's reading, which is not DRAWN on a short corners
+ * phone under 51 rem: `theme.css` §"THE CLOCK ROW" hides it there by clip, as
+ * a race's standings are hidden on a phone, and a screen reader still reads
+ * it. Every other overlay viewport draws it.
+ */
+export const CLOCK_READING = 'reading: Clock';
+
+/** Whether {@link CLOCK_READING} is drawn at this viewport. */
+export function clockDrawn(viewport: Viewport): boolean {
+  const narrowOnItsSide =
+    viewport.width >= 736 &&
+    viewport.width < 816 &&
+    viewport.height >= 360 &&
+    viewport.height <= 480;
+  return !narrowOnItsSide;
+}
+
+/** The stage's items a rider is meant to SEE at this viewport. @see clockDrawn */
+export function drawnItems(seen: StageMeasurement, viewport: Viewport): readonly StageItem[] {
+  return clockDrawn(viewport)
+    ? seen.items
+    : seen.items.filter((each) => each.name !== CLOCK_READING);
+}
+
+/**
  * #1120 — how many `@supports (anchor-name: …)` blocks `theme.css` has, and
  * how many `@supports not (anchor-name: …)` fallbacks. One each for #576's
  * side-camera row on a phone on its side, #1111's moving time below 802 px on
- * its side, and #1111's moving time upright. A block added or taken away
- * changes these, and the case that reads them says which.
+ * its side, #1111's moving time upright, and #2072's clock row on every
+ * overlay layout. A block added or taken away changes these, and the case
+ * that reads them says which.
  */
-export const ANCHOR_BLOCKS = 3;
+export const ANCHOR_BLOCKS = 4;
 
-export const ANCHOR_FALLBACK_BLOCKS = 3;
+export const ANCHOR_FALLBACK_BLOCKS = 4;
 
 /**
  * #1120 — the stage measured as an engine with NO anchor positioning lays it
@@ -293,13 +319,15 @@ export async function withoutAnchors(
 
 /**
  * Whether the layout at this viewport uses anchor positioning at all
- * (`theme.css`): the short corners layout — 46 rem wide or more, 22.5 to 30 rem
- * tall — and the column layout, under 46 rem wide and 47 rem tall or more.
+ * (`theme.css`): every corners layout — 46 rem wide or more, 22.5 rem tall or
+ * more, since #2072's clock row hangs from the primary panel there; until
+ * then only the short one, 30 rem tall or less — and the column layout, under
+ * 46 rem wide and 47 rem tall or more.
  */
 export function usesAnchorPositioning(viewport: Viewport): boolean {
-  const short = viewport.width >= 736 && viewport.height >= 360 && viewport.height <= 480;
+  const corners = viewport.width >= 736 && viewport.height >= 360;
   const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
-  return short || column;
+  return corners || column;
 }
 
 /**

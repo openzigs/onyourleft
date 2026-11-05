@@ -217,6 +217,52 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
     expect(lateralOf(x, z, 1_000)).toBeCloseTo(40, 1);
   });
 
+  it('seeds that end where the door is under `tell` off the middle, and takes the far end past it', () => {
+    // #2132: 24 m along the road by 10 m deep, its front corner at the `toward` end (±1)
+    // cut back `cut` metres, so the door — in the front wall's middle — stands `cut / 2` off
+    // the long axis's middle, toward the other end, and the long axis is unchanged.
+    const church = (along: number, cut: number, toward: number) =>
+      planOne(
+        [
+          [
+            [along - toward * 12, 35],
+            [along + toward * (12 - cut), 35],
+            [along + toward * 12, 35 + cut],
+            [along + toward * 12, 45],
+            [along - toward * 12, 45],
+          ],
+        ],
+        CHURCH,
+      );
+    /** Which end of the long axis `plan`'s spire stands at, and its door: ±1, by the road. */
+    const ends = (plan: FootprintPlan, along: number): { spire: number; door: number } => {
+      const frame = drawnRoadFrame(profile, origin, along);
+      if (frame === undefined) throw new Error('no road there');
+      const alongOf = (x: number, z: number): number =>
+        (x - frame.x) * frame.normalZ - (z - frame.z) * frame.normalX;
+      const [x, , z] = apexOf(plan);
+      const door = plan.triangles.door;
+      let sum = 0;
+      for (let at = 0; at < door.length; at += FOOTPRINT_VERTEX_FLOATS) {
+        sum += alongOf(door[at] as number, door[at + 2] as number);
+      }
+      const doorAlong = sum / (door.length / FOOTPRINT_VERTEX_FLOATS);
+      return { spire: Math.sign(alongOf(x, z)), door: Math.sign(doorAlong) };
+    };
+    const places = Array.from({ length: 16 }, (_, index) => 1_000 + index * 10);
+    for (const toward of [1, -1]) {
+      // 1.4 m cut: the door 0.7 m off the middle, under `tell`, so each place's seed picks
+      // the end — the door's own end at some, the far end at others.
+      const near = places.map((along) => ends(church(along, 1.4, toward), along));
+      expect(near.every((each) => each.door === -toward)).toBe(true);
+      expect(near.some((each) => each.spire === each.door)).toBe(true);
+      expect(near.some((each) => each.spire === -each.door)).toBe(true);
+      // Control: a 3 m cut, the door 1.5 m off — past `tell` — and every spire at the far end.
+      const far = places.map((along) => ends(church(along, 3, toward), along));
+      expect(far.every((each) => each.door === -toward && each.spire === toward)).toBe(true);
+    }
+  });
+
   it('steps a steeple inward to stand on a notched end, and leaves none off a footprint too small', () => {
     // A cross: the nave 10 by 30 m, away from the road, its door on the front wall, with
     // transepts, and behind it an apse 4 m wide and 3 m deep, narrower than the 6 m tower.
