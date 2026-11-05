@@ -11,6 +11,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { BuildingFeature } from '@onyourleft/map-features';
+
 import { FOUNDATION_METRES } from './buildings';
 import {
   FACADE_DOOR,
@@ -21,6 +23,7 @@ import {
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   STEEPLE,
+  STOREY_METRES,
   type FootprintPlan,
   type FootprintPlanOptions,
   type FootprintRole,
@@ -39,7 +42,7 @@ import { landClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { CHURCH, churchFits, spireApexOf, spireIsMapped } from './mapped-landmarks';
 import { drawnRoadFrame } from './terrain';
-import { urbanClassMap } from './urban-class';
+import { urbanClassMap, type UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
 const street = churchStreetFixture();
@@ -215,7 +218,7 @@ describe('#1794: a church, read back from the plan', () => {
   it('tops the spire at a tall mapped height, which is its spire’s', () => {
     const tall = churches.get('tall') as FootprintPlan;
     const height = CHURCH_FOOTPRINTS.find((each) => each.name === 'tall')?.height ?? 0;
-    expect(spireIsMapped(height, CHURCH.storeys * 3)).toBe(true);
+    expect(spireIsMapped(height, CHURCH.storeys * STOREY_METRES)).toBe(true);
     expect(apexOf(tall).y - groundOf(tall)).toBeCloseTo(height, 3);
     // Its nave's walls are `CHURCH.storeys`, not the mapped height's.
     expect(tall.storeys).toBe(CHURCH.storeys);
@@ -364,5 +367,78 @@ describe('#1794: the lever, and a town with no church', () => {
       urbanClassMap(town.corridor, land, town.profile),
     );
     expect(planFingerprint(plans)).toBe(MIXED_TOWN_BEFORE_1794);
+  });
+});
+
+/** A mapped church of each `ring` (with `fields` over its tags), planned on the street's land. */
+function planChurches(
+  rings: readonly (readonly (readonly [number, number])[])[],
+  fields: Partial<BuildingFeature> = {},
+  options: FootprintPlanOptions = {},
+  urban?: UrbanClassMap,
+): readonly FootprintPlan[] {
+  const corridor: WorldCorridor = {
+    ...street.corridor,
+    buildings: rings.map((ring) => ({
+      ...buildingBeside(street.profile, street.origin, [ring], 7),
+      buildingType: 'church' as const,
+      ...fields,
+    })),
+  };
+  const land = landClassMask(corridor);
+  const { plans } = footprintPlans(
+    corridor,
+    land,
+    street.profile,
+    street.origin,
+    undefined,
+    urban ?? urbanClassMap(corridor, land, street.profile),
+    options,
+  );
+  expect(plans).toHaveLength(rings.length);
+  return plans;
+}
+
+describe('#1794: where a church is not drawn, and what its mapped levels do', () => {
+  const nave = rectangleBeside(1_000, 40, 12, 26);
+
+  it('keeps a church with a flat mapped roof a block: a flat roof is no nave’s', () => {
+    const [flat] = planChurches([nave], { roofShape: 'flat' });
+    const [gabled] = planChurches([nave], { roofShape: 'gabled' });
+    const [off] = planChurches([nave], { roofShape: 'flat' }, { landmarkChurches: false });
+    expect(flat?.pitchDegrees).not.toBe(CHURCH.pitchDegrees);
+    expect(planFingerprint([flat as FootprintPlan])).toBe(planFingerprint([off as FootprintPlan]));
+    // Control: the same nave under a mapped gable is a church.
+    expect(gabled?.pitchDegrees).toBe(CHURCH.pitchDegrees);
+  });
+
+  it('keeps a terraced church a block, and its detached twin a church', () => {
+    const town: UrbanClassMap = { classAt: () => 'town' };
+    // Two naves sharing a wall, the same height: a party wall, so a terrace.
+    const pair = [nave, rectangleBeside(1_012, 40, 12, 26)];
+    const joined = planChurches(pair, {}, {}, town);
+    const joinedOff = planChurches(pair, {}, { landmarkChurches: false }, town);
+    for (const plan of joined) expect(plan.pitchDegrees).not.toBe(CHURCH.pitchDegrees);
+    expect(planFingerprint(joined)).toBe(planFingerprint(joinedOff));
+    // Control: apart, in the same town, each is a church.
+    const apart = planChurches([nave, rectangleBeside(1_040, 40, 12, 26)], {}, {}, town);
+    for (const plan of apart) expect(plan.pitchDegrees).toBe(CHURCH.pitchDegrees);
+  });
+
+  it('builds the nave’s walls to its mapped levels where the mapped height is its spire’s', () => {
+    const [levelled] = planChurches([nave], { heightMetres: 35, levels: 4 });
+    const [unlevelled] = planChurches([nave], { heightMetres: 35 });
+    expect(levelled?.storeys).toBe(4);
+    expect(unlevelled?.storeys).toBe(CHURCH.storeys);
+    // The spire is still the mapped height above the ground.
+    const plan = levelled as FootprintPlan;
+    expect(apexOf(plan).y - groundOf(plan)).toBeCloseTo(35, 3);
+    // Control: with `mappedRoofShape` off the tag is ignored.
+    const [ignored] = planChurches(
+      [nave],
+      { heightMetres: 35, levels: 4 },
+      { mappedRoofShape: false },
+    );
+    expect(ignored?.storeys).toBe(CHURCH.storeys);
   });
 });
