@@ -36,11 +36,16 @@ import { describe, expect, it } from 'vitest';
 import {
   expandWorkout,
   POWER_ZONE_NAMES,
+  powerZones,
   seconds,
   thresholdShare,
+  timeInZones,
+  watts,
   type WorkoutBlock,
 } from '@onyourleft/domain';
 
+import { zoneRows } from '../analysis/present';
+import { ZoneChart, zoneFillClass } from '../analysis/ZoneChart';
 import { contrastRatio } from '../design/contrast';
 import { BAND_TOKENS, THEMES, paletteColours, type BandToken } from '../design/tokens';
 import { ZoneKey, zoneSwatchClass } from '../design/ZoneKey';
@@ -186,6 +191,19 @@ const BLOCKS: readonly WorkoutBlock[] = [
 /** Each reader of a zone colour, rendered painting zones. */
 const FIXTURES: Readonly<Record<string, () => JSX.Element>> = {
   'design/ZoneKey.tsx': () => <ZoneKey zones={[1, 3, 4, 6]} />,
+  // #2069: a ride through every power zone, a minute in each.
+  'analysis/ZoneChart.tsx': () => {
+    const zones = powerZones(watts(200));
+    const samples = zones.flatMap((zone) =>
+      Array.from({ length: 60 }, (): number => zone.lower + 1),
+    );
+    return (
+      <ZoneChart
+        rows={zoneRows(zones, timeInZones(zones, samples, seconds(1)), 'W')}
+        basis="power"
+      />
+    );
+  },
   'workouts/BlockChart.tsx': () => (
     <BlockChart segments={expandWorkout({ name: 'fixture', blocks: BLOCKS }).segments} />
   ),
@@ -213,7 +231,13 @@ function zonesDrawn(root: Element): readonly number[] {
   const painted = new Set<number>();
   for (const [index, token] of BAND_TOKENS.entries()) {
     const kebab = token.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
-    if (root.querySelector(`.oyl-block-chart__${kebab}, .${zoneSwatchClass(token)}`) !== null) {
+    // #2069: and the zone chart's bars, so a bar drawn with no words beside it
+    // is a painted zone with no name rather than a zone nothing painted.
+    if (
+      root.querySelector(
+        `.oyl-block-chart__${kebab}, .${zoneSwatchClass(token)}, .${zoneFillClass(token)}`,
+      ) !== null
+    ) {
       painted.add(index);
     }
   }
