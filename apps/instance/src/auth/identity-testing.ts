@@ -50,6 +50,7 @@ import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import type { Embedder } from '../history/embedder.ts';
 import { createHistory, type History } from '../history/history.ts';
 import { scriptedEmbedder } from '../history/history-testing.ts';
+import { createSegments, type Segments } from '../segments/segments.ts';
 import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
@@ -211,6 +212,8 @@ export interface IdentityInstance {
   /** Sync's blobs, as the memory blob store keeps them: the object store, read directly. */
   readonly blobs: MemoryBlobs;
   readonly sync: Sync;
+  /** Published segments and their boards (#68), over the same store. */
+  readonly segments: Segments;
   /** The history index over the same store (#835): sync schedules a catch-up after each item. */
   readonly history: History;
   /** Riders' rooms (#784, #785), over the same store. */
@@ -402,6 +405,8 @@ export async function startIdentityInstance(
     },
     ghostRider: nameFor,
   });
+  // #68: over the same store and clock, as `instance.ts` builds it.
+  const segments = createSegments({ store, now: () => clock.ms });
   const listenerConfig = { bodyLimitBytes: bodyLimitBytes ?? 16_384, ...config };
   const roomRoutes: MemoryBlobs = new Map();
   const rooms = createRooms({
@@ -497,6 +502,7 @@ export async function startIdentityInstance(
       ...(observe === undefined ? {} : { observe }),
       identity,
       sync,
+      segments,
       history,
       rooms,
       instanceKeys,
@@ -652,6 +658,7 @@ export async function startIdentityInstance(
     mail,
     blobs,
     sync,
+    segments,
     history,
     rooms,
     roomRoutes,

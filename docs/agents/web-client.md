@@ -468,7 +468,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         schema v14) — a synced ride missing here is deleted on
                         the instance, a local item change is pushed, and only
                         an item unchanged here whose instance copy moved is
-                        pulled
+                        pulled. Since #68 `leaderboard-port.ts` is the
+                        segment screens' way to the instance's segments and
+                        boards (`segments/InstanceBoard.tsx`,
+                        `InstanceSegments.tsx`): publishing only a segment
+                        `public` here with neither end in a privacy zone,
+                        sharing a ride's efforts makes the ride `public` here
+                        AND there (withdrawing, `private` in both), and an
+                        added segment is checked to hash to its id
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a

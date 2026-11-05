@@ -15,6 +15,7 @@ import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
+import type { Segments } from './segments/segments.ts';
 import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode, type FieldProblem } from './errors.ts';
 
@@ -159,6 +160,8 @@ export interface RouteContext {
   readonly hostedSettings: HostedSettings | undefined;
   /** The side camera's pictures (#1106). Present for every route that declares `sidePose`. */
   readonly sidePose: SidePose | undefined;
+  /** Published segments and their boards (#68). Present for every route that declares `segments`. */
+  readonly segments: Segments | undefined;
   /**
    * The instance's own keys (#1189). Absent until the store is open, and on
    * a test's handler that was handed none.
@@ -243,6 +246,11 @@ export interface Route {
    * handed none answers `unavailable` without calling it.
    */
   readonly sidePose?: true;
+  /**
+   * The route needs published segments and their boards (#68). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly segments?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**

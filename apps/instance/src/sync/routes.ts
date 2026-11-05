@@ -136,7 +136,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record`, its `file` address and its `visibility` here), `segments` (the segments you published, path included) and `segmentEfforts` (every effort you shared), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),
@@ -265,6 +265,30 @@ export const SYNC_ROUTES: readonly Route[] = [
     handle: async (context) =>
       answer(
         await syncOf(context).setRaceConsent(
+          callerOf(context),
+          context.params.content ?? '',
+          context.json,
+        ),
+      ),
+  },
+  {
+    method: 'POST',
+    path: '/v1/sync/records/{content}/visibility',
+    sealed: 'only',
+    operationId: 'setActivityVisibility',
+    reaches: 'own',
+    summary:
+      'Say who may see one of your rides on this instance, by the SHA-256 of its file — its visibility on your device (ADR 0004): private, followers or public. Private unless you set it. Only a public ride’s efforts are ranked on a shared leaderboard (#68); followers is inert until there is a follow. Not part of the signed record, and never the race consent.',
+    ...SESSION,
+    request: object({ visibility: { type: 'string', enum: ['private', 'followers', 'public'] } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ visibility: { type: 'string', enum: ['private', 'followers', 'public'] } }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).setVisibility(
           callerOf(context),
           context.params.content ?? '',
           context.json,

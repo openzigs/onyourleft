@@ -67,6 +67,7 @@ import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import {
   SYNC_KINDS,
   type ActivityRecord,
+  type ActivityVisibility,
   type ManifestPosition,
   type SqlStore,
   type SyncKind,
@@ -273,6 +274,23 @@ export interface AccountExport {
     readonly mayBeRaced: boolean;
     /** The route this ride is offered to be raced on, or `null` (#331). */
     readonly raceRouteSha256: string | null;
+    /** Who may see this ride here, as your device last said (#68). Not in the signed record. */
+    readonly visibility: ActivityVisibility;
+  }[];
+  /** The segments you published here (#68), each with its definition, path included. */
+  readonly segments: readonly {
+    readonly segmentId: string;
+    readonly name: string;
+    readonly createdAt: number;
+    readonly definition: unknown;
+  }[];
+  /** Every effort you shared on a segment here (#68): which segment, from which ride, and its time. */
+  readonly segmentEfforts: readonly {
+    readonly segmentId: string;
+    readonly contentSha256: string;
+    readonly startedAt: number;
+    readonly elapsedSeconds: number;
+    readonly visibility: 'public' | 'private-match';
   }[];
   readonly items: readonly {
     readonly kind: SyncKind;
@@ -386,6 +404,16 @@ export interface Sync {
     contentSha256: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ readonly mayBeRaced: boolean }>>;
+  /**
+   * #68: the visibility of one of the caller's rides, as their device holds it
+   * (ADR 0004 decision A) — what a shared leaderboard reads, and only
+   * `public` reaches one. `not_found` for a ride the caller does not hold.
+   */
+  setVisibility(
+    caller: Caller,
+    contentSha256: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ readonly visibility: ActivityVisibility }>>;
   /**
    * #331: offer one of the caller's consented rides to be raced on a route,
    * by the SHA-256 of the route's canonical GPX — or withdraw the offer with
@@ -559,6 +587,7 @@ export function createSync(options: SyncOptions): Sync {
           file: `/v1/sync/files/${record.contentSha256}`,
           mayBeRaced: consent.get(record.contentSha256) ?? false,
           raceRouteSha256: offered.get(record.contentSha256) ?? null,
+          visibility: record.visibility ?? 'private',
         });
       }
       return {
@@ -601,6 +630,19 @@ export function createSync(options: SyncOptions): Sync {
             }),
           ),
           activities,
+          segments: (await store.listSegmentsPublishedBy(caller.athleteId)).map((segment) => ({
+            segmentId: segment.id,
+            name: segment.name,
+            createdAt: segment.createdAt,
+            definition: JSON.parse(segment.definition) as unknown,
+          })),
+          segmentEfforts: (await store.listSharedEfforts(caller.athleteId)).map((effort) => ({
+            segmentId: effort.segmentId,
+            contentSha256: effort.contentSha256,
+            startedAt: effort.startedAt,
+            elapsedSeconds: effort.elapsedSeconds,
+            visibility: effort.visibility,
+          })),
           items,
           results: (await store.listResults(caller.athleteId)).map((result) => ({
             roomId: result.roomId,
@@ -724,6 +766,16 @@ export function createSync(options: SyncOptions): Sync {
       if (typeof mayBeRaced !== 'boolean') return invalid('mayBeRaced', 'must be true or false');
       const set = await store.setActivityMayBeRaced(caller.athleteId, contentSha256, mayBeRaced);
       return set ? { ok: true, value: { mayBeRaced } } : refuse('not_found');
+    },
+
+    setVisibility: async (caller, contentSha256, body) => {
+      if (!BLOB_KEY.test(contentSha256)) return refuse('not_found');
+      const { visibility } = body;
+      if (visibility !== 'private' && visibility !== 'followers' && visibility !== 'public') {
+        return invalid('visibility', 'must be private, followers or public');
+      }
+      const set = await store.setActivityVisibility(caller.athleteId, contentSha256, visibility);
+      return set ? { ok: true, value: { visibility } } : refuse('not_found');
     },
 
     setRaceRoute: async (caller, contentSha256, body) => {

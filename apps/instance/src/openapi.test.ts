@@ -20,6 +20,7 @@ import { secretBytes } from './keys/instance-keys-testing.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
 import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
 import { base64Of, testPicture } from './camera/picture-testing.ts';
+import { SEGMENT_HAPPY_CALLS } from './segments/segments-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import {
@@ -735,6 +736,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
   },
   ...SYNC_HAPPY_CALLS,
+  ...SEGMENT_HAPPY_CALLS,
   // #1199: a rider's own hosted key and consent — each with both set, so the
   // nullable objects are read as objects.
   getHostedModelSettings: async (world) => {

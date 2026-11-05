@@ -16,6 +16,7 @@ import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
 import { ROOM_ROUTES } from './rooms/routes.ts';
 import { SEALED_ROUTES } from './sealed/routes.ts';
+import { SEGMENT_ROUTES } from './segments/routes.ts';
 import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
@@ -240,6 +241,7 @@ export const ROUTES: readonly Route[] = [
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
   ...SYNC_ROUTES,
+  ...SEGMENT_ROUTES,
   ...HISTORY_ROUTES,
   ...ANALYSIS_ROUTES,
   ...HOSTED_ROUTES,

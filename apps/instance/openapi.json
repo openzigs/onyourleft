@@ -631,7 +631,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record`, its `file` address and its `visibility` here), `segments` (the segments you published, path included) and `segmentEfforts` (every effort you shared), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`."
                 }
               }
             }
@@ -8535,6 +8535,689 @@
         }
       }
     },
+    "/v1/segments": {
+      "post": {
+        "operationId": "publishSegment",
+        "summary": "Publish one of your segments to every rider on this instance: its name, sport, path, endpoint radius and bearing tolerance (#68). Its id is a digest of that definition, so the same one sent again is the same segment. The instance measures the distance itself. Your device publishes only a segment none of your privacy zones touches at either end.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "segment": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "sport": {
+                        "type": "string",
+                        "enum": [
+                          "ride",
+                          "run"
+                        ]
+                      },
+                      "geometry": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "endpointRadiusMetres": {
+                        "type": "number"
+                      },
+                      "bearingToleranceDegrees": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "sport",
+                      "geometry",
+                      "endpointRadiusMetres",
+                      "bearingToleranceDegrees"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "segment"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "segmentId": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "integer"
+                    },
+                    "published": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "segmentId",
+                    "createdAt",
+                    "published"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSegments",
+        "summary": "The segments published on this instance, newest first: `?limit=` (1–200, default 50) and `?cursor=` from the page before. A name, sport, distance and when it was published — never its path or who published it.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "segmentId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "sport": {
+                            "type": "string",
+                            "enum": [
+                              "ride",
+                              "run"
+                            ]
+                          },
+                          "distanceMetres": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "integer"
+                          },
+                          "yours": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "segmentId",
+                          "name",
+                          "sport",
+                          "distanceMetres",
+                          "createdAt",
+                          "yours"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/segments/{segmentId}": {
+      "get": {
+        "operationId": "getSegment",
+        "summary": "One published segment with its definition, path included, for your device to match your own rides against. Never who published it.",
+        "parameters": [
+          {
+            "name": "segmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "segmentId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "sport": {
+                      "type": "string",
+                      "enum": [
+                        "ride",
+                        "run"
+                      ]
+                    },
+                    "distanceMetres": {
+                      "type": "number"
+                    },
+                    "createdAt": {
+                      "type": "integer"
+                    },
+                    "yours": {
+                      "type": "boolean"
+                    },
+                    "definition": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "sport": {
+                          "type": "string",
+                          "enum": [
+                            "ride",
+                            "run"
+                          ]
+                        },
+                        "geometry": {
+                          "type": "array",
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "endpointRadiusMetres": {
+                          "type": "number"
+                        },
+                        "bearingToleranceDegrees": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "sport",
+                        "geometry",
+                        "endpointRadiusMetres",
+                        "bearingToleranceDegrees"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "segmentId",
+                    "name",
+                    "sport",
+                    "distanceMetres",
+                    "createdAt",
+                    "yours",
+                    "definition"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "withdrawSegment",
+        "summary": "Withdraw a segment you published, and every effort any rider shared on it. Their own copies stay on their devices. `not_found` for one you did not publish.",
+        "parameters": [
+          {
+            "name": "segmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/segments/{segmentId}/efforts/{content}": {
+      "post": {
+        "operationId": "shareSegmentEfforts",
+        "summary": "Share your efforts on a published segment from one of your synced rides, by the SHA-256 of its file, replacing what you shared from that ride before; none withdraws them. Each is its start, its elapsed time and its visibility as your device decided it: `private-match` — an end in one of your privacy zones — is kept for your own board and never ranked on anybody else’s. Each must lie within the ride’s recorded time.",
+        "parameters": [
+          {
+            "name": "segmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "efforts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "startedAt": {
+                          "type": "integer"
+                        },
+                        "elapsedSeconds": {
+                          "type": "number"
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "public",
+                            "private-match"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "startedAt",
+                        "elapsedSeconds",
+                        "visibility"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "efforts"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "efforts": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "efforts"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/segments/{segmentId}/leaderboard": {
+      "get": {
+        "operationId": "getSegmentLeaderboard",
+        "summary": "A board on a published segment: ?scope= (instance, personal; default instance) and ?period= (all-time, last-90-days, last-30-days; default all-time). THIS instance only — never every instance. One row per rider, their best, fastest first by elapsed time, at most 50: a rank, a display name, whether it is yours, and the time. Never a position, a date or a ride. A rolling window starts no earlier than the segment’s publication here.",
+        "parameters": [
+          {
+            "name": "segmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "segment": {
+                      "type": "object",
+                      "properties": {
+                        "segmentId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "sport": {
+                          "type": "string",
+                          "enum": [
+                            "ride",
+                            "run"
+                          ]
+                        },
+                        "distanceMetres": {
+                          "type": "number"
+                        },
+                        "createdAt": {
+                          "type": "integer"
+                        },
+                        "yours": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "segmentId",
+                        "name",
+                        "sport",
+                        "distanceMetres",
+                        "createdAt",
+                        "yours"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "instance",
+                        "personal"
+                      ]
+                    },
+                    "period": {
+                      "type": "string",
+                      "enum": [
+                        "all-time",
+                        "last-90-days",
+                        "last-30-days"
+                      ]
+                    },
+                    "rankedBy": {
+                      "type": "string",
+                      "enum": [
+                        "elapsed"
+                      ]
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "rank": {
+                            "type": "integer"
+                          },
+                          "rider": {
+                            "type": "string"
+                          },
+                          "yours": {
+                            "type": "boolean"
+                          },
+                          "elapsedSeconds": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "rank",
+                          "rider",
+                          "yours",
+                          "elapsedSeconds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "segment",
+                    "scope",
+                    "period",
+                    "rankedBy",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/statements": {
       "get": {
         "operationId": "listStatements",
@@ -9611,6 +10294,106 @@
                   },
                   "required": [
                     "routeSha256"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/records/{content}/visibility": {
+      "post": {
+        "operationId": "setActivityVisibility",
+        "summary": "Say who may see one of your rides on this instance, by the SHA-256 of its file — its visibility on your device (ADR 0004): private, followers or public. Private unless you set it. Only a public ride’s efforts are ranked on a shared leaderboard (#68); followers is inert until there is a follow. Not part of the signed record, and never the race consent.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "private",
+                      "followers",
+                      "public"
+                    ]
+                  }
+                },
+                "required": [
+                  "visibility"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "visibility": {
+                      "type": "string",
+                      "enum": [
+                        "private",
+                        "followers",
+                        "public"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "visibility"
                   ],
                   "additionalProperties": false
                 }

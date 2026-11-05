@@ -20,6 +20,8 @@ import {
   segmentRefusals,
   type SegmentOverlap,
 } from '../segments/create';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
+import { InstanceSegments } from '../segments/InstanceSegments';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import {
@@ -113,6 +115,11 @@ export interface SegmentsViewProps {
    * both structurally, so `main.tsx` passes one object twice.
    */
   readonly match?: MatchPort | undefined;
+  /**
+   * The rider's instance's segments (#68), or `undefined` with no instance —
+   * in which case nothing about one renders and nothing is sent.
+   */
+  readonly boards?: LeaderboardPort | undefined;
 }
 
 /**
@@ -132,7 +139,7 @@ interface Outcome {
   readonly overlaps: readonly SegmentOverlap[];
 }
 
-export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
+export function SegmentsView({ port, match, boards }: SegmentsViewProps): JSX.Element {
   const [segments, setSegments] = useState<readonly SegmentRecord[] | undefined>(undefined);
   const [rides, setRides] = useState<readonly ActivitySummary[] | undefined>(undefined);
   const [outcome, setOutcome] = useState<Outcome | undefined>(undefined);
@@ -533,6 +540,15 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
       )}
 
       {noSegments ? null : yours}
+
+      {/* #68: only with an instance this copy can seal to; otherwise nothing. */}
+      {boards?.offered() === true ? (
+        <InstanceSegments
+          port={boards}
+          held={new Set((segments ?? []).map((segment) => segment.id as string))}
+          onAdded={() => void refresh()}
+        />
+      ) : null}
     </div>
   );
 }
