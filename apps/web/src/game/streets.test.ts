@@ -951,9 +951,12 @@ describe('a path to each front door — #1564', () => {
     expect(Math.max(...counts)).toBeGreaterThan(DOOR_PATH_TRIANGLES_PER_VILLAGE * 0.6);
     expect(DOOR_PATH_TRIANGLES_PER_VILLAGE).toBe(960);
     // `realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES`: two villages'
-    // pavements and paths, and the furniture belt's capacity.
+    // pavements and paths, and the furniture belt's capacity — the stylised
+    // world's 324 a set of pieces, and since #1274 the realistic world's 459,
+    // its lamp post Poly Haven's 223 (`realistic-roadside.test.ts` counts it
+    // off the belt).
     expect(REALISTIC_STREET_TRIANGLES).toBe(
-      2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + 64 * 324,
+      2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + 64 * 459,
     );
   });
 

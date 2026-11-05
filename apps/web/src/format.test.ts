@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
 
-import { formatDuration, POWER_UNIT, shownAveragePower } from './format';
+import { formatDuration, formatTimeOfDay, POWER_UNIT, shownAveragePower } from './format';
 
 describe('what is left here is not a unit a rider chooses', () => {
   it('renders a duration the same way whichever units the rider reads in', () => {
@@ -51,5 +51,15 @@ describe('which stored average power is shown at all — #1054', () => {
     expect(shownAveragePower(watts(0.5))).toBe(0.5);
     expect(shownAveragePower(watts(1))).toBe(1);
     expect(shownAveragePower(watts(212))).toBe(212);
+  });
+});
+
+describe('the time of day — #2072', () => {
+  it('is HH:MM, 24-hour and zero-padded, in the device’s own zone', () => {
+    // Built from local fields, so each reads back as the hour it was made at
+    // whatever zone the test runs in.
+    expect(formatTimeOfDay(new Date(2026, 10, 4, 7, 5, 59))).toBe('07:05');
+    expect(formatTimeOfDay(new Date(2026, 10, 4, 21, 5, 0))).toBe('21:05');
+    expect(formatTimeOfDay(new Date(2026, 10, 4, 0, 0, 0))).toBe('00:00');
   });
 });

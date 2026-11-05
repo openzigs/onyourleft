@@ -42,6 +42,8 @@
  *   whose own page states CC0 or CC-BY-4.0 was found (spike 0005).
  * - {@link REALISTIC_BICYCLE_MAPS} are that bicycle's surfaces since #624:
  *   four small maps this repository draws, on the geometry it already had.
+ * - {@link REALISTIC_ROADSIDE_MODELS} are a street's lamp post and a
+ *   gantry's barrier since #1274: Poly Haven's, coloured a vertex at a time.
  *
  * `realistic-assets.test.ts` holds these tables to the pipeline's own list of
  * what it ships, in both directions.
@@ -716,6 +718,27 @@ export function houseModelFile(id: HouseModelId): string {
 export const REALISTIC_HOUSE_ATLAS = 'house_models_atlas.ktx2';
 
 /**
+ * The roadside models — #1274: Poly Haven's CC0 `street_lamp_01`, which a
+ * village street's lamp posts are drawn as, and `concrete_road_barrier`,
+ * which the gantries' barriers are. Each a GLB of geometry and a colour a
+ * vertex, with no picture and no material (`tools/realistic/blender/
+ * process_roadside_model.py`), so each is drawn inside the draw call the
+ * shape it replaces already made: the lamp in the street furniture's painted
+ * mesh (`three-renderer.ts` §`FurnitureBelt`), the barrier in the gantries'
+ * boxes (§`GantryBelt`). The stylised world draws its own shapes as before.
+ */
+export const REALISTIC_ROADSIDE_MODELS = {
+  lamp: 'street_lamp_01.glb',
+  barrier: 'concrete_road_barrier.glb',
+} as const;
+
+/** One of {@link REALISTIC_ROADSIDE_MODELS}. */
+export type RoadsideModel = keyof typeof REALISTIC_ROADSIDE_MODELS;
+
+/** Every {@link RoadsideModel}, in a fixed order. */
+export const REALISTIC_ROADSIDE_MODEL_NAMES: readonly RoadsideModel[] = ['lamp', 'barrier'];
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -757,6 +780,7 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_WORDMARK,
     ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),
     REALISTIC_HOUSE_ATLAS,
+    ...REALISTIC_ROADSIDE_MODEL_NAMES.map((model) => REALISTIC_ROADSIDE_MODELS[model]),
   ];
 }
 

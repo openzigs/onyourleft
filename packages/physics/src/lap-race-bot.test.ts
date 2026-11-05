@@ -22,13 +22,23 @@ import type {
 } from '@onyourleft/domain';
 import {
   altitudeMetres,
+  BOT_MASS_KILOGRAMS,
   BOT_PERSONALITIES,
+  BOT_PLAN_BANKING,
+  BOT_PLAN_MEAN_TOLERANCE,
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  botRacePlan,
   createItemRace,
   degreesCelsius,
   degreesLatitude,
   degreesLongitude,
+  distanceOnRoute,
   geographicPosition,
+  gradeAt,
+  MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   metres,
+  PACING_FACTOR_CEILING,
+  PACING_FACTOR_FLOOR,
   metresPerSecond,
   raceCourse,
   routeProfile,
@@ -149,7 +159,7 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
     expect(next.racers[0]?.racer.effortDistance).toBe(1234);
   });
 
-  it('rides at the bot’s 75 kg, with its tier’s power', () => {
+  it('rides at the bot’s 75 kg, with its race plan’s power at its tier', () => {
     vi.mocked(advance).mockClear();
     const start = createItemRace({
       course: raceCourse(FLAT.totalDistance, 3),
@@ -165,9 +175,10 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
     });
     const [, step, rideConditions] = vi.mocked(advance).mock.calls[0] ?? [];
     expect(rideConditions?.totalMass).toBe(75);
-    // 3.6 W/kg at 75 kg on the flat.
-    expect(step?.power).toBeCloseTo(270, 6);
-    expect(bots[0]?.power).toBeCloseTo(270, 6);
+    // 3.6 W/kg at 75 kg on the flat, banking 5 % into an empty reserve (#1960).
+    expect(step?.power).toBeCloseTo(270 * (1 - BOT_PLAN_BANKING), 6);
+    expect(bots[0]?.power).toBe(step?.power);
+    expect(bots[0]?.reserve).toBeCloseTo(270 * BOT_PLAN_BANKING, 6);
   });
 });
 
@@ -218,7 +229,7 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     >();
     expectTypeOf<keyof BotRaceStep>().toEqualTypeOf<'elapsed' | 'conditions' | 'seed' | 'rider'>();
     expectTypeOf<keyof LapRaceBot>().toEqualTypeOf<
-      'id' | 'tier' | 'strategy' | 'memory' | 'ride' | 'power'
+      'id' | 'tier' | 'strategy' | 'memory' | 'reserve' | 'ride' | 'power'
     >();
     expectTypeOf<keyof LapRaceBotConditions>().toEqualTypeOf<
       | 'profile'
@@ -275,6 +286,8 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
         'RaceTickInput',
         'Seconds',
         'Watts',
+        'botPlanStep',
+        'botRacePlan',
         'botTierPlan',
         'stepRace',
         'strategicBotDecision',
@@ -473,4 +486,185 @@ describe('skill is its own axis, and never power (#1959, ADR 0060 D-9)', () => {
       expect(ahead).toBeGreaterThan(behind);
     },
   );
+});
+
+/** One bot's ride through a run: the power of each tick, where it began, and its grade. */
+interface BotTicks {
+  readonly power: readonly number[];
+  readonly from: readonly number[];
+  readonly grade: readonly number[];
+  /** How many ticks until the bot finished. */
+  readonly finished: number;
+}
+
+function ticksOf(run: Run, id: string, profile: RouteProfile): BotTicks {
+  const power: number[] = [];
+  const from: number[] = [];
+  const grade: number[] = [];
+  let finished = -1;
+  for (let tick = 1; tick < run.bots.length; tick += 1) {
+    const before = run.bots[tick - 1]?.find((bot) => bot.id === id) as LapRaceBot;
+    const after = run.bots[tick]?.find((bot) => bot.id === id) as LapRaceBot;
+    power.push(after.power);
+    from.push(before.ride.distance);
+    grade.push(gradeAt(profile, distanceOnRoute(profile, before.ride.distance)));
+    const racer = run.races[tick]?.racers.find((entry) => entry.racer.id === id);
+    if (finished < 0 && racer?.racer.finishedAtMs !== null) finished = tick;
+  }
+  return { power, from, grade, finished };
+}
+
+const mean = (values: readonly number[]): number =>
+  values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const ALL_TIERS: readonly Entrant[] = [
+  { id: 's', tier: 'steady' },
+  { id: 'b', tier: 'brisk' },
+  { id: 'h', tier: 'hard' },
+  { id: 'f', tier: 'fierce' },
+];
+
+describe('the race plan (#1960, ADR 0061 D-8)', () => {
+  it(
+    'holds every tier’s mean power to its tier, inside the surge ceiling and #92’s floor',
+    { timeout: 30_000 },
+    () => {
+      for (const profile of [FLAT, HILLY]) {
+        for (const [seed, itemsOn] of [
+          [3, false],
+          [4, true],
+        ] as const) {
+          const run = race(profile, ALL_TIERS, seed, itemsOn);
+          for (const { id, tier } of ALL_TIERS) {
+            const ticks = ticksOf(run, id, profile);
+            expect(ticks.finished, id).toBeGreaterThan(100);
+            const ridden = ticks.power.slice(0, ticks.finished);
+            const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
+            const plan = botRacePlan(tier, run.races[0]?.course ?? raceCourse(1, 1), seed);
+            const label = `${id} seed ${String(seed)} ${profile === FLAT ? 'flat' : 'hilly'}`;
+            // D-8.1: the mean over the race, one-second ticks, so time-weighted.
+            expect(mean(ridden), label).toBeLessThanOrEqual(tierWatts + 1e-6);
+            expect(mean(ridden), label).toBeGreaterThanOrEqual(
+              tierWatts * (1 - BOT_PLAN_MEAN_TOLERANCE),
+            );
+            // D-8.2: the surge ceiling, never over 7 W/kg, and #92's −20 % kept.
+            expect(Math.max(...ridden), label).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+            expect(Math.max(...ridden), label).toBeLessThanOrEqual(
+              MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS,
+            );
+            expect(Math.min(...ridden), label).toBeGreaterThanOrEqual(
+              tierWatts * PACING_FACTOR_FLOOR - 1e-9,
+            );
+            // And it does leave #92's +10 % band upward, in the sprint at least.
+            expect(Math.max(...ridden), label).toBeGreaterThan(tierWatts * PACING_FACTOR_CEILING);
+          }
+        }
+      }
+    },
+  );
+
+  it(
+    'finishes fierce, hard, brisk and steady in that order with items off, every seed of 100',
+    { timeout: 60_000 },
+    () => {
+      for (let seed = 1; seed <= 100; seed += 1) {
+        // A seed moves the sprint's opening here, on a hilly loop where it matters.
+        const run = race(HILLY, ALL_TIERS, seed, false);
+        const last = run.races[run.races.length - 1] as ItemRaceState;
+        expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+          'f',
+          'h',
+          'b',
+          's',
+        ]);
+      }
+    },
+  );
+
+  it('surges on the climbs and eases on the descents of a seeded hilly loop', () => {
+    const run = race(HILLY, [{ id: 'bot', tier: 'hard' }], 5, false);
+    const ticks = ticksOf(run, 'bot', HILLY);
+    const plan = botRacePlan('hard', raceCourse(HILLY.totalDistance, 3), 5);
+    const climbs: number[] = [];
+    const descents: number[] = [];
+    ticks.power.forEach((power, tick) => {
+      // Outside the sprint, which rides the same whatever the grade.
+      if (plan.raceMetres - (ticks.from[tick] ?? 0) <= plan.sprintMetres) return;
+      const grade = ticks.grade[tick] ?? 0;
+      if (grade > 1) climbs.push(power);
+      if (grade < -1) descents.push(power);
+    });
+    expect(climbs.length).toBeGreaterThan(20);
+    expect(descents.length).toBeGreaterThan(10);
+    expect(mean(climbs)).toBeGreaterThan(mean(descents));
+    // A climb with a reserve behind it is a surge past #92's +10 % band.
+    expect(Math.max(...climbs)).toBeGreaterThan(plan.tierWatts * PACING_FACTOR_CEILING);
+    expect(Math.max(...descents)).toBeLessThanOrEqual(plan.tierWatts);
+  });
+
+  it('opens its sprint on its own effort distance, on the flat', () => {
+    const run = race(FLAT, [{ id: 'bot', tier: 'brisk' }], 9, false);
+    const ticks = ticksOf(run, 'bot', FLAT);
+    const plan = botRacePlan('brisk', raceCourse(FLAT.totalDistance, 3), 9);
+    const opens = ticks.from.findIndex((at) => plan.raceMetres - at <= plan.sprintMetres);
+    expect(opens).toBeGreaterThan(0);
+    // Banking at most until the tick before; above its tier from the tick it opens.
+    expect(ticks.power[opens - 1]).toBeLessThanOrEqual(plan.tierWatts);
+    expect(ticks.power[opens]).toBeCloseTo(plan.surgeWatts, 9);
+  });
+
+  it('rides the same power at one effort distance whatever items did to its race offset (D-3.3)', () => {
+    // How ADR 0061 D-8.5's race-level property is held here. D-8.5 asks that
+    // the same bot, course and seed read back an identical power as a function
+    // of its own effort distance whatever the other racers' items do, and that
+    // a plan reading its drawn distance turn that red. What other racers' items
+    // change about a bot is its `raceOffset` and nothing else (ADR 0060 D-5.1,
+    // D-4: a solo race's bots have no draft), so this fixture builds that
+    // change directly: one race state, the bot at one effort distance, and the
+    // offset an item would leave it with set to 0, +10 m and −10 m. Equal power
+    // across the three is the property at one effort distance; the two
+    // distances either side of the sprint's opening are where a drawn-distance
+    // read must differ, and it does (M6 in the PR body). #1900's whole-race
+    // lead-or-trail run holds the rank half; it stays green under a
+    // drawn-distance read, because a whole race rarely sits an offset across
+    // the sprint's opening, which is why this fixture puts one there.
+    const seed = 2;
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed,
+      itemsOn: false,
+      racerIds: ['bot', 'rival'],
+      startMs: 0,
+    });
+    const plan = botRacePlan('hard', start.course, seed);
+    const opens = plan.raceMetres - plan.sprintMetres;
+    const powerAt = (effortDistance: number, raceOffset: number): number => {
+      const race: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) =>
+          entry.racer.id === 'bot'
+            ? { ...entry, racer: { ...entry.racer, effortDistance, raceOffset } }
+            : entry,
+        ),
+      };
+      const bot: LapRaceBot = {
+        ...lapRaceBot('bot', 'hard', STRATEGY),
+        reserve: 1_000,
+        ride: { speed: metresPerSecond(10), distance: metres(effortDistance) },
+      };
+      return stepBotRace(race, [bot], { elapsed: seconds(1), conditions: conditions(FLAT), seed })
+        .bots[0]?.power as number;
+    };
+    // 5 m short of the sprint: a bot drawn 10 m on would be inside it on the drawn distance.
+    const before = powerAt(opens - 5, 0);
+    expect(before).toBeLessThan(plan.tierWatts);
+    expect(powerAt(opens - 5, 10)).toBe(before);
+    expect(powerAt(opens - 5, -10)).toBe(before);
+    // 5 m into it: a bot drawn 10 m back would be outside it on the drawn distance.
+    const inside = powerAt(opens + 5, 0);
+    expect(inside).toBeCloseTo(plan.surgeWatts, 9);
+    expect(powerAt(opens + 5, -10)).toBe(inside);
+    expect(powerAt(opens + 5, 10)).toBe(inside);
+  });
 });

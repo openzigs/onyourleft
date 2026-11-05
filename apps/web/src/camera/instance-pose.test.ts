@@ -21,6 +21,7 @@ import {
   hostedServiceHost,
   INSTANCE_POSE_DEADLINE_MILLISECONDS,
   INSTANCE_POSE_INTERVAL_MILLISECONDS,
+  INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS,
   instancePoseEstimator,
   MAXIMUM_CONSECUTIVE_INSTANCE_FAILURES,
   readSideInstanceChoice,
@@ -30,6 +31,7 @@ import {
   SIDE_INSTANCE_WHAT_IS_SENT,
   SIDE_POSE_PATH,
   sideInstanceHostedConsent,
+  sideInstanceHostedService,
   sidePoseRequest,
   writeSideInstanceHostedConsent,
   writeSideInstanceSwitch,
@@ -306,6 +308,17 @@ describe('the words a rider agrees to (#1106) — approved by the owner on 2026-
       expect(hostedServiceHost(bad), bad).toBeUndefined();
     }
   });
+
+  it('names the service pictures go on to only for a hosted choice — #2175', () => {
+    expect(
+      sideInstanceHostedService({ source: 'instance-hosted', endpoint: 'https://models.example' }),
+    ).toBe('models.example');
+    expect(sideInstanceHostedService({ source: 'instance-local' })).toBeUndefined();
+    expect(sideInstanceHostedService(undefined)).toBeUndefined();
+    expect(
+      sideInstanceHostedService({ source: 'instance-hosted', endpoint: 'http://models.example' }),
+    ).toBeUndefined();
+  });
 });
 
 describe('the one builder of a picture request (#1106)', () => {
@@ -522,7 +535,7 @@ describe('a stop that says why (#1106, ruling 3)', () => {
       refusal(502, 'picture_model_failed'),
       new Error('no answer'),
       { status: 200, body: { answer: NOBODY } },
-      refusal(429, 'rate_limited'),
+      new Error('no answer'),
       { status: 200, body: { notAnAnswer: true } },
       refusal(502, 'picture_model_failed'),
     ]);
@@ -544,5 +557,76 @@ describe('a stop that says why (#1106, ruling 3)', () => {
       'unavailable:not-answering',
     ]);
     expect(calls).toHaveLength(6);
+  });
+});
+
+describe('a picture turned away for coming too often is not a failure (#2175)', () => {
+  const kindsOf = async (
+    estimator: ReturnType<typeof world>['estimator'],
+    pictures: number,
+  ): Promise<string[]> => {
+    const kinds: string[] = [];
+    for (let picture = 0; picture < pictures; picture += 1) {
+      const outcome = await estimator.estimateSidePose(PICTURE);
+      kinds.push(
+        outcome.kind === 'unavailable' ? `unavailable:${String(outcome.why)}` : outcome.kind,
+      );
+    }
+    return kinds;
+  };
+
+  it('is counted as rate-limited, never stops the session, and leaves the failure count alone', async () => {
+    const { estimator, calls } = world([
+      refusal(502, 'picture_model_failed'),
+      refusal(429, 'rate_limited'),
+      refusal(429, 'rate_limited'),
+      refusal(429, 'rate_limited'),
+      refusal(429, 'rate_limited'),
+      refusal(502, 'picture_model_failed'),
+      { status: 200, body: { answer: NOBODY } },
+    ]);
+    expect(await kindsOf(estimator, 7)).toStrictEqual([
+      'unreadable',
+      // Four in a row, more than the three failures that stop it: still sending.
+      'rate-limited',
+      'rate-limited',
+      'rate-limited',
+      'rate-limited',
+      // The second failure of the count: the refusals between neither added to it nor reset it.
+      'unreadable',
+      'no-rider',
+    ]);
+    expect(calls).toHaveLength(7);
+  });
+
+  it('does not reset the failure count either: two failures around refusals and a third stop it', async () => {
+    const { estimator } = world([
+      refusal(502, 'picture_model_failed'),
+      refusal(429, 'rate_limited'),
+      refusal(502, 'picture_model_failed'),
+      refusal(429, 'rate_limited'),
+      refusal(502, 'picture_model_failed'),
+    ]);
+    expect(await kindsOf(estimator, 5)).toStrictEqual([
+      'unreadable',
+      'rate-limited',
+      'unreadable',
+      'rate-limited',
+      'unavailable:not-answering',
+    ]);
+  });
+
+  it('waits longer before each picture after one, up to thirty seconds, and a second again after any other answer', async () => {
+    expect(INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS).toBe(30_000);
+    const limited = Array.from({ length: 7 }, () => refusal(429, 'rate_limited'));
+    const { estimator, calls } = world([...limited, { status: 200, body: { answer: NOBODY } }]);
+    // Nine pictures, each ready the moment the last answer came back.
+    await kindsOf(estimator, 9);
+    const gaps = calls.slice(1).map((call, index) => call.at - calls[index]!.at);
+    expect(gaps).toStrictEqual([
+      2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000,
+      // The eighth answer was a picture's: back to one a second.
+      1_000,
+    ]);
   });
 });

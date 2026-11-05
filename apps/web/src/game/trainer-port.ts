@@ -423,6 +423,18 @@ export interface GameTrainerPort {
    */
   rideMovingSeconds(): number | undefined;
   /**
+   * The ELAPSED time of the ride being recorded, in seconds — pauses included
+   * — or `undefined` when no ride is in progress — #2072. The recorder's own
+   * figure again, `RideSnapshot.elapsedSeconds`, which is the recorder
+   * session's `elapsedTime` and the number the saved activity's elapsed time
+   * is written from; {@link rideMovingSeconds} says why the HUD has no other
+   * clock. Read through {@link watchRide} like the moving time. Optional, as
+   * {@link rideLapSeconds} is, so a double with no recording need not say;
+   * `gameTrainerPortOver` always supplies it, and `WIRE003` goes red if
+   * `GameView` stops calling it.
+   */
+  rideElapsedSeconds?(): number | undefined;
+  /**
    * Be told whenever the ride controller's state changes — #1111's review.
    * Returns the call that stops telling.
    *
@@ -522,6 +534,8 @@ interface GameTrainerSource {
      */
     readonly phase?: RidePhase;
     readonly movingSeconds?: number;
+    /** #2072. @see GameTrainerPort.rideElapsedSeconds */
+    readonly elapsedSeconds?: number;
     /** #1312. @see GameTrainerPort.rideLapSeconds */
     readonly courseLapSeconds?: number | undefined;
   };
@@ -666,6 +680,13 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       const snapshot = controller?.getSnapshot();
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? snapshot.movingSeconds
+        : undefined;
+    },
+    rideElapsedSeconds: () => {
+      // The phase and the time from one snapshot, as the moving time's are.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.elapsedSeconds
         : undefined;
     },
   };

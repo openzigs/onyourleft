@@ -45,13 +45,15 @@ export const FRAMING_CHECK_PICTURES = 10;
 
 /**
  * A picture of `bytes` bytes that `src/camera/picture.ts` takes: a JFIF
- * opening, filler, and an end-of-image marker. `variant` changes the filler so
- * no two are the same bytes.
+ * opening, a scan header, filler as the scan's data, and an end-of-image
+ * marker. `variant` changes the filler so no two are the same bytes. The scan
+ * header is there because the instance walks every segment (#2175), and
+ * filler outside a scan is not one.
  */
 export function syntheticPicture(bytes: number, variant: number): Uint8Array {
   const opening = [
     0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
-    0x00, 0x01, 0x00, 0x00,
+    0x00, 0x01, 0x00, 0x00, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
   ];
   const picture = new Uint8Array(Math.max(bytes, opening.length + 2));
   picture.set(opening);
