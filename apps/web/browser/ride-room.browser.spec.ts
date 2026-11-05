@@ -29,7 +29,6 @@ import {
   UNANCHORED,
   bothWays,
   TABLET_VIEWPORTS,
-  drawnItems,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -393,7 +392,6 @@ test.describe('a room ride’s HUD — #1356', () => {
           // Laid out at no size, and still in the list a screen reader reads.
           expect(seen.secondary, how).toEqual([
             'Speed',
-            'Gradient',
             'To go',
             'Moving',
             // #2072: in the primary panel's clock row on the stage.
@@ -478,7 +476,7 @@ function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] 
     ...(phone ? ROOM_GIVES_WAY : []),
     ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
   ] as readonly string[];
-  return drawnItems(seen, viewport)
+  return seen.items
     .filter((each) => !givesWay.includes(each.name))
     .filter((each) => !inside(each.box, viewport) || !each.onTop)
     .map(describeItem);

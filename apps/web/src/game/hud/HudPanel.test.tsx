@@ -50,6 +50,7 @@ import {
   degreesLongitude,
   expandWorkout,
   geographicPosition,
+  gradePercent,
   metres,
   metresPerSecond,
   pacerGap,
@@ -236,10 +237,15 @@ describe('the HUD is four panels (#423)', () => {
   it('renders the two tiers as two lists, in the order there was one', async () => {
     mounted = await mount(<HudPanel {...base} />);
 
-    expect(labelsIn('.oyl-hud__fields--primary')).toEqual(['Power', 'Cadence', 'Heart rate']);
+    // #2071: the gradient is the fourth primary reading.
+    expect(labelsIn('.oyl-hud__fields--primary')).toEqual([
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Gradient',
+    ]);
     expect(labelsIn('.oyl-hud__fields--secondary')).toEqual([
       'Speed',
-      'Gradient',
       'To go',
       'Moving',
       // #2072: the elapsed time and the clock, after the moving time.
@@ -263,7 +269,6 @@ describe('the HUD is four panels (#423)', () => {
     // Still in the secondary list, in #94's order, where a screen reader meets them.
     expect(labelsIn('.oyl-hud__fields--secondary')).toEqual([
       'Speed',
-      'Gradient',
       'To go',
       'Moving',
       'Elapsed',
@@ -551,5 +556,86 @@ describe('the elapsed time and the clock beside the moving time — #2072', () =
     expect(field('Moving').value).toBe('0:01:05');
     expect(queryAll(mounted.container, '.oyl-hud__field--elapsed')).toEqual([]);
     expect(queryAll(mounted.container, '.oyl-hud__field--clock')).toEqual([]);
+  });
+});
+
+/**
+ * #2071 — the gradient, read off the rendered PRIMARY row: signed, with its
+ * unit, and a slope glyph that follows the sign.
+ */
+describe('the gradient on the primary row — #2071', () => {
+  const profile = route();
+  const at = (grade: number) => ({
+    profile,
+    state: { ...atStartLine(profile), grade: gradePercent(grade) },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  });
+
+  /** The gradient's field in the primary list, as a rider and a screen reader meet it. */
+  function primaryGradient(): Element | undefined {
+    return queryAll(
+      mounted?.container ?? document,
+      '.oyl-hud__fields--primary .oyl-hud__field',
+    ).find((each) => each.querySelector('dt')?.textContent === 'Gradient');
+  }
+
+  it('reads +4.5 % on a climb and -2.0 % on a descent', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    expect(primaryGradient()?.querySelector('dd')?.textContent).toBe('+4.5 %');
+    expect(
+      primaryGradient()?.querySelector('[data-oyl-slope]')?.getAttribute('data-oyl-slope'),
+    ).toBe('up');
+    mounted.unmount();
+
+    mounted = await mount(<HudPanel {...at(-2)} />);
+    expect(primaryGradient()?.querySelector('dd')?.textContent).toBe('-2.0 %');
+    expect(
+      primaryGradient()?.querySelector('[data-oyl-slope]')?.getAttribute('data-oyl-slope'),
+    ).toBe('down');
+  });
+
+  /** How far the drawn stroke climbs from left to right, in its box's units (y runs down). */
+  function rise(): number {
+    const line = primaryGradient()?.querySelector('.oyl-hud__slope line');
+    return Number(line?.getAttribute('y1')) - Number(line?.getAttribute('y2'));
+  }
+
+  it('draws a glyph whose angle follows the sign: rising, falling, flat', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    expect(rise()).toBeGreaterThan(0);
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(-2)} />);
+    expect(rise()).toBeLessThan(0);
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(0)} />);
+    expect(rise()).toBe(0);
+  });
+
+  it('sets the sign apart so the stylesheet can size it, and hides the glyph from a screen reader', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    const value = primaryGradient()?.querySelector('dd');
+    expect(value?.querySelector('.oyl-hud__sign')?.textContent).toBe('+');
+    expect(value?.querySelector('.oyl-hud__slope')?.getAttribute('aria-hidden')).toBe('true');
+    // Level road: no sign at all, and a flat glyph.
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(0.02)} />);
+    expect(primaryGradient()?.querySelector('dd')?.textContent).toBe('0.0 %');
+    expect(primaryGradient()?.querySelector('.oyl-hud__sign')).toBeNull();
+    expect(
+      primaryGradient()?.querySelector('[data-oyl-slope]')?.getAttribute('data-oyl-slope'),
+    ).toBe('level');
+  });
+
+  it('names the primary panel for its four readings', async () => {
+    mounted = await mount(<HudPanel {...at(1)} />);
+    expect(
+      mounted.container.querySelector('.oyl-hud__fields--primary')?.getAttribute('aria-label'),
+    ).toBe('Power, cadence, heart rate and gradient');
   });
 });

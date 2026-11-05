@@ -152,6 +152,14 @@ export interface HudReading {
    * words. Absent on every other field.
    */
   readonly alert?: boolean | undefined;
+  /**
+   * Which way the road goes — #2071, the gradient's alone: a small slope glyph
+   * drawn beside its unit, rising for `up`, falling for `down`, flat for
+   * `level` (`HudCore.tsx` §`SlopeGlyph`). ⚠️ **Never the only carrier**: the
+   * value's own sign says it (`gradientReading`), so the glyph is
+   * `aria-hidden`. Absent on every other field.
+   */
+  readonly slope?: 'up' | 'down' | 'level' | undefined;
 }
 
 /**
@@ -166,16 +174,27 @@ export interface HudReading {
  *
  * | tier | fields | why |
  * |---|---|---|
- * | `primary` | power, cadence, heart rate | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to |
- * | `secondary` | speed, gradient, to go, moving time, elapsed time, clock, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the two ride times, the clock, the gaps and the wind change slowly |
+ * | `primary` | power, cadence, heart rate, gradient | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to — and, since #2071, the road they are steering it ON |
+ * | `secondary` | speed, to go, moving time, elapsed time, clock, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; to-go, the two ride times, the clock, the gaps and the wind change slowly |
+ *
+ * ⚠️ **The gradient is primary since #2071, and a reviewer who remembers it
+ * secondary — "felt through the pedals before it is read" — is reading the
+ * old file.** The owner, 2026-11-03: *the grade is hard to see*. It is the
+ * number that says why the same effort is suddenly slower and what the next
+ * minute will ask, so it is drawn at the primary size, SIGNED (`+4.5`,
+ * `-2.0`), with a slope glyph beside its unit ({@link HudReading.slope}).
+ * Where it is drawn on each layout is `theme.css` §"THE GRADIENT, PRIMARY":
+ * on an upright phone too narrow or too short for four primary readings it
+ * keeps the secondary size, in the secondary panel's first cell.
  *
  * ⚠️ **Moving time is secondary, decided for #1111.** It is not a sensor and
  * nothing is ridden TO it second by second: it climbs at one second a second,
  * and a rider reads it the way they read the distance to go — now and then,
  * to know how far into the ride they are. A primary slot would also cost the
- * road the most: the primary tier is three 2.5 rem readings across the top,
- * and a fourth there would widen the corner a rider's eye goes to first for
- * the one number on the HUD that tells them nothing about the effort.
+ * road the most: the primary tier is four 2.5 rem readings across the top
+ * since #2071, and a fifth there would widen the corner a rider's eye goes to
+ * first for the one number on the HUD that tells them nothing about the
+ * effort.
  *
  * ⚠️ **The order {@link hudReadings} returns is untouched**, and the primary
  * three were already its first three — so a field is still found by position
@@ -201,7 +220,15 @@ export type ReadingTier = 'primary' | 'secondary';
  * otherwise, which is the cheap direction to be wrong in: a secondary reading
  * costs the road less.
  */
-const PRIMARY_READING_KEYS: ReadonlySet<string> = new Set(['power', 'cadence', 'heartRate']);
+const PRIMARY_READING_KEYS: ReadonlySet<string> = new Set([
+  'power',
+  'cadence',
+  'heartRate',
+  'gradient',
+]);
+
+/** The key of the gradient field — #2071. @see gradientReading */
+export const GRADIENT_KEY = 'gradient';
 
 /** Which tier a reading is drawn in. @see ReadingTier */
 export function readingTier(reading: HudReading): ReadingTier {
@@ -508,10 +535,14 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
       0,
       input.heartRate.paired,
     ),
-    // Speed, gradient and distance come from the simulation, which cannot drop
-    // out: it is computation, not a sensor. They are never stale.
+    // #2071: the gradient, primary, so it moved from after the speed to here:
+    // the primary readings come first, so splitting the list at the tier
+    // boundary moves nothing (`ReadingTier`). Speed went from index 3 to 4;
+    // every field from the distance to go on keeps its index.
+    gradientReading(state.grade),
+    // Speed and distance, like the gradient, come from the simulation, which
+    // cannot drop out: it is computation, not a sensor. They are never stale.
     measured('speed', 'Speed', speed),
-    reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
     // #1111: beside the distance to go, the other "how far into it am I". It
     // is always present, so its index is the same on every ride; it moved
@@ -532,6 +563,31 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // #1904: a lap race's, last for the same reason. A ride runs one mode.
     ...lapRaceReadings(input.lapRace),
   ];
+}
+
+/**
+ * The gradient — #2071: signed, one decimal, at the primary size.
+ *
+ * ⚠️ **Signed with `+` as well as `-`**, unlike the gap and the wind, which
+ * carry their direction in a word because *"a minus sign is one glyph wide at
+ * arm's length and is the first thing lost"* ({@link timeGap}). Here a word
+ * would be a sentence in a primary track, so the sign stays, and it is never
+ * the only carrier: {@link HudReading.slope} draws a slope glyph whose angle
+ * follows it, and a climb's `+` and a descent's `-` are two different
+ * shapes, not one glyph present or absent.
+ *
+ * ⚠️ **Judged on the ROUNDED value**, as the gap's `Level` is: a grade of
+ * -0.04 % displays as `0.0` with a flat glyph, never `-0.0` or `+0.0`, which
+ * would claim a direction the digits do not support.
+ */
+function gradientReading(grade: number): HudReading {
+  // The state's `GradePercent` is finite by construction
+  // (`@onyourleft/domain` §`gradePercent`), so there is no dash to show.
+  const shown = Math.round(grade * 10) / 10;
+  const slope = shown > 0 ? 'up' : shown < 0 ? 'down' : 'level';
+  const magnitude = Math.abs(shown).toFixed(1);
+  const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
+  return { key: GRADIENT_KEY, label: 'Gradient', value, unit: '%', stale: false, slope };
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */

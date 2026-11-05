@@ -975,3 +975,51 @@ test.describe('#1812 — the Delivery measurement can see a field on a ride cont
     );
   });
 });
+
+/**
+ * #2071 — the gradient at the PRIMARY size, read off Chromium: its value's
+ * computed font size equal to power's, cadence's and heart rate's, in the
+ * primary panel, inside its own track, on the owner's tablet and the owner's
+ * phone. `theme.css` §"THE GRADIENT, PRIMARY" is where four tracks fit and
+ * where they do not.
+ */
+for (const viewport of [
+  { name: 'the owner’s tablet — 1280×800', width: 1280, height: 800 },
+  { name: 'the owner’s phone upright — 412×915', width: 412, height: 915 },
+] as const) {
+  test(`#2071 — the gradient is drawn at the primary size — ${viewport.name}`, async ({ page }) => {
+    await measure(page, viewport);
+    const primary = await page.evaluate(() => {
+      const panel = document.querySelector('[data-oyl-control="false"] .oyl-hud__fields--primary');
+      if (panel === null) throw new Error('no shipping primary panel');
+      const box = panel.getBoundingClientRect();
+      return [...panel.querySelectorAll('.oyl-hud__field')].map((field) => {
+        const value = field.querySelector('.oyl-hud__value');
+        const rect = field.getBoundingClientRect();
+        return {
+          label: field.querySelector('dt')?.textContent ?? '',
+          text: (value?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          fontSize: value === null ? 0 : Number.parseFloat(getComputedStyle(value).fontSize),
+          inPanel: rect.left >= box.left && rect.right <= box.right && rect.bottom <= box.bottom,
+          fits: value === null ? false : value.scrollWidth <= value.clientWidth,
+        };
+      });
+    });
+    expect(primary.map((each) => each.label)).toEqual([
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Gradient',
+    ]);
+    const gradient = primary[3];
+    // Signed, with its unit (the harness's road climbs here).
+    expect(gradient?.text).toMatch(/^[+-]?\d+\.\d %$/);
+    for (const each of primary) {
+      expect(each.fontSize, `${each.label} "${each.text}"`).toBe(primary[0]?.fontSize);
+      expect(each.inPanel, `${each.label} inside the primary panel`).toBe(true);
+      expect(each.fits, `${each.label} "${each.text}" inside its track`).toBe(true);
+    }
+    // Non-vacuity: the primary size, not the secondary one.
+    expect(primary[0]?.fontSize).toBeGreaterThanOrEqual(40);
+  });
+}
