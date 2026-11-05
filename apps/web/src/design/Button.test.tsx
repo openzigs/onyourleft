@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { activateWithKeyboard, mount, type Mounted } from '../testing/mount';
 
-import { Button } from './Button';
+import { Button, ButtonLink } from './Button';
 
 let mounted: Mounted | undefined;
 
@@ -158,5 +158,28 @@ describe('Button', () => {
       </Button>,
     ];
     expect(elements).toHaveLength(3);
+  });
+});
+
+describe('ButtonLink', () => {
+  it('a hash route by default: no target, no rel, the ordinary size', async () => {
+    mounted = await mount(<ButtonLink href="#/ride">Start a ride</ButtonLink>);
+    const link = mounted.container.querySelector('a');
+    expect(link?.className).toBe('oyl-button');
+    expect(link?.hasAttribute('target')).toBe(false);
+    expect(link?.hasAttribute('rel')).toBe(false);
+  });
+
+  it('an external link at the ride-time size — #875: opened by the system, telling the other site nothing of where it came from', async () => {
+    mounted = await mount(
+      <ButtonLink href="https://discord.gg/example" variant="secondary" size="ride" external>
+        Join voice on Discord (opens Discord)
+      </ButtonLink>,
+    );
+    const link = mounted.container.querySelector('a');
+    expect(link?.className).toBe('oyl-button oyl-button--secondary oyl-button--ride');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toBe('noreferrer');
+    expect(link?.getAttribute('href')).toBe('https://discord.gg/example');
   });
 });

@@ -2338,7 +2338,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       })),
       sensors: [...sensors.values()].map((entry) => ({
         id: entry.device.identity.id,
-        name: entry.device.name ?? 'Unnamed sensor',
+        // #2133: an empty or whitespace-only advertised name is no name, so
+        // the row never reads ": Connected" and "Forget ".
+        name:
+          entry.device.name === undefined || entry.device.name.trim() === ''
+            ? 'Unnamed sensor'
+            : entry.device.name,
         role: entry.role,
         capabilities: [...entry.device.capabilities].filter(
           (capability): capability is MeasurementCapability => capability !== 'trainer-control',

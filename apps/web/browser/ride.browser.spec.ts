@@ -132,6 +132,9 @@ import {
   easedCollisions,
   EASED_RIDER_CLEARANCE_PIXELS,
   noticeText,
+  drawnItems,
+  CLOCK_READING,
+  clockDrawn,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -165,20 +168,23 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate']);
       // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
-      // and since #1111 the moving time, beside the distance to go.
+      // and since #1111 the moving time, beside the distance to go; and since
+      // #2072 the elapsed time and the clock, beside the moving time.
       expect(seen.secondary).toEqual([
         'Speed',
         'Gradient',
         'To go',
         'Moving',
+        'Elapsed',
+        'Clock',
         'Pacer',
         'Your best',
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
-      // Ten readings, the strip, the plan view, the trainer line, two controls
-      // and, since #1482, the touch lock.
-      expect(seen.items).toHaveLength(16);
+      // Twelve readings, the strip, the plan view, the trainer line, two
+      // controls and, since #1482, the touch lock.
+      expect(seen.items).toHaveLength(18);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -219,7 +225,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         expect(seen.scrollY, how).toBe(0);
         expect(seen.stageScrollTop, how).toBe(0);
         expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
-        const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
+        const lost = drawnItems(seen, viewport).filter(
+          (each) => !inside(each.box, viewport) || !each.onTop,
+        );
         expect(lost.map(describeItem), how).toEqual([]);
       }
     });
@@ -299,6 +307,53 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           seen.panels.filter((each) => overlap(each.box, upright)).map(describeItem),
           how,
         ).toEqual([]);
+      }
+    });
+
+    /**
+     * #2072: the clock row — *Elapsed* at its widest (9:59:59, as the moving
+     * time) and the time of day — drawn inside the PRIMARY panel's box, on
+     * top, clear of each other and of the moving time, both ways (#1120).
+     * The clock is drawn at every overlay viewport but a short corners phone
+     * under 51 rem, where it is hidden by clip (`theme.css`
+     * §"THE CLOCK ROW") and still in the list a screen reader reads.
+     */
+    test('the clock row is inside the primary panel, uncovered, clear of the moving time — #2072', async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport);
+      for (const [how, seen] of await bothWays(page)) {
+        const primary = seen.panels.find((each) => each.name.includes('oyl-hud__fields--primary'));
+        if (primary === undefined) throw new Error(`${how}: no primary panel`);
+        const within = (box: Box): boolean =>
+          box.left >= primary.box.left - SUBPIXEL_TOLERANCE &&
+          box.right <= primary.box.right + SUBPIXEL_TOLERANCE &&
+          box.top >= primary.box.top - SUBPIXEL_TOLERANCE &&
+          box.bottom <= primary.box.bottom + SUBPIXEL_TOLERANCE;
+        const elapsed = named(seen.items, 'reading: Elapsed');
+        const clock = named(seen.items, CLOCK_READING);
+        const moving = named(seen.items, 'reading: Moving');
+        const drawn = clockDrawn(viewport) ? [elapsed, clock] : [elapsed];
+        for (const each of drawn) {
+          expect(
+            within(each.box),
+            `${how}: ${describeItem(each)} in ${describeItem(primary)}`,
+          ).toBe(true);
+          expect(each.onTop, `${how}: ${describeItem(each)}`).toBe(true);
+          expect(overlap(each.box, moving.box), `${how}: ${describeItem(each)} × Moving`).toBe(
+            false,
+          );
+        }
+        if (clockDrawn(viewport)) {
+          expect(overlap(elapsed.box, clock.box), `${how}: Elapsed × Clock`).toBe(false);
+        } else {
+          expect(
+            clock.box.width * clock.box.height,
+            `${how}: ${describeItem(clock)}`,
+          ).toBeLessThanOrEqual(1);
+        }
+        // And the readings a screen reader meets, in #94's order.
+        expect(seen.secondary.slice(3, 6), how).toEqual(['Moving', 'Elapsed', 'Clock']);
       }
     });
 
@@ -642,8 +697,8 @@ for (const viewport of STACKED_VIEWPORTS) {
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      // Ten readings since #1111's moving time, and the rest as above.
-      expect(seen.items).toHaveLength(16);
+      // Twelve readings since #2072's elapsed time and clock, and the rest as above.
+      expect(seen.items).toHaveLength(18);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -906,18 +961,34 @@ test.describe('a ride with a standing notice', () => {
       // #1120's control for this fixture, on the same load: at 360×800 the
       // plain ride had room without the fallback, and what failed on `main`
       // was this one — the notice beside the moving time as a third row. The
-      // anchor blocks out and no fallback in their place must give a finding
-      // here, or the "without anchor positioning" pass above is as true of a
-      // fallback that was never needed.
+      // anchor blocks out and no fallback in their place must change the
+      // stage here, or the "without anchor positioning" pass above is as true
+      // of a fallback that was never needed.
+      //
+      // ⚠️ **Since #2072 that change is a secondary row, not a collision.**
+      // Without the fallback the elapsed time and the clock go back into the
+      // grid beside the moving time, so its second row holds three readings
+      // with no phrase under them and the gaps move to the third: the tier is a
+      // row taller than with the fallback, and on this fixture the notice
+      // then ends 9 px above the leaning rider, where it ended over it on
+      // `main`. The collisions the fallback prevents are held by the controls
+      // at 736×360 and 360×752 (§`MAIN_FALLBACK_OVER_THE_RIDER`).
       if (viewport.width === 360 && viewport.height === 800) {
         await test.step('the control — without anchors and without the fallback (#1120)', async () => {
           const bare = await withoutAnchors(page, 'none');
+          const shipped = await withoutAnchors(page, 'shipped');
           const found = standingNoticeFindings(bare, viewport);
+          const secondary = (seen: StageMeasurement): number =>
+            seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'))?.box
+              .height ?? 0;
           console.log(
             `#1120 control with Trainer notice — ${viewport.name} — as main laid it out ` +
-              `without anchors: ${found.length === 0 ? 'nothing found' : found.join('; ')}`,
+              `without anchors: ${found.length === 0 ? 'nothing found' : found.join('; ')}; ` +
+              `secondary tier ${secondary(bare).toFixed(1)} px, with the fallback ` +
+              `${secondary(shipped).toFixed(1)} px`,
           );
-          expect(found).not.toEqual([]);
+          // A secondary row is 45 px at its shortest.
+          expect(secondary(bare)).toBeGreaterThan(secondary(shipped) + 40);
         });
       }
     });

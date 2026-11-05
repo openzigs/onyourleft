@@ -231,21 +231,16 @@ export function bearerMatches(authorization: string | null, expected: string | u
 }
 
 /**
- * The room's voice link from `voice`, or `undefined` once `waitMs` has gone
- * by — the asking goes on, so the next lookup finds the link made (#875).
+ * What `asked` settles to, or `undefined` once `waitMs` has gone by — the
+ * asking goes on, so the next lookup finds the link made (#875).
  */
-async function voiceInviteWithin(
-  voice: RoomVoice,
-  roomId: string,
-  riders: number,
-  waitMs: number,
-): Promise<string | undefined> {
+async function voiceInviteWithin<T>(asked: Promise<T>, waitMs: number): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<undefined>((resolve) => {
     timer = setTimeout(() => resolve(undefined), waitMs);
   });
   try {
-    return await Promise.race([voice.inviteFor(roomId, riders), late]);
+    return await Promise.race([asked, late]);
   } finally {
     clearTimeout(timer);
   }
@@ -317,15 +312,46 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     // voice on — never a public one, which waits for account linking (spike
     // 0018 Q1), and never a room an operator opened. It goes to the worker in
     // the plan and to a rider only in the welcome, after admission.
-    const invite =
-      voice !== undefined && made !== undefined && room.visibility === 'private'
-        ? await voiceInviteWithin(
-            voice,
-            roomId,
-            plan.capacity ?? DEFAULT_ROOM_CAPACITY,
-            options.voiceInviteWaitMs ?? VOICE_INVITE_WAIT_MS,
-          )
-        : undefined;
+    let invite: string | undefined;
+    if (voice !== undefined && made !== undefined && room.visibility === 'private') {
+      const roomVoice = voice;
+      const stored = store;
+      // A room can be over between the read above and its channel being made:
+      // `over()`'s close then found nothing held, and the late channel would
+      // be held for good, since the voice sweep skips held channels. So once
+      // Discord has answered, the room is read again, and a room that is over
+      // has its channel closed here, whether or not this socket still waits.
+      // A close committed after this read finds the channel held, and
+      // `over()` deletes it itself. A read that fails says nothing either
+      // way, so the channel is closed then too: nothing else would (#2168).
+      const asked = roomVoice
+        .inviteFor(roomId, plan.capacity ?? DEFAULT_ROOM_CAPACITY)
+        .then(async (link) => {
+          if (link === undefined) return undefined;
+          let open: boolean;
+          try {
+            open = (await stored.getPrivateRoom(roomId))?.closedAt === null;
+          } catch (error) {
+            await roomVoice.close(roomId);
+            throw error;
+          }
+          if (open) return link;
+          await roomVoice.close(roomId);
+          return 'ended' as const;
+        });
+      const answer = await voiceInviteWithin(
+        asked,
+        options.voiceInviteWaitMs ?? VOICE_INVITE_WAIT_MS,
+      );
+      if (answer === 'ended') return { kind: 'ended' };
+      // #2168: no link — the wait gave up first, or Discord gave none — and
+      // the room may have ended while this socket waited: it is read again,
+      // so a socket is never welcomed into a room that is over.
+      if (answer === undefined && (await stored.getPrivateRoom(roomId))?.closedAt !== null) {
+        return { kind: 'ended' };
+      }
+      invite = answer;
+    }
     const planned = invite === undefined ? timed : { ...timed, voiceInvite: invite };
     // Live on a worker, it is rejoined there; on none, the router refuses it.
     return started ? { kind: 'started', plan: planned } : { kind: 'open', plan: planned };

@@ -318,6 +318,29 @@ const HPKE_TESTING_IMPORT_PATTERNS = [
   },
 ];
 
+/**
+ * A package's source, reached from `apps/` by a relative path (#2147). The
+ * package's `exports` map is the only door `apps/` has into it: it refuses a
+ * name the package does not export (TS2305) and a deep package path (TS2307),
+ * which is what keeps `packages/physics/src/pacer.ts` §`advancePlannedBot`
+ * out of `apps/` (ADR 0007 D4, #1960). A relative path such as
+ * `'../../../packages/physics/src/pacer'` goes round the map, and `tsc` and
+ * `boundaries/dependencies` (which bans only the other direction) both pass
+ * it. A regex rather than a gitignore `group`, so it matches only a path made
+ * of `../` up to the repository's `packages/` — never a bare specifier, and
+ * never a directory of an app's own that happens to be named `packages`.
+ * Tests and test support are exempt: they import this way on purpose
+ * (`apps/instance/src/auth/hpke.test.ts`). `apps/web/tools/package-src-imports.test.ts`
+ * holds both halves.
+ */
+const PACKAGE_SOURCE_RELATIVE_IMPORT_PATTERNS = [
+  {
+    regex: '^(?:\\.\\./)+packages/(?:[^/]+/)+src(?:/|$)',
+    message:
+      'apps/ reaches a package through its name and its exports map, never a relative path into its src/ (#2147): that path goes round what the package chose not to export. Import from @onyourleft/<package>, or export the name if apps/ should have it.',
+  },
+];
+
 /** Where a test or test support lives, for the rules such files are exempt from. */
 const TEST_AND_TEST_SUPPORT_FILES = [
   '**/*.test.{ts,tsx}',
@@ -547,7 +570,10 @@ export default tseslint.config(
   //
   // ⚠️ Since #1188 the same rule also carries HPKE_TESTING_IMPORT_PATTERNS, so
   // three blocks set it: this one (both lists), the next (tests and test
-  // support: the AI SDK's list alone) and `model.ts`'s (HPKE's alone).
+  // support: the AI SDK's list alone) and `model.ts`'s (HPKE's alone). Since
+  // #2147 a fourth, right after this one, restates both lists for the non-test
+  // files under `apps/` and adds the relative package-source paths, which
+  // `model.ts`'s block carries too.
   // Probed: `import … from '@onyourleft/domain/hpke-testing'` in
   // `apps/instance/src/auth/crypto.ts` is an error, in `hpke.test.ts` it is not.
   {
@@ -557,6 +583,27 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         { patterns: [...AI_SDK_IMPORT_PATTERNS, ...HPKE_TESTING_IMPORT_PATTERNS] },
+      ],
+    },
+  },
+  // #2147: and in a non-test file under `apps/`, no relative path into a
+  // package's `src/`. The same rule, so this block restates the two lists
+  // above (flat config keeps the last setting); the tests' block below sets
+  // the AI SDK's list alone, which is what leaves them free to import this way,
+  // and `model.ts`'s block carries this list beside HPKE's.
+  {
+    files: ['apps/**/*.{js,mjs,cjs,ts,tsx}'],
+    ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...AI_SDK_IMPORT_PATTERNS,
+            ...HPKE_TESTING_IMPORT_PATTERNS,
+            ...PACKAGE_SOURCE_RELATIVE_IMPORT_PATTERNS,
+          ],
+        },
       ],
     },
   },
@@ -608,7 +655,10 @@ export default tseslint.config(
   {
     files: ['apps/instance/src/analysis/model.ts'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: HPKE_TESTING_IMPORT_PATTERNS }],
+      'no-restricted-imports': [
+        'error',
+        { patterns: [...HPKE_TESTING_IMPORT_PATTERNS, ...PACKAGE_SOURCE_RELATIVE_IMPORT_PATTERNS] },
+      ],
     },
   },
 
