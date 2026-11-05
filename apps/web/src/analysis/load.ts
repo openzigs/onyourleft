@@ -305,12 +305,56 @@ export interface LibraryBests {
 }
 
 /**
+ * One ride's power curve as {@link loadLibraryBests} last computed it, and the
+ * stream summary it was computed from — #2194.
+ */
+interface HeldCurve {
+  /** {@link streamKey} of the summary the curve was read from. */
+  readonly key: string;
+  readonly curve: PowerDurationCurve;
+}
+
+/**
+ * Each ride's power curve, held per analysis port — #2194.
+ *
+ * Every ride page opened asks for the all-time line, and before this each
+ * ask decoded up to {@link BESTS_ACTIVITY_LIMIT} power channels and ran a full
+ * curve over each. A ride's samples do not change once written, so a curve is
+ * kept against the ride's id and reused while the ride's stream summary is
+ * the one it was read from.
+ *
+ * ⚠️ **Invalidated by the write, whichever port made it.** Rides are written
+ * by recording, import and sync, none of them through this port, so there is
+ * no write here to hook. Instead every ask still lists the rides and reads
+ * each one's stream summary, which are the cheap indexed reads: a ride added
+ * or deleted changes the list, and a stream written, replaced or deleted
+ * changes (or removes) its summary, so its curve is read again. Only the
+ * decode and the curve are skipped. A `WeakMap`, so a port nobody holds takes
+ * its curves with it.
+ */
+const HELD_CURVES = new WeakMap<AnalysisPort, Map<ActivityId, HeldCurve>>();
+
+/** What a held curve is checked against: everything a stream summary says about its samples. */
+function streamKey(streams: StreamSetSummary): string {
+  return [
+    String(streams.startedAt),
+    String(streams.sampleInterval),
+    String(streams.sampleCount),
+    String(streams.encodedBytes),
+    streams.channels.join(','),
+  ].join('|');
+}
+
+/**
  * Duration personal bests over the whole library.
  *
  * ⚠️ **Every ride is read on its own and the curves are merged**, never
  * concatenated into one series. `power-duration.ts` records why that is a
  * correctness rule and not a style: concatenating two twenty-minute rides at
  * 300 W would report a forty-minute effort at 300 W that nobody rode.
+ *
+ * Since #2194 each ride's curve is held on the port and read again only when
+ * its stream summary changes ({@link HELD_CURVES}).
  */
 export async function loadLibraryBests(
   port: AnalysisPort,
@@ -325,18 +369,31 @@ export async function loadLibraryBests(
   });
   const considered = summaries.slice(0, limit);
 
+  const held = HELD_CURVES.get(port);
+  // Only the rides listed now are kept: a deleted ride's curve goes with it.
+  const kept = new Map<ActivityId, HeldCurve>();
   const curves: PowerDurationCurve[] = [];
   for (const summary of considered) {
     const streams = await port.store.getStreamSetSummary(port.athleteId, summary.id);
     if (streams === undefined || !streams.channels.includes('power')) {
       continue;
     }
+    const key = streamKey(streams);
+    const before = held?.get(summary.id);
+    if (before !== undefined && before.key === key) {
+      kept.set(summary.id, before);
+      curves.push(before.curve);
+      continue;
+    }
     const samples = await port.store.getStreamChannel(port.athleteId, summary.id, 'power');
     if (samples === undefined) {
       continue;
     }
-    curves.push(powerDurationCurve(samples));
+    const curve = powerDurationCurve(samples);
+    kept.set(summary.id, { key, curve });
+    curves.push(curve);
   }
+  HELD_CURVES.set(port, kept);
 
   return {
     curve: mergeCurves(...curves),
