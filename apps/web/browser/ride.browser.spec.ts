@@ -772,12 +772,12 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
     const zone = await page.evaluate(() => {
       const field = document.querySelector('.oyl-hud__field--effort:has(.oyl-hud__zone-bar)');
       return {
-        value: field?.querySelector('.oyl-hud__zone-chip')?.textContent ?? '',
-        name: (field?.querySelector('.oyl-hud__detail')?.textContent ?? '').trim(),
+        reads: (field?.querySelector('dd')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        swatch: field?.querySelector('.oyl-hud__zone-swatch--6') !== null,
         parts: field?.querySelectorAll('.oyl-hud__zone-bar-part').length ?? 0,
       };
     });
-    expect(zone).toEqual({ value: '6', name: 'Anaerobic', parts: 7 });
+    expect(zone).toEqual({ reads: '6 Anaerobic', swatch: true, parts: 7 });
     for (const [how, seen] of await bothWays(page)) {
       expect(seen.secondary, how).toEqual(
         expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
