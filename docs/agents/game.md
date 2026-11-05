@@ -1132,6 +1132,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/look-ahead.ts
+                        the next kilometre of road on the HUD (#2075), at a
+                        FIXED scale (100 m of height across the strip), in five
+                        grade bands of our own each with its own fill pattern;
+                        the next climb is `climb-ahead.ts`'s own `slopeAhead`,
+                        so the strip and the voice name the same one
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's

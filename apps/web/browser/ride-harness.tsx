@@ -1013,6 +1013,8 @@ function measure(): StageMeasurement {
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
+    // #2075: the next kilometre, beside it.
+    ['the road ahead', '.oyl-hud__ahead-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],

@@ -183,8 +183,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       ]);
       expect(seen.panels).toHaveLength(4);
       // Twelve readings, the strip, the plan view, the trainer line, two
-      // controls and, since #1482, the touch lock.
-      expect(seen.items).toHaveLength(18);
+      // controls and, since #1482, the touch lock — and since #2075 the road
+      // ahead beside the strip.
+      expect(seen.items).toHaveLength(19);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -400,6 +401,38 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         ).toEqual([]);
         // In the primary list in the document, wherever it is drawn.
         expect(seen.primary, how).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
+      }
+    });
+
+    /**
+     * #2075: the road ahead, BESIDE the whole route's strip and at its height,
+     * inside the route panel — so the panel is no taller for it (the cases
+     * above hold every panel clear of the rider). Wider than the whole
+     * route's strip: two to three.
+     */
+    test('the road ahead is beside the elevation strip, at its height — #2075', async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport);
+      for (const [how, seen] of await bothWays(page)) {
+        const whole = named(seen.items, 'the elevation strip');
+        const ahead = named(seen.items, 'the road ahead');
+        const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+        if (route === undefined) throw new Error(`${how}: no route panel`);
+        expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
+        expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(
+          SUBPIXEL_TOLERANCE,
+        );
+        expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
+          SUBPIXEL_TOLERANCE,
+        );
+        expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
+        expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
+        expect(
+          ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+            ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
+        ).toBe(true);
       }
     });
 
@@ -744,7 +777,7 @@ for (const viewport of STACKED_VIEWPORTS) {
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Twelve readings since #2072's elapsed time and clock, and the rest as above.
-      expect(seen.items).toHaveLength(18);
+      expect(seen.items).toHaveLength(19);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -1559,7 +1592,7 @@ test.describe('a ride with a side camera paired — #551', () => {
           expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
           expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(false);
           expect(seen.items.some((each) => each.name === 'the side camera stop')).toBe(false);
-          for (const name of ['the elevation strip', 'the plan view']) {
+          for (const name of ['the elevation strip', 'the road ahead', 'the plan view']) {
             const item = named(seen.items, name);
             expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
           }
@@ -1640,7 +1673,7 @@ test.describe('a ride with a standing notice, once it is put away — #437', () 
       await page.getByRole('button', { name: 'Trainer notice' }).click();
       for (const [how, put] of await bothWays(page)) {
         await test.step(how, async () => {
-          for (const name of ['the elevation strip', 'the plan view']) {
+          for (const name of ['the elevation strip', 'the road ahead', 'the plan view']) {
             const item = named(put.items, name);
             expect(item.box.height, describeItem(item)).toBeGreaterThan(0);
             expect(inside(item.box, viewport), describeItem(item)).toBe(true);

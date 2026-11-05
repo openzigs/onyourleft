@@ -104,6 +104,11 @@
   --oyl-color-hud-ink-muted: #9da3a8;
   --oyl-color-hud-border: #787c82;
   --oyl-color-hud-stale-ink: #f1af48;
+  --oyl-color-hud-grade-descent: #4f9fe0;
+  --oyl-color-hud-grade-flat: #6b7177;
+  --oyl-color-hud-grade-climb: #d8b630;
+  --oyl-color-hud-grade-steep: #e8812c;
+  --oyl-color-hud-grade-wall: #e5484d;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -6960,17 +6965,105 @@ select.oyl-input {
   display: block;
 }
 
-.oyl-hud__profile-line {
-  fill: none;
-  stroke: var(--oyl-color-hud-ink-muted);
-  stroke-width: 1;
+/* #2075: the whole route FILLED, in the HUD's edge colour (4.47:1 on its
+   surface), and the rider's marker in its ink over a wider stroke of the
+   surface, so the marker reads against the fill (3.90:1) and against the
+   empty strip above it alike. Both pairs are declared in `tokens.ts`. */
+.oyl-hud__profile-fill {
+  fill: var(--oyl-color-hud-border);
+}
+
+.oyl-hud__profile-here-edge {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 7;
   vector-effect: non-scaling-stroke;
 }
 
 .oyl-hud__profile-here {
   stroke: var(--oyl-color-hud-ink);
-  stroke-width: 2;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
+}
+
+/*
+ * THE ROAD AHEAD — #2075, `game/hud/look-ahead.ts`.
+ *
+ * Beside the whole route's strip and stretched to its height
+ * (`.oyl-hud__profile-svg` is the one that is sized), two to three, so the route panel is no taller than it
+ * was. Each grade band is its colour under marks of the panel's own surface:
+ * none on the flat, dots on a descent, one hatch on a climb, a denser one on
+ * a steep stretch and a cross-hatch on a very steep one, so no band is told by
+ * colour alone (SC 1.4.1). The rider is the left edge, a 4 px ink line of
+ * which the strip's edge clips half.
+ *
+ * The next climb is a caption of its own beside the route's sentence, on the
+ * same line where the panel is wide enough and wrapping under it where not.
+ */
+.oyl-hud__strips {
+  display: flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__strips > .oyl-hud__profile-svg {
+  flex: 2 1 0;
+  min-width: 0;
+}
+
+.oyl-hud__ahead-svg {
+  display: block;
+  flex: 3 1 0;
+  min-width: 0;
+  height: auto;
+  align-self: stretch;
+}
+
+.oyl-hud__band-mark {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__band-dot {
+  fill: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__band--descent .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-descent);
+}
+
+.oyl-hud__band--flat .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-flat);
+}
+
+.oyl-hud__band--climb .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-climb);
+}
+
+.oyl-hud__band--steep .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-steep);
+}
+
+.oyl-hud__band--wall .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-wall);
+}
+
+.oyl-hud__ahead-here {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__profile-captions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__ahead-text {
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink);
 }
 
 /* #285 — the route in plan, with the rider on it.
@@ -8681,6 +8774,16 @@ select.oyl-input {
     display: grid;
     gap: var(--oyl-space-sm);
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+
+  /* #2075: the strips 2.25 rem rather than 3, so that the route's sentence
+     and the next climb, two lines where the column is too narrow for both on
+     one (190 px at 360 wide), still end above the plan view's 5 rem beside
+     them: 36 + 4 + 2 × 15.4 = 71 px of 80. A third line would make the panel
+     taller, and at 360×752 a Delivery ride's map credit ends about a pixel
+     above the leaning rider (§"#2072 — AN UPRIGHT PHONE UNDER 24 REM"). */
+  .oyl-game--riding .oyl-hud__profile-svg {
+    height: 2.25rem;
   }
 }
 
