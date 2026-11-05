@@ -322,12 +322,20 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // Discord has answered, the room is read again, and a room that is over
       // has its channel closed here, whether or not this socket still waits.
       // A close committed after this read finds the channel held, and
-      // `over()` deletes it itself.
+      // `over()` deletes it itself. A read that fails says nothing either
+      // way, so the channel is closed then too: nothing else would (#2168).
       const asked = roomVoice
         .inviteFor(roomId, plan.capacity ?? DEFAULT_ROOM_CAPACITY)
         .then(async (link) => {
           if (link === undefined) return undefined;
-          if ((await stored.getPrivateRoom(roomId))?.closedAt === null) return link;
+          let open: boolean;
+          try {
+            open = (await stored.getPrivateRoom(roomId))?.closedAt === null;
+          } catch (error) {
+            await roomVoice.close(roomId);
+            throw error;
+          }
+          if (open) return link;
           await roomVoice.close(roomId);
           return 'ended' as const;
         });
@@ -336,6 +344,12 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         options.voiceInviteWaitMs ?? VOICE_INVITE_WAIT_MS,
       );
       if (answer === 'ended') return { kind: 'ended' };
+      // #2168: no link — the wait gave up first, or Discord gave none — and
+      // the room may have ended while this socket waited: it is read again,
+      // so a socket is never welcomed into a room that is over.
+      if (answer === undefined && (await stored.getPrivateRoom(roomId))?.closedAt !== null) {
+        return { kind: 'ended' };
+      }
       invite = answer;
     }
     const planned = invite === undefined ? timed : { ...timed, voiceInvite: invite };
