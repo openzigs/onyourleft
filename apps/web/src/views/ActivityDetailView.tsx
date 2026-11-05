@@ -99,6 +99,9 @@ import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { NOTE_WORDS } from '../rider-text/words';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
+import { loadRideZones, type RideZoneAnalysis } from '../analysis/load';
+import type { AnalysisPort } from '../analysis/store-port';
+import { ZoneTable } from '../analysis/ZoneTable';
 import {
   CHART_POINTS,
   downsample,
@@ -172,6 +175,12 @@ export interface ActivityDetailViewProps {
    */
   readonly riderText?: RiderTextPort | undefined;
   /**
+   * #2069: where the ride's time in zone is read — the analysis screen's own
+   * port, so the zones here are the ones Analysis shows, from the rider's
+   * thresholds. `undefined` and the page has no "Time in zone" section.
+   */
+  readonly analysis?: AnalysisPort | undefined;
+  /**
    * #1439: drawn inside History's detail pane, which is the ride's one page
    * there. The pane heads it with the ride's name (`shell/ListDetail.tsx`
    * §`SELECTED_HEADING_ID`, from the list's own row, so focus has somewhere to land before
@@ -196,6 +205,13 @@ type OverviewState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly overview: RideOverview }
   | { readonly kind: 'missing' }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/** #2069: the ride's time in zone, before and after its section is read. */
+type ZonesState =
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'ready'; readonly zones: RideZoneAnalysis }
+  | { readonly kind: 'none' }
   | { readonly kind: 'failed'; readonly reason: string };
 
 function reasonOf(error: unknown): string {
@@ -231,6 +247,7 @@ export function ActivityDetailView({
   preferences,
   instanceWriteUp,
   riderText,
+  analysis,
   embedded = false,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
@@ -246,6 +263,14 @@ export function ActivityDetailView({
   // The channels a read has been started for, and which units' reads count.
   const requested = useRef(new Set<TraceChannel>());
   const generation = useRef(0);
+  // #2069: the ride's time in zone, read once its section is in view.
+  const zonesSlot = useRef<HTMLDivElement | null>(null);
+  // Held with the ride they belong to: a page that moves to another ride must
+  // neither show the old zones nor read the new ones before they are in view.
+  const [zonesSeenFor, setZonesSeenFor] = useState<ActivityId | undefined>(undefined);
+  const [heldZones, setHeldZones] = useState<
+    { readonly id: ActivityId; readonly state: ZonesState } | undefined
+  >(undefined);
   const [shared, setShared] = useState<SharedTrack | undefined>(undefined);
   const [showShared, setShowShared] = useState(false);
   const [mapPort, setMapPort] = useState<MapPort | undefined>(undefined);
@@ -254,6 +279,9 @@ export function ActivityDetailView({
 
   const id: ActivityId | undefined =
     activityId === undefined || activityId === '' ? undefined : toActivityId(activityId);
+  const zonesSeen = id !== undefined && zonesSeenFor === id;
+  const rideZones: ZonesState =
+    heldZones !== undefined && heldZones.id === id ? heldZones.state : { kind: 'waiting' };
 
   useEffect(() => {
     if (port === undefined || id === undefined) {
@@ -361,6 +389,47 @@ export function ActivityDetailView({
       }
     })();
   }, [port, id, state, seen, units]);
+
+  /**
+   * #2069: the ride's time in zone, read when its section scrolls into view.
+   *
+   * `loadRideZones` decodes the power and heart-rate channels whole, which is
+   * the read this page puts off until it is wanted, as the charts above do
+   * (`detail/visibility.ts`).
+   */
+  useEffect(() => {
+    if (state.kind !== 'ready' || zonesSlot.current === null) {
+      return;
+    }
+    return watchUntilSeen(new Map([['zones', zonesSlot.current]]), () => {
+      setZonesSeenFor(id);
+    });
+  }, [state, id]);
+
+  useEffect(() => {
+    if (!zonesSeen || analysis === undefined || id === undefined) {
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const zones = await loadRideZones(analysis, id);
+        if (live) {
+          setHeldZones({
+            id,
+            state: zones === undefined ? { kind: 'none' } : { kind: 'ready', zones },
+          });
+        }
+      } catch (error: unknown) {
+        if (live) {
+          setHeldZones({ id, state: { kind: 'failed', reason: reasonOf(error) } });
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [zonesSeen, analysis, id]);
 
   /**
    * Load the map engine and the rider's own track, for a ride that has one.
@@ -603,6 +672,18 @@ export function ActivityDetailView({
         </>
       )}
 
+      {/*
+        #2069: the ride's time in zone, as Analysis draws it — a bar chart and
+        its table per basis. Only for a ride with power or heart rate, and only
+        where there is an analysis port to read the rider's thresholds from.
+      */}
+      {analysis === undefined ||
+      !(available.includes('power') || available.includes('heartRate')) ? null : (
+        <div data-oyl-zones-slot="" ref={zonesSlot}>
+          <RideZones state={rideZones} />
+        </div>
+      )}
+
       <h3>Laps</h3>
       {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
       <LapsTable laps={laps} units={units} />
@@ -704,6 +785,70 @@ export function ActivityDetailView({
       ) : undefined}
 
       {embedded ? null : <WayOut />}
+    </>
+  );
+}
+
+/**
+ * #2069: the ride's time in zone, in whichever state its read is in. A ride
+ * the analysis port does not hold renders nothing, not a heading over nothing.
+ */
+function RideZones({ state }: { readonly state: ZonesState }): JSX.Element | null {
+  if (
+    state.kind === 'none' ||
+    (state.kind === 'ready' &&
+      state.zones.power === undefined &&
+      state.zones.heartRate === undefined)
+  ) {
+    return null;
+  }
+  const heading = <h3>Time in zone</h3>;
+  if (state.kind === 'waiting') {
+    return (
+      <>
+        {heading}
+        <p className="oyl-muted">Reading time in zone…</p>
+      </>
+    );
+  }
+  if (state.kind === 'failed') {
+    return (
+      <>
+        {heading}
+        <StatusMessage tone="warning">
+          Could not read this ride&rsquo;s time in zone. {state.reason}
+        </StatusMessage>
+      </>
+    );
+  }
+  const { zones } = state;
+  return (
+    <>
+      {heading}
+      {zones.power === undefined ? null : (
+        <ZoneTable
+          breakdown={zones.power}
+          movingTime={zones.movingTime}
+          unit={POWER_UNIT}
+          heading="Power zones"
+          thresholdNoun="threshold power"
+          assumed={zones.thresholds.assumed.power}
+          basis="power"
+          headingLevel={4}
+        />
+      )}
+      {zones.heartRate === undefined ? null : (
+        <ZoneTable
+          breakdown={zones.heartRate}
+          movingTime={zones.movingTime}
+          unit="bpm"
+          heading="Heart-rate zones"
+          thresholdNoun="threshold heart rate"
+          assumed={zones.thresholds.assumed.heartRate}
+          basis="heartRate"
+          headingLevel={4}
+        />
+      )}
     </>
   );
 }

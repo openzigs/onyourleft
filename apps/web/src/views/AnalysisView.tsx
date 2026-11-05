@@ -11,16 +11,9 @@ import {
   loadRideZones,
   type LibraryBests,
   type RideZoneAnalysis,
-  type ZoneBreakdown,
 } from '../analysis/load';
-import {
-  coverageNote,
-  durationLabel,
-  formatLoad,
-  LOAD_BASIS_TEXT,
-  ZONE_BOUNDARY_NOTE,
-  zoneRows,
-} from '../analysis/present';
+import { durationLabel, formatLoad, LOAD_BASIS_TEXT } from '../analysis/present';
+import { ZoneTable } from '../analysis/ZoneTable';
 import {
   backfillLoadSummaries,
   loadFitnessHistory,
@@ -43,24 +36,16 @@ import { ScrollTable } from '../design/ScrollTable';
 /**
  * Training zones and duration personal bests (#78).
  *
- * ## Colour carries nothing here, and that is the design rather than a gap
+ * ## Colour is never the only carrier of which zone is which
  *
- * #78's seventh criterion is that *"colour is never the only carrier of which
- * zone is which"*. The strong form of passing that is to not encode anything in
- * colour at all, which is what this screen does: every zone is a labelled row
- * carrying its **name**, its **range in watts or beats**, its **time** and its
- * **share**, and the bar beside them is one accent fill whose only job is
- * length. It is `aria-hidden`, because it repeats the percentage that is
- * already in the row and a screen reader announcing both would read the same
- * number twice.
- *
- * A seven-hue intensity ramp would be prettier. It would also be seven new
- * colour tokens that each have to clear WCAG 2.2 SC 1.4.11 against two
- * backgrounds *and* stay distinguishable under the common colour-vision
- * deficiencies, and #48's contrast gate is where that would have to be ruled
- * on. That is a design decision with a gate attached, not a tidy-up, so it is
- * not made here as a side effect of a feature that needs no colour to be
- * correct.
+ * #78's seventh criterion. Every zone is a labelled table row carrying its
+ * **name**, its **range in watts or beats**, its **time** and its **share**.
+ * Since #2069 a bar chart above each table draws the same rows in the zone
+ * colours #2039 ruled on (ADR 0063 D-4), with each bar's number and name and
+ * share beside it as text (`analysis/ZoneChart.tsx`), so the colour is a
+ * second signal and never the only one. The chart is `aria-hidden`: the table
+ * already says every number, and a screen reader would otherwise read each
+ * share twice. It replaced the single-accent bar that sat in the Share cell.
  *
  * ## Duration bests are not segment bests, and the screen says so
  *
@@ -375,6 +360,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
                   heading="Power zones"
                   thresholdNoun="threshold power"
                   assumed={zones.thresholds.assumed.power}
+                  basis="power"
                 />
               )}
 
@@ -386,6 +372,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
                   heading="Heart-rate zones"
                   thresholdNoun="threshold heart rate"
                   assumed={zones.thresholds.assumed.heartRate}
+                  basis="heartRate"
                 />
               )}
             </>
@@ -514,86 +501,6 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
         <a href={hrefFor(routeById('activities'))}>Your rides</a>
         {' · '}
         <a href={hrefFor(routeById('transfer'))}>Import or export files</a>
-      </p>
-    </>
-  );
-}
-
-interface ZoneTableProps {
-  readonly breakdown: ZoneBreakdown;
-  readonly movingTime: number;
-  readonly unit: string;
-  readonly heading: string;
-  /** "threshold power" or "threshold heart rate" — the words, not the number. */
-  readonly thresholdNoun: string;
-  readonly assumed: boolean;
-}
-
-function ZoneTable({
-  breakdown,
-  movingTime,
-  unit,
-  heading,
-  thresholdNoun,
-  assumed,
-}: ZoneTableProps): JSX.Element {
-  const rows = zoneRows(breakdown.zones, breakdown.time, unit);
-  const coverage = coverageNote(breakdown.time.covered, movingTime);
-  // The number the boundaries came from, shown so a rider can check the table
-  // against it rather than take the rows on trust.
-  const thresholdLabel = `${thresholdNoun} ${String(Math.round(breakdown.threshold))} ${unit}`;
-  return (
-    <>
-      <h3>{heading}</h3>
-      {assumed ? (
-        <StatusMessage tone="info">
-          These zones use an assumed {thresholdLabel}, because none is set on this device. They are
-          the right shape and almost certainly the wrong numbers — set your own threshold to make
-          them mean anything about you.
-        </StatusMessage>
-      ) : undefined}
-      <ScrollTable
-        className="oyl-table"
-        caption={
-          <>
-            {heading}, from {thresholdLabel}. {ZONE_BOUNDARY_NOTE}
-          </>
-        }
-      >
-        <thead>
-          <tr>
-            <th scope="col">Zone</th>
-            <th scope="col">Range</th>
-            <th scope="col">Time</th>
-            <th scope="col">Share</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.index}>
-              <th scope="row">
-                {String(row.index)}. {row.name}
-              </th>
-              <td>{row.range}</td>
-              <td>{row.time}</td>
-              <td>
-                {row.share}
-                {/*
-                  The bar repeats the percentage in the same cell, so it is
-                  hidden from assistive technology rather than announced twice.
-                  It carries no colour meaning — see the file comment.
-                */}
-                <span aria-hidden="true" className="oyl-zone-bar">
-                  <span className="oyl-zone-bar__fill" style={{ width: row.width }} />
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </ScrollTable>
-      <p className="oyl-muted">
-        Shares are of the {formatDuration(breakdown.time.covered)} the sensor actually reported.
-        {coverage === undefined ? '' : ` ${coverage}`}
       </p>
     </>
   );
