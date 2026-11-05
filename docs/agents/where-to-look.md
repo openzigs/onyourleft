@@ -408,6 +408,7 @@ It has the same authority as the root file. Where the text below says "this file
 | Why the plan view's fraction is wrapped where the elevation strip's is clamped | `apps/web/src/game/hud/plan.ts` §`planProgress`, `apps/web/src/game/hud/fields.ts` §`profilePosition` |
 | What a jump in a route's positions means, which build can produce one, and which it cannot see | `apps/web/src/game/hud/plan.ts` §`PLAN_BREAK_FACTOR`, `packages/store/src/persisted.ts` §`fromPersistedRoute` |
 | What bounds the points of a route that reach the DOM, and why the memo is not enough on its own | `apps/web/src/game/hud/plan.ts` §`PLAN_MAX_POINTS`, `apps/web/src/game/hud/PlanTrace.tsx` |
+| How wide the plan view's road and how big the rider's mark are, and how ridden and to come differ (#2070) | `apps/web/src/game/hud/plan.ts` §`RIDER_MARK_MINIMUM_PIXELS`, §`planCut`, `PlanTrace.tsx` §`PLAN_PAINTS`, `PlanTrace.a11y.test.tsx` |
 | Whom the gap's direction word describes, and why it is not the rider | `apps/web/src/game/hud/fields.ts` §`gapReading`, `HudPanel.a11y.test.tsx` §`announced` |
 | Why a blocked ride control keeps its tab stop, and what `aria-disabled` does not do to a click | `apps/web/src/game/GameView.tsx` §`PACER_PROBLEM_ID`, `apps/web/src/a11y/audit.ts` §`removedFromTabOrder` |
 | Why the renderer and the HUD are in `apps/web` when their issues say `apps/mobile` | §4h, `apps/mobile/capacitor.config.ts` §`webDir` |

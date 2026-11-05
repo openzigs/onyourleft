@@ -248,6 +248,14 @@ interface PlanMeasurement {
   readonly roadWidth: number;
   readonly roadHeight: number;
   readonly roads: number;
+  readonly mark: { readonly width: number; readonly height: number } | undefined;
+  readonly minimumMarkPixels: number;
+  readonly lines: readonly {
+    readonly part: string;
+    readonly strokeWidth: string;
+    readonly dash: string;
+    readonly stroke: string;
+  }[];
 }
 
 /**
@@ -514,6 +522,66 @@ test.describe('the plan view is drawn at a size a rider can see', () => {
     expect(plan?.roadHeight ?? 0).toBeLessThanOrEqual((plan?.height ?? 0) + 1);
   });
 });
+
+/**
+ * #2070 — the plan view, readable at arm's length, as an engine draws it.
+ *
+ * `PlanTrace.a11y.test.tsx` reads the attributes and the paint table; only a
+ * browser can say how many pixels the mark is once the viewBox is scaled into
+ * the box `theme.css` gives it, and what width and dash a `non-scaling-stroke`
+ * line resolves to. Measured at every viewport this file renders.
+ *
+ * ⚠️ **The landscape tablet's box is held to what it was before #2070**,
+ * measured through this harness on `main` on 2026-11-04: 270 × 80 px at
+ * 1280×800, a 5 rem square in an 18 rem panel. The owner's *"hard to see"* was
+ * about that box, so the floor is that it may not get smaller, and the size it
+ * is now is published on every run.
+ */
+const TABLET_PLAN_BEFORE_2070 = { width: 270, height: 80 } as const;
+
+for (const viewport of VIEWPORTS) {
+  test(`#2070 the plan view's road and mark are sized for arm's length — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const plan = (await measure(page, viewport)).plan;
+    expect(plan, 'the HUD has no plan view at all').toBeDefined();
+    console.log(
+      `#2070 the plan view at ${viewport.name} (${String(viewport.width)}×${String(viewport.height)}): ` +
+        `${(plan?.width ?? 0).toFixed(1)} × ${(plan?.height ?? 0).toFixed(1)} px; the mark ` +
+        `${(plan?.mark?.width ?? 0).toFixed(1)} px across; lines ` +
+        (plan?.lines ?? [])
+          .map((line) => `${line.part} ${line.strokeWidth} dash ${line.dash}`)
+          .join(', '),
+    );
+
+    // The mark: its disc, at least the size `plan.ts` states, on every screen.
+    expect(plan?.mark?.width ?? 0).toBeGreaterThanOrEqual(plan?.minimumMarkPixels ?? Infinity);
+    expect(plan?.mark?.height ?? 0).toBeGreaterThanOrEqual(plan?.minimumMarkPixels ?? Infinity);
+
+    // The harness rides 5 km of 40, so both parts are drawn, and they differ
+    // by dash and by width as the engine resolved them, not only by colour.
+    const ridden = plan?.lines.filter((line) => line.part === 'ridden') ?? [];
+    const ahead = plan?.lines.filter((line) => line.part === 'ahead') ?? [];
+    expect(ridden.length).toBeGreaterThan(0);
+    expect(ahead.length).toBeGreaterThan(0);
+    for (const line of ridden) {
+      expect(line.dash).not.toBe('none');
+      expect(parseFloat(line.strokeWidth)).toBeGreaterThanOrEqual(2);
+    }
+    for (const line of ahead) {
+      expect(line.dash).toBe('none');
+      expect(parseFloat(line.strokeWidth)).toBeGreaterThanOrEqual(3);
+    }
+    expect(new Set(ridden.map((line) => line.stroke))).not.toEqual(
+      new Set(ahead.map((line) => line.stroke)),
+    );
+
+    if (viewport.width === 1280 && viewport.height === 800) {
+      expect(plan?.height ?? 0).toBeGreaterThan(TABLET_PLAN_BEFORE_2070.height);
+      expect(plan?.width ?? 0).toBeGreaterThanOrEqual(TABLET_PLAN_BEFORE_2070.width);
+    }
+  });
+}
 
 /**
  * #401 — the announcement region is NOT hidden, and moves nothing.
