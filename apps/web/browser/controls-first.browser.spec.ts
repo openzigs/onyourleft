@@ -1014,7 +1014,7 @@ test.describe('#666 — a summary is a 44 px row, measured three ways (#316)', (
         await page
           .evaluate(() =>
             getComputedStyle(document.documentElement)
-              .getPropertyValue('--oyl-color-accent')
+              .getPropertyValue('--oyl-color-accent-text')
               .trim(),
           )
           .then(hexToRgb),

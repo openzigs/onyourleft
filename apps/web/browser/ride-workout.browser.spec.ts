@@ -31,6 +31,7 @@ import {
   keepScreenOnLaidOut,
   KEEP_SCREEN_ON_SEEN,
   TABLET_VIEWPORTS,
+  drawnItems,
 } from './ride-stage';
 
 import type { Box, StageMeasurement } from './ride-harness';
@@ -232,11 +233,11 @@ const GRAPH_VIEWPORTS: readonly (Viewport & {
 ];
 
 /** `tokens.ts`: `hudInk`, `hudInkMuted`, `hudBorder` — in BOTH page themes, like `HUD_SURFACE`. */
-const HUD_INK = 'rgb(245, 248, 250)';
+const HUD_INK = 'rgb(244, 247, 249)';
 
-const HUD_INK_MUTED = 'rgb(168, 182, 194)';
+const HUD_INK_MUTED = 'rgb(157, 163, 168)';
 
-const HUD_BORDER = 'rgb(123, 139, 153)';
+const HUD_BORDER = 'rgb(120, 124, 130)';
 
 const PAINTS_NOTHING = 'rgba(0, 0, 0, 0)';
 
@@ -923,7 +924,9 @@ test.describe('a ride on a loop — #1312', () => {
         await test.step(how, () => {
           expect(seen.scrollY).toBe(0);
           expect(seen.pageOverflow).toBeLessThanOrEqual(0);
-          const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
+          const lost = drawnItems(seen, viewport).filter(
+            (each) => !inside(each.box, viewport) || !each.onTop,
+          );
           expect(lost.map(describeItem)).toEqual([]);
           expect(
             seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
@@ -961,7 +964,7 @@ test.describe('a ride on a loop — #1312', () => {
           // on a tablet, where the notice has a cell of its own, they are.
           const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
           const routePanel = ['the elevation strip', 'the plan view'];
-          const lost = seen.items
+          const lost = drawnItems(seen, viewport)
             .filter((each) => !inside(each.box, viewport) || !each.onTop)
             .map((each) => each.name);
           expect(lost).toEqual(onAPhone ? routePanel : []);

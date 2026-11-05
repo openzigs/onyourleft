@@ -166,7 +166,7 @@ INK_CEILING = 70.0
 # DARK_COLOUR_TOKENS.ink), which the dark wordmark is set in. The logo keeps
 # its navy letters in both palettes: they sit on its own white sticker.
 NAVY = (17, 36, 64)
-DARK_INK = (0xE4, 0xEB, 0xE9)
+DARK_INK = (0xED, 0xEE, 0xF1)
 # Where a mark sits. A square icon carries the mark at the share of its side the
 # owner's panel does (its widest extent about 0.78 of the panel). A maskable web
 # icon keeps the mark inside the circle a launcher may crop to -- the middle 80 %

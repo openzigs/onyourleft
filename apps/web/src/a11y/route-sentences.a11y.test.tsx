@@ -166,6 +166,18 @@
  * network.", because there is no document to open any more, only the
  * notices on the screen. Nothing is dropped.
  *
+ * ⚠️ **Re-recorded by PR #2113 (#1992), awaiting the owner's approval with
+ * that pull request's wording**, for added lines and nothing else: the game's
+ * picker gains *Preview without a trainer*, its sentence, "Power, watts",
+ * "Speed-up" and its four choices, and the button "Preview " and the route's
+ * name. No sentence is dropped or reworded.
+ *
+ * ⚠️ **Re-recorded by #2072, awaiting the owner's approval with that pull
+ * request's screenshots**, for added lines and nothing else: the Ride
+ * screen's clock gains *Clock* and the time of day beside the moving time,
+ * on both walks — `07:05`, the fixed local time this file now reads every
+ * route at. No sentence is dropped or reworded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`
@@ -178,7 +190,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { StoreHarness } from '@onyourleft/store/testing';
 
@@ -196,6 +208,21 @@ const RECORDING = process.env['OYL_RECORD_ROUTE_SENTENCES'] === '1';
 
 let mounted: Mounted | undefined;
 let harness: StoreHarness | undefined;
+
+/**
+ * #2072: the Ride screen says the time of day, so the record is taken, and
+ * read, at one fixed local time — `07:05` in any zone, because it is built
+ * from local fields. Only `Date` is faked: every timer runs as it does
+ * without this.
+ */
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 10, 4, 7, 5, 0));
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 afterEach(async () => {
   mounted?.unmount();

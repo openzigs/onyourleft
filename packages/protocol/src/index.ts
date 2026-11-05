@@ -46,6 +46,7 @@ export type {
   RoomMessage,
   Standings,
   StandingsRider,
+  VoiceLink,
   Welcome,
 } from './messages';
 export {
@@ -75,6 +76,7 @@ export {
   MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   MESSAGE_FIELDS,
   ROOM_MESSAGE_TYPES,
+  VOICE_INVITE_PATTERN,
 } from './schema';
 
 export type { DecodeExpectations, Decoded, Refusal, RefusalReason } from './codec';

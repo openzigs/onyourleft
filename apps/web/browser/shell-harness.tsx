@@ -381,8 +381,9 @@ const HIERARCHY_SPECIMENS = 'specimens';
  * `&hover-rule=off` is #688's CONTROL: the same page with the rule that gives
  * a secondary and a toggle their own hover deleted from the shipping sheet
  * through the CSSOM. The spec requires the pair read back there to be the one
- * #688 found — `accent` on `accentHover`, under 4.5:1 — which is what proves
- * the positive case measured the rule rather than something else. It
+ * #688 found — the accent label (`accentText` since #2118) on `accentHover`,
+ * under 4.5:1 — which is what proves the positive case measured the rule
+ * rather than something else. It
  * publishes how many rules it removed, and the spec requires one.
  */
 const HOVER_RULE_OFF = 'off';

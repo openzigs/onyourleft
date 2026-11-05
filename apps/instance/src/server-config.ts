@@ -13,6 +13,7 @@
 import { readSecretKey, SECRET_KEY_MALFORMED } from './analysis/hosted-key.ts';
 import { DEFAULT_HEARTBEAT_MS, MAXIMUM_HEARTBEAT_MS } from './analysis/jobs.ts';
 import { DEFAULT_MAXIMUM_BUFFERED_BYTES, DEFAULT_PING_INTERVAL_MS } from './room/node/room-host.ts';
+import type { DiscordSettings } from './voice/discord.ts';
 
 export interface RawServerConfig {
   readonly database?: string | undefined;
@@ -25,6 +26,8 @@ export interface RawServerConfig {
   readonly metricsToken?: string | undefined;
   readonly secretKey?: string | undefined;
   readonly analysisHeartbeatMs?: string | undefined;
+  readonly discordBotToken?: string | undefined;
+  readonly discordGuildId?: string | undefined;
 }
 
 export interface ServerConfig {
@@ -57,6 +60,12 @@ export interface ServerConfig {
    * which measures the tunnel cutting a stream that has none.
    */
   readonly analysisHeartbeatMs: number;
+  /**
+   * The operator's own Discord bot and server, for a voice channel per private
+   * room (#874, spike 0017 §3.5): `undefined` — voice off — unless both
+   * `OYL_INSTANCE_DISCORD_BOT_TOKEN` and `OYL_INSTANCE_DISCORD_GUILD_ID` are set.
+   */
+  readonly discord: DiscordSettings | undefined;
 }
 
 export type ServerConfigResult =
@@ -172,6 +181,27 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
   const secret = readSecretKey(raw.secretKey);
   if (secret.kind === 'malformed') problems.push(SECRET_KEY_MALFORMED);
 
+  // #874: voice is optional, so unset is OFF, not a problem — the reverse of
+  // the source URL's rule (spike 0017 §3.5). Half of it set is a mistake, and
+  // a problem names the variable, never what it holds: one of them is a secret.
+  let discord: DiscordSettings | undefined;
+  if (present(raw.discordBotToken) || present(raw.discordGuildId)) {
+    const token = raw.discordBotToken?.trim() ?? '';
+    const guildId = raw.discordGuildId?.trim() ?? '';
+    const before = problems.length;
+    if (!/^[A-Za-z0-9._-]{20,200}$/.test(token)) {
+      problems.push(
+        "OYL_INSTANCE_DISCORD_BOT_TOKEN must be your Discord bot's token (letters, digits, dots, dashes and underscores) whenever OYL_INSTANCE_DISCORD_GUILD_ID is set. Empty both to leave voice off.",
+      );
+    }
+    if (!/^[0-9]{17,20}$/.test(guildId)) {
+      problems.push(
+        "OYL_INSTANCE_DISCORD_GUILD_ID must be your Discord server's id (17 to 20 digits) whenever OYL_INSTANCE_DISCORD_BOT_TOKEN is set. Empty both to leave voice off.",
+      );
+    }
+    if (problems.length === before) discord = { botToken: token, guildId };
+  }
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -187,6 +217,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       metricsToken,
       secretKey: secret.kind === 'ok' ? secret.bytes : undefined,
       analysisHeartbeatMs,
+      discord,
     },
   };
 }

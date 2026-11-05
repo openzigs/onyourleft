@@ -186,11 +186,17 @@ describe('the steering controller on the Devices screen', () => {
     expect(fake.bench.device('controller').connected).toBe(false);
   });
 
-  it('says only Connected, and Forget controller, for a controller that advertised no name', async () => {
+  // #2133: an empty or whitespace-only advertised name is no name, never
+  // ": Connected" and "Forget ".
+  it.each([
+    ['advertised no name', undefined],
+    ['advertised an empty name', ''],
+    ['advertised a name of only whitespace', ' \t '],
+  ])('says only Connected, and Forget controller, for a controller that %s', async (_, name) => {
     const steering = createSteeringController({
       requestAndConnect: async () =>
         Promise.resolve({
-          name: undefined,
+          name,
           onEvents: () => () => undefined,
           onDisconnect: () => () => undefined,
           disconnect: () => undefined,

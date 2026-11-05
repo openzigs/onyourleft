@@ -25,7 +25,14 @@ import type { UnitSystem } from '@onyourleft/store';
 
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
-import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
+import {
+  ghostDistanceAt,
+  ghostHasFinished,
+  gradeAt,
+  metres,
+  seconds,
+  type GhostTrack,
+} from '@onyourleft/domain';
 
 import {
   BICYCLE_FRONT_METRES,
@@ -46,7 +53,14 @@ import {
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
 import { easedPlace, type EasedPlace } from './bend-easing';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
-import type { CameraPose, RaceHitLook, RiderMarker, SceneFrame, WaterFrame } from './port';
+import type {
+  CameraPose,
+  RaceHitLook,
+  RiderMarker,
+  RidingInputs,
+  SceneFrame,
+  WaterFrame,
+} from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import {
   LINE_LIMIT_METRES,
@@ -243,6 +257,14 @@ export interface SceneInput {
    * reason.
    */
   readonly pedalling?: boolean | undefined;
+  /**
+   * The cadence turning the rider's cranks, in rpm — #1999, `bicycle.ts`
+   * §`turningCadence`, supplied by `GameView` beside {@link pedalling}. The
+   * rider's drawn position is chosen from it with their power, grade and speed
+   * (`posture.ts`). Absent is no cadence reading, which is what a rider with
+   * no sensor has: the rules then go on what else there is.
+   */
+  readonly cadence?: number | undefined;
   /**
    * Draws every rider on the centreline, upright, as every frame did before
    * #499 — the control the browser gate measures the line against, and
@@ -1037,7 +1059,16 @@ export interface PlacedRider {
 interface Rider {
   readonly kind: RiderMarker['kind'];
   readonly distance: number;
+  /** How fast it is DRAWN — eased for a bend, and above its own speed while it gives the lag back (#1998). */
   readonly speed: number;
+  /**
+   * How fast it is actually going — its own odometer's speed, never the drawn
+   * one — #1999: what its position on the bicycle is chosen from. ⚠️ The
+   * owner fed 55 km/h in and the marker said about 63: that was the drawn
+   * speed giving back a bend's lag, `bend-easing.ts` §`GIVE_BACK_SHARE`'s
+   * 15 % over the rider's own.
+   */
+  readonly ownSpeed: number;
   readonly crankAngle: number | undefined;
   /** Whether a reading turns this rider's cranks, before a bend parks them. @see RiderMarker.pedalling */
   readonly pedalling: boolean;
@@ -1053,6 +1084,12 @@ interface Rider {
   readonly laned?: number | undefined;
   /** @see RiderMarker.hit */
   readonly hit?: RaceHitLook | undefined;
+  /** The cadence turning its cranks, the rider's only. @see RidingInputs.cadence */
+  readonly cadence?: number | undefined;
+  /** Its live power, the rider's and the pacer's. @see RidingInputs.power */
+  readonly power?: number | undefined;
+  /** The grade under it, where the caller has one; otherwise the route's at its distance. */
+  readonly grade?: number | undefined;
 }
 
 /**
@@ -1082,10 +1119,15 @@ function ridersOnTheRoad(
       kind: 'rider',
       distance: drawn.distance,
       speed: drawn.speed,
+      ownSpeed: input.state.ride.speed,
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
       steered: input.steeredLateral,
       hit: input.riderHit,
+      // #1999: what the rider's drawn position is chosen from.
+      cadence: input.cadence,
+      power: input.state.input.live ? input.state.input.power : undefined,
+      grade: input.state.grade,
     },
   ];
   const bot = input.state.bot;
@@ -1096,10 +1138,14 @@ function ridersOnTheRoad(
       kind: 'bot',
       distance: place.distance,
       speed: place.speed,
+      ownSpeed: bot?.state.speed ?? 0,
       crankAngle: pedalling(input.botDistance),
       // #625: a simulated rider pedals while it moves — its cranks turn from
       // its odometer, so a stopped one's are still.
       pedalling: (bot?.state.speed ?? 0) > 0,
+      // #1999: the pacer's simulated power and grade; it has no cadence.
+      power: bot?.power,
+      grade: bot?.grade,
     });
   }
   if (input.ghost !== undefined) {
@@ -1121,6 +1167,7 @@ function ridersOnTheRoad(
       kind: 'ghost',
       distance: place.distance,
       speed: place.speed,
+      ownSpeed: speed,
       crankAngle: pedalling(at),
       pedalling: speed > 0,
     });
@@ -1144,6 +1191,7 @@ function ridersOnTheRoad(
       kind: 'remote',
       distance: place.distance,
       speed: place.speed,
+      ownSpeed: remote.speedMetresPerSecond,
       // ⚠️ From their own odometer at a fixed gear, never an invented rate: a
       // frame carries no cadence (`@onyourleft/protocol` §`FrameRider`), and
       // `bicycle.ts` §`simulatedCrankAngle` is the rule for a rider with none.
@@ -1163,6 +1211,7 @@ function ridersOnTheRoad(
       kind: 'bot',
       distance: bot.distanceMetres,
       speed: bot.speedMetresPerSecond,
+      ownSpeed: bot.speedMetresPerSecond,
       crankAngle: pedalling(bot.distanceMetres),
       pedalling: bot.speedMetresPerSecond > 0,
       laned: bot.lateralMetres,
@@ -1182,6 +1231,7 @@ function ridersOnTheRoad(
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
       rideSeconds: rideClock,
+      riding: ridingOf(rider, input.profile),
     });
     // #546: in a bend tight enough for the inside pedal to strike, every
     // rider's cranks — the rider's own included, by the owner's ruling — are
@@ -1206,6 +1256,21 @@ function ridersOnTheRoad(
       lateral,
     };
   });
+}
+
+/**
+ * What a rider is doing, for `posture.ts` — #1999: what it has of a cadence
+ * and a power, the grade under it (the simulation's for the rider and the
+ * pacer, the route's at its drawn distance for everyone else), and its own
+ * speed — never the drawn one, which a bend eases and its exit hurries.
+ */
+function ridingOf(rider: Rider, profile: RouteProfile): RidingInputs {
+  return {
+    cadence: rider.cadence,
+    power: rider.power,
+    grade: rider.grade ?? gradeAt(profile, metres(rider.distance)),
+    speed: rider.ownSpeed,
+  };
 }
 
 /**
@@ -1444,7 +1509,7 @@ function markerAt(
   kind: RiderMarker['kind'],
   across: Across,
   roll: RiderRoll,
-  motion: Pick<RiderMarker, 'pedalling' | 'rideSeconds'>,
+  motion: Pick<RiderMarker, 'pedalling' | 'rideSeconds' | 'riding'>,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
   // ⚠️ The road's heading at **this** marker's own distance, not the
@@ -1480,6 +1545,7 @@ function markerAt(
     bodyLean: roll.body,
     pedalling: motion.pedalling,
     rideSeconds: motion.rideSeconds,
+    riding: motion.riding,
   };
 }
 

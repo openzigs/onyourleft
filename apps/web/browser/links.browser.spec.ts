@@ -92,7 +92,7 @@ function computedForm(hex: string): string {
 
 /**
  * Every token each computed colour could be. Several tokens share a value —
- * `canvas` and `accentInk` are both white, `accent` and `link` the same teal —
+ * `canvas` and `accentInk` are both white, `accent` and `link` can share a value —
  * so a colour names a SET of tokens and a pair is declared if any combination
  * of the two sets is.
  */

@@ -28,7 +28,22 @@
  * §LATIN_RANGES, so a character outside it is drawn in the system face rather
  * than as a missing glyph; `font-display: swap` draws the system face until
  * the file has loaded, rather than nothing.
+ *
+ * Three weights since #2040 (ADR 0063 D-5): 600 for the third heading and the
+ * labels, 700 for the numerals, 800 for the display step. A browser fetches a
+ * weight only when a rule asks for it.
  */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/barlow-latin-600.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @font-face {
   font-family: 'Barlow';
   font-style: normal;
@@ -63,67 +78,68 @@
      every gate this repository has, and a surface colour arrives inside the
      contrast suite that already exists. */
   --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #f2f5f4;
-  --oyl-color-surface-raised: #e7eae9;
-  --oyl-color-surface-overlay: #dde0df;
-  --oyl-color-border: #767e7e;
-  --oyl-color-ink: #141b1a;
-  --oyl-color-ink-muted: #4a5b5c;
-  --oyl-color-accent: #0b5c55;
-  --oyl-color-accent-hover: #07443f;
+  --oyl-color-surface: #ebeef0;
+  --oyl-color-surface-raised: #dbdde0;
+  --oyl-color-surface-overlay: #cbcdd0;
+  --oyl-color-border: #6a6c6e;
+  --oyl-color-ink: #131415;
+  --oyl-color-ink-muted: #515355;
+  --oyl-color-accent: #517d00;
+  --oyl-color-accent-text: #3e6100;
+  --oyl-color-accent-hover: #2c4300;
   --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #d4ebe7;
+  --oyl-color-selected: #cdf39c;
   /* A link in running text, one per state (#661) — see the `a` rules below. */
-  --oyl-color-link: #0b5c55;
-  --oyl-color-link-visited: #5b3a8c;
-  --oyl-color-link-hover: #07443f;
-  --oyl-color-link-active: #042e2a;
-  --oyl-color-focus: #141b1a;
+  --oyl-color-link: #3d5b00;
+  --oyl-color-link-visited: #5e3a91;
+  --oyl-color-link-hover: #2c4300;
+  --oyl-color-link-active: #1b2b00;
+  --oyl-color-focus: #131415;
 
   /* The ride HUD (#94). Opaque, so its contrast does not depend on the 3D
      scene behind it — `tokens.ts` records why that is the only way #94's
      contrast criterion is checkable. */
-  --oyl-color-hud-surface: #10161c;
-  --oyl-color-hud-ink: #f5f8fa;
-  --oyl-color-hud-ink-muted: #a8b6c2;
-  --oyl-color-hud-border: #7b8b99;
-  --oyl-color-hud-stale-ink: #f0b45f;
+  --oyl-color-hud-surface: #101215;
+  --oyl-color-hud-ink: #f4f7f9;
+  --oyl-color-hud-ink-muted: #9da3a8;
+  --oyl-color-hud-border: #787c82;
+  --oyl-color-hud-stale-ink: #f1af48;
 
-  --oyl-color-info-surface: #e3f0f4;
-  --oyl-color-info-ink: #0e4a57;
-  --oyl-color-info-border: #2c7288;
+  --oyl-color-info-surface: #dceeff;
+  --oyl-color-info-ink: #004876;
+  --oyl-color-info-border: #328bcd;
 
-  --oyl-color-success-surface: #e2f2e9;
-  --oyl-color-success-ink: #14513a;
-  --oyl-color-success-border: #2a7a58;
+  --oyl-color-success-surface: #dbf2df;
+  --oyl-color-success-ink: #005122;
+  --oyl-color-success-border: #3b9655;
 
-  --oyl-color-warning-surface: #fbefda;
-  --oyl-color-warning-ink: #654100;
-  --oyl-color-warning-border: #8a6212;
+  --oyl-color-warning-surface: #f9ebd3;
+  --oyl-color-warning-ink: #5d4000;
+  --oyl-color-warning-border: #ae7c00;
 
-  --oyl-color-danger-surface: #fbe8e8;
-  --oyl-color-danger-ink: #7a1d1d;
-  --oyl-color-danger-border: #a83232;
-  --oyl-color-danger-action: #9e2626;
+  --oyl-color-danger-surface: #ffe7e4;
+  --oyl-color-danger-ink: #792b29;
+  --oyl-color-danger-border: #cc6660;
+  --oyl-color-danger-action: #a21a21;
   --oyl-color-danger-action-ink: #ffffff;
 
   /* The illustration palette (#936) — decoration, painted only by art. What
      may be drawn OVER each is a pair in `tokens.ts` §CONTRAST_REQUIREMENTS. */
-  --oyl-color-illo-sky: #cfe4ef;
-  --oyl-color-illo-sun: #f4c65a;
-  --oyl-color-illo-hill-far: #a7d3a3;
-  --oyl-color-illo-hill-near: #7db678;
-  --oyl-color-illo-road: #6f726c;
+  --oyl-color-illo-sky: #c6d9f2;
+  --oyl-color-illo-sun: #e0c24b;
+  --oyl-color-illo-hill-far: #adcca7;
+  --oyl-color-illo-hill-near: #8fb686;
+  --oyl-color-illo-road: #91969c;
 
   /* The workout block chart's intensity bands (#1043), easiest first. Each
      is a pair against `surface` in `tokens.ts` §CONTRAST_REQUIREMENTS. */
-  --oyl-color-band-recovery: #5e8f88;
-  --oyl-color-band-endurance: #467f75;
-  --oyl-color-band-tempo: #336d61;
-  --oyl-color-band-threshold: #2e5878;
-  --oyl-color-band-vo2: #7a3622;
-  --oyl-color-band-anaerobic: #5e2537;
-  --oyl-color-band-sprint: #3d1d3a;
+  --oyl-color-band-recovery: #6c7278;
+  --oyl-color-band-endurance: #00468c;
+  --oyl-color-band-tempo: #007d30;
+  --oyl-color-band-threshold: #968200;
+  --oyl-color-band-vo2: #8f4c00;
+  --oyl-color-band-anaerobic: #820b0f;
+  --oyl-color-band-sprint: #7e439f;
 
   --oyl-space-xs: 0.25rem;
   --oyl-space-sm: 0.5rem;
@@ -244,55 +260,56 @@
   color-scheme: dark;
 
   /* The elevation ramp, darkest first: a raised surface is LIGHTER here. */
-  --oyl-color-canvas: #121816;
-  --oyl-color-surface: #19201f;
-  --oyl-color-surface-raised: #222a29;
-  --oyl-color-surface-overlay: #2b3433;
-  --oyl-color-border: #869391;
-  --oyl-color-ink: #e4ebe9;
-  --oyl-color-ink-muted: #a9b7b5;
-  --oyl-color-accent: #6cc9bd;
-  --oyl-color-accent-hover: #9ddcd3;
-  --oyl-color-accent-ink: #0d1f1c;
-  --oyl-color-selected: #1d4540;
-  --oyl-color-link: #6cc9bd;
-  --oyl-color-link-visited: #c4a8f0;
-  --oyl-color-link-hover: #9ddcd3;
-  --oyl-color-link-active: #c6ede7;
-  --oyl-color-focus: #e4ebe9;
+  --oyl-color-canvas: #101215;
+  --oyl-color-surface: #242729;
+  --oyl-color-surface-raised: #333639;
+  --oyl-color-surface-overlay: #414447;
+  --oyl-color-border: #93969a;
+  --oyl-color-ink: #edeef1;
+  --oyl-color-ink-muted: #b3b7ba;
+  --oyl-color-accent: #aff13c;
+  --oyl-color-accent-text: #aff13c;
+  --oyl-color-accent-hover: #c7fd7b;
+  --oyl-color-accent-ink: #121809;
+  --oyl-color-selected: #304216;
+  --oyl-color-link: #aade5b;
+  --oyl-color-link-visited: #c5acf2;
+  --oyl-color-link-hover: #cdf39c;
+  --oyl-color-link-active: #e6fad0;
+  --oyl-color-focus: #aff13c;
 
-  --oyl-color-info-surface: #12303a;
-  --oyl-color-info-ink: #a9dcec;
-  --oyl-color-info-border: #4f9db5;
+  --oyl-color-info-surface: #142b3d;
+  --oyl-color-info-ink: #93cbfc;
+  --oyl-color-info-border: #1e72ac;
 
-  --oyl-color-success-surface: #13301f;
-  --oyl-color-success-ink: #a7e0c1;
-  --oyl-color-success-border: #4ea77e;
+  --oyl-color-success-surface: #162e1b;
+  --oyl-color-success-ink: #99d3a4;
+  --oyl-color-success-border: #287b42;
 
-  --oyl-color-warning-surface: #33280f;
-  --oyl-color-warning-ink: #f1d08f;
-  --oyl-color-warning-border: #b98c31;
+  --oyl-color-warning-surface: #35260d;
+  --oyl-color-warning-ink: #e5c182;
+  --oyl-color-warning-border: #906500;
 
-  --oyl-color-danger-surface: #3a1818;
-  --oyl-color-danger-ink: #f4b8b8;
-  --oyl-color-danger-border: #d46a6a;
-  --oyl-color-danger-action: #f08c8c;
-  --oyl-color-danger-action-ink: #2a0d0d;
+  --oyl-color-danger-surface: #3e211e;
+  --oyl-color-danger-ink: #ffb2ac;
+  --oyl-color-danger-border: #ac514c;
+  --oyl-color-danger-action: #fb8981;
+  --oyl-color-danger-action-ink: #321312;
 
   /* Nearer is LIGHTER here, as the elevation ramp is (`tokens.ts`
      §ILLUSTRATION_DEPTH). */
-  --oyl-color-illo-sky: #152637;
-  --oyl-color-illo-sun: #9a7a30;
-  --oyl-color-illo-hill-far: #1d3a2b;
-  --oyl-color-illo-hill-near: #2f5d3b;
-  --oyl-color-illo-road: #5f6a63;
-  --oyl-color-band-recovery: #467a73;
-  --oyl-color-band-endurance: #529085;
-  --oyl-color-band-tempo: #62a596;
-  --oyl-color-band-threshold: #7fb0d6;
-  --oyl-color-band-vo2: #f2b391;
-  --oyl-color-band-anaerobic: #f5c9d3;
-  --oyl-color-band-sprint: #f8e7f3;
+  --oyl-color-illo-sky: #102239;
+  --oyl-color-illo-sun: #897626;
+  --oyl-color-illo-hill-far: #263a22;
+  --oyl-color-illo-hill-near: #304f2a;
+  --oyl-color-illo-road: #53595e;
+  --oyl-color-band-recovery: #949aa1;
+  --oyl-color-band-endurance: #2d74ca;
+  --oyl-color-band-tempo: #5fc372;
+  --oyl-color-band-threshold: #f9df5d;
+  --oyl-color-band-vo2: #f59441;
+  --oyl-color-band-anaerobic: #cb574d;
+  --oyl-color-band-sprint: #cf91f3;
 }
 
 *,
@@ -430,7 +447,7 @@ h3:first-child {
  * that is something else — `.oyl-button`, `.oyl-nav-link`, `.oyl-skip-link`,
  * `.oyl-subnav-link` — is painted by its own class, and a bare `a:visited` or
  * `a:hover` is (0,1,1), which beats a single class: a visited "Ride" button
- * would have turned purple on a teal fill. Written this way, any class wins.
+ * would have turned purple on the accent fill. Written this way, any class wins.
  *
  * The order is the one the cascade needs when specificity ties — visited,
  * then hover and keyboard focus, then a press — so a visited link still
@@ -485,8 +502,8 @@ h3:first-child {
   z-index: 10;
   padding: var(--oyl-space-sm) var(--oyl-space-md);
   background: var(--oyl-color-canvas);
-  color: var(--oyl-color-accent);
-  border: 2px solid var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
+  border: 2px solid var(--oyl-color-accent-text);
   border-radius: var(--oyl-radius);
   transform: translateY(-200%);
 }
@@ -808,10 +825,11 @@ html {
  * The current destination is marked four ways and only one of them is colour:
  * `aria-current` for assistive technology, a heavier label, a larger icon, and
  * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
- * #48's sixth, and #944's third. The fill is `accent`, at 5.90 (light) and
- * 6.53 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
- * label and icon on it are `accentInk`, at 7.85 and 8.72 — both declared pairs
- * in `tokens.ts` §CONTRAST_REQUIREMENTS.
+ * #48's sixth, and #944's third. The fill is `accent`, at 3.08 (light) and
+ * 7.22 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
+ * label and icon on it are `accentInk`, at 4.9 and 13.33 — both declared pairs
+ * in `tokens.ts` §CONTRAST_REQUIREMENTS. A current destination's label off the
+ * pill is text, so it is `accentText` (#2118).
  *
  * ⚠️ The fill is its OWN rule, `.oyl-nav-link[aria-current] .oyl-nav-indicator`,
  * because `shell.browser.spec.ts` §"#944"'s control deletes exactly that rule
@@ -820,7 +838,7 @@ html {
  */
 .oyl-nav-link[aria-current] {
   font-weight: 700;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 .oyl-nav-link[aria-current] .oyl-nav-indicator {
@@ -882,9 +900,9 @@ html {
   padding: 0 var(--oyl-space-sm);
   margin-block-start: -2px;
   margin-inline-start: -2px;
-  border: 2px solid var(--oyl-color-accent);
+  border: 2px solid var(--oyl-color-accent-text);
   background: var(--oyl-color-canvas);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   text-decoration: none;
 }
 
@@ -1050,7 +1068,7 @@ html {
  *
  * The ⓘ is a 44 × 44 target DECLARED (SC 2.5.5, #316's reason): the glyph
  * alone is 20 px, and `controls-first.browser.spec.ts` strips the declaration
- * as its control. Its glyph is `accent` on the page — the declared non-text
+ * as its control. Its glyph is `accentText` on the page — the declared non-text
  * pair the disclosure markers use (SC 1.4.11).
  */
 .oyl-main:has(> .oyl-help) {
@@ -1072,7 +1090,7 @@ html {
   min-height: 2.75rem;
   box-sizing: border-box;
   border-radius: 50%;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   cursor: pointer;
   list-style: none;
 }
@@ -1108,7 +1126,7 @@ html {
  *
  * The ⓘ is a 44 × 44 target DECLARED (SC 2.5.5, #316's reason), like
  * `.oyl-help`'s: the glyph alone is 20 px, and `controls-first.browser.spec.ts`
- * §"#1013" strips the declaration as its control. Its glyph is `accent`, the
+ * §"#1013" strips the declaration as its control. Its glyph is `accentText`, the
  * non-text pair the disclosure markers already use on both the page and a
  * raised surface (SC 1.4.11), and the panel's words are `inkMuted`, the pair
  * `.oyl-muted` already uses there — so no new contrast pair.
@@ -1145,7 +1163,7 @@ html {
   min-height: 2.75rem;
   box-sizing: border-box;
   border-radius: 50%;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   cursor: pointer;
   list-style: none;
 }
@@ -1443,6 +1461,31 @@ html {
     padding: var(--oyl-space-sm);
     margin: calc(-1 * var(--oyl-space-sm));
   }
+
+  /*
+   * A short section beside a long one stays whole — the owner's ruling of
+   * 2026-11-04 on #2125, item 3. Workouts' detail pane holds *Build a workout*
+   * and *Import a workout* side by side in ONE scroll container, so scrolling
+   * the builder to its *Add block* form (or its chart's zone key) carried the
+   * short import column with it, and its heading went under the pane's top
+   * edge half cut: at 1280 × 800 a 34 px scroll left "Import a workout" sliced
+   * through its letters. Sticky at the pane's content edge, the short column
+   * stays put while the long one scrolls beside it. The grid's own height is
+   * the long column's, so the long column cannot stick, and the short one
+   * comes off the top only where the grid itself ends.
+   *
+   * Opt-in (`oyl-sections--pinned`), and only where the pane scrolls on its
+   * own and the sections are columns: below 40rem tall the page scrolls under
+   * a sticky header, and a pinned section would go under it.
+   * `list-detail.browser.spec.ts` §"#2125" scrolls the pane and reads the
+   * heading back, with this rule deleted as the control.
+   */
+  @container oyl-pane (min-width: 40rem) {
+    .oyl-list-detail--two > .oyl-list-detail__detail .oyl-sections--pinned > * {
+      position: sticky;
+      top: 0;
+    }
+  }
 }
 
 /*
@@ -1499,10 +1542,10 @@ html {
  * The chosen item: an edge, not a colour alone (SC 1.4.1), and `aria-current`
  * says it. An inset ring since #992, as an on toggle's is, so choosing an item
  * moves no pixel of the list (the item has no border of its own to thicken).
- * `accent` on `surfaceRaised` is a declared 3:1 pair in both palettes.
+ * `accentText` on `surfaceRaised` is a declared 3:1 pair in both palettes.
  */
 .oyl-pane-list__item[aria-current='true'] {
-  box-shadow: inset 0 0 0 3px var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 3px var(--oyl-color-accent-text);
 }
 
 .oyl-pane-list__item a {
@@ -1584,22 +1627,35 @@ html {
 }
 
 /*
- * Home — #1010. One column on a phone; two where the frame is a portrait
- * tablet's or a phone on its side; and on a landscape tablet a DASHBOARD:
- * *Next up* across two of three columns and two rows, *This week* and the
- * Trainer card beside it, and the three ride cards across the whole width
- * under them. Keyed to the FRAME's width (`.oyl-home-frame` is a size
- * container, `tw:@container` in `HomeView.tsx`) rather than the window's,
- * because the rail takes a different share of each window.
+ * Home — a grid of MODULES since #2044 (#1010 drew the first dashboard).
+ * Keyed to the FRAME's width (`.oyl-home-frame` is a size container,
+ * `tw:@container` in `HomeView.tsx`) rather than the window's, because the
+ * rail takes a different share of each window.
  *
- * ⚠️ **The DOM order is the reading order on every layout**: Next up, This
- * week, Trainer, the ride cards, then the rest. The dashboard places them
- * with explicit columns and auto rows, so a card never jumps ahead of one it
- * follows. `home.browser.spec.ts` §"#1010" measures each layout, and its
- * control (`home.html?dashboard=off`) deletes the dashboard rule.
+ * ⚠️ **The DOM order is the reading order, the visual order and the tab order
+ * on every layout**: Next up (the quick-launch), the sensors (the Trainer
+ * card, #2045's slot), the last ride (#2048's; on a first open the other ways
+ * to start), the week (#2049's), then the ride cards, fitness and the badges.
+ * Every module is placed by its columns alone and the rows are auto, so none
+ * can jump ahead of one it follows.
  *
- * The band under the title that #939 drew is gone: Next up is Home's hero
- * now, and the title is every view's ordinary display `h1`.
+ * - **One column** on a phone, in that order.
+ * - **Two** from 36rem (a portrait tablet, a phone on its side): Next up and
+ *   the sensors each a whole row, then the last ride beside the week.
+ * - **Three** from 60rem — the landscape DASHBOARD: two rows of two, each a
+ *   wide module in the first two columns beside a narrow one in the third —
+ *   Next up beside the sensors, the last ride beside the week — which fits
+ *   all four inside the first screen at 1280×800.
+ *
+ * The two breakpoints are the ones Home already had: a container query cannot
+ * read a custom property (`--oyl-list-detail-from`'s comment says the same),
+ * so no new number is introduced. `home.browser.spec.ts` §"#2044" measures
+ * each layout; its controls are `home.html?columns=one` (every module one
+ * column wide) and `?dashboard=off` (the 60rem rule deleted).
+ *
+ * The band under the title that #939 drew is gone, and since #2043 so is
+ * Next up's picture: the title is every view's ordinary display `h1`, and
+ * Next up is a compact row under it.
  */
 .oyl-home {
   display: grid;
@@ -1618,7 +1674,8 @@ html {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .oyl-next-up {
+  .oyl-next-up,
+  .oyl-home__trainer {
     grid-column: 1 / -1;
   }
 }
@@ -1628,46 +1685,54 @@ html {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .oyl-next-up {
+  .oyl-next-up,
+  .oyl-home__last,
+  .oyl-home__empty {
     grid-column: 1 / 3;
-    grid-row: span 2;
-    align-self: stretch;
-    /* Uses the height: with This week and the Trainer card beside it, Next
-       up runs from under the title to about the fold, so the first screen is
-       the dashboard; the ride cards follow it. 16rem is the header, the
-       title, its summary and the margins above and below, on the owner's
-       tablet in the shell. */
-    min-height: max(18rem, calc(100dvh - 16rem));
   }
 
-  .oyl-home__week,
-  .oyl-home__trainer {
+  .oyl-home__trainer,
+  .oyl-home__week {
     grid-column: 3;
-    align-self: stretch;
   }
 }
 
-/* *Next up*'s picture fills every pixel the band does not take, and is the
-   tallest picture on the screen: it is the biggest thing on it. */
-.oyl-next-up__art {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 12rem;
-}
-
-/* The route's own shape stands on the lower part of the sky. */
-.oyl-next-up__profile {
-  top: 35%;
-  height: 65%;
-}
-
-.oyl-next-up__band {
+/*
+ * *Next up* — #2043. The ride it offers, one line and its Ride in ONE row:
+ * the words take the room and the Ride its own width, so the Ride starts at
+ * the card's top on a phone as on a tablet. Where the row cannot hold both
+ * (a 320 px phone) the Ride wraps under the words and takes the whole line,
+ * which is #1010's phone layout. The card is its own solid `surfaceRaised`,
+ * so every word stands on a declared pair (`home.browser.spec.ts` §"#2043").
+ */
+.oyl-next-up {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm) var(--oyl-space-md);
   padding: var(--oyl-space-md);
 }
 
-@media (min-width: 37.5rem) {
-  .oyl-next-up__band {
-    padding: var(--oyl-space-lg);
+.oyl-next-up__words {
+  display: flex;
+  flex: 999 1 12rem;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+  min-width: 0;
+}
+
+/* The route's own climb, small, beside the words — and only where the frame
+   is wide enough to hold it on the row: the line says the climb in words. */
+.oyl-next-up__profile {
+  display: none;
+}
+
+@container (min-width: 36rem) {
+  .oyl-next-up__profile {
+    display: block;
+    flex: 0 0 8rem;
+    align-self: center;
+    height: 3rem;
   }
 }
 
@@ -1680,23 +1745,18 @@ html {
 }
 
 /* One big Ride: larger type, a heavier weight and more room than an ordinary
-   button — across the band on a phone, at least 16rem wider than that. Its
-   declared floor stays `.oyl-button`'s 44 px: 48 is the ride-time controls'
-   alone (#669), and this is pressed before a ride, not during one. Two
-   classes, because `.oyl-button` is declared later in this file. */
+   button, at the end of the row — and the whole line when it wraps under the
+   words. Its declared floor stays `.oyl-button`'s 44 px: 48 is the ride-time
+   controls' alone (#669), and this is pressed before a ride, not during one.
+   Two classes, because `.oyl-button` is declared later in this file. */
 .oyl-next-up .oyl-next-up__ride {
-  align-self: stretch;
+  flex: 1 0 auto;
+  max-width: 100%;
   padding-block: var(--oyl-space-sm);
+  padding-inline: var(--oyl-space-lg);
   font-size: var(--oyl-font-size-lg);
   font-weight: 700;
   text-align: center;
-}
-
-@container (min-width: 36rem) {
-  .oyl-next-up .oyl-next-up__ride {
-    align-self: start;
-    width: min(100%, 16rem);
-  }
 }
 
 /* One layer of a picture: the kit's parts stack in one box (#938). */
@@ -1742,22 +1802,14 @@ html {
 }
 
 /*
- * A SHORT viewport — a phone on its side (#939's review, B2). The pictures
- * keep their place and give up height, so Next up's Ride stays above the
- * fold at 844×390 and 640×360 (`home.browser.spec.ts`).
+ * A SHORT viewport — a phone on its side (#939's review, B2). The ride cards'
+ * pictures keep their place and give up height. Next up has had no picture
+ * to give up since #2043, so its Ride is above the fold at 844×390 and
+ * 640×360 without this rule (`home.browser.spec.ts`).
  */
 @media (max-height: 30rem) {
-  .oyl-next-up__art {
-    min-height: 3rem;
-  }
-
   .oyl-ride-card__art {
     min-height: 3rem;
-  }
-
-  .oyl-next-up__band {
-    gap: var(--oyl-space-xs);
-    padding-block: var(--oyl-space-sm);
   }
 }
 
@@ -1832,7 +1884,7 @@ html {
 }
 
 .oyl-home__ring-fill {
-  stroke: var(--oyl-color-accent);
+  stroke: var(--oyl-color-accent-text);
   stroke-linecap: round;
 }
 
@@ -1842,6 +1894,22 @@ html {
   flex: none;
   width: 3rem;
   height: 3rem;
+}
+
+/*
+ * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
+ * in a summary, in one face (Barlow, the display family), at 700, with
+ * tabular figures so a changing number does not jitter. One rule over every
+ * number class; `tokens.ts` §`METRIC_TYPE` is the same declarations, and
+ * `design/metric-type.test.ts` holds the two equal. Sizes stay with each
+ * class below.
+ */
+.oyl-reading__value,
+.oyl-metric__value,
+.oyl-hud__value {
+  font-family: var(--oyl-font-family-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -2235,7 +2303,7 @@ html {
   min-width: 2.75rem;
   padding: var(--oyl-space-sm) var(--oyl-space-md);
   border-radius: var(--oyl-radius);
-  border: 2px solid var(--oyl-color-accent);
+  border: 2px solid var(--oyl-color-accent-text);
   background: var(--oyl-color-accent);
   color: var(--oyl-color-accent-ink);
   transition:
@@ -2299,17 +2367,20 @@ a.oyl-button {
  *
  * - **Primary** is filled with the accent, so it is the heaviest control on
  *   any screen, and `a11y/button-hierarchy.a11y.test.tsx` holds every view to
- *   at most one of it.
+ *   at most one of it. ⚠️ Since #2118 its FILL is `accent` and its 2 px EDGE
+ *   is `accentText`, a thin line (ADR 0063 D-1): in light the fill is the
+ *   brighter lime-olive and the edge keeps the olive, so a primary standing
+ *   on the near hill still has a 3:1 edge (`tokens.ts` §CONTRAST_REQUIREMENTS).
  * - **Secondary** is TONAL: a filled surface step, `surfaceOverlay` — the top
  *   of the elevation ramp, so it stands a step above a tile (`surfaceRaised`)
- *   and two above the page — with the accent's label and no outline. Its
+ *   and two above the page — with the `accentText` label and no outline. Its
  *   border is drawn in its own fill, so every kind keeps the same box.
- * - **Tertiary** is TEXT: the accent's label, underlined, on whatever it sits
+ * - **Tertiary** is TEXT: the `accentText` label, underlined, on whatever it sits
  *   on, with no fill and no edge. For the lowest action beside a primary.
  * - **Danger** (#1002) is the destructive answer in a confirmation, drawn
  *   below the tertiary's rules: lighter than the primary it stands beside.
  * - **Toggle** is drawn as a secondary when off. When on (`aria-pressed`) it
- *   takes the `selected` fill AND the accent's border with a second ring
+ *   takes the `selected` fill AND the `accentText` border with a second ring
  *   inside it — a border twice as heavy, where an off toggle has none —
  *   because a state told by colour alone fails WCAG 2.2 SC 1.4.1. The ring is
  *   an inset `box-shadow`, not a wider border, so a press does not move a
@@ -2333,13 +2404,13 @@ a.oyl-button {
 .oyl-button--secondary {
   border: 2px solid var(--oyl-color-surface-overlay);
   background: var(--oyl-color-surface-overlay);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 .oyl-button--toggle {
   border: 2px solid var(--oyl-color-surface-overlay);
   background: var(--oyl-color-surface-overlay);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 /*
@@ -2367,15 +2438,15 @@ a.oyl-button {
  * so the box and its 44 px floor are the other kinds'), the accent's label
  * underlined so it is told from a sentence by more than colour (SC 1.4.1), a
  * thicker line and `accent-hover` under a pointer, as a link in running text
- * (#661). Its label sits on whatever is behind it; `accent` and `accentHover`
- * are declared text pairs on the canvas, and `accent` on `surfaceRaised` and
+ * (#661). Its label sits on whatever is behind it; `accentText` and `accentHover`
+ * are declared text pairs on the canvas, and `accentText` on `surfaceRaised` and
  * `surfaceOverlay` is declared too. `accentHover` on a tile is NOT declared,
  * so a tertiary placed inside a tile owes that pair first.
  */
 .oyl-button--tertiary {
   background: transparent;
   border-color: transparent;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.15em;
@@ -2420,9 +2491,9 @@ a.oyl-button {
 /* A toggle that is on: the `selected` fill and a doubled border (SC 1.4.1). */
 .oyl-button--toggle[aria-pressed='true'] {
   background: var(--oyl-color-selected);
-  border-color: var(--oyl-color-accent);
+  border-color: var(--oyl-color-accent-text);
   color: var(--oyl-color-accent-hover);
-  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent-text);
 }
 
 /* On, under a pointer: the fill stays `selected`, so the pointer never makes
@@ -2512,9 +2583,9 @@ a.oyl-button {
 .oyl-segmented__options > label {
   cursor: pointer;
   padding: 0 var(--oyl-space-md);
-  border: 2px solid var(--oyl-color-accent);
+  border: 2px solid var(--oyl-color-accent-text);
   background: var(--oyl-color-canvas);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   margin-block-start: -2px;
   margin-inline-start: -2px;
 }
@@ -2537,7 +2608,7 @@ a.oyl-button {
 .oyl-segmented__options > label:has(> input:checked) {
   background: var(--oyl-color-selected);
   color: var(--oyl-color-accent-hover);
-  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent-text);
 }
 
 /*
@@ -2656,6 +2727,7 @@ a.oyl-button {
 .oyl-settings-card,
 .oyl-pairing__row,
 .oyl-chooser__loadout,
+.oyl-chooser__preview,
 .oyl-ride-card__body {
   padding: var(--oyl-space-lg);
 }
@@ -2665,6 +2737,7 @@ a.oyl-button {
   .oyl-settings-card,
   .oyl-pairing__row,
   .oyl-chooser__loadout,
+  .oyl-chooser__preview,
   .oyl-ride-card__body {
     padding: var(--oyl-space-md);
   }
@@ -2768,9 +2841,9 @@ a.oyl-button {
 
 /*
  * Elevation 2: a card, and the grid it sits in is the page rather than a panel,
- * so it is two steps up from the canvas behind it. One step was not enough —
- * `#f2f5f4` on `#ffffff` is 1.097:1 and a 10 rem card at that separation reads
- * as a faintly tinted rectangle rather than as an object.
+ * so it is two steps up from the canvas behind it. One step was not enough in
+ * the teal palette — `#f2f5f4` on `#ffffff` was 1.097:1 and a 10 rem card at that
+ * separation read as a faintly tinted rectangle rather than as an object.
  */
 .oyl-metric {
   background: var(--oyl-color-surface-raised);
@@ -2916,7 +2989,7 @@ a.oyl-button {
  * accent along its top edge, and *Done*. Only on a STOPPED ride, so it never
  * shares a column with a ride control and its height changes nothing during
  * a ride (#692). Every colour is a declared pair on `surfaceRaised` — `ink`,
- * `inkMuted` for the labels and units, `accent` for the edge (SC 1.4.11) and
+ * `inkMuted` for the labels and units, `accentText` for the edge (SC 1.4.11) and
  * the buttons' own — in both palettes. Its spacing is the tighter steps on
  * purpose: on a 4:3 tablet in the shell (1024×720) the roomier ones left
  * *Start a new ride*, below it, 15.7 px above the fold (#1042's browser gate).
@@ -2924,7 +2997,7 @@ a.oyl-button {
 .oyl-result {
   margin: var(--oyl-space-md) 0;
   padding: var(--oyl-space-sm) var(--oyl-space-md);
-  border-top: 0.375rem solid var(--oyl-color-accent);
+  border-top: 0.375rem solid var(--oyl-color-accent-text);
   border-radius: var(--oyl-radius-card);
   background: var(--oyl-color-surface-raised);
 }
@@ -3054,7 +3127,9 @@ a.oyl-button {
   margin: 0;
 }
 
-.oyl-ride__time--recorded {
+/* The seconds recorded and, since #2072, the time of day: small type, each on
+   a row of its own under the two readings. */
+.oyl-ride__time--small {
   grid-column: 1 / -1;
   display: flex;
   gap: var(--oyl-space-sm);
@@ -3064,8 +3139,10 @@ a.oyl-button {
 }
 
 @container oyl-live (min-width: 40rem) {
+  /* #2072: the time of day a column of its own, beside the seconds
+     recorded, so the Live group is no taller for it. */
   .oyl-ride__clock {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
   }
 
   .oyl-ride__clock .oyl-reading__value {
@@ -3074,7 +3151,7 @@ a.oyl-button {
     line-height: 1.1;
   }
 
-  .oyl-ride__time--recorded {
+  .oyl-ride__time--small {
     grid-column: auto;
     display: block;
     align-self: end;
@@ -3437,8 +3514,58 @@ a.oyl-button {
     min-width: 0;
   }
 
-  .oyl-ride__group--graph .oyl-workout-graph__key {
+  /*
+   * The notes column: the zone key (#2039) and the sentence. The key is a
+   * column of its own here, one zone a line, so it adds nothing to the
+   * group's height either.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph__notes {
+    display: flex;
+    flex: 0 0 auto;
+    max-width: 13rem;
+    flex-direction: column;
+    gap: var(--oyl-space-xs);
+  }
+
+  /* With a sentence the column is the sentence's 13rem; with only the key, the key's own width. */
+  .oyl-ride__group--graph .oyl-workout-graph__notes:has(.oyl-workout-graph__key) {
+    flex-basis: 13rem;
+  }
+
+  .oyl-ride__group--graph .oyl-zone-key {
+    flex-direction: column;
+    margin: 0;
+  }
+
+  /*
+   * In a hold there are three lanes and their captions are the longest there
+   * are: a column beside them would wrap a caption. There is room UNDER them
+   * instead (a hold's group ends about 70 px clear of the fold, measured), so
+   * there the key is a row of its own under the frame and the sentence, if
+   * any, keeps its column.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph:has([data-oyl-lane='heart-rate']) {
+    flex-wrap: wrap;
+  }
+
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has([data-oyl-lane='heart-rate'])
+    .oyl-workout-graph__notes {
+    display: contents;
+  }
+
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has([data-oyl-lane='heart-rate'])
+    .oyl-workout-graph__key {
     flex: 0 0 13rem;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph:has([data-oyl-lane='heart-rate']) .oyl-zone-key {
+    flex: 1 0 100%;
+    flex-direction: row;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__key {
     margin: 0;
   }
 
@@ -3939,7 +4066,7 @@ input[type='file']::file-selector-button {
   border: 2px solid var(--oyl-color-surface-overlay);
   border-radius: var(--oyl-radius);
   background: var(--oyl-color-surface-overlay);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 input[type='file']::file-selector-button:hover {
@@ -3994,7 +4121,7 @@ p > label + input[type='file'] {
   border: 2px solid var(--oyl-color-surface-overlay);
   border-radius: var(--oyl-radius);
   background: var(--oyl-color-surface-overlay);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   /* A line short enough that the floor, not the padding, makes the 44 px:
      at the body's 1.55 the box came to 44.8 px with the floor stripped, and
      the floor held nothing (#316's arithmetic). */
@@ -4045,7 +4172,7 @@ p > label + input[type='file'] {
   border: 0;
   border-radius: var(--oyl-radius);
   background: transparent;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   cursor: pointer;
 }
 
@@ -4109,7 +4236,7 @@ input[type='checkbox'][role='switch'] {
 }
 
 input[type='checkbox'][role='switch']:checked {
-  border-color: var(--oyl-color-accent);
+  border-color: var(--oyl-color-accent-text);
   background: radial-gradient(
       circle 0.4375rem at calc(100% - 0.625rem) 50%,
       var(--oyl-color-accent-ink) 96%,
@@ -4128,7 +4255,7 @@ input[type='checkbox'][role='switch']:disabled {
  * control at three): a `fieldset` of NATIVE radios, each label a separate
  * rounded chip, wrapping. The platform supplies the arrow keys and the group's
  * one tab stop. The 44 px floor is #667's on a radio row; the chosen chip is
- * told by its radio's dot (SHAPE), a doubled `accent` edge and the `selected`
+ * told by its radio's dot (SHAPE), a doubled `accentText` edge and the `selected`
  * fill — the same three marks as a segment.
  */
 .oyl-chips {
@@ -4166,8 +4293,8 @@ input[type='checkbox'][role='switch']:disabled {
 .oyl-chips__options > label:has(> input:checked) {
   background: var(--oyl-color-selected);
   color: var(--oyl-color-accent-hover);
-  border-color: var(--oyl-color-accent);
-  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+  border-color: var(--oyl-color-accent-text);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent-text);
 }
 
 /*
@@ -4204,7 +4331,7 @@ input[type='checkbox'][role='switch']:disabled {
   border: 2px solid var(--oyl-color-surface-overlay);
   border-radius: var(--oyl-radius);
   background: var(--oyl-color-surface-overlay);
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 .oyl-stepper__step:hover {
@@ -4257,7 +4384,7 @@ input[type='checkbox'][role='switch']:disabled {
 
   .oyl-drop[data-oyl-dragging] {
     border-style: solid;
-    border-color: var(--oyl-color-accent);
+    border-color: var(--oyl-color-accent-text);
     background: var(--oyl-color-selected);
   }
 }
@@ -4383,7 +4510,7 @@ select.oyl-input {
  * one set. A stroke rather than a fill, so the colour is the stroke's.
  */
 .oyl-pairing__icon {
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 /*
@@ -4440,7 +4567,7 @@ select.oyl-input {
 /*
  * #666: the marker is this rule's own, painted with a token, rather than the
  * browser's triangle — `display: flex` above takes that away in Chromium, and
- * its colour was the UA's, which no contrast pair could name. `accent` on the
+ * its colour was the UA's, which no contrast pair could name. `accentText` on the
  * page and on a panel's `surface` are declared non-text pairs (SC 1.4.11).
  * `/ ''` gives the glyph no text alternative: `<details>` already tells a
  * screen reader whether it is open. The plain `content` before each is the
@@ -4455,7 +4582,7 @@ select.oyl-input {
 .oyl-details > summary::before {
   content: '▸';
   content: '▸' / '';
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
 }
 
 .oyl-details[open] > summary::before {
@@ -4568,7 +4695,7 @@ select.oyl-input {
  *
  * A card is its name, its date, and its facts as readings (`Reading`), two to
  * a row where they fit. The chosen ride is told by an inset ring as a pane
- * list's chosen item is (#992): `accent` on `surfaceRaised` is a declared 3:1
+ * list's chosen item is (#992): `accentText` on `surfaceRaised` is a declared 3:1
  * pair in both palettes, and the link's `aria-current` says it in words.
  */
 .oyl-activity-cards {
@@ -4587,7 +4714,7 @@ select.oyl-input {
 }
 
 .oyl-activity-card:has(a[aria-current='true']) {
-  box-shadow: inset 0 0 0 3px var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 3px var(--oyl-color-accent-text);
 }
 
 /*
@@ -4718,15 +4845,68 @@ select.oyl-input {
  * is `none` on the element, so the drawing stretches horizontally and keeps its
  * vertical scale. That is right for a time series and wrong for a map, which is
  * one more reason #63's track is not drawn with this.
+ *
+ * Since #2068 the ride page stacks one trace per recorded channel, so each is
+ * a small chart: 6rem, room for its three value labels.
  */
 .oyl-trace {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   display: block;
-  height: 10rem;
+  height: 6rem;
   margin-top: var(--oyl-space-sm);
   width: 100%;
+}
+
+/*
+ * The place one stacked chart is drawn in — #2068. Its channel is read when
+ * the slot scrolls into view (`detail/visibility.ts`), so the slot holds about
+ * a drawn chart's height meanwhile, and the page below it moves little when
+ * the chart arrives.
+ */
+.oyl-trace-slot {
+  min-height: 12rem;
+}
+
+/*
+ * The shared cursor (#2068): a native range across the stack's width, with
+ * the readings at its time in words under it. The input is given the 44 px
+ * row a thumb lands on (SC 2.5.5), as a checkbox's label row is (#667).
+ */
+.oyl-trace-cursor {
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  /* The charts' own columns (`.oyl-trace-chart`), in the same font size so
+     `10ch` is the same width: the slider runs across the drawings' width. */
+  font-size: var(--oyl-font-size-sm);
+  grid-template-columns: 10ch minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-trace-cursor > label,
+.oyl-trace-cursor__reading {
+  grid-column: 1 / -1;
+}
+
+.oyl-trace-cursor input[type='range'] {
+  grid-column: 2;
+  margin: 0;
+  min-height: 2.75rem;
+  width: 100%;
+}
+
+.oyl-trace-cursor__reading {
+  color: var(--oyl-color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The cursor's line, across every chart at one time. */
+.oyl-trace__cursor {
+  stroke: var(--oyl-color-ink);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 /*
@@ -4747,7 +4927,10 @@ select.oyl-input {
     'values trace'
     '. times'
     '. time-title';
-  grid-template-columns: auto minmax(0, 1fr);
+  /* #2068: a fixed value column, so every chart in the stack starts and ends
+     at the same x and a minute is at one place down the page. `auto` sized it
+     to each chart's own labels ("151 bpm" is wider than "88 rpm"). */
+  grid-template-columns: 10ch minmax(0, 1fr);
   margin-top: var(--oyl-space-sm);
 }
 
@@ -4785,7 +4968,7 @@ select.oyl-input {
  * hairline vertically, which reads as a smeared chart rather than a line.
  */
 .oyl-trace__line {
-  stroke: var(--oyl-color-accent);
+  stroke: var(--oyl-color-accent-text);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
@@ -5032,9 +5215,9 @@ select.oyl-input {
  * - **Route cards**: one native radio group, each card a list item whose
  *   heading is its radio's label, stretched over the card by `::after`, so the
  *   whole card is the target and still holds ONE control. The chosen card is
- *   told by SHAPE twice — the radio's dot, and a doubled `accent` border — and
+ *   told by SHAPE twice — the radio's dot, and a doubled `accentText` border — and
  *   never by a fill alone (SC 1.4.1). Every colour is a declared pair: `ink`
- *   and `inkMuted` on `surface`, `accent` on `surface`, and the focus ring
+ *   and `inkMuted` on `surface`, `accentText` on `surface`, and the focus ring
  *   offset onto `canvas` round the whole card, with the radio's own ring on
  *   `surface`. The drawing is the kit's `ProfileShape`, 3 rem (48 px) tall —
  *   the owner's ruling of 2026-10-01 on #935: medium, not a strip.
@@ -5123,7 +5306,7 @@ select.oyl-input {
  * itself is painted under its children, so the band covered it.
  */
 .oyl-chooser__card:has(> .oyl-chooser__radio:checked) {
-  border-color: var(--oyl-color-accent);
+  border-color: var(--oyl-color-accent-text);
 }
 
 .oyl-chooser__card:has(> .oyl-chooser__radio:checked)::before {
@@ -5131,7 +5314,7 @@ select.oyl-input {
   position: absolute;
   inset: 0;
   border-radius: calc(var(--oyl-radius-card) - 2px);
-  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent-text);
   pointer-events: none;
 }
 
@@ -5233,7 +5416,7 @@ select.oyl-input {
   min-height: 2.75rem;
   box-sizing: border-box;
   border-radius: 50%;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   cursor: pointer;
   list-style: none;
 }
@@ -5254,7 +5437,7 @@ select.oyl-input {
 /*
  * #1011: the loadout's ⓘ, at the top of its tile, beside "Your ride" — the
  * same 44 × 44 target `.oyl-help` declares (SC 2.5.5), with the glyph in
- * `accent` on the tile (a declared pair). The panel opens under the title, in
+ * `accentText` on the tile (a declared pair). The panel opens under the title, in
  * the flow.
  */
 .oyl-chooser__loadout-title {
@@ -5272,7 +5455,7 @@ select.oyl-input {
   min-height: 2.75rem;
   box-sizing: border-box;
   border-radius: 50%;
-  color: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-text);
   cursor: pointer;
   list-style: none;
 }
@@ -5292,6 +5475,37 @@ select.oyl-input {
 
 .oyl-chooser__help-panel > p {
   margin-block: 0 var(--oyl-space-sm);
+}
+
+/*
+ * #1992, PR #2113's ruling: *Preview without a trainer*, its own tile after
+ * the loadout (`StageChooser.tsx` §`PreviewControl`). Every control in it is a
+ * 48 px target, the ride-time size (#669), declared here for the stepper's two
+ * buttons, the power box and the four speed-ups; the button wears
+ * `oyl-button--ride` and is on `RIDE_TIME_CONTROLS`. The button is the tile's
+ * width, as *Ride* is the lead's, so a long route name ends in an ellipsis
+ * rather than widening the page at 320 px.
+ */
+.oyl-chooser__preview .oyl-stepper__step,
+.oyl-chooser__preview .oyl-stepper > input {
+  min-block-size: 3rem;
+}
+
+.oyl-chooser__preview .oyl-stepper__step {
+  min-inline-size: 3rem;
+}
+
+.oyl-chooser__preview .oyl-segmented__options > label {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 3rem;
+  min-inline-size: 3rem;
+  box-sizing: border-box;
+}
+
+.oyl-chooser__preview > .oyl-button {
+  inline-size: 100%;
+  max-width: 100%;
 }
 
 /*
@@ -5326,8 +5540,9 @@ select.oyl-input {
     grid-template-areas:
       'lead lead'
       'heading loadout'
-      'cards loadout';
-    grid-template-rows: auto auto 1fr;
+      'cards loadout'
+      'cards preview';
+    grid-template-rows: auto auto auto 1fr;
     column-gap: var(--oyl-space-lg);
     align-items: start;
   }
@@ -5346,6 +5561,10 @@ select.oyl-input {
 
   .oyl-chooser > .oyl-chooser__loadout {
     grid-area: loadout;
+  }
+
+  .oyl-chooser > .oyl-chooser__preview {
+    grid-area: preview;
   }
 
   /*
@@ -5763,32 +5982,78 @@ select.oyl-input {
 }
 
 /*
- * The zone bar (#78).
+ * THE ZONE CHART (#2069) — `analysis/ZoneChart.tsx`.
  *
- * A length, and nothing else. It carries no colour meaning: which zone a row
- * is, what range it covers, how long was spent in it and what share that is are
- * all words in the same row, and the bar repeats the share. It is `aria-hidden`
- * in the markup for that reason — see `views/AnalysisView.tsx`.
- *
- * `inline-block` with a fixed width rather than a table-cell fill, so the
- * percentage text stays readable beside it at every column width.
+ * Time in zone as one bar per zone, above the zone table: the zone's number
+ * and name (with its swatch) in the first column, the bar in the second, the
+ * share in the third. One grid for the list, so every bar starts at the same
+ * x and their lengths compare. The list sits on `surface`, the well the zone
+ * colours declare their 3:1 against (`tokens.ts` §`BAND_ON_SURFACE_MEASURED`),
+ * as the zone key does. It replaced #78's single-accent bar in the Share cell.
  */
-.oyl-zone-bar {
+.oyl-zone-chart {
+  align-items: center;
   background: var(--oyl-color-surface);
-  border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
-  display: inline-block;
-  height: 0.6rem;
-  margin-left: var(--oyl-space-sm);
-  overflow: hidden;
-  vertical-align: middle;
-  width: 6rem;
+  color: var(--oyl-color-ink);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  gap: var(--oyl-space-xs) var(--oyl-space-sm);
+  grid-template-columns: max-content minmax(0, 1fr) 4ch;
+  list-style: none;
+  margin: var(--oyl-space-sm) 0;
+  padding: var(--oyl-space-sm);
 }
 
-.oyl-zone-bar__fill {
-  background: var(--oyl-color-accent);
+.oyl-zone-chart__row {
+  display: contents;
+}
+
+.oyl-zone-chart__label {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-zone-chart__bar {
+  border: 1px solid var(--oyl-color-border);
+  border-radius: 2px;
   display: block;
-  height: 100%;
+  height: 0.875rem;
+  width: 100%;
+}
+
+.oyl-zone-chart__share {
+  text-align: end;
+}
+
+.oyl-zone-chart__fill--band-recovery {
+  fill: var(--oyl-color-band-recovery);
+}
+
+.oyl-zone-chart__fill--band-endurance {
+  fill: var(--oyl-color-band-endurance);
+}
+
+.oyl-zone-chart__fill--band-tempo {
+  fill: var(--oyl-color-band-tempo);
+}
+
+.oyl-zone-chart__fill--band-threshold {
+  fill: var(--oyl-color-band-threshold);
+}
+
+.oyl-zone-chart__fill--band-vo2 {
+  fill: var(--oyl-color-band-vo2);
+}
+
+.oyl-zone-chart__fill--band-anaerobic {
+  fill: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-zone-chart__fill--band-sprint {
+  fill: var(--oyl-color-band-sprint);
 }
 
 /*
@@ -5817,7 +6082,7 @@ select.oyl-input {
 }
 
 .oyl-fitness-chart__base {
-  stroke: var(--oyl-color-accent);
+  stroke: var(--oyl-color-accent-text);
 }
 
 .oyl-fitness-chart__recent {
@@ -5846,6 +6111,22 @@ select.oyl-input {
   width: 100%;
 }
 
+/*
+ * On a saved workout's card (the owner's ruling of 2026-11-04 on #2125): the
+ * same drawing at the card's own height, `.oyl-shape-card`'s 3rem, which its
+ * wrapper sets. The well stays `surface`, the background every band colour is
+ * declared against, and the list names the zones once above the cards.
+ */
+.oyl-block-chart--card {
+  height: 100%;
+  margin-top: 0;
+}
+
+/* The Workouts list's one key, over its cards: the cards' own gap below it. */
+.oyl-zone-key + .oyl-pane-list {
+  margin-top: var(--oyl-space-sm);
+}
+
 .oyl-block-chart__band-recovery {
   fill: var(--oyl-color-band-recovery);
 }
@@ -5872,6 +6153,71 @@ select.oyl-input {
 
 .oyl-block-chart__band-sprint {
   fill: var(--oyl-color-band-sprint);
+}
+
+/*
+ * THE ZONE KEY (#2039, ADR 0063 D-4) — `design/ZoneKey.tsx`.
+ *
+ * Every drawing that paints a zone colour lists the zones it paints, each by
+ * its number and name beside a swatch of its colour, so no zone is told by
+ * colour alone (WCAG 2.2 SC 1.4.1). The key sits on `surface`, the well the
+ * zone colours declare their 3:1 against, and each swatch carries the
+ * `border` edge as well, which is what survives `forced-colors`.
+ */
+.oyl-zone-key {
+  background: var(--oyl-color-surface);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-ink);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs) var(--oyl-space-md);
+  list-style: none;
+  margin: var(--oyl-space-xs) 0 0;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+}
+
+.oyl-zone-key__zone {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-zone-key__swatch {
+  border: 1px solid var(--oyl-color-border);
+  border-radius: 2px;
+  display: inline-block;
+  flex: none;
+  height: 0.875rem;
+  width: 0.875rem;
+}
+
+.oyl-zone-key__swatch--band-recovery {
+  background: var(--oyl-color-band-recovery);
+}
+
+.oyl-zone-key__swatch--band-endurance {
+  background: var(--oyl-color-band-endurance);
+}
+
+.oyl-zone-key__swatch--band-tempo {
+  background: var(--oyl-color-band-tempo);
+}
+
+.oyl-zone-key__swatch--band-threshold {
+  background: var(--oyl-color-band-threshold);
+}
+
+.oyl-zone-key__swatch--band-vo2 {
+  background: var(--oyl-color-band-vo2);
+}
+
+.oyl-zone-key__swatch--band-anaerobic {
+  background: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-zone-key__swatch--band-sprint {
+  background: var(--oyl-color-band-sprint);
 }
 
 .oyl-block-chart__free-ride {
@@ -6090,7 +6436,7 @@ select.oyl-input {
 
 .oyl-workout-graph__power {
   fill: none;
-  stroke: var(--oyl-color-accent);
+  stroke: var(--oyl-color-accent-text);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.5;
@@ -6147,7 +6493,7 @@ select.oyl-input {
 }
 
 .oyl-target-band__power {
-  background-color: var(--oyl-color-accent);
+  background-color: var(--oyl-color-accent-text);
   bottom: 0;
   margin-left: -2px;
   position: absolute;
@@ -6209,59 +6555,63 @@ select.oyl-input {
  * The two overlay layouts are the media queries at the end of this block.
  */
 .oyl-hud {
-  /* ⚠️ #672 (the review of #744): the HUD KEEPS THE LIGHT PALETTE, whatever
-     the page is in — the owner's ruling that the in-ride HUD is left alone.
-     Its panels paint with the theme-independent `--oyl-color-hud-*` tokens,
-     but what sits inside them — the mute toggle and the volume (#400), the
-     side camera's Stop (#551), a notice's status tones — paints with PAGE
-     tokens, and on a dark page those followed it. So every page colour token
-     is restated here with its LIGHT value, and `color-scheme` pins what the
-     platform draws itself (a range's track, a check mark). `theme.a11y.test.ts`
-     holds this list to `tokens.ts` §`COLOUR_TOKENS`, key for key, and
+  /* ⚠️ #2042, ADR 0063 D-2 (the owner's ruling of 2026-11-03, "Dark screens"):
+     the HUD is DARK, whatever the page is in. Until #2042 it kept the LIGHT
+     palette here (#672, the review of #744); a reviewer who remembers that pin
+     is reading the old file. Its panels paint with the theme-independent
+     `--oyl-color-hud-*` tokens, but what sits inside them — the mute toggle
+     and the volume (#400), the side camera's Stop (#551), a notice's status
+     tones, a zone drawn on the plan — paints with PAGE tokens, which on a light
+     page would follow it. So every page colour token is restated here with its
+     DARK value, and `color-scheme` pins what the platform draws itself (a
+     range's track, a check mark) to the dark platform's. A rider who chose
+     light for the menus still rides on dark. `theme.a11y.test.ts` holds this
+     list to `tokens.ts` §`DARK_COLOUR_TOKENS`, key for key, and
      `theme.browser.spec.ts` reads every descendant in both palettes. */
-  color-scheme: light;
-  --oyl-color-canvas: #ffffff;
-  --oyl-color-surface: #f2f5f4;
-  --oyl-color-surface-raised: #e7eae9;
-  --oyl-color-surface-overlay: #dde0df;
-  --oyl-color-border: #767e7e;
-  --oyl-color-ink: #141b1a;
-  --oyl-color-ink-muted: #4a5b5c;
-  --oyl-color-accent: #0b5c55;
-  --oyl-color-accent-hover: #07443f;
-  --oyl-color-accent-ink: #ffffff;
-  --oyl-color-selected: #d4ebe7;
-  --oyl-color-link: #0b5c55;
-  --oyl-color-link-visited: #5b3a8c;
-  --oyl-color-link-hover: #07443f;
-  --oyl-color-link-active: #042e2a;
-  --oyl-color-focus: #141b1a;
-  --oyl-color-info-surface: #e3f0f4;
-  --oyl-color-info-ink: #0e4a57;
-  --oyl-color-info-border: #2c7288;
-  --oyl-color-success-surface: #e2f2e9;
-  --oyl-color-success-ink: #14513a;
-  --oyl-color-success-border: #2a7a58;
-  --oyl-color-warning-surface: #fbefda;
-  --oyl-color-warning-ink: #654100;
-  --oyl-color-warning-border: #8a6212;
-  --oyl-color-danger-surface: #fbe8e8;
-  --oyl-color-danger-ink: #7a1d1d;
-  --oyl-color-danger-border: #a83232;
-  --oyl-color-danger-action: #9e2626;
-  --oyl-color-danger-action-ink: #ffffff;
-  --oyl-color-illo-sky: #cfe4ef;
-  --oyl-color-illo-sun: #f4c65a;
-  --oyl-color-illo-hill-far: #a7d3a3;
-  --oyl-color-illo-hill-near: #7db678;
-  --oyl-color-illo-road: #6f726c;
-  --oyl-color-band-recovery: #5e8f88;
-  --oyl-color-band-endurance: #467f75;
-  --oyl-color-band-tempo: #336d61;
-  --oyl-color-band-threshold: #2e5878;
-  --oyl-color-band-vo2: #7a3622;
-  --oyl-color-band-anaerobic: #5e2537;
-  --oyl-color-band-sprint: #3d1d3a;
+  color-scheme: dark;
+  --oyl-color-canvas: #101215;
+  --oyl-color-surface: #242729;
+  --oyl-color-surface-raised: #333639;
+  --oyl-color-surface-overlay: #414447;
+  --oyl-color-border: #93969a;
+  --oyl-color-ink: #edeef1;
+  --oyl-color-ink-muted: #b3b7ba;
+  --oyl-color-accent: #aff13c;
+  --oyl-color-accent-text: #aff13c;
+  --oyl-color-accent-hover: #c7fd7b;
+  --oyl-color-accent-ink: #121809;
+  --oyl-color-selected: #304216;
+  --oyl-color-link: #aade5b;
+  --oyl-color-link-visited: #c5acf2;
+  --oyl-color-link-hover: #cdf39c;
+  --oyl-color-link-active: #e6fad0;
+  --oyl-color-focus: #aff13c;
+  --oyl-color-info-surface: #142b3d;
+  --oyl-color-info-ink: #93cbfc;
+  --oyl-color-info-border: #1e72ac;
+  --oyl-color-success-surface: #162e1b;
+  --oyl-color-success-ink: #99d3a4;
+  --oyl-color-success-border: #287b42;
+  --oyl-color-warning-surface: #35260d;
+  --oyl-color-warning-ink: #e5c182;
+  --oyl-color-warning-border: #906500;
+  --oyl-color-danger-surface: #3e211e;
+  --oyl-color-danger-ink: #ffb2ac;
+  --oyl-color-danger-border: #ac514c;
+  --oyl-color-danger-action: #fb8981;
+  --oyl-color-danger-action-ink: #321312;
+  --oyl-color-illo-sky: #102239;
+  --oyl-color-illo-sun: #897626;
+  --oyl-color-illo-hill-far: #263a22;
+  --oyl-color-illo-hill-near: #304f2a;
+  --oyl-color-illo-road: #53595e;
+  --oyl-color-band-recovery: #949aa1;
+  --oyl-color-band-endurance: #2d74ca;
+  --oyl-color-band-tempo: #5fc372;
+  --oyl-color-band-threshold: #f9df5d;
+  --oyl-color-band-vo2: #f59441;
+  --oyl-color-band-anaerobic: #cb574d;
+  --oyl-color-band-sprint: #cf91f3;
 
   color: var(--oyl-color-hud-ink);
   display: flex;
@@ -6701,6 +7051,24 @@ select.oyl-input {
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
   font-variant-numeric: tabular-nums;
+}
+
+/* #1992: the simulated rider's mark, in the actions panel after Pause and End ride. The same
+   sentence size as the lines above, in the HUD's full ink and bold rather than
+   muted, because it is the one line on the stage that says the ride is not a
+   real effort. Only a simulated ride renders it. */
+.oyl-hud__simulated {
+  margin: 0;
+  color: var(--oyl-color-hud-ink);
+  font-size: var(--oyl-font-size-md);
+  font-weight: 700;
+}
+
+/* Each sentence one inline box (PR #2113's review): where the two do not fit
+   one line, the break falls BETWEEN them rather than mid-sentence; a sentence
+   wider than the panel on its own still wraps inside its box. */
+.oyl-hud__simulated > span {
+  display: inline-block;
 }
 
 /* #1810: A DELIVERY ROUND'S THROWS, a row of three ride-time controls under
@@ -7173,11 +7541,14 @@ select.oyl-input {
 /* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
    the `.oyl-hud__control`s'. The mute toggle, the volume and the side
    camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
-   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
-   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
-   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
-   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
-   its own light surface, which is where its ring lands. Read back off the
+   `--oyl-color-focus` to its light value (#141b1a then; #131415 now) — drawn
+   2 px outside the control onto `hudSurface`: 1.01:1, a ring nobody
+   could see (WCAG 2.2 SC 2.4.7, 2.4.13). Since #2042 `.oyl-hud` restates the
+   DARK palette, so the pinned focus is the lime, #aff13c, and a ring that
+   fell back to it would show; the rule still holds the ring to the HUD's
+   own pair, `hudInk` on `hudSurface` (17.44:1, declared in `tokens.ts`). A
+   notice keeps the page's ring: its surface is dark too (the warning's is
+   #35260d), which is where its ring lands, in the pinned lime. Read back off the
    engine, with this rule deleted as the control, by
    `browser/hud-focus.browser.spec.ts`. */
 .oyl-hud :focus-visible {
@@ -7373,6 +7744,108 @@ select.oyl-input {
     align-self: start;
     justify-self: start;
     max-width: min(100%, 22rem);
+  }
+}
+
+/*
+ * A RACE'S VOICE BUTTON, ON ITS LINE — #875, the owner's ruling of
+ * 2026-11-04: *"Make it a button first."*
+ *
+ * *Join voice on Discord (opens Discord)*, while a race waits on its line
+ * (`game/room-voice.ts`), is a secondary button at the ride-time 48 px
+ * (`.oyl-button--ride`), still a link, beside *Start the race* on a row of
+ * their own, so it costs the race's notice no line of its own. It stands on a
+ * PANEL of the HUD's own opaque surface and edge, never bare on the stage, so
+ * it reads over a bright sky: `hudSurface` is 10.4:1 against the world's
+ * brightest sky, its horizon haze (`game/world.ts` §`HORIZON_HAZE`). Its two
+ * halves are flex items, so where it is narrow it breaks between them, and
+ * its padding and leading are the HUD's tighter ones, so two lines make a
+ * 50 px button beside *Start the race*'s 48 rather than 68: the row is what
+ * an upright phone's rider clearance pays for.
+ *
+ * ⚠️ **Where it is shown, and what that costs, recorded as #419 asks.** Shown
+ * at 47 rem tall or more at any width from 22.5 rem (the tablets and the
+ * column layout of an upright phone), and on a WIDE screen of 64 rem or more
+ * at any height over 30 rem: the laptops, 1280×720, 1366×657 (a 1366×768
+ * laptop under its browser's chrome) and 1024×600, where it fits beside
+ * *Start the race* on one line. **Hidden everywhere else**, which is:
+ * - a phone on its side, the short corners layout up to 30 rem tall (736×360
+ *   to 844×390, and 736×480 at its tallest): the race's notice cell is the
+ *   16 rem one and already ends a few pixels above a 736×360 stage's bottom,
+ *   with no room beside *Start the race* for the button and no line below it;
+ * - a screen narrower than 64 rem and under 47 rem tall, such as 802×600:
+ *   the button breaks each half over two lines there, 89 px tall, and runs
+ *   over the route panel.
+ * Both were measured in the browser gate. Where it is hidden it is
+ * `display: none`, neither drawn nor in the keyboard's order, and a racer
+ * there is offered no voice link until the race is over. A group ride's link
+ * is a notice of its own and is shown at every size.
+ * `ride-room.browser.spec.ts` §"#875" holds the button's size, its panel's
+ * contrast and its place at every overlay viewport and at 1280×720, 1024×600
+ * and 802×600, both ways.
+ *
+ * Its keyboard focus ring sits on the panel, at no offset: the HUD's ring
+ * (`.oyl-hud :focus-visible`, #748) is 3 px wide and 2 px outside a control,
+ * which would put its outer 2 px past this panel's 3 px (padding and edge)
+ * and onto the sky. `hud-focus.browser.spec.ts` holds it inside the panel.
+ */
+.oyl-hud__race-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+/* *Start the race* keeps its one line and its width: the voice button is
+   what gives up width, by breaking its words. */
+.oyl-hud__race-actions > .oyl-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.oyl-hud__voice {
+  display: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.125rem;
+  border: 1px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__voice > .oyl-button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0.25em;
+  box-sizing: border-box;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.oyl-hud__voice > .oyl-button:focus-visible {
+  outline-offset: 0;
+}
+
+@media (min-width: 22.5rem) and (min-height: 47rem), (min-width: 64rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__voice {
+    display: block;
+  }
+}
+
+/* On an upright phone the button's words are a notice's size, as the race's
+   notice above it is set: at the page size, on the CI runner's wider fonts,
+   *Start the race* left 183 px at 360 px wide and "Join voice on Discord"
+   broke over two lines of its own, a 69 px button (the browser gate,
+   §"#875"). The target stays 48 px; only its words and its side padding
+   are smaller. */
+@media (width < 46rem) {
+  .oyl-hud__voice > .oyl-button {
+    padding-inline: var(--oyl-space-xs);
+    font-size: var(--oyl-font-size-sm);
   }
 }
 
@@ -8705,13 +9178,197 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE CLOCK ROW — #2072.
+ *
+ * The elapsed time and the time of day, at the bottom of the PRIMARY panel
+ * on every overlay layout: the clock (`fields.ts` §`clockReading`) at its
+ * start edge and *Elapsed* at its end, each a label and its value on one
+ * line, as the moving time is drawn there on a short corners phone (#1111,
+ * above). Both stay in the secondary list in the document, after *Moving*,
+ * where a screen reader and #94's order meet them; only where they are DRAWN
+ * moves, as the moving time's does.
+ *
+ * ⚠️ **Why not two more secondary readings — measured, and #419 asks for it
+ * to be written down.** The secondary tier has no row to give on the
+ * layouts that bind: upright, a third row is over the leaning rider's helmet
+ * at 360×752 (§"THE MOVING TIME ON AN UPRIGHT PHONE"); on its side, at
+ * 736×360 (#1120); and on its side from 51 rem a ninth reading on the widest
+ * ride is a third row there too. The primary panel's three tracks leave a
+ * line under them that costs one row's height, once, and holds both:
+ * `CLOCK 14:32` and `ELAPSED 9:59:59` are about 300 px on the CI runner's
+ * fonts, inside the 326 px a 360 px phone's panel has.
+ *
+ * ⚠️ **What it costs, written down:** upright, the top stack is one line
+ * taller, and that line is what is left between it and the rider's helmet
+ * at 360×752 (`ride.browser.spec.ts` publishes the margin). And on a short
+ * corners phone narrower than 51 rem the row already holds the moving time,
+ * and three figures do not fit 24 rem — so there the CLOCK is not drawn: it
+ * is hidden by clip, as a race's standings are on a phone (#1347), and a
+ * screen reader still reads it. Every other overlay layout draws it.
+ *
+ * With anchor positioning the two hang from the primary panel's own corners;
+ * without it (#1120's engines) they are placed in the HUD's `primary` grid
+ * area, and on the corners layout the panel is stretched to its row so that
+ * area's bottom is the panel's. Every rule that lifts them is inside one of
+ * the two `@supports` blocks, so an engine — or #1120's control — with
+ * neither lays them out as the secondary readings they are in the document. Stacked, they are secondary readings like
+ * any other: the stacked layout scrolls, and its tracks' floor is already the
+ * moving time's width (#1158).
+ */
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem),
+    (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      /* One line of the secondary value size (1.5 rem at line-height 1.05),
+         and half a gap above it — the moving time's reservation, above. */
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed,
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      position: absolute;
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary {
+      anchor-name: --oyl-hud-primary;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed {
+      position-anchor: --oyl-hud-primary;
+      right: calc(anchor(right) + var(--oyl-space-sm));
+      bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      position-anchor: --oyl-hud-primary;
+      left: calc(anchor(left) + var(--oyl-space-sm));
+      bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+    }
+  }
+}
+
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      align-self: stretch;
+    }
+  }
+
+  @media (min-width: 46rem) and (min-height: 22.5rem),
+    (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      /* One line of the secondary value size (1.5 rem at line-height 1.05),
+         and half a gap above it — the moving time's reservation, above. */
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed,
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      position: absolute;
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+
+    /* The panel's padding and border in from its grid area's outer edge, as
+       the moving time is placed without anchors (#1120, above). */
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--elapsed {
+      grid-area: primary;
+      right: calc(var(--oyl-space-sm) + 1px);
+      bottom: calc(var(--oyl-space-sm) + 1px);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+      grid-area: primary;
+      left: calc(var(--oyl-space-sm) + 1px);
+      bottom: calc(var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+/* A short corners phone under 51 rem: the row holds the moving time at its
+   start edge already, so the clock is hidden there by clip (above), and the
+   moving time's field is as wide as what it holds rather than the row, so it
+   ends before *Elapsed* begins. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+    right: auto;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--clock {
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
+ * #2072 — AN UPRIGHT PHONE UNDER 24 REM: the clock row costs no height.
+ *
+ * Under 24 rem a primary unit goes UNDER its number (above), a line of its
+ * own, and upright there is no other height to spend: a Delivery ride's map
+ * credit ends about a pixel above the leaning rider at 360×752, and a standing
+ * notice beside *Keep the screen on* 19 px over #647's 50 px floor. Drawn at
+ * the size it has on every other layout, the clock row put the credit over
+ * the rider and the notice 11 px under its floor
+ * (`ride-delivery.browser.spec.ts`, `ride-notices.browser.spec.ts`).
+ *
+ * So here the row TRADES places with the units' line, exactly: the units go
+ * back BESIDE their numbers at the secondary units' size (`1000 W` and
+ * `168 bpm` fit a 103 px track in Barlow's tabular figures —
+ * `hud.browser.spec.ts` measures every value inside its track at 360 px),
+ * and the row is set at that line's own height, 1.05 × 1 rem, with the
+ * panel's ordinary padding under it. Every line box here is a multiple of its
+ * font size, so the trade is the same on any face. ⚠️ **What it costs: on
+ * these phones the elapsed time and the clock are 1 rem figures**, the size
+ * of a unit, where every other layout draws them at the secondary readings'
+ * 1.5 rem.
+ */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) and (max-width: 24rem) {
+  .oyl-game--riding .oyl-hud__fields--primary {
+    padding-block-end: calc(var(--oyl-space-sm) + 1.05rem);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+    display: inline;
+    font-size: var(--oyl-font-size-sm);
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--elapsed, .oyl-hud__field--clock)
+    .oyl-hud__value {
+    font-size: var(--oyl-font-size-md);
+    line-height: 1.05;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--elapsed, .oyl-hud__field--clock)
+    .oyl-hud__label {
+    line-height: 1.05;
+  }
+}
+
 /* #1111. A time is one token: `9:59:59` broken at a colon reads as two
    numbers, and the second line makes its row taller on a HUD with no height to
    spare. So it is never broken, and what holds it inside its field instead is
    a measurement: `ride.browser.spec.ts` §"#1111" and `hud.browser.spec.ts`'s
    no-overflow check, on the CI runner's fonts. Past ten hours it is set at the
    word size (`fields.ts` §`movingTimeReading`), for #259's reason. */
-.oyl-hud__field--moving .oyl-hud__value {
+/* #2072: and the elapsed time and the clock, for the same reason. */
+.oyl-hud__field--moving .oyl-hud__value,
+.oyl-hud__field--elapsed .oyl-hud__value,
+.oyl-hud__field--clock .oyl-hud__value {
   white-space: nowrap;
 }
 
@@ -9139,7 +9796,8 @@ select.oyl-input {
   .oyl-ride-card,
   .oyl-next-up,
   .oyl-pairing__row,
-  .oyl-chooser__loadout {
+  .oyl-chooser__loadout,
+  .oyl-chooser__preview {
     border: 1px solid;
   }
 
@@ -9440,7 +10098,7 @@ select.oyl-input {
 }
 
 .oyl-framing__ghost * {
-  stroke: var(--oyl-color-accent);
+  stroke: var(--oyl-color-accent-text);
   stroke-dasharray: 8 6;
 }
 

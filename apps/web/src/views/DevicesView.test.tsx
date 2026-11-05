@@ -391,6 +391,49 @@ describe('each device’s state is in words, not colour or an icon alone (WCAG 2
   });
 });
 
+describe('a sensor that advertised an empty name — #2133', () => {
+  it.each([
+    ['an empty name', ''],
+    ['a name of only whitespace', '  '],
+  ])('is listed as an unnamed sensor when it advertised %s', async (_, name) => {
+    // The REAL controller over the simulator, because the fallback is the
+    // controller's: the screen shows the name its snapshot carries.
+    const { transport } = createSimulator({ devices: [hrsStrap({ id: 'strap', name })] });
+    const controller = createRideController({
+      transport,
+      store: {
+        putRecordingSession: (record) => Promise.resolve(record.id),
+        appendRecordingChunk: () => Promise.resolve(0),
+        readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
+        recoverRecording: () => Promise.resolve(undefined),
+        deleteRecordingSession: () => Promise.resolve(false),
+      },
+      athleteId: athleteId('devices'),
+      newSessionId: () => recordingSessionId('devices-ride'),
+      now: () => unixSeconds(0),
+    });
+    try {
+      mounted = await mount(<DevicesView capabilities={CAPABLE} controller={controller} />);
+      await settle();
+      const buttons = (): string[] =>
+        [...mounted!.container.querySelectorAll('button')].map(
+          (each) => each.textContent?.trim() ?? '',
+        );
+      const pair = [...mounted.container.querySelectorAll('button')].find(
+        (each) => each.textContent?.trim() === 'Pair a heart rate strap',
+      );
+      if (pair === undefined) throw new Error('no heart rate strap Pair button');
+      await activateWithKeyboard(pair);
+      await settle();
+      expect(mounted.container.textContent).toContain('Unnamed sensor: Connected');
+      expect(buttons()).toContain('Forget Unnamed sensor');
+      expect(buttons()).not.toContain('Forget');
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
 describe('Forget when an unsubscribe throws — #706', () => {
   it('removes the device, says so in a sentence, and lets no rejection reach the page', async () => {
     // The REAL controller over the simulator, because the defect was in the

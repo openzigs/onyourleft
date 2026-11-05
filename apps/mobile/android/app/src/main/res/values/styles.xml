@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
@@ -13,6 +13,14 @@
     <!--
       Since #672 the window behind the WebView is the page's canvas, per palette
       (colors.xml and values-night/colors.xml), not AppCompat's own background.
+      ⚠️ #2127: AppCompat sets the window's background in super.onCreate, from
+      the launch theme, before BridgeActivity switches to this one, so this
+      item applies only to a window this theme creates. MainActivity resets
+      the window's background to the canvas after super.onCreate, so the
+      launch theme's logo is not behind the WebView for the whole session.
+      No splash item belongs here: below Android 12 the compat library builds
+      its own splash view only for an exit listener, which the plugin skips
+      at launchFadeOutDuration 0, so the launch window is the splash there.
     -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
@@ -25,9 +33,30 @@
       The launch window (#672): on Android 12 and later the system splash screen,
       whose background is the page's canvas rather than the device's default; on
       Android 7 to 11 the launch background colors.xml names per palette.
+      Since #2050 the splash-screen plugin holds it until the page has painted,
+      and postSplashScreenTheme is the theme the window takes when it lets go.
+
+      #2127, so every launch shows the logo on the canvas and nothing else:
+      - windowSplashScreenAnimatedIcon names the launcher icon. Left unset,
+        core-splashscreen's API 31 theme points the platform at an attribute
+        with no value, and below 31 its default is Android's generic icon.
+      - windowSplashScreenBehavior icon_preferred (API 33+) asks for the icon
+        where Android would otherwise choose a plain-colour splash.
+      - android:windowBackground, not android:background (a view attribute,
+        which painted no window). drawable/ and drawable-v31/oyl_launch_window.xml
+        are the canvas with the logo where the splash draws it. Below
+        Android 12 this IS the splash: the system's preview window, held by
+        the plugin until the page has painted. AppCompat also paints the
+        app's window from this theme in super.onCreate, before BridgeActivity
+        switches theme (on API 31+ it was Theme.DeviceDefault.DayNight's,
+        near-black in the device's dark mode), until MainActivity resets it
+        to the canvas.
     -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/oyl_launch_background</item>
+        <item name="android:windowBackground">@drawable/oyl_launch_window</item>
         <item name="windowSplashScreenBackground">@color/oyl_canvas</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenBehavior" tools:targetApi="33">icon_preferred</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

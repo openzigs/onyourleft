@@ -326,9 +326,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`playwright.config.ts` §`FOLLOW_THE_DEVICE`). A colour
                         drawn over the world or a camera picture (the stage, the
                         pairing code) uses a HUD token so it does not flip, and
-                        the HUD keeps the LIGHT palette whatever the page is in:
-                        `theme.css` §`.oyl-hud` restates every page colour token
-                        at its light value, for the controls and notices inside it.
+                        the HUD keeps the DARK palette whatever the page is in
+                        (#2042, ADR 0063 D-2; it kept the LIGHT one from #672
+                        until then): `theme.css` §`.oyl-hud` restates every page
+                        colour token at its dark value, for the controls and
+                        notices inside it, so a ride is dark on a light page.
                         Since #936 the menus' house style is tokens: five `illo*`
                         colours (decoration: what is drawn OVER one declares a
                         pair, and the focus ring is paired with each), a
@@ -467,7 +469,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`. ⚠️ Since #1010 Home
                         leads with ONE "Next up" card (the last route
-                        ridden, else a free ride, else the first ride) —
+                        ridden, else a free ride, else the first ride; since
+                        #2043 a compact row with no picture, which names no
+                        destination until both reads settle) —
                         at most ONE `getRoute` beyond #428's read
                         (`home.ts` §`loadNextUp`), and it opens the game on
                         that route through `#/game?route=…`, the one query
