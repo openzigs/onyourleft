@@ -36,7 +36,7 @@
  * asks the rider, the bot and the ghost to be distinguishable at a glance, and a
  * renderer handed a colour could be passed the same one twice. The same argument
  * binds here: the mark is a filled disc with a ring of the panel's own surface
- * around it, so it reads as a different *shape* from the one-pixel line
+ * around it, so it reads as a different *shape* from the road line
  * underneath it for a rider with a colour-vision deficiency, and in sunlight.
  * Since #2070 the road ahead is `hudInk`, the disc's own colour, so the ring
  * (`hudSurface`, 17:1 against it) is the whole of what separates the two.
@@ -141,8 +141,10 @@ export function PlanTrace(props: PlanTraceProps): JSX.Element {
           {split.ridden.map((run) => (
             <RoadLine key={`ridden-${String(run.from)}`} run={run} part="ridden" />
           ))}
-          {split.ahead.map((run) => (
-            <RoadLine key={`ahead-${String(run.from)}`} run={run} part="ahead" />
+          {split.ahead.map((run, index) => (
+            // By position: the first run starts at the cut, which moves once a
+            // stride, and a key that moved with it would remount the <path>.
+            <RoadLine key={`ahead-${String(index)}`} run={run} part="ahead" />
           ))}
           <circle
             className="oyl-hud__plan-here"

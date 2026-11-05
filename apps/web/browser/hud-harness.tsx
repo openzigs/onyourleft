@@ -224,7 +224,7 @@ export interface PlanMeasurement {
   readonly mark: { readonly width: number; readonly height: number } | undefined;
   /** #2070 — `plan.ts` §RIDER_MARK_MINIMUM_PIXELS, published so the spec need not mirror it. */
   readonly minimumMarkPixels: number;
-  /** #2070 — each line of the road as the engine resolved it, by which part it is. */
+  /** #2070 — each line of the road as `getComputedStyle` reports it (the specified stroke width and dash array, not a raster measurement under non-scaling-stroke), by which part it is. A cascade check: it catches a CSS override. */
   readonly lines: readonly {
     readonly part: string;
     readonly strokeWidth: string;

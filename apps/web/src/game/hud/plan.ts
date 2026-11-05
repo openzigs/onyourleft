@@ -374,7 +374,7 @@ export function riderMark(plan: RoutePlan, profile: RouteProfile, distance: numb
  * and {@link splitPlan} re-serialises the road; keyed on this, `PlanTrace.tsx`
  * redoes that once a stride (10 m on the profile's grid, more on a long route)
  * rather than every frame. The few metres between this sample and the rider
- * are under the mark, which is {@link RIDER_MARK_RADIUS} across.
+ * are under the mark, which is twice {@link RIDER_MARK_RADIUS} across.
  *
  * Through `distanceOnRoute`, so on lap two of a loop the ridden road is lap
  * two's — the same wrap {@link riderMark} and {@link planProgress} make.

@@ -164,6 +164,19 @@ describe('the road ridden and the road ahead — #2070', () => {
     return { x: numbers.at(-2) ?? Number.NaN, y: numbers.at(-1) ?? Number.NaN };
   }
 
+  it('grows the ridden road on the one mounted panel, as HudPanel re-renders it', async () => {
+    const profile = straightRoute();
+    mounted = await mount(<PlanTrace profile={profile} distance={profile.totalDistance / 4} />);
+    const before =
+      queryAll(mounted.container, '[data-oyl-plan-part="ridden"]')[0]?.getAttribute('d') ?? '';
+
+    await mounted.rerender(<PlanTrace profile={profile} distance={profile.totalDistance / 2} />);
+
+    const after =
+      queryAll(mounted.container, '[data-oyl-plan-part="ridden"]')[0]?.getAttribute('d') ?? '';
+    expect(after.split('L').length).toBeGreaterThan(before.split('L').length);
+  });
+
   it('draws no ridden road at the start line', async () => {
     mounted = await mount(<PlanTrace profile={straightRoute()} distance={0} />);
 
@@ -182,7 +195,7 @@ describe('the road ridden and the road ahead — #2070', () => {
       expect(ridden).toHaveLength(1);
       const end = endOf(ridden[0]);
       const mark = markAt();
-      // Under the mark, which is 8 units across: the cut is a drawn sample.
+      // Under the mark, which is 16 units across (radius 8): the cut is a drawn sample.
       expect(Math.hypot(end.x - mark.x, end.y - mark.y)).toBeLessThan(1);
       lengths.push((ridden[0]?.getAttribute('d') ?? '').split('L').length);
     }
