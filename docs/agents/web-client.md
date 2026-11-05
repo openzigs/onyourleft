@@ -469,7 +469,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`. ⚠️ Since #1010 Home
                         leads with ONE "Next up" card (the last route
-                        ridden, else a free ride, else the first ride) —
+                        ridden, else a free ride, else the first ride; since
+                        #2043 a compact row with no picture, which names no
+                        destination until both reads settle) —
                         at most ONE `getRoute` beyond #428's read
                         (`home.ts` §`loadNextUp`), and it opens the game on
                         that route through `#/game?route=…`, the one query
