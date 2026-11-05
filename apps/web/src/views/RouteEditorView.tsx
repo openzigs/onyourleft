@@ -228,6 +228,8 @@ function Editor({
   const [tiles] = useState(() => readMapTilesChoice(tilePreferences ?? deviceStorage()));
   /** The stored route an "over the original" save is guarded against: its `updatedAt` is the token. */
   const [original, setOriginal] = useState(route);
+  /** The route as first opened: what a save counts the redrawn stretches against. */
+  const [opened] = useState(route);
   const [history, setHistory] = useState<DraftHistory<EditedLine>>(() => newHistory(lineOf(route)));
   const line = history.present;
   const [change, setChange] = useState<Change>('stretch');
@@ -279,6 +281,13 @@ function Editor({
   const lengthText = (value: number): string =>
     measurementText(formatDistance(metres(value), units));
   const saveForm = useRef<HTMLFormElement>(null);
+  /** The line on screen now, for a stretch that finishes after the line moved on. */
+  const latestLine = useRef(line);
+  useEffect(() => {
+    latestLine.current = line;
+  }, [line]);
+  /** Whether a save is being written: a second press meanwhile writes nothing. */
+  const saving = useRef(false);
 
   /** Record an edit, and say what it did. */
   const recordEdit = (next: EditedLine, text: string): void => {
@@ -303,8 +312,18 @@ function Editor({
     setBusy(true);
     try {
       const stretch = await drawStretch(from, to, heights, provider, RIDING_DEFAULTS);
+      // Reverse, Out and back, Undo and Redo stay pressable while a stretch is
+      // being drawn, so the line may have moved on: say so, rather than
+      // announcing a redraw that was thrown away.
+      if (latestLine.current !== startedOn) {
+        setSaid({
+          tone: 'warning',
+          text: 'The route changed while that stretch was being drawn, so it was not applied.',
+        });
+        return;
+      }
       const { next, text } = then(stretch);
-      setHistory((current) => (current.present === startedOn ? record(current, next) : current));
+      setHistory((current) => record(current, next));
       setSaid({ tone: 'success', text });
       setSaved(undefined);
     } catch (error: unknown) {
@@ -460,6 +479,16 @@ function Editor({
   };
 
   const onSave = async (over: boolean, form: HTMLFormElement | null): Promise<void> => {
+    if (saving.current) return;
+    saving.current = true;
+    try {
+      await save(over, form);
+    } finally {
+      saving.current = false;
+    }
+  };
+
+  const save = async (over: boolean, form: HTMLFormElement | null): Promise<void> => {
     const instant = now === undefined ? Date.now() / 1000 : now();
     const stamp = unixSeconds(Math.floor(instant));
     let outcome;
@@ -478,10 +507,10 @@ function Editor({
           return;
         }
         const zones = await routes.store.listPrivacyZones(routes.athleteId);
-        outcome = replaceRouteLine(stored, line, original.updatedAt, stamp, zones);
+        outcome = replaceRouteLine(stored, line, original.updatedAt, stamp, zones, opened);
       } else {
         const name = form === null ? null : new FormData(form).get('name');
-        outcome = routeFromEdit(original, line, {
+        outcome = routeFromEdit(opened, line, {
           id: `route-${String(Math.round(instant * 1000))}` as RouteId,
           name: typeof name === 'string' ? name : '',
           now: stamp,

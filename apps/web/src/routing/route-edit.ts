@@ -27,8 +27,18 @@
  * new stretch is sampled at the route's spacing, stretched to land on its own
  * end, as `routeProfile` lands a whole route on its end. The spliced profile's
  * `resolution` is its total length over its sample count, so `totalDistance`
- * is the real length. On a 100 m stretch that differs from the route's old
- * spacing by under 0.05 m per sample.
+ * is the real length. That bound holds for the route-wide mean (under 0.05 m
+ * per sample on a 100 m stretch in a long route). Inside a short stretch the
+ * spacing can be 7.5 m against 10 m, so a consumer that indexes by
+ * `index * resolution` (`gridAt`, the racing line, landform) can drift by up to
+ * about half a sample per edit.
+ *
+ * ⚠️ **Kept gradients near a seam describe the old line.** A kept sample keeps
+ * its gradient byte for byte, but a gradient is fitted over a window of heights,
+ * so within half a gradient window of a seam it was fitted over heights the
+ * splice replaced. It can differ from the slope the new heights beside it
+ * imply (7.66 % kept beside 0.97 % new in a probe). That is the price of keeping
+ * samples identical, and a trainer reads these values.
  *
  * ## Heights with no instance
  *
@@ -298,6 +308,12 @@ export function replaceStretch(
   const positions = splice(profile.positions, drawn.positions);
   const elevations = splice(profile.elevations, drawn.elevations);
   const grades = splice(profile.grades, drawn.grades);
+  const isLoop = loop ?? (from !== 'new-start' && to !== 'new-end' && profile.loop);
+  // #440, as `routeProfile` applies it to every loop: a loop's last sample is its
+  // first, so it takes the first's slope, or the trainer's resistance steps at the
+  // wrap once a lap. Return to start joins an end that was fitted over its own
+  // neighbourhood to a start that was fitted over another.
+  if (isLoop) grades[grades.length - 1] = grades[0]!;
   const ramped = splice(
     line.ramped,
     drawn.positions.map(() => !stretch.measured),
@@ -312,7 +328,7 @@ export function replaceStretch(
   }
   return {
     profile: climbed({
-      loop: loop ?? (from !== 'new-start' && to !== 'new-end' && profile.loop),
+      loop: isLoop,
       resolution: metres(total / (positions.length - 1)),
       totalDistance: metres(total),
       elevations,
@@ -436,6 +452,10 @@ function elevationAfter(
  * Save an edited line as a new route beside the original, which is left as it
  * was. Private, for `routes/save.ts` §`routeFromGpx`'s reason: there is no
  * option here to make it anything else.
+ *
+ * @param original the route **as the editor first opened it**: the line's
+ * ramped samples are counted against its elevation note, and a later save-over
+ * has already counted them in the stored one.
  */
 export function routeFromEdit(
   original: RouteRecord,
@@ -473,6 +493,10 @@ export function routeFromEdit(
  * and writing it over a shared route would publish that. So a route that is
  * not private is refused when its new line could not be shared, with the share
  * screen's own words.
+ *
+ * @param opened the route as the editor **first** opened it, when `stored` has
+ * since been saved over by this editor: the line's ramped samples are counted
+ * against its elevation note, not against one that already counts them.
  */
 export function replaceRouteLine(
   stored: RouteRecord,
@@ -480,6 +504,7 @@ export function replaceRouteLine(
   readAt: UnixSeconds,
   now: UnixSeconds,
   zones: readonly PrivacyZoneRecord[] = [],
+  opened: RouteRecord = stored,
 ): SaveOutcome {
   if (stored.updatedAt !== readAt) {
     return {
@@ -492,7 +517,7 @@ export function replaceRouteLine(
       },
     };
   }
-  const elevation = elevationAfter(stored, line);
+  const elevation = elevationAfter(opened, line);
   const record: RouteRecord = {
     ...stored,
     profile: line.profile,

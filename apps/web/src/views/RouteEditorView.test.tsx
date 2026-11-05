@@ -18,13 +18,15 @@ import {
   distanceBetween,
   geographicPosition,
   LOOP_CLOSURE_METRES,
+  metres,
   routeProfile,
+  type RoutingProvider,
   unixSeconds,
   type GeographicPosition,
 } from '@onyourleft/domain';
-import { athleteId, routeId, type RouteRecord } from '@onyourleft/store';
+import { athleteId, privacyZoneId, routeId, type RouteRecord } from '@onyourleft/store';
 import { act } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import type { MapPointerHandlers } from '../map/port';
@@ -89,8 +91,10 @@ interface Editor {
   readonly engine: StubMapPort;
 }
 
-async function open(options: { provider?: boolean } = {}): Promise<Editor> {
-  const routes = routeStub(ATHLETE, [saturday()]);
+async function open(
+  options: { provider?: boolean | RoutingProvider; route?: Partial<RouteRecord> } = {},
+): Promise<Editor> {
+  const routes = routeStub(ATHLETE, [{ ...saturday(), ...options.route }]);
   const engine = stubMapPort();
   mounted = await mount(
     <main>
@@ -98,7 +102,13 @@ async function open(options: { provider?: boolean } = {}): Promise<Editor> {
       <RouteEditorView
         routes={routes}
         selected={ID}
-        provider={options.provider === true ? scriptedProvider() : undefined}
+        provider={
+          options.provider === true
+            ? scriptedProvider()
+            : options.provider === false
+              ? undefined
+              : options.provider
+        }
         map={() => Promise.resolve(engine)}
         basemap={BASEMAP}
         now={() => NOW}
@@ -375,5 +385,102 @@ describe('saving', () => {
     await press(editor.view, 'Reverse');
     const read = await savedOver(editor);
     expect(read.profile.positions[0]).toEqual(saturday().profile.positions[0]);
+  });
+
+  it('over a shared route is refused when the redrawn start lies in a privacy zone', async () => {
+    const editor = await open({ route: { visibility: 'public' } });
+    const start = saturday().profile.positions[0]!;
+    const home = geographicPosition(
+      start.latitude,
+      degreesLongitude(start.longitude - 2 * NUDGE_DEGREES),
+    );
+    editor.routes.setZones([
+      {
+        id: privacyZoneId('zone-home'),
+        athleteId: ATHLETE,
+        centre: home,
+        radius: metres(30),
+        label: 'Home',
+        createdAt: SAVED_AT,
+      },
+    ]);
+    await chooseChange(editor.view, 'Its start');
+    await typeInto(fieldLabelled(editor.view, 'It joins the route at'), '0.30');
+    await press(editor.view, 'Move the new start west');
+    await press(editor.view, 'Move the new start west');
+    await press(editor.view, 'Change the start');
+    await press(editor.view, 'Save over “Saturday”');
+    expect(editor.view.container.textContent).toContain('starts inside one of your privacy zones');
+    const read = await editor.routes.store.getRoute(ATHLETE, ID);
+    expect(read?.profile).toEqual(saturday().profile);
+  });
+
+  it('counts a redrawn stretch once however often it is saved over', async () => {
+    const editor = await open({
+      route: {
+        elevation: {
+          dataset: 'Copernicus DEM GLO-30',
+          resolution: metres(30),
+          interval: metres(30),
+          missing: metres(100),
+        },
+      },
+    });
+    await typeInto(fieldLabelled(editor.view, 'Stretch starts at'), '0.40');
+    await typeInto(fieldLabelled(editor.view, 'Stretch ends at'), '1.60');
+    await press(editor.view, 'Redraw this stretch');
+    const first = await savedOver(editor);
+    const second = await savedOver(editor);
+    expect(first.elevation?.missing).toBeGreaterThan(100);
+    expect(second.elevation?.missing).toBe(first.elevation?.missing);
+  });
+
+  it('writes one copy however often “Save as a new route” is pressed at once', async () => {
+    const editor = await open();
+    await press(editor.view, 'Reverse');
+    const put = vi.spyOn(editor.routes.store, 'putRoute');
+    const form = editor.view.container.querySelector<HTMLFormElement>(
+      'form[aria-label="Save the edit"]',
+    )!;
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a stretch finishing after the line moved on', () => {
+  it('is not applied, and the screen says so', async () => {
+    const scripted = scriptedProvider();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: RoutingProvider = {
+      ...scripted,
+      route: async (request) => {
+        await gate;
+        return scripted.route(request);
+      },
+    };
+    const editor = await open({ provider: slow });
+    await typeInto(fieldLabelled(editor.view, 'Stretch starts at'), '0.40');
+    await typeInto(fieldLabelled(editor.view, 'Stretch ends at'), '1.60');
+    await press(editor.view, 'Redraw this stretch');
+    await press(editor.view, 'Reverse');
+    await act(async () => {
+      release();
+      await gate;
+    });
+    await settle();
+    await settle();
+    expect(status(editor.view)).toContain('not applied');
+    expect(status(editor.view)).not.toContain('Redrew');
+    const read = await savedOver(editor);
+    expect(read.profile.positions).toHaveLength(saturday().profile.positions.length);
+    expect(read.profile.positions[0]).toEqual(saturday().profile.positions.at(-1));
   });
 });

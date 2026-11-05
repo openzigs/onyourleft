@@ -331,6 +331,21 @@ describe('reverse, out and back, and return to start', () => {
     expect(canReturnToStart(back)).toBe(false);
     expect(returnToStart(back, straightStretch(at(0, 0), at(0, 0), {}))).toBe(back);
   });
+
+  it('returns to its start with no step in the gradient at the wrap (#440)', () => {
+    const line = lineOf(savedRoute());
+    const last = lastSample(line);
+    const back = returnToStart(
+      line,
+      straightStretch(line.profile.positions[last]!, line.profile.positions[0]!, {
+        from: heightAt(line, last),
+        to: heightAt(line, 0),
+      }),
+    );
+    // The last sample of a loop is its first: it takes the first's slope.
+    expect(back.profile.grades.at(-1)).toBe(back.profile.grades[0]);
+    expect(back.profile.grades.at(-1)).not.toBe(line.profile.grades.at(-1));
+  });
 });
 
 describe('undo and redo through an edit', () => {
@@ -433,6 +448,24 @@ describe('saving an edit', () => {
     expect(outcome.record.profile).toBe(edited.profile);
     expect(outcome.record.elevation?.missing).toBeCloseTo(rampedLength(edited), 6);
     expect(outcome.record.elevation?.dataset).toBe(GLO30.name);
+  });
+
+  it('over the original twice: the ramped stretch is counted once, against the route as first opened', () => {
+    const opened = savedRoute({
+      elevation: {
+        dataset: GLO30.name,
+        resolution: GLO30.resolution,
+        interval: metres(30),
+        missing: metres(100),
+      },
+    });
+    const edited = detour(lineOf(opened), 50, 120);
+    const first = replaceRouteLine(opened, edited, SAVED_AT, NOW, [], opened);
+    if (first.status !== 'saved') throw new Error(first.refusal.message);
+    const second = replaceRouteLine(first.record, edited, first.record.updatedAt, NOW, [], opened);
+    if (second.status !== 'saved') throw new Error(second.refusal.message);
+    expect(second.record.elevation?.missing).toBeCloseTo(100 + rampedLength(edited), 6);
+    expect(second.record.elevation?.missing).toBe(first.record.elevation?.missing);
   });
 
   it('as a new route from an import: claims no dataset', () => {
