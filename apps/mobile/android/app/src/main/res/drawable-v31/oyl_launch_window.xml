@@ -6,14 +6,14 @@
   BridgeActivity switches theme, so a frame of the bare window before
   MainActivity resets it to the canvas is the splash, and never
   Theme.DeviceDefault's near-black or white. It is the canvas, per palette,
-  with the launcher icon where the system splash draws an adaptive icon on
-  a different-coloured background (160 dp visible).
+  with the splash's own icon (#2052) at the 288 dp the system splash draws
+  it without an icon background, so the two frames are the same picture.
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@drawable/oyl_launch_background" />
     <item
-        android:drawable="@mipmap/ic_launcher"
+        android:drawable="@drawable/oyl_splash_icon"
         android:gravity="center"
-        android:width="160dp"
-        android:height="160dp" />
+        android:width="288dp"
+        android:height="288dp" />
 </layer-list>
