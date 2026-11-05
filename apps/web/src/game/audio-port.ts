@@ -67,6 +67,18 @@ export interface CueOutput {
    */
   applyMix(): void;
   /**
+   * Route the menus' music element into the music bus — #2058. Once per
+   * element, and only after {@link resume}, inside the press that starts the
+   * music; a no-op with no context. The bus stays at 0 until
+   * {@link setMusicOn}.
+   */
+  attachMusic(element: HTMLMediaElement): void;
+  /**
+   * Ramp the music bus up to the rider's music level, or down to 0 — #2058.
+   * A ramp, never a step; it never makes or resumes a context.
+   */
+  setMusicOn(on: boolean): void;
+  /**
    * Let the platform stop running the audio — #447. Suspends a context that is
    * running and does nothing otherwise; never creates one.
    *

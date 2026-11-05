@@ -51,8 +51,10 @@ async function settings(
     () => fake.context,
     deviceAudioMix(() => store),
   );
-  // A press elsewhere has built the graph before Settings is opened.
+  // A press elsewhere has built the graph and started the menus' music
+  // (#2058) before Settings is opened.
   output.resume();
+  output.setMusicOn(true);
   mounted = await mount(
     <SettingsView
       units="metric"
