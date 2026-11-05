@@ -265,8 +265,12 @@ export function ActivityDetailView({
   const generation = useRef(0);
   // #2069: the ride's time in zone, read once its section is in view.
   const zonesSlot = useRef<HTMLDivElement | null>(null);
-  const [zonesSeen, setZonesSeen] = useState(false);
-  const [rideZones, setRideZones] = useState<ZonesState>({ kind: 'waiting' });
+  // Held with the ride they belong to: a page that moves to another ride must
+  // neither show the old zones nor read the new ones before they are in view.
+  const [zonesSeenFor, setZonesSeenFor] = useState<ActivityId | undefined>(undefined);
+  const [heldZones, setHeldZones] = useState<
+    { readonly id: ActivityId; readonly state: ZonesState } | undefined
+  >(undefined);
   const [shared, setShared] = useState<SharedTrack | undefined>(undefined);
   const [showShared, setShowShared] = useState(false);
   const [mapPort, setMapPort] = useState<MapPort | undefined>(undefined);
@@ -275,6 +279,9 @@ export function ActivityDetailView({
 
   const id: ActivityId | undefined =
     activityId === undefined || activityId === '' ? undefined : toActivityId(activityId);
+  const zonesSeen = id !== undefined && zonesSeenFor === id;
+  const rideZones: ZonesState =
+    heldZones !== undefined && heldZones.id === id ? heldZones.state : { kind: 'waiting' };
 
   useEffect(() => {
     if (port === undefined || id === undefined) {
@@ -387,9 +394,9 @@ export function ActivityDetailView({
       return;
     }
     return watchUntilSeen(new Map([['zones', zonesSlot.current]]), () => {
-      setZonesSeen(true);
+      setZonesSeenFor(id);
     });
-  }, [state]);
+  }, [state, id]);
 
   useEffect(() => {
     if (!zonesSeen || analysis === undefined || id === undefined) {
@@ -400,11 +407,14 @@ export function ActivityDetailView({
       try {
         const zones = await loadRideZones(analysis, id);
         if (live) {
-          setRideZones(zones === undefined ? { kind: 'none' } : { kind: 'ready', zones });
+          setHeldZones({
+            id,
+            state: zones === undefined ? { kind: 'none' } : { kind: 'ready', zones },
+          });
         }
       } catch (error: unknown) {
         if (live) {
-          setRideZones({ kind: 'failed', reason: reasonOf(error) });
+          setHeldZones({ id, state: { kind: 'failed', reason: reasonOf(error) } });
         }
       }
     })();

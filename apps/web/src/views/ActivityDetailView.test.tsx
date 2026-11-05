@@ -457,6 +457,47 @@ describe('#2069 — the ride’s time in zone, on its own page', () => {
     expect(document.body.textContent).not.toContain('Time in zone');
   });
 
+  it('forgets one ride’s zones when the page moves to another, and reads the next only once it is in view', async () => {
+    observers = installFakeIntersectionObserver();
+    const power = [
+      ...Array.from({ length: 300 }, () => watts(100)),
+      ...Array.from({ length: 300 }, () => watts(200)),
+    ];
+    const first = stubActivity({ hasPosition: false });
+    const second = stubActivity({ id: activityId('ride-2'), hasPosition: false });
+    const detail = stubDetail(ATHLETE, { activity: first, channels: { power }, laps: [] });
+    const other = stubDetail(ATHLETE, { activity: second, channels: { power }, laps: [] });
+    const analysis = stubAnalysis(ATHLETE, [
+      { activity: first, power },
+      { activity: second, power },
+    ]);
+    await import('../detail/TraceChart');
+    const view = (port: StubDetail, id: string): ReactElement => (
+      <ActivityDetailView port={port} activityId={id} analysis={analysis} />
+    );
+    mounted = await mount(view(detail, 'ride-1'));
+    await settle();
+    await settle();
+    await observers.reveal([document.querySelector('[data-oyl-zones-slot]') as Element]);
+    await settle();
+    await settle();
+    expect(analysis.channelReads).toEqual(['ride-1:power']);
+
+    await mounted.rerender(view(other, 'ride-2'));
+    await settle();
+    await settle();
+
+    const slot = document.querySelector('[data-oyl-zones-slot]');
+    expect(analysis.channelReads).toEqual(['ride-1:power']);
+    expect(slot?.querySelector('.oyl-zone-chart')).toBeNull();
+    expect(slot?.textContent).toContain('Reading time in zone…');
+
+    await observers.reveal([slot as Element]);
+    await settle();
+    await settle();
+    expect(analysis.channelReads).toEqual(['ride-1:power', 'ride-2:power']);
+  });
+
   it('says so when the read fails, rather than drawing nothing', async () => {
     const { detail, analysis } = bothPorts();
     const broken: StubAnalysis = {
