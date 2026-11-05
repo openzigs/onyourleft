@@ -42,9 +42,12 @@ import {
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
   realisticVegetation,
+  REALISTIC_ROADSIDE_MODEL_NAMES,
+  REALISTIC_ROADSIDE_MODELS,
   TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type RealisticTrees,
+  type RoadsideModel,
 } from './realistic-assets';
 import { treeSlots, type TreeLevels } from './tree-levels';
 import {
@@ -81,7 +84,9 @@ import {
   fileImageSize,
   fileKtx2Facts,
   modelFacts,
+  roadsideFacts,
   type Ktx2Facts,
+  type RoadsideFacts,
 } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
@@ -94,6 +99,8 @@ import { drawnRoadFrame } from './terrain';
 import { landClassMask } from './land-class';
 import { REALISTIC_LADDER } from './quality';
 import {
+  FURNITURE_CAPACITY,
+  FurnitureBelt,
   MappedBuildingBelt,
   realisticBicycleTriangles,
   realisticStructureTriangles,
@@ -172,6 +179,29 @@ function worstVegetation(
 /** A box's triangles: six faces, two each. */
 const BOX_TRIANGLES = 12;
 
+/** The committed roadside models, read off their bytes — #1274. */
+const roadside = Object.fromEntries(
+  REALISTIC_ROADSIDE_MODEL_NAMES.map((model) => [
+    model,
+    roadsideFacts(at(REALISTIC_ROADSIDE_MODELS[model])),
+  ]),
+) as Readonly<Record<RoadsideModel, RoadsideFacts>>;
+
+/**
+ * What one realistic gantry instance submits — #1274: the unit box and the
+ * barrier, one of them folded away (`three-renderer.ts` §`GantryBelt`).
+ */
+const GANTRY_INSTANCE_TRIANGLES = BOX_TRIANGLES + roadside.barrier.triangles;
+
+/** The realistic lamp post's triangles, and the stylised one's as its belt builds it — #1274, #1536. */
+const lampTriangles = roadside.lamp.triangles;
+const STYLISED_LAMP_TRIANGLES = ((): number => {
+  const belt = new FurnitureBelt('stylised');
+  const triangles = belt.shapeOf('lamp-post').getAttribute('position').count / 3;
+  belt.dispose();
+  return triangles;
+})();
+
 describe('each committed file inside its class’s budget — ADR 0026 D-6', () => {
   it('keeps every model at or under its kind’s triangles', () => {
     // Non-vacuity for #1283: both sets' broadleaves are read, eight files.
@@ -192,6 +222,30 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     }
     expect(riderTriangles).toBeGreaterThan(0);
     expect(riderTriangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.rider);
+  });
+
+  it('keeps every roadside model under its class, with no picture and a colour a vertex — #1274', () => {
+    for (const model of REALISTIC_ROADSIDE_MODEL_NAMES) {
+      const facts = roadside[model];
+      const file = REALISTIC_ROADSIDE_MODELS[model];
+      expect(facts.triangles, file).toBeGreaterThan(0);
+      expect(facts.triangles, file).toBeLessThanOrEqual(REALISTIC_TRIANGLES.roadside);
+      // Drawn inside its stylised shape's call, so it brings no material and
+      // no picture to make one of: geometry and COLOR_0, nothing else.
+      expect(facts.attributes, file).toEqual(['COLOR_0', 'NORMAL', 'POSITION']);
+      expect(facts.materials, file).toBe(0);
+      expect(facts.images, file).toBe(0);
+      expect(modelFacts(at(file)).images, file).toEqual([]);
+      // Stood on the origin: its lowest point on the ground it is placed on.
+      let lowest = Number.POSITIVE_INFINITY;
+      for (let y = 1; y < facts.position.length; y += 3) {
+        lowest = Math.min(lowest, facts.position[y] as number);
+      }
+      expect(lowest, file).toBeCloseTo(0, 4);
+    }
+    // Non-vacuity: the lamp is a real share of the class, the barrier a box's four times.
+    expect(roadside.lamp.triangles).toBeGreaterThan(REALISTIC_TRIANGLES.roadside * 0.8);
+    expect(roadside.barrier.triangles).toBe(48);
   });
 
   it('keeps every map inside a model at or under the model class’s size', () => {
@@ -397,6 +451,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     readonly heaviestStructure: number;
     readonly blobs: number;
     readonly gantries: number;
+    readonly lamps: number;
   } => {
     return {
       // #679: two gantries and the board before a line, a quad a banner —
@@ -406,10 +461,16 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       // way, so the sum did not move. A billboard's board is a
       // STRUCTURE in the budget (`scene.ts`), lighter than any, so the
       // structures' term below covers it.
+      // ⚠️ #1274: every gantry instance submits the box AND Poly Haven's
+      // barrier, whichever it is drawn as (`three-renderer.ts` §`GantryBelt`).
       gantries:
-        2 * (standBoxes('gantry').length * BOX_TRIANGLES + 2) +
-        (standBoxes('board').length * BOX_TRIANGLES + 2) +
+        2 * (standBoxes('gantry').length * GANTRY_INSTANCE_TRIANGLES + 2) +
+        (standBoxes('board').length * GANTRY_INSTANCE_TRIANGLES + 2) +
         2 * logoBoxes().length * BOX_TRIANGLES,
+      // #1274: what the realistic street's lamp posts add over the stylised
+      // street's, the capacity's worth — the realistic world's alone, so
+      // inside the frame (`realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES`).
+      lamps: FURNITURE_CAPACITY * (lampTriangles - STYLISED_LAMP_TRIANGLES),
       // #620: the ground blobs, every one the belt has room for, a quad each.
       blobs: REALISTIC_GROUND_BLOBS * GROUND_BLOB_TRIANGLES,
       vegetation: worstVegetation(REALISTIC_TREE_LEVELS, trees),
@@ -423,12 +484,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   };
 
   it('holds the worst frame the caps allow under the frame’s triangles, structures included — #506', () => {
-    const { vegetation, riders, structureItems, heaviestStructure, blobs, gantries } = worstFrame();
+    const { vegetation, riders, structureItems, heaviestStructure, blobs, gantries, lamps } =
+      worstFrame();
     // ⚠️ #506: until this the sum stopped at the riders, and 240 structures
     // at up to 640 triangles each went into no sum at all. This is the line
     // that is red on the tree #506 was filed against.
     expect(
-      vegetation + riders + structureItems * heaviestStructure + blobs + gantries,
+      vegetation + riders + structureItems * heaviestStructure + blobs + gantries + lamps,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // #1283: with EITHER set's trees, since the owner's page can load both —
     // at every structure's ceiling, the heaviest frame the budget prices.
@@ -439,13 +501,17 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
           frame.riders +
           frame.structureItems * REALISTIC_TRIANGLES.structure +
           frame.blobs +
-          frame.gantries,
+          frame.gantries +
+          frame.lamps,
         trees,
       ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     }
     // #679: the gantries inside their own ceiling, and a real sum.
     expect(gantries).toBeLessThanOrEqual(REALISTIC_GANTRY_TRIANGLES);
     expect(gantries).toBeGreaterThan(REALISTIC_GANTRY_TRIANGLES / 2);
+    // #1274: the barrier and the lamp are real terms, priced off the files.
+    expect(gantries).toBe(4_338);
+    expect(lamps).toBe(8_640);
     // Non-vacuity: the structures are a real share of the frame — a village
     // of detailed buildings — rather than a term that rounds to nothing.
     expect(structureItems * heaviestStructure).toBeGreaterThan(10_000);
@@ -456,7 +522,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   });
 
   it('holds it with a room’s remote riders in it too: two realistic and the stylised rest — #783', () => {
-    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const { vegetation, riders, structureItems, blobs, gantries, lamps } = worstFrame();
     const stylised = stylisedRiderTriangles();
     const remote =
       REALISTIC_REMOTE_RIDERS * (riderTriangles + realisticBicycleTriangles()) +
@@ -468,6 +534,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         structureItems * REALISTIC_TRIANGLES.structure +
         blobs +
         gantries +
+        lamps +
         remote,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // Non-vacuity: the stylised term is real, and the room's whole K drawn
@@ -479,6 +546,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         structureItems * REALISTIC_TRIANGLES.structure +
         blobs +
         gantries +
+        lamps +
         REALISTIC_REMOTE_RIDERS * (riderTriangles + realisticBicycleTriangles()) +
         MAXIMUM_DRAWN_RIDERS * stylised,
     ).toBeGreaterThan(REALISTIC_FRAME_TRIANGLES);
@@ -492,24 +560,35 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         structureItems * REALISTIC_TRIANGLES.structure +
         blobs +
         gantries +
+        lamps +
         REALISTIC_REMOTE_TRIANGLES,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     expect(remote).toBeLessThanOrEqual(REALISTIC_REMOTE_TRIANGLES);
   });
 
   it('holds it with every structure at its CEILING too, so a building may grow to its budget — #506', () => {
-    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const { vegetation, riders, structureItems, blobs, gantries, lamps } = worstFrame();
     expect(
-      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure + blobs + gantries,
+      vegetation +
+        riders +
+        structureItems * REALISTIC_TRIANGLES.structure +
+        blobs +
+        gantries +
+        lamps,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
   });
 
   it('holds it with the holiday decorations at their ceiling too, inside the frame — #1624', () => {
-    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const { vegetation, riders, structureItems, blobs, gantries, lamps } = worstFrame();
     const worst =
-      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure + blobs + gantries;
+      vegetation +
+      riders +
+      structureItems * REALISTIC_TRIANGLES.structure +
+      blobs +
+      gantries +
+      lamps;
     expect(worst + REALISTIC_DECORATION_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // Non-vacuity: a real share — room for an item of eight boxes on each of
     // two full villages' 116 anchors.
@@ -517,7 +596,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {
-    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const { vegetation, riders, structureItems, blobs, gantries, lamps } = worstFrame();
     const structureTerm = structureItems * REALISTIC_TRIANGLES.structure;
     // The term is the one the frame has priced since #506, not a new one.
     expect(structureTerm).toBe(23_040);
@@ -559,7 +638,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         (cap ?? 0) * REALISTIC_TRIANGLES.structure + mapped,
         String(procedural),
       ).toBeLessThanOrEqual(structureTerm);
-      expect(vegetation + riders + structures + blobs + gantries).toBeLessThanOrEqual(
+      expect(vegetation + riders + structures + blobs + gantries + lamps).toBeLessThanOrEqual(
         REALISTIC_FRAME_TRIANGLES,
       );
       if (procedural === 0) {

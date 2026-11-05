@@ -1594,13 +1594,16 @@ function applyPanesControl(): void {
  * first column and on into the next. `?sections=columns` deletes the shipped
  * grid's rules through the CSSOM and puts these back, so
  * `sections.browser.spec.ts`' row-major check has the layout it replaced to
- * fail on, and the heights it publishes have a "before".
+ * fail on, and the heights it publishes have a "before". The one change to
+ * it is #2195's: a section the shipped page keeps in a column
+ * (`.oyl-sections__fits-column`) is kept in one here too, so the control
+ * differs from the page in the columns and in nothing else.
  */
 const FIRST_CUT_COLUMNS = `
 .oyl-sections > * { break-inside: avoid; }
 .oyl-sections :is(h2, h3) { break-after: avoid; }
 .oyl-sections > .oyl-sections__title,
-.oyl-sections > :has(.oyl-scroll-region) { column-span: all; }
+.oyl-sections > :has(.oyl-scroll-region):not(.oyl-sections__fits-column) { column-span: all; }
 @container oyl-pane (min-width: 40rem) {
   .oyl-sections:not(.oyl-sections--broad) { columns: 2; column-gap: var(--oyl-space-lg); }
   .oyl-sections > .oyl-panel + .oyl-panel { margin-block-start: var(--oyl-space-md); }

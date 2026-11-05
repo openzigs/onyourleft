@@ -910,6 +910,9 @@ const TRAINER: GameTrainerPort = {
   // under *Ride* and its *Record this ride* are laid out and measured with the
   // rest. This double records nothing.
   rideMovingSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
+  // #2072: the elapsed time at the same widest figure, so the clock row is
+  // laid out and measured with its widest time in it.
+  rideElapsedSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
   recordGameRide: () => Promise.resolve(false),
   watchRide: () => () => undefined,
   readTrainer: () =>

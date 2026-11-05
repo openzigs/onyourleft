@@ -252,7 +252,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * §`FOOTPRINT_MAX_TRIANGLES` reads it, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
-  Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>
+  Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure' | 'roadside', number>
 > = {
   'tree-broadleaf': 28_000,
   'tree-conifer': 24_000,
@@ -296,6 +296,19 @@ export const REALISTIC_TRIANGLES: Readonly<
    * 4 314 of room. {@link REALISTIC_STRUCTURE_ITEMS} is what bounds them now.
    */
   structure: 640,
+  /**
+   * One roadside model — #1274: **240**, what `tools/realistic/sources.ts`
+   * §`ROADSIDE_MODEL_SOURCES` asks the pipeline to cut Poly Haven's street
+   * lamp to (it stops at 223); the barrier is asked for 48 and is 48. A lamp
+   * post is seen at 5 to 120 m (`streets.ts` §`FURNITURE_DRAW_METRES`), as a
+   * column a few pixels wide and a lantern; 240 keeps the lantern's four
+   * panes, its cap and the post's mouldings, and the stylised post is 88.
+   * Neither carries a picture: each is coloured a vertex at a time and drawn
+   * inside the call its stylised shape makes, so what this class costs is
+   * these triangles and nothing else — {@link REALISTIC_STREET_TRIANGLES}
+   * counts the lamps and {@link REALISTIC_GANTRY_TRIANGLES} the barriers.
+   */
+  roadside: 240,
 };
 
 /**
@@ -963,14 +976,25 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,
- * #1564's paths to the front doors and #1536's street furniture: **25 024**,
- * in either world.
+ * #1564's paths to the front doors and #1536's street furniture: **33 664**
+ * in the realistic world since #1274, and 25 024 in the stylised one.
  *
  * | | triangles |
  * |---|--:|
  * | Pavements: two villages in view at most, each at `streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE` | 2 × 1 184 = 2 368 |
  * | Front paths: the same two villages, each at `streets.ts` §`DOOR_PATH_TRIANGLES_PER_VILLAGE` | 2 × 960 = 1 920 |
- * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (lamp post 88, bollard 64, bench 108, bin 64) | 64 × 324 = 20 736 |
+ * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (the realistic lamp post 223, bollard 64, bench 108, bin 64) | 64 × 459 = 29 376 |
+ *
+ * ⚠️ **#1274 made the realistic lamp post Poly Haven's `street_lamp_01`**,
+ * 223 triangles where the stylised post is 88, so the two worlds' streets
+ * are no longer the same triangles, and a reviewer who remembers 25 024
+ * "in either world" is reading the old file. The stylised street is still
+ * 25 024 (64 × 324 of furniture). The realistic world's **8 640** over it,
+ * 64 lamps at 135 more each, is the realistic world's alone, and
+ * `realistic-budget.test.ts` counts it INSIDE {@link REALISTIC_FRAME_TRIANGLES}
+ * by that constant's own rule, below. The lamp is merged into the painted
+ * mesh with the bollards and bins (`three-renderer.ts` §`FurnitureBelt`), so
+ * the street's calls did not move.
  *
  * The furniture's row is the CAPACITY, a hard bound the belt cannot pass; a
  * village at its fullest has 16 lamp posts, 8 bollards, 2 benches and 2 bins
@@ -982,8 +1006,9 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * in a frame: 3 504, inside the two rows above. Not raised.
  *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
- * rule**: a street is the SAME triangles in both worlds, as the corridor, the
- * terrain and the water are, so it does not change with the world. It adds
+ * rule, all but the lamps' 8 640**: what a street is in BOTH worlds — the
+ * stylised street's 25 024 — does not change with the world, as the
+ * corridor, the terrain and the water do not. It adds
  * no texture: the pavement's 512 px paving pair (0.5 MiB estimated) is
  * #1535's, counted with the rest of the set, the front paths wear the same
  * paving in the pavements' own draw call, and the bench wears `planks`,
@@ -993,7 +1018,7 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * which counts the belt's own meshes, and by `streets.test.ts` §"a path to
  * each front door"
  */
-export const REALISTIC_STREET_TRIANGLES = 25_024;
+export const REALISTIC_STREET_TRIANGLES = 33_664;
 
 /**
  * The most triangles a frame's holiday decorations may add — #1624:
@@ -1071,8 +1096,8 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
 /**
  * The most triangles the start and finish gantries may add to a frame:
- * **1 000** — #679's ceiling, against the 1 350 its research found spare in the
- * worst frame before #617 freed more. Spent only within
+ * **4 400** since #1274 — #679's ceiling was **1 000**, against the 1 350 its
+ * research found spare in the worst frame before #617 freed more. Spent only within
  * `gantry.ts` §`LINE_DRAW_AHEAD_METRES` of a line, and nothing anywhere else.
  * The worst a frame carries is two gantries and a board — a point-to-point
  * route shorter than the reach, whose start and finish are both in view —
@@ -1085,11 +1110,37 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
  * which is exactly the two the sum already priced. A billboard's board spends
  * a STRUCTURE's slot (`scene.ts`), not this ceiling.
  *
+ * ## ⚠️ Raised by #1274, and the draw calls were not
+ *
+ * Since #1274 a realistic barrier piece is Poly Haven's
+ * `concrete_road_barrier`, 48 triangles, where it was a 12-triangle box. The
+ * owner's ruling of 2026-11-04 holds every draw-call ceiling where it is, so
+ * the gantry is still the two calls #679 measured: its one instanced mesh
+ * carries the box AND the barrier, and the vertex shader folds away the shape
+ * an instance is not (`three-renderer.ts` §`GantryBelt`). Every instance
+ * therefore submits both, 60 triangles, legs and beam and board post as much
+ * as a barrier:
+ *
+ * | The worst frame: two gantries and a board, two wordmark boards | triangles |
+ * |---|--:|
+ * | Before: 71 boxes at 12, three banners at 2, two boards' 36 | 930 |
+ * | After: 71 instances at 12 + 48, three banners at 2, two boards' 36 | **4 338** |
+ *
+ * — 3 408 more, every one of them inside {@link REALISTIC_FRAME_TRIANGLES},
+ * which was not raised: `realistic-budget.test.ts` sums the frame with them.
+ * Held a gantry's width over 4 338, as #679 held 1 000 over 930. Two meshes
+ * a frame where it is a separate barrier mesh's three would have cost 1 104
+ * fewer triangles and a call; the calls are the ruling's.
+ *
+ * ⚠️ **62 triangles of headroom.** When a new gantry box or a re-cut barrier
+ * turns the test red, do not raise this number: move the new part to a third
+ * mesh, or cut the barrier lighter, as the trade above weighs.
+ *
  * @test-facing held by `realistic-budget.test.ts`, and by
  * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the
  * WebGL entry points
  */
-export const REALISTIC_GANTRY_TRIANGLES = 1_000;
+export const REALISTIC_GANTRY_TRIANGLES = 4_400;
 
 /**
  * The most GPU texture memory the realistic set may hold, estimated: **160 MiB**,

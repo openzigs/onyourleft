@@ -72,6 +72,7 @@ import { modelFacts } from '../src/game/realistic-bytes-testing';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
@@ -914,12 +915,14 @@ const TOWN_LOAD_BUDGET_MS = 225_000;
 /**
  * #679: the least lettering contrast a banner strip must read (a variance of
  * relative luminance over the strip's mean) — **0.05** — the most — **2** —
- * and #679's ceiling on what a gantry and its barriers may add near a line:
- * **1 000** triangles.
+ * and the ceiling on what a gantry and its barriers may add near a line:
+ * `realistic-budget.ts` §`REALISTIC_GANTRY_TRIANGLES`, which was #679's
+ * **1 000** until #1274 drew the barriers as Poly Haven's in the same two
+ * calls, and is 4 400 since.
  */
 const GANTRY_LETTERING_FLOOR = 0.05;
 const GANTRY_LETTERING_CEILING = 2;
-const GANTRY_TRIANGLE_CEILING = 1_000;
+const GANTRY_TRIANGLE_CEILING = REALISTIC_GANTRY_TRIANGLES;
 
 /**
  * #630: how much lighter the far band's sun side must read than its shade

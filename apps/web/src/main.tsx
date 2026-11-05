@@ -109,6 +109,7 @@ import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-an
 import {
   instancePoseEstimator,
   readSideInstanceChoice,
+  sideInstanceHostedService,
   sidePictureSessionOf,
 } from './camera/instance-pose';
 import type { SideInstancePicturesPort } from './camera/side-instance-port';
@@ -1553,6 +1554,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
             control,
             estimator: analyser.estimator,
             place: analyser.place,
+            // #2175: the screen names the hosted service pictures go on to.
+            hostedService:
+              analyser.place === 'instance'
+                ? () =>
+                    sideInstanceHostedService(
+                      readSideInstanceChoice(sidePictures?.port.sideInstanceOrigin()),
+                    )
+                : undefined,
             references: { store: localStore(), athleteId: LOCAL_ATHLETE },
             reports: sideReports,
           });
