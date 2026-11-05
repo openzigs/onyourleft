@@ -170,6 +170,14 @@ const MAIN_ID = 'oyl-main';
  */
 const APP_NAME = 'On Your Left';
 
+/**
+ * The rail's mark — #2066: the launcher icon `tools/brand/` cuts into
+ * `public/` (`brand.json`), precached with the rest of `public/`. Its
+ * intrinsic size, so the box is reserved before the file decodes.
+ */
+const NAV_MARK_FILE = 'icon-192.png';
+const NAV_MARK_PIXELS = 192;
+
 /** The id of the `h1`, which names the `main` landmark through `aria-labelledby`. */
 const VIEW_TITLE_ID = 'oyl-view-title';
 
@@ -1137,10 +1145,29 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * colours border — is `theme.css` §"NAVIGATION", because a state keyed on
  * `aria-current` is a rule a browser control can delete through the CSSOM.
  * The span is not `aria-hidden`: it holds the label, which names the link.
+ *
+ * ## The mark — #2066
+ *
+ * The app's own mark, its launcher icon, heads the RAIL on a tablet, so the
+ * brand is where the eye starts on the column a rider steers by. It is
+ * decoration and is hidden from assistive technology twice over (`alt=""`
+ * and `aria-hidden`): the header's wordmark and its `aria-label` already name
+ * the app once, and a second name would read it twice. `theme.css`
+ * §"THE MARK" draws it only on a rail with the height to spare; whether a
+ * phone's bar carries one is the owner's open question on #2030.
  */
 function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
   return (
     <nav aria-label="Primary" className="oyl-nav">
+      <img
+        className="oyl-nav-mark"
+        src={`${import.meta.env.BASE_URL}${NAV_MARK_FILE}`}
+        width={NAV_MARK_PIXELS}
+        height={NAV_MARK_PIXELS}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
       <ul className="oyl-nav-list">
         {NAV_GROUPS.map((group) => {
           const destination = groupDestination(group.id);
