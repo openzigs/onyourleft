@@ -1407,6 +1407,52 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
     }
     return top;
   };
+  /**
+   * Whether the far leg's road at `centre[index]` faces the eye: the eye more
+   * than `margin` above the road's plane there (half a metre unless given),
+   * its slope taken from the two neighbouring rows.
+   */
+  const facesEye = (
+    rig: ReturnType<typeof cameraRig>,
+    centre: RoadCorridor['centre'],
+    index: number,
+    margin = 0.5,
+  ): boolean => {
+    const point = centre[index] as RoadCorridor['centre'][number];
+    const before = centre[index - 1] as typeof point;
+    const after = centre[index + 1] as typeof point;
+    const run = Math.hypot(after.x - before.x, after.z - before.z);
+    const along =
+      ((rig.eye.x - point.x) * (after.x - before.x) +
+        (rig.eye.z - point.z) * (after.z - before.z)) /
+      run;
+    return rig.eye.y - point.y > ((after.y - before.y) / run) * along + margin;
+  };
+  /**
+   * How far the first of `cells`' triangles to stand more than `slack` over
+   * the ray from `eye` to `target` stands over it, sampled every metre from
+   * 3 m out to `short` metres short of the target; `undefined` if none does.
+   */
+  const standsOver = (
+    ground: TerrainMesh,
+    cells: Map<number, number[]>,
+    eye: { x: number; y: number; z: number },
+    target: { x: number; y: number; z: number },
+    short: number,
+    slack: number,
+  ): number | undefined => {
+    const dx = target.x - eye.x;
+    const dy = target.y - eye.y;
+    const dz = target.z - eye.z;
+    const span = Math.hypot(dx, dz);
+    for (let step = 3; step < span - short; step += 1) {
+      const share = step / span;
+      const over =
+        facingTop(ground, cells, eye.x + dx * share, eye.z + dz * share) - (eye.y + dy * share);
+      if (over > slack) return over;
+    }
+    return undefined;
+  };
 
   it.each(corners.filter(([, , grade]) => grade === 0 || grade === -0.03))(
     'shows the far leg’s road from the approach over no bank beyond the bend, %s',
@@ -1427,9 +1473,13 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       // the road faces the eye — passes over every triangle of the ground
       // that faces the eye, as three draws it, sampled every metre. Nothing
       // exempt: a road that faces the eye is hidden by no verge of its own.
-      // Climbs are not asked here: there the far leg is above the eye and its
-      // road faces away from it, with or without any ground. The next test
-      // asks what an eye below the far leg can see of it.
+      // Climbs are not asked here: there the far leg is above the eye, so the
+      // top of its road faces away from it. Both road materials are
+      // `DoubleSide` (`three-renderer.ts`, the road's `MeshBasicMaterial` and
+      // `photographicRoadMaterial`), so three does draw that road from below
+      // wherever no ground facing the eye covers it, and what shows there is
+      // its underside. The next test asks what an eye below the far leg can
+      // see of it.
       //
       // Measured before this fix: hidden by up to 2.09 m on the level (140°
       // to the right), and 2.03 m descending at 3 %. At 3 % a ray to a road
@@ -1452,30 +1502,11 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
           const target = { x: point.x, y: point.y + 0.1, z: point.z };
           if (framed(rig, target) === undefined) continue;
           // Whether the road there faces the eye: the eye above its plane.
-          const before = centre[index - 1] as typeof point;
-          const after = centre[index + 1] as typeof point;
-          const run = Math.hypot(after.x - before.x, after.z - before.z);
-          const along =
-            ((rig.eye.x - point.x) * (after.x - before.x) +
-              (rig.eye.z - point.z) * (after.z - before.z)) /
-            run;
-          if (!(rig.eye.y - point.y > ((after.y - before.y) / run) * along + 0.5)) continue;
+          if (!facesEye(rig, centre, index)) continue;
           rays += 1;
-          const dx = target.x - rig.eye.x;
-          const dy = target.y - rig.eye.y;
-          const dz = target.z - rig.eye.z;
-          const span = Math.hypot(dx, dz);
-          for (let step = 3; step < span - 6; step += 1) {
-            const share = step / span;
-            const over =
-              facingTop(ground, cells, rig.eye.x + dx * share, rig.eye.z + dz * share) -
-              (rig.eye.y + dy * share);
-            if (over > slack) {
-              hidden.push(
-                `${over.toFixed(2)} m at ${String(at)}, road ${point.distance.toFixed(0)}`,
-              );
-              break;
-            }
+          const over = standsOver(ground, cells, rig.eye, target, 6, slack);
+          if (over !== undefined) {
+            hidden.push(`${over.toFixed(2)} m at ${String(at)}, road ${point.distance.toFixed(0)}`);
           }
         }
       }
@@ -1492,7 +1523,7 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
    * climb to a far leg that runs level — from 140° to 150°, both hands, at
    * 6 %, 8 % and 10 %.
    */
-  const climbs: readonly (readonly [string, RouteProfile])[] = [140, 143, 147, 150].flatMap(
+  const climbs: readonly (readonly [string, RouteProfile, number])[] = [140, 143, 147, 150].flatMap(
     (degrees) =>
       (['right', 'left'] as const).flatMap((hand) =>
         [0.06, 0.08, 0.1].map(
@@ -1500,67 +1531,98 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
             [
               `${String(degrees)}° to the ${hand}, climbing at ${String(Math.round(grade * 100))} % to a level far leg`,
               plannerCornerRoute(degrees, hand, grade, 0),
+              grade,
             ] as const,
         ),
       ),
   );
+  /**
+   * How far over the far leg's centreline the climb test aims its rays: **1 m**
+   * (#2150). Aimed at 0.5 m, it goes red on this head at the far road's own
+   * near verge: ground 4 to 7 m short of the target and 4 to 6 m off that
+   * road's centreline, which rises from the road towards the rider and stands
+   * up to 0.15 m over the ray (150° to the right at 10 %), on every 10 % case
+   * and at 150° and 8 %, measured. That verge is what truly hides a road above
+   * the eye, so the target clears it rather than the test exempting it.
+   */
+  const CLIMB_TARGET_METRES = 1;
 
   it.each(climbs)(
     'stands no ground over the far leg from a climb to the bend, %s',
-    (_name, profile) => {
+    (_name, profile, grade) => {
       // #2117's ruling of 2026-11-04: coming up a 9–10 % climb to the 143°
       // bend, the owner saw a grass rise where main showed the far leg's
       // road. On such a climb the far leg runs at the bend's height, above
       // the eye — 1.4 m above it 20 m short of the owner's bend and 3.4 m
       // 40 m short, measured — so the top of its road faces away from the
-      // eye, and no ground at all lets the eye see it. What main drew there
-      // was its own ground culled: rising all the way out from the far
-      // leg, that ground's face looked away from the rider, and the road
-      // showed through ground standing over it (up to 19 m here, at 150° to
-      // the left). And #2117's first approach fix stood a ridge beside the
-      // far leg (the owner's frames at c9136f63).
+      // eye, and no ground lets the eye see that top. Three still draws the
+      // road there: both road materials are `DoubleSide` (`three-renderer.ts`,
+      // the road's `MeshBasicMaterial` and `photographicRoadMaterial`), so
+      // wherever no ground facing the eye covers it, the rider sees its
+      // underside. That is what main showed on the climb: rising all the way
+      // out from the far leg, its ground's face looked away from the rider
+      // and was culled, and the road's underside showed through ground
+      // standing over it (up to 19 m here, at 150° to the left). What does
+      // hide a road above the eye is its own near verge, rising from it
+      // towards the rider ({@link CLIMB_TARGET_METRES}). And #2117's first
+      // approach fix stood a ridge beside the far leg (the owner's frames at
+      // c9136f63).
       //
       // What the rider can see of a road above the eye is what stands on
       // it. So from the chase camera's eye on the approach, a ray to a point
-      // a metre over every point of the far leg's centreline in the frame
-      // passes over every triangle of the ground that faces the eye, as
-      // three draws it, sampled every metre: no ground stands between the
-      // rider and the far leg. Measured on this change's head: at least
-      // 0.32 m clear (150° to the left at 10 %). At c9136f63, standing up to
-      // 2.02 m over it (140° to the right at 10 %); on main, up to 19.25 m.
+      // {@link CLIMB_TARGET_METRES} over every point of the far leg's
+      // centreline in the frame passes over every triangle of the ground that
+      // faces the eye, as three draws it, sampled every metre: no ground
+      // stands between the rider and the far leg. Measured on this change's
+      // head: at least 0.32 m clear (150° to the left at 10 %). At c9136f63,
+      // standing up to 2.02 m over it (140° to the right at 10 %); on main,
+      // up to 19.25 m.
+      //
+      // And where the far road does face the eye — a few points of it at
+      // 6 % and 8 %, none at 10 % — it is held as the test above holds it
+      // (#2150): a ray to 10 cm over the road passes over the ground with
+      // 5 cm to spare, the last 6 m excepted. The eye there is less than half
+      // a metre above the road's plane, so the margin is nought, not that
+      // test's half metre, which would leave out every point at 8 %.
+      // Measured on this head: at least 1.0 m clear.
       let rays = 0;
+      let facing = 0;
       const hidden: string[] = [];
       for (let at = bend - 300; at <= bend - 20; at += 10) {
         const frame = sceneAt(profile, at);
         const rig = cameraRig(frame.camera);
         const ground = frame.terrain.mesh;
         const cells = facingGround(ground, rig.eye);
-        for (const point of frame.corridor.centre) {
+        const centre = frame.corridor.centre;
+        for (let index = 0; index < centre.length; index += 1) {
+          const point = centre[index] as RoadCorridor['centre'][number];
           if (!(point.distance > bend + 15)) continue;
-          const target = { x: point.x, y: point.y + 1, z: point.z };
+          const target = { x: point.x, y: point.y + CLIMB_TARGET_METRES, z: point.z };
           if (framed(rig, target) === undefined) continue;
           rays += 1;
-          const dx = target.x - rig.eye.x;
-          const dy = target.y - rig.eye.y;
-          const dz = target.z - rig.eye.z;
-          const span = Math.hypot(dx, dz);
-          for (let step = 3; step < span - 2; step += 1) {
-            const share = step / span;
-            const over =
-              facingTop(ground, cells, rig.eye.x + dx * share, rig.eye.z + dz * share) -
-              (rig.eye.y + dy * share);
-            if (over > 0) {
-              hidden.push(
-                `${over.toFixed(2)} m at ${String(at)}, road ${point.distance.toFixed(0)}`,
-              );
-              break;
-            }
+          const over = standsOver(ground, cells, rig.eye, target, 2, 0);
+          if (over !== undefined) {
+            hidden.push(`${over.toFixed(2)} m at ${String(at)}, road ${point.distance.toFixed(0)}`);
+          }
+          const road = { x: point.x, y: point.y + 0.1, z: point.z };
+          if (index === 0 || index + 1 === centre.length || framed(rig, road) === undefined) {
+            continue;
+          }
+          if (!facesEye(rig, centre, index, 0)) continue;
+          facing += 1;
+          const onRoad = standsOver(ground, cells, rig.eye, road, 6, 0.05);
+          if (onRoad !== undefined) {
+            hidden.push(
+              `${onRoad.toFixed(2)} m over the road at ${String(at)}, road ${point.distance.toFixed(0)}`,
+            );
           }
         }
       }
       expect(hidden).toEqual([]);
-      // Non-vacuity: the far leg really is in the frame.
+      // Non-vacuity: the far leg really is in the frame, and below 10 % some
+      // of its road faces the eye.
       expect(rays).toBeGreaterThan(300);
+      if (grade < 0.1) expect(facing).toBeGreaterThan(0);
     },
     120_000,
   );
