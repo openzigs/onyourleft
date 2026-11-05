@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { effectsBus, writeMenuSoundPreference } from '../shell/menu-sound-preference';
 
-import { AUDIO_MIX_STORAGE_KEY, readAudioMix, writeAudioBus } from './audio-mix';
+import { AUDIO_MIX_STORAGE_KEY, readAudioMix, writeAudioBus, writeMasterMuted } from './audio-mix';
 import type { CueOutput } from './audio-port';
 import { busOf, fakeAudioContext, musicPath, type FakeAudio } from './audio-testing';
 import { cueBus, writeCuePreference } from './cue-preference';
@@ -142,6 +142,35 @@ describe('the mix across a reload — #2055', () => {
     values.set('oyl.cues.v1', JSON.stringify({ enabled: true, volume: 0.8, muted: true }));
     const { fake, output } = start(store);
     expect(levels(fake, output).cues).toBe(0);
+  });
+});
+
+describe('the master mute keeps every bus as stored — #2056', () => {
+  const legacy = () => {
+    throw new Error('every bus is stored, so no old key is read');
+  };
+
+  it('leaves every bus alone when the master is muted and unmuted', () => {
+    const { store } = disk();
+    writeAudioBus(store, 'music', { volume: 0.3, muted: true });
+    writeAudioBus(store, 'effects', { volume: 0.6, muted: false });
+    writeAudioBus(store, 'cues', { volume: 0.4, muted: true });
+    expect(writeMasterMuted(store, true)).toBe(true);
+    expect(readAudioMix(store, legacy)).toEqual({
+      masterMuted: true,
+      music: { volume: 0.3, muted: true },
+      effects: { volume: 0.6, muted: false },
+      cues: { volume: 0.4, muted: true },
+    });
+    expect(writeMasterMuted(store, false)).toBe(true);
+    expect(readAudioMix(store, legacy)).toMatchObject({
+      masterMuted: false,
+      music: { volume: 0.3, muted: true },
+    });
+  });
+
+  it('says false when there is no storage', () => {
+    expect(writeMasterMuted(undefined, true)).toBe(false);
   });
 });
 

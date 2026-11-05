@@ -288,6 +288,10 @@ export function gradientInPrimary(viewport: Viewport): boolean {
  * no room for four primary tracks — and, since #2130, the same gradient in the
  * secondary panel on a 4:3 tablet. A block added or taken away changes these,
  * and the case that reads them says which.
+ *
+ * Plus one anchor block with NO fallback: #2056's header mute drawn beside the
+ * title on a phone, on a menu route only. Without anchor positioning it is the
+ * header's own row, which is what the stylesheet lays out with no rule at all.
  */
 export const ANCHOR_BLOCKS = 6;
 
