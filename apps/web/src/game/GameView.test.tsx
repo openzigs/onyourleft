@@ -1748,6 +1748,24 @@ describe('GameView — the cranks turn at the rider’s own cadence (#349)', () 
     expect(afterwards).toHaveLength(4);
     expect(new Set(afterwards)).toEqual(new Set([0]));
   });
+
+  it('hands the renderer the cadence the rider’s position is chosen from, and none when it goes — #1999', async () => {
+    // ⚠️ `RiderMarker.riding` is optional the UNSAFE way round: a GameView
+    // that stopped supplying the cadence would never stand a rider for one.
+    // This reads what the renderer was handed.
+    let reported: SensorReading = LIVE_CADENCE;
+    const frames = await startRiding({ pacer: false, cadence: () => reported });
+    await pump(8, CRANK_FRAME_MS);
+    const cadence = (frame: SceneFrame): number | undefined =>
+      frame.markers.find((each) => each.kind === 'rider')?.riding?.cadence;
+    expect(new Set(frames.slice(-4).map(cadence))).toEqual(new Set([88]));
+    const seen = frames.length;
+    reported = { value: undefined, live: false, paired: true };
+    await pump(8, CRANK_FRAME_MS);
+    const afterwards = frames.slice(seen).slice(-4);
+    expect(afterwards).toHaveLength(4);
+    expect(new Set(afterwards.map(cadence))).toEqual(new Set([undefined]));
+  });
 });
 
 /**

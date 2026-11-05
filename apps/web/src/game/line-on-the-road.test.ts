@@ -61,7 +61,7 @@ import {
   sceneFrame,
 } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
-import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
+import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor, type RoadCorridor } from './terrain';
 
 const RADIUS = 20;
 const hairpin = hairpinRoute(RADIUS);
@@ -111,7 +111,7 @@ function markerOf(frame: SceneFrame, kind: RiderMarker['kind']): RiderMarker {
  * Where a distance falls on the centreline, found by this test from the
  * corridor's own points rather than through `scene.ts`.
  */
-function centreAt(frame: SceneFrame, distance: number): { x: number; z: number } {
+function centreAt(frame: Pick<SceneFrame, 'corridor'>, distance: number): { x: number; z: number } {
   const centre = frame.corridor.centre;
   for (let index = 0; index < centre.length - 1; index += 1) {
     const from = centre[index];
@@ -724,7 +724,7 @@ describe('a rider faces the way the line takes them, not the way the road runs â
    * 8, ahead of the road at a corridor point â€” and the rider is always on one.
    */
   function roadUnderBicycle(
-    frame: SceneFrame,
+    frame: Pick<SceneFrame, 'corridor'>,
     distance: number,
   ): { headingX: number; headingZ: number } {
     const rear = centreAt(frame, distance - SPAN);
@@ -851,10 +851,23 @@ describe('a rider faces the way the line takes them, not the way the road runs â
     // file's own, ridden through from approach to exit.
     const tight = hairpinRoute(8);
     const exit = 400 + Math.PI * 8 + 40;
+    const origin = corridorOrigin(tight);
+    // The riders placed on the corridor built around where the rider is drawn,
+    // as `sceneFrame` builds a frame's, without the scenery, the ground and the
+    // camera it also builds (#588): none of them is read here, and they were
+    // nearly all of this walk's cost, which timed out under coverage (#2135).
+    const placedAt = (
+      distance: number,
+    ): { readonly corridor: RoadCorridor; readonly rider: RiderMarker } => {
+      const input = { profile: tight, origin, state: stateAt(tight, distance, 9) };
+      const corridor = roadCorridor(tight, origin, drawnRiderDistance(input));
+      const placed = placedRiders(input, corridor).find((one) => one.marker.kind === 'rider');
+      if (placed === undefined) throw new Error('no rider placed');
+      return { corridor, rider: placed.marker };
+    };
     let steepestMotion = 0;
     for (let at = 360; at <= exit; at += 0.5) {
-      const frameAt = (distance: number): SceneFrame => frameOf(tight, stateAt(tight, distance, 9));
-      const here = frameAt(at);
+      const here = placedAt(at);
       // Since #1998 the rider is drawn eased off for the bend, behind the
       // odometer: the road's heading is read where it is drawn. Since #2017
       // the road under the bicycle, which is what the facing is held to: a
@@ -862,16 +875,15 @@ describe('a rider faces the way the line takes them, not the way the road runs â
       // that stepped with it for every marker not sat on a point.
       const drawn = drawnRiderDistance({
         profile: tight,
-        origin: corridorOrigin(tight),
+        origin,
         state: stateAt(tight, at, 9),
       });
       const road = roadUnderBicycle(here, drawn);
-      const rider = markerOf(here, 'rider');
-      const before = markerOf(frameAt(at - SPAN), 'rider');
-      const after = markerOf(frameAt(at + SPAN), 'rider');
+      const before = placedAt(at - SPAN).rider;
+      const after = placedAt(at + SPAN).rider;
       const motion = offRoad(road, { x: after.x - before.x, z: after.z - before.z });
       steepestMotion = Math.max(steepestMotion, Math.abs(motion));
-      expect(Math.abs(offRoad(road, facing(rider)))).toBeLessThanOrEqual(
+      expect(Math.abs(offRoad(road, facing(here.rider)))).toBeLessThanOrEqual(
         FACING_TURN_LIMIT_RADIANS + 1e-9,
       );
     }
