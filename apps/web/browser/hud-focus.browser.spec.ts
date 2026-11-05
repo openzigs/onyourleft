@@ -3,10 +3,10 @@
 /**
  * Every keyboard focus ring on the ride HUD can be seen — #748.
  *
- * The HUD is pinned to the light palette (`theme.css` §`.oyl-hud`, #672), so
- * `--oyl-color-focus` there is #141b1a, and a control that took the page's
+ * The HUD was pinned to the light palette (`theme.css` §`.oyl-hud`, #672) until
+ * #2042, so `--oyl-color-focus` there was #131415, and a control that took the page's
  * `:focus-visible` drew that ring 2 px outside itself onto `hudSurface`,
- * #10161c: **1.04:1**. The mute toggle, the volume and the side camera's Stop
+ * #10161c: **1.01:1**. The mute toggle, the volume and the side camera's Stop
  * all did, in both page palettes, and nothing measured it: `contrast.a11y.test`
  * checks declared PAIRS, and no pair said which colour a HUD ring is.
  *
@@ -17,10 +17,11 @@
  * non-text contrast), in the light page palette and the dark one. The three
  * controls #748 names must each be among those visited.
  *
- * **Control:** the rule #748 added is deleted through the CSSOM, and the same
- * three rings must read back at the 1.04:1 #748's review measured — so a
- * green run is a statement about that rule, not about a page whose rings
- * happened to be light.
+ * **Control:** the rule #748 added is deleted through the CSSOM and the HUD's
+ * focus token is put back at the light palette's (what it was until #2042),
+ * and the same three rings must then read back near 1:1, as #748's review
+ * measured — so a green run is a statement about that rule, not about a page
+ * whose rings happened to be light.
  *
  * ⚠️ Not a screen reader and not a real phone: what it proves is the colour the
  * engine gives a keyboard focus ring, and where that ring lands.
@@ -29,6 +30,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { paletteColours } from '../src/design/tokens';
 
 const QUERY = '?sounds=on&side=lost';
 
@@ -46,7 +48,7 @@ interface Ring {
   readonly surface: string;
 }
 
-/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+/** `rgb(16, 18, 21)` → `#101215`, for {@link contrastRatio}. */
 function hex(rgb: string): string {
   const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
   if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
@@ -151,8 +153,124 @@ for (const colorScheme of ['light', 'dark'] as const) {
   });
 }
 
-test('#748 control — without the rule, the three rings are back at 1.04:1', async ({ page }) => {
+test('#748 control — without the rule, and the page focus the light one, the three rings vanish', async ({
+  page,
+}) => {
   await openRide(page);
+  const lightFocus = paletteColours('light').focus;
+  const deleted = await page.evaluate(
+    ({ selector, lightFocus }) => {
+      // ⚠️ Since #2042 the HUD restates the DARK palette, whose focus token is
+      // the lime, so a ring that fell back to the page's focus would still show.
+      // #748's failure was the LIGHT focus (what the HUD carried until #2042)
+      // landing on hudSurface, so the control puts that back too.
+      document
+        .querySelector<HTMLElement>('.oyl-hud')
+        ?.style.setProperty('--oyl-color-focus', lightFocus);
+      let removed = 0;
+      for (const sheet of document.styleSheets) {
+        for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
+          const rule = sheet.cssRules[index];
+          if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
+            sheet.deleteRule(index);
+            removed += 1;
+          }
+        }
+      }
+      return removed;
+    },
+    { selector: RULE, lightFocus },
+  );
+  expect(deleted, `${RULE} was not found to delete`).toBe(1);
+  const named = (await tabThroughTheHud(page)).filter((ring) => NAMED.includes(ring.name));
+  expect(named.map((ring) => ring.name).sort()).toEqual([...NAMED].sort());
+  for (const ring of named) {
+    expect(ratio(ring), `${ring.name} is still visible without the rule`).toBeLessThan(1.1);
+  }
+});
+
+/**
+ * #875: a race's *Join voice on Discord* stands on a panel of its own, 3 px
+ * deep around it (`theme.css` §"A RACE'S VOICE BUTTON, ON ITS LINE"), over
+ * the sky. The HUD's ring, 3 px wide and 2 px outside a control, would put
+ * its outer 2 px past that panel and onto the sky (review 5777449216 on
+ * #2141), so the button's ring is drawn at no offset. This reads the ring's
+ * reach off the engine — its width and offset around the button's box — and
+ * holds it inside the panel, on the panel's surface at 3:1. The control
+ * deletes that rule and requires the ring to reach past the panel's edge.
+ */
+const VOICE_RULE = '.oyl-hud__voice > .oyl-button:focus-visible';
+
+interface VoiceRing {
+  /** How far the ring reaches past each edge of the panel, in px: none is ≤ 0. */
+  readonly past: number;
+  readonly outline: string;
+  readonly surface: string;
+}
+
+async function voiceRing(page: Page): Promise<VoiceRing> {
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  for (let press = 0; press < 60; press += 1) {
+    await page.keyboard.press('Tab');
+    const read = await page.evaluate(() => {
+      const element = document.activeElement;
+      if (!(element instanceof HTMLElement) || !element.matches('.oyl-hud__voice > a')) {
+        return undefined;
+      }
+      if (!element.matches(':focus-visible'))
+        throw new Error('no :focus-visible from the keyboard');
+      const panel = element.parentElement as HTMLElement;
+      const style = getComputedStyle(element);
+      const reach = Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset);
+      const box = element.getBoundingClientRect();
+      const edge = panel.getBoundingClientRect();
+      return {
+        past: Math.max(
+          edge.left - (box.left - reach),
+          edge.top - (box.top - reach),
+          box.right + reach - edge.right,
+          box.bottom + reach - edge.bottom,
+        ),
+        outline: style.outlineColor,
+        surface: getComputedStyle(panel).backgroundColor,
+      };
+    });
+    if (read !== undefined) return read;
+  }
+  throw new Error('the voice button never took focus from the keyboard');
+}
+
+async function openRaceVoice(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const response = await page.goto('/ride.html?room=race-voice&sounds=on');
+  expect(response?.status()).toBe(200);
+  await page.waitForFunction(
+    () =>
+      (window as { __oylRide?: { readonly ready: boolean } }).__oylRide?.ready === true &&
+      document.querySelector('.oyl-hud__voice > a') !== null,
+  );
+}
+
+test('#875 — the race’s voice button’s ring stays on its panel, at 3:1 on it — 390×844', async ({
+  page,
+}) => {
+  await openRaceVoice(page);
+  const ring = await voiceRing(page);
+  console.log(
+    `#875 ring ${ring.outline} on ${ring.surface}, ${ring.past.toFixed(2)} px past the panel`,
+  );
+  expect(ring.past).toBeLessThanOrEqual(0.5);
+  expect(contrastRatio(hex(ring.outline), hex(ring.surface))).toBeGreaterThanOrEqual(
+    AA_LARGE_TEXT_OR_NON_TEXT,
+  );
+});
+
+test('#875 control — without its rule, the voice button’s ring reaches past its panel — 390×844', async ({
+  page,
+}) => {
+  await openRaceVoice(page);
   const deleted = await page.evaluate((selector) => {
     let removed = 0;
     for (const sheet of document.styleSheets) {
@@ -165,11 +283,9 @@ test('#748 control — without the rule, the three rings are back at 1.04:1', as
       }
     }
     return removed;
-  }, RULE);
-  expect(deleted, `${RULE} was not found to delete`).toBe(1);
-  const named = (await tabThroughTheHud(page)).filter((ring) => NAMED.includes(ring.name));
-  expect(named.map((ring) => ring.name).sort()).toEqual([...NAMED].sort());
-  for (const ring of named) {
-    expect(ratio(ring), `${ring.name} is still visible without the rule`).toBeLessThan(1.1);
-  }
+  }, VOICE_RULE);
+  expect(deleted, `${VOICE_RULE} was not found to delete`).toBe(1);
+  const ring = await voiceRing(page);
+  console.log(`#875 control: the ring ${ring.past.toFixed(2)} px past the panel`);
+  expect(ring.past).toBeGreaterThan(1);
 });

@@ -588,6 +588,11 @@ voice: nothing else changes.
   Developer Portal, add its bot to a server of its own, and give it **Manage Channels** and **Create
   Instant Invite**. Turn **Membership Screening off** in that server: with it on, riders would join
   unable to speak, so the instance turns voice off.
+- **Who is given the link.** A rider a **private** room admits, in the room's welcome (#875), and
+  nobody else: a rider the room refuses is never told it. A public room has no voice until account
+  linking exists (#877), because a link alone cannot remove a banned rider from a channel they are
+  already in. The app shows it while a race waits on its line (on a tablet) and for the first
+  seconds of a group ride.
 - **What reaches Discord.** A channel named `oyl-ride-` and the first twelve hex digits of the
   room's random id; a temporary, single-room invite for at most the room's riders, for a day. No
   topic, no category, no audit-log reason, no ride data and nothing a rider typed.
@@ -635,6 +640,10 @@ voice: nothing else changes.
 | `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
 | `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
 | `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
+| `"event":"voice-failed","code":"log"` (or `"member"`) | after a removal or a suspension, writing the `rotate_voice` log entry (or reading who is in a room) failed. The removal or suspension itself was applied |
+
+**A removal or a ban replaces the room's channel** (#876): see `docs/moderation.md`, "Moderation
+in a room". What was done is a `rotate_voice` entry in the moderation log, not a line here.
 
 ## Room close codes
 
@@ -671,6 +680,18 @@ the blob count, and the database's SHA-256). `--keep N` removes all but the newe
 copies the snapshot to a second place — the off-box copy. The home deployment runs this on a
 schedule (the `backup` service: every six hours, fourteen kept, into `OYL_BACKUP_DIR` with a copy in
 `OYL_OFFBOX_DIR`).
+
+⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
+the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
+account that was erased. The privacy policy tells riders and notifiers that the project's own
+instance keeps no backup for longer than 30 days, so that is the limit. The home deployment's
+defaults keep the newest fourteen of one every six hours, which is 3.5 days, and are well inside it.
+If you change `OYL_BACKUP_KEEP` or `OYL_BACKUP_INTERVAL_SECONDS`, keep their product under 30 days
+(`OYL_BACKUP_KEEP` × `OYL_BACKUP_INTERVAL_SECONDS` ≤ 2 592 000 seconds). Nothing enforces that: it is
+yours to check. Count the other places a snapshot lands too: `OYL_OFFBOX_DIR` keeps the same number,
+the `pre-deploy` folder keeps the last three deploys' snapshots however old they are, and a copy you
+make by hand or with `rclone` is yours to delete. Restoring one needs no extra step for notifier
+details: the instance erases whatever is due again when it starts.
 
 ⚠️ **A backup kept only on the box it backs up is not a backup** of the box. `OYL_OFFBOX_DIR` is a
 drive or a share that survives the machine: a USB drive that is unplugged and kept elsewhere, or a

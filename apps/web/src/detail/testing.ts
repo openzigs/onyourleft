@@ -16,6 +16,8 @@
  * `detail/load.test.ts` and the view's tests assert on.
  */
 
+import { act } from 'react';
+
 import { metres, seconds, unixSeconds } from '@onyourleft/domain';
 import {
   activityId as toActivityId,
@@ -200,4 +202,91 @@ export function stubDetail(
   };
 
   return { athleteId: owner, store, channelReads, summaryReads, zoneReads };
+}
+
+/**
+ * A stand-in for `IntersectionObserver`, which jsdom does not have — #2068.
+ *
+ * The ride page decodes a chart's channel only once its slot is in view
+ * (`detail/visibility.ts`). With no observer at all every slot counts as seen,
+ * so a test that asserts the budget installs this one and says which slots
+ * have scrolled into view with {@link FakeIntersectionObservers.reveal}.
+ */
+export interface FakeIntersectionObservers {
+  /** Every element a live observer is still watching, in the order it was observed. */
+  observed(): readonly Element[];
+  /**
+   * Report each of `elements` to the observers that watch it, inside `act`:
+   * as intersecting, unless `intersecting` is `false`.
+   */
+  reveal(elements: readonly Element[], intersecting?: boolean): Promise<void>;
+  /** Put back whatever `globalThis.IntersectionObserver` was before. */
+  restore(): void;
+}
+
+type ObserverGlobal = { IntersectionObserver?: unknown };
+
+export function installFakeIntersectionObserver(): FakeIntersectionObservers {
+  const live = new Set<FakeObserver>();
+  class FakeObserver {
+    readonly root = null;
+    readonly rootMargin: string;
+    readonly thresholds: readonly number[] = [0];
+    readonly watched: Element[] = [];
+    constructor(
+      readonly callback: IntersectionObserverCallback,
+      options: IntersectionObserverInit = {},
+    ) {
+      this.rootMargin = options.rootMargin ?? '0px';
+      live.add(this);
+    }
+    observe(element: Element): void {
+      if (!this.watched.includes(element)) this.watched.push(element);
+    }
+    unobserve(element: Element): void {
+      const at = this.watched.indexOf(element);
+      if (at >= 0) this.watched.splice(at, 1);
+    }
+    disconnect(): void {
+      this.watched.length = 0;
+      live.delete(this);
+    }
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+  }
+  const scope = globalThis as ObserverGlobal;
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'IntersectionObserver');
+  const before = scope.IntersectionObserver;
+  scope.IntersectionObserver = FakeObserver;
+  return {
+    observed: () => [...live].flatMap((observer) => observer.watched),
+    reveal: async (elements, intersecting = true) => {
+      await act(async () => {
+        for (const observer of [...live]) {
+          const entries = elements
+            .filter((element) => observer.watched.includes(element))
+            .map(
+              (target) =>
+                ({
+                  target,
+                  isIntersecting: intersecting,
+                  intersectionRatio: intersecting ? 1 : 0,
+                }) as IntersectionObserverEntry,
+            );
+          if (entries.length > 0) {
+            observer.callback(entries, observer as unknown as IntersectionObserver);
+          }
+        }
+        await Promise.resolve();
+      });
+    },
+    restore: () => {
+      if (had) {
+        scope.IntersectionObserver = before;
+      } else {
+        delete scope.IntersectionObserver;
+      }
+    },
+  };
 }

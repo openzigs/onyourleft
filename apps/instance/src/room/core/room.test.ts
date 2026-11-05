@@ -641,6 +641,8 @@ describe('who can be in a room — ruling Q18', () => {
       'receive',
       // #789: takes a rider OUT; it adds nobody.
       'remove',
+      // #875: what a welcome says of the room's voice link; it seats nobody.
+      'setVoiceInvite',
       'start',
       'tick',
       'view',

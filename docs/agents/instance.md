@@ -332,6 +332,21 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` (a file, never
                         the token in the environment, #2146) and `…_GUILD_ID`;
                         `rooms.ts` §`over` deletes a room's channel, and the
-                        room sweep deletes leftovers
+                        room sweep deletes leftovers. Since #875 a rider's
+                        PRIVATE room's link goes to its riders in the
+                        welcome (protocol 4): `instance.ts`'s lookup asks
+                        `inviteFor` for each socket, waiting at most 2 s,
+                        and puts it in the plan; the worker sets it on the
+                        core (`setVoiceInvite`), which says it in every
+                        welcome and nowhere else. Never a public room.
+                        Since #876 a removal from a room and a suspension
+                        ROTATE the channel (`voice/voice-moderation.ts`),
+                        after the action is logged and the rider's socket
+                        closed: the riders who stay are told the new link
+                        in a `voice` message (the router's
+                        `setVoiceInvite`), the athlete it was about never,
+                        and `rotate_voice` is appended to the log
+                        (`SqlStore.logVoiceAction`). A linked rider's role
+                        and disconnect wait for #877
 
 ```
