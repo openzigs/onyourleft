@@ -522,6 +522,7 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
         throw new Error('the audio would not resume');
       },
       isRunning: () => false,
+      applyMix: () => undefined,
       suspend: () => undefined,
       startTone: () => undefined,
       setTone: () => undefined,

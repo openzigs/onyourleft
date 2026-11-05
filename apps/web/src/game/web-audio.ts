@@ -263,6 +263,11 @@ export function webAudioOutput(
     isRunning() {
       return context?.state === 'running' && !asleep;
     },
+    applyMix() {
+      // No context, no graph: the mix is read when the first press builds it.
+      if (context === undefined) return;
+      buses(context);
+    },
     suspend() {
       // ⚠️ `waking > 0` is #455: a resume in flight has not moved `state` yet,
       // and it WILL land — so `suspended` here is not a reason to do nothing.

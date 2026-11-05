@@ -22,6 +22,7 @@ import type { AudioContextLike } from './web-audio';
 
 export type RecordedCall =
   | { readonly kind: 'resume' }
+  | { readonly kind: 'applyMix' }
   | { readonly kind: 'suspend' }
   | { readonly kind: 'startTone'; readonly hz: number; readonly gain: number }
   | { readonly kind: 'setTone'; readonly hz: number; readonly gain: number }
@@ -56,6 +57,9 @@ export function recordingOutput(): RecordingOutput {
       output.running = true;
     },
     isRunning: () => output.running,
+    applyMix: () => {
+      output.calls.push({ kind: 'applyMix' });
+    },
     suspend: () => {
       output.calls.push({ kind: 'suspend' });
       output.running = false;
