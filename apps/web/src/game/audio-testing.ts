@@ -108,11 +108,30 @@ export interface FakeNode {
 }
 
 /** A gain node. Its `value` is the level it was last told to reach. */
+/**
+ * One call made on a gain's `AudioParam` — #2059 — as the real one plans it:
+ * `value` is a STEP at once; the three schedules are steps or ramps at `at`.
+ * A `cancelScheduledValues(t)` takes every planned event at `t` or later off
+ * the list, as the platform does, so the list is the plan as it now stands.
+ */
+export type FakeAutomation =
+  | { readonly method: 'value'; readonly value: number }
+  | { readonly method: 'setValueAtTime'; readonly value: number; readonly at: number }
+  | { readonly method: 'linearRampToValueAtTime'; readonly value: number; readonly at: number }
+  | {
+      readonly method: 'setTargetAtTime';
+      readonly value: number;
+      readonly at: number;
+      readonly constant: number;
+    };
+
 export interface FakeGain extends FakeNode {
   readonly kind: 'gain';
   readonly gain: { readonly value: number };
   /** How many automation calls it has been given, after it was made. */
   readonly scheduled: number;
+  /** Every step and schedule it has been given, in order, less any cancelled. */
+  readonly automation: FakeAutomation[];
 }
 
 export interface FakeAudio {
@@ -149,19 +168,47 @@ export function fakeAudioContext(): FakeAudio {
     resume: () => Promise.resolve(),
     suspend: () => Promise.resolve(),
     createGain: () => {
-      const gain = { value: 1 };
+      let current = 1;
+      const automation: FakeAutomation[] = [];
+      const gain = {
+        get value(): number {
+          return current;
+        },
+        // A direct assignment is a step at once — recorded, so a test can
+        // tell a ramp from a cut (#2059).
+        set value(value: number) {
+          current = value;
+          automation.push({ method: 'value', value });
+        },
+      };
       const node = {
         kind: 'gain' as const,
         outputs: [],
         scheduled: 0,
+        automation,
         gain: Object.assign(gain, {
-          setValueAtTime: (value: number) => reach(value),
-          setTargetAtTime: (value: number) => reach(value),
-          linearRampToValueAtTime: (value: number) => reach(value),
+          setValueAtTime: (value: number, at: number) => {
+            reach(value, { method: 'setValueAtTime', value, at });
+          },
+          setTargetAtTime: (value: number, at: number, constant: number) => {
+            reach(value, { method: 'setTargetAtTime', value, at, constant });
+          },
+          linearRampToValueAtTime: (value: number, at: number) => {
+            reach(value, { method: 'linearRampToValueAtTime', value, at });
+          },
+          cancelScheduledValues: (at: number) => {
+            for (let index = automation.length - 1; index >= 0; index -= 1) {
+              const event = automation[index];
+              if (event !== undefined && event.method !== 'value' && event.at >= at) {
+                automation.splice(index, 1);
+              }
+            }
+          },
         }),
       };
-      function reach(value: number): void {
-        gain.value = value;
+      function reach(value: number, event: FakeAutomation): void {
+        current = value;
+        automation.push(event);
         node.scheduled += 1;
       }
       gains.push(node);

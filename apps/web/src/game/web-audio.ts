@@ -56,8 +56,17 @@
  * The bus gains are set from the rider's mix (`audio-mix.ts`), read again at
  * every press that resumes the context and before every sound is scheduled, so
  * a choice made in Settings or on the ride's own controls is heard on the very
- * next sound, with nothing to subscribe to. Nothing moves the duck yet
- * (#2059): it stays at 1.
+ * next sound, with nothing to subscribe to.
+ *
+ * ## The duck — #2059
+ *
+ * While the music plays, every short sound ducks it: the duck gain ramps down
+ * to {@link MUSIC_DUCK_LEVEL} as the sound starts and back up to 1 once it has
+ * ended, so an effect over full-volume music is heard and the music is never
+ * cut. Ramps on the AudioParam (`setTargetAtTime`), no library, and a second
+ * sound inside the first one's duck moves the way back up rather than letting
+ * it land mid-sound. Music never plays during a ride, so in practice it is the
+ * menus' effects that duck it; the ride's cues would reuse this unchanged.
  *
  * ## The music — #2058
  *
@@ -154,11 +163,30 @@ export const MUSIC_FADE_SECONDS = 0.2;
 /** Five time constants of {@link MUSIC_FADE_SECONDS}, in ms: the fade is over. */
 export const MUSIC_FADE_MS = MUSIC_FADE_SECONDS * 5 * 1000;
 
+/**
+ * Where the music sits under a short sound — #2059: 0.35 of its level, about
+ * 9 dB down. Enough for a 60 ms note to be heard over it; not a cut.
+ */
+export const MUSIC_DUCK_LEVEL = 0.35;
+
+/**
+ * How quickly the duck goes down and comes back, in seconds (time constants).
+ * Down fast, so the sound's attack is not masked; back slower, so the music
+ * returns rather than jumps.
+ */
+export const MUSIC_DUCK_DOWN_SECONDS = 0.015;
+export const MUSIC_DUCK_BACK_SECONDS = 0.12;
+
+/** How long a short sound lasts, from its first note's start to its last note's end. */
+function soundSeconds(name: CueName): number {
+  return Math.max(...SOUNDS[name].map((note) => note.at + note.seconds));
+}
+
 /** The graph's gains — built once, with the context. @see the module note */
 interface Graph {
   readonly master: GainNode;
   readonly music: GainNode;
-  /** On music only, at 1 until #2059 ducks it. */
+  /** On music only: at 1, and ramped down under each short sound while music plays (#2059). */
   readonly duck: GainNode;
   readonly effects: GainNode;
   readonly cues: GainNode;
@@ -356,8 +384,17 @@ export function webAudioOutput(
     },
     playCue(name, level) {
       if (context === undefined) return;
-      const bus = buses(context)[BUS_OF[name]];
+      const graph = buses(context);
+      const bus = graph[BUS_OF[name]];
       const start = context.currentTime;
+      if (musicOn) {
+        // #2059: under the music's ramp, never a cut. Anything scheduled from
+        // now on — an earlier sound's way back up — gives way to this sound's.
+        const duck = graph.duck.gain;
+        duck.cancelScheduledValues(start);
+        duck.setTargetAtTime(MUSIC_DUCK_LEVEL, start, MUSIC_DUCK_DOWN_SECONDS);
+        duck.setTargetAtTime(1, start + soundSeconds(name), MUSIC_DUCK_BACK_SECONDS);
+      }
       for (const note of SOUNDS[name]) {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
