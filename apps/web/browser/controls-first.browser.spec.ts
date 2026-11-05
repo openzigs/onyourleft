@@ -1037,7 +1037,7 @@ test.describe('#993 — the help control beside a title', () => {
     await open(page, PHONE, 'data=empty');
     const route = routeById('segments');
     await visit(page, route);
-    const summary = page.locator('main > details.oyl-help > summary');
+    const summary = page.locator('main > .oyl-view-head > details.oyl-help > summary');
     const read = await summary.evaluate((element) => {
       const style = getComputedStyle(element);
       const shipped = element.getBoundingClientRect();
@@ -1050,22 +1050,22 @@ test.describe('#993 — the help control beside a title', () => {
       const stripped = element.getBoundingClientRect();
       (element as HTMLElement).style.minWidth = '';
       (element as HTMLElement).style.minHeight = '';
-      const title = document.querySelector('main > h1')?.getBoundingClientRect();
+      const title = document.querySelector('main > .oyl-view-head > h1')?.getBoundingClientRect();
+      // #2065: the line under the title shares its row where it fits, so it
+      // too must stop short of the ⓘ.
+      const line = document
+        .querySelector('main > .oyl-view-head > h1 + p')
+        ?.getBoundingClientRect();
       return {
         shipped: { width: shipped.width, height: shipped.height },
         declared,
         stripped: { width: stripped.width, height: stripped.height },
         // Beside the title: its middle within the title's first line, and the
-        // title's text stopping short of it.
+        // title's text — and the line's — stopping short of it.
         middle: shipped.top + shipped.height / 2,
         titleTop: title?.top ?? Number.NaN,
-        titleRight:
-          title === undefined
-            ? Number.NaN
-            : title.right -
-              Number.parseFloat(
-                getComputedStyle(document.querySelector('main > h1') as Element).paddingRight,
-              ),
+        titleRight: title?.right ?? Number.NaN,
+        lineRight: line?.right ?? Number.NaN,
         left: shipped.left,
       };
     });
@@ -1078,16 +1078,19 @@ test.describe('#993 — the help control beside a title', () => {
     expect(read.stripped.width).toBeLessThan(TOUCH_TARGET_PIXELS);
     expect(read.stripped.height).toBeLessThan(TOUCH_TARGET_PIXELS);
     expect(read.titleRight).toBeLessThanOrEqual(read.left);
+    expect(read.lineRight).toBeLessThanOrEqual(read.left);
     expect(read.middle).toBeGreaterThan(read.titleTop);
 
     // The platform's own name for it, as a screen reader would be given it.
     await expect(summary).toHaveAccessibleName(`Help with ${route.title}`);
-    const details = page.locator('main > details.oyl-help');
+    const details = page.locator('main > .oyl-view-head > details.oyl-help');
     await expect(details).not.toHaveAttribute('open');
     await summary.focus();
     await page.keyboard.press('Enter');
     await expect(details).toHaveAttribute('open', '');
-    await expect(page.locator('main > details.oyl-help .oyl-help__panel')).toBeVisible();
+    await expect(
+      page.locator('main > .oyl-view-head > details.oyl-help .oyl-help__panel'),
+    ).toBeVisible();
     await page.keyboard.press('Space');
     await expect(details).not.toHaveAttribute('open');
   });
@@ -1261,4 +1264,151 @@ test.describe('#1050, #1087 — Save workout, with blocks in the builder', () =>
     ).toBe(true);
     expect(below.margin).toBeLessThanOrEqual(FOLD_MARGIN_PIXELS);
   });
+});
+
+/**
+ * #2065 — the title block costs less than half what it did.
+ *
+ * Every route in `ALL_ROUTES` is opened in `reflow.html` at the owner's tablet
+ * size and at a phone, and its title block is measured: from the top of
+ * `main` to the bottom of the line under the `h1`. Every route must come in at
+ * no more than HALF of the tallest title block the same walk measures with
+ * today's rules put back ({@link TITLE_BLOCK_AS_IT_WAS}) — the control, in
+ * the same engine and the same fonts, so a runner whose system face sets the
+ * line wider moves both figures together. And the control itself must fail:
+ * every route's old title block is over that ceiling.
+ *
+ * Measured in the pinned Chromium on macOS, 2026-11-04 (CSS px; before is
+ * the control, after the shipped rules):
+ *
+ *   1280×800  before 107.8 on most routes, 115.8 on a list–detail route and
+ *             66.8 on Ride (#422 had put its line beside the title); the
+ *             ceiling is 57.9. After: 53.8 on every route.
+ *   412×915   before 107.8 where the line took one row, 132.6 where it took
+ *             two and 175.5 where the title took two (Instance, Not found);
+ *             the ceiling is 87.8. After: 62.8 where the line wraps under
+ *             the title on one row, 83.6 where it takes two, and 64.6 where
+ *             a short title leaves it 20rem to sit beside it (Ride, More).
+ *
+ * ⚠️ **Why half of the TALLEST, and not half of each route's own.** The
+ * issue's criterion is "half of today's measured value", one value, and the
+ * reason it gives is the 100–150 px every screen spent. Half of each route's
+ * own figure cannot be met by any layout that keeps the line at the body
+ * size: a phone route whose title and line took 108 px would need both in
+ * 54 px, and a title row and two rows of 16 px text are more than that with
+ * no padding at all. The per-route figures are printed so that the owner's
+ * before-and-after review sees every one of them.
+ *
+ * ## What it does NOT prove
+ *
+ * A real tablet's or phone's system face, which sets the line; or a text size
+ * above 100 %, where the line wraps sooner. The figures are printed so a near
+ * miss is visible.
+ */
+const TITLE_BLOCK_VIEWPORTS = [
+  { name: 'tablet 1280×800', width: 1280, height: 800 },
+  { name: 'phone 412×915', width: 412, height: 915 },
+] as const;
+
+/**
+ * The title block's rules as they were before #2065, put back over the
+ * shipping stylesheet. `display: contents` takes the box away, so the `h1`,
+ * the line and the help lay out as `main`'s own children again, under the
+ * display step, the paragraph's margins and `main`'s `lg` top padding — and,
+ * on Ride from 60rem, #422's two grid columns.
+ */
+const TITLE_BLOCK_AS_IT_WAS = `
+  .oyl-main { padding-top: var(--oyl-space-lg) !important; }
+  .oyl-main:has(.oyl-help) { position: relative; }
+  .oyl-view-head { display: contents; }
+  .oyl-view-head > h1 { font-size: var(--oyl-font-size-display); margin: 0 0 var(--oyl-space-sm); }
+  .oyl-main:has(.oyl-help) .oyl-view-head > h1 {
+    padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
+  }
+  .oyl-view-head > h1 + p { flex: none; margin: 1em 0; line-height: inherit; }
+  @media (min-width: 60rem) {
+    .oyl-main--instruments {
+      grid-template-columns: auto minmax(0, 1fr);
+      column-gap: var(--oyl-space-lg);
+    }
+    .oyl-main--instruments > *,
+    .oyl-main--instruments .oyl-view-head > * { grid-column: 1 / -1; }
+    .oyl-main--instruments .oyl-view-head > h1 {
+      grid-column: 1;
+      align-self: baseline;
+      margin-bottom: var(--oyl-space-md);
+    }
+    .oyl-main--instruments .oyl-view-head > h1 + p {
+      grid-column: 2;
+      align-self: baseline;
+      margin: 0 0 var(--oyl-space-md);
+    }
+  }
+`;
+
+/** Every route's title block: the top of `main` to the bottom of the line under the `h1`. */
+async function titleBlocks(
+  page: Page,
+  viewport: (typeof TITLE_BLOCK_VIEWPORTS)[number],
+  asItWas: boolean,
+): Promise<ReadonlyMap<RouteId, number>> {
+  await open(page, { ...viewport, margin: 0, consentBelowFold: [], summaryLines: 2 }, 'data=empty');
+  if (asItWas) {
+    await page.addStyleTag({ content: TITLE_BLOCK_AS_IT_WAS });
+  }
+  const heights = new Map<RouteId, number>();
+  for (const route of ALL_ROUTES) {
+    await visit(page, route);
+    const height = await page.evaluate(() => {
+      const main = document.querySelector('main');
+      const line = document.querySelector('main > .oyl-view-head > h1 + p');
+      if (main === null || line === null) return null;
+      return line.getBoundingClientRect().bottom - main.getBoundingClientRect().top;
+    });
+    if (height === null) {
+      throw new Error(`${route.id}: no line under the title to measure`);
+    }
+    heights.set(route.id, height);
+  }
+  const unvisited = await page.evaluate(() => window.__oylReflow?.unvisited());
+  expect(unvisited, 'routes in ALL_ROUTES the walk never opened').toEqual([]);
+  return heights;
+}
+
+test.describe('#2065 — the title block costs less than half what it did', () => {
+  for (const viewport of TITLE_BLOCK_VIEWPORTS) {
+    test(`on every route, at a ${viewport.name}`, async ({ browser }, info) => {
+      test.setTimeout(180_000);
+      const asItWas = await browser.newPage();
+      const before = await titleBlocks(asItWas, viewport, true);
+      await asItWas.close();
+      const shipped = await browser.newPage();
+      const after = await titleBlocks(shipped, viewport, false);
+      await shipped.close();
+
+      const ceiling = Math.max(...before.values()) / 2;
+      const lines = ALL_ROUTES.map(
+        (route) =>
+          `${route.id}: ${(before.get(route.id) ?? Number.NaN).toFixed(1)} → ` +
+          `${(after.get(route.id) ?? Number.NaN).toFixed(1)} px`,
+      );
+      const published = `ceiling ${ceiling.toFixed(1)} px, half of the tallest before`;
+      console.log(`#2065 title block, ${viewport.name}, ${published}\n  ${lines.join('\n  ')}`);
+      info.annotations.push({
+        type: 'title block',
+        description: `${published}; ${lines.join('; ')}`,
+      });
+
+      const over = ALL_ROUTES.filter((route) => (after.get(route.id) ?? Infinity) > ceiling).map(
+        (route) => `${route.id}: ${(after.get(route.id) ?? Number.NaN).toFixed(1)} px`,
+      );
+      expect(over, `title blocks over ${ceiling.toFixed(1)} px`).toEqual([]);
+      // The control: today's rules fail on every route, or the ceiling is one
+      // the old layout met somewhere and the case above proves less than it says.
+      const metAsItWas = ALL_ROUTES.filter((route) => (before.get(route.id) ?? 0) <= ceiling).map(
+        (route) => route.id,
+      );
+      expect(metAsItWas, 'routes whose OLD title block is within the ceiling').toEqual([]);
+    });
+  }
 });

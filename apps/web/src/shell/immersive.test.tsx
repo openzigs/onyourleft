@@ -160,7 +160,7 @@ function chrome(): Record<string, Element | null> {
     skipLink: document.querySelector('.oyl-skip-link'),
     header: document.querySelector('header.oyl-header'),
     navigation: document.querySelector('nav[aria-label="Primary"]'),
-    summary: document.querySelector('main > p.oyl-muted'),
+    summary: document.querySelector('main > .oyl-view-head > p.oyl-muted'),
     footer: document.querySelector('footer.oyl-footer'),
   };
 }

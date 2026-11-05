@@ -1053,36 +1053,139 @@ html {
 
 .oyl-main {
   flex: 1;
-  padding: var(--oyl-space-lg) var(--oyl-space-md);
+  padding: calc(var(--oyl-space-md) + var(--oyl-space-xs)) var(--oyl-space-md) var(--oyl-space-lg);
   max-width: var(--oyl-measure);
+}
+
+/*
+ * THE TITLE BLOCK — #2065, epic #2034.
+ *
+ * Every screen opened with its `h1` at the display step and the line under it
+ * stacked below at a paragraph's margins: 108 px from the top of `main` to the
+ * bottom of the line at 1280×800 and at 412×915, 116 px on a list–detail
+ * route, and 176 px on a phone where the title wrapped — paid above the fold
+ * on every screen, for two lines of words. `controls-first.browser.spec.ts`
+ * §"#2065" walks the route table at both sizes, holds every route to half of
+ * the tallest of those figures (today's rules put back are its control), and
+ * publishes each route's height before and after.
+ *
+ * - **One row that wraps.** `AppShell` puts the `h1`, its line and the
+ *   screen's ⓘ in one box, a flex row on the first baseline: the line sits
+ *   beside the title where it fits, and wraps under the title where it does
+ *   not. On a phone "fits" is 20rem of line — most of a phone's width — so a
+ *   line wraps whole under its title rather than into a narrow column beside
+ *   it, where a 60-character sentence took three rows. A wrap moves the line,
+ *   never a word of it: every sentence stays on its route, and the DOM order
+ *   is still the `h1`, the line, the help.
+ * - **The title steps down** — `xxl` from 40rem, where the cards' own titles
+ *   are `xl` and the page's stays above them, and `lg` on a phone, the size a
+ *   compact app bar gives its title: at `xl` a phone's long title pushed its
+ *   two-row line past the ceiling. The display step was a hero's size for a
+ *   title that names the screen the rider just chose. Still the display face
+ *   at its heaviest weight and still `main`'s first heading. The line keeps
+ *   the body size, at a line-height a step tighter than a paragraph's.
+ * - **`main`'s top padding from `lg` (24 px) to `md` + `xs` (20 px)**, and no
+ *   further: `shell.browser.spec.ts` §`MINIMUM_HEADING_CLEARANCE` holds the
+ *   `h1` 16 px clear of the chrome after a fragment jump, and the padding is
+ *   that gap — on a page too short to scroll, and where the header sticks, no
+ *   scroll margin can supply it, and where the header does not stick the same
+ *   spec holds the margin at the inset alone. `md` alone left the `h1` 15.8 px
+ *   clear at 320×256, where the jump lands `main` a fraction of a pixel high;
+ *   `xs` is the slack.
+ * - **As wide as its words, and wider than the reading measure if they need
+ *   it.** A `prose` route's `main` stops at `--oyl-measure`, and a long title
+ *   beside its line does not fit in it: at 1280 px *Connect to an instance*
+ *   took two rows there. From the rail's breakpoint the box is as wide as the
+ *   title, the line and the ⓘ, up to the shell's width less `main`'s padding
+ *   — the viewport less the rail (5.5rem, §"RAIL") and the side insets — so
+ *   it may reach past `main`'s end edge, and the ⓘ stays at the end of the
+ *   line rather than out at the window's edge. Where `main` fills the shell
+ *   the cap is `main`'s own width, so one rule serves every layout; the line
+ *   itself keeps the measure. Below the rail the box is `main`'s width.
+ *
+ * The box takes the margin the line under the title had (`md`), and it
+ * collapses with what follows as the line's did. While a ride has the screen
+ * the box has no class (#423) and holds only the hidden title.
+ */
+.oyl-view-head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--oyl-space-md);
+  margin-block-end: var(--oyl-space-md);
+}
+
+.oyl-view-head > h1 {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--oyl-font-size-lg);
+}
+
+.oyl-view-head > h1 + p {
+  flex: 1 1 20rem;
+  max-width: var(--oyl-measure);
+  margin: 0;
+  line-height: 1.3;
+}
+
+/*
+ * From the rail: the box is its words' width, so the line's flex basis is its
+ * own width too — a 20rem basis wider than a short line would wrap a row that
+ * fits. It wraps under the title only where the whole row is wider than the
+ * shell.
+ */
+@media (min-width: 37.5rem) {
+  .oyl-view-head > h1 + p {
+    flex-basis: auto;
+  }
+
+  .oyl-view-head {
+    inline-size: max-content;
+    max-inline-size: max(
+      100%,
+      calc(100vw - 5.5rem - var(--oyl-safe-left) - var(--oyl-safe-right) - 2 * var(--oyl-space-md))
+    );
+  }
+}
+
+@media (min-width: 40rem) {
+  .oyl-view-head > h1 {
+    font-size: var(--oyl-font-size-xxl);
+  }
 }
 
 /*
  * A screen's help, beside its title — #993 (`design/ScreenHelp.tsx`).
  *
- * The `<details>` stands AFTER the line under the title, so `main > h1 + p` is
- * still that line and the panel opens in its place in the flow; its summary,
- * the ⓘ, is drawn at the end of the title's first line. So `main` is its
- * containing block, and the title stops short of the ⓘ rather than running
- * under it.
+ * The `<details>` stands AFTER the line under the title, inside the title
+ * block since #2065: on a line of its own (`flex-basis: 100%`), so its panel
+ * opens under the row, in the flow; its summary, the ⓘ, is drawn at the end
+ * of the title's row. So the title block is its containing block, and the
+ * title and the line beside it stop short of the ⓘ rather than running under
+ * it. A closed `<details>` whose summary is out of the flow is no height at
+ * all, so the row costs nothing for it.
  *
  * The ⓘ is a 44 × 44 target DECLARED (SC 2.5.5, #316's reason): the glyph
  * alone is 20 px, and `controls-first.browser.spec.ts` strips the declaration
  * as its control. Its glyph is `accentText` on the page — the declared non-text
  * pair the disclosure markers use (SC 1.4.11).
  */
-.oyl-main:has(> .oyl-help) {
-  position: relative;
+.oyl-view-head:has(> .oyl-help) {
+  padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
 }
 
-.oyl-main:has(> .oyl-help) > h1 {
-  padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
+/* A line of its own: a `max-width` here would let it share the title's row
+   wherever the row is wider than the measure, and squeeze the line. */
+.oyl-view-head > .oyl-help {
+  flex-basis: 100%;
 }
 
 .oyl-help > summary {
   position: absolute;
-  inset-block-start: calc(var(--oyl-space-lg) + (var(--oyl-font-size-display) * 1.1 - 2.75rem) / 2);
-  inset-inline-end: var(--oyl-space-md);
+  inset-block-start: calc((var(--oyl-font-size-lg) * 1.1 - 2.75rem) / 2);
+  inset-inline-end: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1093,6 +1196,12 @@ html {
   color: var(--oyl-color-accent-text);
   cursor: pointer;
   list-style: none;
+}
+
+@media (min-width: 40rem) {
+  .oyl-help > summary {
+    inset-block-start: calc((var(--oyl-font-size-xxl) * 1.1 - 2.75rem) / 2);
+  }
 }
 
 .oyl-help > summary::-webkit-details-marker {
@@ -1109,7 +1218,8 @@ html {
 }
 
 .oyl-help__panel {
-  margin-block-end: var(--oyl-space-md);
+  max-width: var(--oyl-measure);
+  margin-block-start: var(--oyl-space-sm);
 }
 
 .oyl-help__panel > p {
@@ -2080,9 +2190,11 @@ html {
  * first control for one line of text that fits beside the heading. `.oyl-ride`
  * below has the whole budget; this rule is one of its two terms.
  *
- * The same `60rem` as `.oyl-ride`'s first column break, on purpose: below it
- * the screen is one column and a page that scrolls, the fold is not a promise
- * anybody made, and the stacked title is left exactly as it was.
+ * ⚠️ **Since #2065 the row itself is `.oyl-view-head`'s, on every route and at
+ * every width** (§"THE TITLE BLOCK"), so this grid no longer places the title
+ * and the line in two columns: it is one column, kept so that the Ride
+ * screen's children keep the margins they were measured with (a grid's
+ * margins do not collapse, and `rideview.browser.spec.ts` holds the fold).
  *
  * `align-items: start` and not `stretch`: `.oyl-main` is the flex child that
  * takes the shell's spare height, and a stretched grid row would hand that
@@ -2091,26 +2203,9 @@ html {
 @media (min-width: 60rem) {
   .oyl-main--instruments {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: var(--oyl-space-lg);
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
     align-content: start;
-  }
-
-  .oyl-main--instruments > * {
-    grid-column: 1 / -1;
-  }
-
-  .oyl-main--instruments > h1 {
-    grid-column: 1;
-    align-self: baseline;
-    margin-bottom: var(--oyl-space-md);
-  }
-
-  .oyl-main--instruments > h1 + p {
-    grid-column: 2;
-    align-self: baseline;
-    margin: 0 0 var(--oyl-space-md);
   }
 }
 
@@ -2177,8 +2272,9 @@ html {
  * margin, which comes out negative, so the browser clamps it to the top of the
  * document and `main` is never tucked under the header at all. Measured by
  * `shell.browser.spec.ts`: `scrollY` 0, the `h1` 24px clear of the header —
- * which is `.oyl-main`'s own 1.5rem top padding, the same gap the layout has
- * with no sticky header. The 5rem this replaces lands `scrollY` at 17 and the
+ * which is `.oyl-main`'s own top padding (1.5rem then, 1rem here since
+ * #2065), the same gap the layout has with no sticky header. The 5rem this
+ * replaces lands `scrollY` at 17 and the
  * `h1` 7px clear, flush against the chrome.
  *
  * ⚠️ The 97px is a MEASUREMENT and a twelfth route would change it. If the

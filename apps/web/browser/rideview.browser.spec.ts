@@ -337,9 +337,12 @@ for (const viewport of TABLETS) {
 
     test('the title and its one-line summary share a row', async ({ browser }) => {
       // 40.8 px of the budget above. Stacked, they spend a line of the fold on
-      // a sentence that fits beside the heading; the control below requires
-      // them to be stacked again under the prose measure, so this is not true
-      // of a page that simply has no summary.
+      // a sentence that fits beside the heading. ⚠️ Until #2065 the control
+      // below required them to be stacked again under the prose measure; the
+      // row is every layout's now (`theme.css` §"THE TITLE BLOCK"), and
+      // `controls-first.browser.spec.ts` §"#2065" holds it on every route with
+      // the old rules as its control. The two heights are what keep this from
+      // passing on a page that simply has no summary.
       const page = await sharedRideView(browser, viewport);
       const { title, summary } = await measure(page);
 
@@ -383,9 +386,9 @@ for (const viewport of TABLETS) {
       const start = seen.controls.find((each) => each.name === STARTS_A_WORKOUT);
       expect(start?.box.height ?? 0).toBeGreaterThan(0);
       expect(start?.box.bottom ?? 0).toBeGreaterThan(viewport.height - insetsOf(viewport).bottom);
-      // And the title is stacked over its summary again, which is what makes
-      // "they share a row" above a statement about the instruments layout.
-      expect(seen.summary?.top ?? 0).toBeGreaterThanOrEqual(seen.title?.bottom ?? Infinity);
+      // ⚠️ It no longer requires the title stacked over its summary: since
+      // #2065 they share a row on every layout, the prose measure included
+      // (see "share a row" above).
     });
   });
 }

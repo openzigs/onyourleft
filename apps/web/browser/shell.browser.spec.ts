@@ -455,10 +455,12 @@ for (const viewport of VIEWPORTS) {
         // there it is the far end of the `h1`'s box that has to hit the `h1`
         // — the same proof that hit-testing sees this page, on the one thing
         // every route is sure to have, and clear of the link, which on a
-        // phone sits over the heading's start.
+        // phone sits over the heading's start. ⚠️ Since #2065 that is the
+        // title BLOCK's far end: the `h1` is as wide as its words, beside the
+        // line under it, and on a phone the link covers all of it.
         const headerBox = header.getBoundingClientRect();
-        const heading = document.querySelector('h1');
-        if (heading === null) throw new Error('no h1');
+        const heading = document.querySelector('main > .oyl-view-head');
+        if (heading === null) throw new Error('no title block');
         const headingBox = heading.getBoundingClientRect();
         const [target, x, y] =
           headerBox.height > 0
@@ -476,7 +478,7 @@ for (const viewport of VIEWPORTS) {
       expect(hit.linkHeight, 'the skip link has no box to hit-test').toBeGreaterThan(0);
       expect(
         hit.onHeaderElsewhere,
-        'a point inside the header (or, where the header is folded away, the h1) does not hit ' +
+        'a point inside the header (or, where the header is folded away, the title block) does not hit ' +
           'it, so this hit test proves nothing',
       ).toBe(true);
       expect(

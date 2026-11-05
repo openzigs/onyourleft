@@ -168,8 +168,6 @@ function notMedium(box: Box | undefined): string | undefined {
   return undefined;
 }
 
-const area = (box: Box | undefined): number => (box === undefined ? 0 : box.width * box.height);
-
 const overlaps = (line: Box, box: Box | undefined): boolean =>
   box !== undefined &&
   line.right > box.left + SUBPIXEL_TOLERANCE &&
@@ -261,11 +259,19 @@ test.describe('#1010 — Next up is the first thing, and its Ride starts above t
       // The one primary on the screen, and the first control in it.
       expect(seen.primaries).toEqual(['Ride']);
       // The biggest thing on the screen: larger than every other card that
-      // starts on it. (On a phone on its side This week starts under the
-      // fold, and Next up's picture gives up height there to keep Ride on it.)
+      // starts on it. (On a phone on its side Next up's picture gives up
+      // height to keep Ride on it.) ⚠️ What is compared is what is ON the
+      // screen, each card cut at the fold: since #2065 halved the title above
+      // them, the card after Next up starts just above a 640×360 fold, and
+      // all 520×317 px of it were weighed against Next up when a strip of it
+      // is what shows.
+      const shown = (box: Box | undefined): number =>
+        box === undefined
+          ? 0
+          : box.width * Math.max(0, Math.min(box.bottom, seen.fold) - Math.max(box.top, 0));
       for (const other of [seen.week, seen.trainer, ...seen.rideCards.map((card) => card.card)]) {
         if (other !== undefined && other.top < seen.fold) {
-          expect(area(next?.card)).toBeGreaterThan(area(other));
+          expect(shown(next?.card)).toBeGreaterThan(shown(other));
         }
       }
       // Ride is a 44 px target at least, and big: wider than the ride cards' links.

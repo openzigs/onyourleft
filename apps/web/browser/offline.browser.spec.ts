@@ -641,11 +641,12 @@ test.describe('a cold start with the network off', () => {
         await expect(second.page.locator('h1')).toHaveText(title);
         await expect(second.page.locator('main [data-oyl-view-loading]')).toHaveCount(0);
         await expect(second.page.locator('main')).not.toContainText('Could not load this page');
-        // More than the shell's own heading and summary: the view itself.
+        // More than the shell's own title block (#2065: the heading, its
+        // summary and its help in one box): the view itself.
         expect(
-          await second.page.locator('main > *').count(),
+          await second.page.locator('main > :not(.oyl-view-head)').count(),
           `${group}: main holds only the shell's heading and summary`,
-        ).toBeGreaterThan(2);
+        ).toBeGreaterThan(0);
         // ⚠️ Fetched at SOME point in the session rather than on this
         // navigation: `main.tsx` preloads every group once Home is idle, so
         // the chunk may already have arrived. Each group chunk is named for
