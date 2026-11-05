@@ -308,6 +308,22 @@
  * own rule. A plan says what it
  * was inferred ({@link FootprintPlan.family}, {@link FootprintPlan.inferred}).
  *
+ * ## Mapped colours and materials (#1792, the owner's ruling D4 of 2026-10-27)
+ *
+ * A mapped `building:material` puts the walls on one of the belt's own
+ * surfaces ({@link MAPPED_WALL_SURFACES}) — or `wood` in clapboard, or `glass`
+ * a tower's curtain wall ({@link STYLE_GLAZED}) at any urban class — over the
+ * archetype's cladding and every seeded share; a pitched roof's
+ * `roof:material` its roof ({@link MAPPED_ROOF_SURFACES}, `asphalt` the
+ * shingles). `stone`, which no surface reads as, and a `concrete` roof are not
+ * read. A mapped `building:colour` or `roof:colour` — an index into the
+ * profile's palette — paints the wall or the roof the nearest entry its
+ * surface's list already has (`building-paint.ts` §`mappedPaintEntry`), and
+ * `paintTown` never moves it, so two tagged neighbours in one colour are
+ * painted alike. No surface, paint, uniform or draw call is added. Untagged
+ * footprints are planned as before, and so is every one with
+ * `?levers=-mapped-paint` ({@link FootprintPlanOptions}' `mappedPaint`).
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -329,13 +345,16 @@ import {
   triangulate,
   type BuildingFeature,
   type Ring,
+  type RoofMaterial,
   type RoofShape,
   type StreetFeature,
+  type WallMaterial,
 } from '@onyourleft/map-features';
 
 import {
   AWNING_PAINTS,
   DOOR_PAINTS,
+  mappedPaintEntry,
   paintsOf,
   roofPaintsOf,
   SHINGLE_SHARE,
@@ -1481,6 +1500,33 @@ export function roofSurfaceOf(roof: FootprintRoof, share: number): StructureSurf
   if (roof === 'flat') return 'flat-roof';
   return share < 0.5 ? 'roof-tiles' : 'slate';
 }
+
+/**
+ * The surface a mapped `building:material` puts a plan's walls in — #1792,
+ * always one the belt already draws ({@link FOOTPRINT_SURFACES}), so no
+ * surface, material or draw call is added. `wood` is clapboard
+ * ({@link SIDING_SURFACE}, `CLAD_CLAPBOARD`) and `glass` the curtain wall
+ * ({@link STYLE_GLAZED}), so neither is here; `stone` is not read, because
+ * none of the belt's surfaces reads as stone.
+ */
+export const MAPPED_WALL_SURFACES: Readonly<Partial<Record<WallMaterial, StructureSurface>>> = {
+  brick: 'brick',
+  plaster: 'render',
+  concrete: 'concrete',
+  metal: 'corrugated',
+};
+
+/**
+ * The surface a mapped `roof:material` puts a pitched plan's roof in — #1792,
+ * on the belt's own surfaces. `asphalt` is shingles ({@link SHINGLE_SURFACE},
+ * `CLAD_SHINGLE`), so is not here; a `concrete` roof is not read, and nor is
+ * any tag on a flat roof, whose surface is the flat roof's.
+ */
+export const MAPPED_ROOF_SURFACES: Readonly<Partial<Record<RoofMaterial, StructureSurface>>> = {
+  slate: 'slate',
+  roof_tiles: 'roof-tiles',
+  metal: 'corrugated',
+};
 
 /**
  * Every surface a plan can wear — the range of {@link wallSurfaceOf} and
@@ -5209,6 +5255,8 @@ export function footprintPlans(
   const seed = scatterSeed(profile);
   // #1790: each footprint's mapped roof and storeys, unless `-mapped-roof-shape` is off.
   const mapped = options.mappedRoofShape ?? true;
+  // #1792: and its mapped colours and materials, unless `-mapped-paint` is off.
+  const mappedPaint = options.mappedPaint ?? true;
   const counts: Record<FootprintVerdict, number> = {
     kept: 0,
     'on-excluded-land': 0,
@@ -5218,6 +5266,8 @@ export function footprintPlans(
     'too-large': 0,
   };
   const plans: FootprintPlan[] = [];
+  // #1792: which of each plan's wall and roof paints is its mapped colour, by its place in `plans`.
+  const pinned: PinnedPaint[] = [];
   // #1588: every footprint, planned or not, so a driveway keeps off each.
   const others = new RingGrid(
     corridor.buildings.map((building) => building.rings[0] ?? new Float32Array(0)),
@@ -5298,32 +5348,34 @@ export function footprintPlans(
   for (const [index, each] of measured.entries()) {
     if (each === undefined) continue;
     counts.kept += 1;
-    plans.push(
-      planFootprint(
-        each,
-        land,
-        profile,
-        origin,
-        seed,
-        maxVertices,
-        { grid: others, own: index, porches, driveways },
-        party.get(index) ?? NO_PARTY_WALLS,
-        {
-          split: options.splitRoofs ?? true,
-          flat: false,
-          variants: options.roofVariants === false ? 'off' : (options.roofVariant ?? 'archetype'),
-          mapped,
-        },
-        {
-          on: options.houseArchetypes ?? true,
-          dropped: 0,
-          dormers: options.dormerVariants ?? true,
-          porches: options.archetypePorches ?? true,
-          buildings: options.commercialArchetypes ?? true,
-          steeples: options.steeples ?? true,
-        },
-      ),
+    const plan = planFootprint(
+      each,
+      land,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      { grid: others, own: index, porches, driveways },
+      party.get(index) ?? NO_PARTY_WALLS,
+      {
+        split: options.splitRoofs ?? true,
+        flat: false,
+        variants: options.roofVariants === false ? 'off' : (options.roofVariant ?? 'archetype'),
+        mapped,
+      },
+      {
+        on: options.houseArchetypes ?? true,
+        dropped: 0,
+        dormers: options.dormerVariants ?? true,
+        porches: options.archetypePorches ?? true,
+        buildings: options.commercialArchetypes ?? true,
+        steeples: options.steeples ?? true,
+        mappedPaint,
+      },
     );
+    plans.push(plan);
+    // #1792: a mapped colour is the building's own, which no neighbour moves it off.
+    pinned.push(mappedPaint ? pinnedPaintOf(plan, each.building) : NOT_PINNED);
   }
   // #1637: and a city centre's lots, as terraced blocks, off every one kept.
   // Not footprints of the corridor's, so no verdict counts them.
@@ -5350,7 +5402,7 @@ export function footprintPlans(
       ),
     );
   }
-  return { plans: paintTown(plans), verdicts: counts };
+  return { plans: paintTown(plans, pinned), verdicts: counts };
 }
 
 /**
@@ -5520,6 +5572,38 @@ function seededEntry(share: number, count: number): number {
   return Math.min(count - 1, Math.floor(share * count));
 }
 
+/** Which of a plan's wall and roof paints is its mapped colour — #1792 — which `paintTown` keeps. */
+interface PinnedPaint {
+  readonly wall: boolean;
+  readonly roof: boolean;
+}
+
+/** Neither paint is a mapped colour: an untagged plan's, a terraced block's, and `-mapped-paint`. */
+const NOT_PINNED: PinnedPaint = { wall: false, roof: false };
+
+/**
+ * The paint entry a mapped colour gives a plan's wall or roof — #1792, on the
+ * surface and cladding it wears (`building-paint.ts` §`mappedPaintEntry`) — or
+ * `undefined` where the footprint carries no colour there.
+ */
+function mappedPaintOf(
+  colour: number | null,
+  surface: StructureSurface,
+  shingled: boolean,
+): number | undefined {
+  return colour === null ? undefined : mappedPaintEntry(surface, shingled, colour);
+}
+
+/** Which of `plan`'s paints are `building`'s mapped colours — #1792. */
+function pinnedPaintOf(plan: FootprintPlan, building: BuildingFeature): PinnedPaint {
+  return {
+    wall: mappedPaintOf(building.wallColour, plan.surfaces.wall, false) !== undefined,
+    roof:
+      mappedPaintOf(building.roofColour, plan.surfaces.roof, plan.cladding.roof === 'shingle') !==
+      undefined,
+  };
+}
+
 /** Whether two plans are painted alike: the same surfaces, in the same four paints. */
 export function paintedAlike(a: FootprintPlan, b: FootprintPlan): boolean {
   return (
@@ -5594,8 +5678,15 @@ function nearestWearer(
  * "Alike" compares the surface and the paint entry, not the cladding the rider
  * sees: shingled and plain slate roofs, or clapboard and plastered walls, with
  * the same entry count as alike. That only over-constrains the choice.
+ *
+ * Since #1792 a wall or roof paint that is its footprint's mapped colour
+ * (`pinned`) is kept wherever it is, so two tagged neighbours in one colour
+ * wear it alike; only their trims and doors walk.
  */
-function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
+function paintTown(
+  plans: readonly FootprintPlan[],
+  pinned: readonly PinnedPaint[],
+): FootprintPlan[] {
   const reach = PAINT_NEIGHBOUR_METRES;
   const cells = new Map<number, number[]>();
   const painted: FootprintPlan[] = [];
@@ -5603,7 +5694,8 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
   const key = (ix: number, iz: number): number => (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
   const alike = (each: FootprintPlan): boolean =>
     near.some((other) => paintedAlike(other.plan, each));
-  for (const plan of plans) {
+  for (const [index, plan] of plans.entries()) {
+    const fixed = pinned[index] ?? NOT_PINNED;
     const ix = Math.floor(plan.centroid.x / reach);
     const iz = Math.floor(plan.centroid.z / reach);
     near.length = 0;
@@ -5622,21 +5714,26 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
     const { wall: wallSurface, roof: roofSurface } = plan.surfaces;
     const shingled = plan.cladding.roof === 'shingle';
     const paint: FootprintPaint = {
-      wall: farthestEntry(plan.paint.wall, paintsOf(wallSurface)?.length ?? 1, (entry) =>
-        nearestWearer(
-          near,
-          (other) => other.surfaces.wall === wallSurface && other.paint.wall === entry,
-        ),
-      ),
-      roof: farthestEntry(
-        plan.paint.roof,
-        roofPaintsOf(roofSurface, shingled)?.length ?? 1,
-        (entry) =>
-          nearestWearer(
-            near,
-            (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
+      // #1792: a mapped colour stays, whoever beside it wears the same.
+      wall: fixed.wall
+        ? plan.paint.wall
+        : farthestEntry(plan.paint.wall, paintsOf(wallSurface)?.length ?? 1, (entry) =>
+            nearestWearer(
+              near,
+              (other) => other.surfaces.wall === wallSurface && other.paint.wall === entry,
+            ),
           ),
-      ),
+      roof: fixed.roof
+        ? plan.paint.roof
+        : farthestEntry(
+            plan.paint.roof,
+            roofPaintsOf(roofSurface, shingled)?.length ?? 1,
+            (entry) =>
+              nearestWearer(
+                near,
+                (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
+              ),
+          ),
       trim: farthestEntry(plan.paint.trim, TRIM_PAINTS.length, (entry) =>
         nearestWearer(near, (other) => other.paint.trim === entry),
       ),
@@ -6272,6 +6369,15 @@ export interface FootprintPlanOptions {
    * footprint is planned as before (`?levers=-inferred-commercial`).
    */
   readonly inferredCommercial?: boolean;
+  /**
+   * #1792: each footprint's mapped `building:colour`, `roof:colour`,
+   * `building:material` and `roof:material`, where #1789 carries them,
+   * painting and cladding it on the belt's own surfaces and paints
+   * ({@link MAPPED_WALL_SURFACES}, {@link MAPPED_ROOF_SURFACES},
+   * `building-paint.ts` §`mappedPaintEntry`); `true` by default. Off, the four
+   * tags are ignored and every plan is as before (`?levers=-mapped-paint`).
+   */
+  readonly mappedPaint?: boolean;
 }
 
 /**
@@ -6320,6 +6426,8 @@ interface ArchetypeChoice {
   readonly buildings?: boolean;
   /** #2021: whether a mapped place of worship is given its steeple (`-steeples` off). */
   readonly steeples?: boolean;
+  /** #1792: whether its mapped colours and materials paint and clad it (`-mapped-paint` off). */
+  readonly mappedPaint?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -6560,14 +6668,28 @@ function planFootprint(
     share(STREAM_PORCH) < shareOf(features.canopy, PORCH_SHARE);
   const withPosts = share(STREAM_POSTS) < shareOf(features.canopyPosts, PORCH_POSTS_SHARE);
 
+  // #1792: the mapped `building:material` and, on a pitched roof, `roof:material`, while
+  // the lever is on — over the archetype's cladding and every seeded share.
+  const wallMaterial = choice.mappedPaint === true ? building.wallMaterial : null;
+  const roofMaterial =
+    choice.mappedPaint === true && roof !== 'flat' ? building.roofMaterial : null;
+  // #1792: `wood` is clapboard wherever clapboard is drawn, but on a barn, whose planks are wood.
+  const woodSiding =
+    wallMaterial === 'wood' && !part && storeys <= TOWER_STOREYS && family !== 'barn';
   // #1588: the US house — its cladding, its windows' style, a garage.
   const clapboard =
-    residential &&
-    !part &&
-    storeys <= TOWER_STOREYS &&
-    share(STREAM_SIDING) < shareOf(features.siding, SIDING_SHARE);
-  // #2024: a pole building's roof is its grey sheet, never shingles.
-  const shingled = roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
+    woodSiding ||
+    ((wallMaterial === null || MAPPED_WALL_SURFACES[wallMaterial] === undefined) &&
+      residential &&
+      !part &&
+      storeys <= TOWER_STOREYS &&
+      share(STREAM_SIDING) < shareOf(features.siding, SIDING_SHARE));
+  // #2024: a pole building's roof is its grey sheet, never shingles. #1792: a mapped
+  // `asphalt` roof is shingles, and any other mapped one none.
+  const shingled =
+    roofMaterial !== null
+      ? roofMaterial === 'asphalt'
+      : roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
   const { least, most } = CLAPBOARD_COURSE_METRES;
   const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
   const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
@@ -6583,8 +6705,11 @@ function planFootprint(
     (roof === 'flat' ? STYLE_FLAT_ROOF : STYLE_EAVES) +
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
     (use === 'commercial' ? STYLE_COMMERCIAL : 0) +
-    // #1636: a tower in a covered urban class is glazed; with no class, as before.
-    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0) +
+    // #1636: a tower in a covered urban class is glazed; with no class, as before. #1792: and
+    // a tower mapped `glass` in any.
+    ((urbanClass !== 'unknown' || wallMaterial === 'glass') && storeys >= GLAZED_MIN_STOREYS
+      ? STYLE_GLAZED
+      : 0) +
     // #1663: a terraced building's corners are its row's, and carry no quoin.
     (terraced ? STYLE_TERRACED : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
@@ -7166,26 +7291,36 @@ function planFootprint(
           frontFrame?.nz ?? 0,
           base,
         );
+  const wallMaterialSurface =
+    wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];
+  const roofMaterialSurface =
+    roofMaterial === null ? undefined : MAPPED_ROOF_SURFACES[roofMaterial];
   const wallSurface = clapboard
     ? SIDING_SURFACE
-    : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
-      buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
-      ? 'brick'
-      : // #1791: a mapped barn's planks, under any roof.
-        family === 'barn'
-        ? 'planks'
-        : // #2024: a pole building's metal sheet.
-          pole
-          ? 'corrugated'
-          : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+    : // #1792: the mapped material's surface, over every rule below.
+      wallMaterialSurface !== undefined
+      ? wallMaterialSurface
+      : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+        buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+        ? 'brick'
+        : // #1791: a mapped barn's planks, under any roof.
+          family === 'barn'
+          ? 'planks'
+          : // #2024: a pole building's metal sheet.
+            pole
+            ? 'corrugated'
+            : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.
+  // #1792: a mapped roof material's surface over each of those, on a pitched roof.
   const roofSurface = shingled
     ? SHINGLE_SURFACE
-    : (pole && roof !== 'flat') || drew.steeple
-      ? 'slate'
-      : roofSurfaceOf(roof, share(STREAM_ROOF));
+    : roofMaterialSurface !== undefined
+      ? roofMaterialSurface
+      : (pole && roof !== 'flat') || drew.steeple
+        ? 'slate'
+        : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
   const driveway = drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING;
@@ -7207,10 +7342,18 @@ function planFootprint(
       roof: shingled ? 'shingle' : 'photograph',
       course,
     },
-    // Where the paint starts; `paintTown` moves it off a neighbour's.
+    // Where the paint starts; `paintTown` moves it off a neighbour's. #1792: a mapped colour's
+    // nearest paint is where it stays.
     paint: {
-      wall: seededEntry(share(STREAM_PAINT_WALL), paintsOf(wallSurface)?.length ?? 1),
-      roof: seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, shingled)?.length ?? 1),
+      wall:
+        (choice.mappedPaint === true
+          ? mappedPaintOf(building.wallColour, wallSurface, false)
+          : undefined) ?? seededEntry(share(STREAM_PAINT_WALL), paintsOf(wallSurface)?.length ?? 1),
+      roof:
+        (choice.mappedPaint === true
+          ? mappedPaintOf(building.roofColour, roofSurface, shingled)
+          : undefined) ??
+        seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, shingled)?.length ?? 1),
       trim: seededEntry(share(STREAM_PAINT_TRIM), TRIM_PAINTS.length),
       door: seededEntry(share(STREAM_PAINT_DOOR), DOOR_PAINTS.length),
     },
