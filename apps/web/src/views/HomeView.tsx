@@ -65,6 +65,17 @@
  * it used to say "A free ride" with a Ride to `#/ride` and then change its
  * mind. A screen with no store, or whose read failed, still offers a free ride.
  *
+ * ## A dashboard of modules — #2044
+ *
+ * Home was one column of cards with the last ride under the ride choices. It
+ * is a grid of modules now, in ONE reading order on every layout: Next up
+ * (the quick-launch), the sensors (today the Trainer card; #2045 fills the
+ * slot), the last ride (#2048) — or, on a first open, the other ways to start
+ * — and the week (#2049); then the ride choices, fitness and the badges. On a
+ * phone that is one column in that order; on a landscape tablet the first
+ * four are two rows of two inside the first screen. DOM order is the visual
+ * order and the tab order (`home.browser.spec.ts` §"#2044").
+ *
  * ## What it reads
  *
  * `home/home.ts` — one bounded store read and no stream decode, on every
@@ -174,12 +185,16 @@ export function HomeView(props: HomeViewProps): JSX.Element {
     <div className="oyl-home-frame tw:@container">
       <div className="oyl-home">
         {props.controller === undefined ? null : <LeftUnfinished controller={props.controller} />}
+        {/* #2044: the modules in their reading order — quick-launch, sensors,
+            the last ride (or, on a first open, the other ways to start), the
+            week — and then the rest. `theme.css` §"#2044" lays them out. */}
         <NextUp next={next} />
+        {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
         {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
+        {data?.lastRide === undefined ? null : <LastRide last={data.lastRide} />}
         {data?.lastRide === undefined ? null : (
           <ThisWeek week={data.week} previous={data.previousWeek} />
         )}
-        {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
         {firstOpen || reading ? null : <RideChoices />}
 
         {analysis === undefined ? (
@@ -242,6 +257,68 @@ function GettingStarted({
   );
 }
 
+/**
+ * *Last ride* — the module slot #2048 fills. Since #2044 it is its own
+ * module, third in the reading order after Next up and the sensors, rather
+ * than the first of the cards under the ride choices: a `section` named by
+ * its own `h2`, as every module is — `a11y/audit.ts` §"landmarks are
+ * distinguishable" (#864) refuses an unnamed `section` beside another.
+ */
+function LastRide({ last }: { readonly last: NonNullable<HomeData['lastRide']> }): JSX.Element {
+  const units = useUnits();
+  const lastDistance = shownDistance(last.distance);
+  return (
+    <section className="oyl-panel oyl-home__last" aria-labelledby="oyl-home-last">
+      <h2 id="oyl-home-last">Last ride</h2>
+      <p>
+        <strong>{last.name}</strong>
+      </p>
+      <dl className="oyl-home__facts">
+        <div>
+          <dt>When</dt>
+          <dd>{formatStartedAt(last.startedAt, last.timeZone)}</dd>
+        </div>
+        <div>
+          <dt>{MOVING_TIME_LABEL}</dt>
+          <dd>
+            <Reading value={formatDuration(last.movingTime)} />
+          </dd>
+        </div>
+        {/* #1070: a ride recorded with no speed channel stored 0 m, which is
+            no distance known — no reading, as the Activities card. */}
+        {lastDistance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading {...formatDistance(lastDistance, units)} />
+            </dd>
+          </div>
+        )}
+        <div>
+          <dt>Load</dt>
+          <dd>
+            {/* #1084: "not worked out yet" promises the backfill can; for a
+                ride with nothing to work a load out from it cannot. */}
+            {last.load === undefined ? (
+              last.noLoadToWorkOut ? (
+                'none: nothing on this ride to work one out from'
+              ) : (
+                'not worked out yet'
+              )
+            ) : (
+              <Reading value={String(Math.round(last.load))} />
+            )}
+          </dd>
+        </div>
+      </dl>
+      <p>
+        <a href={hrefFor(routeById('activities'))}>All your rides</a>
+      </p>
+    </section>
+  );
+}
+
+/** Fitness and freshness, and the progress badges: the rest, after the modules. */
 function Rides({
   data,
   analysis,
@@ -251,62 +328,9 @@ function Rides({
   readonly analysis: AnalysisPort;
   readonly onRead: () => void;
 }): JSX.Element {
-  const units = useUnits();
-  const last = data.lastRide;
-  const lastDistance = last === undefined ? undefined : shownDistance(last.distance);
   const readings = trendReadings(data.fitness);
   return (
     <>
-      {last === undefined ? null : (
-        <section className="oyl-panel" aria-labelledby="oyl-home-last">
-          <h2 id="oyl-home-last">Last ride</h2>
-          <p>
-            <strong>{last.name}</strong>
-          </p>
-          <dl className="oyl-home__facts">
-            <div>
-              <dt>When</dt>
-              <dd>{formatStartedAt(last.startedAt, last.timeZone)}</dd>
-            </div>
-            <div>
-              <dt>{MOVING_TIME_LABEL}</dt>
-              <dd>
-                <Reading value={formatDuration(last.movingTime)} />
-              </dd>
-            </div>
-            {/* #1070: a ride recorded with no speed channel stored 0 m, which is
-                no distance known — no reading, as the Activities card. */}
-            {lastDistance === undefined ? null : (
-              <div>
-                <dt>Distance</dt>
-                <dd>
-                  <Reading {...formatDistance(lastDistance, units)} />
-                </dd>
-              </div>
-            )}
-            <div>
-              <dt>Load</dt>
-              <dd>
-                {/* #1084: "not worked out yet" promises the backfill can; for a
-                    ride with nothing to work a load out from it cannot. */}
-                {last.load === undefined ? (
-                  last.noLoadToWorkOut ? (
-                    'none: nothing on this ride to work one out from'
-                  ) : (
-                    'not worked out yet'
-                  )
-                ) : (
-                  <Reading value={String(Math.round(last.load))} />
-                )}
-              </dd>
-            </div>
-          </dl>
-          <p>
-            <a href={hrefFor(routeById('activities'))}>All your rides</a>
-          </p>
-        </section>
-      )}
-
       <section className="oyl-panel" aria-labelledby="oyl-home-form">
         <h2 id="oyl-home-form">Fitness and freshness</h2>
         {readings.length === 0 ? (
@@ -375,6 +399,10 @@ function LeftUnfinished({
  * The trainer, from what the ride controller already knows. Its words and its
  * link to Devices (#659) are unchanged by #939: a rider with no trainer is
  * told so in a sentence, never by a picture alone.
+ *
+ * Since #2044 it is the sensor-status module's slot (#2045 fills it), second
+ * in the reading order, and — like the last ride's and the week's — a
+ * `section` named by its own `h2`.
  */
 function TrainerCard({ controller }: { readonly controller: RideController }): JSX.Element {
   const trainer = useRideSnapshot(controller).trainer;
@@ -519,7 +547,8 @@ function weekBefore(value: string): string {
  * (`Reading`), each set against the seven days before, and the days ridden as
  * a ring beside the sentence that says the same. Numbers only — no streak
  * and no target (#935 D-6). Every figure is `home/home.ts`'s arithmetic over
- * the one read.
+ * the one read. Since #2044 the week module's slot (#2049 fills it), fourth
+ * in the reading order, a `section` named by its own `h2`.
  */
 function ThisWeek({
   week,

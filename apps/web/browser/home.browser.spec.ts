@@ -17,7 +17,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
-import type { Box, HomeMeasurement } from './home-harness';
+import type { Box, HomeMeasurement, ModuleMeasurement } from './home-harness';
 
 const SUBPIXEL_TOLERANCE = 1;
 
@@ -455,77 +455,226 @@ test.describe('#1010 — the pictures are the cards, and every word is on a soli
   });
 });
 
+/**
+ * #2044 — Home is a grid of modules.
+ *
+ * The four modules, in their one reading order: Next up (the quick-launch),
+ * the sensors (the Trainer card, #2045's slot), the last ride (#2048's) and
+ * the week (#2049's). ⚠️ A reviewer who remembers §"#1010 — a landscape
+ * tablet is a dashboard" holding Next up down to the fold, with This week and
+ * the Trainer card stacked beside it, is reading the old file: #2043 made Next
+ * up a compact row and #2044 made the first screen two rows of two.
+ *
+ * - At 1280×800 in the shell all four are wholly above the fold. **Control:**
+ *   `?columns=one`, every module one column wide, puts the week under it.
+ * - At 412×915 they are one column in that order, and every child of the grid
+ *   is lower on the screen than the one before it in the DOM.
+ * - The tab order follows the visual order on every layout: each tab stop's
+ *   module is never before the previous stop's in reading order — rows top to
+ *   bottom, and left to right within a row.
+ */
 const LANDSCAPE_TABLET = FOLD_VIEWPORTS[3];
 
-/**
- * The most space allowed between Next up and the Trainer card under it: the
- * grid's 16 px gap and the share of This week's height the two rows split
- * (29 px measured), and well under a card — This week is 300 px and more.
- */
-const HOLE_PIXELS = 48;
+interface GridViewport {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly insets: Insets | undefined;
+}
+
+const GRID_VIEWPORTS: readonly GridViewport[] = [
+  LANDSCAPE_TABLET,
+  FOLD_VIEWPORTS[4],
+  FOLD_VIEWPORTS[1],
+  { name: 'phone 412×915', width: 412, height: 915, insets: undefined },
+];
+const PHONE_412 = GRID_VIEWPORTS[3] as GridViewport;
+
+async function openGrid(page: Page, viewport: GridViewport, query?: string) {
+  const seen = await open(page, viewport.width, viewport.height, {
+    ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
+    ...(query === undefined ? {} : { query }),
+  });
+  if (viewport.insets !== undefined) {
+    expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  }
+  return seen;
+}
+
+/** The four modules' boxes, in reading order, from one measurement. */
+function fourModules(seen: HomeMeasurement): readonly (readonly [string, Box | undefined])[] {
+  return [
+    ['Next up', seen.nextUp?.card],
+    ['the sensors', seen.trainer],
+    ['the last ride', seen.lastRide],
+    ['the week', seen.week],
+  ];
+}
+
+const describeBoxes = (boxes: readonly (readonly [string, Box | undefined])[]): string =>
+  boxes
+    .map(
+      ([name, box]) =>
+        `${name} ${(box?.left ?? NaN).toFixed(0)},${(box?.top ?? NaN).toFixed(0)}` +
+        `–${(box?.bottom ?? NaN).toFixed(0)}`,
+    )
+    .join('; ');
 
 /**
- * ⚠️ **Since #2043 Next up no longer runs down to the fold**: a reviewer who
- * remembers this describe holding it at half the fold or more, with This week
- * and the Trainer card stacked beside it, is reading the old file. Next up is
- * a compact row in the first two columns, the Trainer card under it, and This
- * week in the third beside both.
+ * Whether the modules' visual reading order is their DOM order: sorted by top
+ * (a row's modules share one, within a pixel) and then by left, they are
+ * still in DOM order. Returns their DOM indices in visual order.
  */
-test.describe('#1010 — a landscape tablet is a dashboard', () => {
-  test('Next up and the Trainer card under it, This week beside both; the ride cards after', async ({
+function visualOrder(modules: readonly ModuleMeasurement[]): readonly number[] {
+  return modules
+    .map((module, index) => ({ index, box: module.box }))
+    .sort((a, b) =>
+      Math.abs(a.box.top - b.box.top) > SUBPIXEL_TOLERANCE
+        ? a.box.top - b.box.top
+        : a.box.left - b.box.left,
+    )
+    .map((each) => each.index);
+}
+
+test.describe('#2044 — Home is a grid of modules', () => {
+  test('a landscape tablet: Next up beside the sensors, the last ride beside the week, all four above the fold', async ({
     page,
   }) => {
     const seen = await openAt(page, LANDSCAPE_TABLET);
-    const { nextUp: next, week, trainer, start } = seen;
-    expect(next).toBeDefined();
-    expect(week).toBeDefined();
-    expect(trainer).toBeDefined();
-    // Beside: This week right of Next up and of the Trainer card, level with Next up.
-    expect(week?.left ?? 0).toBeGreaterThanOrEqual((next?.card.right ?? Infinity) - 1);
-    expect(week?.left ?? 0).toBeGreaterThanOrEqual((trainer?.right ?? Infinity) - 1);
-    expect(Math.abs((week?.top ?? 0) - (next?.card.top ?? 0))).toBeLessThanOrEqual(1);
-    // Under: the Trainer card below Next up, in its columns.
-    expect(trainer?.top ?? 0).toBeGreaterThanOrEqual((next?.card.bottom ?? Infinity) - 1);
-    // ...and close under it, not under This week: no hole the height of a card.
-    expect((trainer?.top ?? Infinity) - (next?.card.bottom ?? 0)).toBeLessThan(HOLE_PIXELS);
-    expect(Math.abs((trainer?.left ?? 0) - (next?.card.left ?? -1))).toBeLessThanOrEqual(1);
-    expect(Math.abs((trainer?.width ?? 0) - (next?.card.width ?? -1))).toBeLessThanOrEqual(1);
-    console.log(
-      `#1010 dashboard: Next up ${(next?.card.width ?? 0).toFixed(1)}×` +
-        `${(next?.card.height ?? 0).toFixed(1)} px, Trainer ${(trainer?.top ?? 0).toFixed(1)} to ` +
-        `${(trainer?.bottom ?? 0).toFixed(1)}, ` +
-        `This week to ${(week?.bottom ?? 0).toFixed(1)}; the ride cards start at ` +
-        `${(start?.top ?? 0).toFixed(1)} (fold ${seen.fold.toFixed(1)})`,
+    const four = fourModules(seen);
+    console.log(`#2044 tablet 1280×800, fold ${seen.fold.toFixed(1)}: ${describeBoxes(four)}`);
+    for (const [name, box] of four) {
+      expect(box, `${name} was not drawn`).toBeDefined();
+      expect(box?.top ?? -1, `${name} starts above the screen`).toBeGreaterThanOrEqual(0);
+      expect(box?.bottom ?? Infinity, `${name} is not wholly above the fold`).toBeLessThanOrEqual(
+        seen.fold + SUBPIXEL_TOLERANCE,
+      );
+    }
+    const { nextUp: next, trainer, lastRide, week, start } = seen;
+    // Two rows of two: each wide module beside a narrow one, level with it.
+    expect(trainer?.left ?? 0).toBeGreaterThanOrEqual((next?.card.right ?? Infinity) - 1);
+    expect(Math.abs((trainer?.top ?? 0) - (next?.card.top ?? -1))).toBeLessThanOrEqual(1);
+    expect(week?.left ?? 0).toBeGreaterThanOrEqual((lastRide?.right ?? Infinity) - 1);
+    expect(Math.abs((week?.top ?? 0) - (lastRide?.top ?? -1))).toBeLessThanOrEqual(1);
+    expect(lastRide?.top ?? 0).toBeGreaterThanOrEqual(
+      Math.max(next?.card.bottom ?? Infinity, trainer?.bottom ?? Infinity) - 1,
     );
-    // The ride cards after all three, three across the whole width.
+    // The last ride takes columns 1–2, as wide as Next up above it, so column
+    // 2 is not left empty beside the week.
+    expect(Math.abs((lastRide?.left ?? 0) - (next?.card.left ?? -1))).toBeLessThanOrEqual(1);
+    expect(Math.abs((lastRide?.right ?? 0) - (next?.card.right ?? -1))).toBeLessThanOrEqual(1);
+    // The ride cards after all four, three across the whole width.
     expect(start?.top ?? 0).toBeGreaterThanOrEqual(
-      Math.max(week?.bottom ?? Infinity, trainer?.bottom ?? Infinity) - 1,
+      Math.max(week?.bottom ?? Infinity, lastRide?.bottom ?? Infinity) - 1,
     );
     expect(new Set(seen.rideCards.map((card) => Math.round(card.card.top))).size).toBe(1);
   });
 
-  test('the control — without the dashboard rule This week is under Next up, not beside it', async ({
+  test('a first open on a landscape tablet: the other ways to start take the last ride’s columns 1–2', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?rides=none');
+    const empty = await page.locator('.oyl-home__empty').boundingBox();
+    expect(empty, 'the first-open state was not drawn').not.toBeNull();
+    const next = seen.nextUp?.card;
+    console.log(
+      `#2044 first open: empty ${(empty?.x ?? NaN).toFixed(0)}–${((empty?.x ?? 0) + (empty?.width ?? 0)).toFixed(0)}, ` +
+        `Next up ${(next?.left ?? NaN).toFixed(0)}–${(next?.right ?? NaN).toFixed(0)}`,
+    );
+    expect(Math.abs((empty?.x ?? 0) - (next?.left ?? -1))).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs((empty?.x ?? 0) + (empty?.width ?? 0) - (next?.right ?? -1)),
+    ).toBeLessThanOrEqual(1);
+  });
+
+  test('the control — one column puts a module under the landscape tablet’s fold', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?columns=one');
+    const four = fourModules(seen);
+    console.log(`#2044 control, one column, fold ${seen.fold.toFixed(1)}: ${describeBoxes(four)}`);
+    const below = four.filter(([, box]) => (box?.bottom ?? 0) > seen.fold + SUBPIXEL_TOLERANCE);
+    expect(below.map(([name]) => name)).not.toEqual([]);
+  });
+
+  test('the control — without the dashboard rule the sensors are under Next up, not beside it', async ({
     page,
   }) => {
     const seen = await openAt(page, LANDSCAPE_TABLET, '?dashboard=off');
     console.log(
-      `#1010 dashboard control: This week at ${(seen.week?.top ?? 0).toFixed(1)}, Next up ends ` +
-        `at ${(seen.nextUp?.card.bottom ?? 0).toFixed(1)}`,
+      `#2044 dashboard control: the sensors at ${(seen.trainer?.top ?? 0).toFixed(1)}, Next up ` +
+        `ends at ${(seen.nextUp?.card.bottom ?? 0).toFixed(1)}`,
     );
-    expect(seen.week?.top ?? 0).toBeGreaterThanOrEqual((seen.nextUp?.card.bottom ?? Infinity) - 1);
+    expect(seen.trainer?.top ?? 0).toBeGreaterThanOrEqual(
+      (seen.nextUp?.card.bottom ?? Infinity) - 1,
+    );
   });
+
+  test('a phone 412×915: one column, quick-launch, sensors, last ride, week, then the rest', async ({
+    page,
+  }) => {
+    const seen = await openGrid(page, PHONE_412);
+    const four = fourModules(seen);
+    console.log(
+      `#2044 phone 412×915: ${describeBoxes(four)}; then ` +
+        seen.modules
+          .slice(4)
+          .map((module) => `${module.name} ${module.box.top.toFixed(0)}`)
+          .join(', '),
+    );
+    // DOM order: the four are the grid's first four children, in this order.
+    expect(seen.modules.slice(0, 4).map((module) => module.box)).toEqual(
+      four.map(([, box]) => box),
+    );
+    // Visual order: every child lower than the one before it, one column.
+    for (const [index, module] of seen.modules.entries()) {
+      expect(Math.abs(module.box.left - (seen.modules[0]?.box.left ?? -1))).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      if (index > 0) {
+        expect(module.box.top, `${module.name} is not under the one before it`).toBeGreaterThan(
+          seen.modules[index - 1]?.box.bottom ?? Infinity,
+        );
+      }
+    }
+  });
+
+  for (const viewport of GRID_VIEWPORTS) {
+    test(`the tab order follows the visual order — ${viewport.name}`, async ({ page }) => {
+      const seen = await openGrid(page, viewport);
+      const order = visualOrder(seen.modules);
+      // The modules' visual order is their DOM order...
+      expect(
+        order.map((index) => seen.modules[index]?.name),
+        'the modules on the screen are not in DOM order',
+      ).toEqual(seen.modules.map((module) => module.name));
+      // ...and the tab stops walk the modules in it, never back.
+      expect(seen.tabModules.length).toBeGreaterThanOrEqual(5);
+      const back = seen.tabModules.filter(
+        (module, index) => index > 0 && module < (seen.tabModules[index - 1] ?? 0),
+      );
+      console.log(
+        `#2044 tab order at ${viewport.name}: ${String(seen.tabModules.length)} stops over modules ` +
+          seen.tabModules.join(' '),
+      );
+      expect(back, 'a tab stop goes back to a module before the last one').toEqual([]);
+    });
+  }
 });
 
-test.describe('#1010 — a portrait tablet, and a phone on its side, are two columns', () => {
+/** #1010's two-column layout, as #2044 re-ordered it. */
+test.describe('#2044 — a portrait tablet, and a phone on its side, are two columns', () => {
   for (const viewport of [FOLD_VIEWPORTS[4], FOLD_VIEWPORTS[1]]) {
     test(viewport.name, async ({ page }) => {
       const seen = await openAt(page, viewport);
-      const { nextUp: next, week, trainer, start } = seen;
-      // Next up across both columns; This week and Trainer side by side under it.
+      const { nextUp: next, trainer, lastRide, week, start } = seen;
+      // Next up and the sensors across both columns; the last ride and the week side by side.
       expect(Math.abs((next?.card.width ?? 0) - (start?.width ?? -1))).toBeLessThanOrEqual(1);
-      expect(week?.top ?? 0).toBeGreaterThanOrEqual((next?.card.bottom ?? Infinity) - 1);
-      expect(Math.abs((week?.top ?? 0) - (trainer?.top ?? -1))).toBeLessThanOrEqual(1);
-      expect(trainer?.left ?? 0).toBeGreaterThanOrEqual((week?.right ?? Infinity) - 1);
+      expect(Math.abs((trainer?.width ?? 0) - (start?.width ?? -1))).toBeLessThanOrEqual(1);
+      expect(trainer?.top ?? 0).toBeGreaterThanOrEqual((next?.card.bottom ?? Infinity) - 1);
+      expect(lastRide?.top ?? 0).toBeGreaterThanOrEqual((trainer?.bottom ?? Infinity) - 1);
+      expect(Math.abs((week?.top ?? 0) - (lastRide?.top ?? -1))).toBeLessThanOrEqual(1);
+      expect(week?.left ?? 0).toBeGreaterThanOrEqual((lastRide?.right ?? Infinity) - 1);
     });
   }
 });

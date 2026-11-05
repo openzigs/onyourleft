@@ -188,17 +188,19 @@ describe('the home screen — #428', () => {
     const card = document.querySelector('.oyl-next-up');
     expect(card?.querySelectorAll('h2')).toHaveLength(1);
     expect(card?.querySelector('h2')?.textContent).toBe('Your first ride');
-    // Every link once: no second way to Ride, no second way to Devices.
+    // Every link once: no second way to Ride, no second way to Devices. Since
+    // #2044 the sensors module (the Trainer card) is second, before the other
+    // ways to start, which stand where the last ride will.
     const links = [...(main?.querySelectorAll('a') ?? [])].map((link) => [
       link.textContent,
       link.getAttribute('href'),
     ]);
     expect(links).toEqual([
       ['Start a ride', hrefFor(routeById('ride'))],
+      ['Pair one on Devices', hrefFor(routeById('devices'))],
       ['Ride a route', hrefFor(routeById('game'))],
       ['Follow a workout', hrefFor(routeById('workouts'))],
       ['Bring rides in', hrefFor(routeById('transfer'))],
-      ['Pair one on Devices', hrefFor(routeById('devices'))],
     ]);
     // The words beside each link say where it goes.
     const line = (href: string): string =>
@@ -241,7 +243,7 @@ describe('the home screen — #428', () => {
     await settle();
     await settle();
     // No Trainer card to carry it, so the empty state does — once.
-    expect(document.querySelector('[aria-labelledby="oyl-home-trainer"]')).toBeNull();
+    expect(document.querySelector('.oyl-home__trainer')).toBeNull();
     const devices = [
       ...document.querySelectorAll(`main a[href="${hrefFor(routeById('devices'))}"]`),
     ];
@@ -459,7 +461,7 @@ describe('the illustrated home — #939', () => {
 
   it('keeps the trainer’s sentence and its link to Devices (#659) when no trainer is paired', async () => {
     await openHome([]);
-    const trainer = document.querySelector('[aria-labelledby="oyl-home-trainer"]');
+    const trainer = document.querySelector('.oyl-home__trainer');
     expect(trainer?.textContent).toContain('No trainer paired.');
     expect(trainer?.querySelector(`a[href="${hrefFor(routeById('devices'))}"]`)?.textContent).toBe(
       'Pair one on Devices',
@@ -633,6 +635,57 @@ describe('next up — #1010', () => {
     await openHome([ride('r', 3, { routeId: stubRouteId('hill') })], idleSnapshot(), failing);
     expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
     expect(text()).not.toContain('could not be read');
+  });
+});
+
+describe('the module grid — #2044', () => {
+  /** The grid's children by their first heading, in DOM order. */
+  const modules = (): (string | undefined)[] =>
+    [...document.querySelectorAll('.oyl-home > *')].map(
+      (module) => module.querySelector('h2')?.textContent ?? module.className,
+    );
+
+  it('puts the modules in reading order: quick-launch, sensors, last ride, week, then the rest', async () => {
+    await openHome(
+      Array.from({ length: 40 }, (_unused, index) => ride(`r${String(index)}`, 40 - index)),
+    );
+    expect(modules()).toEqual([
+      'Next up',
+      'Trainer',
+      'Last ride',
+      'This week',
+      'Ride',
+      'Fitness and freshness',
+      'Streaks and badges',
+    ]);
+    expectClean('home, the module grid');
+  });
+
+  it('a first open: the other ways to start stand where the last ride will, after the sensors', async () => {
+    await openHome([]);
+    expect(modules()).toEqual(['Your first ride', 'Trainer', 'Nothing recorded yet']);
+  });
+
+  it('makes each module slot a section named by its own h2, each a named region (not landmark-free: an unnamed section beside another fails the audit)', async () => {
+    await openHome([ride('only', 2)]);
+    for (const slot of ['.oyl-home__trainer', '.oyl-home__last', '.oyl-home__week']) {
+      const section = document.querySelector(slot);
+      expect(section?.tagName, slot).toBe('SECTION');
+      // No role of its own: not a nav, an aside or a declared region.
+      expect(section?.getAttribute('role'), slot).toBeNull();
+      const headings = section?.querySelectorAll(':scope > h2, :scope > * > h2');
+      expect(headings, slot).toHaveLength(1);
+      // Named by that heading — the audit refuses an unnamed section beside another (#864).
+      expect(section?.getAttribute('aria-labelledby'), slot).toBe(headings?.[0]?.id);
+    }
+    // Heading order kept: every module's heading is an h2 under the view's h1.
+    const levels = [...document.querySelectorAll('main h1, main h2, main h3, main h4')].map(
+      (heading) => Number(heading.tagName.slice(1)),
+    );
+    expect(levels[0]).toBe(1);
+    for (const [index, level] of levels.entries()) {
+      if (index > 0) expect(level).toBeLessThanOrEqual((levels[index - 1] ?? 0) + 1);
+    }
   });
 });
 

@@ -239,6 +239,7 @@ function Harness(): JSX.Element {
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
+            elapsedSeconds={MOVING_SECONDS}
             chases={CHASES}
             paused={false}
             onPause={() => undefined}
