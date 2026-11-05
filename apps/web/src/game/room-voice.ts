@@ -17,12 +17,12 @@
  * ## When, and where, the HUD shows it
  *
  * - **A race holding the rider on its line** (`room-ride.ts`
- *   §`heldOnTheLine`), which is when its riders gather: as the last line of
- *   the race's own notice, under *Start the race* (`place: 'race'`), for as
- *   long as the race waits — and **on a tablet only** (`theme.css` §"A RACE'S
- *   VOICE LINK, ON ITS LINE"): on a phone there is no line to spare beside a
- *   race's notice, and a notice of its own put the cell 10 px into the
- *   leaning rider at 360×752 (measured in the browser gate, #875).
+ *   §`heldOnTheLine`), which is when its riders gather: as a button beside
+ *   *Start the race*, inside the race's own notice (`place: 'race'`), for as
+ *   long as the race waits — the owner's ruling of 2026-11-04, *"Make it a
+ *   button first"* — on a tablet and an upright phone, and not on a phone on
+ *   its side, where there is no room beside *Start the race* (`theme.css`
+ *   §"A RACE'S VOICE BUTTON, ON ITS LINE").
  * - **A group ride**: a notice of its own (`place: 'notice'`) for a standing
  *   notice's span of ride from when the link first came —
  *   `GameView` §`STANDING_NOTICE_SECONDS`, the world notice's rule (#475) —
@@ -34,12 +34,11 @@
  * ## What it says
  *
  * The link's own words, *Join voice on Discord*, and after them that it
- * opens Discord — one line on the narrowest phone, so a race's notice grows
- * by a line at most. It opens with `target="_blank"`, which inside the
- * Android shell hands it to the system (`views/AboutView.tsx`). What
- * Discord receives is said where the app names Discord as a third party
- * (`views/InstanceView.tsx`, #778). ⚠️ Draft wording awaiting the owner's
- * approval, with screenshots, before merge.
+ * opens Discord — the owner's approved wording (2026-11-04). In a race the
+ * whole of it is the button's name. It opens with `target="_blank"`, which
+ * inside the Android shell hands it to the system (`views/AboutView.tsx`).
+ * What Discord receives is said where the app names Discord as a third party
+ * (`views/InstanceView.tsx`, #778).
  */
 
 import type { RoomRace, RoomSessionStatus } from '../net/room-session';
@@ -48,15 +47,15 @@ import { heldOnTheLine } from './room-ride';
 /** The label the HUD gives the voice notice. */
 export const VOICE_NOTICE_LABEL = 'Voice';
 
-/** Every rider-facing word of the link. ⚠️ Draft wording for the owner's approval. */
+/** Every rider-facing word of the link: the owner's approved wording of 2026-11-04. */
 export const VOICE_TEXT = {
   /** The link's own words. */
   link: 'Join voice on Discord',
-  /** What follows it: one line on the narrowest phone, so a race's notice grows by one line at most. */
+  /** What follows it: in a group ride's notice after the link, in a race's button inside it. */
   after: ' (opens Discord)',
 } as const;
 
-/** Where the HUD shows the link: inside a race's notice, or as a notice of its own. */
+/** Where the HUD shows the link: a button in a race's notice, or a notice of its own. */
 type VoicePlace = 'race' | 'notice';
 
 /** The room's voice link, and the ride's elapsed seconds when it first came. */
