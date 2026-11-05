@@ -346,15 +346,31 @@ describe('which routes are read and which are operated (#422)', () => {
     }
   });
 
-  it('lays out the screens of sections in columns, and nothing else — #1014', () => {
+  it('lays out the screens of sections in columns, and nothing else — #1014, #2067', () => {
     // Epic #935 Phase 2: the screens #1014 names. Home, the game picker and
     // Ride have their own layouts and issues; the list–detail screens' detail
-    // panes are columned by their pane's own container query instead.
+    // panes are columned by their pane's own container query instead. #2067
+    // added the single-column screens whose content makes sections; the
+    // side camera, moderation, a segment and not-found keep the measure, and
+    // `sections.browser.spec.ts` §"#2067" says why for each.
     expect(
       ALL_ROUTES.filter((route) => route.layout === 'sections')
         .map((route) => route.id)
         .sort(),
-    ).toEqual(['about', 'analysis', 'camera', 'devices', 'segments', 'settings', 'transfer']);
+    ).toEqual([
+      'about',
+      'activity-detail',
+      'analysis',
+      'camera',
+      'credits',
+      'devices',
+      'instance',
+      'more',
+      'route-builder',
+      'segments',
+      'settings',
+      'transfer',
+    ]);
   });
 
   it('lays out Activities, Workouts and Routes as a list beside its detail, and nothing else — #670', () => {

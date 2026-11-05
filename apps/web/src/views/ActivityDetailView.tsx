@@ -428,266 +428,286 @@ export function ActivityDetailView({
     <>
       {embedded ? null : <h2>{activity.name}</h2>}
 
-      <dl className="oyl-ride-summary">
+      {/*
+        #2067: the ride's own page is two columns on a tablet — its figures,
+        traces and laps, then everything else this device holds about it —
+        in the order they are read. Inside a list–detail pane (embedded) the
+        pane is the column, and the two groups simply follow each other.
+      */}
+      <div className={embedded ? undefined : 'oyl-sections oyl-sections--pair'}>
         <div>
-          <dt>Started</dt>
-          <dd>{formatStartedAt(activity.startedAt, activity.startedAtTimeZone)}</dd>
-        </div>
-        {/* #1437: the same two names as Home and History, moving first. */}
-        <div>
-          <dt>{MOVING_TIME_LABEL}</dt>
-          <dd>
-            <Reading value={formatDuration(activity.movingTime)} />
-          </dd>
-        </div>
-        <div>
-          <dt>{ELAPSED_TIME_LABEL}</dt>
-          <dd>
-            <Reading value={formatDuration(activity.elapsedTime)} />
-          </dd>
-        </div>
-        {/* #1070: a ride recorded with no speed channel stored 0 m, which is no
+          <dl className="oyl-ride-summary">
+            <div>
+              <dt>Started</dt>
+              <dd>{formatStartedAt(activity.startedAt, activity.startedAtTimeZone)}</dd>
+            </div>
+            {/* #1437: the same two names as Home and History, moving first. */}
+            <div>
+              <dt>{MOVING_TIME_LABEL}</dt>
+              <dd>
+                <Reading value={formatDuration(activity.movingTime)} />
+              </dd>
+            </div>
+            <div>
+              <dt>{ELAPSED_TIME_LABEL}</dt>
+              <dd>
+                <Reading value={formatDuration(activity.elapsedTime)} />
+              </dd>
+            </div>
+            {/* #1070: a ride recorded with no speed channel stored 0 m, which is no
             distance known — no row, as on Home and the result card. */}
-        {distance === undefined ? null : (
-          <div>
-            <dt>Distance</dt>
-            <dd>
-              <Reading value={formatDistance(distance, units).value} unit={distanceUnit(units)} />
-            </dd>
-          </div>
-        )}
-        <div>
-          <dt>Average power</dt>
-          <dd>
-            {averagePower === undefined ? (
-              noPowerText(activity.averagePower)
-            ) : (
-              <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
+            {distance === undefined ? null : (
+              <div>
+                <dt>Distance</dt>
+                <dd>
+                  <Reading
+                    value={formatDistance(distance, units).value}
+                    unit={distanceUnit(units)}
+                  />
+                </dd>
+              </div>
             )}
-          </dd>
-        </div>
-        <div>
-          <dt>Position</dt>
-          {/*
+            <div>
+              <dt>Average power</dt>
+              <dd>
+                {averagePower === undefined ? (
+                  noPowerText(activity.averagePower)
+                ) : (
+                  <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Position</dt>
+              {/*
             In words. An indoor ride is the ordinary case here, and #50's first
             criterion is that it renders without a map rather than with an empty
             one — so the view says which it is rather than leaving a hole where
             a map would be.
           */}
-          <dd>{activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}</dd>
-        </div>
-        {/* #785: the races this ride was ridden in, as each room said it —
+              <dd>
+                {activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}
+              </dd>
+            </div>
+            {/* #785: the races this ride was ridden in, as each room said it —
             kept with the ride on this device, one line each, in order (#1360's
             review, N3). No row for a ride in no race. */}
-        {activity.rideFacts?.races === undefined || activity.rideFacts.races.length === 0 ? null : (
-          <div>
-            <dt>{raceFactTerm(activity.rideFacts.races)}</dt>
-            {activity.rideFacts.races.map((race, index) => (
-              <dd key={index}>{raceFactText(race)}</dd>
-            ))}
-          </div>
-        )}
-      </dl>
+            {activity.rideFacts?.races === undefined ||
+            activity.rideFacts.races.length === 0 ? null : (
+              <div>
+                <dt>{raceFactTerm(activity.rideFacts.races)}</dt>
+                {activity.rideFacts.races.map((race, index) => (
+                  <dd key={index}>{raceFactText(race)}</dd>
+                ))}
+              </div>
+            )}
+          </dl>
 
-      <h3>Traces</h3>
+          <h3>Traces</h3>
 
-      {streams === undefined ? (
-        <StatusMessage tone="info">
-          This ride has no per-second data stored on this device, so there is nothing to chart. Its
-          totals above are the whole of what was kept.
-        </StatusMessage>
-      ) : (
-        <>
-          <p className="oyl-muted">
-            {/*
+          {streams === undefined ? (
+            <StatusMessage tone="info">
+              This ride has no per-second data stored on this device, so there is nothing to chart.
+              Its totals above are the whole of what was kept.
+            </StatusMessage>
+          ) : (
+            <>
+              <p className="oyl-muted">
+                {/*
               The reduction, said out loud. #50's fourth criterion is a read
               budget, and a budget the rider cannot see is one that quietly
               stops being met.
             */}
-            {String(streams.sampleCount)} readings a second apart, drawn at up to{' '}
-            {String(CHART_POINTS)} points a trace.
-          </p>
-          <div className="oyl-library-controls">
-            {chartable.map((series) => (
-              // #668: showing a trace changes what is drawn, not the ride, so
-              // it is a toggle. It was a PRIMARY when on, which put one filled
-              // button per trace on this screen. The name is stable — "Show
-              // power" — and `aria-pressed` says whether it is shown.
-              <Button
-                key={series.channel}
-                variant="toggle"
-                pressed={enabled.includes(series.channel)}
-                onClick={() => {
-                  toggle(series.channel);
-                }}
-              >
-                Show {series.label.toLowerCase()}
-              </Button>
-            ))}
-          </div>
+                {String(streams.sampleCount)} readings a second apart, drawn at up to{' '}
+                {String(CHART_POINTS)} points a trace.
+              </p>
+              <div className="oyl-library-controls">
+                {chartable.map((series) => (
+                  // #668: showing a trace changes what is drawn, not the ride, so
+                  // it is a toggle. It was a PRIMARY when on, which put one filled
+                  // button per trace on this screen. The name is stable — "Show
+                  // power" — and `aria-pressed` says whether it is shown.
+                  <Button
+                    key={series.channel}
+                    variant="toggle"
+                    pressed={enabled.includes(series.channel)}
+                    onClick={() => {
+                      toggle(series.channel);
+                    }}
+                  >
+                    Show {series.label.toLowerCase()}
+                  </Button>
+                ))}
+              </div>
 
-          {chartable.length === 0 ? (
-            <StatusMessage tone="info">
-              This ride stored a track and no sensor channels, so there is nothing to chart.
-            </StatusMessage>
-          ) : undefined}
+              {chartable.length === 0 ? (
+                <StatusMessage tone="info">
+                  This ride stored a track and no sensor channels, so there is nothing to chart.
+                </StatusMessage>
+              ) : undefined}
 
-          {chartable
-            .filter((series) => enabled.includes(series.channel))
-            .map((series) => {
-              const trace = traces.get(series.channel);
-              if (trace === undefined) {
-                return (
-                  <p className="oyl-muted" key={series.channel}>
-                    Reading {series.label.toLowerCase()}…
-                  </p>
-                );
-              }
-              // The table is the same trace at reading resolution rather than
-              // at drawing resolution — `series.ts` records why six hundred
-              // rows is not an equivalent of anything. Derived from the points
-              // the chart already holds, so it costs no further read.
-              const tableRows = downsample(trace.points, TABLE_ROWS);
-              const secondsPerRow =
-                tableRows.length === 0
-                  ? 0
-                  : (trace.points.length * trace.secondsPerPoint) / tableRows.length;
-              const rows = tableRows.map((value, index) => [
-                formatDuration(index * secondsPerRow),
-                // Named rather than an em dash. A gap and a zero reading are
-                // different facts and the table is where a reader who cannot
-                // see the broken line finds that out.
-                value === undefined ? 'no reading' : series.format(value),
-              ]);
-              return (
-                <ChartSlot
-                  key={series.channel}
-                  caption={`${series.label} (${series.unit})`}
-                  columns={['From', `${series.label} (${series.unit})`]}
-                  rows={rows}
-                  emptyMessage="No readings in this ride."
-                  // #1439: the table is the chart's alternative, not a second
-                  // screen of numbers open under it by default.
-                  tablePosition="disclosed"
-                  chart={
-                    <Suspense fallback={null}>
-                      <TraceChart
-                        label={series.label}
-                        unit={series.unit}
-                        points={trace.points}
-                        secondsPerPoint={trace.secondsPerPoint}
-                        format={series.format}
-                        missingSamples={trace.missingSamples}
-                      />
-                    </Suspense>
+              {chartable
+                .filter((series) => enabled.includes(series.channel))
+                .map((series) => {
+                  const trace = traces.get(series.channel);
+                  if (trace === undefined) {
+                    return (
+                      <p className="oyl-muted" key={series.channel}>
+                        Reading {series.label.toLowerCase()}…
+                      </p>
+                    );
                   }
-                />
-              );
-            })}
-        </>
-      )}
+                  // The table is the same trace at reading resolution rather than
+                  // at drawing resolution — `series.ts` records why six hundred
+                  // rows is not an equivalent of anything. Derived from the points
+                  // the chart already holds, so it costs no further read.
+                  const tableRows = downsample(trace.points, TABLE_ROWS);
+                  const secondsPerRow =
+                    tableRows.length === 0
+                      ? 0
+                      : (trace.points.length * trace.secondsPerPoint) / tableRows.length;
+                  const rows = tableRows.map((value, index) => [
+                    formatDuration(index * secondsPerRow),
+                    // Named rather than an em dash. A gap and a zero reading are
+                    // different facts and the table is where a reader who cannot
+                    // see the broken line finds that out.
+                    value === undefined ? 'no reading' : series.format(value),
+                  ]);
+                  return (
+                    <ChartSlot
+                      key={series.channel}
+                      caption={`${series.label} (${series.unit})`}
+                      columns={['From', `${series.label} (${series.unit})`]}
+                      rows={rows}
+                      emptyMessage="No readings in this ride."
+                      // #1439: the table is the chart's alternative, not a second
+                      // screen of numbers open under it by default.
+                      tablePosition="disclosed"
+                      chart={
+                        <Suspense fallback={null}>
+                          <TraceChart
+                            label={series.label}
+                            unit={series.unit}
+                            points={trace.points}
+                            secondsPerPoint={trace.secondsPerPoint}
+                            format={series.format}
+                            missingSamples={trace.missingSamples}
+                          />
+                        </Suspense>
+                      }
+                    />
+                  );
+                })}
+            </>
+          )}
 
-      <h3>Laps</h3>
-      {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
-      <LapsTable laps={laps} units={units} />
+          <h3>Laps</h3>
+          {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
+          <LapsTable laps={laps} units={units} />
+        </div>
 
-      {/*
+        <div>
+          {/*
         #1319: a ride with a workout lists its blocks, under their own
         heading after the laps — two tables, never one (WorkoutBlocksTable).
         A ride with no workout renders nothing here.
       */}
-      {activity.rideFacts?.workoutBlocks === undefined ? null : (
-        <>
-          <h3>Workout blocks</h3>
-          <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
-        </>
-      )}
+          {activity.rideFacts?.workoutBlocks === undefined ? null : (
+            <>
+              <h3>Workout blocks</h3>
+              <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
+            </>
+          )}
 
-      {/*
+          {/*
         #388. Only for a ride the side camera filmed — the owner's ruling puts
         the report on the ride's own page and nowhere else, and a ride with no
         report renders nothing here at all.
       */}
-      <SideCameraSection sideCamera={sideCamera} />
+          <SideCameraSection sideCamera={sideCamera} />
 
-      {/*
+          {/*
         #804, #805. A model's write-up of this ride, on every ride's page and
         below the side camera's report, never in place of it (ADR 0035 D-3):
         the saved one, screened again, and the press that asks for a new one.
         It sends nothing until that is pressed. With no instance it is one
         sentence.
       */}
-      <RideWriteUpSection
-        instance={instanceWriteUp}
-        activityId={activity.id}
-        initial={savedWriteUp}
-        reread={async () =>
-          port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
-        }
-      />
+          <RideWriteUpSection
+            instance={instanceWriteUp}
+            activityId={activity.id}
+            initial={savedWriteUp}
+            reread={async () =>
+              port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
+            }
+          />
 
-      {/*
+          {/*
         #793. The ride's "may be raced" consent (ADR 0021 D-5.1): off unless
         the rider turns it on here, revocable here, and never the share
         setting. On every ride, because consent is per ride.
       */}
-      <RaceConsentSection port={port} activity={activity} />
+          <RaceConsentSection port={port} activity={activity} />
 
-      {/*
+          {/*
         #836. The rider's own note on this ride, for the analysis to look back
         on: one passage of at most 900 characters, kept here and synced.
       */}
-      <RiderTextBox
-        port={riderText}
-        kind="note"
-        textKey={activity.id}
-        maximum={MAXIMUM_RIDE_NOTE_CHARACTERS}
-        words={NOTE_WORDS}
-        headingLevel={3}
-      />
+          <RiderTextBox
+            port={riderText}
+            kind="note"
+            textKey={activity.id}
+            maximum={MAXIMUM_RIDE_NOTE_CHARACTERS}
+            words={NOTE_WORDS}
+            headingLevel={3}
+          />
 
-      {activity.hasPosition ? (
-        <>
-          <h3>Route</h3>
-          {/*
+          {activity.hasPosition ? (
+            <>
+              <h3>Route</h3>
+              {/*
             The geometry the map is handed is chosen here, and it is the whole
             of #63's sixth criterion: with the shared view open the map receives
             the **trimmed** segments, and the untrimmed ones are not in its
             props, its state or the DOM. ADR 0004 decision C — obfuscation is
             applied in the payload, never by the renderer.
           */}
-          <MapPanel
-            port={mapPort}
-            basemap={basemap}
-            tiles={tiles}
-            track={showShared && shared !== undefined ? trackGeometry(shared.segments) : ownTrack}
-          />
+              <MapPanel
+                port={mapPort}
+                basemap={basemap}
+                tiles={tiles}
+                track={
+                  showShared && shared !== undefined ? trackGeometry(shared.segments) : ownTrack
+                }
+              />
 
-          <h3>What a shared copy would contain</h3>
-          {showShared ? (
-            <SharedSummary track={shared} own={activity.distance} />
-          ) : (
-            <>
-              {/* #1013: what a published copy would hide is a privacy sentence,
+              <h3>What a shared copy would contain</h3>
+              {showShared ? (
+                <SharedSummary track={shared} own={activity.distance} />
+              ) : (
+                <>
+                  {/* #1013: what a published copy would hide is a privacy sentence,
                 kept on the screen whole. */}
-              <p className="oyl-muted" data-oyl-kept-visible="">
-                Your own view shows your own track, whole — this ride is yours. A copy published
-                anywhere else would have your privacy zones applied to it first.
-              </p>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  void revealShared();
-                }}
-              >
-                Show what a shared copy would contain
-              </Button>
+                  <p className="oyl-muted" data-oyl-kept-visible="">
+                    Your own view shows your own track, whole — this ride is yours. A copy published
+                    anywhere else would have your privacy zones applied to it first.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      void revealShared();
+                    }}
+                  >
+                    Show what a shared copy would contain
+                  </Button>
+                </>
+              )}
             </>
-          )}
-        </>
-      ) : undefined}
+          ) : undefined}
 
-      {embedded ? null : <WayOut />}
+          {embedded ? null : <WayOut />}
+        </div>
+      </div>
     </>
   );
 }

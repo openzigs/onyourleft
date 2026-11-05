@@ -1417,9 +1417,23 @@ html {
 }
 
 @container oyl-pane (min-width: 64rem) {
-  .oyl-sections:not(.oyl-sections--broad) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+/*
+ * A pair — #2067: a screen whose view gathers itself into exactly two groups
+ * (the route builder: the waypoints and their map, then the legs and the
+ * save; a ride's own page: its figures, traces and laps, then the rest). Two
+ * columns from 40rem like any screen of sections, and never three, which
+ * would leave a third of a landscape tablet empty beside two groups. A group
+ * holding a table keeps its column rather than spanning both, as a lone
+ * table section does above: each group is half of the pair, and its table
+ * scrolls sideways inside its own region (`design/ScrollTable.tsx`).
+ */
+.oyl-sections--pair > :has(.oyl-scroll-region) {
+  grid-column: auto;
 }
 
 /*

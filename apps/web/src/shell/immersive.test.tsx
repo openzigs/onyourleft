@@ -337,8 +337,9 @@ describe('which routes keep the reading measure — #422', () => {
   });
 
   it('leaves a page that is read at the measure', async () => {
-    // Credits, not About: since #1014 About is a screen of sections.
-    globalThis.location.hash = hrefFor(routeById('credits'));
+    // Not-found, not About or Credits: since #1014 About, and since #2067
+    // Credits, are screens of sections.
+    globalThis.location.hash = hrefFor(routeById('not-found'));
     await openTheGame();
 
     expect(document.querySelector('main')?.className).toBe('oyl-main oyl-main--prose');
