@@ -14,6 +14,14 @@
  * and none with it — and since #1922, the pair's frames planted alike but on
  * the driveways a garden apartment gives up. Since #1790 `-mapped-roof-shape`:
  * the tagged street's roofs as tagged without it, and every tag ignored with it.
+ * Since #1792 `-mapped-paint`: the painted street's walls in their tagged
+ * materials without it, and every colour and material ignored with it.
+ * Since #1793 `-start-year`: the dated road's 1915 houses Foursquares without
+ * it, and every year ignored with it.
+ * Since #1794 `-landmark-churches`: the street of churches' naves under their
+ * steep gables without it, and every one planned as before with it. Since
+ * #1795 `-landmark-civic`: the town halls' and schools' odd-bayed brick fronts
+ * without it, and every one planned as before with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,8 +36,12 @@ import {
   type FootprintPlan,
 } from '../../src/game/footprint-buildings';
 import {
+  churchStreetFixture,
+  civicStreetFixture,
   commercialStreetFixture,
+  datedStreetFixture,
   houseStreetFixture,
+  mappedPaintStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
   planFingerprint,
@@ -134,6 +146,129 @@ describe('the realistic page’s `roof-variants` lever — #1785', () => {
         expect(plan.triangles[role]).toStrictEqual(off[index]?.triangles[role]);
       }
     });
+  });
+});
+
+describe('the realistic page’s `mapped-paint` lever — #1792', () => {
+  const street = mappedPaintStreetFixture();
+
+  it('draws every tagged wall in its material on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=painted').leversOff);
+    expect(plans).toHaveLength(street.corridor.buildings.length);
+    const wanted = { brick: 'brick', plaster: 'render', concrete: 'concrete', metal: 'corrugated' };
+    plans.forEach((plan, index) => {
+      const material = street.corridor.buildings[index]?.wallMaterial ?? null;
+      if (material === 'wood') expect(plan.cladding.wall).toBe('clapboard');
+      else if (material !== null && material in wanted) {
+        expect(plan.surfaces.wall).toBe(wanted[material as keyof typeof wanted]);
+        expect(plan.cladding.wall).toBe('photograph');
+      }
+    });
+  });
+
+  it('plans every house as the planner with them off does, with `levers=-mapped-paint`', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=painted&levers=-mapped-paint').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { mappedPaint: false },
+    ).plans;
+    expect(plans.length).toBe(off.length);
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.map((plan) => plan.surfaces)).toStrictEqual(off.map((plan) => plan.surfaces));
+    // Not vacuous: with the lever on, the same street plans otherwise.
+    const on = plannedTown(street, parseConfig('?town=painted').leversOff).plans;
+    expect(on.map((plan) => plan.surfaces)).not.toStrictEqual(plans.map((plan) => plan.surfaces));
+  });
+});
+
+describe('the realistic page’s `start-year` lever — #1793', () => {
+  const road = datedStreetFixture();
+
+  it('draws the dated road’s 1915 houses as Foursquares on the product’s page', () => {
+    const { plans } = plannedTown(road, parseConfig('?town=dated').leversOff);
+    const of1915 = plans.filter((_, index) => road.corridor.buildings[index]?.startYear === 1915);
+    expect(of1915.length).toBeGreaterThan(0);
+    expect(of1915.every((plan) => plan.archetype === 'foursquare')).toBe(true);
+  });
+
+  it('plans the dated road, with `levers=-start-year`, as the planner with the years off does', () => {
+    const { land, plans, urban } = plannedTown(
+      road,
+      parseConfig('?town=dated&levers=-start-year').leversOff,
+    );
+    const off = footprintPlans(road.corridor, land, road.profile, road.origin, undefined, urban, {
+      mappedStartYear: false,
+    }).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
+  });
+});
+
+describe('the realistic page’s `landmark-civic` lever — #1795', () => {
+  const street = civicStreetFixture();
+
+  it('draws the street’s town halls and schools in brick on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=civic').leversOff);
+    const fits = new Set(['hall', 'flat-hall', 'school']);
+    plans.forEach((plan, index) => {
+      if (fits.has(street.rows[index]?.[0] ?? '')) expect(plan.surfaces.wall).toBe('brick');
+    });
+  });
+
+  it('plans the street, with `levers=-landmark-civic`, as the planner with them off does', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=civic&levers=-landmark-civic').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { landmarkCivic: false },
+    ).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    // Not vacuous: on, the street plans otherwise.
+    const on = plannedTown(street, parseConfig('?town=civic').leversOff).plans;
+    expect(planFingerprint(on)).not.toBe(planFingerprint(plans));
+  });
+});
+
+describe('the realistic page’s `landmark-churches` lever — #1794', () => {
+  const street = churchStreetFixture();
+
+  it('draws the street’s churches under their steep gables on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=churches').leversOff);
+    const naves = plans.filter((plan) => plan.roof === 'gable' && plan.pitchDegrees === 45);
+    expect(naves.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('plans the street, with `levers=-landmark-churches`, as the planner with them off does', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=churches&levers=-landmark-churches').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { landmarkChurches: false },
+    ).plans;
+    expect(planFingerprint(plans)).toBe(planFingerprint(off));
+    expect(plans.some((plan) => plan.pitchDegrees === 45)).toBe(false);
   });
 });
 

@@ -192,7 +192,6 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
     }
     expect(seen.secondary, at).toEqual([
       'Speed',
-      'Gradient',
       'To go',
       'Moving',
       // #2072: drawn in the primary panel's clock row.

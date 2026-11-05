@@ -473,7 +473,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         named 225° where it was 135°: the same light, which
                         under the mirror stood in the south-west — and
                         nothing measured along the road can move, because none
-                        of it is read off `x`
+                        of it is read off `x`. ⚠️ **Since #1996 a road ridden
+                        twice is drawn once**: `RoadCorridor.retraced` marks
+                        the points of the pass further from where the camera
+                        looks (§`retracedRows`: within half a road of another
+                        pass, along it, much further apart along the road than
+                        across), and their road quads and marks are folded to
+                        nothing in a fresh index list. A point where the road
+                        doubles back keeps the arriving normal
+                        (§`ribbonNormals`). `out-and-back.test.ts` holds it on
+                        `route-fixtures-testing.ts` §`outAndBackRoute`, which
+                        the realistic page rides as `route=out-and-back`
     src/game/world.ts   the ground, the sky and the depth cue (#241), and since
                         #286 the one light direction — the two axes a route is
                         read on, the one number that is physics rather than
@@ -1111,7 +1121,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         names `AudioContext`; `SoundControls.tsx` is the mute and
                         the volume a rider reaches DURING a ride (WCAG 2.2 SC
                         1.4.2). ⚠️ No dependency and no speech engine, and
-                        nothing claims a sound beats the screen
+                        nothing claims a sound beats the screen. Since #2055
+                        `web-audio.ts` builds a master, a duck on music, and
+                        music, effects and cue buses, set from `audio-mix.ts`
+                        (`oyl.audioMix.v1`, taken from the two old keys the
+                        first time): ⚠️ the volume is the BUS's gain and is
+                        multiplied nowhere else, or it would be squared
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from
@@ -1170,7 +1185,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         built-up land (`land-class.ts` §`builtUpDistances`),
                         so a mapped town is level with the road; the mask is
                         a REQUIRED argument of `terrainCorridor` and
-                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly.
+                        ⚠️ **Since #1996 a later pass of a road reads its
+                        earlier pass's relief** (§`reliefFields`, sides swapped
+                        where it runs the other way), so changing pass at an
+                        out-and-back's turn changes no hill in view; the other
+                        pass's ground is sunk out of sight with the turning
+                        point closed round the road's end (§`retracedRoles`),
+                        or drawn a metre under where it only lies alongside
+                        ⚠️ Since #2149 a sharp bend's inside, where the fold
+                        stops the rows short of the bend's centre, is closed
+                        on one point (`closeFans`): within the clear band
+                        only, and in the band just past each row's end, which
+                        every quality rung draws
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
@@ -1272,6 +1299,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pitch, porch, shutters, picture window, dormers,
                         garage and cladding together, `unknown` planned as
                         before (`-house-archetypes`, `town=houses`);
+                        since #1793 a mapped start year narrowing the ranked
+                        candidates to its era (`ARCHETYPE_ERAS`,
+                        `archetypeCandidates`), one of the era before a
+                        timeless Colonial or farmhouse, never widening and
+                        ignored where it leaves none (`-start-year`,
+                        `town=dated`);
                         since #1785 a gambrel, half-hipped, saltbox or
                         side-hipped roof (`variantRoof`) on a share of the
                         farmhouses, bungalows, Colonials and ranches, on a
@@ -1337,6 +1370,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         painted in `trim`, 6 m over the roof, the spire
                         shaded as a 60° slope and the church roofed in
                         `slate`;
+                        since #1794 one whose footprint holds a nave
+                        (≥ 80 m², rectangularity ≥ 0.6, a rectangle or
+                        #1660's rectangles, its tower standing on it) a
+                        church (`mapped-landmarks.ts`): the nave under a 45°
+                        gable at any size, with that tower and spire, the
+                        spire's top at a mapped height ≥ 1.6 times the
+                        nave's walls (then 2 storeys) or else at 1.8 times
+                        the ridge, at most 40 m, never under 3 m over the
+                        tower; every other one as before
+                        (`-landmark-churches`, `town=churches`);
+                        since #1795 a mapped town hall or school
+                        (`civicLandmarkOf`) of ≥ 100 m² and rectangularity
+                        ≥ 0.6 as itself: brick, its front an odd number of
+                        bays (`Windows.oddFront`) so the door is the middle
+                        one; a town hall's entry under a posted canopy and a
+                        cupola (`CUPOLA`, #2021's tower and spire small: 24
+                        triangles, 12 far) on its ridge or roof; a school
+                        none (`-landmark-civic`, `town=civic`);
                         since #2023 an untagged footprint inferred a shed
                         (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
                         rectangularity ≥ 0.9, a house-sized footprint within
@@ -1360,11 +1411,33 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         tertiary street commercial, drawn as a mapped shop;
                         no parking half (`-inferred-commercial`,
                         `town=untagged` at 400–700 m);
+                        since #1792 a mapped `building:material` and, on a
+                        pitched roof, `roof:material` on the belt's own
+                        surfaces (`MAPPED_WALL_SURFACES`,
+                        `MAPPED_ROOF_SURFACES`: brick, plaster render,
+                        concrete, metal corrugated, wood clapboard, glass a
+                        tower's curtain wall, asphalt shingles, slate,
+                        roof tiles; stone and a concrete roof unread), over
+                        the archetype's cladding, and a mapped colour the
+                        nearest paint its surface already has
+                        (`building-paint.ts` §`MAPPED_PALETTE`,
+                        §`mappedPaintEntry`, linear RGB over the list's
+                        ground), which `paintTown` never moves
+                        (`-mapped-paint`, `town=painted`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/mapped-landmarks.ts
+                        the mapped landmarks drawn as themselves (#1794): a
+                        church's fit (`churchFits`), its steep nave's
+                        features (`CHURCH_FEATURES`) and its spire's height
+                        rule (`spireIsMapped`, `spireApexOf`); since #1795 a
+                        town hall's and a school's (`civicLandmarkOf`,
+                        `civicLandmarkFits`, `CUPOLA`), read by
+                        `footprint-buildings.ts`; pure, plan-time, no draw
+                        call, byte or shader term
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in
@@ -1517,6 +1590,29 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
                         (`people.ts`). No crossing is either
+    src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
+                        Poly Haven's `trashbag` beside some bins and one
+                        `old_tyre` laid flat by a lamp post, placed from the
+                        street's own furniture (never a new placement), never
+                        by a front path, none on a city centre's street.
+                        Realistic only: merged into `FurnitureBelt`'s painted
+                        mesh and admitted only beside an anchor the frame
+                        draws, so 0 calls; ≤ `LITTER_CAPACITY` a frame,
+                        inside `REALISTIC_STREET_TRIANGLES`. Lever `-litter`
+    src/game/chain-link.ts
+                        the chain-link fence (#1274, owner ruling 2026-11-05)
+                        — along mapped `industrial`, `school` and `pitch`
+                        outlines within 40 m of the road, a ground drawn to
+                        the road's line fenced on the field verge's line;
+                        `fence` items with `ScatterItem.chainLink`, built once
+                        a route by `MappedTown.chainLinkAt`, in the
+                        boundaries' budget. ⚠️ Drawn IN the field fence's one
+                        instanced mesh (`ScatterFold`: both shapes, the vertex
+                        shader folds the other away; the wire a cut-out of the
+                        kit's opacity map), so 0 new calls, and every
+                        realistic fence instance submits both shapes. A field
+                        fence keeps its planks. No corridor, none. Lever
+                        `-chain-link`, page `town=grounds`
     src/game/people.ts  people walking and running (#1541) — on a village's
                         pavements and front paths (`streets.ts`'s `walks`
                         and `DoorPath.walk`) and the mapped footways, never

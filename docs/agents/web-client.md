@@ -437,7 +437,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         withheld ask keeps the earlier write-up and says why
                         ABOVE it (the owner's ruling of 2026-09-29); with no
                         instance it is one sentence (since #1103 no link to
-                        Camera: the device sets up no model of its own)
+                        Camera: the device sets up no model of its own).
+                        Since #2081 the stacked traces carry the ride's laps
+                        as bands, a tap or hover read-out and a distance axis
+                        (`axis.ts`), and the page draws a power curve
+                        (`curve.ts`, `PowerCurveChart.tsx`) beside the
+                        all-time one Analysis reads — from the power chart's
+                        own decode, never a second one
     src/instance/       the client half of signing in to an instance (#772) and
                         of linking this device to an athlete (#773): the local
                         athlete first, then the device key, then challenge →
@@ -725,6 +731,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         press in the shell goes to it and it alone decides —
                         off by default (`oyl.menuSounds.v1`), never on a ride
                         route, while recording or paused, or while immersive.
+                        Since #2055 its volume is the effects bus's gain in
+                        `game/web-audio.ts`, which its writer keeps in step.
                         ⚠️ Since #1072 `ListDetail.tsx` carries a card into its
                         detail with Motion (ADR 0041), reached only through
                         that lazily loaded chunk

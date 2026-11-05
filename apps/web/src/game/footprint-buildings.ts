@@ -309,6 +309,22 @@
  * own rule. A plan says what it
  * was inferred ({@link FootprintPlan.family}, {@link FootprintPlan.inferred}).
  *
+ * ## Mapped colours and materials (#1792, the owner's ruling D4 of 2026-10-27)
+ *
+ * A mapped `building:material` puts the walls on one of the belt's own
+ * surfaces ({@link MAPPED_WALL_SURFACES}) — or `wood` in clapboard, or `glass`
+ * a tower's curtain wall ({@link STYLE_GLAZED}) at any urban class — over the
+ * archetype's cladding and every seeded share; a pitched roof's
+ * `roof:material` its roof ({@link MAPPED_ROOF_SURFACES}, `asphalt` the
+ * shingles). `stone`, which no surface reads as, and a `concrete` roof are not
+ * read. A mapped `building:colour` or `roof:colour` — an index into the
+ * profile's palette — paints the wall or the roof the nearest entry its
+ * surface's list already has (`building-paint.ts` §`mappedPaintEntry`), and
+ * `paintTown` never moves it, so two tagged neighbours in one colour are
+ * painted alike. No surface, paint, uniform or draw call is added. Untagged
+ * footprints are planned as before, and so is every one with
+ * `?levers=-mapped-paint` ({@link FootprintPlanOptions}' `mappedPaint`).
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -330,13 +346,16 @@ import {
   triangulate,
   type BuildingFeature,
   type Ring,
+  type RoofMaterial,
   type RoofShape,
   type StreetFeature,
+  type WallMaterial,
 } from '@onyourleft/map-features';
 
 import {
   AWNING_PAINTS,
   DOOR_PAINTS,
+  mappedPaintEntry,
   paintsOf,
   roofPaintsOf,
   SHINGLE_SHARE,
@@ -363,6 +382,7 @@ import {
   type BuildingFamily,
 } from './building-types';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
+import { chainLinkPieces, fencedGrounds, type ChainLinkPiece } from './chain-link';
 import { widthClassOf } from './cross-streets';
 import type { AnchorKind } from './decorations';
 import {
@@ -397,6 +417,16 @@ import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } fro
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
+import {
+  CHURCH,
+  CHURCH_FEATURES,
+  churchFits,
+  civicLandmarkFits,
+  civicLandmarkOf,
+  CUPOLA,
+  spireApexOf,
+  spireIsMapped,
+} from './mapped-landmarks';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
@@ -409,6 +439,8 @@ import {
 } from './road-grid';
 import { scatterSeed } from './scatter';
 import {
+  BOUNDARY_PIECE_METRES,
+  FIELD_EDGE_LATERAL_METRES,
   footprintIndexOf,
   LOT_FLOATS,
   lotSpacing,
@@ -1484,6 +1516,33 @@ export function roofSurfaceOf(roof: FootprintRoof, share: number): StructureSurf
 }
 
 /**
+ * The surface a mapped `building:material` puts a plan's walls in — #1792,
+ * always one the belt already draws ({@link FOOTPRINT_SURFACES}), so no
+ * surface, material or draw call is added. `wood` is clapboard
+ * ({@link SIDING_SURFACE}, `CLAD_CLAPBOARD`) and `glass` the curtain wall
+ * ({@link STYLE_GLAZED}), so neither is here; `stone` is not read, because
+ * none of the belt's surfaces reads as stone.
+ */
+export const MAPPED_WALL_SURFACES: Readonly<Partial<Record<WallMaterial, StructureSurface>>> = {
+  brick: 'brick',
+  plaster: 'render',
+  concrete: 'concrete',
+  metal: 'corrugated',
+};
+
+/**
+ * The surface a mapped `roof:material` puts a pitched plan's roof in — #1792,
+ * on the belt's own surfaces. `asphalt` is shingles ({@link SHINGLE_SURFACE},
+ * `CLAD_SHINGLE`), so is not here; a `concrete` roof is not read, and nor is
+ * any tag on a flat roof, whose surface is the flat roof's.
+ */
+export const MAPPED_ROOF_SURFACES: Readonly<Partial<Record<RoofMaterial, StructureSurface>>> = {
+  slate: 'slate',
+  roof_tiles: 'roof-tiles',
+  metal: 'corrugated',
+};
+
+/**
  * Every surface a plan can wear — the range of {@link wallSurfaceOf} and
  * {@link roofSurfaceOf}.
  *
@@ -2519,6 +2578,12 @@ interface Windows {
    * then drawn as one too short for a window is: plain, in the walls' style.
    */
   readonly blind?: boolean;
+  /**
+   * #1795: the door's wall an odd number of bays — one more where
+   * {@link baysOf} counts an even number — so the door stands in the middle
+   * bay and the windows are mirrored about it: a town hall's and a school's.
+   */
+  readonly oddFront?: boolean;
 }
 
 /** How near a wall must stand to a rectangle's side to be under its eaves: **0.5 m** (#1660). */
@@ -2738,7 +2803,10 @@ function wallPiece(
     [u1, v1],
     [u0, v1],
   ];
-  const bays = windows === undefined || windows.blind === true ? 0 : baysOf(length);
+  const counted = windows === undefined || windows.blind === true ? 0 : baysOf(length);
+  // #1795: an odd number on a town hall's or a school's front.
+  const bays =
+    front && windows?.oddFront === true && counted > 0 && counted % 2 === 0 ? counted + 1 : counted;
   // #1790: the facade's storeys are the mapped levels' where the plan has them.
   const storey = windows?.storey ?? STOREY_METRES;
   const f0 = (bottom - from) / storey;
@@ -4877,6 +4945,8 @@ function steeple(
   site: SteepleSite,
   heights: readonly [bottom: number, top: number, floor: number],
   styles: { readonly wall: Style; readonly roof: Style },
+  // #1794: how far the spire rises over the tower, metres; #2021's `spire` sides by default.
+  spireRise?: number,
 ): void {
   const { cx, cz, ux, uz, half } = site;
   const [, top, floor] = heights;
@@ -4903,7 +4973,7 @@ function steeple(
     PAINTED,
     { top: true, bottom: true },
   );
-  const rise = 2 * half * STEEPLE.spire;
+  const rise = spireRise ?? 2 * half * STEEPLE.spire;
   const apex: Vec = [cx, top + rise, cz];
   const slant = Math.hypot(rise, half);
   // #2100: shaded as a slope at `lit`, a touch steeper than the town's roofs.
@@ -5210,6 +5280,8 @@ export function footprintPlans(
   const seed = scatterSeed(profile);
   // #1790: each footprint's mapped roof and storeys, unless `-mapped-roof-shape` is off.
   const mapped = options.mappedRoofShape ?? true;
+  // #1792: and its mapped colours and materials, unless `-mapped-paint` is off.
+  const mappedPaint = options.mappedPaint ?? true;
   const counts: Record<FootprintVerdict, number> = {
     kept: 0,
     'on-excluded-land': 0,
@@ -5219,6 +5291,8 @@ export function footprintPlans(
     'too-large': 0,
   };
   const plans: FootprintPlan[] = [];
+  // #1792: which of each plan's wall and roof paints is its mapped colour, by its place in `plans`.
+  const pinned: PinnedPaint[] = [];
   // #1588: every footprint, planned or not, so a driveway keeps off each.
   const others = new RingGrid(
     corridor.buildings.map((building) => building.rings[0] ?? new Float32Array(0)),
@@ -5299,32 +5373,37 @@ export function footprintPlans(
   for (const [index, each] of measured.entries()) {
     if (each === undefined) continue;
     counts.kept += 1;
-    plans.push(
-      planFootprint(
-        each,
-        land,
-        profile,
-        origin,
-        seed,
-        maxVertices,
-        { grid: others, own: index, porches, driveways },
-        party.get(index) ?? NO_PARTY_WALLS,
-        {
-          split: options.splitRoofs ?? true,
-          flat: false,
-          variants: options.roofVariants === false ? 'off' : (options.roofVariant ?? 'archetype'),
-          mapped,
-        },
-        {
-          on: options.houseArchetypes ?? true,
-          dropped: 0,
-          dormers: options.dormerVariants ?? true,
-          porches: options.archetypePorches ?? true,
-          buildings: options.commercialArchetypes ?? true,
-          steeples: options.steeples ?? true,
-        },
-      ),
+    const plan = planFootprint(
+      each,
+      land,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      { grid: others, own: index, porches, driveways },
+      party.get(index) ?? NO_PARTY_WALLS,
+      {
+        split: options.splitRoofs ?? true,
+        flat: false,
+        variants: options.roofVariants === false ? 'off' : (options.roofVariant ?? 'archetype'),
+        mapped,
+      },
+      {
+        on: options.houseArchetypes ?? true,
+        dropped: 0,
+        dormers: options.dormerVariants ?? true,
+        porches: options.archetypePorches ?? true,
+        buildings: options.commercialArchetypes ?? true,
+        steeples: options.steeples ?? true,
+        mappedPaint,
+        startYear: options.mappedStartYear ?? true,
+        churches: options.landmarkChurches ?? true,
+        civicLandmarks: options.landmarkCivic ?? true,
+      },
     );
+    plans.push(plan);
+    // #1792: a mapped colour is the building's own, which no neighbour moves it off.
+    pinned.push(mappedPaint ? pinnedPaintOf(plan, each.building) : NOT_PINNED);
   }
   // #1637: and a city centre's lots, as terraced blocks, off every one kept.
   // Not footprints of the corridor's, so no verdict counts them.
@@ -5351,7 +5430,7 @@ export function footprintPlans(
       ),
     );
   }
-  return { plans: paintTown(plans), verdicts: counts };
+  return { plans: paintTown(plans, pinned), verdicts: counts };
 }
 
 /**
@@ -5521,6 +5600,38 @@ function seededEntry(share: number, count: number): number {
   return Math.min(count - 1, Math.floor(share * count));
 }
 
+/** Which of a plan's wall and roof paints is its mapped colour — #1792 — which `paintTown` keeps. */
+interface PinnedPaint {
+  readonly wall: boolean;
+  readonly roof: boolean;
+}
+
+/** Neither paint is a mapped colour: an untagged plan's, a terraced block's, and `-mapped-paint`. */
+const NOT_PINNED: PinnedPaint = { wall: false, roof: false };
+
+/**
+ * The paint entry a mapped colour gives a plan's wall or roof — #1792, on the
+ * surface and cladding it wears (`building-paint.ts` §`mappedPaintEntry`) — or
+ * `undefined` where the footprint carries no colour there.
+ */
+function mappedPaintOf(
+  colour: number | null,
+  surface: StructureSurface,
+  shingled: boolean,
+): number | undefined {
+  return colour === null ? undefined : mappedPaintEntry(surface, shingled, colour);
+}
+
+/** Which of `plan`'s paints are `building`'s mapped colours — #1792. */
+function pinnedPaintOf(plan: FootprintPlan, building: BuildingFeature): PinnedPaint {
+  return {
+    wall: mappedPaintOf(building.wallColour, plan.surfaces.wall, false) !== undefined,
+    roof:
+      mappedPaintOf(building.roofColour, plan.surfaces.roof, plan.cladding.roof === 'shingle') !==
+      undefined,
+  };
+}
+
 /** Whether two plans are painted alike: the same surfaces, in the same four paints. */
 export function paintedAlike(a: FootprintPlan, b: FootprintPlan): boolean {
   return (
@@ -5595,8 +5706,15 @@ function nearestWearer(
  * "Alike" compares the surface and the paint entry, not the cladding the rider
  * sees: shingled and plain slate roofs, or clapboard and plastered walls, with
  * the same entry count as alike. That only over-constrains the choice.
+ *
+ * Since #1792 a wall or roof paint that is its footprint's mapped colour
+ * (`pinned`) is kept wherever it is, so two tagged neighbours in one colour
+ * wear it alike; only their trims and doors walk.
  */
-function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
+function paintTown(
+  plans: readonly FootprintPlan[],
+  pinned: readonly PinnedPaint[],
+): FootprintPlan[] {
   const reach = PAINT_NEIGHBOUR_METRES;
   const cells = new Map<number, number[]>();
   const painted: FootprintPlan[] = [];
@@ -5604,7 +5722,8 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
   const key = (ix: number, iz: number): number => (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
   const alike = (each: FootprintPlan): boolean =>
     near.some((other) => paintedAlike(other.plan, each));
-  for (const plan of plans) {
+  for (const [index, plan] of plans.entries()) {
+    const fixed = pinned[index] ?? NOT_PINNED;
     const ix = Math.floor(plan.centroid.x / reach);
     const iz = Math.floor(plan.centroid.z / reach);
     near.length = 0;
@@ -5623,21 +5742,26 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
     const { wall: wallSurface, roof: roofSurface } = plan.surfaces;
     const shingled = plan.cladding.roof === 'shingle';
     const paint: FootprintPaint = {
-      wall: farthestEntry(plan.paint.wall, paintsOf(wallSurface)?.length ?? 1, (entry) =>
-        nearestWearer(
-          near,
-          (other) => other.surfaces.wall === wallSurface && other.paint.wall === entry,
-        ),
-      ),
-      roof: farthestEntry(
-        plan.paint.roof,
-        roofPaintsOf(roofSurface, shingled)?.length ?? 1,
-        (entry) =>
-          nearestWearer(
-            near,
-            (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
+      // #1792: a mapped colour stays, whoever beside it wears the same.
+      wall: fixed.wall
+        ? plan.paint.wall
+        : farthestEntry(plan.paint.wall, paintsOf(wallSurface)?.length ?? 1, (entry) =>
+            nearestWearer(
+              near,
+              (other) => other.surfaces.wall === wallSurface && other.paint.wall === entry,
+            ),
           ),
-      ),
+      roof: fixed.roof
+        ? plan.paint.roof
+        : farthestEntry(
+            plan.paint.roof,
+            roofPaintsOf(roofSurface, shingled)?.length ?? 1,
+            (entry) =>
+              nearestWearer(
+                near,
+                (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
+              ),
+          ),
       trim: farthestEntry(plan.paint.trim, TRIM_PAINTS.length, (entry) =>
         nearestWearer(near, (other) => other.paint.trim === entry),
       ),
@@ -5698,10 +5822,31 @@ export function mappedTown(
   );
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
   const commercial = new Map<number, Map<number, boolean>>();
+  // #1274: the grounds a chain-link fence stands beside, and its pieces by route.
+  const grounds = fencedGrounds(corridor.landUse);
+  // Keyed by the profile alone: the pieces' heights also depend on the origin,
+  // seed and land, which every caller holds fixed for a whole ride. A caller
+  // that varies them for one profile must not share this town.
+  const chainLinks = new WeakMap<RouteProfile, readonly ChainLinkPiece[]>();
   const town: MappedTown = {
     // #1637: the ride's urban class, which the lots and the streets read.
     ...(urban === undefined ? {} : { urban }),
     overlaps: (lot) => index.overlaps(lot),
+    chainLinkAt(profile, origin, seed, land) {
+      const known = chainLinks.get(profile);
+      if (known !== undefined) return known;
+      const pieces = chainLinkPieces(grounds, {
+        profile,
+        origin,
+        seed,
+        land,
+        roadside: FIELD_EDGE_LATERAL_METRES,
+        piece: BOUNDARY_PIECE_METRES,
+        cityCentre: (along) => urban?.classAt(along) === 'city-centre',
+      });
+      chainLinks.set(profile, pieces);
+      return pieces;
+    },
     commercialAt(x, z) {
       const column = Math.round(x * 10);
       const row = Math.round(z * 10);
@@ -6273,6 +6418,39 @@ export interface FootprintPlanOptions {
    * footprint is planned as before (`?levers=-inferred-commercial`).
    */
   readonly inferredCommercial?: boolean;
+  /**
+   * #1792: each footprint's mapped `building:colour`, `roof:colour`,
+   * `building:material` and `roof:material`, where #1789 carries them,
+   * painting and cladding it on the belt's own surfaces and paints
+   * ({@link MAPPED_WALL_SURFACES}, {@link MAPPED_ROOF_SURFACES},
+   * `building-paint.ts` §`mappedPaintEntry`); `true` by default. Off, the four
+   * tags are ignored and every plan is as before (`?levers=-mapped-paint`).
+   */
+  readonly mappedPaint?: boolean;
+  /**
+   * #1793: a mapped house's `startYear`, where #1789 carries it, narrowing its
+   * archetype to those of its era (`house-archetypes.ts` §`ARCHETYPE_ERAS`),
+   * and ignored where it would leave none; `true` by default, and only while
+   * `houseArchetypes` is on. Off, the year is ignored and every plan is as
+   * before (`?levers=-start-year`).
+   */
+  readonly mappedStartYear?: boolean;
+  /**
+   * #1794: a mapped place of worship whose footprint holds one drawn as a
+   * church — a nave under a steep gable with #2021's tower and spire
+   * (`mapped-landmarks.ts`); `true` by default, and only while `buildingTypes`
+   * and `steeples` are on. Off, every one is planned as before
+   * (`?levers=-landmark-churches`).
+   */
+  readonly landmarkChurches?: boolean;
+  /**
+   * #1795: a mapped town hall or school whose footprint holds one drawn as
+   * itself (`mapped-landmarks.ts`): a symmetrical brick block under a cupola,
+   * its entry under a posted canopy, or a brick school in a regular rhythm;
+   * `true` by default, and only while `buildingTypes` is on. Off, every one is
+   * #1791's civic block, as before (`?levers=-landmark-civic`).
+   */
+  readonly landmarkCivic?: boolean;
 }
 
 /**
@@ -6321,6 +6499,14 @@ interface ArchetypeChoice {
   readonly buildings?: boolean;
   /** #2021: whether a mapped place of worship is given its steeple (`-steeples` off). */
   readonly steeples?: boolean;
+  /** #1792: whether its mapped colours and materials paint and clad it (`-mapped-paint` off). */
+  readonly mappedPaint?: boolean;
+  /** #1793: whether its mapped start year narrows its archetype (`-start-year` off). */
+  readonly startYear?: boolean;
+  /** #1794: whether a mapped place of worship is drawn as a church (`-landmark-churches` off). */
+  readonly churches?: boolean;
+  /** #1795: whether a mapped town hall or school is drawn as one (`-landmark-civic` off). */
+  readonly civicLandmarks?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -6363,7 +6549,7 @@ function planFootprint(
 ): FootprintPlan {
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
-  const { storeys, wallHeight, base, floor, eaves, family, inferred } = measured;
+  const { base, floor, family, inferred } = measured;
   // #1791: a mapped garage or shed stands on a home's land and is no home — no window, no
   // house feature; a civic block is no house and no shop.
   const outbuilding = family === 'garage' || family === 'shed';
@@ -6385,6 +6571,73 @@ function planFootprint(
   const terraced = party.length > 0;
   // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
   const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
+  const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
+  const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
+  // #2021: a mapped place of worship's steeple, at the end of its long axis away from its
+  // front door (the owner's ruling of 2026-11-03), and seeded where the door is within `tell`
+  // of the axis's middle, or there is none.
+  const steepleAt = ((): SteepleSite | undefined => {
+    if (choice.steeples !== true || part || family !== 'civic') return undefined;
+    if (!isWorship(building.buildingType, building.landmark)) return undefined;
+    const doorAlong =
+      frontFrame === undefined
+        ? 0
+        : (frontFrame.mx - rectangle.cx) * rectangle.ux +
+          (frontFrame.mz - rectangle.cz) * rectangle.uz;
+    const end =
+      Math.abs(doorAlong) >= STEEPLE.tell
+        ? doorAlong > 0
+          ? -1
+          : 1
+        : share(STREAM_STEEPLE) < 0.5
+          ? 1
+          : -1;
+    return steepleSiteOf(drawn, rectangle, end);
+  })();
+  // #1790: the mapped `roof:shape`, where the lever is on and the footprint is not terraced. A
+  // pitched one only on a shape a pitched roof is built on — a rectangle, or #1660's L, T, U
+  // or Z; on any other the tag is not read, and the roof is as before.
+  const tag =
+    roofing.mapped === true && !terraced && building.roofShape !== null
+      ? MAPPED_ROOFS[building.roofShape]
+      : undefined;
+  const mappedRoof =
+    tag !== undefined &&
+    (tag.roof === 'flat' ||
+      split !== undefined ||
+      rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY)
+      ? tag
+      : undefined;
+  // #1794: a mapped place of worship drawn as a church — a nave under a steep gable and
+  // #2021's tower and spire — where its footprint holds a nave and the tower stands on it
+  // (`mapped-landmarks.ts`); a flat mapped roof is no nave's. A split roof that fell back to
+  // the flat one is no church either, and keeps its block.
+  const church =
+    choice.churches === true &&
+    !roofing.flat &&
+    !terraced &&
+    steepleAt !== undefined &&
+    (mappedRoof === undefined || mappedRoof.roof !== 'flat') &&
+    churchFits({ area, rectangularity, rectilinear: split !== undefined });
+  // #1794: and where its mapped height is its spire's, its nave's walls are its mapped storeys'
+  // or `CHURCH.storeys`, and the spire's top is that height.
+  const naveStoreys =
+    (roofing.mapped === true ? levelsOf(building.levels) : null) ?? CHURCH.storeys;
+  const spired = church && spireIsMapped(building.heightMetres, naveStoreys * STOREY_METRES);
+  const storeys = spired ? naveStoreys : measured.storeys;
+  const wallHeight = spired ? naveStoreys * STOREY_METRES : measured.wallHeight;
+  const eaves = spired ? floor + wallHeight : measured.eaves;
+  const storey = spired ? STOREY_METRES : measured.storey;
+  const mappedSpire = spired ? lowest + (building.heightMetres ?? 0) : undefined;
+  // #1795: a mapped town hall or school drawn as one, where its footprint holds the block.
+  const civicLandmark =
+    choice.civicLandmarks === true &&
+    family === 'civic' &&
+    !part &&
+    !terraced &&
+    civicLandmarkFits({ area, rectangularity })
+      ? civicLandmarkOf(building.buildingType, building.landmark)
+      : undefined;
   // #1783: the commercial or multi-family building it is, which sets its cladding, roof,
   // ground floor and upper windows together; `unknown` is planned as before.
   // #1791: an untyped or commercial footprint by its cue, an apartment block as a garden
@@ -6408,41 +6661,27 @@ function planFootprint(
           terraced,
         })
       : 'unknown';
-  // #1790: the mapped `roof:shape`, where the lever is on and the footprint is not terraced. A
-  // pitched one only on a shape a pitched roof is built on — a rectangle, or #1660's L, T, U
-  // or Z; on any other the tag is not read, and the roof is as before.
-  const tag =
-    roofing.mapped === true && !terraced && building.roofShape !== null
-      ? MAPPED_ROOFS[building.roofShape]
-      : undefined;
-  const mappedRoof =
-    tag !== undefined &&
-    (tag.roof === 'flat' ||
-      split !== undefined ||
-      rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY)
-      ? tag
-      : undefined;
   const pitched =
     !roofing.flat &&
-    (mappedRoof !== undefined
-      ? mappedRoof.roof !== 'flat'
-      : pitchedFootprint({
-          // #2024: a pole building's low gable, at any size.
-          area: pole ? Math.min(area, FOOTPRINT_GABLE_MAX_AREA) : area,
-          rectangularity,
-          wallHeight,
-          use,
-          terraced,
-          rectilinear: split !== undefined,
-        }) ||
-        // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
-        (buildingArchetype === 'garden-apartment' &&
-          wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES));
+    // #1794: a church's nave is pitched, at any size or height.
+    (church ||
+      (mappedRoof !== undefined
+        ? mappedRoof.roof !== 'flat'
+        : pitchedFootprint({
+            // #2024: a pole building's low gable, at any size.
+            area: pole ? Math.min(area, FOOTPRINT_GABLE_MAX_AREA) : area,
+            rectangularity,
+            wallHeight,
+            use,
+            terraced,
+            rectilinear: split !== undefined,
+          }) ||
+          // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
+          (buildingArchetype === 'garden-apartment' &&
+            wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES)));
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = terraced ? { party: { walls: party, eaves } } : {};
-  const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
-  const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
   const residential = use === 'residential' && !outbuilding;
   // #1782: the US house it is, from what the plan already has, which sets its features
   // together; `unknown` keeps every independent share, as before. #1791: a mapped house
@@ -6467,21 +6706,26 @@ function planFootprint(
             pitched,
           },
           family === 'bungalow' ? BUNGALOW_ONLY : undefined,
+          // #1793: its mapped year, which only narrows the candidates.
+          choice.startYear === true ? building.startYear : null,
         )
       : 'unknown';
   const features = droppedFeatures(
-    archetype !== 'unknown'
-      ? ARCHETYPE_FEATURES[archetype]
-      : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
-        // block's, so none has a garage.
-        buildingArchetype === 'garden-apartment' || family === 'apartments'
-        ? GARDEN_APARTMENT_FEATURES
-        : family === undefined
-          ? SEEDED_FEATURES
-          : // #2024: an inferred barn's gambrel on a seeded share only.
-            measured.inferred && family === 'barn'
-            ? INFERRED_BARN_FEATURES
-            : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
+    // #1794: a church's nave under its steep gable.
+    church
+      ? CHURCH_FEATURES
+      : archetype !== 'unknown'
+        ? ARCHETYPE_FEATURES[archetype]
+        : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
+          // block's, so none has a garage.
+          buildingArchetype === 'garden-apartment' || family === 'apartments'
+          ? GARDEN_APARTMENT_FEATURES
+          : family === undefined
+            ? SEEDED_FEATURES
+            : // #2024: an inferred barn's gambrel on a seeded share only.
+              measured.inferred && family === 'barn'
+              ? INFERRED_BARN_FEATURES
+              : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -6553,22 +6797,46 @@ function planFootprint(
   // Which end of the ridge the chimney stands toward; a side-hipped roof hips the other (#1785).
   const chimneyEnd = share(STREAM_CHIMNEY) < chimneyShare / 2 ? 1 : -1;
   // A canopy only where it stands clear of the road's clearance, as the walls do.
+  // #1795: and a town hall's entry under one on posts, its surround.
   const withPorch =
     front !== undefined &&
-    residential &&
     front.length >= PORCH.width &&
     front.distance - PORCH.depth >= ROAD_CLEARANCE_METRES &&
-    share(STREAM_PORCH) < shareOf(features.canopy, PORCH_SHARE);
-  const withPosts = share(STREAM_POSTS) < shareOf(features.canopyPosts, PORCH_POSTS_SHARE);
+    ((residential && share(STREAM_PORCH) < shareOf(features.canopy, PORCH_SHARE)) ||
+      civicLandmark === 'townhall');
+  const withPosts =
+    civicLandmark === 'townhall' ||
+    share(STREAM_POSTS) < shareOf(features.canopyPosts, PORCH_POSTS_SHARE);
 
+  // #1792: the mapped `building:material` and, on a pitched roof, `roof:material`, while
+  // the lever is on — over the archetype's cladding and every seeded share.
+  const wallMaterial = choice.mappedPaint === true ? building.wallMaterial : null;
+  // A material nothing draws (`concrete`) is unread, as on the wall side: it leaves the seeded draw.
+  const roofMaterial =
+    choice.mappedPaint === true &&
+    roof !== 'flat' &&
+    building.roofMaterial !== null &&
+    (building.roofMaterial === 'asphalt' ||
+      MAPPED_ROOF_SURFACES[building.roofMaterial] !== undefined)
+      ? building.roofMaterial
+      : null;
+  // #1792: `wood` is clapboard wherever clapboard is drawn, but on a barn, whose planks are wood.
+  const woodSiding =
+    wallMaterial === 'wood' && !part && storeys <= TOWER_STOREYS && family !== 'barn';
   // #1588: the US house — its cladding, its windows' style, a garage.
   const clapboard =
-    residential &&
-    !part &&
-    storeys <= TOWER_STOREYS &&
-    share(STREAM_SIDING) < shareOf(features.siding, SIDING_SHARE);
-  // #2024: a pole building's roof is its grey sheet, never shingles.
-  const shingled = roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
+    woodSiding ||
+    ((wallMaterial === null || MAPPED_WALL_SURFACES[wallMaterial] === undefined) &&
+      residential &&
+      !part &&
+      storeys <= TOWER_STOREYS &&
+      share(STREAM_SIDING) < shareOf(features.siding, SIDING_SHARE));
+  // #2024: a pole building's roof is its grey sheet, never shingles. #1792: a mapped
+  // `asphalt` roof is shingles, and any other mapped one none.
+  const shingled =
+    roofMaterial !== null
+      ? roofMaterial === 'asphalt'
+      : roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
   const { least, most } = CLAPBOARD_COURSE_METRES;
   const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
   const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
@@ -6584,8 +6852,11 @@ function planFootprint(
     (roof === 'flat' ? STYLE_FLAT_ROOF : STYLE_EAVES) +
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
     (use === 'commercial' ? STYLE_COMMERCIAL : 0) +
-    // #1636: a tower in a covered urban class is glazed; with no class, as before.
-    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0) +
+    // #1636: a tower in a covered urban class is glazed; with no class, as before. #1792: and
+    // a tower mapped `glass` in any.
+    ((urbanClass !== 'unknown' || wallMaterial === 'glass') && storeys >= GLAZED_MIN_STOREYS
+      ? STYLE_GLAZED
+      : 0) +
     // #1663: a terraced building's corners are its row's, and carry no quoin.
     (terraced ? STYLE_TERRACED : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
@@ -6781,8 +7052,8 @@ function planFootprint(
       : -1;
   const windows: Windows = {
     // #1790: in storeys of the mapped levels', where it has them.
-    top: (eaves - floor) / measured.storey,
-    ...(measured.storey === STOREY_METRES ? {} : { storey: measured.storey }),
+    top: (eaves - floor) / storey,
+    ...(storey === STOREY_METRES ? {} : { storey }),
     doorEdge: front?.edge ?? -1,
     clad: wallClad,
     flags,
@@ -6794,6 +7065,8 @@ function planFootprint(
       : {}),
     // #1791: a mapped garage or shed has no window.
     ...(outbuilding || pole ? { blind: true } : {}),
+    // #1795: a town hall's and a school's front an odd number of bays, its door the middle one.
+    ...(civicLandmark !== undefined ? { oddFront: true } : {}),
   };
   // The slope the gutters' downpipe and the dormers are on: the one facing the front.
   // Since #1785 each rectangle's, for a saltbox's front.
@@ -6828,33 +7101,14 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  // #2021: a mapped place of worship's steeple, at the end of its long axis away from its
-  // front door (the owner's ruling of 2026-11-03), and seeded where the door is within `tell`
-  // of the axis's middle, or there is none.
-  const steepleAt = ((): SteepleSite | undefined => {
-    if (choice.steeples !== true || part || family !== 'civic') return undefined;
-    if (!isWorship(building.buildingType, building.landmark)) return undefined;
-    const doorAlong =
-      frontFrame === undefined
-        ? 0
-        : (frontFrame.mx - rectangle.cx) * rectangle.ux +
-          (frontFrame.mz - rectangle.cz) * rectangle.uz;
-    const end =
-      Math.abs(doorAlong) >= STEEPLE.tell
-        ? doorAlong > 0
-          ? -1
-          : 1
-        : share(STREAM_STEEPLE) < 0.5
-          ? 1
-          : -1;
-    return steepleSiteOf(drawn, rectangle, end);
-  })();
   /** What one build drew of #1588's extras, #1590's cornice and #2021's steeple. */
   interface Extras {
     garage: boolean;
     dormers: number;
     cornice: boolean;
     steeple: boolean;
+    /** #1795: a town hall's cupola. */
+    cupola: boolean;
   }
   const build = (
     withHoles: boolean,
@@ -6878,7 +7132,35 @@ function planFootprint(
       'porch-roof': [],
       'porch-trim': [],
     };
-    const drew: Extras = { garage: false, dormers: 0, cornice: false, steeple: false };
+    const drew: Extras = {
+      garage: false,
+      dormers: 0,
+      cornice: false,
+      steeple: false,
+      cupola: false,
+    };
+    // #1795: where a town hall's cupola stands — the highest ridge's middle, or a flat roof's
+    // middle where that is on the roof — and its axis.
+    // Its drum's four corners must all stand on the footprint, so a long thin one gets none.
+    const drumOn = (site: SteepleSite): boolean =>
+      [1, -1].every((a) =>
+        [1, -1].every((b) =>
+          insideRing(
+            drawn,
+            site.cx + (a * site.ux - b * site.uz) * site.half,
+            site.cz + (a * site.uz + b * site.ux) * site.half,
+          ),
+        ),
+      );
+    const flatCupola: SteepleSite = {
+      cx: centroid.x,
+      cz: centroid.z,
+      ux: rectangle.ux,
+      uz: rectangle.uz,
+      half: CUPOLA.half,
+    };
+    let cupolaAt: SteepleSite | undefined =
+      civicLandmark === 'townhall' && drumOn(flatCupola) ? flatCupola : undefined;
     // #2021: the top of the roof, which a steeple's tower stands above.
     let roofTop = eaves + PARAPET_METRES;
     // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
@@ -6948,6 +7230,12 @@ function planFootprint(
         if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
       }
       roofTop = stack.ridge.top;
+      // An off-centre ridge (a skillion's, a saltbox's) has no middle for the drum to stand on.
+      if (civicLandmark === 'townhall') {
+        const { cx, cz, ux, uz } = stack.rectangle;
+        const site = { cx, cz, ux, uz, half: CUPOLA.half };
+        cupolaAt = stack.ridge.offset === undefined && drumOn(site) ? site : undefined;
+      }
       if (withChimney) {
         chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], chimneyEnd);
       }
@@ -7003,11 +7291,30 @@ function planFootprint(
       }
     }
     if (withSteeple && steepleAt !== undefined) {
-      steeple(writing, steepleAt, [base, roofTop + STEEPLE.above, floor], {
-        wall: wallStyle,
-        roof: roofStyle,
-      });
+      const towerTop = roofTop + STEEPLE.above;
+      steeple(
+        writing,
+        steepleAt,
+        [base, towerTop, floor],
+        { wall: wallStyle, roof: roofStyle },
+        // #1794: a church's spire, to its top by `CHURCH`'s height rule.
+        church
+          ? spireApexOf({ ground: lowest, ridge: roofTop, towerTop, mapped: mappedSpire }) -
+              towerTop
+          : undefined,
+      );
       drew.steeple = true;
+    }
+    // #1795: a town hall's cupola, #2021's tower and spire at a small scale, on the roof's top.
+    if (withSteeple && cupolaAt !== undefined) {
+      steeple(
+        writing,
+        cupolaAt,
+        [roofTop - CUPOLA.half, roofTop + CUPOLA.drum, floor],
+        { wall: wallStyle, roof: roofStyle },
+        CUPOLA.cap,
+      );
+      drew.cupola = true;
     }
     if (frontFrame !== undefined) {
       // #1791: a mapped garage's door is its garage door, and a civic block's and a shed's plain.
@@ -7081,8 +7388,10 @@ function planFootprint(
   let built = build(holed, true, true);
   if (!fits(built.writing) && built.drew.cornice) built = build(holed, false, true);
   // #2021: a steeple that will not fit is left off before the holes are, and put back once
-  // they are: a civic block has no garage, porch or dormer, so without its holes there is room.
-  if (!fits(built.writing) && built.drew.steeple) built = build(holed, false, false);
+  // they are: a civic block has no garage, porch or dormer (a town hall's canopy is trim, not a porch), so without its holes there is room.
+  if (!fits(built.writing) && (built.drew.steeple || built.drew.cupola)) {
+    built = build(holed, false, false);
+  }
   if (holed && !fits(built.writing)) built = build(false, false, true);
   // #1785: a roof variant that will not fit falls back to the plain roof, then as before.
   if (variant !== 'plain' && !fits(built.writing)) {
@@ -7167,26 +7476,39 @@ function planFootprint(
           frontFrame?.nz ?? 0,
           base,
         );
+  const wallMaterialSurface =
+    wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];
+  const roofMaterialSurface =
+    roofMaterial === null ? undefined : MAPPED_ROOF_SURFACES[roofMaterial];
   const wallSurface = clapboard
     ? SIDING_SURFACE
-    : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
-      buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
-      ? 'brick'
-      : // #1791: a mapped barn's planks, under any roof.
-        family === 'barn'
-        ? 'planks'
-        : // #2024: a pole building's metal sheet.
-          pole
-          ? 'corrugated'
-          : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+    : // #1792: the mapped material's surface, over every rule below.
+      wallMaterialSurface !== undefined
+      ? wallMaterialSurface
+      : // #1795: a town hall's and a school's brick.
+        civicLandmark !== undefined
+        ? 'brick'
+        : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+          buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+          ? 'brick'
+          : // #1791: a mapped barn's planks, under any roof.
+            family === 'barn'
+            ? 'planks'
+            : // #2024: a pole building's metal sheet.
+              pole
+              ? 'corrugated'
+              : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.
+  // #1792: a mapped roof material's surface over each of those, on a pitched roof.
   const roofSurface = shingled
     ? SHINGLE_SURFACE
-    : (pole && roof !== 'flat') || drew.steeple
-      ? 'slate'
-      : roofSurfaceOf(roof, share(STREAM_ROOF));
+    : roofMaterialSurface !== undefined
+      ? roofMaterialSurface
+      : (pole && roof !== 'flat') || drew.steeple
+        ? 'slate'
+        : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
   const driveway = drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING;
@@ -7208,10 +7530,18 @@ function planFootprint(
       roof: shingled ? 'shingle' : 'photograph',
       course,
     },
-    // Where the paint starts; `paintTown` moves it off a neighbour's.
+    // Where the paint starts; `paintTown` moves it off a neighbour's. #1792: a mapped colour's
+    // nearest paint is where it stays.
     paint: {
-      wall: seededEntry(share(STREAM_PAINT_WALL), paintsOf(wallSurface)?.length ?? 1),
-      roof: seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, shingled)?.length ?? 1),
+      wall:
+        (choice.mappedPaint === true
+          ? mappedPaintOf(building.wallColour, wallSurface, false)
+          : undefined) ?? seededEntry(share(STREAM_PAINT_WALL), paintsOf(wallSurface)?.length ?? 1),
+      roof:
+        (choice.mappedPaint === true
+          ? mappedPaintOf(building.roofColour, roofSurface, shingled)
+          : undefined) ??
+        seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, shingled)?.length ?? 1),
       trim: seededEntry(share(STREAM_PAINT_TRIM), TRIM_PAINTS.length),
       door: seededEntry(share(STREAM_PAINT_DOOR), DOOR_PAINTS.length),
     },

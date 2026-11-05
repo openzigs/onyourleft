@@ -25,6 +25,17 @@
  * {@link CHART_POINTS} points a chart rather than 14 400 — `detail/load.ts` is
  * where that is enforced and `detail/load.test.ts` counts it.
  *
+ * ## The power curve, the laps and the read-out (#2081)
+ *
+ * The stack's laps are bands on every chart, and a tap or a hover on any
+ * chart moves its one cursor, whose `<output>` says every channel's reading
+ * (a polite live region, so the slider's keyboard moves are announced too).
+ * A ride with a speed channel may be drawn against the distance ridden
+ * instead of time (`detail/axis.ts`). Below the stack, the ride's power curve
+ * from five seconds to an hour beside the all-time one: the ride's line comes
+ * with the power chart's read and the distance with the speed chart's
+ * (`detail/load.ts` §`loadTrace`), so neither decodes a channel twice.
+ *
  * ## The side camera (#388)
  *
  * A ride the side camera filmed carries a report: sentences, saved with the
@@ -60,7 +71,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
-import type { Metres } from '@onyourleft/domain';
+import { metres, type Metres, type PowerDurationCurve } from '@onyourleft/domain';
 import { activityId as toActivityId, type ActivityId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
@@ -88,6 +99,18 @@ import {
   type RideOverview,
   type Trace,
 } from '../detail/load';
+import {
+  distanceAt,
+  distanceAxis,
+  lapAt,
+  lapBands,
+  timeAxis,
+  type AxisKind,
+  type DistanceProfile,
+  type LapBand,
+  type RideAxis,
+} from '../detail/axis';
+import { curveRows, onRideDurations } from '../detail/curve';
 import type { SharedTrack } from '../detail/privacy';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
@@ -99,7 +122,7 @@ import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { NOTE_WORDS } from '../rider-text/words';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
-import { loadRideZones, type RideZoneAnalysis } from '../analysis/load';
+import { loadLibraryBests, loadRideZones, type RideZoneAnalysis } from '../analysis/load';
 import type { AnalysisPort } from '../analysis/store-port';
 import { ZoneTable } from '../analysis/ZoneTable';
 import {
@@ -133,6 +156,9 @@ import { hrefFor, routeById } from '../shell/routes';
  * the table.
  */
 const TraceChart = lazy(async () => import('../detail/TraceChart'));
+
+/** #2081: the ride's power curve, loaded on demand for the same reason. */
+const PowerCurveChart = lazy(async () => import('../detail/PowerCurveChart'));
 
 export interface ActivityDetailViewProps {
   /**
@@ -207,6 +233,28 @@ type OverviewState =
   | { readonly kind: 'missing' }
   | { readonly kind: 'failed'; readonly reason: string };
 
+/**
+ * #2081: the all-time power curve beside the ride's, before and after the
+ * library is read. `none` with no analysis port: the ride's line alone.
+ */
+type AllTimeState =
+  | { readonly kind: 'waiting' }
+  | {
+      readonly kind: 'ready';
+      readonly curve: PowerDurationCurve;
+      /** The line rests on the most recent rides only (`analysis/load.ts` §`BESTS_ACTIVITY_LIMIT`). */
+      readonly truncated: boolean;
+      readonly ridesRead: number;
+    }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * #2081: the distance axis, as the rider's choice finds it — still to be read
+ * (it comes with the speed chart's read), or read and covering no ground.
+ */
+type DistanceState = 'reading' | 'ready' | 'none';
+
 /** #2069: the ride's time in zone, before and after its section is read. */
 type ZonesState =
   | { readonly kind: 'waiting' }
@@ -271,6 +319,15 @@ export function ActivityDetailView({
   const [heldZones, setHeldZones] = useState<
     { readonly id: ActivityId; readonly state: ZonesState } | undefined
   >(undefined);
+  // #2081: the power curve's section, and the all-time line read once it is
+  // in view — held with its ride, as the zones are.
+  const curveSlot = useRef<HTMLDivElement | null>(null);
+  const [curveSeenFor, setCurveSeenFor] = useState<ActivityId | undefined>(undefined);
+  const [heldAllTime, setHeldAllTime] = useState<
+    { readonly id: ActivityId; readonly state: AllTimeState } | undefined
+  >(undefined);
+  // #2081: which axis the charts share.
+  const [axisKind, setAxisKind] = useState<AxisKind>('time');
   const [shared, setShared] = useState<SharedTrack | undefined>(undefined);
   const [showShared, setShowShared] = useState(false);
   const [mapPort, setMapPort] = useState<MapPort | undefined>(undefined);
@@ -282,6 +339,13 @@ export function ActivityDetailView({
   const zonesSeen = id !== undefined && zonesSeenFor === id;
   const rideZones: ZonesState =
     heldZones !== undefined && heldZones.id === id ? heldZones.state : { kind: 'waiting' };
+  const curveSeen = id !== undefined && curveSeenFor === id;
+  const allTime: AllTimeState =
+    analysis === undefined
+      ? { kind: 'none' }
+      : heldAllTime !== undefined && heldAllTime.id === id
+        ? heldAllTime.state
+        : { kind: 'waiting' };
 
   useEffect(() => {
     if (port === undefined || id === undefined) {
@@ -375,7 +439,14 @@ export function ActivityDetailView({
       for (const channel of wanted) {
         let trace: Trace | undefined;
         try {
-          trace = await loadTrace(port, id, channel, units, CHART_POINTS);
+          trace = await loadTrace(
+            port,
+            id,
+            channel,
+            units,
+            CHART_POINTS,
+            Number(state.overview.streams?.sampleInterval ?? 1),
+          );
         } catch {
           // A channel that will not read (a corrupt blob) must not stop the
           // channels after it, and may be asked for again on a later pass.
@@ -430,6 +501,66 @@ export function ActivityDetailView({
       live = false;
     };
   }, [zonesSeen, analysis, id]);
+
+  /**
+   * #2081: the ride's power curve, once its section scrolls into view. The
+   * ride's own line comes with the power trace (`detail/load.ts`
+   * §`loadTrace`), so the section asks for that chart's channel as well, in
+   * case the rider jumped past it; the all-time line is Analysis' own library
+   * read, through the analysis port where there is one.
+   */
+  useEffect(() => {
+    if (state.kind !== 'ready' || curveSlot.current === null) {
+      return;
+    }
+    return watchUntilSeen(new Map([['curve', curveSlot.current]]), () => {
+      setCurveSeenFor(id);
+      setSeen((held) => (held.has('power') ? held : new Set([...held, 'power'])));
+    });
+  }, [state, id]);
+
+  useEffect(() => {
+    if (!curveSeen || analysis === undefined || id === undefined) {
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const library = await loadLibraryBests(analysis);
+        if (live) {
+          setHeldAllTime({
+            id,
+            state: {
+              kind: 'ready',
+              curve: onRideDurations(library.curve),
+              truncated: library.truncated,
+              ridesRead: library.activitiesRead,
+            },
+          });
+        }
+      } catch (error: unknown) {
+        if (live) {
+          setHeldAllTime({ id, state: { kind: 'failed', reason: reasonOf(error) } });
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [curveSeen, analysis, id]);
+
+  /**
+   * #2081: the distance axis is the speed channel summed, which comes with the
+   * speed chart's read (`detail/load.ts` §`loadTrace`). Picking that axis asks
+   * for the speed chart, in case it has not scrolled into view yet; until then
+   * nothing is read for it, so the time axis, the default, costs nothing.
+   */
+  const chooseAxis = useCallback((kind: AxisKind): void => {
+    setAxisKind(kind);
+    if (kind === 'distance') {
+      setSeen((held) => (held.has('speed') ? held : new Set([...held, 'speed'])));
+    }
+  }, []);
 
   /**
    * Load the map engine and the rider's own track, for a ride that has one.
@@ -531,6 +662,22 @@ export function ActivityDetailView({
   // the summary, so no chart's own length decides where a minute is.
   const rideSeconds =
     streams === undefined ? 0 : streams.sampleCount * Number(streams.sampleInterval);
+  // #2081: the laps as stretches of the ride's clock, and the axis the stack shares.
+  const bands = streams === undefined ? [] : lapBands(laps, streams.startedAt, rideSeconds);
+  const unit = distanceUnit(units);
+  const sayDistance = (metresRidden: number): string =>
+    `${formatDistance(metres(metresRidden), units).value} ${unit}`;
+  const profile: DistanceProfile | undefined = traces.get('speed')?.distance;
+  const coverage =
+    profile === undefined ? undefined : distanceAxis(profile, DISTANCE_AXIS_TITLE, sayDistance);
+  const byDistance = axisKind === 'distance' ? coverage : undefined;
+  const distanceState: DistanceState =
+    profile === undefined ? 'reading' : coverage === undefined ? 'none' : 'ready';
+  const axis: RideAxis = byDistance ?? timeAxis(rideSeconds);
+  const step = cursorStep(rideSeconds);
+  const pickAt = (seconds: number): void => {
+    setCursor(Math.min(rideSeconds, Math.round(seconds / step) * step));
+  };
   // #1054: a stored average that shows as 0 W says nothing was measured.
   const averagePower = shownAveragePower(activity.averagePower);
   // #1070: a stored 0 m says no distance is known (`units/format.ts` §`shownDistance`).
@@ -639,15 +786,32 @@ export function ActivityDetailView({
                   This ride stored a track and no sensor channels, so there is nothing to chart.
                 </StatusMessage>
               ) : (
-                <TraceCursor
-                  seconds={cursor}
-                  rideSeconds={rideSeconds}
-                  onChange={setCursor}
-                  readings={chartable.flatMap((series) => {
-                    const trace = traces.get(series.channel);
-                    return trace === undefined ? [] : [{ series, trace }];
-                  })}
-                />
+                <>
+                  {/* #2081: distance is the speed channel summed, so only a ride with one offers it. */}
+                  {available.includes('speed') ? (
+                    <AxisChoice
+                      kind={axisKind}
+                      onChange={chooseAxis}
+                      distance={distanceState}
+                      unit={unit}
+                    />
+                  ) : null}
+                  <TraceCursor
+                    seconds={cursor}
+                    rideSeconds={rideSeconds}
+                    onChange={setCursor}
+                    distance={
+                      coverage === undefined || profile === undefined
+                        ? undefined
+                        : sayDistance(distanceAt(profile, cursor))
+                    }
+                    lap={lapAt(bands, cursor)}
+                    readings={chartable.flatMap((series) => {
+                      const trace = traces.get(series.channel);
+                      return trace === undefined ? [] : [{ series, trace }];
+                    })}
+                  />
+                </>
               )}
 
               {/*
@@ -678,6 +842,9 @@ export function ActivityDetailView({
                         trace={trace}
                         rideSeconds={rideSeconds}
                         cursor={cursor}
+                        axis={axis}
+                        laps={bands}
+                        onPick={pickAt}
                       />
                     )}
                   </div>
@@ -685,6 +852,17 @@ export function ActivityDetailView({
               })}
             </>
           )}
+
+          {/*
+        #2081: the ride's power curve, five seconds to an hour, with the
+        all-time curve as a second line. Only for a ride with power; read once
+        its section scrolls into view.
+      */}
+          {available.includes('power') ? (
+            <div data-oyl-curve-slot="" ref={curveSlot}>
+              <RideCurve ride={traces.get('power')?.curve} allTime={allTime} />
+            </div>
+          ) : null}
 
           {/*
         #2069: the ride's time in zone, as Analysis draws it — a bar chart and
@@ -873,8 +1051,129 @@ function RideZones({ state }: { readonly state: ZonesState }): JSX.Element | nul
   );
 }
 
+/**
+ * #2081: the ride's power curve — the drawing, and its table one press away —
+ * in whichever state its read is in. A ride with no power renders nothing.
+ */
+function RideCurve({
+  ride,
+  allTime,
+}: {
+  /** The ride's own curve, from the power trace; `undefined` until that is read. */
+  readonly ride: PowerDurationCurve | undefined;
+  readonly allTime: AllTimeState;
+}): JSX.Element {
+  const heading = <h3>Power curve</h3>;
+  if (ride === undefined || allTime.kind === 'waiting') {
+    return (
+      <>
+        {heading}
+        <p className="oyl-muted">Reading the power curve…</p>
+      </>
+    );
+  }
+  const best = allTime.kind === 'ready' ? allTime.curve : undefined;
+  return (
+    <>
+      {heading}
+      <ChartSlot
+        caption={`Best average power (${POWER_UNIT}) for each length of time`}
+        columns={[
+          'Duration',
+          `This ride (${POWER_UNIT})`,
+          ...(best === undefined ? [] : [`All-time best (${POWER_UNIT})`]),
+        ]}
+        rows={curveRows(ride, best)}
+        emptyMessage="No stretch of power in this ride is long enough to measure."
+        tablePosition="disclosed"
+        chart={
+          <Suspense fallback={null}>
+            <PowerCurveChart ride={ride} allTime={best} />
+          </Suspense>
+        }
+      />
+      {allTime.kind === 'failed' ? (
+        <StatusMessage tone="warning">
+          Could not read your all-time bests, so only this ride&rsquo;s line is drawn.{' '}
+          {allTime.reason}
+        </StatusMessage>
+      ) : null}
+      {allTime.kind === 'ready' && allTime.truncated ? (
+        <p className="oyl-muted">
+          The all-time line is your best across the {String(allTime.ridesRead)} most recent rides on
+          this device.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 /** The shared cursor's control: its `id`, for the label (#2068). */
 const TRACE_CURSOR_ID = 'oyl-trace-cursor';
+
+/** #2081: the distance axis' title. Its labels carry the rider's unit. */
+export const DISTANCE_AXIS_TITLE = 'Distance ridden';
+
+/**
+ * One step of the cursor: one drawn point (the ride over {@link CHART_POINTS}),
+ * at least a second. A tap lands on a step too, so the slider and the line
+ * always agree.
+ */
+function cursorStep(rideSeconds: number): number {
+  return Math.max(1, Math.ceil(rideSeconds / CHART_POINTS));
+}
+
+/**
+ * #2081: which axis the stacked charts share — the time into the ride, or the
+ * distance ridden. A native radio pair drawn as `.oyl-segmented`, so a
+ * keyboard moves between the two with the arrow keys.
+ */
+function AxisChoice({
+  kind,
+  onChange,
+  distance,
+  unit,
+}: {
+  readonly kind: AxisKind;
+  readonly onChange: (kind: AxisKind) => void;
+  readonly distance: DistanceState;
+  readonly unit: string;
+}): JSX.Element {
+  const options: readonly { readonly value: AxisKind; readonly label: string }[] = [
+    { value: 'time', label: 'Time' },
+    { value: 'distance', label: `Distance (${unit})` },
+  ];
+  return (
+    <>
+      <fieldset className="oyl-segmented">
+        <legend>Draw the charts against</legend>
+        <div className="oyl-segmented__options">
+          {options.map((option) => (
+            <label key={option.value}>
+              <input
+                type="radio"
+                name="oyl-trace-axis"
+                value={option.value}
+                checked={kind === option.value}
+                onChange={() => {
+                  onChange(option.value);
+                }}
+              />{' '}
+              {option.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {kind !== 'distance' ? null : distance === 'none' ? (
+        <StatusMessage tone="info">
+          This ride&rsquo;s speed covers no distance, so its charts stay drawn against time.
+        </StatusMessage>
+      ) : distance === 'ready' ? null : (
+        <p className="oyl-muted">Reading the distance ridden…</p>
+      )}
+    </>
+  );
+}
 
 /**
  * The shared cursor — #2068. A native range input, so it is keyboard-operable
@@ -890,16 +1189,26 @@ function TraceCursor({
   seconds,
   rideSeconds,
   onChange,
+  distance,
+  lap,
   readings,
 }: {
   readonly seconds: number;
   readonly rideSeconds: number;
   readonly onChange: (seconds: number) => void;
+  /** #2081: the distance ridden by then, with its unit, once the distance axis has been read. */
+  readonly distance?: string | undefined;
+  /** #2081: the lap being ridden then, if any. */
+  readonly lap?: LapBand | undefined;
   /** The charts drawn so far, in stack order. A chart still to be read says nothing yet. */
   readonly readings: readonly { readonly series: TraceSeriesDefinition; readonly trace: Trace }[];
 }): JSX.Element {
-  const step = Math.max(1, Math.ceil(rideSeconds / CHART_POINTS));
-  const at = formatDuration(seconds);
+  const step = cursorStep(rideSeconds);
+  const at = [
+    formatDuration(seconds),
+    ...(distance === undefined ? [] : [distance]),
+    ...(lap === undefined ? [] : [`lap ${String(lap.number)}`]),
+  ].join(', ');
   const said = readings.map(({ series, trace }) => {
     const value = pointAt(trace.points, trace.secondsPerPoint, seconds);
     return `${series.label} ${value === undefined ? 'no reading' : `${series.format(value)} ${series.unit}`}`;
@@ -914,12 +1223,19 @@ function TraceCursor({
         max={rideSeconds}
         step={step}
         value={seconds}
-        aria-valuetext={at}
+        aria-valuetext={formatDuration(seconds)}
         onChange={(event) => {
           onChange(Number(event.currentTarget.value));
         }}
       />
-      <output htmlFor={TRACE_CURSOR_ID} className="oyl-trace-cursor__reading">
+      {/* #2081: polite and whole, so a screen reader says every channel's
+          reading each time the cursor moves — by key, tap or hover. */}
+      <output
+        htmlFor={TRACE_CURSOR_ID}
+        className="oyl-trace-cursor__reading"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {at}
         {said.length === 0 ? '' : `: ${said.join(', ')}`}
       </output>
@@ -933,6 +1249,9 @@ function TraceSlot({
   trace,
   rideSeconds,
   cursor,
+  axis,
+  laps,
+  onPick,
 }: {
   readonly series: TraceSeriesDefinition;
   readonly trace: Trace;
@@ -940,7 +1259,12 @@ function TraceSlot({
   readonly rideSeconds: number;
   /** The shared cursor, in seconds (#2068). */
   readonly cursor: number;
+  /** #2081: the axis the stack shares, its laps, and where a tap moves the cursor. */
+  readonly axis: RideAxis;
+  readonly laps: readonly LapBand[];
+  readonly onPick: (seconds: number) => void;
 }): JSX.Element {
+  const here = pointAt(trace.points, trace.secondsPerPoint, cursor);
   // The table is the same trace at reading resolution rather than at drawing
   // resolution — `series.ts` records why six hundred rows is not an equivalent
   // of anything. Derived from the points the chart already holds, so it costs
@@ -975,6 +1299,11 @@ function TraceSlot({
             missingSamples={trace.missingSamples}
             timeSpan={rideSeconds}
             cursor={cursor}
+            axis={axis}
+            laps={laps}
+            // A dropped sensor shows a dash, never a number.
+            cursorReading={here === undefined ? '—' : `${series.format(here)} ${series.unit}`}
+            onPick={onPick}
           />
         </Suspense>
       }

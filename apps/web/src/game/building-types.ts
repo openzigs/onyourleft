@@ -20,7 +20,7 @@
  * | `barn`, `farm_auxiliary`, `cowshed`, `stable` | `barn` | the farm building: planks, a gambrel (#1785) or else a steep gable |
  * | `commercial`, `retail`, `office`, `supermarket` | `commercial` | commercial: #1783's main-street block or strip front |
  * | `industrial`, `warehouse` | `industrial` | corrugated walls under a flat roof |
- * | `church`, `chapel`, `cathedral`, `school`, `civic`, `government`, `townhall`, or any `landmark` | `civic` | a plain civic block, brick or render, flat or a low hip, one central plain door; since #2021 a place of worship ({@link isWorship}) with a steeple at its street end (`footprint-buildings.ts` §`STEEPLE`) |
+ * | `church`, `chapel`, `cathedral`, `school`, `civic`, `government`, `townhall`, or any `landmark` | `civic` | a plain civic block, brick or render, flat or a low hip, one central plain door; since #2021 a place of worship ({@link isWorship}) with a steeple at its end away from the door (`footprint-buildings.ts` §`STEEPLE`), and since #1794 one whose footprint holds a nave a church under a steep gable, and since #1795 a town hall or a school whose footprint holds the block one (`mapped-landmarks.ts`) |
  * | none (`yes` and unknown values decode to none) | — | today's rule and #1782's archetypes |
  * | none, inferred a barn over 250 m² (#2024, `footprint-buildings.ts` §`footprintKindOf`) | `pole-building` | a metal pole building: corrugated walls with no window, a plain door, a low gable in grey |
  *

@@ -20,6 +20,9 @@ import {
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
+  mappedPaintWithLevers,
+  landmarkChurchesWithLevers,
+  landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   LAYERS,
@@ -32,8 +35,12 @@ import {
   PROBE_DECORATIONS,
   surfacesWithLevers,
   roadsideWithLevers,
+  litterWithLevers,
+  chainLinkWithLevers,
+  townWithChainLink,
   treesWithLevers,
   splitRoofsWithLevers,
+  startYearWithLevers,
   steeplesWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
@@ -91,6 +98,14 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(() => parseConfig('?town=richmond&route=village')).toThrow(/route and town/);
     // The village road turns to the sun as the default one does.
     expect(parseConfig('?route=village&facing=sun').facing).toBe('sun');
+    // #1996: the out-and-back, for the turning point's frames, and no
+    // nearer spelling of it.
+    expect(parseConfig('?route=out-and-back').route).toBe('out-and-back');
+    expect(configQuery(parseConfig('?route=out-and-back&at=1475'))).toBe(
+      '?at=1475&route=out-and-back',
+    );
+    expect(() => parseConfig('?route=out-back')).toThrow(/route is one of village, out-and-back/);
+    expect(() => parseConfig('?route=out-and-back&town=mixed')).toThrow(/route and town/);
   });
 
   it('rides through the mixed town only when asked, and refuses any other — #1581', () => {
@@ -534,6 +549,94 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
   });
 
+  it('paints and clads the mapped buildings from their tags, as the product does, unless #1792’s lever takes it out', () => {
+    expect(LEVERS).toContain('mapped-paint');
+    expect(mappedPaintWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(mappedPaintWithLevers(LEVERS.filter((lever) => lever !== 'mapped-paint'))).toBe(true);
+    expect(mappedPaintWithLevers(parseConfig('?levers=-mapped-paint').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=painted&levers=-mapped-paint'))).toBe(
+      `?levers=${encodeURIComponent('-mapped-paint')}&town=painted`,
+    );
+  });
+
+  it('rides the painted street through #1792’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=painted').town).toBe('painted');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(
+      /config\.town === 'painted'\s*\?\s*mappedPaintStreetFixture\(latitude\)/,
+    );
+  });
+
+  it('narrows a mapped house’s archetype by its start year, as the product does, unless #1793’s lever takes it out', () => {
+    expect(LEVERS).toContain('start-year');
+    expect(startYearWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(startYearWithLevers(LEVERS.filter((lever) => lever !== 'start-year'))).toBe(true);
+    expect(startYearWithLevers(parseConfig('?levers=-start-year').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=dated&levers=-start-year'))).toBe(
+      `?levers=${encodeURIComponent('-start-year')}&town=dated`,
+    );
+  });
+
+  it('rides the dated road through #1793’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=dated').town).toBe('dated');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'dated'\s*\?\s*datedStreetFixture\(latitude\)/);
+  });
+
+  it('draws each mapped place of worship as a church, as the product does, unless #1794’s lever takes it out', () => {
+    expect(LEVERS).toContain('landmark-churches');
+    expect(landmarkChurchesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(
+      landmarkChurchesWithLevers(LEVERS.filter((lever) => lever !== 'landmark-churches')),
+    ).toBe(true);
+    expect(landmarkChurchesWithLevers(parseConfig('?levers=-landmark-churches').leversOff)).toBe(
+      false,
+    );
+    expect(configQuery(parseConfig('?town=churches&levers=-landmark-churches'))).toBe(
+      `?levers=${encodeURIComponent('-landmark-churches')}&town=churches`,
+    );
+  });
+
+  it('draws each mapped town hall and school as itself, as the product does, unless #1795’s lever takes it out', () => {
+    expect(LEVERS).toContain('landmark-civic');
+    expect(landmarkCivicWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(landmarkCivicWithLevers(LEVERS.filter((lever) => lever !== 'landmark-civic'))).toBe(
+      true,
+    );
+    expect(landmarkCivicWithLevers(parseConfig('?levers=-landmark-civic').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=civic&levers=-landmark-civic'))).toBe(
+      `?levers=${encodeURIComponent('-landmark-civic')}&town=civic`,
+    );
+  });
+
+  it('rides the street of town halls and schools through #1795’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=civic').town).toBe('civic');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'civic'\s*\?\s*civicStreetFixture\(latitude\)/);
+  });
+
+  it('rides the street of churches through #1794’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=churches').town).toBe('churches');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'churches'\s*\?\s*churchStreetFixture\(latitude\)/);
+  });
+
   it('rides the tagged street through #1790’s fixture, which is where it is wired', () => {
     expect(parseConfig('?town=roofs').town).toBe('roofs');
     const harness = readFileSync(
@@ -630,6 +733,36 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(roadsideWithLevers(parseConfig('?levers=-roadside-models').leversOff)).toBe(false);
     expect(LEVERS).toContain('roadside-models');
     expect(configQuery(parseConfig('?levers=-roadside-models'))).toBe('?levers=-roadside-models');
+  });
+
+  it('loads the litter and the chain-link unless each is switched off — #1274, the ruling of 2026-11-05', () => {
+    // No lever is the product, and another lever leaves them as they are.
+    expect(litterWithLevers([])).toBe(true);
+    expect(chainLinkWithLevers([])).toBe(true);
+    const roadside = parseConfig('?levers=-roadside-models').leversOff;
+    expect(litterWithLevers(roadside)).toBe(true);
+    expect(chainLinkWithLevers(roadside)).toBe(true);
+    expect(litterWithLevers(parseConfig('?levers=-litter').leversOff)).toBe(false);
+    expect(chainLinkWithLevers(parseConfig('?levers=-litter').leversOff)).toBe(true);
+    expect(chainLinkWithLevers(parseConfig('?levers=-chain-link').leversOff)).toBe(false);
+    expect(LEVERS).toContain('litter');
+    expect(LEVERS).toContain('chain-link');
+    // The town's pieces go with the lever, and nothing else of it does.
+    const town = { overlaps: () => false, chainLinkAt: () => [] };
+    expect(townWithChainLink(town, [])).toBe(town);
+    const before = townWithChainLink(town, parseConfig('?levers=-chain-link').leversOff);
+    expect('chainLinkAt' in before).toBe(false);
+    expect(before.overlaps).toBe(town.overlaps);
+    // And the grounds town is ridden through #1274's fixture, which is where it is wired.
+    expect(parseConfig('?town=grounds').town).toBe('grounds');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'grounds'\s*\?\s*fencedGroundsFixture\(latitude\)/);
+    expect(harness).toMatch(/setRealisticLitter\(litterWithLevers\(config\.leversOff\)\)/);
+    expect(harness).toMatch(/setRealisticChainLink\(chainLinkWithLevers\(config\.leversOff\)\)/);
+    expect(harness).toMatch(/townWithChainLink\(mappedTown\(/);
   });
 
   it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {

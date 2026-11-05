@@ -252,7 +252,10 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * §`FOOTPRINT_MAX_TRIANGLES` reads it, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
-  Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure' | 'roadside', number>
+  Record<
+    RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure' | 'roadside' | 'chain-link',
+    number
+  >
 > = {
   'tree-broadleaf': 28_000,
   'tree-conifer': 24_000,
@@ -307,8 +310,26 @@ export const REALISTIC_TRIANGLES: Readonly<
    * inside the call its stylised shape makes, so what this class costs is
    * these triangles and nothing else — {@link REALISTIC_STREET_TRIANGLES}
    * counts the lamps and {@link REALISTIC_GANTRY_TRIANGLES} the barriers.
+   *
+   * Since the owner's ruling of 2026-11-05 a village's litter is in this
+   * class too: Poly Haven's `trashbag` at 60 and `old_tyre` at 64, which
+   * {@link REALISTIC_STREET_TRIANGLES} counts at `litter.ts`
+   * §`LITTER_CAPACITY`.
    */
   roadside: 240,
+  /**
+   * One piece of chain-link fence — #1274, the owner's ruling of 2026-11-05:
+   * **180**. `tools/realistic/sources.ts` §`CHAIN_LINK_SOURCE` cuts Poly
+   * Haven's kit to five posts and four panels' tubes, which the committed
+   * file holds as 143 triangles, and its wire to its four planes faced both
+   * ways, 16: 159. It carries no picture but the wire's opacity, and it is
+   * drawn folded into the field fence's own instanced mesh
+   * (`three-renderer.ts` §`RealisticStructureBelts`), so EVERY realistic
+   * fence instance submits the field fence's 84 and these: 243, under the
+   * 580 of the heaviest structure that {@link REALISTIC_STRUCTURE_ITEMS}'
+   * term prices every structure slot at — the frame's sum does not move.
+   */
+  'chain-link': 180,
 };
 
 /**
@@ -976,14 +997,22 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,
- * #1564's paths to the front doors and #1536's street furniture: **33 664**
- * in the realistic world since #1274, and 25 024 in the stylised one.
+ * #1564's paths to the front doors and #1536's street furniture: **34 304**
+ * in the realistic world since the owner's ruling of 2026-11-05 on #1274
+ * (33 664 before it, since #1274's lamp), and 25 024 in the stylised one.
  *
  * | | triangles |
  * |---|--:|
  * | Pavements: two villages in view at most, each at `streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE` | 2 × 1 184 = 2 368 |
  * | Front paths: the same two villages, each at `streets.ts` §`DOOR_PATH_TRIANGLES_PER_VILLAGE` | 2 × 960 = 1 920 |
  * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (the realistic lamp post 223, bollard 64, bench 108, bin 64) | 64 × 459 = 29 376 |
+ * | Litter, the realistic world's only: `litter.ts` §`LITTER_CAPACITY` pieces, each at the heavier model's triangles (the tyre's 64; the bag is 60) | 10 × 64 = 640 |
+ *
+ * ⚠️ **The litter is in the painted mesh** with the bins and the lamp posts
+ * it lies beside (`three-renderer.ts` §`FurnitureBelt`), and only on a frame
+ * that draws them, so the street's calls did not move; its **640** is the
+ * realistic world's alone and is counted inside
+ * {@link REALISTIC_FRAME_TRIANGLES} as the lamps' 8 640 is.
  *
  * ⚠️ **#1274 made the realistic lamp post Poly Haven's `street_lamp_01`**,
  * 223 triangles where the stylised post is 88, so the two worlds' streets
@@ -1006,7 +1035,7 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * in a frame: 3 504, inside the two rows above. Not raised.
  *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
- * rule, all but the lamps' 8 640**: what a street is in BOTH worlds — the
+ * rule, all but the lamps' 8 640 and the litter's 640**: what a street is in BOTH worlds — the
  * stylised street's 25 024 — does not change with the world, as the
  * corridor, the terrain and the water do not. It adds
  * no texture: the pavement's 512 px paving pair (0.5 MiB estimated) is
@@ -1018,7 +1047,7 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * which counts the belt's own meshes, and by `streets.test.ts` §"a path to
  * each front door"
  */
-export const REALISTIC_STREET_TRIANGLES = 33_664;
+export const REALISTIC_STREET_TRIANGLES = 34_304;
 
 /**
  * The most triangles a frame's holiday decorations may add — #1624:

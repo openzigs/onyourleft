@@ -44,6 +44,9 @@ export interface CueOutput {
    * suspended. ⚠️ **Only ever called from inside a user gesture** — a browser
    * refuses audio that starts without one, silently, so an implementation that
    * relied on autoplay would pass every test and be dead in the product.
+   *
+   * Also where a volume or a mute chosen since the last sound reaches the
+   * graph's buses (#2055) — the press that moved it is this call.
    */
   resume(): void;
   /**

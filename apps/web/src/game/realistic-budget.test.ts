@@ -44,6 +44,7 @@ import {
   realisticVegetation,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
+  REALISTIC_CHAIN_LINK,
   TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type RealisticTrees,
@@ -80,7 +81,9 @@ import {
 import { GROUND_BLOB_TRIANGLES } from './ground-blob';
 import { PERSON_ANIMATION_MAX_BYTES } from './people-body';
 import { readGlb } from './model-bytes-testing';
+import { LITTER_CAPACITY, LITTER_KINDS } from './litter';
 import {
+  chainLinkFacts,
   fileImageSize,
   fileKtx2Facts,
   modelFacts,
@@ -89,6 +92,7 @@ import {
   type RoadsideFacts,
 } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
+import { BOUNDARY_PIECE_METRES } from './settlements';
 import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
 import { footprintPlans } from './footprint-buildings';
@@ -193,6 +197,12 @@ const roadside = Object.fromEntries(
  */
 const GANTRY_INSTANCE_TRIANGLES = BOX_TRIANGLES + roadside.barrier.triangles;
 
+/** One piece of litter at its heaviest, either model — #1274: the tyre's 64. */
+const LITTER_TRIANGLES = Math.max(...LITTER_KINDS.map((kind) => roadside[kind].triangles));
+
+/** The committed chain-link piece, read off its bytes — #1274. */
+const chainLink = chainLinkFacts(at(REALISTIC_CHAIN_LINK.model));
+
 /** The realistic lamp post's triangles, and the stylised one's as its belt builds it — #1274, #1536. */
 const lampTriangles = roadside.lamp.triangles;
 const STYLISED_LAMP_TRIANGLES = ((): number => {
@@ -246,6 +256,48 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     // Non-vacuity: the lamp is a real share of the class, the barrier a box's four times.
     expect(roadside.lamp.triangles).toBeGreaterThan(REALISTIC_TRIANGLES.roadside * 0.8);
     expect(roadside.barrier.triangles).toBe(48);
+  });
+
+  it('keeps the chain-link piece under its class, its frame a colour a vertex and its wire a cut-out — #1274', () => {
+    const file = REALISTIC_CHAIN_LINK.model;
+    const { frame, wire } = chainLink;
+    expect(frame.triangles + wire.triangles, file).toBeLessThanOrEqual(
+      REALISTIC_TRIANGLES['chain-link'],
+    );
+    // Non-vacuity: posts and panels, not a stub — and the wire's four planes,
+    // faced both ways, two triangles a face.
+    expect(frame.triangles).toBeGreaterThan(REALISTIC_TRIANGLES['chain-link'] * 0.6);
+    expect(wire.triangles).toBe(16);
+    // No picture and no material: the frame is coloured a vertex at a time,
+    // and the wire carries the coordinates its opacity is read at.
+    expect(frame.attributes, file).toEqual(['COLOR_0', 'NORMAL', 'POSITION']);
+    expect(wire.attributes, file).toEqual(['COLOR_0', 'NORMAL', 'POSITION', 'TEXCOORD_0']);
+    expect(frame.materials + frame.images, file).toBe(0);
+    expect(modelFacts(at(file)).images, file).toEqual([]);
+    // One field boundary's piece long, standing on the origin.
+    const along = (facts: typeof frame, axis: 0 | 1): number[] => {
+      const values = Array.from(facts.position).filter((_, at) => at % 3 === axis);
+      return [Math.min(...values), Math.max(...values)];
+    };
+    const [left, right] = along(frame, 0);
+    expect((right as number) - (left as number)).toBeCloseTo(BOUNDARY_PIECE_METRES, 0);
+    expect(along(frame, 1)[0]).toBeGreaterThanOrEqual(0);
+    expect(along(frame, 1)[0]).toBeLessThan(0.02);
+    // Its wire's opacity is a 1K map, a number a texel, counted with the set.
+    const opacity = fileKtx2Facts(at(REALISTIC_CHAIN_LINK.wire));
+    expect([opacity.width, opacity.height]).toEqual([1024, 1024]);
+  });
+
+  it('keeps every realistic fence instance, field fence and chain-link folded together, under the heaviest structure — #1274', () => {
+    // Every realistic fence instance submits both shapes, one folded away
+    // (`three-renderer.ts` §`RealisticStructureBelts`), so a fence's slot in
+    // the structures' term is this — and that term prices every slot at the
+    // heaviest structure, which stays the heaviest.
+    const fence =
+      realisticStructureTriangles('fence') + chainLink.frame.triangles + chainLink.wire.triangles;
+    expect(fence).toBe(84 + 159);
+    expect(fence).toBeLessThan(Math.max(...STRUCTURE_KINDS.map(realisticStructureTriangles)));
+    expect(fence).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
   });
 
   it('keeps every map inside a model at or under the model class’s size', () => {
@@ -469,8 +521,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         2 * logoBoxes().length * BOX_TRIANGLES,
       // #1274: what the realistic street's lamp posts add over the stylised
       // street's, the capacity's worth — the realistic world's alone, so
-      // inside the frame (`realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES`).
-      lamps: FURNITURE_CAPACITY * (lampTriangles - STYLISED_LAMP_TRIANGLES),
+      // inside the frame (`realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES`)
+      // — and since the owner's ruling of 2026-11-05 its litter, at its
+      // capacity and the heavier model's triangles, which is the realistic
+      // world's alone too.
+      lamps:
+        FURNITURE_CAPACITY * (lampTriangles - STYLISED_LAMP_TRIANGLES) +
+        LITTER_CAPACITY * LITTER_TRIANGLES,
       // #620: the ground blobs, every one the belt has room for, a quad each.
       blobs: REALISTIC_GROUND_BLOBS * GROUND_BLOB_TRIANGLES,
       vegetation: worstVegetation(REALISTIC_TREE_LEVELS, trees),
@@ -511,7 +568,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(gantries).toBeGreaterThan(REALISTIC_GANTRY_TRIANGLES / 2);
     // #1274: the barrier and the lamp are real terms, priced off the files.
     expect(gantries).toBe(4_338);
-    expect(lamps).toBe(8_640);
+    expect(lamps).toBe(8_640 + 640);
     // Non-vacuity: the structures are a real share of the frame — a village
     // of detailed buildings — rather than a term that rounds to nothing.
     expect(structureItems * heaviestStructure).toBeGreaterThan(10_000);
@@ -810,9 +867,19 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     trees: RealisticTrees = REALISTIC_TREES_DEFAULT,
   ): readonly {
     readonly role:
-      'surface' | 'structure' | 'model' | 'impostor' | 'impostor-normals' | 'bicycle' | 'rider';
+      | 'surface'
+      | 'structure'
+      | 'model'
+      | 'impostor'
+      | 'impostor-normals'
+      | 'bicycle'
+      | 'rider'
+      | 'chain-link';
     readonly facts: Ktx2Facts;
   }[] => [
+    // #1274: the chain-link fence's wire, a number a texel, which every
+    // realistic fence's material holds.
+    { role: 'chain-link' as const, facts: fileKtx2Facts(at(REALISTIC_CHAIN_LINK.wire)) },
     // #623: the rider's kit, relief and occlusion.
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => ({
       role: 'rider' as const,
@@ -925,7 +992,10 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(2);
     const trees = (which: RealisticTrees): number =>
       textures(which)
-        .filter((each) => each.role !== 'surface' && each.role !== 'structure')
+        .filter(
+          (each) =>
+            each.role !== 'surface' && each.role !== 'structure' && each.role !== 'chain-link',
+        )
         .reduce(
           (sum, { facts }) =>
             sum +
@@ -1014,10 +1084,15 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         `normal maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'uastc'))}, ` +
         `maps inside a GLB ${mib(sum((each) => each.role === 'model'))}, ` +
         `impostors ${mib(sum((each) => each.role === 'impostor'))}, ` +
-        `their normals (#630) ${mib(sum((each) => each.role === 'impostor-normals'))}; ` +
+        `their normals (#630) ${mib(sum((each) => each.role === 'impostor-normals'))}, ` +
+        `the chain-link's wire (#1274) ${mib(sum((each) => each.role === 'chain-link'))}; ` +
         `the banners (#679) ${mib(banners)}; the sky alone ${mib(skyBytes())}`,
     );
     expect(total).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
+    // #1274: the chain-link's wire is in the sum, at its 1K's mipmapped byte a texel.
+    expect(sum((each) => each.role === 'chain-link')).toBe(
+      estimatedTextureBytes({ width: 1024, height: 1024, bytesPerTexel: 1, mipmapped: true }),
+    );
     // #618's criterion: it FALLS, from the 136 MiB the RGBA8 set was estimated at.
     expect(before).toBeGreaterThan(130 * 2 ** 20);
     expect(total).toBeLessThan(before - 60 * 2 ** 20);

@@ -5175,15 +5175,21 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
 
   /**
    * #625: how far the realistic rider's shoulders must move across the
-   * bicycle between two frames half a stroke apart, and at most: 2.5 cm and
-   * 8 cm. `bicycle.ts` §`TRUNK_ROCK_RADIANS` puts 3.8 cm there on the body the
-   * jsdom half poses; the ceiling is about twice that, which a rock of 6° or
-   * more would pass. ⚠️ 10 cm since PR #2116's third pass sat the hoods' back
-   * up from 48° to 58° (Refs #1999): the same rock's angle about the hips
-   * carries shoulders that are higher, and the browser measured 8.9 cm. A
-   * doubled rock would still be over 15 cm.
+   * bicycle between two frames half a stroke apart, at least and at most:
+   * 6 cm and 10 cm. `bicycle.ts` §`TRUNK_ROCK_RADIANS` is a 6° rock, and on
+   * the hoods' 58° back it puts 8.9 cm there, on this live context and on
+   * the body the jsdom half poses alike (the readings are of fixed crank
+   * angles, so they do not vary from run to run).
+   *
+   * - **The floor, 6 cm since #2153**, and 2.5 cm until then, which a rock
+   *   put back to 3° passed: that rock measures 4.5 cm on this body, so
+   *   undoing the owner's 6° now goes red.
+   * - **The ceiling, 10 cm since PR #2116's third pass** sat the hoods' back
+   *   up from 48° to 58° (Refs #1999), and 8 cm until then: the same angle
+   *   about the hips carries shoulders that are higher. A doubled rock,
+   *   about 17.7 cm, still fails it.
    */
-  const SHOULDER_ROCK_FLOOR_METRES = 0.025;
+  const SHOULDER_ROCK_FLOOR_METRES = 0.06;
   const SHOULDER_ROCK_CEILING_METRES = 0.1;
 
   /**
@@ -5219,10 +5225,11 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       `#625: shoulders half a stroke apart ${(measured.shoulderRock * 100).toFixed(2)} cm across ` +
         `the bicycle pedalling; control, no cadence: ${(measured.shoulderRockControl * 100).toFixed(3)} cm`,
     );
-    // The stated amount: 2.5 cm, against the 3.8 cm `bicycle.ts`'s 3° rock
-    // puts there (the jsdom half measures the same bones).
+    // The stated amount: 6 cm, against the 8.9 cm `bicycle.ts`'s 6° rock puts
+    // there, so a 3° rock (4.5 cm) is not a pass (the jsdom half measures
+    // the same bones).
     expect(measured.shoulderRock).toBeGreaterThan(SHOULDER_ROCK_FLOOR_METRES);
-    // A ceiling too, so a rock many times the cited 3° is not a pass.
+    // A ceiling too, so a rock twice the cited 6° is not a pass.
     expect(measured.shoulderRock).toBeLessThan(SHOULDER_ROCK_CEILING_METRES);
     // THE CONTROL: the same two frames with no cadence reading.
     expect(measured.shoulderRockControl).toBeLessThan(1e-6);

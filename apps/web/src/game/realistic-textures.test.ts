@@ -101,6 +101,7 @@ import {
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
   REALISTIC_ROADSIDE_MODELS,
+  REALISTIC_CHAIN_LINK,
   REALISTIC_BROADLEAVES,
   REALISTIC_CONIFERS,
   REALISTIC_SURFACES,
@@ -111,7 +112,7 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
-import { modelFacts, roadsideFacts } from './realistic-bytes-testing';
+import { chainLinkFacts, modelFacts, roadsideFacts } from './realistic-bytes-testing';
 
 /* ============================================================================
  * Running three's `KTX2Loader` under Vitest, for real
@@ -854,7 +855,11 @@ describe('the realistic rider moves like a rider — #625', () => {
       `#625: the shoulders half a stroke apart — ${(Math.abs(rocked) * 100).toFixed(2)} cm ` +
         `pedalling, ${(Math.abs(still) * 100).toFixed(3)} cm with no cadence`,
     );
-    expect(Math.abs(rocked)).toBeGreaterThan(0.025);
+    // #2153: 6 cm, between the 8.9 cm `bicycle.ts`'s 6° rock puts there on
+    // the hoods' 58° back and the 4.5 cm a rock put back to 3° would, so that
+    // undoing the owner's 6° goes red. 2.5 cm until then, which a 3° rock
+    // passed. `game.browser.spec.ts` holds the same floor on a live context.
+    expect(Math.abs(rocked)).toBeGreaterThan(0.06);
     // Toward the downstroke: +X's pedal is going down at a quarter turn.
     expect(rocked).toBeGreaterThan(0);
     expect(Math.abs(still)).toBeLessThan(1e-9);
@@ -1202,6 +1207,14 @@ describe('the realistic rider moves like a rider — #625', () => {
     expect(hoods.back - drops.back).toBeGreaterThan(18);
     // ⚠️ 10° until PR #2116's third pass raised the hoods' back so the arm
     // reaches the hood; the tops read by their hands beside the stem.
+    // #2153 (F5), decided: the bound KEEPS 5°, and the gap is not widened.
+    // The tops draw 62.0° against the hoods' 56.2°, 0.8° over the bound, and
+    // the owner approved PR #2116's frames at those backs (64° and 58°) on
+    // 2026-11-04. What tells the tops from the hoods is the hands beside the
+    // stem, which "puts each drawn hand on its grip" holds at 0.06 to 0.12 m
+    // across. The 0.8° is a tripwire on purpose: any further lift of the
+    // hoods' back, or a lowering of the tops', goes red here and comes back
+    // to the owner with frames rather than closing the gap unseen.
     expect(tops.back - hoods.back).toBeGreaterThan(5);
     expect(drops.back).toBeLessThan(25);
     expect(hoods.head - drops.head).toBeGreaterThan(0.2);
@@ -1661,25 +1674,43 @@ describe('the realistic rider moves like a rider — #625', () => {
     // right was clamped at straight down, and every one of the owner's frames
     // caught the cranks near a quarter turn. Now the swing is a share of the
     // position's own turn (`ELBOW_SWING_SHARE`).
+    //
+    // #2153 (F7): every 30° of the stroke, not only the two quarter turns
+    // this test once took, so "all round the stroke" is what it reads. The
+    // two sides differ most at the quarter turns, which are among the twelve.
+    //
+    // #2153 (F6): the drops' allowance is 8.5 cm, not 10. In the drops the
+    // two elbows still differ by 7.6 cm at a quarter turn, and that is the
+    // stroke's swing and nothing else: with `ELBOW_SWING_SHARE` at nought
+    // the difference is 0.4 cm. The swing shows in a frame from behind at a
+    // quarter turn (the owner's frames of 2026-11-05, #2153), one elbow out
+    // and the other in, so the allowance now sits just over what is drawn
+    // and a larger swing goes red. The hoods' 1.0 cm keeps its 7 cm.
     const renderer = await loadedOn(TABLET);
     const riders = renderer.realisticRidersOfLoadedWorld();
     if (riders === undefined) throw new Error('no world');
     const lines: string[] = [];
     for (const [name, riding, most] of [
-      ['drops', FAST, 0.1],
+      ['drops', FAST, 0.085],
       ['hoods', ORDINARY, 0.07],
     ] as const) {
       let apart = 0;
+      let apartAt = 0;
       let furthest = Number.NEGATIVE_INFINITY;
-      for (const crank of [HALF_PI, 3 * HALF_PI]) {
+      for (let step = 0; step < 12; step += 1) {
+        const crank = (step * Math.PI) / 6;
         const pose = ridden(riders, riding, crank);
         const left = outPast(riders, pose, 'L');
         const right = outPast(riders, pose, 'R');
-        apart = Math.max(apart, Math.abs(left - right));
+        if (Math.abs(left - right) > apart) {
+          apart = Math.abs(left - right);
+          apartAt = step * 30;
+        }
         furthest = Math.max(furthest, left, right);
       }
       lines.push(
-        `${name} ${(apart * 100).toFixed(1)} cm between the two, the further ${(furthest * 100).toFixed(1)} cm out`,
+        `${name} ${(apart * 100).toFixed(1)} cm between the two (at ${String(apartAt)}°), ` +
+          `the further ${(furthest * 100).toFixed(1)} cm out`,
       );
       // Half a stroke on, the other side is the one out: what differs between
       // them is the stroke, and the rest is mirrored.
@@ -1687,7 +1718,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(furthest, name).toBeLessThan(0.1);
     }
     console.log(
-      `PR #2116: at a quarter turn, each elbow out past its shoulder — ${lines.join('; ')}`,
+      `PR #2116: every 30° of the stroke, each elbow out past its shoulder — ${lines.join('; ')}`,
     );
   }, 120_000);
 
@@ -2861,7 +2892,8 @@ describe('the roadside models, loaded by the product’s own loader — #1274', 
       dispose: inner.dispose,
     });
     expect(outcome).toEqual({ loaded: true });
-    for (const file of Object.values(REALISTIC_ROADSIDE_MODELS)) {
+    // The lamp and the barrier: the litter has a lever of its own (below).
+    for (const file of [REALISTIC_ROADSIDE_MODELS.lamp, REALISTIC_ROADSIDE_MODELS.barrier]) {
       expect(
         asked.some((url) => url.endsWith(file)),
         file,
@@ -2898,6 +2930,95 @@ describe('the roadside models, loaded by the product’s own loader — #1274', 
       expect(
         drawing.gantries.meshes.boxes.geometry.getAttribute(renderer.GANTRY_PART_ATTRIBUTE),
       ).toBeUndefined();
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+describe('the litter and the chain-link, loaded by the product’s own loader — #1274, the ruling of 2026-11-05', () => {
+  it('lays the committed litter and folds the committed chain-link into the fence, as their bytes say', async () => {
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const shipped = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
+      const bag = roadsideFacts(join(shipped, REALISTIC_ROADSIDE_MODELS.bag));
+      const tyre = roadsideFacts(join(shipped, REALISTIC_ROADSIDE_MODELS.tyre));
+      const piece = chainLinkFacts(join(shipped, REALISTIC_CHAIN_LINK.model));
+      // The litter the street lays: `GLTFLoader`'s reading of each file.
+      for (const [kind, facts] of [
+        ['bag', bag],
+        ['tyre', tyre],
+      ] as const) {
+        const shape = drawing.furniture.litterShapeOf(kind);
+        if (shape === undefined) throw new Error(`${kind}: no litter shape`);
+        expect(shape.getAttribute('position').count, kind).toBe(facts.triangles * 3);
+        const colour = shape.getAttribute('color');
+        for (let at = 0; at < colour.count; at += 1) {
+          expect(colour.getX(at), `${kind} ${String(at)}`).toBeCloseTo(
+            facts.colour[at * 3] as number,
+            3,
+          );
+        }
+      }
+      // The field fence's ONE mesh, folded with the committed piece and taught it.
+      const meshes = drawing.structures.beltOf('planks')?.meshesOf('fence') ?? [];
+      expect(meshes).toHaveLength(1);
+      const mesh = meshes[0] as (typeof meshes)[number];
+      const parts = Array.from(
+        mesh.geometry.getAttribute(renderer.CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array,
+      );
+      expect(parts.filter((part) => part === 1)).toHaveLength(piece.frame.triangles * 3);
+      expect(parts.filter((part) => part === 2)).toHaveLength(piece.wire.triangles * 3);
+      expect(renderer.drawsChainLink(mesh.material as never)).toBe(true);
+      // The wire's coordinates, as the file holds them.
+      const uv = mesh.geometry.getAttribute('uv');
+      const firstWire = parts.indexOf(2);
+      expect(uv.getX(firstWire)).toBeCloseTo(piece.wire.uv[0] as number, 5);
+      expect(uv.getY(firstWire)).toBeCloseTo(piece.wire.uv[1] as number, 5);
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+
+  it('CONTROL: with the owner’s levers off, fetches none of them, and lays and folds none', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    renderer.setRealisticLitter(false);
+    renderer.setRealisticChainLink(false);
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const asked: string[] = [];
+    const at = (url: string): string => {
+      asked.push(url);
+      return `${ORIGIN}${url}`;
+    };
+    const outcome = await renderer.loadRealisticWorld({
+      model: (url) => inner.model(at(url)),
+      texture: (url) => inner.texture(at(url)),
+      sky: (url) => inner.sky(at(url)),
+      dispose: inner.dispose,
+    });
+    expect(outcome).toEqual({ loaded: true });
+    for (const file of [
+      REALISTIC_ROADSIDE_MODELS.bag,
+      REALISTIC_ROADSIDE_MODELS.tyre,
+      REALISTIC_CHAIN_LINK.model,
+      REALISTIC_CHAIN_LINK.wire,
+    ]) {
+      expect(
+        asked.some((url) => url.endsWith(file)),
+        file,
+      ).toBe(false);
+    }
+    // Non-vacuity: the lamp, under its own lever, still is.
+    expect(asked.some((url) => url.endsWith(REALISTIC_ROADSIDE_MODELS.lamp))).toBe(true);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      expect(drawing.furniture.litterShapeOf('bag')).toBeUndefined();
+      const mesh = drawing.structures.beltOf('planks')?.meshesOf('fence')[0];
+      expect(mesh?.geometry.getAttribute(renderer.CHAIN_LINK_PART_ATTRIBUTE)).toBeUndefined();
     } finally {
       drawing.dispose();
     }

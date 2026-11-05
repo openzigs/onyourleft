@@ -167,6 +167,58 @@ export function plannerCornerRoute(
 }
 
 /**
+ * A very sharp corner as a course sampled every 10 m draws it — #2149: 1 500 m
+ * north, a bend of `radius` through `degrees` to the `hand` side with a sample
+ * about every 10 m round its arc, and 1 500 m on along the new heading;
+ * climbing at `grade` to the bend and level after it.
+ *
+ * ⚠️ **Not {@link plannerCornerRoute}, which turns at one sample.** Its
+ * corridor rounds the corner over `terrain.ts` §`BEND_SMOOTHING_METRES` and
+ * the legs' ground covers the bend's inside; spread over several samples, as
+ * on the owner's course, the rows round the bend fan about a centre near the
+ * road, which is where the pocket of #2149 lay.
+ */
+export function sampledCornerRoute(
+  degrees: number,
+  hand: 'right' | 'left',
+  radius: number,
+  grade = 0,
+): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const turn = (degrees * Math.PI) / 180;
+  const mirror = hand === 'right' ? 1 : -1;
+  const points: RoutePoint[] = [];
+  let along = 0;
+  let lastEast = 0;
+  let lastNorth = 0;
+  const push = (east: number, north: number): void => {
+    along += Math.hypot(east - lastEast, north - lastNorth);
+    lastEast = east;
+    lastNorth = north;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(grade * Math.min(along, 1_500)),
+    });
+  };
+  for (let north = 0; north < 1_500; north += 10) push(0, north);
+  const steps = Math.max(1, Math.round((turn * radius) / 10));
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = (step / steps) * turn;
+    push(radius * (1 - Math.cos(angle)), 1_500 + radius * Math.sin(angle));
+  }
+  const endEast = radius * (1 - Math.cos(turn));
+  const endNorth = 1_500 + radius * Math.sin(turn);
+  for (let leg = 10; leg <= 1_500; leg += 10) {
+    push(endEast + leg * Math.sin(turn), endNorth + leg * Math.cos(turn));
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/**
  * A valley with a level floor 40 m wide and 12 % walls — #501's review. Its
  * floor meets its walls 20 m either side of the stream, inside a bridge's
  * approach (`waterways.ts` §`BRIDGE_HALF_SPAN_METRES` to
@@ -341,6 +393,96 @@ export function levelHairpinRoute(radius: number, leg: number): RouteProfile {
   }
   for (let north = leg - 10; north >= 0; north -= 10) push(2 * radius, north);
   return routeProfile(points);
+}
+
+/**
+ * A road that crosses itself — #1996: 200 m north, 100 m east, 100 m south,
+ * then 200 m west, across the first 200 m at right angles 100 m along it, and
+ * 300 m south. Both crossings of the one place are in one corridor; neither
+ * runs along the other. Level, a point every 10 m.
+ */
+export function crossingRoute(): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (north: number, east: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(30),
+    });
+  };
+  for (let north = 0; north < 200; north += 10) push(north, 0);
+  for (let east = 0; east < 100; east += 10) push(200, east);
+  for (let north = 200; north > 100; north -= 10) push(north, 100);
+  for (let east = 100; east > -100; east -= 10) push(100, east);
+  for (let north = 100; north >= -200; north -= 10) push(north, -100);
+  return routeProfile(points, { loop: false });
+}
+
+/**
+ * A lollipop — #1996: 1 000 m north up a stem, round a square of 300 m sides
+ * clockwise (east, north, west, then south back to the stem's head), and back
+ * down the stem. The way back JOINS the way out at the stem's head, running
+ * on straight, rather than turning back along it. A point every 10 m, its
+ * height a function of where it is, climbing gently north and east, so the
+ * stem is one height both ways and no lake lies beside a level stretch.
+ */
+export function lollipopRoute(): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (north: number, east: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(30 + 0.02 * north + 0.02 * east),
+    });
+  };
+  for (let north = 0; north < 1_000; north += 10) push(north, 0);
+  for (let east = 0; east < 300; east += 10) push(1_000, east);
+  for (let north = 1_000; north < 1_300; north += 10) push(north, 300);
+  for (let east = 300; east > 0; east -= 10) push(1_300, east);
+  for (let north = 1_300; north >= 0; north -= 10) push(north, 0);
+  return routeProfile(points, { loop: false });
+}
+
+/**
+ * How far north {@link outAndBackRoute} turns back, in metres: **1 500**. The
+ * turn is half way along it, its meander making that a few metres more.
+ */
+export const OUT_AND_BACK_NORTH_METRES = 1_500;
+
+/**
+ * An out-and-back — #1996: a road meandering north for
+ * {@link OUT_AND_BACK_NORTH_METRES}, then back down the same road to the start,
+ * a point every 10 m as a planner exports one. The return is the outbound's
+ * own points in reverse, so the two passes are one road; `offset` moves the
+ * return that many metres east, as a recorded ride on the other side of the
+ * road would be. Its height is a function of where a point is, so both passes
+ * of one place are at one height, climbing gently on the way out.
+ */
+export function outAndBackRoute(options: { readonly offset?: number } = {}): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const offset = options.offset ?? 0;
+  const points: RoutePoint[] = [];
+  const push = (north: number, east: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (east + 40 * Math.sin(north / 400)) / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(30 + 0.02 * north + 3 * Math.sin(north / 150)),
+    });
+  };
+  for (let north = 0; north <= OUT_AND_BACK_NORTH_METRES; north += 10) push(north, 0);
+  for (let north = OUT_AND_BACK_NORTH_METRES - 10; north >= 0; north -= 10) push(north, offset);
+  return routeProfile(points, { loop: false });
 }
 
 /**

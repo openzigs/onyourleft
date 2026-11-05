@@ -90,14 +90,70 @@ export const PLAN_SIZE = 100;
 /**
  * The margin the route is fitted inside, in the same units.
  *
- * Large enough that {@link RIDER_MARK_RADIUS} at the extreme edge of the route
- * — the start of a point-to-point climb, the westernmost point of a loop — is
- * drawn whole rather than half outside the viewBox.
+ * Large enough that {@link RIDER_MARK_RADIUS} and the outer half of its ring
+ * ({@link RIDER_MARK_RING_PIXELS}) at the extreme edge of the route — the
+ * start of a point-to-point climb, the westernmost point of a loop — are drawn
+ * whole rather than cut off at the viewBox: 8 units of disc and, at the
+ * smallest panel ({@link PLAN_SMALLEST_PIXELS}), 1.4 units of ring. 6 until
+ * #2070 made the mark twice the size.
  */
-export const PLAN_PADDING = 6;
+export const PLAN_PADDING = 10;
 
-/** The rider's mark, as a radius in the same units. @see PLAN_PADDING */
-export const RIDER_MARK_RADIUS = 4;
+/**
+ * The height of the smallest box `theme.css` gives the plan view, in CSS
+ * pixels: 4.5 rem, the short corners layout (a phone on its side). The viewBox
+ * is scaled into the box, so this is where the mark is smallest on screen.
+ * `PlanTrace.a11y.test.tsx` holds every `.oyl-hud__plan-svg` height in
+ * `theme.css` to it, so a smaller box cannot shrink the mark unnoticed.
+ *
+ * @test-facing a statement about the stylesheet, which the component never
+ * reads: the viewBox scales into whatever box `theme.css` gives it.
+ */
+export const PLAN_SMALLEST_PIXELS = 72;
+
+/**
+ * How wide the rider's mark is, at least, on any screen: **11 px** — #2070.
+ *
+ * Until #2070 the mark was 6.4 px across on a phone and 5.8 px on a phone on
+ * its side, measured, which is about a millimetre and a half at arm's length:
+ * the owner's *"the map on the ride screen is hard to see"*. With
+ * {@link RIDER_MARK_RADIUS} it is 11.5 px at {@link PLAN_SMALLEST_PIXELS},
+ * 12.8 px in a phone's 5 rem box and 20.5 px in a landscape tablet's 8 rem
+ * one. `hud.browser.spec.ts` measures it at every viewport it renders.
+ *
+ * @test-facing the floor {@link RIDER_MARK_RADIUS} is chosen to clear;
+ * `PlanTrace.a11y.test.tsx` and `browser/hud-harness.tsx` hold the drawn mark
+ * to it, and nothing draws from it.
+ */
+export const RIDER_MARK_MINIMUM_PIXELS = 11;
+
+/** The rider's mark, as a radius in viewBox units. @see RIDER_MARK_MINIMUM_PIXELS */
+export const RIDER_MARK_RADIUS = 8;
+
+/**
+ * The ring of the panel's own surface around the mark, in screen pixels
+ * (`non-scaling-stroke`): what keeps the mark a separate shape where it sits
+ * on the bright road ahead, which is the same colour as its disc.
+ */
+export const RIDER_MARK_RING_PIXELS = 2;
+
+/**
+ * The road still to ride: a solid line, 3 px — #2070. Twice the 1.5 px hairline
+ * the whole road was before, so the road reads at arm's length.
+ */
+export const PLAN_AHEAD_STROKE_PIXELS = 3;
+
+/**
+ * The road already ridden on this lap: a DASHED line, 2 px — #2070.
+ *
+ * ⚠️ **Not colour alone** (SC 1.4.1): ridden and to come differ by dash and
+ * by width as well as by token, so a rider who cannot tell the two greys
+ * apart, or who reads the panel in sunlight, still can.
+ */
+export const PLAN_RIDDEN_STROKE_PIXELS = 2;
+
+/** The ridden road's dash and gap, in screen pixels. @see PLAN_RIDDEN_STROKE_PIXELS */
+export const PLAN_RIDDEN_DASH = '4 3';
 
 /**
  * How many grid steps apart two consecutive positions must be to be a break: 4.
@@ -167,6 +223,13 @@ export interface PlanProjection {
 export interface PlanRun {
   readonly from: number;
   readonly points: readonly PlanPoint[];
+  /**
+   * Where in `positions` each of {@link points} came from, ascending — #2070.
+   * The thinning ({@link PLAN_MAX_POINTS}) keeps every `stride`-th sample, so
+   * a point's place along the road is this index times `resolution`, which is
+   * what {@link planCut} compares the rider's distance with.
+   */
+  readonly indices: readonly number[];
 }
 
 /** A route ready to draw: one transform, and the runs it placed. */
@@ -234,6 +297,7 @@ export function routePlan(profile: RouteProfile): RoutePlan {
   const stride = Math.max(1, Math.ceil(positions.length / PLAN_MAX_POINTS));
   const runs: PlanRun[] = [];
   let points: PlanPoint[] = [];
+  let indices: number[] = [];
   let from = 0;
   const closeRun = (endsAt: number): void => {
     if (points.length === 0) {
@@ -248,9 +312,11 @@ export function routePlan(profile: RouteProfile): RoutePlan {
     const previous = points[points.length - 1] as PlanPoint;
     if (previous.x !== tail.x || previous.y !== tail.y) {
       points.push(tail);
+      indices.push(endsAt);
     }
-    runs.push({ from, points });
+    runs.push({ from, points, indices });
     points = [];
+    indices = [];
   };
   for (let index = 0; index < positions.length; index += 1) {
     const position = positions[index] as GeographicPosition;
@@ -265,6 +331,7 @@ export function routePlan(profile: RouteProfile): RoutePlan {
     // never empty and its start is never a stride late.
     if (index === from || (index - from) % stride === 0) {
       points.push(planPoint(projection, position));
+      indices.push(index);
     }
   }
   closeRun(positions.length - 1);
@@ -296,6 +363,88 @@ export function planPath(run: PlanRun): string {
  */
 export function riderMark(plan: RoutePlan, profile: RouteProfile, distance: number): PlanPoint {
   return planPoint(plan.projection, positionAt(profile, distance));
+}
+
+/**
+ * The last DRAWN sample at or behind the rider, as an index into `positions`,
+ * or `-1` when no drawn sample is — #2070. Where the ridden road stops.
+ *
+ * ⚠️ **A drawn sample, not the rider's exact place**, and that is what keeps
+ * the split off the per-frame path. `HudPanel` renders sixty times a second
+ * and {@link splitPlan} re-serialises the road; keyed on this, `PlanTrace.tsx`
+ * redoes that once a stride (10 m on the profile's grid, more on a long route)
+ * rather than every frame. The few metres between this sample and the rider
+ * are under the mark, which is twice {@link RIDER_MARK_RADIUS} across.
+ *
+ * Through `distanceOnRoute`, so on lap two of a loop the ridden road is lap
+ * two's — the same wrap {@link riderMark} and {@link planProgress} make.
+ */
+export function planCut(plan: RoutePlan, profile: RouteProfile, distance: number): number {
+  const resolution = profile.resolution as number;
+  const along = resolution > 0 ? distanceOnRoute(profile, distance) / resolution : 0;
+  let cut = -1;
+  for (const run of plan.runs) {
+    const indices = run.indices;
+    if ((indices[0] ?? Number.POSITIVE_INFINITY) > along) {
+      break;
+    }
+    // The largest index at or below `along`, by halving: a run is up to
+    // `PLAN_MAX_POINTS` long and this runs every frame.
+    let low = 0;
+    let high = indices.length - 1;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if ((indices[middle] as number) <= along) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    cut = indices[low] as number;
+  }
+  return cut;
+}
+
+/** The road split at the rider: what is behind them on this lap, and what is not. */
+export interface PlanSplit {
+  readonly ridden: readonly PlanRun[];
+  readonly ahead: readonly PlanRun[];
+}
+
+/**
+ * Split each run at {@link planCut}'s sample — #2070.
+ *
+ * A run cut in two shares the sample it is cut at, so the two lines meet
+ * rather than leaving a hole at the rider. A ridden part that would be that
+ * one shared sample alone is dropped: it is the start of the road ahead, and
+ * a dashed line of no length is a stray dot. A run that is one sample long
+ * (a fragment between two breaks) goes whole to one side.
+ */
+export function splitPlan(plan: RoutePlan, cut: number): PlanSplit {
+  const ridden: PlanRun[] = [];
+  const ahead: PlanRun[] = [];
+  for (const run of plan.runs) {
+    const behind = run.indices.filter((index) => index <= cut).length;
+    if (behind === 0) {
+      ahead.push(run);
+    } else if (behind === run.indices.length) {
+      ridden.push(run);
+    } else {
+      if (behind > 1) {
+        ridden.push({
+          from: run.from,
+          points: run.points.slice(0, behind),
+          indices: run.indices.slice(0, behind),
+        });
+      }
+      ahead.push({
+        from: run.indices[behind - 1] as number,
+        points: run.points.slice(behind - 1),
+        indices: run.indices.slice(behind - 1),
+      });
+    }
+  }
+  return { ridden, ahead };
 }
 
 /**
