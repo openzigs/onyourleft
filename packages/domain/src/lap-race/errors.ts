@@ -34,7 +34,11 @@ export type LapRaceErrorCode =
   /** A field that is empty, or names one racer twice (#1899). */
   | 'field-invalid'
   /** A bot's travel this tick that is not a finite number of metres of at least zero (#1900). */
-  | 'travel-out-of-range';
+  | 'travel-out-of-range'
+  /** A bot plan's tick that is not a finite number of seconds of at least zero (#1960). */
+  | 'elapsed-out-of-range'
+  /** A bot's reserve that is not between nought and its plan's budget (#1960). */
+  | 'reserve-out-of-range';
 
 /** Raised by the lap-race model. @see LapRaceErrorCode */
 export class LapRaceError extends Error {

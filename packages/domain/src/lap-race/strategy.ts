@@ -9,8 +9,8 @@
  * (`@onyourleft/physics` §`stepBotRace`). It **decides** better, and it
  * changes **no power**: what it returns is a lane and whether to use the held
  * item, the inputs a rider's client sends (D-5.4), and nothing here holds a
- * power, a mass or an effort distance. A bot's power is still its tier's
- * pacing on the road under it, whatever its place (D-9).
+ * power, a mass or an effort distance. A bot's power is still its race
+ * plan's (`plan.ts`, ADR 0061 D-1), whatever its place (D-9).
  *
  * ## Item timing: what a use is worth, in metres
  *
