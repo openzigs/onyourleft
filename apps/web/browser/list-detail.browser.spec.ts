@@ -1934,6 +1934,9 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
           await expect(slots.nth(index).locator('.oyl-trace-chart')).toHaveCount(1);
         }
         await expect(page.locator('.oyl-trace-chart')).toHaveCount(shown);
+        // #2069: and the ride's time in zone above the laps, read the same way.
+        await page.locator('[data-oyl-zones-slot]').scrollIntoViewIfNeeded();
+        await expect(page.locator('[data-oyl-zones-slot] .oyl-zone-chart')).toHaveCount(2);
 
         const measure = async () =>
           table.evaluate((element) => {
@@ -2009,22 +2012,22 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
           `#1312 lap table, ${theme} — ${TABLET_IN_THE_SHELL.name} — ${String(seen.wider)} px wider than its region`,
         );
 
-        // The control: without the class the Lap column scrolls away.
+        // The control: without the class the Lap column scrolls away. The
+        // same table, marked before its class goes: since #2069 the ride's
+        // zone tables are `table.oyl-table` too, and come before the laps.
         await table.evaluate((element) => {
+          element.setAttribute('data-oyl-lap-control', '');
           element.classList.remove('oyl-table--laps');
         });
-        const control = await page
-          .locator('table.oyl-table')
-          .first()
-          .evaluate((element) => {
-            const region = element.closest<HTMLElement>('.oyl-scroll-region');
-            if (region === null) return [];
-            region.scrollLeft = region.scrollWidth;
-            const frame = region.getBoundingClientRect();
-            return [...element.querySelectorAll('tbody th')].map(
-              (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
-            );
-          });
+        const control = await page.locator('table[data-oyl-lap-control]').evaluate((element) => {
+          const region = element.closest<HTMLElement>('.oyl-scroll-region');
+          if (region === null) return [];
+          region.scrollLeft = region.scrollWidth;
+          const frame = region.getBoundingClientRect();
+          return [...element.querySelectorAll('tbody th')].map(
+            (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
+          );
+        });
         expect(control).toEqual([false, false, false, false, false]);
       });
     });
