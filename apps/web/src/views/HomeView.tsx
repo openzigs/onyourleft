@@ -99,7 +99,14 @@ import { ProfileShape, SensorGlyph } from '../design/illustration';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
-import { formatDuration, formatStartedAt, MOVING_TIME_LABEL } from '../format';
+import {
+  formatDuration,
+  formatPowerValue,
+  formatStartedAt,
+  MOVING_TIME_LABEL,
+  POWER_UNIT,
+  shownAveragePower,
+} from '../format';
 import {
   loadHome,
   loadNextUp,
@@ -305,6 +312,8 @@ function LastRide({
 }): JSX.Element {
   const units = useUnits();
   const lastDistance = shownDistance(last.distance);
+  // #1054: a mean that shows as 0 W is no figure, as on the ride result card.
+  const lastPower = shownAveragePower(last.averagePower);
   return (
     <section className="oyl-panel oyl-home__last" aria-labelledby="oyl-home-last">
       <h2 id="oyl-home-last">Last ride</h2>
@@ -342,11 +351,11 @@ function LastRide({
             </dd>
           </div>
         )}
-        {last.averagePower === undefined ? null : (
+        {lastPower === undefined ? null : (
           <div>
             <dt>Average power</dt>
             <dd>
-              <Reading value={String(Math.round(last.averagePower))} unit="W" />
+              <Reading value={formatPowerValue(lastPower)} unit={POWER_UNIT} />
             </dd>
           </div>
         )}

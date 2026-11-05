@@ -148,6 +148,22 @@ describe('Home’s last ride — #2048', () => {
     );
   });
 
+  it.each([0, 0.3])('has no power line for a stored mean of %s W (#1054)', async (mean) => {
+    const open = await seeded();
+    await open.write(async (store) => {
+      await store.putActivity(
+        rideFor(ATHLETE_A, {
+          id: activityId('zero-power'),
+          startedAt: unixSeconds(NOW - DAY),
+          averagePower: watts(mean),
+        }),
+      );
+    });
+    expect(await withHome(open, (module) => module?.textContent ?? '')).not.toContain(
+      'Average power',
+    );
+  });
+
   it('draws the climb of the route it was ridden on, with the climb in words — and no coordinate reaches the module', async () => {
     const open = await seeded();
     const route = await seedRoute(open, ATHLETE_A, {
