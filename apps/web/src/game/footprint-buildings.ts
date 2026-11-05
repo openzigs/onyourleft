@@ -382,6 +382,7 @@ import {
   type BuildingFamily,
 } from './building-types';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
+import { chainLinkPieces, fencedGrounds, type ChainLinkPiece } from './chain-link';
 import { widthClassOf } from './cross-streets';
 import type { AnchorKind } from './decorations';
 import {
@@ -438,6 +439,8 @@ import {
 } from './road-grid';
 import { scatterSeed } from './scatter';
 import {
+  BOUNDARY_PIECE_METRES,
+  FIELD_EDGE_LATERAL_METRES,
   footprintIndexOf,
   LOT_FLOATS,
   lotSpacing,
@@ -5819,10 +5822,31 @@ export function mappedTown(
   );
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
   const commercial = new Map<number, Map<number, boolean>>();
+  // #1274: the grounds a chain-link fence stands beside, and its pieces by route.
+  const grounds = fencedGrounds(corridor.landUse);
+  // Keyed by the profile alone: the pieces' heights also depend on the origin,
+  // seed and land, which every caller holds fixed for a whole ride. A caller
+  // that varies them for one profile must not share this town.
+  const chainLinks = new WeakMap<RouteProfile, readonly ChainLinkPiece[]>();
   const town: MappedTown = {
     // #1637: the ride's urban class, which the lots and the streets read.
     ...(urban === undefined ? {} : { urban }),
     overlaps: (lot) => index.overlaps(lot),
+    chainLinkAt(profile, origin, seed, land) {
+      const known = chainLinks.get(profile);
+      if (known !== undefined) return known;
+      const pieces = chainLinkPieces(grounds, {
+        profile,
+        origin,
+        seed,
+        land,
+        roadside: FIELD_EDGE_LATERAL_METRES,
+        piece: BOUNDARY_PIECE_METRES,
+        cityCentre: (along) => urban?.classAt(along) === 'city-centre',
+      });
+      chainLinks.set(profile, pieces);
+      return pieces;
+    },
     commercialAt(x, z) {
       const column = Math.round(x * 10);
       const row = Math.round(z * 10);

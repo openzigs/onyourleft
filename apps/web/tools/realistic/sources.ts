@@ -77,6 +77,7 @@ import {
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
+  REALISTIC_CHAIN_LINK,
   houseModelFile,
   type HouseModelId,
   type RealisticBicycleMap,
@@ -373,7 +374,18 @@ export type PolyHavenSelection =
       readonly resolution: string;
       readonly maps: readonly string[];
     }
-  | { readonly type: 'model'; readonly resolution: string }
+  | {
+      readonly type: 'model';
+      readonly resolution: string;
+      /**
+       * Named maps besides the files its glTF includes — #1274: the chain-link
+       * fence's `wire_opacity`, which its glTF names inside the wire's colour
+       * map's title but does not include. The keys of Poly Haven's
+       * `/files/{id}` answer, taken as JPEG at `resolution`, as `maps` takes
+       * them.
+       */
+      readonly maps?: readonly string[];
+    }
   /**
    * Named maps of an asset of any kind and none of its geometry — #1294: a
    * model's twig atlas and bark, for a generated tree to wear. `maps` are the
@@ -1402,13 +1414,40 @@ export function structureMapMade(file: string): string {
  *   long and 0.82 m tall. `concrete_road_barrier_02`, the taller slab, was
  *   tried first: its lifting hooks are welded to its top, and the collapse
  *   left them as two spikes at any budget under 100 triangles.
+ * - `trashbag` (Benny Weimer) and `old_tyre` (MP): a village's litter, by the
+ *   owner's ruling of 2026-11-05 — a black bag 0.56 m tall and a worn tyre
+ *   0.62 m across, cut to 60 and 64 triangles. Neither carries lettering:
+ *   `can_rusted` and `cement_bag` were refused for a brand's printed on them.
  */
 export const ROADSIDE_MODEL_SOURCES: Readonly<
   Record<RoadsideModel, { readonly id: string; readonly triangles: number }>
 > = {
   lamp: { id: 'street_lamp_01', triangles: 240 },
   barrier: { id: 'concrete_road_barrier', triangles: 48 },
+  bag: { id: 'trashbag', triangles: 60 },
+  tyre: { id: 'old_tyre', triangles: 64 },
 };
+
+/**
+ * The chain-link fence's Poly Haven asset — #1274, the owner's ruling of
+ * 2026-11-05: `modular_chainlink_fence` (James Ray Cock; its wire's material
+ * by Amal Kumar), a `model` from the origin #430 already reads, and with it
+ * its `wire_opacity` map, which its glTF does not include. Its post is cut to
+ * about `postTriangles` and its panel's tubes to about `panelTriangles` by
+ * {@link CHAIN_LINK_SCRIPT}, five posts and four panels a piece. The
+ * script's report counts 195 triangles of frame and the wire's 16; the GLB
+ * the exporter writes holds 143 of frame and the 16, 159, under
+ * `realistic-budget.ts` §`REALISTIC_TRIANGLES`' `chain-link`, which
+ * `realistic-budget.test.ts` reads the committed file back against. Tried
+ * besides, by the report's count: 12 and 24 make a piece of 172, and 24 and
+ * 48 one of 324.
+ */
+export const CHAIN_LINK_SOURCE = {
+  id: 'modular_chainlink_fence',
+  opacity: 'wire_opacity',
+  postTriangles: 16,
+  panelTriangles: 32,
+} as const;
 
 /**
  * Every upstream input. Why each one, briefly — `docs/spikes/0005` has the
@@ -1434,7 +1473,9 @@ export const ROADSIDE_MODEL_SOURCES: Readonly<
  *   read on 2026-09-22, is thirteen urban facade kits, gates and shutters, the
  *   facades at 118 000 to 175 000 triangles — so the structures are built from
  *   numbers in `three-renderer.ts` and wear these.
- * - {@link ROADSIDE_MODEL_SOURCES} — a street lamp and a road barrier (#1274).
+ * - {@link ROADSIDE_MODEL_SOURCES} — a street lamp and a road barrier (#1274),
+ *   and a village's litter.
+ * - {@link CHAIN_LINK_SOURCE} — the chain-link fence (#1274).
  */
 export const SOURCES: readonly AssetSource[] = [
   polyHaven('farm_field', { type: 'hdri', resolution: '2k' }),
@@ -1561,6 +1602,12 @@ export const SOURCES: readonly AssetSource[] = [
   ...REALISTIC_ROADSIDE_MODEL_NAMES.map((model) =>
     polyHaven(ROADSIDE_MODEL_SOURCES[model].id, { type: 'model', resolution: '1k' }),
   ),
+  // #1274: the chain-link fence, and its wire's opacity map.
+  polyHaven(CHAIN_LINK_SOURCE.id, {
+    type: 'model',
+    resolution: '1k',
+    maps: [CHAIN_LINK_SOURCE.opacity],
+  }),
 ];
 
 /** The Blender version every derived asset was made with, and the one a re-run must use. */
@@ -1987,6 +2034,9 @@ export const HOUSE_SCRIPT = 'blender/process_house_models.py';
 /** The script that cuts a roadside model and colours it a vertex at a time — #1274. */
 export const ROADSIDE_SCRIPT = 'blender/process_roadside_model.py';
 
+/** The script that builds the chain-link fence's 8 m piece — #1274. */
+export const CHAIN_LINK_SCRIPT = 'blender/process_chain_link.py';
+
 /** What the house models' atlas run writes, before the KTX2 step. */
 export const HOUSE_ATLAS_MADE = 'house_models_atlas.png';
 
@@ -2137,6 +2187,27 @@ export const OUTPUTS: readonly OutputSpec[] = [
   houseAtlasOutput(),
   // #1274: the roadside models.
   ...REALISTIC_ROADSIDE_MODEL_NAMES.map(roadsideOutput),
+  // #1274: the chain-link fence's piece, and its wire's opacity.
+  {
+    file: REALISTIC_CHAIN_LINK.model,
+    from: CHAIN_LINK_SOURCE.id,
+    recipe: {
+      how: 'blender',
+      script: CHAIN_LINK_SCRIPT,
+      args: [String(CHAIN_LINK_SOURCE.postTriangles), String(CHAIN_LINK_SOURCE.panelTriangles)],
+    },
+    modified: `one 8 m piece built from the kit's double panel and its post, four panels between five posts; the post and the panel's tubes each welded and collapse-decimated, to about ${String(CHAIN_LINK_SOURCE.postTriangles)} and ${String(CHAIN_LINK_SOURCE.panelTriangles)} triangles, their base colour read through each corner's texture coordinates from the posts' colour map averaged to 32 cells a side and kept as one colour a vertex; the panels' wire planes kept with their texture coordinates, faced both ways, and coloured the wire's colour map's mean; every material and picture dropped; geometry, vertex colour and the wire's texture coordinates only`,
+  },
+  {
+    file: REALISTIC_CHAIN_LINK.wire,
+    from: CHAIN_LINK_SOURCE.id,
+    recipe: {
+      how: 'ktx2',
+      file: `${CHAIN_LINK_SOURCE.id}_${CHAIN_LINK_SOURCE.opacity}_1k.jpg`,
+      ktx2: { encoding: 'data', origin: 'top-left' },
+    },
+    modified: `the wire's opacity map (${CHAIN_LINK_SOURCE.id}_${CHAIN_LINK_SOURCE.opacity}_1k.jpg), ${encodingWords({ encoding: 'data', origin: 'top-left' })}`,
+  },
 ];
 
 /** One roadside model's GLB — #1274: its geometry, cut down, its colour in its vertices. */
@@ -2536,7 +2607,8 @@ export function polyHavenFiles(
         md5: file.md5,
         size: file.size,
       }));
-      return [one(gltf), ...included];
+      const maps = (select.maps ?? []).map((map) => one(pick([map, select.resolution, 'jpg'])));
+      return [one(gltf), ...included, ...maps];
     }
   }
 }

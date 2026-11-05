@@ -236,6 +236,14 @@ export interface ScatterItem {
    * for it (`three-renderer.ts` §`VillageHouseBelt`) and the kind elsewhere.
    */
   readonly house?: number;
+  /**
+   * A `fence` that is a chain-link fence — #1274, `chain-link.ts`: beside an
+   * industrial, school or sports ground on a ride's corridor, never a field's.
+   * The realistic world draws it as Poly Haven's chain-link inside the field
+   * fence's own draw (`three-renderer.ts` §`RealisticStructureBelts`). Like
+   * the variant it changes what stands somewhere, never where.
+   */
+  readonly chainLink?: true;
 }
 
 /**

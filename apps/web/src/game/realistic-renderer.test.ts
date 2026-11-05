@@ -99,6 +99,7 @@ import {
   REALISTIC_CONIFERS,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_CHAIN_LINK,
   REALISTIC_BUILDING_SURFACES,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
@@ -2008,7 +2009,11 @@ describe('a failed load releases everything it loaded, including what arrives la
     expect(outcome.loaded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const late = held.filter((one) => one.url.includes('_1k.ktx2'));
-    // The town's six, and the road's and the grass's four, which are 1K too.
+    // The town's six, and the road's and the grass's four, which are 1K too,
+    // and since #1274 the chain-link's wire.
+    expect(late.map((one) => one.url)).toContainEqual(
+      expect.stringContaining(REALISTIC_CHAIN_LINK.wire),
+    );
     for (const surface of TOWN_STRUCTURE_SURFACES) {
       const maps = REALISTIC_STRUCTURE_SURFACES[surface];
       for (const file of [maps.colour, maps.normal]) {
@@ -2018,7 +2023,7 @@ describe('a failed load releases everything it loaded, including what arrives la
         ).toContainEqual(expect.stringContaining(file));
       }
     }
-    expect(late.length).toBe(2 * TOWN_STRUCTURE_SURFACES.length + 4);
+    expect(late.length).toBe(2 * TOWN_STRUCTURE_SURFACES.length + 4 + 1);
     expect(late.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
   });
 

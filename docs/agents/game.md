@@ -1585,6 +1585,29 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
                         (`people.ts`). No crossing is either
+    src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
+                        Poly Haven's `trashbag` beside some bins and one
+                        `old_tyre` laid flat by a lamp post, placed from the
+                        street's own furniture (never a new placement), never
+                        by a front path, none on a city centre's street.
+                        Realistic only: merged into `FurnitureBelt`'s painted
+                        mesh and admitted only beside an anchor the frame
+                        draws, so 0 calls; ≤ `LITTER_CAPACITY` a frame,
+                        inside `REALISTIC_STREET_TRIANGLES`. Lever `-litter`
+    src/game/chain-link.ts
+                        the chain-link fence (#1274, owner ruling 2026-11-05)
+                        — along mapped `industrial`, `school` and `pitch`
+                        outlines within 40 m of the road, a ground drawn to
+                        the road's line fenced on the field verge's line;
+                        `fence` items with `ScatterItem.chainLink`, built once
+                        a route by `MappedTown.chainLinkAt`, in the
+                        boundaries' budget. ⚠️ Drawn IN the field fence's one
+                        instanced mesh (`ScatterFold`: both shapes, the vertex
+                        shader folds the other away; the wire a cut-out of the
+                        kit's opacity map), so 0 new calls, and every
+                        realistic fence instance submits both shapes. A field
+                        fence keeps its planks. No corridor, none. Lever
+                        `-chain-link`, page `town=grounds`
     src/game/people.ts  people walking and running (#1541) — on a village's
                         pavements and front paths (`streets.ts`'s `walks`
                         and `DoorPath.walk`) and the mapped footways, never
