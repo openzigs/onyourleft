@@ -46,6 +46,34 @@ const suspendB: ModerationAction = {
   at: 1_790_002_000,
 };
 
+describe('a voice action in the moderation log (#876)', () => {
+  it('is appended as rotate_voice with its room, read back from the log, and changes nothing else', async () => {
+    const h = await seeded();
+    const before = await h.read((store) => wholeModerationLog(store));
+    const id = await h.write((store) =>
+      store.logVoiceAction({
+        actorAthleteId: ATHLETE_A,
+        targetAthleteId: ATHLETE_B,
+        roomId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        reason: 'The room’s voice channel was replaced after log entry 7.',
+        at: 1_790_002_100,
+      }),
+    );
+    const after = await h.read((store) => wholeModerationLog(store));
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.find((entry) => entry.id === id)).toMatchObject({
+      action: 'rotate_voice',
+      actorAthleteId: ATHLETE_A,
+      targetAthleteId: ATHLETE_B,
+      reportId: null,
+      reason: 'The room’s voice channel was replaced after log entry 7.',
+      at: 1_790_002_100,
+    });
+    // Nothing applied: B is not suspended by it.
+    expect((await h.read((store) => store.getAthlete(ATHLETE_B)))?.suspendedAt).toBeNull();
+  });
+});
+
 describe('the moderation log (#83)', () => {
   it('refuses, in the database itself, any UPDATE or DELETE of an entry', async () => {
     const h = await seeded();

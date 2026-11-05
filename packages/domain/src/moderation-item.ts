@@ -11,10 +11,16 @@
  *
  * | Identifier | The item |
  * | --- | --- |
- * | `rider:<athlete id>` | a rider's display name |
  * | `room:<room id>` | a room's listing |
  * | `route:<room id>` | the route a room is ridden on, shown to its riders |
  * | `result:<room id>:<row>` | one row of a race's published result, counted from 1 in the order the instance publishes it |
+ *
+ * ⚠️ **There is no identifier for a rider's display name** (#1381, the owner's
+ * ruling of 2026-11-04). The app never holds another rider's athlete id — a
+ * room's snapshot carries a number local to the room, and a published result a
+ * name — so no screen could show one, and showing one would hand every rider
+ * the id the instance keeps from them (ADR 0036 D-3). A report about a name
+ * names the room or the race row it was seen in, or says so in words.
  *
  * ⚠️ **A result is named by its ROW, not by the rider in it.** A race's
  * published result carries a name and never an athlete id (`apps/instance`
@@ -27,18 +33,14 @@
  * shows the identifier parse it with the same function.
  */
 
-/** An athlete id as the instance mints and accepts one. */
-const ATHLETE_ID = '[A-Za-z0-9_-]{1,128}';
 /** A room id as the instance mints one: 16 random bytes, hex. */
 const ROOM_ID = '[0-9a-f]{32}';
 
 export type ModerationItem =
-  | { readonly kind: 'rider'; readonly athleteId: string }
   | { readonly kind: 'room'; readonly roomId: string }
   | { readonly kind: 'route'; readonly roomId: string }
   | { readonly kind: 'result'; readonly roomId: string; readonly row: number };
 
-const RIDER = new RegExp(`^rider:(${ATHLETE_ID})$`);
 const ROOM = new RegExp(`^room:(${ROOM_ID})$`);
 const ROUTE = new RegExp(`^route:(${ROOM_ID})$`);
 const RESULT = new RegExp(`^result:(${ROOM_ID}):([1-9][0-9]{0,3})$`);
@@ -46,8 +48,6 @@ const RESULT = new RegExp(`^result:(${ROOM_ID}):([1-9][0-9]{0,3})$`);
 /** One identifier, read; `undefined` for anything that is not one. Surrounding spaces are ignored. */
 export function parseModerationItem(text: string): ModerationItem | undefined {
   const value = text.trim();
-  const rider = RIDER.exec(value);
-  if (rider !== null) return { kind: 'rider', athleteId: rider[1] as string };
   const room = ROOM.exec(value);
   if (room !== null) return { kind: 'room', roomId: room[1] as string };
   const route = ROUTE.exec(value);
@@ -62,8 +62,6 @@ export function parseModerationItem(text: string): ModerationItem | undefined {
 /** The identifier of an item, as the app shows it and {@link parseModerationItem} reads it back. */
 export function formatModerationItem(item: ModerationItem): string {
   switch (item.kind) {
-    case 'rider':
-      return `rider:${item.athleteId}`;
     case 'room':
       return `room:${item.roomId}`;
     case 'route':

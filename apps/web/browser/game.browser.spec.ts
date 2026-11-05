@@ -5175,10 +5175,13 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
    * bicycle between two frames half a stroke apart, and at most: 2.5 cm and
    * 8 cm. `bicycle.ts` §`TRUNK_ROCK_RADIANS` puts 3.8 cm there on the body the
    * jsdom half poses; the ceiling is about twice that, which a rock of 6° or
-   * more would pass.
+   * more would pass. ⚠️ 10 cm since PR #2116's third pass sat the hoods' back
+   * up from 48° to 58° (Refs #1999): the same rock's angle about the hips
+   * carries shoulders that are higher, and the browser measured 8.9 cm. A
+   * doubled rock would still be over 15 cm.
    */
   const SHOULDER_ROCK_FLOOR_METRES = 0.025;
-  const SHOULDER_ROCK_CEILING_METRES = 0.08;
+  const SHOULDER_ROCK_CEILING_METRES = 0.1;
 
   /**
    * #626: how much of its own bounding rectangle a bicycle's shadow may fill —
