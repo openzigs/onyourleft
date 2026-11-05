@@ -110,9 +110,10 @@ import {
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
+import { HeaderMute } from './HeaderMute';
 import type { MenuSounds } from './menu-sounds';
 import { useAndroidBack } from './android-back';
-import { mayAnimateBetween, RideHasTheScreen } from './route-motion';
+import { isRideRoute, mayAnimateBetween, RideHasTheScreen } from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
 
@@ -333,6 +334,12 @@ export interface AppShellProps {
    * every test that does not ask for sounds render with none.
    */
   readonly menuSounds?: MenuSounds | undefined;
+  /**
+   * The output the header's mute reaches — #2056. Absent, it is the app's
+   * shared one (`game/web-audio.ts` §`sharedCueOutput`), which makes no audio
+   * context until a press asks for sound; a test hands in a recording double.
+   */
+  readonly soundOutput?: import('../game/audio-port').CueOutput | undefined;
   /**
    * The trainer game's store reads and sensor sampling (#85).
    *
@@ -787,6 +794,7 @@ function viewFor(
           maskedWords={props.maskedWords}
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
+          soundOutput={props.soundOutput}
         />
       );
     case 'about':
@@ -999,7 +1007,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
         {props.update === undefined || immersive ? null : <UpdateOffer watcher={props.update} />}
 
         {/*
-          #671: the header is the wordmark and nothing else. The navigation is
+          #671: the header is the wordmark and, since #2056, the one-press
+          mute on a menu route — nothing else. The navigation is
           its own landmark beside it rather than inside it — a bar or a rail
           since #427, so it was never in the header's box on any screen but the
           shortest, where it made the header 191 px of 256.
@@ -1015,6 +1024,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
             <p className="oyl-wordmark">
               <Wordmark text={APP_NAME} />
             </p>
+            {/*
+              #2056: the one-press mute, on every menu route — WCAG 2.2 SC
+              1.4.2 for the music that plays there (`HeaderMute.tsx`). Not on a
+              ride route, whose own sound controls stay as they are.
+            */}
+            {isRideRoute(route.id) ? null : <HeaderMute output={props.soundOutput} />}
           </header>
         )}
 
