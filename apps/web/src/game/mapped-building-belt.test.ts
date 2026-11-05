@@ -49,6 +49,7 @@ import { landClassMask } from './land-class';
 import {
   FAR_ROLES,
   mappedBuildingsOf,
+  mappedChunk,
   NEAR_ROLES,
   type MappedBuildings,
   type MappedBuildingsInView,
@@ -68,7 +69,7 @@ import {
   surfaceRepeat,
 } from './realistic-assets';
 import type { ScatterItem } from './scatter';
-import { sceneFrame } from './scene';
+import { drawnRiderDistance, sceneFrame } from './scene';
 import { STRUCTURE_FOOTPRINTS } from './settlements';
 import { atStartLine } from './simulation';
 import { drawnRoadFrame } from './terrain';
@@ -643,32 +644,48 @@ describe('what the buffers hold — #1549', () => {
 
 describe('refilled only at a chunk, and nothing allocated between — #1549, #240 NFR-3', () => {
   it('refills 2 000 / MAPPED_CHUNK_METRES ± 1 times over a 2 km ride, frame by frame', () => {
+    // #2145: a whole `sceneFrame` (scenery, ground, side roads) is built only
+    // where the rider's chunk changes, about 21 of the 401 frames. On any
+    // other frame `refillMappedBuildings` reads `view.chunk` and returns, so
+    // that frame passes the last built frame's view, scatter and billboards
+    // under its own chunk — the frame's: `sceneFrame` takes it from
+    // `mappedChunk(drawnRiderDistance(input))`, as each built frame asserts.
     const belt = aBelt();
     const start = atStartLine(town.profile);
     const frames = Array.from({ length: 401 }, (_, index) => 500 + index * 5);
+    let built: ReturnType<typeof sceneFrame> | undefined;
+    let builtView: MappedBuildingsInView | undefined;
+    let frameBuilds = 0;
     for (const along of frames) {
-      const frame = sceneFrame({
+      const input = {
         profile: town.profile,
         origin: town.origin,
         state: { ...start, ride: { ...start.ride, distance: metres(along) } },
         mappedBuildings: buildings,
-      });
-      const view = frame.mappedBuildings;
-      if (view === undefined) throw new Error('the frame carries no mapped buildings');
-      expect(view.buildings).toBe(buildings);
+      };
+      const chunk = mappedChunk(drawnRiderDistance(input));
+      if (built === undefined || builtView === undefined || builtView.chunk !== chunk) {
+        built = sceneFrame(input);
+        frameBuilds += 1;
+        builtView = built.mappedBuildings;
+        if (builtView === undefined) throw new Error('the frame carries no mapped buildings');
+        expect(builtView.buildings).toBe(buildings);
+        expect(builtView.chunk).toBe(chunk);
+      }
       refillMappedBuildings(
         belt,
-        view,
-        frame.scatter,
-        frame.billboards.length,
+        { ...builtView, chunk },
+        built.scatter,
+        built.billboards.length,
         REALISTIC_STRUCTURE_ITEMS,
       );
     }
     const expected = 2_000 / MAPPED_CHUNK_METRES;
     expect(belt.refills).toBeGreaterThanOrEqual(expected - 1);
     expect(belt.refills).toBeLessThanOrEqual(expected + 1);
-    // Non-vacuity: far more frames than refills.
+    // Non-vacuity: far more frames than refills, and a frame built for each.
     expect(frames.length).toBeGreaterThan(10 * belt.refills);
+    expect(frameBuilds).toBeGreaterThanOrEqual(belt.refills);
     // And a new rung refills at once, whatever the chunk.
     const last = viewAt(2_500);
     const before = belt.refills;

@@ -46,6 +46,7 @@ import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './n
 import { assessReadiness, type MigrationState } from './readiness.ts';
 import type { InstanceProbes, SidePose } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
+import { DEFAULT_ROOM_CAPACITY } from './room/core/settings.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
 import { NOTICE_RETENTION_SWEEP_PERIOD_MS } from './moderation/notice-retention.ts';
@@ -54,6 +55,9 @@ import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
 import { createSync, type Sync } from './sync/sync.ts';
+import { createDiscordClient } from './voice/discord.ts';
+import { createRoomVoice, type RoomVoice } from './voice/room-voice.ts';
+import { createVoiceModeration, type VoiceModeration } from './voice/voice-moderation.ts';
 
 /**
  * The running instance, put together (#780, #791): the store opened (never
@@ -101,6 +105,14 @@ const KEYS_RETRY_SECONDS = 3600;
  */
 const KEYS_BUSY_RETRY_MS = 5_000;
 
+/**
+ * The longest a room socket's lookup waits for the room's voice link (#875):
+ * two seconds. ⚠️ The author's number. Making a channel and its invite is two
+ * requests to Discord; a socket whose wait runs out is welcomed with no link,
+ * and the channel goes on being made, so the next socket's welcome has it.
+ */
+export const VOICE_INVITE_WAIT_MS = 2_000;
+
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
   override readonly name = 'InstanceRefusal';
@@ -134,6 +146,10 @@ export interface InstanceOptions {
   readonly defaultCountdownMs?: number;
   /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
   readonly hostedFetch?: typeof globalThis.fetch;
+  /** The `fetch` Discord is reached through, for voice (#874): the platform's unless a test's. */
+  readonly discordFetch?: typeof globalThis.fetch;
+  /** How long a room socket waits for its voice link (#875): {@link VOICE_INVITE_WAIT_MS} unless a test's. */
+  readonly voiceInviteWaitMs?: number;
 }
 
 export interface StartedInstance {
@@ -179,6 +195,13 @@ export interface StartedInstance {
   instanceKeys(): InstanceKeys | undefined;
   /** Resolves once the first pass over the instance's keys has run and been logged. */
   readonly keysMaintained: Promise<void>;
+  /**
+   * The rooms' Discord voice (#874), once the store is open on an instance with
+   * accounts and a bot configured; `undefined` otherwise.
+   */
+  voice(): RoomVoice | undefined;
+  /** Resolves once voice has asked Discord about its server and the first voice sweep has run. */
+  readonly voiceReady: Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -205,6 +228,27 @@ export function bearerMatches(authorization: string | null, expected: string | u
     difference |= expected.charCodeAt(i) ^ given.charCodeAt(i % Math.max(1, given.length));
   }
   return difference === 0;
+}
+
+/**
+ * The room's voice link from `voice`, or `undefined` once `waitMs` has gone
+ * by — the asking goes on, so the next lookup finds the link made (#875).
+ */
+async function voiceInviteWithin(
+  voice: RoomVoice,
+  roomId: string,
+  riders: number,
+  waitMs: number,
+): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), waitMs);
+  });
+  try {
+    return await Promise.race([voice.inviteFor(roomId, riders), late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function startInstance(options: InstanceOptions): Promise<StartedInstance> {
@@ -235,6 +279,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       ? Promise.resolve(undefined)
       : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
+  let voice: RoomVoice | undefined;
+  let voiceModeration: VoiceModeration | undefined;
+  let voiceReady: Promise<void> = Promise.resolve();
   let sync: Sync | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
@@ -266,8 +313,22 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       plan.countdownMs === null && options.defaultCountdownMs !== undefined
         ? { ...plan, countdownMs: options.defaultCountdownMs }
         : plan;
+    // #875: a rider's PRIVATE room has a voice link where the operator turned
+    // voice on — never a public one, which waits for account linking (spike
+    // 0018 Q1), and never a room an operator opened. It goes to the worker in
+    // the plan and to a rider only in the welcome, after admission.
+    const invite =
+      voice !== undefined && made !== undefined && room.visibility === 'private'
+        ? await voiceInviteWithin(
+            voice,
+            roomId,
+            plan.capacity ?? DEFAULT_ROOM_CAPACITY,
+            options.voiceInviteWaitMs ?? VOICE_INVITE_WAIT_MS,
+          )
+        : undefined;
+    const planned = invite === undefined ? timed : { ...timed, voiceInvite: invite };
     // Live on a worker, it is rejoined there; on none, the router refuses it.
-    return started ? { kind: 'started', plan: timed } : { kind: 'open', plan: timed };
+    return started ? { kind: 'started', plan: planned } : { kind: 'open', plan: planned };
   };
 
   const router: RoomRouter = new RoomRouter({
@@ -336,6 +397,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       (await router.startRoom(roomId, athleteId)) ? 'started' : 'not_found',
     seatOf: (roomId, riderId) => router.seatOf(roomId, riderId),
     removeFromRoom: (roomId, athleteId) => router.removeFromRoom(roomId, athleteId),
+    // #876: a removal and a ban reach the room's Discord voice, where there is any.
+    afterRoomRemoval: async (removal) => {
+      await voiceModeration?.afterRemoval(removal);
+    },
+    afterSuspension: async (suspension) => {
+      await voiceModeration?.afterSuspension(suspension);
+    },
   };
 
   const handlerOptions = {
@@ -506,6 +574,37 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ghostRider: nameFor,
           })
         : undefined;
+      // #874: a Discord voice channel per private room, only where the
+      // operator configured their own bot and server. Off — no RoomVoice at
+      // all — otherwise, and a room works exactly as it did. Its token goes
+      // to Discord in a header and nowhere else (`voice/discord.ts`).
+      voice =
+        server.discord === undefined
+          ? undefined
+          : createRoomVoice({
+              discord: createDiscordClient({
+                settings: server.discord,
+                version: options.version,
+                now,
+                ...(options.discordFetch === undefined ? {} : { fetch: options.discordFetch }),
+              }),
+              log,
+            });
+      const roomsVoice = voice;
+      const voiceStore = store;
+      voiceModeration =
+        voice === undefined
+          ? undefined
+          : createVoiceModeration({
+              voice,
+              tell: (roomId, invite, withheldFrom) => {
+                router.setVoiceInvite(roomId, invite, withheldFrom);
+              },
+              isMember: (roomId, athleteId) => voiceStore.isRoomMember(roomId, athleteId),
+              record: (entry) => voiceStore.logVoiceAction(entry),
+              now,
+              log,
+            });
       // #784, #785: riders' rooms. Their routes are kept apart from the
       // synced files — under the blob directory's `rooms/` — and live only as
       // long as their room (`rooms/rooms.ts`), so a backup does not carry them.
@@ -521,6 +620,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           const held = await people.account(caller);
           return held.ok && held.value.publicRooms.eligible;
         },
+        ...(roomsVoice === undefined ? {} : { voice: roomsVoice }),
       });
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
@@ -533,7 +633,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // day after they were made, a race a restart interrupted, a creator who
       // is gone — end here and let their routes go. Once now, for whatever a
       // restart left, and every ten minutes after.
-      const endRooms = (): void => {
+      const endRooms = (): Promise<void> | undefined => {
         void roomsSwept
           .sweep({
             claim: (roomId) => router.claimForEnding(roomId),
@@ -544,10 +644,21 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
               error: error instanceof Error ? error.name : 'unknown',
             });
           });
+        // #874: and every voice channel of ours that no open room holds —
+        // what a restart, or a delete Discord refused, left behind.
+        return roomsVoice?.sweep().then(() => undefined);
       };
-      endRooms();
+      // Voice asks Discord about its server first; its sweep waits for that.
+      const voiceStarted = roomsVoice?.start();
+      const voiceSwept = endRooms();
+      voiceReady = Promise.all([voiceStarted, voiceSwept]).then(() => undefined);
       const stopEndingRooms = sweepOnBoundaries(
-        { periodMs: ROOM_SWEEP_PERIOD_MS, run: endRooms },
+        {
+          periodMs: ROOM_SWEEP_PERIOD_MS,
+          run: () => {
+            void endRooms();
+          },
+        },
         options.sweepTimers,
       );
       const stopRateLimitSweep = sweepOnBoundaries(
@@ -756,6 +867,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),
     hostedKeyReported: opened.then(() => hostedKeyReported),
     instanceKeys: () => instanceKeys,
+    voice: () => voice,
+    voiceReady: opened.then(() => voiceReady),
     keysMaintained: opened.then(() => keysMaintained),
     async stop() {
       stopping = true;
