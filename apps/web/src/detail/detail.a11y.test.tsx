@@ -203,17 +203,11 @@ describe('the ride detail view passes the audit in every state it renders', () =
     expectClean('the detail view with the shared view open');
   });
 
-  it('with every series switched on', async () => {
+  it('with every recorded channel charted — #2068', async () => {
     await openDetail(busyRide());
-    for (const button of queryAll<HTMLButtonElement>(document, 'button')) {
-      if (button.textContent?.startsWith('Show ') === true) {
-        await activateWithKeyboard(button);
-        await settle();
-      }
-    }
-    await settle();
-    expect(queryAll(document, 'svg.oyl-trace').length).toBeGreaterThan(2);
-    expectClean('the detail view with every series on');
+    // Six chartable channels stored (latitude and longitude are not charts).
+    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(6);
+    expectClean('the detail view with every chart drawn');
   });
 
   it('with no local store, which is what a private window gets', async () => {
@@ -238,15 +232,19 @@ describe('every control on the detail view is reachable and named', () => {
     }
   });
 
-  it('names each series toggle by what pressing it does', async () => {
-    // "Show cadence", not "Cadence" with the state carried by a colour. #48's
-    // sixth criterion: colour is never the sole carrier of meaning.
+  it('describes every stacked chart by its own channel — #2068', async () => {
+    // The series toggles are gone with #2068: every channel is drawn. Each
+    // chart is then a picture a reader is told about in words, by name.
     await openDetail(busyRide());
-    const toggles = queryAll<HTMLButtonElement>(document, '.oyl-library-controls button');
-    expect(toggles.length).toBeGreaterThan(0);
-    for (const toggle of toggles) {
-      expect(accessibleName(toggle)).toMatch(/^(Show|Hide) /);
-    }
+    const names = queryAll(document, 'svg.oyl-trace').map((svg) => accessibleName(svg));
+    expect(names.map((name) => name.split(' over ')[0])).toEqual([
+      'Power',
+      'Heart rate',
+      'Cadence',
+      'Speed',
+      'Altitude',
+      'Temperature',
+    ]);
   });
 });
 

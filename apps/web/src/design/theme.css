@@ -1627,22 +1627,35 @@ html {
 }
 
 /*
- * Home — #1010. One column on a phone; two where the frame is a portrait
- * tablet's or a phone on its side; and on a landscape tablet a DASHBOARD:
- * *Next up* across two of three columns and two rows, *This week* and the
- * Trainer card beside it, and the three ride cards across the whole width
- * under them. Keyed to the FRAME's width (`.oyl-home-frame` is a size
- * container, `tw:@container` in `HomeView.tsx`) rather than the window's,
- * because the rail takes a different share of each window.
+ * Home — a grid of MODULES since #2044 (#1010 drew the first dashboard).
+ * Keyed to the FRAME's width (`.oyl-home-frame` is a size container,
+ * `tw:@container` in `HomeView.tsx`) rather than the window's, because the
+ * rail takes a different share of each window.
  *
- * ⚠️ **The DOM order is the reading order on every layout**: Next up, This
- * week, Trainer, the ride cards, then the rest. The dashboard places them
- * with explicit columns and auto rows, so a card never jumps ahead of one it
- * follows. `home.browser.spec.ts` §"#1010" measures each layout, and its
- * control (`home.html?dashboard=off`) deletes the dashboard rule.
+ * ⚠️ **The DOM order is the reading order, the visual order and the tab order
+ * on every layout**: Next up (the quick-launch), the sensors (the Trainer
+ * card, #2045's slot), the last ride (#2048's; on a first open the other ways
+ * to start), the week (#2049's), then the ride cards, fitness and the badges.
+ * Every module is placed by its columns alone and the rows are auto, so none
+ * can jump ahead of one it follows.
  *
- * The band under the title that #939 drew is gone: Next up is Home's hero
- * now, and the title is every view's ordinary display `h1`.
+ * - **One column** on a phone, in that order.
+ * - **Two** from 36rem (a portrait tablet, a phone on its side): Next up and
+ *   the sensors each a whole row, then the last ride beside the week.
+ * - **Three** from 60rem — the landscape DASHBOARD: two rows of two, each a
+ *   wide module in the first two columns beside a narrow one in the third —
+ *   Next up beside the sensors, the last ride beside the week — which fits
+ *   all four inside the first screen at 1280×800.
+ *
+ * The two breakpoints are the ones Home already had: a container query cannot
+ * read a custom property (`--oyl-list-detail-from`'s comment says the same),
+ * so no new number is introduced. `home.browser.spec.ts` §"#2044" measures
+ * each layout; its controls are `home.html?columns=one` (every module one
+ * column wide) and `?dashboard=off` (the 60rem rule deleted).
+ *
+ * The band under the title that #939 drew is gone, and since #2043 so is
+ * Next up's picture: the title is every view's ordinary display `h1`, and
+ * Next up is a compact row under it.
  */
 .oyl-home {
   display: grid;
@@ -1661,7 +1674,8 @@ html {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .oyl-next-up {
+  .oyl-next-up,
+  .oyl-home__trainer {
     grid-column: 1 / -1;
   }
 }
@@ -1671,46 +1685,54 @@ html {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .oyl-next-up {
+  .oyl-next-up,
+  .oyl-home__last,
+  .oyl-home__empty {
     grid-column: 1 / 3;
-    grid-row: span 2;
-    align-self: stretch;
-    /* Uses the height: with This week and the Trainer card beside it, Next
-       up runs from under the title to about the fold, so the first screen is
-       the dashboard; the ride cards follow it. 16rem is the header, the
-       title, its summary and the margins above and below, on the owner's
-       tablet in the shell. */
-    min-height: max(18rem, calc(100dvh - 16rem));
   }
 
-  .oyl-home__week,
-  .oyl-home__trainer {
+  .oyl-home__trainer,
+  .oyl-home__week {
     grid-column: 3;
-    align-self: stretch;
   }
 }
 
-/* *Next up*'s picture fills every pixel the band does not take, and is the
-   tallest picture on the screen: it is the biggest thing on it. */
-.oyl-next-up__art {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 12rem;
-}
-
-/* The route's own shape stands on the lower part of the sky. */
-.oyl-next-up__profile {
-  top: 35%;
-  height: 65%;
-}
-
-.oyl-next-up__band {
+/*
+ * *Next up* — #2043. The ride it offers, one line and its Ride in ONE row:
+ * the words take the room and the Ride its own width, so the Ride starts at
+ * the card's top on a phone as on a tablet. Where the row cannot hold both
+ * (a 320 px phone) the Ride wraps under the words and takes the whole line,
+ * which is #1010's phone layout. The card is its own solid `surfaceRaised`,
+ * so every word stands on a declared pair (`home.browser.spec.ts` §"#2043").
+ */
+.oyl-next-up {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm) var(--oyl-space-md);
   padding: var(--oyl-space-md);
 }
 
-@media (min-width: 37.5rem) {
-  .oyl-next-up__band {
-    padding: var(--oyl-space-lg);
+.oyl-next-up__words {
+  display: flex;
+  flex: 999 1 12rem;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+  min-width: 0;
+}
+
+/* The route's own climb, small, beside the words — and only where the frame
+   is wide enough to hold it on the row: the line says the climb in words. */
+.oyl-next-up__profile {
+  display: none;
+}
+
+@container (min-width: 36rem) {
+  .oyl-next-up__profile {
+    display: block;
+    flex: 0 0 8rem;
+    align-self: center;
+    height: 3rem;
   }
 }
 
@@ -1723,23 +1745,18 @@ html {
 }
 
 /* One big Ride: larger type, a heavier weight and more room than an ordinary
-   button — across the band on a phone, at least 16rem wider than that. Its
-   declared floor stays `.oyl-button`'s 44 px: 48 is the ride-time controls'
-   alone (#669), and this is pressed before a ride, not during one. Two
-   classes, because `.oyl-button` is declared later in this file. */
+   button, at the end of the row — and the whole line when it wraps under the
+   words. Its declared floor stays `.oyl-button`'s 44 px: 48 is the ride-time
+   controls' alone (#669), and this is pressed before a ride, not during one.
+   Two classes, because `.oyl-button` is declared later in this file. */
 .oyl-next-up .oyl-next-up__ride {
-  align-self: stretch;
+  flex: 1 0 auto;
+  max-width: 100%;
   padding-block: var(--oyl-space-sm);
+  padding-inline: var(--oyl-space-lg);
   font-size: var(--oyl-font-size-lg);
   font-weight: 700;
   text-align: center;
-}
-
-@container (min-width: 36rem) {
-  .oyl-next-up .oyl-next-up__ride {
-    align-self: start;
-    width: min(100%, 16rem);
-  }
 }
 
 /* One layer of a picture: the kit's parts stack in one box (#938). */
@@ -1785,22 +1802,14 @@ html {
 }
 
 /*
- * A SHORT viewport — a phone on its side (#939's review, B2). The pictures
- * keep their place and give up height, so Next up's Ride stays above the
- * fold at 844×390 and 640×360 (`home.browser.spec.ts`).
+ * A SHORT viewport — a phone on its side (#939's review, B2). The ride cards'
+ * pictures keep their place and give up height. Next up has had no picture
+ * to give up since #2043, so its Ride is above the fold at 844×390 and
+ * 640×360 without this rule (`home.browser.spec.ts`).
  */
 @media (max-height: 30rem) {
-  .oyl-next-up__art {
-    min-height: 3rem;
-  }
-
   .oyl-ride-card__art {
     min-height: 3rem;
-  }
-
-  .oyl-next-up__band {
-    gap: var(--oyl-space-xs);
-    padding-block: var(--oyl-space-sm);
   }
 }
 
@@ -4832,15 +4841,68 @@ select.oyl-input {
  * is `none` on the element, so the drawing stretches horizontally and keeps its
  * vertical scale. That is right for a time series and wrong for a map, which is
  * one more reason #63's track is not drawn with this.
+ *
+ * Since #2068 the ride page stacks one trace per recorded channel, so each is
+ * a small chart: 6rem, room for its three value labels.
  */
 .oyl-trace {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   display: block;
-  height: 10rem;
+  height: 6rem;
   margin-top: var(--oyl-space-sm);
   width: 100%;
+}
+
+/*
+ * The place one stacked chart is drawn in — #2068. Its channel is read when
+ * the slot scrolls into view (`detail/visibility.ts`), so the slot holds about
+ * a drawn chart's height meanwhile, and the page below it moves little when
+ * the chart arrives.
+ */
+.oyl-trace-slot {
+  min-height: 12rem;
+}
+
+/*
+ * The shared cursor (#2068): a native range across the stack's width, with
+ * the readings at its time in words under it. The input is given the 44 px
+ * row a thumb lands on (SC 2.5.5), as a checkbox's label row is (#667).
+ */
+.oyl-trace-cursor {
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  /* The charts' own columns (`.oyl-trace-chart`), in the same font size so
+     `10ch` is the same width: the slider runs across the drawings' width. */
+  font-size: var(--oyl-font-size-sm);
+  grid-template-columns: 10ch minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-trace-cursor > label,
+.oyl-trace-cursor__reading {
+  grid-column: 1 / -1;
+}
+
+.oyl-trace-cursor input[type='range'] {
+  grid-column: 2;
+  margin: 0;
+  min-height: 2.75rem;
+  width: 100%;
+}
+
+.oyl-trace-cursor__reading {
+  color: var(--oyl-color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The cursor's line, across every chart at one time. */
+.oyl-trace__cursor {
+  stroke: var(--oyl-color-ink);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 /*
@@ -4861,7 +4923,10 @@ select.oyl-input {
     'values trace'
     '. times'
     '. time-title';
-  grid-template-columns: auto minmax(0, 1fr);
+  /* #2068: a fixed value column, so every chart in the stack starts and ends
+     at the same x and a minute is at one place down the page. `auto` sized it
+     to each chart's own labels ("151 bpm" is wider than "88 rpm"). */
+  grid-template-columns: 10ch minmax(0, 1fr);
   margin-top: var(--oyl-space-sm);
 }
 
@@ -5913,32 +5978,78 @@ select.oyl-input {
 }
 
 /*
- * The zone bar (#78).
+ * THE ZONE CHART (#2069) — `analysis/ZoneChart.tsx`.
  *
- * A length, and nothing else. It carries no colour meaning: which zone a row
- * is, what range it covers, how long was spent in it and what share that is are
- * all words in the same row, and the bar repeats the share. It is `aria-hidden`
- * in the markup for that reason — see `views/AnalysisView.tsx`.
- *
- * `inline-block` with a fixed width rather than a table-cell fill, so the
- * percentage text stays readable beside it at every column width.
+ * Time in zone as one bar per zone, above the zone table: the zone's number
+ * and name (with its swatch) in the first column, the bar in the second, the
+ * share in the third. One grid for the list, so every bar starts at the same
+ * x and their lengths compare. The list sits on `surface`, the well the zone
+ * colours declare their 3:1 against (`tokens.ts` §`BAND_ON_SURFACE_MEASURED`),
+ * as the zone key does. It replaced #78's single-accent bar in the Share cell.
  */
-.oyl-zone-bar {
+.oyl-zone-chart {
+  align-items: center;
   background: var(--oyl-color-surface);
-  border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
-  display: inline-block;
-  height: 0.6rem;
-  margin-left: var(--oyl-space-sm);
-  overflow: hidden;
-  vertical-align: middle;
-  width: 6rem;
+  color: var(--oyl-color-ink);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  gap: var(--oyl-space-xs) var(--oyl-space-sm);
+  grid-template-columns: max-content minmax(0, 1fr) 4ch;
+  list-style: none;
+  margin: var(--oyl-space-sm) 0;
+  padding: var(--oyl-space-sm);
 }
 
-.oyl-zone-bar__fill {
-  background: var(--oyl-color-accent);
+.oyl-zone-chart__row {
+  display: contents;
+}
+
+.oyl-zone-chart__label {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-zone-chart__bar {
+  border: 1px solid var(--oyl-color-border);
+  border-radius: 2px;
   display: block;
-  height: 100%;
+  height: 0.875rem;
+  width: 100%;
+}
+
+.oyl-zone-chart__share {
+  text-align: end;
+}
+
+.oyl-zone-chart__fill--band-recovery {
+  fill: var(--oyl-color-band-recovery);
+}
+
+.oyl-zone-chart__fill--band-endurance {
+  fill: var(--oyl-color-band-endurance);
+}
+
+.oyl-zone-chart__fill--band-tempo {
+  fill: var(--oyl-color-band-tempo);
+}
+
+.oyl-zone-chart__fill--band-threshold {
+  fill: var(--oyl-color-band-threshold);
+}
+
+.oyl-zone-chart__fill--band-vo2 {
+  fill: var(--oyl-color-band-vo2);
+}
+
+.oyl-zone-chart__fill--band-anaerobic {
+  fill: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-zone-chart__fill--band-sprint {
+  fill: var(--oyl-color-band-sprint);
 }
 
 /*
@@ -7629,6 +7740,108 @@ select.oyl-input {
     align-self: start;
     justify-self: start;
     max-width: min(100%, 22rem);
+  }
+}
+
+/*
+ * A RACE'S VOICE BUTTON, ON ITS LINE — #875, the owner's ruling of
+ * 2026-11-04: *"Make it a button first."*
+ *
+ * *Join voice on Discord (opens Discord)*, while a race waits on its line
+ * (`game/room-voice.ts`), is a secondary button at the ride-time 48 px
+ * (`.oyl-button--ride`), still a link, beside *Start the race* on a row of
+ * their own, so it costs the race's notice no line of its own. It stands on a
+ * PANEL of the HUD's own opaque surface and edge, never bare on the stage, so
+ * it reads over a bright sky: `hudSurface` is 10.4:1 against the world's
+ * brightest sky, its horizon haze (`game/world.ts` §`HORIZON_HAZE`). Its two
+ * halves are flex items, so where it is narrow it breaks between them, and
+ * its padding and leading are the HUD's tighter ones, so two lines make a
+ * 50 px button beside *Start the race*'s 48 rather than 68: the row is what
+ * an upright phone's rider clearance pays for.
+ *
+ * ⚠️ **Where it is shown, and what that costs, recorded as #419 asks.** Shown
+ * at 47 rem tall or more at any width from 22.5 rem (the tablets and the
+ * column layout of an upright phone), and on a WIDE screen of 64 rem or more
+ * at any height over 30 rem: the laptops, 1280×720, 1366×657 (a 1366×768
+ * laptop under its browser's chrome) and 1024×600, where it fits beside
+ * *Start the race* on one line. **Hidden everywhere else**, which is:
+ * - a phone on its side, the short corners layout up to 30 rem tall (736×360
+ *   to 844×390, and 736×480 at its tallest): the race's notice cell is the
+ *   16 rem one and already ends a few pixels above a 736×360 stage's bottom,
+ *   with no room beside *Start the race* for the button and no line below it;
+ * - a screen narrower than 64 rem and under 47 rem tall, such as 802×600:
+ *   the button breaks each half over two lines there, 89 px tall, and runs
+ *   over the route panel.
+ * Both were measured in the browser gate. Where it is hidden it is
+ * `display: none`, neither drawn nor in the keyboard's order, and a racer
+ * there is offered no voice link until the race is over. A group ride's link
+ * is a notice of its own and is shown at every size.
+ * `ride-room.browser.spec.ts` §"#875" holds the button's size, its panel's
+ * contrast and its place at every overlay viewport and at 1280×720, 1024×600
+ * and 802×600, both ways.
+ *
+ * Its keyboard focus ring sits on the panel, at no offset: the HUD's ring
+ * (`.oyl-hud :focus-visible`, #748) is 3 px wide and 2 px outside a control,
+ * which would put its outer 2 px past this panel's 3 px (padding and edge)
+ * and onto the sky. `hud-focus.browser.spec.ts` holds it inside the panel.
+ */
+.oyl-hud__race-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+/* *Start the race* keeps its one line and its width: the voice button is
+   what gives up width, by breaking its words. */
+.oyl-hud__race-actions > .oyl-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.oyl-hud__voice {
+  display: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.125rem;
+  border: 1px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__voice > .oyl-button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0.25em;
+  box-sizing: border-box;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.oyl-hud__voice > .oyl-button:focus-visible {
+  outline-offset: 0;
+}
+
+@media (min-width: 22.5rem) and (min-height: 47rem), (min-width: 64rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__voice {
+    display: block;
+  }
+}
+
+/* On an upright phone the button's words are a notice's size, as the race's
+   notice above it is set: at the page size, on the CI runner's wider fonts,
+   *Start the race* left 183 px at 360 px wide and "Join voice on Discord"
+   broke over two lines of its own, a 69 px button (the browser gate,
+   §"#875"). The target stays 48 px; only its words and its side padding
+   are smaller. */
+@media (width < 46rem) {
+  .oyl-hud__voice > .oyl-button {
+    padding-inline: var(--oyl-space-xs);
+    font-size: var(--oyl-font-size-sm);
   }
 }
 

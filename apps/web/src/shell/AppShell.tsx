@@ -622,6 +622,7 @@ function viewFor(
           basemap={props.basemap}
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
+          analysis={props.analysis}
         />
       );
     case 'activity-detail':
@@ -633,6 +634,7 @@ function viewFor(
           basemap={props.basemap}
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
+          analysis={props.analysis}
         />
       );
     case 'analysis':

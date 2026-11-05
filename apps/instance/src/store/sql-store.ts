@@ -759,7 +759,26 @@ export type LoggedActionKind =
   | `refused_${ModerationActionKind}`
   /** An appeal decided (#911): the restriction stands, or it is reversed. */
   | 'uphold_appeal'
-  | 'reverse_appeal';
+  | 'reverse_appeal'
+  /**
+   * The instance's, after a removal or a ban (#876): what it did to the
+   * room's Discord voice channel, in one of `voice/voice-moderation.ts`'s
+   * fixed sentences, naming the log entry it followed. Through
+   * {@link SqlStore.logVoiceAction}, never {@link SqlStore.moderate}: it
+   * applies nothing to anybody.
+   */
+  | 'rotate_voice';
+
+/** A voice action, as {@link SqlStore.logVoiceAction} appends it (#876). */
+export interface VoiceLogEntry {
+  /** Who took the action it followed: the moderator, or the room's host. */
+  readonly actorAthleteId: string;
+  /** Whom that action was about. */
+  readonly targetAthleteId: string;
+  readonly roomId: string;
+  readonly reason: string;
+  readonly at: number;
+}
 
 /** An appeal against a restriction (#911), with its decision once there is one. */
 export interface Appeal {
@@ -1765,6 +1784,11 @@ export interface SqlStore {
    * `refused_<action>`, changing nothing else. Answers the log entry's id.
    */
   logRefusedAction(action: ModerationAction): Promise<number>;
+  /**
+   * Log what the instance did to a room's voice channel after a removal or a
+   * ban (#876), as `rotate_voice`, changing nothing else. Answers its id.
+   */
+  logVoiceAction(entry: VoiceLogEntry): Promise<number>;
   /**
    * One page of the moderation log, NEWEST first (#961): at most `limit`
    * entries whose id is below `beforeId`, or the newest when it is `undefined`.
@@ -4965,6 +4989,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             reason: action.reason,
             at: action.at,
             room_id: action.roomId ?? null,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return logged.id;
+      }),
+
+    logVoiceAction: (entry) =>
+      exclusive(async () => {
+        const logged = await db
+          .insertInto('moderation_log')
+          .values({
+            actor_athlete_id: entry.actorAthleteId,
+            action: 'rotate_voice',
+            target_athlete_id: entry.targetAthleteId,
+            report_id: null,
+            reason: entry.reason,
+            at: entry.at,
+            room_id: entry.roomId,
           })
           .returning('id')
           .executeTakeFirstOrThrow();

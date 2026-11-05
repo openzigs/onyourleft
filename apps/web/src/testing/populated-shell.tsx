@@ -465,8 +465,21 @@ function instanceAnalysisPort(populated: boolean): InstanceAnalysisPort {
   };
 }
 
+/** How many 1 Hz samples the populated ride carries. */
+const POPULATED_SAMPLES = 1800;
+
+/**
+ * The populated ride's power and heart rate — one array each, read by the
+ * ride's page (`detailPort`) and by Analysis (#2069), so both draw the same
+ * ride's time in zone.
+ */
+const POPULATED_POWER = Array.from({ length: POPULATED_SAMPLES }, (_unused, index) =>
+  watts(150 + (index % 97)),
+);
+const POPULATED_HEART_RATE = Array.from({ length: POPULATED_SAMPLES }, () => beatsPerMinute(151));
+
 function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
-  const count = 1800;
+  const count = POPULATED_SAMPLES;
   const track = Array.from({ length: count }, (_unused, index) =>
     north(index * 8, Math.sin(index / 90) * 400),
   );
@@ -475,8 +488,8 @@ function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
     // the ride is not on this device.
     activity: populated ? ride(0) : { ...ride(0), id: activityId('not-this-one') },
     channels: {
-      power: Array.from({ length: count }, (_unused, index) => watts(150 + (index % 97))),
-      heartRate: Array.from({ length: count }, () => beatsPerMinute(151)),
+      power: POPULATED_POWER,
+      heartRate: POPULATED_HEART_RATE,
       cadence: Array.from({ length: count }, () => revolutionsPerMinute(88)),
       speed: Array.from({ length: count }, () => metresPerSecond(8.2)),
       altitude: Array.from({ length: count }, (_unused, index) =>
@@ -827,13 +840,32 @@ export function PopulatedShell({
       instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,
-        rides.map((activity) => ({
-          activity: {
-            ...activity,
-            effortWeightedPower: watts(210),
-            loadCoveredTime: seconds(3600),
-          },
-        })),
+        rides.map((activity) =>
+          activity.id === RIDE_ID
+            ? {
+                // #2069: the populated ride's own streams, so its page and
+                // Analysis both draw its time in zone (the reflow and look
+                // walks lay it out). At 21 s a sample they cover the whole of
+                // its 10:23:45 moving time, which Home's walk holds on one
+                // line: a ride whose sensors went quiet is
+                // `AnalysisView.test.tsx`'s case, not the walk's.
+                activity: {
+                  ...activity,
+                  effortWeightedPower: watts(210),
+                  loadCoveredTime: seconds(3600),
+                },
+                power: POPULATED_POWER,
+                heartRate: POPULATED_HEART_RATE,
+                sampleInterval: 21,
+              }
+            : {
+                activity: {
+                  ...activity,
+                  effortWeightedPower: watts(210),
+                  loadCoveredTime: seconds(3600),
+                },
+              },
+        ),
       )}
       segments={stubSegments(
         ATHLETE,

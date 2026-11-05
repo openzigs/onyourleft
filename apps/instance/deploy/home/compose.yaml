@@ -103,6 +103,12 @@ services:
       # it, so nothing that writes a snapshot holds the secret that opens the
       # key in it (docs/operating-an-instance.md, "A hosted model key").
       OYL_INSTANCE_SECRET_KEY: ${OYL_INSTANCE_SECRET_KEY:-}
+      # Voice on Discord (#874): your own bot's token and your own server's id.
+      # Both empty is no voice, and nothing else changes; one without the
+      # other refuses to start. The token is a secret: this box's .env only
+      # (docs/operating-an-instance.md, "Voice on Discord").
+      OYL_INSTANCE_DISCORD_BOT_TOKEN: ${OYL_INSTANCE_DISCORD_BOT_TOKEN:-}
+      OYL_INSTANCE_DISCORD_GUILD_ID: ${OYL_INSTANCE_DISCORD_GUILD_ID:-}
     volumes:
       - data:/data
     # Docker waits this long after SIGTERM before it kills the instance: the
