@@ -965,7 +965,18 @@ describe('a kept-visible sentence stays in the reading measure on a sections rou
  * where the two hold one value, nothing else would notice.
  */
 describe('#2118 — a fill reads `accent`, and text and lines read `accentText`', () => {
-  /** The properties that paint an area rather than a glyph or a line. */
+  /**
+   * The properties that paint an area rather than a glyph or a line.
+   *
+   * ⚠️ The classifier goes by the CSS PROPERTY alone, never by what the rule
+   * draws (#2152). An SVG glyph painted with `fill: var(--oyl-color-accent)` is
+   * text, and a `background` gradient that draws a hairline is a line, and
+   * both would pass here unflagged. Neither exists today: `.oyl-illo__mark`'s
+   * `fill` is a shape in an illustration, which is art, not text. The one known line
+   * drawn through a fill property is listed by hand in
+   * {@link LINES_DRAWN_AS_FILLS}; a new glyph or line painted through a fill
+   * property goes there too, or this check says nothing about it.
+   */
   const FILL_PROPERTIES = new Set(['background', 'background-color', 'fill', 'accent-color']);
 
   /**

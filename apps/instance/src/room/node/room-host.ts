@@ -332,6 +332,7 @@ export class RoomHost {
     socketId: string,
     started = false,
     startedBy: RaceStarter = 'any-seated-rider',
+    voiceInvite?: string,
   ): void {
     if (this.#stopping) {
       socket.close(1001, 'server-stopping');
@@ -347,6 +348,9 @@ export class RoomHost {
       return;
     }
     const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings, startedBy);
+    // #875: the newest plan's voice link, which this socket's welcome says —
+    // and, if it changed, the riders already here are told it (#876).
+    this.#apply(hosted, hosted.room.setVoiceInvite(voiceInvite));
     const connection: Connection = {
       id: hosted.nextConnection,
       socketId,
@@ -409,6 +413,17 @@ export class RoomHost {
     const hosted = this.#rooms.get(roomId);
     if (hosted === undefined) return false;
     this.#call(hosted, (room) => room.remove(athleteId, this.#options.now()));
+    return true;
+  }
+
+  /**
+   * `roomId`'s voice link is now `invite` (#876): every rider connected to it
+   * is told, but `withheldFrom`. `false` when this host does not hold the room.
+   */
+  setVoiceInvite(roomId: string, invite: string | undefined, withheldFrom?: string): boolean {
+    const hosted = this.#rooms.get(roomId);
+    if (hosted === undefined) return false;
+    this.#apply(hosted, hosted.room.setVoiceInvite(invite, withheldFrom));
     return true;
   }
 
