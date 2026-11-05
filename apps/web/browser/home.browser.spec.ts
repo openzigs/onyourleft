@@ -610,6 +610,41 @@ test.describe('#2044 — Home is a grid of modules', () => {
     );
   });
 
+  /*
+   * The owner's screenshot review of #2045 (2026-11-05): with four sensors
+   * paired the module was ~430–480 px tall and pushed Last ride and This week
+   * under the tablet's fold. Each device is one compact row now.
+   */
+  test('four sensors paired: the last ride and the week are still above the landscape tablet’s fold', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?sensors=four');
+    const four = fourModules(seen);
+    console.log(
+      `#2045 four sensors, tablet 1280×800, fold ${seen.fold.toFixed(1)}, sensors ` +
+        `${(seen.trainer?.height ?? NaN).toFixed(0)} px tall: ${describeBoxes(four)}`,
+    );
+    expect(await page.locator('.oyl-home__sensor-row').count()).toBe(4);
+    for (const [name, box] of four) {
+      expect(box, `${name} was not drawn`).toBeDefined();
+      expect(box?.bottom ?? Infinity, `${name} is not wholly above the fold`).toBeLessThanOrEqual(
+        seen.fold + SUBPIXEL_TOLERANCE,
+      );
+    }
+  });
+
+  test('the control — four sensors on stacked rows push the last ride and the week under the fold', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?sensors=four&rows=stacked');
+    console.log(
+      `#2045 control, stacked rows, fold ${seen.fold.toFixed(1)}, sensors ` +
+        `${(seen.trainer?.height ?? NaN).toFixed(0)} px tall: ${describeBoxes(fourModules(seen))}`,
+    );
+    expect(seen.lastRide?.bottom ?? 0).toBeGreaterThan(seen.fold + SUBPIXEL_TOLERANCE);
+    expect(seen.week?.bottom ?? 0).toBeGreaterThan(seen.fold + SUBPIXEL_TOLERANCE);
+  });
+
   test('a phone 412×915: one column, quick-launch, sensors, last ride, week, then the rest', async ({
     page,
   }) => {
