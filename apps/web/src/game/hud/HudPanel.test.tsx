@@ -36,8 +36,10 @@
  * that fits from a value that was never marked, and this can.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { act } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
@@ -240,6 +242,9 @@ describe('the HUD is four panels (#423)', () => {
       'Gradient',
       'To go',
       'Moving',
+      // #2072: the elapsed time and the clock, after the moving time.
+      'Elapsed',
+      'Clock',
       'Pacer',
     ]);
     // Document order is the order a screen reader meets them in, and it is
@@ -261,6 +266,8 @@ describe('the HUD is four panels (#423)', () => {
       'Gradient',
       'To go',
       'Moving',
+      'Elapsed',
+      'Clock',
       'Pacer',
       'Following',
       'Nearby',
@@ -447,5 +454,102 @@ describe('the running workout’s graph on the HUD — #1307', () => {
     expect(queryAll(mounted.container, '.oyl-workout-graph__key')).toHaveLength(0);
     // The elevation strip above it stays.
     expect(queryAll(mounted.container, '.oyl-hud__route .oyl-hud__profile-svg')).toHaveLength(1);
+  });
+});
+
+/**
+ * #2072 — the elapsed time and the time of day beside the moving time, read
+ * off the rendered HUD.
+ */
+describe('the elapsed time and the clock beside the moving time — #2072', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The `dd` under the `dt` reading `label`, and the classes of its field. */
+  function field(label: string): { readonly value: string; readonly classes: string } {
+    const row = queryAll(mounted?.container ?? document, '.oyl-hud__field').find(
+      (each) => each.querySelector('dt')?.textContent === label,
+    );
+    return {
+      value: row?.querySelector('dd')?.textContent ?? '',
+      classes: row?.className ?? '',
+    };
+  }
+
+  it('shows the device’s time of day, HH:MM, and moves it when the minute turns', async () => {
+    vi.useFakeTimers();
+    // 07:05:30 local, so the next minute is thirty seconds away.
+    vi.setSystemTime(new Date(2026, 10, 4, 7, 5, 30));
+    mounted = await mount(<HudPanel {...base} movingSeconds={65} elapsedSeconds={125} />);
+
+    expect(field('Clock').value).toBe('07:05');
+    expect(field('Clock').classes).toContain('oyl-hud__field--clock');
+
+    await act(async () => {
+      vi.advanceTimersByTime(29_000);
+      await Promise.resolve();
+    });
+    expect(field('Clock').value).toBe('07:05');
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+      await Promise.resolve();
+    });
+    expect(field('Clock').value).toBe('07:06');
+  });
+
+  it('labels the two ride times Elapsed and Moving, each its own figure', async () => {
+    mounted = await mount(<HudPanel {...base} movingSeconds={65} elapsedSeconds={125} />);
+
+    expect(field('Moving').value).toBe('0:01:05');
+    expect(field('Elapsed').value).toBe('0:02:05');
+    expect(field('Elapsed').classes).toContain('oyl-hud__field--elapsed');
+    // In the secondary list, after Moving and before the clock — where a
+    // screen reader meets them, whatever the layout draws.
+    const labels = queryAll(mounted.container, '.oyl-hud__fields--secondary dt').map(
+      (each) => each.textContent,
+    );
+    expect(labels.indexOf('Elapsed')).toBe(labels.indexOf('Moving') + 1);
+    expect(labels.indexOf('Clock')).toBe(labels.indexOf('Elapsed') + 1);
+  });
+
+  it('shows a dash for each where nothing is being recorded', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+
+    expect(field('Moving').value).toBe('—');
+    expect(field('Elapsed').value).toBe('—');
+  });
+
+  it('leaves the demo’s HUD with neither: no clock handed in, and its elapsed time left out', async () => {
+    mounted = await mount(
+      <HudCore
+        {...base}
+        movingSeconds={65}
+        elapsedSeconds={125}
+        units="metric"
+        touchLock={false}
+        labels={{ resume: 'Play', end: 'Stop' }}
+        routeFigure={null}
+        withoutElapsed
+      />,
+    );
+
+    expect(field('Moving').value).toBe('0:01:05');
+    expect(queryAll(mounted.container, '.oyl-hud__field--elapsed')).toEqual([]);
+    expect(queryAll(mounted.container, '.oyl-hud__field--clock')).toEqual([]);
   });
 });

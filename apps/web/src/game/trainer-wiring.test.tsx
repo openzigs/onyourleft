@@ -262,6 +262,8 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  // #2072's case runs on fake timers; every other case here on real ones.
+  vi.useRealTimers();
   localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
 });
 
@@ -1497,6 +1499,90 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     }
     // The second lap began where the first ended.
     expect(laps[1]?.startedAt).toBe((laps[0]?.startedAt ?? 0) + (laps[0]?.elapsedTime ?? 0));
+    await rig.done();
+  });
+
+  /**
+   * #2072: the HUD's two ride times, read off the rendered HUD over the REAL
+   * ride controller, its recorder and the #44 simulator — nothing between
+   * the recording and the screen is a double, so the difference read is the
+   * pause the recording counted.
+   */
+  it('reads Elapsed 60 s greater than Moving across a 60 s pause, and no timer moves it', async () => {
+    // Fake timers and a fake `Date` from the first render, so a timer anything
+    // on the page set — at mount or later — is one the last step below can
+    // run. They advance with real time too, so the page settles as it does
+    // without them; `setImmediate` stays real, so the store's IndexedDB does.
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      advanceTimeDelta: 1,
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    });
+    const rig = await onTheBench(false);
+    await rig.controller.start();
+    await openTheGame(gameTrainerPortOver(rig.controller));
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+
+    const field = (label: string): string => {
+      const rows = queryAll(mounted?.container ?? document, '.oyl-hud__field');
+      const row = rows.find((each) => each.querySelector('dt')?.textContent === label);
+      return row?.querySelector('dd')?.textContent ?? '';
+    };
+    const inSeconds = (shown: string): number => {
+      const [hours, minutes, secs] = shown.split(':').map(Number);
+      return (hours ?? 0) * 3600 + (minutes ?? 0) * 60 + (secs ?? 0);
+    };
+    /** Seconds of the recording's own clock: the bench moves, the controller ticks. */
+    const recordFor = async (count: number): Promise<void> => {
+      for (let second = 0; second < count; second += 1) {
+        await pump(1);
+        await act(async () => {
+          rig.bench.advance(seconds(1));
+          await rig.controller.tick(rig.bench.now);
+        });
+        await pump(1);
+      }
+    };
+
+    await recordFor(5);
+    // Nothing paused yet: the two read the same, and neither is a dash.
+    expect(inSeconds(field('Elapsed'))).toBeGreaterThan(0);
+    expect(field('Elapsed')).toBe(field('Moving'));
+
+    // The rider pauses the recording for exactly a minute of its clock. No
+    // game frame is drawn meanwhile: a frame's gradient write is answered on
+    // the simulator's clock and would lengthen the pause.
+    await act(async () => {
+      await rig.controller.pause();
+    });
+    for (let second = 0; second < 60; second += 1) {
+      await act(async () => {
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      });
+    }
+    await act(async () => {
+      await rig.controller.resume();
+    });
+    await recordFor(5);
+
+    expect(inSeconds(field('Elapsed')) - inSeconds(field('Moving'))).toBe(60);
+    // And both are the recorder's own figures, the ones the save writes.
+    const snapshot = rig.controller.getSnapshot();
+    expect(inSeconds(field('Elapsed'))).toBe(Math.floor(snapshot.elapsedSeconds));
+    expect(inSeconds(field('Moving'))).toBe(Math.floor(snapshot.movingSeconds));
+
+    // A minute of every timer on the page with no reading and no tick of the
+    // recording: the elapsed time is the recording's instants, so it does not
+    // move. (No game frame either: a frame's trainer write is answered on the
+    // simulator's clock, which is a reading.)
+    const before = field('Elapsed');
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      await Promise.resolve();
+    });
+    expect(field('Elapsed')).toBe(before);
     await rig.done();
   });
 

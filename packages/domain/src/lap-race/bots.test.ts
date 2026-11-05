@@ -25,6 +25,7 @@ import indexSource from './index.ts?raw';
 import itemRaceSource from './item-race.ts?raw';
 import { createItemRace } from './item-race';
 import itemsSource from './items.ts?raw';
+import planSource from './plan.ts?raw';
 import {
   GUST_REACH_METRES,
   pickUpsPassed,
@@ -215,6 +216,7 @@ describe('never from a recorded ride (ADR 0007 D4, ADR 0060 D-7.1)', () => {
       'index.ts': indexSource,
       'item-race.ts': itemRaceSource,
       'items.ts': itemsSource,
+      'plan.ts': planSource,
       'random.ts': randomSource,
       'race.ts': raceSource,
       'strategy.ts': strategySource,

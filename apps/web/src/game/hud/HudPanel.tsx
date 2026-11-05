@@ -61,6 +61,7 @@ import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
 import { useUnits } from '../../units/context';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { useTimeOfDay } from '../../design/time-of-day';
 
 import { NO_READING, type HudInput, type TrainerLine } from './fields';
 import type { ControllerPort } from '../delivery/controller-port';
@@ -85,9 +86,10 @@ import type { WorkoutGraphInput } from '../../workout/workout-graph';
  * function takes it as a parameter, so there is exactly one way in on each
  * side of the seam. A prop as well would be a second source for the same
  * answer, and the two could disagree on the screen a rider stares at for an
- * hour — which is the failure #238 is about.
+ * hour — which is the failure #238 is about. `timeOfDay` is omitted for the
+ * same reason (#2072): this component reads the device's clock itself.
  */
-export interface HudPanelProps extends Omit<HudInput, 'units'> {
+export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
   /** Pauses the ride. Large target — see {@link CONTROL_MINIMUM_PIXELS}. */
   readonly onPause: () => void;
   /** Ends it. Same. */
@@ -327,6 +329,9 @@ const RIDE_LABELS = { resume: 'Resume', end: 'End ride' } as const;
  */
 export function HudPanel(props: HudPanelProps): JSX.Element {
   const units = useUnits();
+  // #2072: the time of day, read here rather than handed in, so every ride's
+  // HUD has its clock and the demo's (which renders `HudCore` alone) has none.
+  const timeOfDay = useTimeOfDay();
   const {
     workout,
     sound,
@@ -344,6 +349,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     <HudCore
       {...shared}
       units={units}
+      timeOfDay={timeOfDay}
       labels={RIDE_LABELS}
       touchLock
       routeFigure={

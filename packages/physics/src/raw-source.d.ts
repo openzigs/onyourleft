@@ -11,3 +11,16 @@ declare module '*?raw' {
   const text: string;
   export default text;
 }
+
+/**
+ * Vite's `import.meta.glob`, as eagerly as `?raw` above and for the same
+ * reason declared here: `pacer.test.ts` reads every source file in this
+ * package to find the callers of `advancePlannedBot` (#1960). Only Vitest
+ * transforms it.
+ */
+interface ImportMeta {
+  glob<T>(
+    patterns: string | readonly string[],
+    options: { readonly query: '?raw'; readonly import: 'default'; readonly eager: true },
+  ): Record<string, T>;
+}

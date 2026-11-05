@@ -29,6 +29,7 @@ import {
   UNANCHORED,
   bothWays,
   TABLET_VIEWPORTS,
+  drawnItems,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
@@ -398,6 +399,9 @@ test.describe('a room ride’s HUD — #1356', () => {
             'Gradient',
             'To go',
             'Moving',
+            // #2072: in the primary panel's clock row on the stage.
+            'Elapsed',
+            'Clock',
             'Pacer',
             'Your best',
             'Wilhelmina Vandersteen-Oduya Mbe',
@@ -477,7 +481,7 @@ function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] 
     ...(phone ? ROOM_GIVES_WAY : []),
     ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
   ] as readonly string[];
-  return seen.items
+  return drawnItems(seen, viewport)
     .filter((each) => !givesWay.includes(each.name))
     .filter((each) => !inside(each.box, viewport) || !each.onTop)
     .map(describeItem);
