@@ -150,8 +150,9 @@ const TOUCH_TARGET_PIXELS = 44;
 
 /**
  * The owner's ruling of 2026-10-01 on #935 still governs the Trainer card's
- * glyph and the days ring: about 48 px tall, and not thin strips. (#1010 made
- * the ride cards' pictures their backgrounds; see below.)
+ * glyph and the week chart (#2049, in #939's ring's place): about 48 px
+ * tall, and not thin strips. (#1010 made the ride cards' pictures their
+ * backgrounds; see below.)
  */
 const MEDIUM_DRAWING_PIXELS = { least: 44, most: 56 } as const;
 const MAXIMUM_DRAWING_ASPECT = 3;
@@ -435,7 +436,7 @@ test.describe('#1010 — the pictures are the cards, and every word is on a soli
       }
       // The two drawings #1010 left medium.
       expect(notMedium(seen.trainerGlyph), 'the Trainer card’s glyph').toBeUndefined();
-      expect(notMedium(seen.daysRing), 'the days ring').toBeUndefined();
+      expect(notMedium(seen.weekChart), 'the week chart').toBeUndefined();
     });
   }
 

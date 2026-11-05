@@ -154,8 +154,11 @@ export interface HomeMeasurement {
   readonly rideCards: readonly RideCardMeasurement[];
   /** The Trainer card's glyph, or `undefined` when none was drawn. */
   readonly trainerGlyph: Box | undefined;
-  /** The last-seven-days ring, or `undefined` when none was drawn. */
-  readonly daysRing: Box | undefined;
+  /**
+   * The week chart beside the days-ridden sentence — #2049, in #939's ring's
+   * place — or `undefined` when none was drawn.
+   */
+  readonly weekChart: Box | undefined;
   /** Every `.oyl-button` in main that is a PRIMARY, by its text. */
   readonly primaries: readonly string[];
 }
@@ -297,7 +300,7 @@ function measure(): HomeMeasurement {
       .filter((index) => index >= 0),
     start: boxOrNothing(document.querySelector('.oyl-home__start')),
     trainerGlyph: boxOrNothing(document.querySelector('.oyl-home__glyph')),
-    daysRing: boxOrNothing(document.querySelector('.oyl-home__ring')),
+    weekChart: boxOrNothing(document.querySelector('.oyl-week-chart')),
     primaries: [...document.querySelectorAll('main .oyl-button')]
       .filter(
         (button) =>

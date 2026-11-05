@@ -442,8 +442,9 @@ describe('the illustrated home — #939', () => {
     const main = document.querySelector('main');
     expect(main?.querySelectorAll('img')).toHaveLength(0);
     const pictures = [...(main?.querySelectorAll('svg') ?? [])];
-    // The cards' eight, the trainer's glyph and the ring. (#2043 took Next
-    // up's three layers away: a free ride draws nothing there.)
+    // The cards' eight, the trainer's glyph and the week chart (#2049, in
+    // the ring's place). (#2043 took Next up's three layers away: a free
+    // ride draws nothing there.)
     expect(pictures.length).toBeGreaterThanOrEqual(10);
     for (const picture of pictures) {
       expect(
@@ -468,12 +469,14 @@ describe('the illustrated home — #939', () => {
     );
   });
 
-  it('says how many of the last seven days were ridden, beside a ring that draws the same share', async () => {
+  it('says how many of the last seven days were ridden, beside a chart that draws a bar on exactly those days', async () => {
+    // #2049: the week's bar chart took #939's ring's place, and draws the
+    // same fact — one bar per day ridden — and each day's moving time.
     await openHome([ride('a', 5), ride('b', 2), ride('c', 2), ride('d', 30)]);
     expect(text()).toContain('You rode on 2 of the last seven days.');
-    const fill = document.querySelector('.oyl-home__ring-fill');
-    const [drawn, whole] = (fill?.getAttribute('stroke-dasharray') ?? '').split(' ').map(Number);
-    expect((drawn ?? 0) / (whole ?? 1)).toBeCloseTo(2 / 7, 5);
+    const bars = document.querySelectorAll('.oyl-home__days .oyl-week-chart rect');
+    expect(bars).toHaveLength(2);
+    expectClean('home, the week chart');
   });
 
   it('never says "0 of the last seven days" above a ride: one window for both — #939 second review', async () => {

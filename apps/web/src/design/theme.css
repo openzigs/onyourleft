@@ -1861,37 +1861,77 @@ html {
   inset: 0;
 }
 
-/* The days ridden of the last seven, as a ring beside the sentence (#939). */
+/*
+ * The days ridden of the last seven, and since #2049 the week's bar chart
+ * beside the sentence — where #939's ring was, a medium drawing of the same
+ * fact and more (the owner's ruling of 2026-10-01 on #935: about 48 px tall,
+ * not a strip). The sentence comes first in the DOM and is read first; the
+ * drawing is `aria-hidden`. Under them, the whole width: the table's
+ * disclosure, or the table itself when the chart has thrown.
+ */
 .oyl-home__days {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--oyl-space-md);
+  column-gap: var(--oyl-space-md);
+  row-gap: var(--oyl-space-xs);
   margin-bottom: var(--oyl-space-sm);
 }
 
-.oyl-home__days p {
+.oyl-home__days > p {
+  grid-column: 2;
+  grid-row: 1;
   margin: 0;
 }
 
-.oyl-home__ring {
-  flex: none;
-  width: 3rem;
-  height: 3rem;
+.oyl-home__days > .oyl-week-chart {
+  grid-column: 1;
+  grid-row: 1;
 }
 
-.oyl-home__ring-track,
-.oyl-home__ring-fill {
-  fill: none;
-  stroke-width: 6;
+.oyl-home__days > :not(p, .oyl-week-chart) {
+  grid-column: 1 / -1;
+  margin-block: 0;
 }
 
-.oyl-home__ring-track {
+/*
+ * #2049: this week's moving time, a bar per day (`home/WeekChart.tsx`). The
+ * bars are one colour — `accent` on the panel's `surfaceRaised`, a declared
+ * non-text pair (3.60:1 light, `tokens.ts`) — so colour says nothing; the
+ * day's letter under each column and the table one press away say the rest.
+ */
+.oyl-week-chart {
+  display: grid;
+  gap: 0.125rem;
+  width: 8.5rem;
+}
+
+.oyl-week-chart__bars {
+  display: block;
+  width: 100%;
+  height: 2rem;
+}
+
+.oyl-week-chart__bar {
+  fill: var(--oyl-color-accent);
+}
+
+.oyl-week-chart__base {
   stroke: var(--oyl-color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
-.oyl-home__ring-fill {
-  stroke: var(--oyl-color-accent-text);
-  stroke-linecap: round;
+.oyl-week-chart__days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1;
+  text-align: center;
 }
 
 /* The Trainer card's glyph — a medium drawing, 3rem, like the ring above and
