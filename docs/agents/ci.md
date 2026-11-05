@@ -35,7 +35,7 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
-`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
+`playwright install --only-shell chromium` (with `--with-deps` until [#2207](https://github.com/openzigs/onyourleft/issues/2207)), `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
 `bash scripts/check-third-party-notices.test.sh`, `check:notices` and — since
 [#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
 suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841),
