@@ -717,7 +717,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // named for pictures or to the hosted service the rider's OWN key is
       // for. Handed no store and no log: a picture is kept nowhere.
       const pictures = options.config.pictures;
-      sidePose = createSidePose({
+      const looks = createSidePose({
         local:
           pictures.kind === 'on'
             ? createLocalPictureModel({
@@ -728,7 +728,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             : undefined,
         hostedKey,
         hosted: (key) => hostedForPictures(key, options.hostedFetch),
+        // #2175: half of any hour of the local picture model, an athlete.
+        now,
       });
+      sidePose = looks;
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
@@ -758,6 +761,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // Ended jobs go seven days after they ended (the owner's Q5 ruling), and
       // the start limit's ended windows with them: once now, and every hour.
       const sweepJobs = (): void => {
+        // #2175: the picture model's ended hour goes with them, on the same hour.
+        looks.sweep();
         void jobs.sweep().catch((error: unknown) => {
           logUnhandled(log, null, error);
         });

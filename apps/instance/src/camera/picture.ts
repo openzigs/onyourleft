@@ -6,10 +6,12 @@
  *
  * The device strips a picture at capture (ADR 0029 D-9: re-encoded from raw
  * pixels, `apps/web/src/camera/frame.ts`) and refuses to send one that
- * carries a metadata marker. This is the same check made again on arrival,
+ * carries a metadata marker. This is the check made again on arrival,
  * because a request is untrusted input and the next hop may be a company: a
  * picture that names where it was taken, or the device that took it, is
- * refused here and goes no further.
+ * refused here and goes no further. Since #2175 it walks every segment of the
+ * file rather than scanning a window of it ({@link pictureFrom}), so it is
+ * stricter than the device's own check, which still scans a window.
  *
  * ⚠️ **Bytes in memory, and nowhere else.** Nothing in this module, or in
  * `side-pose.ts` that calls it, writes: no store, no file, no log
@@ -35,23 +37,80 @@ export type PictureProblem =
   | 'must be at most 64 KiB'
   | 'must carry no location or device metadata';
 
-/** The JPEG metadata this refuses: the signatures `frame.ts` §`METADATA_MARKERS` looks for. */
-const METADATA_SIGNATURES: readonly { readonly signature: string; readonly within: number }[] = [
-  // APP1/Exif, which holds the GPS IFD and the camera's make and model.
-  { signature: 'Exif\0\0', within: 4096 },
-  // APP1/XMP, which holds the same as text.
-  { signature: 'http://ns.adobe.com/xap/1.0/', within: 65_536 },
-  // APP13/IPTC, which carries its own location fields.
-  { signature: 'Photoshop 3.0', within: 65_536 },
-];
+/**
+ * The JPEG segments this refuses, wherever in the file they are: `APP1`, which
+ * holds Exif (the GPS IFD, the camera's make and model) and XMP (the same as
+ * text), and `APP13`, which holds IPTC and its own location fields. Every
+ * `APP1` and every `APP13` is refused, not only one whose signature is the
+ * usual one: a canvas re-encode writes neither (ADR 0029 D-9), so a picture
+ * carrying one was not made by the app.
+ */
+const METADATA_SEGMENTS: ReadonlySet<number> = new Set([0xe1, 0xed]);
 
-function holds(bytes: Uint8Array, signature: string, within: number): boolean {
-  const needle = Array.from(signature, (character) => character.charCodeAt(0));
-  const last = Math.min(bytes.length, within) - needle.length;
-  for (let start = 0; start <= last; start += 1) {
-    if (needle.every((code, offset) => bytes[start + offset] === code)) return true;
+/** Markers that stand alone, with no length after them: `TEM` and the restarts. */
+const standsAlone = (marker: number): boolean =>
+  marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7);
+
+/**
+ * Where the entropy-coded data that starts at `from`, after a scan header, ends: the
+ * next `0xff` that is neither a stuffed zero nor a restart, which is the next
+ * segment's marker.
+ */
+function endOfScan(bytes: Uint8Array, from: number): number {
+  let at = from;
+  while (at < bytes.length) {
+    if (bytes[at] === 0xff) {
+      const next = bytes[at + 1];
+      if (next === 0x00 || (next !== undefined && next >= 0xd0 && next <= 0xd7)) {
+        at += 2;
+        continue;
+      }
+      if (next === 0xff) {
+        // A fill byte before the next marker.
+        at += 1;
+        continue;
+      }
+      return at;
+    }
+    at += 1;
   }
-  return false;
+  return at;
+}
+
+/**
+ * Every segment of the picture, from start of image to end of image, walked
+ * (#2175): `metadata` when any is one of {@link METADATA_SEGMENTS},
+ * `malformed` when the segments do not parse — a length past the end, a
+ * second start of image, no end of image, or any byte after it — and `clean`
+ * otherwise. Before #2175 this scanned a window of the file for each
+ * signature, so an Exif block that started after the first 4096 bytes passed.
+ *
+ * ⚠️ **Nothing after end of image is taken.** Bytes there are a place to
+ * carry anything at all, and an encoder that re-encodes from pixels writes
+ * none.
+ */
+function segmentsOf(bytes: Uint8Array): 'clean' | 'metadata' | 'malformed' {
+  let at = 2;
+  while (at < bytes.length) {
+    if (bytes[at] !== 0xff) return 'malformed';
+    while (bytes[at] === 0xff) at += 1;
+    const marker = bytes[at];
+    if (marker === undefined) return 'malformed';
+    at += 1;
+    if (marker === 0xd9) return at === bytes.length ? 'clean' : 'malformed';
+    if (marker === 0x00 || marker === 0xd8) return 'malformed';
+    if (standsAlone(marker)) continue;
+    const high = bytes[at];
+    const low = bytes[at + 1];
+    if (high === undefined || low === undefined) return 'malformed';
+    const length = (high << 8) | low;
+    if (length < 2 || at + length > bytes.length) return 'malformed';
+    if (METADATA_SEGMENTS.has(marker)) return 'metadata';
+    at += length;
+    // A scan header is followed by its entropy-coded data, which has no length.
+    if (marker === 0xda) at = endOfScan(bytes, at);
+  }
+  return 'malformed';
 }
 
 /** Standard base64, padded or not, and nothing else: no data URL, no whitespace. */
@@ -88,8 +147,8 @@ export function pictureFrom(
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) {
     return refused('must be a JPEG picture, base64-encoded');
   }
-  if (METADATA_SIGNATURES.some((each) => holds(bytes, each.signature, each.within))) {
-    return refused('must carry no location or device metadata');
-  }
+  const segments = segmentsOf(bytes);
+  if (segments === 'malformed') return refused('must be a JPEG picture, base64-encoded');
+  if (segments === 'metadata') return refused('must carry no location or device metadata');
   return { ok: true, bytes };
 }

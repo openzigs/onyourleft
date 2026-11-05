@@ -43,6 +43,11 @@
  * model is `rate_limited`, unread: a queue of photographs in memory is
  * refused (ADR 0033 D-6).
  *
+ * ⚠️ **Half of any hour of the local model, an athlete** (#2175,
+ * {@link LOCAL_PICTURE_MODEL_MS_PER_HOUR}). Past it their pictures are
+ * `rate_limited` too, until the hour ends. Held in memory, by athlete id, for
+ * the hour it was counted in and no longer.
+ *
  * ⚠️ **What comes back is a model's words, unread** (`route-kit.ts` §`SidePoseAnswer`).
  * They are attacker-influenceable through the picture, so the device reads
  * them as numbers or nothing (`apps/web/src/camera/computer-pose.ts`
@@ -68,6 +73,29 @@ export const SIDE_POSE_MODEL_TIMEOUT_MS = 25_000;
 /** The longest answer passed on, in characters. Nine landmarks as JSON are about 300. */
 export const MAXIMUM_SIDE_POSE_ANSWER = 4096;
 
+/**
+ * How long one athlete may hold the LOCAL picture model in a clock hour (#2175):
+ * thirty minutes, counted from each picture handed to the model to its answer,
+ * a failure or a time-out included. Past it, the athlete's pictures are
+ * refused `rate_limited`, unread, until the hour ends.
+ *
+ * ## Provenance — ⚠️ the author's choice, not a measurement
+ *
+ * The local picture model is the operator's machine, and before #2175 a rider
+ * could keep it busy for as long as they filmed (ADR 0050 D-4). Time, not a
+ * count of pictures, because time is what another rider waits for: the two
+ * local models asked in spike 0025 took five to seven seconds a picture, so
+ * a count high enough for a fast model would never stop a slow one. Half an
+ * hour leaves any hour's other half to everybody else. A rider filming longer
+ * than that with a slow model is refused for the rest of the hour, and the
+ * side-camera screen counts those pictures. A hosted model is not counted: it
+ * is the rider's own key, and not this machine's time.
+ */
+export const LOCAL_PICTURE_MODEL_MS_PER_HOUR = 30 * 60 * 1000;
+
+/** The window {@link LOCAL_PICTURE_MODEL_MS_PER_HOUR} is counted in: a clock hour. */
+export const LOCAL_PICTURE_WINDOW_MS = 60 * 60 * 1000;
+
 /** The two models a picture may be shown to. The device names one with every picture. */
 export const PICTURE_SOURCES = ['instance-local', 'instance-hosted'] as const;
 export type PictureSource = (typeof PICTURE_SOURCES)[number];
@@ -79,6 +107,20 @@ export interface SidePoseOptions {
   readonly hostedKey: (athleteId: string) => Promise<HostedKeyState>;
   /** `hosted-pictures.ts` §`hostedForPictures`: the one builder of a picture's hosted connection. */
   readonly hosted: (key: OpenedHostedKey) => PictureConnection;
+  /** Milliseconds, for {@link LOCAL_PICTURE_MODEL_MS_PER_HOUR}. `Date.now` unless a test says otherwise. */
+  readonly now?: () => number;
+  /** {@link LOCAL_PICTURE_MODEL_MS_PER_HOUR} unless a test says otherwise. */
+  readonly localModelMsPerHour?: number;
+}
+
+/** What `instance.ts` holds: the look, and the sweep that forgets an ended hour's athletes. */
+export interface SidePoseService extends SidePose {
+  /**
+   * Drop the time counted in an hour that has ended, so an athlete id is held
+   * no longer than the hour it was counted in. Run on the hour. Answers how
+   * many athletes are still counted.
+   */
+  sweep(): number;
 }
 
 const FIELDS: readonly string[] = ['picture', 'source', 'endpoint'];
@@ -87,9 +129,22 @@ function invalid(...fields: FieldProblem[]): SidePoseOutcome {
   return { ok: false, code: 'validation_failed', fields };
 }
 
-export function createSidePose(options: SidePoseOptions): SidePose {
+export function createSidePose(options: SidePoseOptions): SidePoseService {
   /** The athletes with a picture at a model now. */
   const looking = new Set<string>();
+  const now = options.now ?? (() => Date.now());
+  const budget = options.localModelMsPerHour ?? LOCAL_PICTURE_MODEL_MS_PER_HOUR;
+  /** The local model's time each athlete has held this hour, and which hour that is. */
+  let hour = Number.NaN;
+  let held = new Map<string, number>();
+  function thisHour(): Map<string, number> {
+    const at = Math.floor(now() / LOCAL_PICTURE_WINDOW_MS);
+    if (at !== hour) {
+      hour = at;
+      held = new Map();
+    }
+    return held;
+  }
 
   async function connectionFor(
     source: PictureSource,
@@ -111,6 +166,9 @@ export function createSidePose(options: SidePoseOptions): SidePose {
   }
 
   return {
+    sweep() {
+      return thisHour().size;
+    },
     async look(caller, body, signal) {
       const unknown = Object.keys(body).filter((field) => !FIELDS.includes(field));
       if (unknown.length > 0) {
@@ -143,11 +201,27 @@ export function createSidePose(options: SidePoseOptions): SidePose {
           endpoint as string | undefined,
         );
         if (typeof connection === 'string') return { ok: false, code: connection };
-        const looked = await connection.look({
-          picture: picture.bytes,
-          timeoutMilliseconds: SIDE_POSE_MODEL_TIMEOUT_MS,
-          signal,
-        });
+        const counted = source === 'instance-local';
+        if (counted && (thisHour().get(caller.athleteId) ?? 0) >= budget) {
+          return { ok: false, code: 'rate_limited' };
+        }
+        const started = now();
+        let looked: Awaited<ReturnType<PictureConnection['look']>>;
+        try {
+          looked = await connection.look({
+            picture: picture.bytes,
+            timeoutMilliseconds: SIDE_POSE_MODEL_TIMEOUT_MS,
+            signal,
+          });
+        } finally {
+          if (counted) {
+            const hourNow = thisHour();
+            hourNow.set(
+              caller.athleteId,
+              (hourNow.get(caller.athleteId) ?? 0) + Math.max(0, now() - started),
+            );
+          }
+        }
         if (!looked.ok) {
           return {
             ok: false,

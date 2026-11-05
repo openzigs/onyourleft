@@ -549,3 +549,26 @@ committed. **No model was shown a rider, so no model's landmarks were read.**
   setting; a hosted key has one.
 - **What a hosted service that takes no picture answers.** DeepSeek's `deepseek-flash` takes them.
 - **A real camera's picture sizes, the tablet, and a WebView's sealing time.**
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-04** — Three sentences of the body are no longer true, from
+  [#2175](https://github.com/openzigs/onyourleft/issues/2175), which fixed four low findings of
+  #1284's review. **D-4's "no other cap on a rider"** and Consequences' "with no cap of its own":
+  an athlete may now hold the LOCAL picture model for at most thirty minutes of model time in a
+  clock hour (`camera/side-pose.ts` §`LOCAL_PICTURE_MODEL_MS_PER_HOUR`), counted from each picture
+  handed to it to its answer, and is refused `rate_limited` past it until the hour ends; a hosted
+  model on the rider's own key is not counted. *The author's choice*, not ruled on, like the rest
+  of D-4's limits. **D-8's "a window scan, not a segment walk"**: the instance now walks every
+  segment of the picture from start to end of image and refuses any `APP1` or `APP13`, wherever it
+  is, and any picture whose segments do not parse or that carries a byte after its end of image
+  (`camera/picture.ts`). The device's own check (`frame.ts`) is still a window scan. And the app
+  no longer counts a `rate_limited` answer as a failed picture: it is counted on its own, on the
+  side-camera screen, and the next picture waits longer, up to thirty seconds
+  (`instance-pose.ts` §`INSTANCE_POSE_LONGEST_BACK_OFF_MILLISECONDS`). With the hosted switch on,
+  that screen now names the service the instance sends each picture on to. Its new words are for
+  the owner to approve, as D-7's are; they are not among D-7's quoted strings, which are unchanged.
