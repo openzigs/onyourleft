@@ -64,6 +64,9 @@ interface Seen {
     readonly day: string | null;
     readonly classes: string;
     readonly fill: string | null;
+    readonly x: number;
+    readonly y: number;
+    readonly height: number;
   }[];
   readonly facts: string;
 }
@@ -101,6 +104,9 @@ async function openWeek(rides: readonly ReturnType<typeof rideOn>[]): Promise<Se
         day: bar.getAttribute('data-oyl-week-day'),
         classes: bar.getAttribute('class') ?? '',
         fill: bar.getAttribute('fill'),
+        x: Number(bar.getAttribute('x')),
+        y: Number(bar.getAttribute('y')),
+        height: Number(bar.getAttribute('height')),
       })),
       facts: week?.querySelector('.oyl-home__facts')?.textContent ?? '',
     };
@@ -128,6 +134,13 @@ describe('Home’s week, day by day — #2049', () => {
       ['Today', '1', '1:00:00'],
     ]);
     expect(seen.bars.map((bar) => bar.day)).toEqual(['2027-01-11', '2027-01-13', '2027-01-15']);
+    // The geometry: the longest day (Wed, 120 min) fills the 40-unit drawing,
+    // the others are their share of it, and each bar sits in its own day's
+    // column (ten wide, the bar centred): Mon is the third, Wed the fifth,
+    // today the seventh.
+    expect(seen.bars.map((bar) => bar.height)).toEqual([15, 40, 20]);
+    expect(seen.bars.map((bar) => bar.y)).toEqual([25, 0, 20]);
+    expect(seen.bars.map((bar) => bar.x)).toEqual([22, 42, 62]);
     // The totals, in text: rides, moving time and distance.
     expect(seen.facts).toContain('Rides4');
     expect(seen.facts).toContain('3:45:00');
