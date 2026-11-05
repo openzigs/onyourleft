@@ -209,6 +209,12 @@
       "family": "icon",
       "kind": "splash",
       "size": 1152
+    },
+    {
+      "path": "apps/web/src/brand/splash-mark.webp",
+      "family": "icon",
+      "kind": "splash",
+      "size": 576
     }
   ]
 }

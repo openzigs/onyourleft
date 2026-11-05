@@ -2004,6 +2004,20 @@ inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
 tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
+[[asset]]
+path = "apps/web/src/brand/splash-mark.webp"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "bd1a22fd81c3bf41ac60b68605d24392650ad8f7124b69723ce1de94ad21022f"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
 # ---------------------------------------------------------------------------
 # #1167: the lossless WebP reader's own fixtures. Pictures drawn from arithmetic
 # (nothing read or downloaded) and written by Pillow 12.3.0 with the libwebp

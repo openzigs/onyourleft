@@ -444,6 +444,16 @@ describe('no motion runs longer than 200 ms (#936)', () => {
     ]);
   });
 
+  it('refuses the first-paint intro run at 400 ms (#2053)', () => {
+    // `motion.browser.spec.ts` §"#2053"'s control, as the stylesheet would say it.
+    expect(
+      durationsOver(
+        ".oyl-intro[data-oyl-intro='leaving'] {\n  animation: oyl-intro-out 400ms ease forwards;\n}",
+        ceiling,
+      ),
+    ).toEqual(['animation: 400ms']);
+  });
+
   it('passes what the ceiling allows, and what the reduced-motion blocks write', () => {
     expect(
       durationsOver(
