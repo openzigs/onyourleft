@@ -2353,3 +2353,4 @@ input = "https://polyhaven.com/a/concrete_road_barrier"
 inputsha256 = "97db415eb62dc2327ac4388ca47307afc638763a97c2352caa3304bce7deb0ae"
 script = "apps/web/tools/realistic/blender/process_roadside_model.py"
 tool = "Blender 4.4.3"
+

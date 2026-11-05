@@ -1132,6 +1132,10 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
  * a frame where it is a separate barrier mesh's three would have cost 1 104
  * fewer triangles and a call; the calls are the ruling's.
  *
+ * ⚠️ **62 triangles of headroom.** When a new gantry box or a re-cut barrier
+ * turns the test red, do not raise this number: move the new part to a third
+ * mesh, or cut the barrier lighter, as the trade above weighs.
+ *
  * @test-facing held by `realistic-budget.test.ts`, and by
  * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the
  * WebGL entry points
