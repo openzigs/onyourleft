@@ -709,6 +709,30 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     expect(gameTrainerPortOver(undefined).rideMovingSeconds()).toBeUndefined();
   });
 
+  it('reads the elapsed time of a ride in progress off the controller, and nothing otherwise — #2072', () => {
+    let snapshot: {
+      phase: 'idle' | 'recording' | 'paused' | 'stopped';
+      movingSeconds: number;
+      elapsedSeconds: number;
+    } = { phase: 'idle', movingSeconds: 0, elapsedSeconds: 0 };
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined, ...snapshot }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.rideElapsedSeconds?.()).toBeUndefined();
+    // The ELAPSED figure, not the moving one beside it in the snapshot.
+    snapshot = { phase: 'recording', movingSeconds: 65, elapsedSeconds: 125 };
+    expect(port.rideElapsedSeconds?.()).toBe(125);
+    snapshot = { phase: 'paused', movingSeconds: 65, elapsedSeconds: 185 };
+    expect(port.rideElapsedSeconds?.()).toBe(185);
+    snapshot = { phase: 'stopped', movingSeconds: 70, elapsedSeconds: 200 };
+    expect(port.rideElapsedSeconds?.()).toBeUndefined();
+    expect(gameTrainerPortOver(undefined).rideElapsedSeconds?.()).toBeUndefined();
+  });
+
   it('tells the HUD whenever the controller changes, and stops when asked — #1111', () => {
     // What keeps the moving time current while the GAME is paused and its
     // render loop is not running. @see GameTrainerPort.watchRide
