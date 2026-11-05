@@ -163,4 +163,28 @@ describe('each sensor’s battery on Home — #2047', () => {
     expect(battery.reads).toEqual([]);
     expect(rowText('HRM 04B1')).not.toContain('Battery');
   });
+
+  it('asks nothing while this app holds trainer control, even with no ride under way', async () => {
+    const battery = port(new Map([[STRAP, percent(37)]]));
+    const idle = idleSnapshot();
+    await openHome(
+      { ...idle, sensors: [strap], trainer: { ...idle.trainer, hasControl: true } },
+      battery,
+    );
+    expect(battery.reads).toEqual([]);
+  });
+
+  it('asks nothing while a ride is under way, even with no trainer control held', async () => {
+    const battery = port(new Map([[STRAP, percent(37)]]));
+    const riding = ridingSnapshot();
+    await openHome(
+      {
+        ...riding,
+        sensors: [...riding.sensors, strap],
+        trainer: { ...riding.trainer, hasControl: false },
+      },
+      battery,
+    );
+    expect(battery.reads).toEqual([]);
+  });
 });

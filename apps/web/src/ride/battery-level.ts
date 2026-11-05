@@ -13,8 +13,9 @@
  *
  * ## ⚠️ Read only while nothing is driving a trainer
  *
- * The read waits in the device's GATT queue, and on a trainer a control-point
- * write — a Stop included — would wait behind it. So, as the Devices screen's
+ * The read waits in the transport's one GATT queue, shared by every device,
+ * so a strap's read also holds up a trainer's control-point write — a Stop
+ * included. So, as the Devices screen's
  * signal strength (`signal-strength.ts` §"Read only while nothing is driving
  * a trainer"), the level is asked for only while no ride is under way and
  * this app holds no trainer control ({@link mayBatteryBeRead}), and at most
