@@ -1132,6 +1132,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/hud-layout-preference.ts
+                        the panels a rider turns off and the HUD's text size
+                        (#2079), kept on the device and read as a ride starts;
+                        never the notices, the controls or the primary readings
     src/game/hud/recent-trace.ts, RecentGraph.tsx
                         the last ten minutes of power and heart rate (#2078):
                         a fixed ring of 600 one-second slots, written from the

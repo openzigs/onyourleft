@@ -716,3 +716,63 @@ describe('the zone indicator on the HUD — #2077', () => {
     expect(mounted.container.querySelector('.oyl-hud__zone-swatch')).toBeNull();
   });
 });
+
+/** #2079: a race's standings, turned off by the rider, and the text size's class. */
+describe('the rider’s HUD layout — #2079', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    room: { nearby: 2 },
+    standings: {
+      place: 1,
+      of: 2,
+      lines: [
+        {
+          riderId: 3,
+          place: 1,
+          who: 'You',
+          gap: '',
+          figure: '3.5 W/kg',
+          flagged: false,
+          you: true,
+        },
+        {
+          riderId: 7,
+          place: 2,
+          who: 'Bea',
+          gap: '+4 s',
+          figure: '3.1 W/kg',
+          flagged: false,
+          you: false,
+        },
+      ],
+    },
+  };
+
+  it('draws a race’s standings unless the rider turned them off', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} layout={{ hidden: ['standings'], textSize: 'normal' }} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
+  });
+
+  it('carries the text size as a class the stylesheet reads, and none at the normal size', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ hidden: [], textSize: 'extra-large' }} />);
+    expect(mounted.container.querySelector('.oyl-hud')?.className).toBe(
+      'oyl-hud oyl-hud--text-extra-large',
+    );
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud')?.className).toBe('oyl-hud');
+  });
+});

@@ -62,6 +62,11 @@ import { CAMERA_NOTICE_SENTENCES, CAMERA_NOTICES } from '../camera/notice';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 
 import { GameView, type GamePort, type RidableRoute } from '../game/GameView';
+import {
+  HUD_LAYOUT_STORAGE_KEY,
+  HUD_PANELS,
+  writeHudLayout,
+} from '../game/hud/hud-layout-preference';
 import type { GameRenderer } from '../game/port';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../game/trainer-port';
 import { OSM_ATTRIBUTION, PUBLISHED_BASEMAP_URL } from '../map/basemap';
@@ -918,6 +923,34 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     if (main === null) throw new Error('no main');
     expect(main.querySelector('.oyl-hud__notices'), 'the ride started').not.toBeNull();
     expect(allFaults(main, GAME_RIDING_KEPT_VISIBLE, everyListed(KEPT.game))).toEqual([]);
+  });
+
+  it('the game’s HUD with every panel a rider may hide hidden still keeps its safety sentences (#2079)', async () => {
+    // #2079: Settings offers no way to hide the notices, and a rider who has
+    // hidden everything it does offer still sees every safety sentence.
+    writeHudLayout(localStorage, { hidden: [...HUD_PANELS], textSize: 'extra-large' });
+    try {
+      const frames = rideFrames();
+      mounted = await mount(
+        <main>
+          <GameView
+            port={GAME_PORT}
+            trainer={gameTrainer({ rescue: GAME_STALLED, mayStop: true, workoutRunning: true })}
+            renderer={() => Promise.resolve(GAME_RENDERER)}
+          />
+        </main>,
+      );
+      await settle();
+      await pressButton('Ride ');
+      await frames.pump(2);
+      const main = document.querySelector('main');
+      if (main === null) throw new Error('no main');
+      expect(main.querySelector('.oyl-hud__route'), 'the route panel was hidden').toBeNull();
+      expect(main.querySelector('.oyl-hud__notices'), 'the notices are the HUD’s').not.toBeNull();
+      expect(allFaults(main, GAME_RIDING_KEPT_VISIBLE, everyListed(KEPT.game))).toEqual([]);
+    } finally {
+      localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+    }
   });
 
   it('Camera: the side camera’s way in comes before “What this does” — the reorder, guarded by itself', async () => {

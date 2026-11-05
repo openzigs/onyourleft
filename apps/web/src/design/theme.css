@@ -10257,6 +10257,107 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE HUD'S TEXT SIZE — #2079.
+ *
+ * *Large* and *extra large* (`game/hud/hud-layout-preference.ts`) set the four
+ * readings a rider steers the effort by — power, cadence, heart rate and the
+ * gradient — at 1.25 and 1.5 times the primary size, 3.125 and 3.75 rem, on
+ * a TABLET's corners layout (46 rem wide and 47 rem tall or more). The
+ * column they stand in grows to hold them (30 and 33 rem), power and the
+ * gradient take the wider tracks (1.3 to 1: `1999` and `+12.5` are the widest
+ * readings), and an upright tablet stands the secondary panel under the
+ * primary, across the stage, because 33 rem and the secondary tier do not fit
+ * 50 rem side by side.
+ *
+ * ⚠️ **What it costs, recorded as #419 asks: on a phone the setting changes
+ * nothing**, and Settings says so beside it. Every phone layout is measured
+ * to within a few pixels of the leaning rider and of its own tracks at the
+ * size it has (§"THE CLOCK ROW", §"THE MOVING TIME ON AN UPRIGHT PHONE"), and
+ * a primary reading a quarter larger is a third primary row or a value past
+ * its track on every one. ⚠️ **And only the four primary readings grow**: the
+ * secondary tier's tracks and rows are what a room's standings and a Delivery
+ * round are fitted around on a tablet, and the four are the numbers a tired
+ * rider looks for. `ride-hud-layout.browser.spec.ts` lays the HUD out at both
+ * sizes at all nine overlay viewports.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+
+  .oyl-game--riding .oyl-hud--text-large .oyl-hud__fields--primary .oyl-hud__value {
+    font-size: 3.125rem;
+  }
+
+  .oyl-game--riding .oyl-hud--text-extra-large .oyl-hud__fields--primary .oyl-hud__value {
+    font-size: 3.75rem;
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud.oyl-hud--text-large {
+    grid-template-columns: minmax(0, 30rem) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud.oyl-hud--text-extra-large {
+    grid-template-columns: minmax(0, 33rem) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-areas:
+      'primary primary .'
+      'secondary secondary secondary'
+      'notices notices notices'
+      'route actions actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 9rem) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    width: 100%;
+  }
+}
+
+/*
+ * The Ride HUD panel in Settings — #2079: every choice a 48 px target, as
+ * every ride-time control is (`ride-targets.browser.spec.ts`).
+ */
+.oyl-hud-layout__group {
+  margin: var(--oyl-space-sm) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.oyl-hud-layout__group > legend {
+  padding: 0;
+  font-weight: 600;
+}
+
+/* Two classes, to outrank the design system's `label:has(> input)` row
+   (2.75 rem): these are set from the bars, where 48 px is the floor. */
+.oyl-hud-layout .oyl-hud-layout__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+  /* In CSS px as well as rem: a rider who sets the page's text smaller still
+     gets the 48 px. */
+  min-height: max(3rem, 48px);
+}
+
+.oyl-hud-layout__choice > input {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+
 /* --- Capability queries (#307) --------------------------------------------- */
 
 /*

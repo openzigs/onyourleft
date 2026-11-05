@@ -103,6 +103,12 @@ import type { LapFigures } from '../src/recording/laps';
 import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import {
+  HUD_LAYOUT_STORAGE_KEY,
+  HUD_PANELS,
+  HUD_TEXT_SIZES,
+  writeHudLayout,
+} from '../src/game/hud/hud-layout-preference';
+import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
@@ -509,6 +515,15 @@ const CORRIDOR =
  * itself, on Playwright's clock.
  */
 const DELIVERY = new URLSearchParams(window.location.search).get('delivery') === 'round';
+
+/** #2079: `?text=large` or `?text=extra-large`, the HUD's text size. */
+const HUD_TEXT_ASKED = new URLSearchParams(window.location.search).get('text');
+const HUD_TEXT = HUD_TEXT_SIZES.find((size) => size === HUD_TEXT_ASKED);
+
+/** #2079: `?hide=readings,route`, the HUD's panels turned off. */
+const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
+  (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
+);
 const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 
 const GAME: GamePort = {
@@ -1333,6 +1348,12 @@ async function run(): Promise<void> {
   localStorage.removeItem(CUES_STORAGE_KEY);
   if (WITH_SOUNDS) {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
+  }
+  // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
+  // written where Settings writes them, read as the ride starts.
+  localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0) {
+    writeHudLayout(localStorage, { textSize: HUD_TEXT ?? 'normal', hidden: HUD_HIDDEN });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
