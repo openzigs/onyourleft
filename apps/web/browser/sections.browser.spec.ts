@@ -788,6 +788,49 @@ test.describe('#2067 — the single-column screens use a tablet’s width', () =
     });
   }
 
+  // The span above reads the right edges of grid cells, so a grid of empty
+  // columns scores 100 %: the height is what shows the empty space (#2190's
+  // review: Credits was 15220 px against 12240 on the measure).
+  test(`no widened route is taller than on the reading measure, at ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const heights = async (extra: string): Promise<Map<RouteId, number>> => {
+      await open(page, TABLET_IN_THE_SHELL, extra);
+      const seen = new Map<RouteId, number>();
+      for (const id of WIDENED_BY_2067) {
+        const layout = await layoutAt(page, await hashOf(page, widened(id)), 'main');
+        seen.set(id, layout.pageHeight);
+      }
+      return seen;
+    };
+    const columns = await heights('');
+    const prose = await heights('&sections=prose');
+    for (const id of WIDENED_BY_2067) {
+      const wide = columns.get(id) ?? 0;
+      const narrow = prose.get(id) ?? 0;
+      console.log(
+        `[#2067] height ${id}: ${wide.toFixed(0)} px, on the measure ${narrow.toFixed(0)} px`,
+      );
+      expect(wide, `${id} is taller in columns than on the reading measure`).toBeLessThanOrEqual(
+        narrow,
+      );
+    }
+  });
+
+  test(`a pair stays one column upright, at ${TABLET_UPRIGHT.name}`, async ({ page }) => {
+    await open(page, TABLET_UPRIGHT);
+    for (const id of ['route-builder', 'activity-detail'] as const) {
+      await layoutAt(page, await hashOf(page, widened(id)), 'main');
+      const places = await sectionPlaces(page);
+      expect(places.length, `${id}: no sections`).toBeGreaterThanOrEqual(2);
+      expect(
+        new Set(places.map((place) => Math.round(place.left))).size,
+        `${id}: two columns in a main narrower than the list–detail breakpoint`,
+      ).toBe(1);
+    }
+  });
+
   test('the control — on the reading measure again, every route #2067 widened falls short', async ({
     page,
   }) => {

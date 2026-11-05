@@ -379,7 +379,7 @@ export function CreditsView({
         lie in rows across its width, in the order they are read.
       */}
       <div className="oyl-sections">
-        <div data-terms="attribution">
+        <div data-terms="attribution" className="oyl-sections__long">
           <h2>Credited because the licence asks for it</h2>
           {credits.required.length === 0 ? (
             <StatusMessage tone="info" label="Nothing owed">
@@ -439,15 +439,15 @@ export function CreditsView({
           </div>
         )}
 
-        <section aria-labelledby="oyl-credits-source">
-          <h2 id="oyl-credits-source">Where this list comes from</h2>
+        <div data-terms="source">
+          <h2>Where this list comes from</h2>
           <p>
             From <code>ASSETS.toml</code> in this project&rsquo;s own repository, which records the
             source, the licence and a checksum for every file of somebody else&rsquo;s that is
             committed to it. A file that is not recorded there fails the build, so this page is as
             complete as that record is.
           </p>
-        </section>
+        </div>
 
         {/*
         #1552, ADR 0054 D-3.6: the map data. Not a file this app ships, so not
@@ -483,7 +483,7 @@ export function CreditsView({
           </p>
         </div>
 
-        <div data-terms="software">
+        <div data-terms="software" className="oyl-sections__long">
           <h2>Software this app includes</h2>
           <p>
             This app is built from open-source software written by other people, and each part is
