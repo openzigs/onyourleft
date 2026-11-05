@@ -3790,8 +3790,9 @@ test.describe('#944 — under forced colours the current destination keeps a sha
  *
  * - **Its target**, at a landscape tablet and an upright phone: 44 px in both
  *   axes, and the topmost thing at its own centre. Below the rail breakpoint
- *   the wordmark is folded away (#671) and the mute is the header's one row,
- *   so there the header is no taller than the mute.
+ *   the wordmark is folded away (#671) and the mute is drawn at the end of
+ *   the page title's line (`theme.css` anchors it to the `h1`), so there the
+ *   header stays 0 px tall.
  * - **What it does to the sound**, read from the PAGE'S OWN AUDIO GRAPH: a
  *   probe installed before the app loads ({@link AUDIO_GRAPH_PROBE}) records
  *   every gain the platform's `AudioContext` makes and where each is
