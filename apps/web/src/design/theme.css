@@ -1281,9 +1281,15 @@ html {
  * section holding a table, which a column would make scroll sideways inside
  * its region for no reason but the column (`design/ScrollTable.tsx`). Outside
  * a grid (a phone) it does nothing.
+ *
+ * `.oyl-sections__fits-column` keeps a section whose table is narrow enough
+ * for a column in one (#2195): Analysis' duration bests, two columns of a
+ * duration and a number. Given its zones (#2069), Analysis spanned every
+ * section but *Your thresholds*, which sat alone in a third of a landscape
+ * tablet with the rest of its row empty; the bests now sit beside it.
  */
 .oyl-sections > .oyl-sections__title,
-.oyl-sections > :has(.oyl-scroll-region) {
+.oyl-sections > :has(.oyl-scroll-region):not(.oyl-sections__fits-column) {
   grid-column: 1 / -1;
 }
 
