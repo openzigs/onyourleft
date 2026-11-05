@@ -188,3 +188,104 @@ test('#748 control — without the rule, and the page focus the light one, the t
     expect(ratio(ring), `${ring.name} is still visible without the rule`).toBeLessThan(1.1);
   }
 });
+
+/**
+ * #875: a race's *Join voice on Discord* stands on a panel of its own, 3 px
+ * deep around it (`theme.css` §"A RACE'S VOICE BUTTON, ON ITS LINE"), over
+ * the sky. The HUD's ring, 3 px wide and 2 px outside a control, would put
+ * its outer 2 px past that panel and onto the sky (review 5777449216 on
+ * #2141), so the button's ring is drawn at no offset. This reads the ring's
+ * reach off the engine — its width and offset around the button's box — and
+ * holds it inside the panel, on the panel's surface at 3:1. The control
+ * deletes that rule and requires the ring to reach past the panel's edge.
+ */
+const VOICE_RULE = '.oyl-hud__voice > .oyl-button:focus-visible';
+
+interface VoiceRing {
+  /** How far the ring reaches past each edge of the panel, in px: none is ≤ 0. */
+  readonly past: number;
+  readonly outline: string;
+  readonly surface: string;
+}
+
+async function voiceRing(page: Page): Promise<VoiceRing> {
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  for (let press = 0; press < 60; press += 1) {
+    await page.keyboard.press('Tab');
+    const read = await page.evaluate(() => {
+      const element = document.activeElement;
+      if (!(element instanceof HTMLElement) || !element.matches('.oyl-hud__voice > a')) {
+        return undefined;
+      }
+      if (!element.matches(':focus-visible'))
+        throw new Error('no :focus-visible from the keyboard');
+      const panel = element.parentElement as HTMLElement;
+      const style = getComputedStyle(element);
+      const reach = Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset);
+      const box = element.getBoundingClientRect();
+      const edge = panel.getBoundingClientRect();
+      return {
+        past: Math.max(
+          edge.left - (box.left - reach),
+          edge.top - (box.top - reach),
+          box.right + reach - edge.right,
+          box.bottom + reach - edge.bottom,
+        ),
+        outline: style.outlineColor,
+        surface: getComputedStyle(panel).backgroundColor,
+      };
+    });
+    if (read !== undefined) return read;
+  }
+  throw new Error('the voice button never took focus from the keyboard');
+}
+
+async function openRaceVoice(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const response = await page.goto('/ride.html?room=race-voice&sounds=on');
+  expect(response?.status()).toBe(200);
+  await page.waitForFunction(
+    () =>
+      (window as { __oylRide?: { readonly ready: boolean } }).__oylRide?.ready === true &&
+      document.querySelector('.oyl-hud__voice > a') !== null,
+  );
+}
+
+test('#875 — the race’s voice button’s ring stays on its panel, at 3:1 on it — 390×844', async ({
+  page,
+}) => {
+  await openRaceVoice(page);
+  const ring = await voiceRing(page);
+  console.log(
+    `#875 ring ${ring.outline} on ${ring.surface}, ${ring.past.toFixed(2)} px past the panel`,
+  );
+  expect(ring.past).toBeLessThanOrEqual(0.5);
+  expect(contrastRatio(hex(ring.outline), hex(ring.surface))).toBeGreaterThanOrEqual(
+    AA_LARGE_TEXT_OR_NON_TEXT,
+  );
+});
+
+test('#875 control — without its rule, the voice button’s ring reaches past its panel — 390×844', async ({
+  page,
+}) => {
+  await openRaceVoice(page);
+  const deleted = await page.evaluate((selector) => {
+    let removed = 0;
+    for (const sheet of document.styleSheets) {
+      for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
+        const rule = sheet.cssRules[index];
+        if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
+          sheet.deleteRule(index);
+          removed += 1;
+        }
+      }
+    }
+    return removed;
+  }, VOICE_RULE);
+  expect(deleted, `${VOICE_RULE} was not found to delete`).toBe(1);
+  const ring = await voiceRing(page);
+  console.log(`#875 control: the ring ${ring.past.toFixed(2)} px past the panel`);
+  expect(ring.past).toBeGreaterThan(1);
+});

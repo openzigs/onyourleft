@@ -15,8 +15,8 @@
  *    how many bytes" costs a point lookup rather than a quarter of a megabyte
  *    of inflate.
  * 2. {@link loadTrace} — one channel, reduced to chart resolution before it is
- *    returned. Called once per series the rider has switched on, and never for
- *    one they have not.
+ *    returned. Called once per chart the rider has scrolled to (#2068), and
+ *    never for one they have not.
  *
  * `load.test.ts` counts the calls and the points rather than trusting this
  * comment: an overview that decoded a channel, or a chart handed 14 400 points,

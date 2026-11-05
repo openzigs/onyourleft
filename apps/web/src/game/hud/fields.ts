@@ -46,7 +46,7 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { formatDuration } from '../../format';
+import { formatDuration, formatTimeOfDay } from '../../format';
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
 import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
@@ -167,7 +167,7 @@ export interface HudReading {
  * | tier | fields | why |
  * |---|---|---|
  * | `primary` | power, cadence, heart rate | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to |
- * | `secondary` | speed, gradient, to go, moving time, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the moving time, the gaps and the wind change slowly |
+ * | `secondary` | speed, gradient, to go, moving time, elapsed time, clock, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the two ride times, the clock, the gaps and the wind change slowly |
  *
  * ⚠️ **Moving time is secondary, decided for #1111.** It is not a sensor and
  * nothing is ridden TO it second by second: it climbs at one second a second,
@@ -382,6 +382,37 @@ export interface HudInput {
    */
   readonly movingSeconds?: number | undefined;
   /**
+   * The ride's elapsed time, in seconds, pauses INCLUDED — #2072. **The
+   * recorder's again** ({@link movingSeconds} says why there is no other
+   * clock): `RideSnapshot.elapsedSeconds`, the recorder session's
+   * `elapsedTime`, read through `trainer-port.ts`
+   * §`GameTrainerPort.rideElapsedSeconds`. It is worked out from the
+   * instants the recording was told about (`domain/recording/session.ts`
+   * §`elapsedTime`), so a timer that fires while no reading arrives moves it
+   * no more than it moves the moving time — and it is the figure the saved
+   * activity's `elapsedTime` is written from.
+   *
+   * ⚠️ **Never derived from {@link movingSeconds}**, nor the other way round:
+   * the two differ by exactly the time paused, which is the whole of what a
+   * rider reading both is told.
+   *
+   * `undefined` where nothing is being recorded, and then the field shows
+   * {@link NO_READING}, as the moving time does.
+   */
+  readonly elapsedSeconds?: number | undefined;
+  /**
+   * The device's own time, now — #2072: the time of day, shown `HH:MM` under
+   * the label *Clock* ({@link clockReading}). Not a ride figure and not a
+   * clock of the ride's: what a rider with the phone's own status bar hidden
+   * under a full-bleed ride (`shell/immersive.ts`) cannot otherwise see.
+   *
+   * ⚠️ **Absent means the field is absent**, not a dash: the demo (#1650)
+   * passes none, and a ride's HUD always does (`HudPanel.tsx`). The choice is
+   * made by the caller and never changes mid-ride, so no field moves under a
+   * rider ({@link hudReadings}).
+   */
+  readonly timeOfDay?: Date | undefined;
+  /**
    * The moving time of the lap in progress, in seconds — #1312. **The
    * recorder's again** ({@link movingSeconds} says why there is no other
    * clock): `RideSnapshot.courseLapSeconds`, its moving time since the rider
@@ -486,6 +517,12 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // is always present, so its index is the same on every ride; it moved
     // every gap, room and wind field one place along, once, for every ride.
     movingTimeReading(input.movingSeconds),
+    // #2072: the elapsed time beside the moving time, and the time of day
+    // beside both. Each is present on every ride (the clock on every ride's
+    // HUD), so their indices are the same on every ride; they moved every
+    // gap, room and wind field two places along, once.
+    elapsedTimeReading(input.elapsedSeconds),
+    ...clockReading(input.timeOfDay),
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
@@ -540,13 +577,36 @@ export function givesWayToTheRoom(reading: HudReading): boolean {
  * 1.5 rem on the CI runner's fonts it would be wider than a 93 px track.
  */
 function movingTimeReading(movingSeconds: number | undefined): HudReading {
+  return rideTimeReading(MOVING_TIME_KEY, 'Moving', movingSeconds);
+}
+
+/** The key of the elapsed-time field — #2072. @see elapsedTimeReading */
+export const ELAPSED_TIME_KEY = 'elapsedTime';
+
+/**
+ * The elapsed-time field — #2072: the ride's time with its pauses, beside
+ * {@link movingTimeReading}'s without them, in the same `h:mm:ss`, never
+ * stale, and set at the word size past ten hours for the same reason.
+ *
+ * ⚠️ **Labelled `Elapsed`, one word, as the Ride screen's clock labels the
+ * same figure** (`views/RideView.tsx` §`RideClock`), so the two times on the
+ * HUD are told apart by their labels, and `Moving` is not `Moving time` for
+ * {@link movingTimeReading}'s reason. Where each is drawn is `theme.css`
+ * §"THE CLOCK ROW".
+ */
+function elapsedTimeReading(elapsedSeconds: number | undefined): HudReading {
+  return rideTimeReading(ELAPSED_TIME_KEY, 'Elapsed', elapsedSeconds);
+}
+
+/** One of the ride's two times, `h:mm:ss`, or a dash with nothing recorded. */
+function rideTimeReading(key: string, label: string, seconds: number | undefined): HudReading {
   const value =
-    movingSeconds === undefined || !Number.isFinite(movingSeconds)
+    seconds === undefined || !Number.isFinite(seconds)
       ? NO_READING
-      : formatDuration(movingSeconds, 'always');
+      : formatDuration(seconds, 'always');
   return {
-    key: MOVING_TIME_KEY,
-    label: 'Moving',
+    key,
+    label,
     value,
     unit: '',
     stale: false,
@@ -556,6 +616,24 @@ function movingTimeReading(movingSeconds: number | undefined): HudReading {
 
 /** The widest moving time the HUD's layout is measured at — #1111. @see movingTimeReading */
 const WIDEST_MEASURED_MOVING_TIME = '9:59:59';
+
+/** The key of the time-of-day field — #2072. @see clockReading */
+export const CLOCK_KEY = 'clock';
+
+/**
+ * The time of day — #2072: `HH:MM` on the device's own clock
+ * (`format.ts` §`formatTimeOfDay`), labelled `Clock` — a word that cannot be
+ * read as a third ride time beside `Moving` and `Elapsed`. No seconds: it is
+ * read the way a wall clock is, and a digit that changes every second is one
+ * a glance has to settle on. Absent with no time handed in
+ * ({@link HudInput.timeOfDay}).
+ */
+function clockReading(timeOfDay: Date | undefined): readonly HudReading[] {
+  if (timeOfDay === undefined) return [];
+  return [
+    { key: CLOCK_KEY, label: 'Clock', value: formatTimeOfDay(timeOfDay), unit: '', stale: false },
+  ];
+}
 
 /**
  * The room's two fields — #783: the one chosen rider's gap, and how many are
