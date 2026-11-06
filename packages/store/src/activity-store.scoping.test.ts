@@ -790,6 +790,20 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'setActivityVisibility',
+    leaks:
+      "another athlete's ride, made public on their behalf — and with it every effort on it ranked on an instance's leaderboard (#68)",
+    async run(store, mine, theirs) {
+      const before = await store.getActivity(theirs.owner, theirs.ride.id);
+      await expect(store.setActivityVisibility(mine.owner, theirs.ride.id, 'public')).resolves.toBe(
+        false,
+      );
+      const after = await store.getActivity(theirs.owner, theirs.ride.id);
+      expect(after).toStrictEqual(before);
+      expect(after?.visibility).not.toBe('public');
+    },
+  },
+  {
     member: 'listCameraFrames',
     leaks:
       'every picture kept on this device, whoever took it — a photograph of the inside of somebody else’s house',

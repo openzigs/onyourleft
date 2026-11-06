@@ -124,6 +124,9 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   notice_step: `INSERT INTO notice_step VALUES (1, 1, 'decided', 'a', 'Not illegal', 1, 30)`,
   notice_erasure: `INSERT INTO notice_erasure VALUES (1, 0, 0, 32)`,
   hidden_item: `INSERT INTO hidden_item VALUES (1, 'room:0123456789abcdef0123456789abcdef', 'b', 31, NULL)`,
+  // #68: after `activity_record`, which an effort's ride is a foreign key to.
+  segment: `INSERT INTO segment VALUES ('${'a'.repeat(32)}', 'a', 'S', 'ride', 555.5, '{}', 33)`,
+  segment_effort: `INSERT INTO segment_effort VALUES ('effort-a', 'a', '${'a'.repeat(32)}', '${'1'.repeat(64)}', 34, 60.5, 'public', 35)`,
 };
 
 /**

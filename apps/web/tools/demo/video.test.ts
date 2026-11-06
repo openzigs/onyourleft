@@ -261,8 +261,8 @@ describe('demo:video under node — #1655', () => {
   const WEB = fileURLToPath(new URL('../../', import.meta.url));
 
   it('loads its whole import graph with types stripped, as package.json runs it', () => {
-    // #1931's shape: `demo:bake`'s graph reaches a parameter property, which
-    // node will not strip, so its script does not start. `demo-video.ts`
+    // #1931's shape: `demo:bake`'s graph once reached a parameter property,
+    // which node will not strip, so its script did not start. `demo-video.ts`
     // renders as soon as it is imported, so its graph is loaded through
     // `render-video.ts`, which does nothing until called.
     const manifest = JSON.parse(readFileSync(`${WEB}package.json`, 'utf8')) as {

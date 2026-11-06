@@ -62,6 +62,8 @@ import type {
   ResultTable,
   RoomCourseTable,
   RoomTable,
+  SegmentEffortTable,
+  SegmentTable,
   SessionScope,
   SessionTable,
   SyncItemTable,
@@ -127,6 +129,61 @@ export interface ActivityRecord {
   readonly contentSha256: string;
   readonly signedRecord: Uint8Array;
   readonly receivedAt: number;
+  /**
+   * The ride's visibility here (#68, migration 0038), on a read that selects
+   * it — `getActivityRecord` and `listActivityRecords`. Never written through
+   * this record: `setActivityVisibility` is the one write.
+   */
+  readonly visibility?: ActivityVisibility;
+}
+
+/** ADR 0004 decision A's three values: a synced ride's visibility on this instance (#68). */
+export type ActivityVisibility = 'private' | 'followers' | 'public';
+
+/** A segment published to this instance (#68), as the store holds it. */
+export interface PublishedSegment {
+  /** The first 32 hex digits of the SHA-256 of {@link definition}. */
+  readonly id: string;
+  /** Who published it first. Never sent to another rider. */
+  readonly athleteId: string;
+  readonly name: string;
+  readonly sport: 'ride' | 'run';
+  /** Measured by the instance from the definition's path. */
+  readonly distanceMetres: number;
+  /** The definition's canonical JSON, path included. */
+  readonly definition: string;
+  /** Unix seconds: when it was published here. */
+  readonly createdAt: number;
+}
+
+/** One effort as a rider shares it (#68): the instance mints its id. */
+export interface SegmentEffortWrite {
+  readonly id: string;
+  /** Unix seconds. */
+  readonly startedAt: number;
+  readonly elapsedSeconds: number;
+  readonly visibility: 'public' | 'private-match';
+}
+
+/** One stored effort (#68). */
+export interface SegmentEffortRow extends SegmentEffortWrite {
+  readonly athleteId: string;
+  readonly segmentId: string;
+  readonly contentSha256: string;
+}
+
+/**
+ * One row of a SHARED board (#68): an athlete's best effort, with what the
+ * one public projection needs (`auth/public-athlete.ts`) and nothing else.
+ */
+export interface BoardRow {
+  readonly effortId: string;
+  readonly athleteId: string;
+  readonly displayName: string;
+  readonly displayNameHiddenAt: number | null;
+  /** Unix seconds. */
+  readonly startedAt: number;
+  readonly elapsedSeconds: number;
 }
 
 export interface Room {
@@ -1893,6 +1950,95 @@ export interface SqlStore {
    */
   listAnalysisResults(athleteId: string): Promise<readonly AnalysisResult[]>;
 
+  // --- Segments and leaderboards (#68, migration 0038) ----------------------
+
+  /**
+   * #68: set the visibility of one of THIS athlete's synced rides, as their
+   * device holds it (ADR 0004). `false`, and nothing written, when the athlete
+   * holds no such record.
+   */
+  setActivityVisibility(
+    athleteId: string,
+    contentSha256: string,
+    visibility: ActivityVisibility,
+  ): Promise<boolean>;
+  /**
+   * #68: publish a segment as `athleteId`. A segment with this id already
+   * published — the same definition, by anybody — is left as it is and
+   * answered `existing`; `no-athlete` when the athlete does not exist. One
+   * statement, so an erasure cannot land between the check and the write.
+   */
+  publishSegment(
+    athleteId: string,
+    segment: Omit<PublishedSegment, 'athleteId'>,
+  ): Promise<'published' | 'existing' | 'no-athlete'>;
+  /**
+   * #68: one published segment, as `viewerId` may see it — ⚠️ **cross-athlete
+   * by design**: its publisher is any athlete the choke point's rule lets the
+   * viewer see (`moderation.ts` §`canSee`, applied in SQL: {@link seenBy}),
+   * themselves included. `undefined` otherwise, as for none.
+   */
+  getPublishedSegment(viewerId: string, segmentId: string): Promise<PublishedSegment | undefined>;
+  /**
+   * #68: published segments, newest first, after `after` (`pagination.ts`'s
+   * keyset), whose publisher `viewerId` may see — the same rule as
+   * {@link getPublishedSegment}. ⚠️ Cross-athlete by design.
+   */
+  listPublishedSegments(
+    viewerId: string,
+    after: { readonly createdAt: number; readonly id: string } | undefined,
+    limit: number,
+  ): Promise<readonly PublishedSegment[]>;
+  /**
+   * #68: withdraw a segment THIS athlete published, with every effort anybody
+   * shared on it. `false`, and nothing deleted, for a segment they did not
+   * publish.
+   */
+  withdrawSegment(athleteId: string, segmentId: string): Promise<boolean>;
+  /**
+   * #68: replace THIS athlete's efforts on one segment from one of their
+   * synced rides with `efforts` — none withdraws them. Idempotent: an effort
+   * already held keeps its id. `no-segment` or `no-ride`, and nothing
+   * written, when either is not there; checked in the same transaction.
+   */
+  replaceSegmentEfforts(
+    athleteId: string,
+    segmentId: string,
+    contentSha256: string,
+    efforts: readonly SegmentEffortWrite[],
+    now: number,
+  ): Promise<'replaced' | 'no-segment' | 'no-ride'>;
+  /**
+   * #68: THIS athlete's own efforts on a segment, fastest first (elapsed,
+   * then start, then id), `private-match` included — their personal board.
+   * From `since` (Unix seconds) on, at most `limit`.
+   */
+  listOwnSegmentEfforts(
+    athleteId: string,
+    segmentId: string,
+    since: number,
+    limit: number,
+  ): Promise<readonly SegmentEffortRow[]>;
+  /**
+   * #68: a SHARED board, in ONE statement whatever its length: each athlete's
+   * best effort on the segment, fastest first (elapsed, then start, then id),
+   * at most `limit`. ⚠️ **Cross-athlete by design**, and every row stands on
+   * four conditions: the effort is `public` (never `private-match`), its ride
+   * is `public` here (`setActivityVisibility`), it started at or after
+   * `since`, and its athlete is one `viewerId` may see — the choke point's
+   * rule in SQL ({@link seenBy}). `segments/leaderboard.test.ts` holds each.
+   */
+  listSegmentBoard(
+    viewerId: string,
+    segmentId: string,
+    since: number,
+    limit: number,
+  ): Promise<readonly BoardRow[]>;
+  /** #68, for the account export: every segment THIS athlete published, oldest first. */
+  listSegmentsPublishedBy(athleteId: string): Promise<readonly PublishedSegment[]>;
+  /** #68, for the account export: every effort THIS athlete shared, on any segment. */
+  listSharedEfforts(athleteId: string): Promise<readonly SegmentEffortRow[]>;
+
   /**
    * Remove every row this athlete owns, the athlete included (#35). Answers
    * the content hashes of the records it removed, for the caller's blob sweep.
@@ -2472,12 +2618,61 @@ const sessionFrom = (row: Selectable<SessionTable>): Session => ({
 });
 
 const activityRecordFrom = (
-  row: Omit<Selectable<ActivityRecordTable>, 'may_be_raced' | 'race_route_sha256'>,
+  row: Omit<
+    Selectable<ActivityRecordTable>,
+    'may_be_raced' | 'race_route_sha256' | 'visibility'
+  > & {
+    readonly visibility?: ActivityVisibility;
+  },
 ): ActivityRecord => ({
   athleteId: row.athlete_id,
   contentSha256: row.content_sha256,
   signedRecord: row.signed_record,
   receivedAt: row.received_at,
+  ...(row.visibility === undefined ? {} : { visibility: row.visibility }),
+});
+
+/**
+ * **The choke point's rule as a SQL condition** (#68): may `viewerId` see the
+ * athlete in the joined `athlete` row? For a read that returns many athletes'
+ * rows in ONE statement — a leaderboard — where asking `moderation.ts`
+ * §`canSee` once per row would be the N+1 #68's third criterion forbids.
+ *
+ * ⚠️ **It is `canSee`'s rule, not a second one**, and must stay so: the
+ * viewer themselves; otherwise an active account (not awaiting approval, not
+ * refused, #775), not suspended, and no block either way round (#83).
+ * `segments/leaderboard.test.ts` holds the two together — every pair of its
+ * riders asked of `canSee` and of a board — so a change to either that the
+ * other does not make is a red test.
+ */
+export function seenBy(viewerId: string) {
+  return sql<boolean>`(athlete.id = ${viewerId} or (
+    athlete.registration_state = 'active'
+    and athlete.suspended_at is null
+    and not exists (
+      select 1 from block
+      where (block.athlete_id = ${viewerId} and block.blocked_athlete_id = athlete.id)
+         or (block.athlete_id = athlete.id and block.blocked_athlete_id = ${viewerId}))))`;
+}
+
+const segmentEffortFrom = (row: Selectable<SegmentEffortTable>): SegmentEffortRow => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  segmentId: row.segment_id,
+  contentSha256: row.content_sha256,
+  startedAt: row.started_at,
+  elapsedSeconds: row.elapsed_seconds,
+  visibility: row.visibility,
+});
+
+const publishedSegmentFrom = (row: Selectable<SegmentTable>): PublishedSegment => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  name: row.name,
+  sport: row.sport,
+  distanceMetres: row.distance_metres,
+  definition: row.definition,
+  createdAt: row.created_at,
 });
 
 const syncItemFrom = (row: Selectable<SyncItemTable>): SyncItem => ({
@@ -3740,6 +3935,247 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .execute()
         ).map(activityRecordFrom),
       ),
+
+    setActivityVisibility: (athleteId, contentSha256, visibility) =>
+      exclusive(async () => {
+        const updated = await db
+          .updateTable('activity_record')
+          .set({ visibility })
+          .where('athlete_id', '=', athleteId)
+          .where('content_sha256', '=', contentSha256)
+          .executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
+
+    publishSegment: (athleteId, segment) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          // ONE statement for the athlete's existence and the write, as the
+          // hosted key's: an erasure cannot land between them.
+          const written = await sql<{ id: string }>`
+            insert into segment (id, athlete_id, name, sport, distance_metres, definition, created_at)
+            select ${segment.id}, id, ${segment.name}, ${segment.sport}, ${segment.distanceMetres},
+              ${segment.definition}, ${segment.createdAt}
+            from athlete where id = ${athleteId}
+            on conflict (id) do nothing
+            returning id`.execute(trx);
+          if (written.rows.length > 0) return 'published' as const;
+          const athlete = await trx
+            .selectFrom('athlete')
+            .select('id')
+            .where('id', '=', athleteId)
+            .executeTakeFirst();
+          return athlete === undefined ? ('no-athlete' as const) : ('existing' as const);
+        }),
+      ),
+
+    getPublishedSegment: (viewerId, segmentId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('segment')
+          .innerJoin('athlete', 'athlete.id', 'segment.athlete_id')
+          .selectAll('segment')
+          .where('segment.id', '=', segmentId)
+          .where(seenBy(viewerId))
+          .executeTakeFirst();
+        return row === undefined ? undefined : publishedSegmentFrom(row);
+      }),
+
+    listPublishedSegments: (viewerId, after, limit) =>
+      exclusive(async () => {
+        let query = db
+          .selectFrom('segment')
+          .innerJoin('athlete', 'athlete.id', 'segment.athlete_id')
+          .selectAll('segment')
+          .where(seenBy(viewerId));
+        if (after !== undefined) {
+          query = query.where((eb) =>
+            eb.or([
+              eb('segment.created_at', '<', after.createdAt),
+              eb.and([
+                eb('segment.created_at', '=', after.createdAt),
+                eb('segment.id', '<', after.id),
+              ]),
+            ]),
+          );
+        }
+        return (
+          await query
+            .orderBy('segment.created_at', 'desc')
+            .orderBy('segment.id', 'desc')
+            .limit(Math.max(0, Math.floor(limit)))
+            .execute()
+        ).map(publishedSegmentFrom);
+      }),
+
+    withdrawSegment: (athleteId, segmentId) =>
+      exclusive(() =>
+        // A segment's path is a stretch of its publisher's ride: scrubbed, as
+        // every other deletion of a place is.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('segment')
+              .select('id')
+              .where('id', '=', segmentId)
+              .where('athlete_id', '=', athleteId)
+              .executeTakeFirst();
+            if (held === undefined) return false;
+            // Every effort on it, anybody's: `segment_id` has no foreign key
+            // (migration 0038 says why), so nothing else would.
+            await trx.deleteFrom('segment_effort').where('segment_id', '=', segmentId).execute();
+            await trx
+              .deleteFrom('segment')
+              .where('id', '=', segmentId)
+              .where('athlete_id', '=', athleteId)
+              .execute();
+            return true;
+          }),
+        ),
+      ),
+
+    replaceSegmentEfforts: (athleteId, segmentId, contentSha256, efforts, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const segment = await trx
+            .selectFrom('segment')
+            .select('id')
+            .where('id', '=', segmentId)
+            .executeTakeFirst();
+          if (segment === undefined) return 'no-segment' as const;
+          const ride = await trx
+            .selectFrom('activity_record')
+            .select('content_sha256')
+            .where('athlete_id', '=', athleteId)
+            .where('content_sha256', '=', contentSha256)
+            .executeTakeFirst();
+          if (ride === undefined) return 'no-ride' as const;
+          const kept = efforts.map((effort) => effort.startedAt);
+          let gone = trx
+            .deleteFrom('segment_effort')
+            .where('athlete_id', '=', athleteId)
+            .where('segment_id', '=', segmentId)
+            .where('content_sha256', '=', contentSha256);
+          if (kept.length > 0) gone = gone.where('started_at', 'not in', kept);
+          await gone.execute();
+          for (const effort of efforts) {
+            await trx
+              .insertInto('segment_effort')
+              .values({
+                id: effort.id,
+                athlete_id: athleteId,
+                segment_id: segmentId,
+                content_sha256: contentSha256,
+                started_at: effort.startedAt,
+                elapsed_seconds: effort.elapsedSeconds,
+                visibility: effort.visibility,
+                received_at: now,
+              })
+              // The same traversal shared again keeps its id.
+              .onConflict((conflict) =>
+                conflict
+                  .columns(['athlete_id', 'segment_id', 'content_sha256', 'started_at'])
+                  .doUpdateSet({
+                    elapsed_seconds: effort.elapsedSeconds,
+                    visibility: effort.visibility,
+                    received_at: now,
+                  }),
+              )
+              .execute();
+          }
+          return 'replaced' as const;
+        }),
+      ),
+
+    listOwnSegmentEfforts: (athleteId, segmentId, since, limit) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('segment_effort')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .where('segment_id', '=', segmentId)
+            .where('started_at', '>=', since)
+            .orderBy('elapsed_seconds')
+            .orderBy('started_at')
+            .orderBy('id')
+            .limit(Math.max(0, Math.floor(limit)))
+            .execute()
+        ).map(segmentEffortFrom),
+      ),
+
+    listSegmentsPublishedBy: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('segment')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('created_at')
+            .orderBy('id')
+            .execute()
+        ).map(publishedSegmentFrom),
+      ),
+
+    listSharedEfforts: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('segment_effort')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('segment_id')
+            .orderBy('started_at')
+            .orderBy('id')
+            .execute()
+        ).map(segmentEffortFrom),
+      ),
+
+    listSegmentBoard: (viewerId, segmentId, since, limit) =>
+      exclusive(async () => {
+        // ONE statement, whatever the board's length (#68's third criterion):
+        // the names come in the same join, never a read per row. The ride's
+        // visibility and the effort's are two conditions on purpose — the
+        // second is the privacy zone (`@onyourleft/domain` §`EffortVisibility`).
+        const rows = await sql<{
+          id: string;
+          athlete_id: string;
+          started_at: number;
+          elapsed_seconds: number;
+          display_name: string;
+          display_name_hidden_at: number | null;
+        }>`
+          with best as (
+            select effort.id, effort.athlete_id, effort.started_at, effort.elapsed_seconds,
+              row_number() over (
+                partition by effort.athlete_id
+                order by effort.elapsed_seconds, effort.started_at, effort.id
+              ) as place
+            from segment_effort as effort
+            join activity_record as ride
+              on ride.athlete_id = effort.athlete_id and ride.content_sha256 = effort.content_sha256
+            join athlete on athlete.id = effort.athlete_id
+            where effort.segment_id = ${segmentId}
+              and effort.visibility = 'public'
+              and ride.visibility = 'public'
+              and effort.started_at >= ${since}
+              and ${seenBy(viewerId)}
+          )
+          select best.id, best.athlete_id, best.started_at, best.elapsed_seconds,
+            athlete.display_name, athlete.display_name_hidden_at
+          from best join athlete on athlete.id = best.athlete_id
+          where best.place = 1
+          order by best.elapsed_seconds, best.started_at, best.id
+          limit ${Math.max(0, Math.floor(limit))}`.execute(db);
+        return rows.rows.map((row) => ({
+          effortId: row.id,
+          athleteId: row.athlete_id,
+          displayName: row.display_name,
+          displayNameHiddenAt: row.display_name_hidden_at,
+          startedAt: row.started_at,
+          elapsedSeconds: row.elapsed_seconds,
+        }));
+      }),
 
     ingestActivity: (ingestion) =>
       exclusive(() =>
@@ -5520,6 +5956,15 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .selectFrom('activity_record')
               .select('content_sha256')
               .where('athlete_id', '=', athleteId)
+              .execute();
+            // Every effort anybody shared on a segment this athlete published
+            // (#68): `segment_effort.segment_id` has no foreign key, so the
+            // loop below would leave them ranked on a segment that is gone.
+            await trx
+              .deleteFrom('segment_effort')
+              .where('segment_id', 'in', (eb) =>
+                eb.selectFrom('segment').select('id').where('athlete_id', '=', athleteId),
+              )
               .execute();
             for (const table of await athleteTablesInErasureOrder(trx)) {
               // Every table here has `athlete_id`: the derivation refuses one that does not.
