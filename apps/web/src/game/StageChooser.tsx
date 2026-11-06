@@ -189,6 +189,12 @@ export interface RecordingOffer {
  * a shorter one, and one with fewer than `FEWEST_DELIVERY_HOUSES`, or with no
  * houses read, is an ordinary ride the HUD says is one
  * (`hud/delivery-announce.ts` §`oweNoRound`).
+ *
+ * Since #2294 it is TOLD what each route holds: `GameView` counts every saved
+ * route's houses through `delivery/courses.ts` once the round is switched on
+ * and hands the counts in as {@link DeliveryOffer.courses}, so this file still
+ * imports no planner. A route counted short of a round cannot hold one; a
+ * route counted enough is "up to" its count, and the press still decides.
  */
 export interface DeliveryOffer {
   /** Whether the rider switched the round on. */
@@ -199,7 +205,25 @@ export interface DeliveryOffer {
    * and how many houses are on today's round. Counts only (DL11).
    */
   readonly week: Pick<WeekProgress, 'day' | 'houses'>;
+  /**
+   * Each saved route's houses for a round, by route id — #2294, counted by
+   * `GameView` through `delivery/courses.ts` once the round is switched on.
+   * A route not in it is still being counted. `undefined` says nothing on
+   * the cards: no corridor port, or the round not chosen.
+   */
+  readonly courses?: ReadonlyMap<string, DeliveryCourse> | undefined;
 }
+
+/**
+ * What one route's count came to, as the chooser shows it — #2294,
+ * `delivery/courses.ts` §`CourseCount`, restated here so this file imports no
+ * planner (`stage-chooser-imports.test.ts`). `houses` is the most a round
+ * from the start line could take there, a ceiling on the round itself.
+ */
+export type DeliveryCourse =
+  | { readonly kind: 'counted'; readonly houses: number }
+  | { readonly kind: 'unread'; readonly state: Exclude<CorridorState, { kind: 'ready' }> }
+  | { readonly kind: 'failed' };
 
 /**
  * A lap race, as the chooser offers it — #1907 (epic #1894, ADR 0060): on a
@@ -437,6 +461,11 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   const headingId = `${ids}-heading`;
   // #1818: offered with the realistic world only (DL6), so asked for only then.
   const deliveryOffer = props.worldChosen ? props.delivery : undefined;
+  // #2294: every card says what its route holds for a round, once one is chosen.
+  const courses =
+    deliveryOffer?.chosen === true && deliveryOffer.courses !== undefined
+      ? { courses: deliveryOffer.courses, week: deliveryOffer.week }
+      : undefined;
   const notices = [
     props.worldChosen ? (
       // #475, and since #1011 ONE compact line rather than a box: which world,
@@ -583,12 +612,22 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       </div>
       <h2 id={headingId}>Choose a route</h2>
       <RouteCards
+        summary={
+          courses === undefined ? undefined : (
+            <CoursesLine routes={props.routes} courses={courses.courses} week={courses.week} />
+          )
+        }
         routes={props.routes}
         chosen={chosen}
         onPick={props.onPick}
         units={props.units}
         labelledBy={headingId}
         idPrefix={ids}
+        course={
+          courses === undefined
+            ? undefined
+            : (route) => deliveryCourseLine(courses.courses.get(route.id), courses.week)
+        }
       />
       <div className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card">
         <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
@@ -629,7 +668,17 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           problem={props.air.problem}
           field={props.air.field}
         />
-        {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
+        {deliveryOffer === undefined ? null : (
+          <DeliveryControl
+            offer={deliveryOffer}
+            // #2294: said beside the switch too, for the route chosen.
+            chosenCourse={
+              courses === undefined
+                ? undefined
+                : deliveryCourseLine(courses.courses.get(chosen.id), courses.week)
+            }
+          />
+        )}
         {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
       {props.onPreview === undefined ? null : (
@@ -767,6 +816,14 @@ function PreviewControl(props: {
  * by. ⚠️ The drawing is `aria-hidden` and says nothing the words do not
  * (epic #935, principle 1): it is RELATIVE, highest point near the top whatever
  * the metres (`ProfileShape`), so the climb in metres is only in the text.
+ *
+ * Since #2294, with a Delivery round chosen, each card carries a second band
+ * saying what its route holds for a round, and the radio is described by it
+ * too. A route that cannot hold one is GREYED: its drawing is faded, and its
+ * band says why in words, at the band's full contrast, because the fade alone
+ * would be colour carrying the meaning. It is still a route the rider may
+ * choose, for an ordinary ride; the cards keep their order while the counts
+ * arrive, so nothing moves under a rider's finger or focus.
  */
 function RouteCards(props: {
   readonly routes: readonly RidableRoute[];
@@ -775,6 +832,10 @@ function RouteCards(props: {
   readonly units: UnitSystem;
   readonly labelledBy: string;
   readonly idPrefix: string;
+  /** #2294: each route's line about a Delivery round; `undefined` draws none. */
+  readonly course?: ((route: RidableRoute) => CourseLine) | undefined;
+  /** #2294: the line over the cards saying how many hold a round. Inside the group, in its grid area. */
+  readonly summary?: JSX.Element | undefined;
 }): JSX.Element {
   const group = `${props.idPrefix}-route`;
   return (
@@ -782,15 +843,18 @@ function RouteCards(props: {
       className="oyl-chooser__routes tw:mt-0 tw:mx-0 tw:mb-md tw:p-0 tw:border-0 tw:min-w-0"
       aria-labelledby={props.labelledBy}
     >
+      {props.summary}
       <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
         {props.routes.map((route, index) => {
           const radioId = `${group}-${String(index)}`;
           const factsId = `${radioId}-facts`;
+          const courseId = `${radioId}-course`;
           const chosen = route.id === props.chosen.id;
+          const course = props.course?.(route);
           return (
             <li
               key={route.id}
-              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:overflow-hidden tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card"
+              className={`oyl-chooser__card${course?.holds === false ? ' oyl-chooser__card--no-round' : ''} tw:relative tw:grid tw:gap-x-sm tw:items-center tw:overflow-hidden tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card`}
             >
               <input
                 className="oyl-chooser__radio tw:my-sm tw:ml-md tw:mr-0"
@@ -799,7 +863,7 @@ function RouteCards(props: {
                 name={group}
                 value={route.id}
                 checked={chosen}
-                aria-describedby={factsId}
+                aria-describedby={course === undefined ? factsId : `${factsId} ${courseId}`}
                 onChange={() => {
                   props.onPick(route.id);
                 }}
@@ -835,6 +899,14 @@ function RouteCards(props: {
               >
                 {routeFacts(route.profile, props.units)}
               </p>
+              {course === undefined ? null : (
+                <p
+                  className="oyl-chooser__course tw:col-span-full tw:m-0 tw:pb-sm tw:px-md tw:bg-surface-overlay tw:text-ink"
+                  id={courseId}
+                >
+                  {course.text}
+                </p>
+              )}
             </li>
           );
         })}
@@ -1131,16 +1203,163 @@ export function deliveryWeekText(week: Pick<WeekProgress, 'day' | 'houses'>): st
   return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · up to ${houses} on the round`;
 }
 
+/** One route's line about a Delivery round — #2294: its words, and whether it holds one. */
+interface CourseLine {
+  readonly text: string;
+  /** `false` greys the card; `undefined` while it is still being counted. */
+  readonly holds: boolean | undefined;
+}
+
+/**
+ * The words of #2294's course lines, for the owner's approval: the project's
+ * own, naming no other game and no place. Each reason says what the rider can
+ * change where there is something to change (Settings, a network).
+ */
+export const DELIVERY_COURSE_TEXT = {
+  counting: 'Delivery: counting the mapped houses…',
+  noRound: 'No Delivery round on this route',
+  noHouse: 'no mapped house is in reach of the road',
+  failed: 'its houses could not be counted',
+  allCounting: 'Counting the mapped houses on your routes for a Delivery round…',
+  chosenNoRound: 'Ridden with the round on, it is an ordinary ride.',
+} as const;
+
+/** Why a route's corridor gave no houses to count, in words. */
+function unreadReason(state: Exclude<CorridorState, { kind: 'ready' }>): string | undefined {
+  switch (state.kind) {
+    case 'reading':
+      return undefined;
+    case 'unavailable':
+      switch (state.why) {
+        case 'offline':
+          return 'its map cannot be read while this device is offline';
+        case 'outside-coverage':
+          return 'there is no map data for it';
+        case 'refused':
+          return 'its map could not be read';
+      }
+      break;
+    case 'off':
+      switch (state.why) {
+        case 'map-tiles-off':
+          return 'map tiles are off in Settings';
+        case 'stylised-world':
+          return 'the stylised world is chosen';
+        case 'no-archive':
+          return 'this build has no map archive';
+        case 'wrong-schema':
+          return 'this build’s map archive is not one this reads';
+      }
+  }
+}
+
+/** `n` houses, in words. */
+function housesText(n: number): string {
+  return n === 1 ? '1 house' : `${String(n)} houses`;
+}
+
+/**
+ * What a route holds for today's round — #2294. A round is ridden where the
+ * pick finds the day's whole count, or at least `FEWEST_DELIVERY_HOUSES`
+ * (`ride-round.ts` §`startDeliveryRide`), so a route holds one where its
+ * count reaches the smaller of the two; the round is never longer than the
+ * day's count or the route's, so the line says "up to" the smaller (#1878).
+ * `undefined` is a route still being counted.
+ */
+export function deliveryCourseLine(
+  course: DeliveryCourse | undefined,
+  week: Pick<WeekProgress, 'houses'>,
+): CourseLine {
+  const counting = { text: DELIVERY_COURSE_TEXT.counting, holds: undefined };
+  if (course === undefined) return counting;
+  const no = (reason: string): CourseLine => ({
+    text: `${DELIVERY_COURSE_TEXT.noRound}: ${reason}`,
+    holds: false,
+  });
+  switch (course.kind) {
+    case 'failed':
+      return no(DELIVERY_COURSE_TEXT.failed);
+    case 'unread': {
+      const reason = unreadReason(course.state);
+      return reason === undefined ? counting : no(reason);
+    }
+    case 'counted': {
+      const needs = Math.min(week.houses, FEWEST_DELIVERY_HOUSES);
+      if (course.houses >= needs && course.houses > 0) {
+        const most = Math.min(course.houses, week.houses);
+        return { text: `Delivery: up to ${housesText(most)} on the round`, holds: true };
+      }
+      if (course.houses === 0) return no(DELIVERY_COURSE_TEXT.noHouse);
+      const mapped =
+        course.houses === 1 ? '1 mapped house' : `${String(course.houses)} mapped houses`;
+      return no(`${mapped} in reach, and a round needs ${String(needs)}`);
+    }
+  }
+}
+
+/**
+ * The cards' summary, under *Choose a route* — #2294: how many of the
+ * rider's routes can hold today's round, once every one is counted.
+ */
+export function deliveryCoursesText(
+  routes: readonly RidableRoute[],
+  courses: ReadonlyMap<string, DeliveryCourse>,
+  week: Pick<WeekProgress, 'houses'>,
+): string {
+  const lines = routes.map((route) => deliveryCourseLine(courses.get(route.id), week));
+  if (lines.some((line) => line.holds === undefined)) return DELIVERY_COURSE_TEXT.allCounting;
+  const holding = lines.filter((line) => line.holds === true).length;
+  if (routes.length === 1) {
+    return holding === 1
+      ? 'Your route can hold today’s Delivery round.'
+      : 'Your route cannot hold today’s Delivery round: its card says why.';
+  }
+  return holding === 0
+    ? 'None of your routes can hold today’s Delivery round: each card says why.'
+    : `${String(holding)} of your ${String(routes.length)} routes can hold today’s Delivery round.`;
+}
+
+/**
+ * The summary line — #2294. ⚠️ Announced politely, once, when every route is
+ * counted (`CorridorLine`'s pattern): the counting words are drawn for the
+ * eye and hidden from assistive technology, so a screen reader is not read
+ * a line that changes with every route.
+ */
+function CoursesLine(props: {
+  readonly routes: readonly RidableRoute[];
+  readonly courses: ReadonlyMap<string, DeliveryCourse>;
+  readonly week: Pick<WeekProgress, 'houses'>;
+}): JSX.Element {
+  const text = deliveryCoursesText(props.routes, props.courses, props.week);
+  const settled = text !== DELIVERY_COURSE_TEXT.allCounting;
+  return (
+    <p className="oyl-chooser__courses tw:mt-0">
+      <span role="status">{settled ? text : ''}</span>
+      <span aria-hidden="true">{settled ? '' : text}</span>
+    </p>
+  );
+}
+
 const DELIVERY_WEEK_ID = 'oyl-game-delivery-week';
 const DELIVERY_HINT_ID = 'oyl-game-delivery-hint';
+const DELIVERY_COURSE_ID = 'oyl-game-delivery-course';
 
 /**
  * Whether this ride runs a Delivery round — #1818. A switch, as the ghost,
  * the pacer and the wind beside it are, described by the week's progress and
  * by what a round is. Last in the loadout: it is the one choice that is about
  * the game rather than the ride's company or its air.
+ *
+ * Since #2294, where the chosen route cannot hold today's round, the switch
+ * says so beside it, before the press: the rider who has just switched the
+ * round on is told here, not only on the card above.
  */
-function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element {
+function DeliveryControl(props: {
+  readonly offer: DeliveryOffer;
+  /** #2294: the chosen route's line, with the round chosen and counted. */
+  readonly chosenCourse?: CourseLine | undefined;
+}): JSX.Element {
+  const noRound = props.chosenCourse?.holds === false ? props.chosenCourse : undefined;
   return (
     <div className="oyl-game__delivery tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
       <label>
@@ -1148,13 +1367,22 @@ function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element 
           type="checkbox"
           role="switch"
           checked={props.offer.chosen}
-          aria-describedby={`${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`}
+          aria-describedby={
+            noRound === undefined
+              ? `${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`
+              : `${DELIVERY_COURSE_ID} ${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`
+          }
           onChange={(event) => {
             props.offer.onChoose(event.target.checked);
           }}
         />
         {DELIVERY_CHOICE_TEXT.label}
       </label>
+      {noRound === undefined ? null : (
+        <p id={DELIVERY_COURSE_ID} className="oyl-game__problem tw:m-0">
+          {`${noRound.text}. ${DELIVERY_COURSE_TEXT.chosenNoRound}`}
+        </p>
+      )}
       <p id={DELIVERY_WEEK_ID} className="tw:m-0">
         {deliveryWeekText(props.offer.week)}
       </p>

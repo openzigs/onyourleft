@@ -1739,3 +1739,216 @@ describe('offered in the chooser, with the short round and the no-round fallback
     },
   );
 });
+
+describe('the course picker: which saved routes can hold a round — #2294', () => {
+  /** A renderer for a ride that chose the realistic world, which does not load here. */
+  function realisticNotLoaded(): GameRenderer {
+    return {
+      ...capturingRenderer([]),
+      loadRealisticWorld: () =>
+        Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' }),
+    };
+  }
+
+  /** Two more saved routes beside {@link ROUTE}: one with two houses in reach, one with the tiles off. */
+  const short = deliveryTown('short-town', { lastAlong: 220 });
+  const SHORT: RidableRoute = {
+    id: 'short-town',
+    name: 'Short town',
+    profile: short.profile,
+    attempts: 0,
+  };
+  const UNREAD: RidableRoute = {
+    id: 'tiles-off-town',
+    name: 'Tiles-off town',
+    profile: deliveryTown('tiles-off-town').profile,
+    attempts: 0,
+  };
+
+  const CORRIDORS: ReadonlyMap<string, CorridorState> = new Map<string, CorridorState>([
+    [ROUTE.id, { kind: 'ready', corridor: town.corridor }],
+    [SHORT.id, { kind: 'ready', corridor: short.corridor }],
+    [UNREAD.id, { kind: 'off', why: 'map-tiles-off' }],
+  ]);
+
+  /** The game's port over the three routes, each read through its own corridor. */
+  function threeRoutes(asked: string[]): GamePort {
+    return {
+      ...portWith(undefined),
+      listRoutes: () => Promise.resolve([ROUTE, SHORT, UNREAD]),
+      loadWorldCorridor: (route) => {
+        asked.push(route.id);
+        return Promise.resolve(
+          CORRIDORS.get(route.id) ?? { kind: 'unavailable', why: 'outside-coverage' },
+        );
+      },
+    };
+  }
+
+  /** The chooser's switch, by its label. */
+  function deliverySwitch(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[role="switch"]').find(
+      (box) => (box.closest('label')?.textContent ?? '').includes(DELIVERY_CHOICE_TEXT.label),
+    );
+  }
+
+  interface Card {
+    /** What the card's radio is described by after its facts, read as a screen reader reads it. */
+    readonly course: string | undefined;
+    readonly greyed: boolean;
+    readonly radio: HTMLInputElement;
+  }
+
+  /** Each route card, by its route's name. */
+  function cards(): Map<string, Card> {
+    const found = new Map<string, Card>();
+    for (const card of queryAll<HTMLElement>(
+      mounted?.container ?? document,
+      '.oyl-chooser__card',
+    )) {
+      const radio = card.querySelector<HTMLInputElement>('input[type="radio"]');
+      if (radio === null) continue;
+      const described = (radio.getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent ?? '');
+      found.set(card.querySelector('label')?.textContent ?? '', {
+        course: described[1],
+        greyed: card.classList.contains('oyl-chooser__card--no-round'),
+        radio,
+      });
+    }
+    return found;
+  }
+
+  function courseLines(): (string | undefined)[] {
+    return [...cards().values()].map((card) => card.course);
+  }
+
+  /** The summary over the cards, as it is announced. */
+  function summary(): string {
+    return (
+      mounted?.container.querySelector('.oyl-chooser__courses [role="status"]')?.textContent ?? ''
+    );
+  }
+
+  /** Settle until every card is counted; the expectations say so if it never is. */
+  async function counted(): Promise<void> {
+    for (let turn = 0; turn < 20 && summary() === ''; turn += 1) await settle();
+  }
+
+  async function mountThree(asked: string[] = []): Promise<void> {
+    writeRealisticWorldChoice(localStorage, true);
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={threeRoutes(asked)}
+        renderer={() => Promise.resolve(realisticNotLoaded())}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+  }
+
+  it('counts nothing and draws no line until the round is chosen', async () => {
+    const asked: string[] = [];
+    await mountThree(asked);
+    // The chosen route's corridor is read for the world, as before; no other.
+    expect(asked).toEqual([ROUTE.id]);
+    expect(courseLines()).toEqual([undefined, undefined, undefined]);
+    expect(mounted?.container.querySelector('.oyl-chooser__courses')).toBeNull();
+  });
+
+  it(
+    'lists every saved route with its houses once the round is chosen, greying with the reason those that cannot hold one',
+    { timeout: 16_000 },
+    async () => {
+      const asked: string[] = [];
+      await mountThree(asked);
+      await clickThrough(deliverySwitch());
+      await counted();
+      // Every saved route read through the corridor port, after the chosen one's own read.
+      expect(asked.slice(1)).toEqual([ROUTE.id, SHORT.id, UNREAD.id]);
+      const shown = cards();
+      expect(shown.get(ROUTE.name)).toMatchObject({
+        course: 'Delivery: up to 3 houses on the round',
+        greyed: false,
+      });
+      expect(shown.get(SHORT.name)).toMatchObject({
+        course: 'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3',
+        greyed: true,
+      });
+      expect(shown.get(UNREAD.name)).toMatchObject({
+        course: 'No Delivery round on this route: map tiles are off in Settings',
+        greyed: true,
+      });
+      expect(summary()).toBe('1 of your 3 routes can hold today’s Delivery round.');
+      // Switched off, the lines go.
+      await clickThrough(deliverySwitch());
+      expect(courseLines()).toEqual([undefined, undefined, undefined]);
+    },
+  );
+
+  it(
+    'says beside the switch, before the press, that a greyed route rides an ordinary ride, and it does',
+    { timeout: 16_000 },
+    async () => {
+      await mountThree();
+      await clickThrough(deliverySwitch());
+      await counted();
+      expect(document.getElementById('oyl-game-delivery-course')).toBeNull();
+      await clickThrough(cards().get(SHORT.name)?.radio);
+      expect(document.getElementById('oyl-game-delivery-course')?.textContent).toBe(
+        'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3. ' +
+          'Ridden with the round on, it is an ordinary ride.',
+      );
+      expect(deliverySwitch()?.getAttribute('aria-describedby')?.split(' ')).toContain(
+        'oyl-game-delivery-course',
+      );
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 0; index < 20; index += 1) await pump();
+      await settle();
+      // What the card said is what the ride did: no round, in the HUD's own words.
+      expect(field('Houses')).toBeUndefined();
+      expect(said.filter((each) => each === TOO_FEW_HOUSES_TEXT)).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    // The day's three on a town of many: the line's count and the HUD's are one.
+    { cause: 'the day’s three on a town of many', week: WEEK, line: 3 },
+    // A week of eight on the same town: up to eight, and eight on the HUD.
+    { cause: 'a day of eight on the same town', week: { day: 2, houses: 8, score: 4 }, line: 8 },
+  ])(
+    'states the round the press then rides: $cause',
+    { timeout: 16_000 },
+    async ({ week, line }) => {
+      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(week));
+      await mountThree();
+      await clickThrough(deliverySwitch());
+      await counted();
+      expect(cards().get(ROUTE.name)?.course).toBe(
+        `Delivery: up to ${String(line)} houses on the round`,
+      );
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 0; index < 5; index += 1) await pump();
+      await settle();
+      expect(field('Houses')?.value).toBe(String(line));
+    },
+  );
+
+  it('draws no line where the game has no corridor port: nothing could be counted', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    mounted = await mount(
+      <GameView
+        port={{ ...portWith(undefined), listRoutes: () => Promise.resolve([ROUTE, SHORT]) }}
+        renderer={() => Promise.resolve(realisticNotLoaded())}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(deliverySwitch());
+    expect(deliverySwitch()?.checked).toBe(true);
+    expect(courseLines()).toEqual([undefined, undefined]);
+    expect(mounted.container.querySelector('.oyl-chooser__courses')).toBeNull();
+  });
+});
