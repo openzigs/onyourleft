@@ -23,6 +23,8 @@ import type { AudioContextLike } from './web-audio';
 export type RecordedCall =
   | { readonly kind: 'resume' }
   | { readonly kind: 'applyMix' }
+  | { readonly kind: 'attachMusic' }
+  | { readonly kind: 'setMusicOn'; readonly on: boolean }
   | { readonly kind: 'suspend' }
   | { readonly kind: 'startTone'; readonly hz: number; readonly gain: number }
   | { readonly kind: 'setTone'; readonly hz: number; readonly gain: number }
@@ -60,6 +62,12 @@ export function recordingOutput(): RecordingOutput {
     applyMix: () => {
       output.calls.push({ kind: 'applyMix' });
     },
+    attachMusic: () => {
+      output.calls.push({ kind: 'attachMusic' });
+    },
+    setMusicOn: (on) => {
+      output.calls.push({ kind: 'setMusicOn', on });
+    },
     suspend: () => {
       output.calls.push({ kind: 'suspend' });
       output.running = false;
@@ -95,7 +103,7 @@ export const EVERY_BUS_ON = (): AudioMix => ({
 
 /** A node of {@link fakeAudioContext}'s graph, and where it is connected. */
 export interface FakeNode {
-  readonly kind: 'destination' | 'gain' | 'oscillator';
+  readonly kind: 'destination' | 'gain' | 'oscillator' | 'media';
   readonly outputs: FakeNode[];
 }
 
@@ -113,6 +121,8 @@ export interface FakeAudio {
   /** Every gain made, in the order it was made. */
   readonly gains: FakeGain[];
   readonly oscillators: FakeNode[];
+  /** Every media element source made (#2058), and the element each was made for. */
+  readonly media: (FakeNode & { readonly element: HTMLMediaElement })[];
 }
 
 /**
@@ -125,6 +135,7 @@ export function fakeAudioContext(): FakeAudio {
   const destination: FakeNode = { kind: 'destination', outputs: [] };
   const gains: FakeGain[] = [];
   const oscillators: FakeNode[] = [];
+  const media: (FakeNode & { readonly element: HTMLMediaElement })[] = [];
   const connect =
     (from: FakeNode) =>
     (to: FakeNode): FakeNode => {
@@ -156,6 +167,15 @@ export function fakeAudioContext(): FakeAudio {
       gains.push(node);
       return Object.assign(node, { connect: connect(node) });
     },
+    createMediaElementSource: (element: HTMLMediaElement) => {
+      if (media.some((source) => source.element === element)) {
+        // As the platform does: an element has one source, ever.
+        throw new Error('InvalidStateError: this element already has a source');
+      }
+      const node = { kind: 'media' as const, outputs: [] as FakeNode[], element };
+      media.push(node);
+      return Object.assign(node, { connect: connect(node) });
+    },
     createOscillator: () => {
       const node: FakeNode = { kind: 'oscillator', outputs: [] };
       oscillators.push(node);
@@ -168,7 +188,13 @@ export function fakeAudioContext(): FakeAudio {
       });
     },
   };
-  return { context: context as unknown as AudioContextLike, destination, gains, oscillators };
+  return {
+    context: context as unknown as AudioContextLike,
+    destination,
+    gains,
+    oscillators,
+    media,
+  };
 }
 
 /** Every gain and oscillator made so far that connects INTO `node`. */

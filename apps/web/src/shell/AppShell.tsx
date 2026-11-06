@@ -38,6 +38,7 @@
 
 import {
   Suspense,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -111,6 +112,7 @@ import {
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
+import type { MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
 import { useAndroidBack } from './android-back';
 import { isRideRoute, mayAnimateBetween, RideHasTheScreen } from './route-motion';
@@ -334,6 +336,13 @@ export interface AppShellProps {
    * every test that does not ask for sounds render with none.
    */
   readonly menuSounds?: MenuSounds | undefined;
+  /**
+   * The menus' music — #2058. Every press is handed to it, as to
+   * {@link menuSounds}, and it is told whenever the route, the ride, immersion
+   * or the page's visibility changes (`menu-music.ts` says why only a press
+   * starts it). `undefined` is silence, as for the sounds.
+   */
+  readonly menuMusic?: MenuMusic | undefined;
   /**
    * The output the header's mute reaches — #2056. Absent, it is the app's
    * shared one (`game/web-audio.ts` §`sharedCueOutput`), which makes no audio
@@ -933,12 +942,42 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
-    props.menuSounds?.press(event.target, {
+    const context = {
       immersive,
       routeId: route.id,
       ridePhase: props.rideController?.getSnapshot().phase,
-    });
+    };
+    props.menuSounds?.press(event.target, context);
+    // #2058: the same press, and the only thing that can start the music.
+    props.menuMusic?.press(event.target, context);
   }
+
+  /*
+   * #2058: the music is told whenever it may have to stop or may carry on — a
+   * new route, the stage taking or giving back the screen, the ride
+   * controller's phase moving, the page hidden or shown. None of these is a
+   * press, so none can start it (`menu-music.ts` §"Only from the rider's first
+   * press").
+   */
+  const menuMusic = props.menuMusic;
+  const rideController = props.rideController;
+  useEffect(() => {
+    if (menuMusic === undefined) return undefined;
+    const tell = (): void => {
+      menuMusic.update({
+        immersive,
+        routeId: route.id,
+        ridePhase: rideController?.getSnapshot().phase,
+      });
+    };
+    tell();
+    const unsubscribe = rideController?.subscribe(tell);
+    document.addEventListener('visibilitychange', tell);
+    return () => {
+      unsubscribe?.();
+      document.removeEventListener('visibilitychange', tell);
+    };
+  }, [menuMusic, rideController, immersive, route.id]);
 
   const view = (
     // #1072's review (N5): a view deciding about motion of its own reads
