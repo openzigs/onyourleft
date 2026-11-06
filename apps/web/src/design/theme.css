@@ -11261,6 +11261,21 @@ select.oyl-input {
   }
 }
 
+/* ⚠️ **On a tablet, the followed rider's name is one line, cut with an
+   ellipsis** — recorded as #419 asks, the owner's ruling of 2026-11-06
+   (#2034): it is the label of the room's first reading, and long, it wrapped
+   over three lines and made the tier's row as tall, so a race's standings
+   under it came within 9 px of the actions panel at 1280×800 with *Report*'s
+   reasons open. As on a phone (§"A ROOM RIDE ON A PHONE"), the whole name is
+   still in the document, where a screen reader reads it. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__field--room .oyl-hud__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* The swatch: a square of the zone's colour beside its number, the height of
    the digits' x-height or so, so the number is still the reading. */
 .oyl-hud__zone-swatch {
