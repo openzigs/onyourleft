@@ -1544,8 +1544,10 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
 
     /** The panel's rows as a rider reads them: label, lap, time, power. */
     const rows = (): string[][] =>
-      [...(mounted?.container.querySelectorAll('.oyl-hud__laps tbody tr') ?? [])].map((row) =>
-        [...row.children].map((cell) => cell.textContent ?? ''),
+      [...(mounted?.container.querySelectorAll('.oyl-hud__laps-row') ?? [])].map((row) =>
+        [...row.querySelectorAll('.oyl-hud__laps-label, .oyl-hud__laps-value')].map(
+          (cell) => cell.textContent ?? '',
+        ),
       );
     const rideOneSecond = async (): Promise<void> => {
       await pump(1);

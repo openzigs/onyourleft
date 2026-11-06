@@ -8617,28 +8617,38 @@ select.oyl-input {
  * cannot see is a focus with nowhere to show (SC 2.4.7) — so there it is not
  * displayed at all, and a phone's screen reader reads the standings.
  */
-.oyl-hud__laps-table {
-  width: 100%;
-  border-collapse: collapse;
+/* PR #2248's review: a list, not a table (`LapSplits.tsx` says why), so the
+   columns are each row's own grid on one shared set of tracks: the label the
+   rest, the lap number 2.5 rem, a time (`1:02:03`) and a power (`1999 W`)
+   4.5 rem each, and the headings' row drawn on the same tracks. */
+.oyl-hud__laps-head,
+.oyl-hud__laps-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.5rem 4.5rem 4.5rem;
+  column-gap: var(--oyl-space-xs);
+  align-items: baseline;
+  padding: 0.125rem 0;
   font-variant-numeric: tabular-nums;
-}
-
-.oyl-hud__laps-table :is(th, td) {
-  padding: 0.125rem 0 0.125rem var(--oyl-space-xs);
-  text-align: end;
   white-space: nowrap;
 }
 
-.oyl-hud__laps-table thead th {
+.oyl-hud__laps-head {
   font-size: var(--oyl-font-size-sm);
-  font-weight: 400;
   color: var(--oyl-color-hud-ink-muted);
 }
 
-.oyl-hud__laps-table .oyl-hud__laps-label {
-  padding-inline-start: 0;
-  text-align: start;
-  font-weight: 400;
+.oyl-hud__laps-head > :not(:first-child),
+.oyl-hud__laps-figure {
+  text-align: end;
+}
+
+.oyl-hud__laps-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.oyl-hud__laps-label {
   color: var(--oyl-color-hud-ink-muted);
 }
 
@@ -11216,9 +11226,10 @@ select.oyl-input {
     align-self: start;
   }
 
+  /* #2080: and a loop's lap splits, which take the standings' place. */
   .oyl-game--riding
     .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
-    .oyl-hud__standings {
+    :is(.oyl-hud__standings, .oyl-hud__laps) {
     grid-area: beside;
   }
 }
@@ -11306,9 +11317,10 @@ select.oyl-input {
       repeat(2, minmax(5.5rem, 1fr));
   }
 
+  /* #2080: and a loop's lap splits, which take the standings' place. */
   .oyl-game--riding
     .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
-    .oyl-hud__standings {
+    :is(.oyl-hud__standings, .oyl-hud__laps) {
     grid-area: beside;
   }
 }

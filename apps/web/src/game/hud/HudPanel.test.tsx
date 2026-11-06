@@ -36,9 +36,10 @@
  * that fits from a value that was never marked, and this can.
  */
 
-import { act } from 'react';
+import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { auditAccessibility, formatViolations } from '../../a11y/audit';
 import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
@@ -883,8 +884,10 @@ describe('the lap splits panel — #2080', () => {
   };
   /** The panel's rows as read: each row's cells, its label first. */
   const rows = (): string[][] =>
-    queryAll(mounted?.container ?? document, '.oyl-hud__laps tbody tr').map((row) =>
-      [...row.children].map((cell) => cell.textContent ?? ''),
+    queryAll(mounted?.container ?? document, '.oyl-hud__laps-row').map((row) =>
+      [...row.querySelectorAll('.oyl-hud__laps-label, .oyl-hud__laps-value')].map(
+        (cell) => cell.textContent ?? '',
+      ),
     );
   const button = (name: string): HTMLButtonElement | undefined =>
     queryAll(mounted?.container ?? document, 'button').find(
@@ -959,5 +962,42 @@ describe('the lap splits panel — #2080', () => {
     expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
     expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
     expect(button('Show standings')).toBeUndefined();
+  });
+
+  /**
+   * PR #2248's review: the panel was a `<table>` outside a scroll region, the
+   * a11y gate's `table-in-scroll-region`, and no audited route rides a loop.
+   * So the gate's own audit runs over the HUD here, with the splits drawn,
+   * alone and in a race with the swap.
+   */
+  it('audits clean, alone and beside a race’s standings', async () => {
+    // In the page's one `main`, under its one `h1`, as the shell draws a ride.
+    const onAPage = (hud: JSX.Element): JSX.Element => (
+      <main>
+        <h1>Ride</h1>
+        {hud}
+      </main>
+    );
+    mounted = await mount(
+      onAPage(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />),
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    const alone = auditAccessibility(document);
+    expect(alone, formatViolations(alone)).toEqual([]);
+    mounted.unmount();
+    mounted = await mount(
+      onAPage(
+        <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} standings={standings} />,
+      ),
+    );
+    const standingsShown = auditAccessibility(document);
+    expect(standingsShown, formatViolations(standingsShown)).toEqual([]);
+    await act(async () => {
+      button('Show laps')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    const splitsShown = auditAccessibility(document);
+    expect(splitsShown, formatViolations(splitsShown)).toEqual([]);
   });
 });
