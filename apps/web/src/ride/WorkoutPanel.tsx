@@ -135,6 +135,7 @@ import {
   REPLAN_STARTS_AT_NEXT_BLOCK,
   REPLANS_OFF,
   REPLANS_ON_BADGE,
+  RIDE_WITH_REPLANS,
 } from '../workout/replan-text';
 import { durationText, workoutRow } from '../workouts/library';
 
@@ -558,6 +559,12 @@ export function WorkoutPanel({
       trainer.hasControl &&
       thresholdPower !== undefined &&
       saved.length > 0;
+    // #1329: one answer for what the badge, every Ride button and the press
+    // itself say, so a button can never read "with re-plans" and start
+    // without them. Inside the list it is the same as the old
+    // `replansAvailable === true && replans`: the list needs control, a
+    // threshold and a saved workout too.
+    const withReplans = offerReplans && replans;
     return (
       <section>
         {/*
@@ -574,7 +581,7 @@ export function WorkoutPanel({
         */}
         <div className="oyl-workout-heading">
           <h3>Ride a workout</h3>
-          {offerReplans && replans ? (
+          {withReplans ? (
             <p className="oyl-workout-replans-on" data-oyl-replans-on="">
               {REPLANS_ON_BADGE}
             </p>
@@ -653,13 +660,32 @@ export function WorkoutPanel({
                       setSound(choice);
                       cues.set(choice);
                       cues.begin();
-                      onStart(
-                        record,
-                        replansAvailable === true && replans ? { replans: true } : {},
-                      );
+                      onStart(record, withReplans ? { replans: true } : {});
                     }}
                   >
-                    Ride {row.name}
+                    {/*
+                      #1329, the owner's ruling of 2026-11-05: while the switch
+                      is on, every Ride reads "Ride, with re-plans". The badge
+                      is on the heading's row and scrolls away; this is on the
+                      control that is pressed.
+
+                      ⚠️ The workout's name stays in the button, off the screen
+                      only: the row above shows it, and twelve buttons with one
+                      name would be twelve identical stops for a screen-reader
+                      user. What is seen begins the name (WCAG 2.2 SC 2.5.3).
+                      The name is NOT kept on the screen: "Ride Sweet spot,
+                      three by twelve, with re-plans" wraps onto a second line
+                      in the trainer column and puts the first Ride under the
+                      fold floor in the Android shell.
+                    */}
+                    {withReplans ? (
+                      <>
+                        {RIDE_WITH_REPLANS}
+                        <span className="oyl-visually-hidden">: {row.name}</span>
+                      </>
+                    ) : (
+                      <>Ride {row.name}</>
+                    )}
                   </Button>
                 </li>
               );

@@ -1231,7 +1231,7 @@ function SoundsPanel({
           Play sounds during a ride
         </label>
       </p>
-      <p>
+      <p className="oyl-volume-row">
         <label htmlFor="oyl-sounds-volume">Sound volume</label>{' '}
         <input
           id="oyl-sounds-volume"
@@ -1324,7 +1324,7 @@ function MenuSoundsPanel({
         the tab order that does nothing. Kept, not reset, while they are off.
       */}
       {preference.enabled ? (
-        <p>
+        <p className="oyl-volume-row">
           <label htmlFor="oyl-menu-sounds-volume">Menu sound volume</label>{' '}
           <input
             id="oyl-menu-sounds-volume"
@@ -1407,7 +1407,7 @@ function MusicPanel({
           Play music in the menus
         </label>
       </p>
-      <p>
+      <p className="oyl-volume-row">
         <label htmlFor="oyl-music-volume">Music volume</label>{' '}
         <input
           id="oyl-music-volume"
