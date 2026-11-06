@@ -2960,14 +2960,40 @@ export class ActivityStore {
     segment: SegmentId,
     limit?: number,
   ): Promise<SegmentEffortRecord[]> {
+    // Filtered BEFORE the limit (#69): an excluded effort is the fastest a
+    // rider has when it is impossible, so a limit counted first would fill
+    // the page with rows the filter then drops, and hide counted efforts.
     let query = this.#segmentEfforts
       .where(INDEX.effortByAthleteAndSegment)
-      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true);
+      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true)
+      .filter((row) => row.visibility !== 'excluded');
     if (limit !== undefined) {
       query = query.limit(limit);
     }
-    const rows = await query.toArray();
-    return rows.filter((row) => row.visibility !== 'excluded');
+    return query.toArray();
+  }
+
+  /**
+   * This athlete's **excluded** efforts on one segment, fastest first — the
+   * other half of {@link listEfforts} (#69).
+   *
+   * An effort whose implied speed is impossible for its sport is no personal
+   * best and goes on no board, but it is still the rider's: #69's second
+   * criterion is that it stays visible to them, with the reason. This is the
+   * read that shows it, so {@link listEfforts}' callers — the personal best
+   * among them — keep never seeing one.
+   */
+  async listExcludedEfforts(
+    owner: AthleteId,
+    segment: SegmentId,
+    limit?: number,
+  ): Promise<SegmentEffortRecord[]> {
+    const rows = await this.#segmentEfforts
+      .where(INDEX.effortByAthleteAndSegment)
+      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true)
+      .filter((row) => row.visibility === 'excluded')
+      .toArray();
+    return limit === undefined ? rows : rows.slice(0, limit);
   }
 
   /**

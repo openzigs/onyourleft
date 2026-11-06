@@ -44,6 +44,10 @@ import type {
 import { chooseOption, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import {
+  FLAG_SENTENCE,
+  HAZARD_CONFIRM_SENTENCE,
+  HAZARD_SENTENCE,
+  HAZARDOUS_BOARD_SENTENCE,
   InstanceBoard,
   PUBLISH_SENTENCE,
   SHARE_SENTENCE,
@@ -88,12 +92,29 @@ const EFFORT: SegmentEffortRecord = {
   attributes: {},
 };
 
+const BEA_EFFORT = 'b'.repeat(32);
+
 const BOARD: Board = {
   scope: 'instance',
   period: 'all-time',
+  hazardous: false,
   rows: [
-    { rank: 1, rider: 'Bea', yours: false, elapsedSeconds: 90 },
-    { rank: 2, rider: 'Anna', yours: true, elapsedSeconds: 95 },
+    {
+      rank: 1,
+      rider: 'Bea',
+      yours: false,
+      elapsedSeconds: 90,
+      effortId: BEA_EFFORT,
+      excluded: null,
+    },
+    {
+      rank: 2,
+      rider: 'Anna',
+      yours: true,
+      elapsedSeconds: 95,
+      effortId: 'a'.repeat(32),
+      excluded: null,
+    },
   ],
 };
 
@@ -130,6 +151,14 @@ function stubPort(
     instanceName: () => 'rides.example.org',
     publishRefusal: () => Promise.resolve(options.refusal),
     standing: () => Promise.resolve(standing),
+    flagEffort: (id, effortId, reason) => {
+      calls.added.push(`flag ${effortId} ${reason} on ${id}`);
+      return Promise.resolve('flagged');
+    },
+    flagHazard: (id, reason) => {
+      calls.added.push(`hazard ${reason} on ${id}`);
+      return Promise.resolve('rate-limited');
+    },
     withdrawSegment: (id) => {
       calls.added.push(`withdrawn ${id}`);
       standing = { kind: 'not-published', segmentId: id };
@@ -339,6 +368,107 @@ describe('a segment’s board on the instance (#68)', () => {
     expect(text()).not.toContain('could not be asked');
     expect(queryAll(document, 'button')).toEqual([]);
     expect(calls.boards).toEqual([]);
+    clean();
+  });
+});
+
+describe('flagging, and what is not counted (#69)', () => {
+  it('lets a rider with efforts of their own flag another rider’s time, saying what that does', async () => {
+    const { port, calls } = stubPort();
+    mounted = await mount(
+      onAPage(<InstanceBoard port={port} segment={SEGMENT} efforts={[EFFORT]} />),
+    );
+    await settle();
+    expect(text()).toContain(FLAG_SENTENCE);
+    expect(text()).toContain(HAZARD_SENTENCE);
+    clean();
+    const [, , which, why] = queryAll<HTMLSelectElement>(document, 'select');
+    // Only the other rider's time is offered: never the rider's own.
+    expect([...which!.options].map((option) => option.value)).toEqual([BEA_EFFORT]);
+    await chooseOption(why!, 'gps-error');
+    button(/^Flag this time/).click();
+    await settle();
+    expect(calls.added).toEqual([`flag ${BEA_EFFORT} gps-error on ${'a'.repeat(32)}`]);
+    expect(text()).toContain('Flagged. It is off the board.');
+    button(/^Flag it as hazardous/).click();
+    await settle();
+    // Asked before it is raised: the first press sends nothing.
+    expect(calls.added).toHaveLength(1);
+    expect(text()).toContain(HAZARD_CONFIRM_SENTENCE);
+    button(/^No, keep it/).click();
+    await settle();
+    expect(text()).not.toContain(HAZARD_CONFIRM_SENTENCE);
+    expect(calls.added).toHaveLength(1);
+    button(/^Flag it as hazardous/).click();
+    await settle();
+    button(/^Yes, flag it as hazardous/).click();
+    await settle();
+    expect(calls.added.at(-1)).toBe(`hazard traffic on ${'a'.repeat(32)}`);
+    expect(text()).toContain('You have flagged as many as you may today');
+  });
+
+  it('offers no flag to a rider with no effort of their own on the segment', async () => {
+    const { port } = stubPort();
+    mounted = await mount(onAPage(<InstanceBoard port={port} segment={SEGMENT} efforts={[]} />));
+    await settle();
+    expect(text()).not.toContain(FLAG_SENTENCE);
+    expect(text()).not.toContain(HAZARD_SENTENCE);
+  });
+
+  it('says a hazardous segment ranks nobody, tells the screen above, and offers no flag', async () => {
+    const { port } = stubPort({ board: { ...BOARD, hazardous: true, rows: [] } });
+    const told: boolean[] = [];
+    mounted = await mount(
+      onAPage(
+        <InstanceBoard
+          port={port}
+          segment={SEGMENT}
+          efforts={[EFFORT]}
+          onHazardous={(hazardous) => told.push(hazardous)}
+        />,
+      ),
+    );
+    await settle();
+    expect(text()).toContain(HAZARDOUS_BOARD_SENTENCE);
+    expect(told.at(-1)).toBe(true);
+    expect(text()).not.toContain(FLAG_SENTENCE);
+    clean();
+  });
+
+  it('shows the rider’s own uncounted effort with its reason and no place', async () => {
+    const { port } = stubPort({
+      board: {
+        scope: 'personal',
+        period: 'all-time',
+        hazardous: false,
+        rows: [
+          {
+            rank: 1,
+            rider: 'Anna',
+            yours: true,
+            elapsedSeconds: 95,
+            effortId: 'a'.repeat(32),
+            excluded: null,
+          },
+          {
+            rank: null,
+            rider: 'Anna',
+            yours: true,
+            elapsedSeconds: 9,
+            effortId: 'c'.repeat(32),
+            excluded: 'Excluded automatically: 61.7 m/s averaged over the segment.',
+          },
+        ],
+      },
+    });
+    mounted = await mount(
+      onAPage(<InstanceBoard port={port} segment={SEGMENT} efforts={[EFFORT]} />),
+    );
+    await settle();
+    const cells = queryAll(document, 'tbody tr').map((row) => row.textContent);
+    expect(cells[1]).toContain('—');
+    expect(cells[1]).toContain('Excluded automatically: 61.7 m/s averaged over the segment.');
+    expect(cells[0]).toContain('Yes');
     clean();
   });
 });
