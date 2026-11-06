@@ -44,10 +44,10 @@ export interface RiderPlayerInUse {
    * Whether the rider's own player is in use now, so that our menu music
    * stays silent (ruling 3 of 2026-11-05 on #2073).
    *
-   * @unwired the menu music player (#2058, PR #2215) is not on `main` yet, so
-   * nothing asks this; wiring it is the follow-up to owner ruling 3 on #2073,
-   * which must also keep our own music from reading as the rider's (spike
-   * 0034 §1.3).
+   * @unwired the menu music player (#2058) reached `main` while #2073 was in
+   * review, and #2073's lane scope leaves its yield to a follow-up to owner
+   * ruling 3: `menu-music.ts` asking this before it starts, without reading
+   * our own music as the rider's (spike 0034 §1.3, isMusicActive counts it).
    */
   riderPlayerInUse(): boolean;
 }

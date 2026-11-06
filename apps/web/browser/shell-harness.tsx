@@ -73,6 +73,12 @@ import {
 import { StatusMessage, type StatusTone } from '../src/design/StatusMessage';
 import { AppShell } from '../src/shell/AppShell';
 import { OtherPlayer } from '../src/shell/other-player';
+import { createMenuSounds } from '../src/shell/menu-sounds';
+import { createMenuMusic } from '../src/shell/menu-music';
+import { readMusicAndMaster } from '../src/game/audio-mix';
+import { readMenuSoundPreference } from '../src/shell/menu-sound-preference';
+import { deviceStorage } from '../src/game/hud/announce-preference';
+import { sharedCueOutput } from '../src/game/web-audio';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -156,8 +162,8 @@ const SPACER_PIXELS = 4000;
  */
 const READY_ATTRIBUTE = 'data-oyl-shell-ready';
 
-/** `?music=heard`: the rider's own music player's controls are showing — #2073. */
-const MUSIC_HEARD = 'heard';
+/** `?own-player=heard`: the rider's own music player's controls are showing — #2073. */
+const OWN_PLAYER_HEARD = 'heard';
 
 /**
  * The `.oyl-button` controls a rider touches mid-ride, rendered so that a real
@@ -671,6 +677,58 @@ const CAMERA_LIVE = 'live';
  */
 const PAIRING_ON = 'on';
 
+/**
+ * `?sounds=on` hands the shell the menus' sounds over the app's SHARED audio
+ * output, as `main.tsx` builds them — #2056 — so a press on this page makes
+ * and resumes a real `AudioContext` and the graph `game/web-audio.ts` builds,
+ * which `shell.browser.spec.ts` §"#2056" reads back. Opt-in for
+ * `CAMERA_LIVE`'s reason: every pre-existing case goes on loading the page it
+ * was written against, with no audio at all.
+ */
+const SOUNDS_ON = 'on';
+
+/**
+ * `?music=fixture` hands the shell the menus' music — #2058 — over the same
+ * shared output, with a loop this page MAKES: one second of a 440 Hz tone as a
+ * WAV, served from a `blob:` URL, because the real loop is #2057's and is not
+ * committed yet, and a test fixture is not an asset to ship. Every element the
+ * player makes is kept on `window.__oylMusicElements` for the spec to read.
+ */
+const MUSIC_FIXTURE = 'fixture';
+
+/** One second of a quiet 440 Hz sine, as a 16-bit mono WAV at 8 kHz. */
+function fixtureLoop(): string {
+  const rate = 8000;
+  const samples = rate;
+  const bytes = new DataView(new ArrayBuffer(44 + samples * 2));
+  const text = (at: number, value: string): void => {
+    for (let index = 0; index < value.length; index += 1) {
+      bytes.setUint8(at + index, value.charCodeAt(index));
+    }
+  };
+  text(0, 'RIFF');
+  bytes.setUint32(4, 36 + samples * 2, true);
+  text(8, 'WAVE');
+  text(12, 'fmt ');
+  bytes.setUint32(16, 16, true);
+  bytes.setUint16(20, 1, true);
+  bytes.setUint16(22, 1, true);
+  bytes.setUint32(24, rate, true);
+  bytes.setUint32(28, rate * 2, true);
+  bytes.setUint16(32, 2, true);
+  bytes.setUint16(34, 16, true);
+  text(36, 'data');
+  bytes.setUint32(40, samples * 2, true);
+  for (let index = 0; index < samples; index += 1) {
+    bytes.setInt16(
+      44 + index * 2,
+      Math.round(Math.sin((2 * Math.PI * 440 * index) / rate) * 3000),
+      true,
+    );
+  }
+  return URL.createObjectURL(new Blob([bytes.buffer], { type: 'audio/wav' }));
+}
+
 /** The `z-index` the ride stage declares — `theme.css` §"THE STAGE". */
 const PRODUCT_MAXIMUM_STACKING = 20;
 
@@ -811,6 +869,11 @@ function main(): void {
   const wantsCamera = new URLSearchParams(globalThis.location.search).get('camera') === CAMERA_LIVE;
   const wantsPairing =
     new URLSearchParams(globalThis.location.search).get('pairing') === PAIRING_ON;
+  const wantsSounds = params.get('sounds') === SOUNDS_ON;
+  const wantsMusic = params.get('music') === MUSIC_FIXTURE;
+  const musicElements: HTMLMediaElement[] = [];
+  (window as unknown as { __oylMusicElements: HTMLMediaElement[] }).__oylMusicElements =
+    musicElements;
   const wantsLinkSpecimens =
     new URLSearchParams(globalThis.location.search).get('links') === LINK_SPECIMENS;
   const camera = new CameraController({
@@ -838,12 +901,12 @@ function main(): void {
     schedule: () => () => undefined,
   });
 
-  // #2073: `?music=heard` is the rider's own player already heard, so the
+  // #2073: `?own-player=heard` is the rider's own player already heard, so the
   // header's controls show — as they do only inside the Android shell. A port
   // that always hears music and a clock with no timer: `AppShell` asks once as
   // it mounts, and the second reading in a row is asked for below.
   const otherPlayer =
-    params.get('music') === MUSIC_HEARD
+    params.get('own-player') === OWN_PLAYER_HEARD
       ? new OtherPlayer(
           { sendKey: () => Promise.resolve(), otherAudioActive: () => Promise.resolve(true) },
           { now: () => 0, every: () => () => undefined },
@@ -858,6 +921,34 @@ function main(): void {
           camera={camera}
           otherPlayer={otherPlayer}
           {...(wantsPairing ? { sidePairing: sidePairingPort({ peer: () => undefined }) } : {})}
+          {...(wantsMusic
+            ? {
+                menuMusic: createMenuMusic({
+                  output: sharedCueOutput(),
+                  track: fixtureLoop(),
+                  mix: () => readMusicAndMaster(deviceStorage()),
+                  createElement: () => {
+                    const element = new Audio();
+                    musicElements.push(element);
+                    return element;
+                  },
+                  schedule: (callback, ms) => {
+                    const timer = window.setTimeout(callback, ms);
+                    return () => {
+                      window.clearTimeout(timer);
+                    };
+                  },
+                  hidden: () => document.hidden,
+                }),
+              }
+            : {})}
+          {...(wantsSounds
+            ? {
+                menuSounds: createMenuSounds(sharedCueOutput(), () =>
+                  readMenuSoundPreference(deviceStorage()),
+                ),
+              }
+            : {})}
         />
       </StrictMode>,
     );

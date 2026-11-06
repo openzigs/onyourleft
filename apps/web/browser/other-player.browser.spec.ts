@@ -5,7 +5,7 @@
  * them out — #2073.
  *
  * A touch target is a layout claim, so it is measured here and never read off
- * the CSS (apps/web/CLAUDE.md). `shell-harness.tsx`'s `?music=heard` renders
+ * the CSS (apps/web/CLAUDE.md). `shell-harness.tsx`'s `?own-player=heard` renders
  * the real `AppShell` under the real `theme.css` with the controls showing, as
  * they show only inside the Android shell once the rider's own player is
  * heard. Measured at the two sizes the issue's screenshots are taken at: a
@@ -38,7 +38,7 @@ interface Box {
 }
 
 async function open(page: Page): Promise<void> {
-  await page.goto('/shell.html?music=heard');
+  await page.goto('/shell.html?own-player=heard');
   await page.waitForSelector('html[data-oyl-shell-ready]');
   await page.waitForSelector(`${GROUP} button`);
 }

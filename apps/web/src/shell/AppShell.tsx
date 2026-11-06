@@ -111,6 +111,8 @@ import {
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
+import { HeaderMute } from './HeaderMute';
+import type { MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
 import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
@@ -336,6 +338,19 @@ export interface AppShellProps {
    * every test that does not ask for sounds render with none.
    */
   readonly menuSounds?: MenuSounds | undefined;
+  /**
+   * The menus' music — #2058. Every press is handed to it, as to
+   * {@link menuSounds}, and it is told whenever the route, the ride, immersion
+   * or the page's visibility changes (`menu-music.ts` says why only a press
+   * starts it). `undefined` is silence, as for the sounds.
+   */
+  readonly menuMusic?: MenuMusic | undefined;
+  /**
+   * The output the header's mute reaches — #2056. Absent, it is the app's
+   * shared one (`game/web-audio.ts` §`sharedCueOutput`), which makes no audio
+   * context until a press asks for sound; a test hands in a recording double.
+   */
+  readonly soundOutput?: import('../game/audio-port').CueOutput | undefined;
   /**
    * The rider's own music player, another app — #2073. Made by `main.tsx`
    * inside the Android shell only (`other-player.ts` §`otherPlayerOffered`);
@@ -796,6 +811,7 @@ function viewFor(
           maskedWords={props.maskedWords}
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
+          soundOutput={props.soundOutput}
         />
       );
     case 'about':
@@ -944,12 +960,42 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
-    props.menuSounds?.press(event.target, {
+    const context = {
       immersive,
       routeId: route.id,
       ridePhase: props.rideController?.getSnapshot().phase,
-    });
+    };
+    props.menuSounds?.press(event.target, context);
+    // #2058: the same press, and the only thing that can start the music.
+    props.menuMusic?.press(event.target, context);
   }
+
+  /*
+   * #2058: the music is told whenever it may have to stop or may carry on — a
+   * new route, the stage taking or giving back the screen, the ride
+   * controller's phase moving, the page hidden or shown. None of these is a
+   * press, so none can start it (`menu-music.ts` §"Only from the rider's first
+   * press").
+   */
+  const menuMusic = props.menuMusic;
+  const rideController = props.rideController;
+  useEffect(() => {
+    if (menuMusic === undefined) return undefined;
+    const tell = (): void => {
+      menuMusic.update({
+        immersive,
+        routeId: route.id,
+        ridePhase: rideController?.getSnapshot().phase,
+      });
+    };
+    tell();
+    const unsubscribe = rideController?.subscribe(tell);
+    document.addEventListener('visibilitychange', tell);
+    return () => {
+      unsubscribe?.();
+      document.removeEventListener('visibilitychange', tell);
+    };
+  }, [menuMusic, rideController, immersive, route.id]);
 
   const view = (
     // #1072's review (N5): a view deciding about motion of its own reads
@@ -1018,9 +1064,10 @@ export function AppShell(props: AppShellProps): JSX.Element {
         {props.update === undefined || immersive ? null : <UpdateOffer watcher={props.update} />}
 
         {/*
-          #671: the header is the wordmark and, since #2073, the rider's own
-          music player's controls once other audio was seen, on a menu route
-          inside the Android shell — nothing else. The navigation is
+          #671: the header is the wordmark and, since #2056, the one-press
+          mute on a menu route, and since #2073 the rider's own music player's
+          controls once other audio was seen, on a menu route inside the
+          Android shell — nothing else. The navigation is
           its own landmark beside it rather than inside it — a bar or a rail
           since #427, so it was never in the header's box on any screen but the
           shortest, where it made the header 191 px of 256.
@@ -1037,8 +1084,15 @@ export function AppShell(props: AppShellProps): JSX.Element {
               <Wordmark text={APP_NAME} />
             </p>
             {/*
+              #2056: the one-press mute, on every menu route — WCAG 2.2 SC
+              1.4.2 for the music that plays there (`HeaderMute.tsx`). Not on a
+              ride route, whose own sound controls stay as they are.
+            */}
+            {isRideRoute(route.id) ? null : <HeaderMute output={props.soundOutput} />}
+            {/*
               #2073, owner ruling 2 of 2026-11-05: never on a ride route, whose
               controls have their own rules (`design/ride-time-controls.ts`).
+              After the mute, which stays first in the tab order (#2056).
             */}
             {otherPlayer === undefined || !otherPlayerMayShow ? null : (
               <OtherPlayerControls player={otherPlayer} />

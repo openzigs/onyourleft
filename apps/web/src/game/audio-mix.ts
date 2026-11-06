@@ -25,13 +25,16 @@
  * is taken as if nothing were stored for it, bus by bus, so a junk value costs
  * that bus and nothing else.
  *
- * ## ⚠️ Until #2056, the old switches still write their bus here
+ * ## ⚠️ The old switches write their bus here
  *
- * Settings and the ride's `SoundControls.tsx` still write the old keys, and a
- * mix copied from them once would go stale the moment a rider moved one:
- * menu sounds turned on in Settings would land on an effects bus still muted,
- * and play silently. So `writeCuePreference` and `writeMenuSoundPreference`
- * also write their bus through {@link writeAudioBus}.
+ * Settings and the ride's `SoundControls.tsx` write the old keys, which still
+ * hold each class's switch, and a mix copied from them once would go stale the
+ * moment a rider moved one: menu sounds turned on in Settings would land on an
+ * effects bus still muted, and play silently. So `writeCuePreference` and
+ * `writeMenuSoundPreference` also write their bus through {@link writeAudioBus}.
+ * Since #2056 that is how the effects and cue rows on Settings write this
+ * preference; music, which has no old key, is written here directly, and so is
+ * the header's master mute ({@link writeMasterMuted}).
  *
  * ## On the device
  *
@@ -136,6 +139,23 @@ export function readAudioMix(
 }
 
 /**
+ * The music bus and the master mute as they are stored, or their defaults —
+ * #2056's Settings panel and header mute. ⚠️ Reads only: unlike
+ * {@link readAudioMix} it keeps nothing, so opening a screen writes nothing to
+ * the device. Music and the master have no old key, so nothing is lost by not
+ * taking the other buses from theirs here.
+ */
+export function readMusicAndMaster(
+  storage: PreferenceStorage | undefined,
+): Pick<AudioMix, 'music' | 'masterMuted'> {
+  const row = stored(storage);
+  return {
+    music: storedBus(row['music']) ?? DEFAULT_MUSIC,
+    masterMuted: row['masterMuted'] === true,
+  };
+}
+
+/**
  * Keep one bus, leaving the rest as they are stored: a bus not stored yet
  * stays unstored, so the next {@link readAudioMix} still takes it from its old
  * key. `false` when the device refused, so a screen can say so.
@@ -146,4 +166,12 @@ export function writeAudioBus(
   setting: BusSetting,
 ): boolean {
   return keep(storage, { ...stored(storage), [bus]: setting });
+}
+
+/**
+ * Keep the master mute — #2056's one-press mute in the header — leaving every
+ * bus as it is stored. `false` when the device refused.
+ */
+export function writeMasterMuted(storage: PreferenceStorage | undefined, muted: boolean): boolean {
+  return keep(storage, { ...stored(storage), masterMuted: muted });
 }
