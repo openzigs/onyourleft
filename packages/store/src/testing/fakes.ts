@@ -151,6 +151,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     listRaceableAttempts: async (query, limit) => real.listRaceableAttempts(query, limit),
     setActivityMayBeRaced: async (owner, activity, mayBeRaced) =>
       real.setActivityMayBeRaced(owner, activity, mayBeRaced),
+    setActivityVisibility: async (owner, activity, visibility) =>
+      real.setActivityVisibility(owner, activity, visibility),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
     moveActivityToRecentlyDeleted: async (owner, id, deletedAt) =>
       real.moveActivityToRecentlyDeleted(owner, id, deletedAt),

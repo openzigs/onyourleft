@@ -175,6 +175,7 @@ import { createStatementsPort, type StatementsPort } from './instance/statements
 import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
+import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -1111,6 +1112,26 @@ function buildGhostPort(): GhostPort | undefined {
 }
 
 /**
+ * The segment screens' way to the rider's instance's segments and boards
+ * (#68): the ONE production place a leaderboard port is built, so
+ * `check:wiring` reports `createLeaderboardPort` if this goes. Over the sealed
+ * session the Connect screen keeps, through the one instance module (ADR 0036
+ * D-3 (a)); a device with no instance is offered none of it and sends nothing.
+ */
+function buildLeaderboardPort(): LeaderboardPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createLeaderboardPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    store: localStore,
+    athleteId: LOCAL_ATHLETE,
+  });
+}
+
+/**
  * The Moderation screen's port (#955): the ONE production place a moderation
  * port is built, so `check:wiring` reports `createModerationPort` if this goes.
  * Over the session the Connect screen keeps, through the one instance module
@@ -1711,6 +1732,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           routes={buildRoutePort(worldCorridorPort)}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
+          boards={buildLeaderboardPort()}
           game={buildGamePort(rideController, buildGhostPort(), worldCorridorPort)}
           gameTrainer={buildGameTrainerPort(rideController)}
           gameRenderer={loadGameRenderer}

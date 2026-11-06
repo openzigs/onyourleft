@@ -13,7 +13,9 @@
  * two room routes a rider reports and a host removes by. Its second amendment
  * of 2026-10-16 (#788) adds the public rooms' listing and joining, in the
  * room routes' row. Its amendment of 2026-10-21 (#1516) adds blocking a
- * rider from a race's result, by their row, in the room moderation row.
+ * rider from a race's result, by their row, in the room moderation row. Its
+ * amendment of 2026-11-05 (#68) adds a row of its own: published segments,
+ * the efforts shared on them and their leaderboards, sealed from the first.
  *
  * The COMMITTED list, as `phase-one.ts` is, and held to the route table the
  * same way: `sealed/phase-one.test.ts` compares the table with BOTH lists in
@@ -46,6 +48,8 @@ const BLOCKS_AND_REPORTS = 'A rider’s own blocks and reports';
 const STATEMENTS = 'The statements of reasons about a rider, and their appeal against one';
 const ROOM_MODERATION =
   'A report from inside a room, a block from a race’s result, and a host removing a rider from their room';
+/** The row ADR 0047's amendment of 2026-11-05 adds (#68). */
+const SEGMENTS = 'Published segments, the efforts riders share on them, and their leaderboards';
 
 export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // Every sign-in, a key the instance holds included; registering a new key
@@ -91,4 +95,13 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // from the first, in the room routes' own row.
   only('GET', '/v1/rooms/public', ROOMS),
   only('POST', '/v1/rooms/{roomId}/join', ROOMS),
+  // #68, ADR 0047's amendment of 2026-11-05: published segments, the efforts
+  // riders share on them and their boards, sealed from the first — a
+  // segment's path is a stretch of somebody's ride, and a board names riders.
+  only('POST', '/v1/segments', SEGMENTS),
+  only('GET', '/v1/segments', SEGMENTS),
+  only('GET', '/v1/segments/{segmentId}', SEGMENTS),
+  only('DELETE', '/v1/segments/{segmentId}', SEGMENTS),
+  only('POST', '/v1/segments/{segmentId}/efforts/{content}', SEGMENTS),
+  only('GET', '/v1/segments/{segmentId}/leaderboard', SEGMENTS),
 ];
