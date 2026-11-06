@@ -64,6 +64,7 @@ import { accessibleName } from '../a11y/audit';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
 import { workoutGraphText } from '../workout/workout-graph';
+import { RIDE_WITH_REPLANS } from '../workout/replan-text';
 import { RideView } from './RideView';
 
 let mounted: Mounted | undefined;
@@ -1485,7 +1486,8 @@ describe('#1244 — re-plans on the Ride screen: the switch, and Keep the plan',
     expect(stub.calls.startWorkoutWith.map((each) => each.choices)).toStrictEqual([{}]);
 
     await activateWithKeyboard(theSwitch() as HTMLElement);
-    await activateWithKeyboard(buttonNamed('Ride Tempo'));
+    // #1329: switched on, the button reads "Ride, with re-plans".
+    await activateWithKeyboard(buttonNamed(`${RIDE_WITH_REPLANS}: Tempo`));
     await settle();
     expect(stub.calls.startWorkoutWith.map((each) => each.choices)).toStrictEqual([
       {},

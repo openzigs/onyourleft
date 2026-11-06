@@ -4270,6 +4270,20 @@ a.oyl-button {
   margin-block-start: 0;
 }
 
+/* #1329, the owner's ruling of 2026-11-05: while the switch is on, every
+   *Ride* reads "Ride, with re-plans", which is shorter than "Ride" and a
+   workout's name. Inline after the workout's row, the shorter button then fit
+   on the row's last line and every *Ride* jumped up 25 px when the switch was
+   pressed. On a line of its own, under its row, the first *Ride* is where it
+   was in both states. Only where the switch is, like the two rules above.
+   `rideview.browser.spec.ts` §"#1244" and §"#1329 — many saved workouts" hold
+   that the first *Ride* does not move and none grows when the switch is
+   pressed. A long name that wraps with the switch off can drop to one line
+   with it on, so a *Ride* after it can move up. */
+.oyl-ride__group--trainer .oyl-workout-replans ~ ul > li > .oyl-button {
+  display: block;
+}
+
 /* #1244, restored by the owner's ruling of 2026-10-14 on #1332: "Re-plans
    on", beside the chooser's heading while the switch is on — a paragraph
    AFTER the `h3`, not inside it, so the heading is still named "Ride a
