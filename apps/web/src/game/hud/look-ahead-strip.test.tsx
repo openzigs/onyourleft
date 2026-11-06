@@ -30,7 +30,13 @@ import { atStartLine, type GameState } from '../simulation';
 
 import { slopeEvent, slopesOf } from './climb-ahead';
 import { HudPanel } from './HudPanel';
-import { GRADE_BANDS, LOOK_AHEAD_METRES, LOOK_AHEAD_RISE_METRES, lookAhead } from './look-ahead';
+import {
+  GRADE_BANDS,
+  LOOK_AHEAD_METRES,
+  LOOK_AHEAD_RISE_METRES,
+  lookAhead,
+  routeBands,
+} from './look-ahead';
 
 let mounted: Mounted | undefined;
 
@@ -87,7 +93,9 @@ describe('the look-ahead strip on the HUD (#2075)', () => {
     const strip = hud.querySelector('.oyl-hud__route [data-testid="oyl-hud-look-ahead"]');
     expect(strip).not.toBeNull();
     expect(strip?.parentElement?.querySelector('.oyl-hud__profile-svg')).not.toBeNull();
-    expect(strip?.getAttribute('viewBox')).toBe(`0 0 ${String(LOOK_AHEAD_METRES)} 100`);
+    expect(strip?.getAttribute('viewBox')).toBe(
+      `0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`,
+    );
   });
 
   it('fills the climb ahead in the steep band, from where it starts', async () => {
@@ -194,12 +202,17 @@ describe('the look-ahead strip on the HUD (#2075)', () => {
     // "Climb in 400 metres, 6 percent", spoken; "Climb in 400 m · 6 %", shown.
     const [, spokenMetres, spokenPercent] =
       /Climb in (\d+) metres, (\d+) percent/.exec(said ?? '') ?? [];
+    // #2291: and where its top is, a kilometre on (`look-ahead.ts` §`climbAhead`).
+    const top = lookAhead(profile, 600).climb?.topIn ?? Number.NaN;
+    const topMetres = String(Math.round(top / 10) * 10);
     const shown = hud.querySelector('[data-testid="oyl-hud-next-climb"]')?.textContent ?? '';
-    expect(shown).toBe(`Climb in ${spokenMetres ?? '?'} m · ${spokenPercent ?? '?'} %`);
+    expect(shown).toBe(
+      `Climb in ${spokenMetres ?? '?'} m · ${spokenPercent ?? '?'} % · top in ${topMetres} m`,
+    );
     expect(
       hud.querySelector('[data-testid="oyl-hud-look-ahead"]')?.getAttribute('aria-label'),
     ).toBe(
-      `The next kilometre: next climb in ${spokenMetres ?? '?'} metres, ${spokenPercent ?? '?'} per cent average`,
+      `The next 2 kilometres: next climb in ${spokenMetres ?? '?'} metres, ${spokenPercent ?? '?'} per cent average, top in ${topMetres} metres`,
     );
   });
 
@@ -209,16 +222,144 @@ describe('the look-ahead strip on the HUD (#2075)', () => {
     expect(hud.querySelector('.oyl-hud__profile-text')?.textContent).toMatch(/^\d+% complete$/);
     expect(
       hud.querySelector('[data-testid="oyl-hud-look-ahead"]')?.getAttribute('aria-label'),
-    ).toBe('The next kilometre: no climb in the next kilometre');
+    ).toBe('The next 2 kilometres: no climb in the next 2 kilometres');
+    expect(hud.querySelector('[data-testid="oyl-hud-climb-top"]')).toBeNull();
   });
 
   it('fills the whole route’s strip, and keeps its marker', async () => {
     const hud = await hudAt(profile, 600);
-    const fill = hud.querySelector('.oyl-hud__profile-svg .oyl-hud__profile-fill');
-    expect(fill?.tagName.toLowerCase()).toBe('polygon');
+    const shape = hud.querySelector('.oyl-hud__profile-svg clipPath .oyl-hud__profile-shape');
+    expect(shape?.tagName.toLowerCase()).toBe('polygon');
     // Closed along the strip's floor at both ends.
-    expect(fill?.getAttribute('points')?.startsWith('0,24 ')).toBe(true);
-    expect(fill?.getAttribute('points')?.endsWith(' 100,24')).toBe(true);
+    expect(shape?.getAttribute('points')?.startsWith('0,24 ')).toBe(true);
+    expect(shape?.getAttribute('points')?.endsWith(' 100,24')).toBe(true);
     expect(hud.querySelector('[data-testid="oyl-hud-position"]')).not.toBeNull();
+  });
+});
+
+/**
+ * #2291's climb view on the rendered HUD: the top of the climb in the
+ * caption and on the strip, the climb under the rider named as well as the
+ * one ahead.
+ */
+describe('the climb view on the HUD (#2291)', () => {
+  const profile = climb();
+
+  it('names the top of the climb the rider is on, and its average', async () => {
+    const hud = await hudAt(profile, 1200);
+    const top = lookAhead(profile, 1200).climb?.topIn ?? Number.NaN;
+    const metres = String(Math.round(top / 10) * 10);
+    expect(hud.querySelector('[data-testid="oyl-hud-next-climb"]')?.textContent).toBe(
+      `Top in ${metres} m · 6 %`,
+    );
+    expect(
+      hud.querySelector('[data-testid="oyl-hud-look-ahead"]')?.getAttribute('aria-label'),
+    ).toBe(`The next 2 kilometres: on a climb, top in ${metres} metres, 6 per cent average`);
+  });
+
+  it('marks the top on the strip, dashed, where the window reaches it', async () => {
+    const hud = await hudAt(profile, 1200);
+    const marker = hud.querySelector('[data-testid="oyl-hud-climb-top"]');
+    const top = lookAhead(profile, 1200).climb?.topIn ?? Number.NaN;
+    expect(marker?.getAttribute('data-ahead')).toBe(String(top));
+    expect(marker?.getAttribute('x1')).toBe(String(top));
+    expect(marker?.getAttribute('x2')).toBe(String(top));
+    expect(marker?.getAttribute('y2')).toBe(String(LOOK_AHEAD_RISE_METRES));
+    expect(marker?.classList.contains('oyl-hud__ahead-top')).toBe(true);
+    // Over the road, so it is drawn on top of the bands and the line.
+    const road = hud.querySelector('[data-testid="oyl-hud-road-ahead"]');
+    expect(
+      (road?.compareDocumentPosition(marker as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('marks the next climb’s top too, from before it starts', async () => {
+    const hud = await hudAt(profile, 600);
+    const top = lookAhead(profile, 600).climb?.topIn ?? Number.NaN;
+    expect(top).toBeLessThan(LOOK_AHEAD_METRES);
+    expect(hud.querySelector('[data-testid="oyl-hud-climb-top"]')?.getAttribute('data-ahead')).toBe(
+      String(top),
+    );
+  });
+
+  it('draws no top the window does not reach', async () => {
+    // A 2.5 km climb from 500 m: from the start its top is past the window.
+    const elevations = [100];
+    for (let metre = STEP; metre <= 4000; metre += STEP) {
+      elevations.push(metre <= 500 ? 100 : metre <= 3000 ? 100 + ((metre - 500) * 4) / 100 : 200);
+    }
+    const long = routeProfile(
+      elevations.map((elevation, index) => ({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (index * STEP) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(elevation),
+      })),
+    );
+    expect(lookAhead(long, 0).climb?.topIn).toBeGreaterThan(LOOK_AHEAD_METRES);
+    const hud = await hudAt(long, 0);
+    expect(hud.querySelector('[data-testid="oyl-hud-climb-top"]')).toBeNull();
+    // The caption still says where it is.
+    expect(hud.querySelector('[data-testid="oyl-hud-next-climb"]')?.textContent).toMatch(
+      /^Climb in \d+0 m · 4 % · top in \d+0 m$/,
+    );
+  });
+});
+
+/** #2291's third part: the whole route's strip shaded by steepness, not one grey. */
+describe('the whole route’s strip, shaded by steepness (#2291)', () => {
+  const profile = climb();
+
+  it('draws each of the route’s bands where it is on the route, clipped to its shape', async () => {
+    const hud = await hudAt(profile, 600);
+    const svg = hud.querySelector('.oyl-hud__profile-svg');
+    const runs = queryAll(svg ?? hud, '.oyl-hud__profile-run');
+    const expected = routeBands(profile);
+    expect(runs.map((run) => run.getAttribute('data-band'))).toEqual(
+      expected.map((run) => run.band),
+    );
+    expect(runs.map((run) => run.getAttribute('data-band'))).toContain('steep');
+    runs.forEach((run, index) => {
+      expect(Number(run.getAttribute('x'))).toBeCloseTo((expected[index]?.from ?? -1) * 100, 6);
+      expect(Number(run.getAttribute('width'))).toBeCloseTo(
+        ((expected[index]?.to ?? 0) - (expected[index]?.from ?? 0)) * 100,
+        6,
+      );
+      expect(run.getAttribute('height')).toBe('24');
+    });
+    // Clipped to the route's own filled shape.
+    const group = svg?.querySelector('.oyl-hud__profile-fill');
+    const clip = /^url\(#(.+)\)$/.exec(group?.getAttribute('clip-path') ?? '')?.[1];
+    const clipPath = clip === undefined ? null : hud.querySelector(`[id="${clip}"]`);
+    expect(clipPath?.tagName.toLowerCase()).toBe('clippath');
+    expect(clipPath?.querySelector('.oyl-hud__profile-shape')).not.toBeNull();
+    expect(runs.every((run) => group?.contains(run) === true)).toBe(true);
+  });
+
+  it('fills each band with its own pattern, so colour is never the only signal', async () => {
+    const hud = await hudAt(profile, 600);
+    const svg = hud.querySelector('.oyl-hud__profile-svg');
+    const patterns = queryAll(svg ?? hud, 'pattern');
+    expect(patterns.map((pattern) => pattern.getAttribute('data-pattern'))).toEqual(
+      GRADE_BANDS.map((band) => band.pattern),
+    );
+    for (const run of queryAll(svg ?? hud, '.oyl-hud__profile-run')) {
+      const band = run.getAttribute('data-band');
+      const reference = /^url\(#(.+)\)$/.exec(run.getAttribute('fill') ?? '')?.[1];
+      const pattern = reference === undefined ? null : svg?.querySelector(`[id="${reference}"]`);
+      expect(pattern?.classList.contains(`oyl-hud__band--${band ?? ''}`)).toBe(true);
+    }
+    // Sized for this strip's 100 × 24 box, not the road ahead's metres.
+    expect(Number(patterns[0]?.getAttribute('width'))).toBeLessThan(10);
+  });
+
+  it('keeps the rider’s marker over the bands', async () => {
+    const hud = await hudAt(profile, 600);
+    const marker = hud.querySelector('[data-testid="oyl-hud-position"]');
+    const last = queryAll(hud, '.oyl-hud__profile-run').at(-1);
+    expect(
+      (last?.compareDocumentPosition(marker as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

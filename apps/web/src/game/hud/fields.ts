@@ -160,6 +160,14 @@ export interface HudReading {
    * `aria-hidden`. Absent on every other field.
    */
   readonly slope?: 'up' | 'down' | 'level' | undefined;
+  /**
+   * The grade the value SHOWS, as a number — #2291, the gradient's alone:
+   * `HudCore.tsx` colours the digits and the slope glyph by its band
+   * (`look-ahead.ts` §`gradeBand`), so the colour is the band of the number a
+   * rider reads, never of a grade the rounding hid. ⚠️ **Never the only
+   * carrier**: the number is the reading. Absent on every other field.
+   */
+  readonly grade?: number | undefined;
 }
 
 /**
@@ -589,7 +597,16 @@ function gradientReading(grade: number): HudReading {
   const slope = shown > 0 ? 'up' : shown < 0 ? 'down' : 'level';
   const magnitude = Math.abs(shown).toFixed(1);
   const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
-  return { key: GRADIENT_KEY, label: 'Gradient', value, unit: '%', stale: false, slope };
+  return {
+    key: GRADIENT_KEY,
+    label: 'Gradient',
+    value,
+    unit: '%',
+    stale: false,
+    slope,
+    // `+ 0` so a rounded -0.04 is 0, not -0, for a reader comparing it.
+    grade: shown + 0,
+  };
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */

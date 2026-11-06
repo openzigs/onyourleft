@@ -643,3 +643,91 @@ describe('the gradient on the primary row — #2071', () => {
     ).toBe('Power, cadence, heart rate and gradient');
   });
 });
+
+/**
+ * #2291 — the gradient's digits in their grade band's colour, and a slope
+ * glyph steeper for a steeper band, read off the rendered primary row. The
+ * class is the wire; `hud-value-size.test.ts` holds the rule each class
+ * names, and `ride.browser.spec.ts` reads the colour and size Chromium paints.
+ */
+describe('the gradient in its band’s colour — #2291', () => {
+  const profile = route();
+  const at = (grade: number) => ({
+    profile,
+    state: { ...atStartLine(profile), grade: gradePercent(grade) },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  });
+
+  function primaryGradient(): Element | undefined {
+    return queryAll(
+      mounted?.container ?? document,
+      '.oyl-hud__fields--primary .oyl-hud__field',
+    ).find((each) => each.querySelector('dt')?.textContent === 'Gradient');
+  }
+
+  async function bandAt(grade: number): Promise<string | null | undefined> {
+    mounted?.unmount();
+    mounted = await mount(<HudPanel {...at(grade)} />);
+    const field = primaryGradient();
+    const band = field?.getAttribute('data-grade-band');
+    expect(field?.classList.contains(`oyl-hud__field--grade-${band ?? ''}`)).toBe(true);
+    return band;
+  }
+
+  it('bands the field by the grade it shows, through the road ahead’s five bands', async () => {
+    expect(await bandAt(-6)).toBe('descent');
+    expect(await bandAt(-2)).toBe('flat');
+    expect(await bandAt(0)).toBe('flat');
+    expect(await bandAt(4.5)).toBe('climb');
+    expect(await bandAt(7)).toBe('steep');
+    expect(await bandAt(12)).toBe('wall');
+    // 2.96 SHOWS +3.0, and is coloured as the climb it says it is.
+    expect(await bandAt(2.96)).toBe('climb');
+  });
+
+  it('sets the digits apart from the sign, so the sign keeps its ink', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    const value = primaryGradient()?.querySelector('dd');
+    expect(value?.querySelector('.oyl-hud__digits')?.textContent).toBe('4.5');
+    expect(value?.querySelector('.oyl-hud__digits .oyl-hud__sign')).toBeNull();
+    // What a screen reader reads is the value as it was.
+    expect(value?.textContent).toBe('+4.5 %');
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(0)} />);
+    expect(primaryGradient()?.querySelector('.oyl-hud__digits')?.textContent).toBe('0.0');
+  });
+
+  it('colours no other reading', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    expect(queryAll(mounted.container, '.oyl-hud__digits')).toHaveLength(1);
+    expect(queryAll(mounted.container, '[data-grade-band]')).toHaveLength(1);
+  });
+
+  /** How far the drawn stroke climbs from left to right, in its box's units. */
+  async function riseAt(grade: number): Promise<number> {
+    mounted?.unmount();
+    mounted = await mount(<HudPanel {...at(grade)} />);
+    const line = primaryGradient()?.querySelector('.oyl-hud__slope line');
+    return Number(line?.getAttribute('y1')) - Number(line?.getAttribute('y2'));
+  }
+
+  it('draws the glyph steeper for a steeper band, so the band is a shape as well', async () => {
+    const flat = await riseAt(1.5);
+    const climbing = await riseAt(4.5);
+    const steep = await riseAt(7);
+    const wall = await riseAt(12);
+    expect(flat).toBeGreaterThan(0);
+    expect(climbing).toBeGreaterThan(flat);
+    expect(steep).toBeGreaterThan(climbing);
+    expect(wall).toBeGreaterThan(steep);
+    // A descent falls, and further than a flat stretch that dips.
+    expect(await riseAt(-6)).toBeLessThan(await riseAt(-1.5));
+    expect(await riseAt(-1.5)).toBeLessThan(0);
+  });
+});

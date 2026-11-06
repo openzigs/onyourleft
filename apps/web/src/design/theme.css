@@ -7667,14 +7667,12 @@ select.oyl-input {
   display: block;
 }
 
-/* #2075: the whole route FILLED, in the HUD's edge colour (4.47:1 on its
-   surface), and the rider's marker in its ink over a wider stroke of the
-   surface, so the marker reads against the fill (3.90:1) and against the
-   empty strip above it alike. Both pairs are declared in `tokens.ts`. */
-.oyl-hud__profile-fill {
-  fill: var(--oyl-color-hud-border);
-}
-
+/* #2075: the whole route FILLED, and the rider's marker in its ink over a
+   wider stroke of the surface. Since #2291 the fill is the route's grade
+   bands, each its colour and pattern (the band rules under §"THE ROAD
+   AHEAD"), clipped to the route's shape (`HudCore.tsx` §`ElevationStrip`),
+   where it was one grey: the marker's surface edge is what it reads against
+   on every band, each band a declared 3:1 on the surface in `tokens.ts`. */
 .oyl-hud__profile-here-edge {
   stroke: var(--oyl-color-hud-surface);
   stroke-width: 7;
@@ -7778,6 +7776,54 @@ select.oyl-input {
   stroke: var(--oyl-color-hud-ink);
   stroke-width: 4;
   vector-effect: non-scaling-stroke;
+}
+
+/* #2291: the top of the climb the caption names, where the window reaches it
+   — DASHED ink over a wider stroke of the surface, so it reads on every band
+   as the road's line does and is a different shape from the rider's edge. */
+.oyl-hud__ahead-top-edge {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__ahead-top {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+
+/*
+ * THE GRADIENT IN ITS BAND'S COLOUR — #2291.
+ *
+ * The gradient's digits and its slope glyph take its grade band's colour,
+ * the road ahead's five (`look-ahead.ts` §`GRADE_BANDS`), so the number says
+ * at a glance which band the rider is in. Only the DIGITS: they are never
+ * under 1.5 rem (24 px, large text, held in `ride.browser.spec.ts` at every
+ * viewport), where each band's colour is a declared 3:1 on the surface in
+ * `tokens.ts`; the sign is half their size, small text, and keeps the ink.
+ * Never the only signal: the number is the reading, and the glyph is steeper
+ * for a steeper band (`HudCore.tsx` §`SlopeGlyph`).
+ */
+.oyl-hud__field--grade-descent :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-descent);
+}
+
+.oyl-hud__field--grade-flat :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-flat);
+}
+
+.oyl-hud__field--grade-climb :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-climb);
+}
+
+.oyl-hud__field--grade-steep :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-steep);
+}
+
+.oyl-hud__field--grade-wall :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-wall);
 }
 
 .oyl-hud__profile-captions {

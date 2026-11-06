@@ -1144,12 +1144,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
     src/game/hud/look-ahead.ts
-                        the next kilometre of road on the HUD (#2075): the
-                        road a line at a FIXED scale (100 m of height across the
+                        the next 2 km of road on the HUD (#2075, #2291): the
+                        road a line at a FIXED scale (200 m of height across the
                         strip) over five grade bands of our own, each the
                         strip's full height with its own fill pattern;
                         the next climb is `climb-ahead.ts`'s own `slopeAhead`,
-                        so the strip and the voice name the same one
+                        so the strip and the voice name the same one, and
+                        `climbAhead` adds the climb under the rider and the top
+                        of either (#2291). The same bands shade the whole
+                        route's strip (`routeBands`) and colour the gradient's
+                        digits (`gradeBand`, `HudCore.tsx`)
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's
