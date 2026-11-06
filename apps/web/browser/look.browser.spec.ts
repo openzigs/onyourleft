@@ -18,8 +18,10 @@
  *   Chromium paints it, not the token the spec expects there. Elevation is the
  *   fill step and never a shadow (#307), so a tile that cleared this only by a
  *   `box-shadow` fails it — the shadow is read and named in the fault;
- * - **every view's title** is the display step, at the heaviest weight, in the
- *   display face (`--oyl-font-family-display`).
+ * - **every view's title** is the title step, at the heaviest weight, in the
+ *   display face (`--oyl-font-family-display`). ⚠️ The step was `display`
+ *   until #2065, which set the title a step down beside its line: `xxl` at
+ *   this walk's 1280 px (`theme.css` §"THE TITLE BLOCK").
  *
  * **No outline**, on purpose: ADR 0063 D-3 (accepted 2026-11-04) says direction
  * A's cards have no edge and adds no outline token. #2064's draft asked for
@@ -182,12 +184,13 @@ async function lookAt(page: Page, hash: string): Promise<Look> {
 /** Everything about one route that is not the Phase 1 look. Empty is a pass. */
 function lookFaults(where: string, look: Look, theme: Theme): string[] {
   const faults: string[] = [];
-  const display = Number.parseFloat(FONT_SIZE_TOKENS.display) * 16;
+  // #2065: the title step from 40rem, which this walk's 1280 px is.
+  const titleStep = Number.parseFloat(FONT_SIZE_TOKENS.xxl) * 16;
   if (look.title === null) {
     faults.push(`${where}: no title`);
   } else {
-    if (Math.abs(look.title.size - display) > 0.1) {
-      faults.push(`${where}: the title is ${String(look.title.size)} px, not the display step`);
+    if (Math.abs(look.title.size - titleStep) > 0.1) {
+      faults.push(`${where}: the title is ${String(look.title.size)} px, not the title step`);
     }
     if (look.title.weight < 800) {
       faults.push(`${where}: the title's weight is ${String(look.title.weight)}`);
@@ -225,7 +228,9 @@ for (const theme of THEMES) {
   test.describe(`#992 — the menus' look, ${theme} palette`, () => {
     test.use({ colorScheme: theme });
 
-    test('every route: filled tiles with no outline, and a display title', async ({ page }) => {
+    test('every route: filled tiles with no outline, and a display-face title', async ({
+      page,
+    }) => {
       test.setTimeout(120_000);
       await open(page);
       expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);

@@ -189,9 +189,12 @@ describe('every launch shows the branded splash, cold or warm (#2127)', () => {
   });
 
   it('names the logo for the system splash, rather than leaving the library’s dangling reference', () => {
-    expect(launch?.get('windowSplashScreenAnimatedIcon')).toBe('@mipmap/ic_launcher');
-    // The launcher icon itself: an adaptive icon from API 26, a picture at
-    // every density below it, so the reference resolves on every API level.
+    // Since #2052 the mark composed for the splash, which splash-icon.test.ts
+    // resolves to a picture at every density in both device modes.
+    expect(launch?.get('windowSplashScreenAnimatedIcon')).toBe('@drawable/oyl_splash_icon');
+    // The launcher icon the pre-31 launch window still draws (Refs #968): an
+    // adaptive icon from API 26, a picture at every density below it, so the
+    // reference resolves on every API level.
     expect(read(join(RES, 'mipmap-anydpi-v26/ic_launcher.xml'))).toContain('<adaptive-icon');
     for (const density of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
       expect(existsSync(join(RES, `mipmap-${density}/ic_launcher.png`)), density).toBe(true);
@@ -207,11 +210,19 @@ describe('every launch shows the branded splash, cold or warm (#2127)', () => {
     // A view attribute in a theme paints every view without a background of
     // its own, and no window.
     expect(launch?.has('android:background')).toBe(false);
-    for (const file of ['drawable/oyl_launch_window.xml', 'drawable-v31/oyl_launch_window.xml']) {
+    // Below 31 the launcher icon where core-splashscreen would draw it; from
+    // 31 (#2052) the splash's own icon at the size the system splash draws
+    // it, so a frame of the bare window is the same picture as the splash.
+    for (const [file, drawable, size] of [
+      ['drawable/oyl_launch_window.xml', '@mipmap/ic_launcher', '192dp'],
+      ['drawable-v31/oyl_launch_window.xml', '@drawable/oyl_splash_icon', '288dp'],
+    ] as const) {
       const [canvas, ...rest] = layers(file);
       expect(canvas, file).toMatch(/android:drawable="@drawable\/oyl_launch_background"/);
-      const logo = rest.find((layer) => layer.includes('android:drawable="@mipmap/ic_launcher"'));
+      const logo = rest.find((layer) => layer.includes(`android:drawable="${drawable}"`));
       expect(logo, file).toMatch(/android:gravity="center"/);
+      expect(logo, file).toContain(`android:width="${size}"`);
+      expect(logo, file).toContain(`android:height="${size}"`);
     }
     // The premise: AppCompat's window set-up runs in super.onCreate, BEFORE
     // BridgeActivity switches the theme, so the launch theme is the one read.

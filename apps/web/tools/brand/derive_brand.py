@@ -172,9 +172,14 @@ DARK_INK = (0xED, 0xEE, 0xF1)
 # icon keeps the mark inside the circle a launcher may crop to -- the middle 80 %
 # (W3C Manifest, "icon masks") -- and an Android foreground inside the 66 dp
 # circle of its 108 dp layer; both are held there by `provenance.test.ts`.
+# The Android 12+ splash icon (#2052) has no background of its own: the system
+# draws it at 288 dp on the canvas and masks it to the middle 192 dp circle
+# (developer.android.com, "Splash screens", read 2026-11-03), so its mark's
+# diagonal is held inside that circle, with 6 dp to spare on each side.
 SQUARE_EXTENT = 0.78
 MASKABLE_DIAGONAL = 0.76
 FOREGROUND_DIAGONAL = 62.0 / 108.0
+SPLASH_DIAGONAL = 180.0 / 288.0
 
 
 def as_float(image: Image.Image) -> np.ndarray:
@@ -240,8 +245,9 @@ MASTER = 1024
 
 
 def icon(kind: str, size: int, mark: np.ndarray, blue: tuple[int, int, int]) -> Image.Image:
-    if kind == "foreground":
-        layer = placed(mark, MASTER, FOREGROUND_DIAGONAL, by_diagonal=True)
+    if kind in ("foreground", "splash"):
+        diagonal = FOREGROUND_DIAGONAL if kind == "foreground" else SPLASH_DIAGONAL
+        layer = placed(mark, MASTER, diagonal, by_diagonal=True)
         return layer.resize((size, size), Image.Resampling.LANCZOS)
     extent, diagonal = (SQUARE_EXTENT, False) if kind == "square" else (MASKABLE_DIAGONAL, True)
     ground = Image.new("RGBA", (MASTER, MASTER), (*blue, 255))
