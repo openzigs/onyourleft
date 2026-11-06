@@ -76,6 +76,7 @@ import {
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { createFakeBluetooth } from '@onyourleft/sensors/web-bluetooth/testing';
 import {
+  cpsPowerMeter,
   createSimulator,
   ftmsTrainer,
   hrsStrap,
@@ -805,6 +806,109 @@ describe('criterion 3 — a disconnected sensor goes unavailable, and does not f
     await ride(rig, METRIC_STALE_AFTER_SECONDS);
 
     expect(metric(rig, 'heartRate').kind).toBe('live');
+    rig.controller.dispose();
+  });
+});
+
+describe('each paired sensor’s own readings — #2045', () => {
+  /** One sensor's reading on one channel, from the snapshot Home reads. */
+  const reading = (rig: Bench, id: typeof STRAP, channel: 'power' | 'heartRate') =>
+    rig.controller
+      .getSnapshot()
+      .sensors.find((sensor) => sensor.id === id)
+      ?.readings?.find((each) => each.id === channel)?.state;
+
+  it('lists only the channels each device supplies, and the strap’s number is the Ride screen’s', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+
+    const channels = (id: typeof STRAP): readonly string[] =>
+      rig.controller
+        .getSnapshot()
+        .sensors.find((sensor) => sensor.id === id)
+        ?.readings?.map((each) => each.id) ?? [];
+    expect(channels(TRAINER)).toEqual(['power', 'cadence', 'speed']);
+    expect(channels(STRAP)).toEqual(['heartRate']);
+    const strap = reading(rig, STRAP, 'heartRate');
+    expect(strap?.kind).toBe('live');
+    expect(strap).toEqual(metric(rig, 'heartRate'));
+    rig.controller.dispose();
+  });
+
+  it('two devices sending power keep their own: a power meter gone quiet is stale while the trainer and the channel stay live', async () => {
+    // The power meter first, so the power-meter role's chooser picks it; the
+    // trainer role asks for trainer-control as well, which only the trainer has.
+    const { transport, bench } = createSimulator({
+      devices: [
+        cpsPowerMeter({ id: 'meter', name: 'Crank PM' }),
+        ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' }),
+      ],
+    });
+    const controller = createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('two-power'),
+      now: () => bench.now,
+    });
+    const power = (id: string) =>
+      controller
+        .getSnapshot()
+        .sensors.find((sensor) => sensor.id === deviceId(id))
+        ?.readings?.find((each) => each.id === 'power')?.state.kind;
+    const step = async (count: number): Promise<void> => {
+      for (let index = 0; index < count; index += 1) {
+        bench.advance(seconds(1));
+        await controller.tick(bench.now);
+      }
+    };
+    await controller.pair('power-meter');
+    await controller.pair('trainer');
+    await step(3);
+    expect([power('meter'), power('kickr')]).toEqual(['live', 'live']);
+
+    bench.device(deviceId('meter')).script({ kind: 'notification-dropout', duration: seconds(30) });
+    await step(METRIC_STALE_AFTER_SECONDS + 1);
+
+    expect(power('meter')).toBe('stale');
+    expect(power('kickr')).toBe('live');
+    // The Ride screen's one power channel is still live, from the trainer —
+    // which is exactly why the module cannot name a device beside it.
+    expect(controller.getSnapshot().metrics.find((each) => each.id === 'power')?.state.kind).toBe(
+      'live',
+    );
+    controller.dispose();
+  });
+
+  it('a device forgotten and paired again starts with no reading, not the one it last sent', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 2);
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('live');
+
+    await rig.controller.unpair(STRAP);
+    // Paired again inside the stale window, before it has sent anything.
+    rig.bench.device(STRAP).script({ kind: 'notification-dropout', duration: seconds(30) });
+    await rig.controller.pair('heart-rate');
+
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('waiting');
+    rig.controller.dispose();
+  });
+
+  it('a device that is not connected reads unpaired on every channel, though it sent a moment ago', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('live');
+
+    // Gone, with the last reading still inside the stale window.
+    rig.bench.device(STRAP).script({ kind: 'disconnect' });
+    const row = rig.controller.getSnapshot().sensors.find((sensor) => sensor.id === STRAP);
+    expect(row?.state).toBe('disconnected');
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('unpaired');
     rig.controller.dispose();
   });
 });

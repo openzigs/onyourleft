@@ -480,6 +480,10 @@ function fieldClass(reading: HudReading): string {
     // #2213 with #2076: the 4:3 tablet sets *Avg power* in its narrowest
     // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
     ...(reading.key === 'averagePower' ? ['oyl-hud__field--average-power'] : []),
+    // And the distance and the climb by name, which it sets in the second
+    // row's wide tracks there (the same section).
+    ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
+    ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
   ].join(' ');
 }
 

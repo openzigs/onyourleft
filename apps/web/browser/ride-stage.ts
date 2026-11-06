@@ -276,16 +276,31 @@ export const RIDE_TOTAL_READINGS = [
 ] as const;
 
 /**
- * #2076 — whether the ride so far is DRAWN at this viewport: on a tablet's
- * corners layout (47 rem tall or more) and wherever the HUD stacks; given way
- * by clip on a phone's overlay — the corners layouts under 47 rem tall and the
- * column layout upright (`theme.css` §"THE RIDE SO FAR").
+ * #2076 — whether the ride so far is DRAWN at this viewport: everywhere but a
+ * PHONE's overlay — the short corners layout on its side (30 rem tall or
+ * less) and the column layout upright — where it gives way by clip
+ * (`theme.css` §"THE RIDE SO FAR"). The owner's ruling of 2026-11-06 (#2034)
+ * ties it to phones: a laptop's window under 47 rem tall draws it.
  */
 export function rideTotalsDrawn(viewport: Viewport): boolean {
   const corners = viewport.width >= 736 && viewport.height >= 360;
   const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
-  return (corners && viewport.height >= 752) || (!corners && !column);
+  const phoneOnItsSide = corners && viewport.height <= 480;
+  return !phoneOnItsSide && !column;
 }
+
+/**
+ * A laptop's or a desktop's window under 47 rem tall: the corners layout, not
+ * a phone's and not a tablet's. None of the nine overlay viewports is one,
+ * and the owner's ruling of 2026-11-06 (#2034) is that what a phone gives way
+ * is drawn here; `theme.css` names these three in its note on *Start the
+ * race*.
+ */
+export const LAPTOP_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a laptop window — 1280×720', width: 1280, height: 720, unstagedFails: true },
+  { name: 'a laptop window — 1366×657', width: 1366, height: 657, unstagedFails: true },
+  { name: 'a small laptop window — 1024×600', width: 1024, height: 600, unstagedFails: true },
+];
 
 /**
  * #2071 — whether the gradient is drawn in the PRIMARY panel at this
