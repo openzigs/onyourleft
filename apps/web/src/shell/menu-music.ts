@@ -13,7 +13,8 @@
  * {@link MenuMusic.press}, which `AppShell` calls from its `click` handler and
  * nowhere else — the audio context is resumed there, inside the gesture. A
  * press on the header's *Mute all sound* ({@link HOLDS_THE_MUSIC}) never starts
- * it: a rider reaching for the mute first has said what they want.
+ * it: a rider reaching for the mute first has said what they want. Nor does
+ * any press on the rider's own player's controls ({@link THE_RIDERS_PLAYER}).
  *
  * ## Never during a ride
  *
@@ -90,6 +91,16 @@ export const MENU_MUSIC_TRACK: string | undefined = undefined;
  * started is a rider reaching for silence.
  */
 export const HOLDS_THE_MUSIC = '.oyl-header__mute';
+
+/**
+ * The rider's own player's controls in the header (#2073,
+ * `OtherPlayerControls.tsx`, its class): a press there is never one of ours,
+ * whether or not the loop has started. Its `onClick` runs before `AppShell`'s
+ * press handler and `OtherPlayer` believes a *Pause* at once, so without this
+ * the rider's own *Pause music* would start our loop on the same click — and
+ * keep it playing over theirs when the key is refused (#2242's review).
+ */
+export const THE_RIDERS_PLAYER = '.oyl-other-player';
 
 /**
  * How long the loop must have been silent, on a visible menu route, before the
@@ -212,6 +223,7 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
     press(target, context) {
       lastContext = context;
       if (deps.track === undefined || quiet(context)) return;
+      if (target instanceof Element && target.closest(THE_RIDERS_PLAYER) !== null) return;
       if (
         element === undefined &&
         target instanceof Element &&
@@ -242,7 +254,13 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       const nowOnMenu = !deps.hidden() && !quiet(context);
       const cameBack = onMenu === false && nowOnMenu;
       onMenu = nowOnMenu;
-      if (element === undefined) return;
+      if (element === undefined) {
+        // Never played, but the header did not read while the rider was away
+        // either: a press now would ask a reading from before they left, when
+        // they may have started their own player (#2242's review).
+        if (cameBack) unsettle();
+        return;
+      }
       if (deps.hidden()) {
         stop(element, false);
       } else if (quiet(context)) {
