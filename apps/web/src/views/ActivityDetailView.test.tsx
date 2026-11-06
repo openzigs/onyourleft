@@ -43,6 +43,9 @@ import {
   seedRide,
   streamSetFor,
 } from '@onyourleft/store/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -1212,6 +1215,13 @@ describe('#2194 — a read that fails says so, never “Reading…” for good',
     );
     expect(slot?.textContent).not.toContain('Reading power');
     expect(slot?.querySelector('.oyl-status--warning')).not.toBeNull();
+    // The owner's ruling of 2026-11-06: no chart-sized space under the warning.
+    expect(slot?.classList.contains('oyl-trace-slot--failed')).toBe(true);
+    expect(
+      document
+        .querySelector('[data-oyl-trace-slot="heartRate"]')
+        ?.classList.contains('oyl-trace-slot--failed'),
+    ).toBe(false);
     const curve = document.querySelector('[data-oyl-curve-slot]');
     expect(curve?.textContent).toContain(
       'Could not read this ride’s power, so its power curve cannot be drawn. The stored channel is corrupt.',
@@ -1249,12 +1259,52 @@ describe('#2194 — a read that fails says so, never “Reading…” for good',
       'Could not read this ride’s speed, so its charts stay drawn against time. The stored channel is corrupt.',
     );
     expect(document.body.textContent).not.toContain('Reading the distance ridden');
+    // The owner's ruling of 2026-11-06: said once, by the axis choice, and not
+    // again in the speed slot, which keeps no chart's height either.
+    expect(document.body.textContent?.split('Could not read this ride’s speed')).toHaveLength(2);
+    const speed = document.querySelector('[data-oyl-trace-slot="speed"]');
+    expect(speed?.textContent).toBe('');
+    expect(speed?.classList.contains('oyl-trace-slot--failed')).toBe(true);
     expect(
       queryAll(
         document.querySelector('[data-oyl-trace-slot="power"]') as Element,
         '.oyl-trace-chart__times > div',
       ).map((each) => each.textContent),
     ).toEqual(['0:00', '5:00', '10:00']);
+  });
+});
+
+describe('#2194 — the owner’s screenshot rulings of 2026-11-06', () => {
+  it('says a failed speed read once on the time axis, in the speed slot and not at the axis choice', async () => {
+    mounted = await open(
+      failing(
+        stubDetail(ATHLETE, {
+          activity: stubActivity({ hasPosition: false }),
+          channels: {
+            power: powerSeries(600),
+            speed: Array.from({ length: 600 }, () => metresPerSecond(10)),
+          },
+          laps: [],
+        }),
+        'speed',
+      ),
+    );
+    await settle();
+    await settle();
+    expect(document.body.textContent?.split('Could not read this ride’s speed')).toHaveLength(2);
+    expect(document.querySelector('[data-oyl-trace-slot="speed"]')?.textContent).toContain(
+      'Could not read this ride’s speed. The stored channel is corrupt.',
+    );
+  });
+
+  it('gives a failed slot no chart’s height in the stylesheet', () => {
+    const theme = readFileSync(join(import.meta.dirname, '../design/theme.css'), 'utf8');
+    const slot = theme.indexOf('.oyl-trace-slot {');
+    const failed = theme.indexOf('.oyl-trace-slot--failed {');
+    expect(slot).toBeGreaterThan(-1);
+    // After the slot's own rule, so it wins at the same specificity.
+    expect(failed).toBeGreaterThan(slot);
+    expect(theme.slice(failed, theme.indexOf('}', failed))).toMatch(/min-height:\s*0;/);
   });
 });
 

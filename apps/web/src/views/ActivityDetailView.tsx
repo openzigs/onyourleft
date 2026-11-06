@@ -877,10 +877,21 @@ export function ActivityDetailView({
           */}
           {chartable.map((series) => {
             const trace = traces.get(series.channel);
+            const failed = trace === undefined ? failedReads.get(series.channel) : undefined;
+            // #2194, the owner's ruling of 2026-11-06: with the distance axis
+            // chosen, a failed speed read is said once, by the axis choice,
+            // which already gives the reason; the speed slot then says nothing.
+            const saidByAxis =
+              series.channel === 'speed' &&
+              axisKind === 'distance' &&
+              distanceState.kind === 'failed';
             return (
               <div
                 key={series.channel}
-                className="oyl-trace-slot"
+                // #2194: a failed slot holds no chart, so it keeps no chart's height.
+                className={
+                  failed === undefined ? 'oyl-trace-slot' : 'oyl-trace-slot oyl-trace-slot--failed'
+                }
                 data-oyl-trace-slot={series.channel}
                 ref={(element) => {
                   if (element === null) {
@@ -891,12 +902,13 @@ export function ActivityDetailView({
                 }}
               >
                 {trace === undefined ? (
-                  failedReads.has(series.channel) ? (
-                    // #2194: a read that failed says so, not "Reading…" for good.
-                    <StatusMessage tone="warning">
-                      Could not read this ride&rsquo;s {series.label.toLowerCase()}.{' '}
-                      {failedReads.get(series.channel)}
-                    </StatusMessage>
+                  failed !== undefined ? (
+                    saidByAxis ? null : (
+                      // #2194: a read that failed says so, not "Reading…" for good.
+                      <StatusMessage tone="warning">
+                        Could not read this ride&rsquo;s {series.label.toLowerCase()}. {failed}
+                      </StatusMessage>
+                    )
                   ) : (
                     <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
                   )

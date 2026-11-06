@@ -4875,6 +4875,11 @@ select.oyl-input {
   min-height: 12rem;
 }
 
+/* #2194: a slot whose read failed holds a warning, not a chart, so it keeps no chart's height. */
+.oyl-trace-slot--failed {
+  min-height: 0;
+}
+
 /*
  * The shared cursor (#2068): a native range across the stack's width, with
  * the readings at its time in words under it. The input is given the 44 px
