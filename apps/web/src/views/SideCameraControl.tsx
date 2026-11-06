@@ -302,7 +302,8 @@ export const SIDE_INSTANCE_STOPPED_TEXT: Readonly<Record<SideUnavailableReason, 
  * first NAMES the service the instance sends each picture on to, as the
  * hosted consent does ({@link sideInstanceOnToText}); and pictures the
  * instance turned away for coming too often are counted on their own, not as
- * failures ({@link instanceRateLimitedText}).
+ * failures ({@link instanceRateLimitedText}) — as a part of the pictures sent,
+ * since #2192.
  */
 function instancePicturesText(state: SideAnalysisState, looked: number): string {
   const onTo = sideInstanceOnToText(state.hostedService);
@@ -317,12 +318,18 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
         'Pictures are still thrown away here as they arrive.'
       );
     case 'ready':
+      // #2192: a picture the instance turned away was still sealed and sent,
+      // so it is counted among the sent, and the turned-away count is told as
+      // a part OF that count, naming it — never beside a sent count that
+      // leaves it out, which read as a contradiction. The hosted sentence
+      // stays straight after the first and says it covers pictures READ, as
+      // the turned-away ones were never forwarded.
       return (
-        `Pictures sealed and sent to your instance, and not kept here: ${String(looked)}, ` +
+        `Pictures sealed and sent to your instance, and not kept here: ${String(looked + state.rateLimited)}, ` +
         `with you in ${String(state.posed)} of them.` +
         onTo +
-        ` Not sent, because one was already with your instance: ${String(state.skipped)}.` +
-        instanceRateLimitedText(state.rateLimited)
+        instanceRateLimitedText(state.rateLimited, looked + state.rateLimited) +
+        ` Not sent, because one was already with your instance: ${String(state.skipped)}.`
       );
   }
 }
@@ -336,17 +343,18 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
 function sideInstanceOnToText(host: string | undefined): string {
   return host === undefined
     ? ''
-    : ` Your instance sends each one on to ${host}, the service your own key is for.`;
+    : ` Your instance sends each one it reads on to ${host}, the service your own key is for.`;
 }
 
 /**
- * How many pictures the instance turned away unread for coming too often,
- * with its leading space, or nothing when none was (#2175).
+ * How many of the pictures sent the instance turned away unread for coming
+ * too often, with its leading space, or nothing when none was (#2175). Since
+ * #2192 these are a part of the sent count it follows, not apart from it.
  */
-function instanceRateLimitedText(count: number): string {
+function instanceRateLimitedText(count: number, sent: number): string {
   return count === 0
     ? ''
-    : ` Turned away by your instance unread, because it was asked too often: ${String(count)}.`;
+    : ` Of the ${String(sent)} sent, turned away by your instance unread, because it was asked too often: ${String(count)}.`;
 }
 
 /**
