@@ -436,8 +436,11 @@ export function InstanceView({
     </>
   );
 
+  // #2067: the panels are a screen of sections (`shell/routes.ts`
+  // §`INSTANCE_ROUTE`), so on a tablet they lie in rows across its width, in
+  // the order they are read.
   return (
-    <>
+    <div className="oyl-sections">
       {state.kind === 'connected' ? (
         <section className="oyl-panel" aria-labelledby="oyl-instance-connected">
           <h2 id="oyl-instance-connected">Connected</h2>
@@ -584,6 +587,6 @@ export function InstanceView({
       ) : null}
 
       <Receives />
-    </>
+    </div>
   );
 }

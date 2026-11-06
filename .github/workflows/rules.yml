@@ -717,9 +717,9 @@ jobs:
       # deb822 format would name it `.sources`; `rm -f` because a missing file
       # is this step's desired outcome rather than an error. It runs before
       # the step that installs the browser. ⚠️ Since #2207 nothing in this
-      # workflow runs apt, so here it is a no-op kept as a guard; it is still
-      # load-bearing in nightly.yml and demo-video.yml, whose installs keep
-      # `--with-deps` and which point at this comment for the reason.
+      # workflow runs apt, so here it is a no-op kept as a guard, as it is in
+      # nightly.yml since #2209; it is still load-bearing in demo-video.yml,
+      # whose ffmpeg comes from apt, and which points at this comment.
       - name: Drop the unrelated Chrome apt source
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \

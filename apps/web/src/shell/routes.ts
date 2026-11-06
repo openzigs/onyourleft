@@ -112,7 +112,13 @@ export type RouteId =
  *
  * - `sections` drops it for a screen made of sections a rider works through —
  *   Devices, Settings, Files, Camera, Analysis, Segments and About (#1014,
- *   epic #935 Phase 2). On a phone nothing changes; given a tablet's width the
+ *   epic #935 Phase 2), and since #2067 More, Credits, Instance, the route
+ *   builder and a ride's own page, which were one column a reading measure
+ *   wide beside an empty half of a landscape tablet. The side camera (a
+ *   phone's screen, whose consent is read before its first control),
+ *   Moderation, a segment's page and not-found keep `prose`;
+ *   `sections.browser.spec.ts` §"#2067" says why for each. On a phone nothing
+ *   changes; given a tablet's width the
  *   view's `.oyl-sections` lays its sections in rows of two or three,
  *   decided by a container query on `main` rather than on the window
  *   (`theme.css` §"A screen of sections"). The prose directly under `main` —
@@ -451,7 +457,7 @@ export const ROUTES: readonly RouteDefinition[] = [
 export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
   id: 'route-builder',
   group: 'routes',
-  layout: 'prose',
+  layout: 'sections',
   path: '/routes/new',
   navLabel: 'Draw a route',
   title: 'Draw a route',
@@ -497,7 +503,7 @@ export const ROUTE_EDITOR_ROUTE: RouteDefinition = {
 export const MORE_ROUTE: RouteDefinition = {
   id: 'more',
   group: 'more',
-  layout: 'prose',
+  layout: 'sections',
   path: '/more',
   navLabel: 'More',
   title: 'More',
@@ -524,7 +530,7 @@ export const MORE_ROUTE: RouteDefinition = {
 export const CREDITS_ROUTE: RouteDefinition = {
   id: 'credits',
   group: 'more',
-  layout: 'prose',
+  layout: 'sections',
   path: '/about/credits',
   navLabel: 'Credits',
   title: 'Credits',
@@ -545,7 +551,7 @@ export const CREDITS_ROUTE: RouteDefinition = {
 export const INSTANCE_ROUTE: RouteDefinition = {
   id: 'instance',
   group: 'more',
-  layout: 'prose',
+  layout: 'sections',
   path: '/settings/instance',
   navLabel: 'Instance',
   title: 'Connect to an instance',
@@ -618,7 +624,7 @@ export const SIDE_CAMERA_ROUTE: RouteDefinition = {
 export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
   id: 'activity-detail',
   group: 'history',
-  layout: 'prose',
+  layout: 'sections',
   path: '/activities/:activity',
   navLabel: 'Ride details',
   // The `h1` the shell renders, and therefore the same for every ride. The
