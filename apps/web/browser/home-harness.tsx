@@ -38,7 +38,8 @@
  * `home.html?sensors=four` is another state (the owner's screenshot review of
  * 2026-11-05 on #2045): a trainer, a heart rate strap, a power meter and a
  * cadence sensor, all paired, connected and reading, and the trainer not
- * handed control — the longest sensors module there is.
+ * handed control — the longest sensors module there is. Since #2047 three of
+ * them report a battery level, one of them low.
  *
  * The controls, each the defect its assertion exists for:
  *
@@ -75,6 +76,7 @@ import {
   degreesLongitude,
   geographicPosition,
   metres,
+  percent,
   routeProfile,
   seconds,
   unixSeconds,
@@ -88,6 +90,7 @@ import { tabbableElements } from '../src/a11y/audit';
 import { stubAnalysis } from '../src/analysis/testing';
 import { routeStub, stubRouteId } from '../src/routes/testing';
 import { stubActivity } from '../src/detail/testing';
+import type { BatteryLevelPort } from '../src/ride/battery-port';
 import type { RideSnapshot } from '../src/ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
@@ -501,6 +504,18 @@ function fourSensors(): RideSnapshot {
   };
 }
 
+/** `?sensors=four`'s batteries (#2047): the trainer reports none, the strap is low. */
+const FOUR_SENSOR_BATTERIES: BatteryLevelPort = {
+  readBatteryLevel: (id) =>
+    Promise.resolve(
+      new Map([
+        [deviceId('strap'), percent(15)],
+        [deviceId('pedals'), percent(82)],
+        [deviceId('cadence'), percent(100)],
+      ]).get(id),
+    ),
+};
+
 async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
   const deadline = performance.now() + PATIENCE_MS;
   for (;;) {
@@ -569,6 +584,7 @@ async function run(): Promise<void> {
           analysis={stubAnalysis(ATHLETE, rides)}
           routes={routeStub(ATHLETE, [ROUTE])}
           rideController={stubRideController(sensors ? fourSensors() : idleSnapshot()).controller}
+          {...(sensors ? { battery: FOUR_SENSOR_BATTERIES } : {})}
         />
       </StrictMode>,
     );
@@ -585,6 +601,12 @@ async function run(): Promise<void> {
     );
     await until('Next up on the route', () =>
       document.querySelector('.oyl-next-up__profile') === null ? undefined : true,
+    );
+  }
+  if (sensors) {
+    // #2047: the three batteries that report a level are drawn.
+    await until('the batteries', () =>
+      document.querySelectorAll('.oyl-home__battery').length === 3 ? true : undefined,
     );
   }
   await document.fonts.ready;

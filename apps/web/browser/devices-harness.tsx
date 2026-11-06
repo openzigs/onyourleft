@@ -42,6 +42,8 @@ import { flushSync } from 'react-dom';
 
 import { athleteId, recordingSessionId } from '@onyourleft/store';
 import {
+  BATTERY_LEVEL,
+  BATTERY_SERVICE,
   createIndoorBikeDataProfile,
   FITNESS_MACHINE_CONTROL_POINT,
   FITNESS_MACHINE_FEATURE,
@@ -58,6 +60,7 @@ import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { createFakeBluetooth } from '@onyourleft/sensors/web-bluetooth/testing';
 
 import { stubAnalysis } from '../src/analysis/testing';
+import type { BatteryLevelPort } from '../src/ride/battery-port';
 import type { RecordingCheckpointStore } from '../src/recording/recorder';
 import { browserClock, createRideController } from '../src/ride/controller';
 import { openWebBluetoothTrainer } from '../src/ride/trainer';
@@ -65,7 +68,7 @@ import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
-import { STRAP_NAME, TRAINER_NAME } from './devices-fixture';
+import { STRAP_BATTERY_PERCENT, STRAP_NAME, TRAINER_NAME } from './devices-fixture';
 
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
@@ -131,7 +134,15 @@ const fake = createFakeBluetooth({
     {
       id: 'strap',
       name: STRAP_NAME,
-      services: [{ uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] }],
+      services: [
+        { uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] },
+        // #2047: the strap reports its battery; the trainer above does not.
+        {
+          uuid: BATTERY_SERVICE,
+          characteristics: [BATTERY_LEVEL],
+          readValues: { [BATTERY_LEVEL]: Uint8Array.from([STRAP_BATTERY_PERCENT]) },
+        },
+      ],
     },
   ],
 });
@@ -155,7 +166,12 @@ function run(): void {
   const transport = createWebBluetoothTransport({
     profiles: [createIndoorBikeDataProfile(), heartRateProfile],
     bluetooth: fake.bluetooth,
+    batteryLevel: true,
   });
+  // #2047: `main.tsx`'s browser port, over this transport.
+  const battery: BatteryLevelPort = {
+    readBatteryLevel: async (id) => transport.readBatteryLevel(id).catch(() => undefined),
+  };
   const capabilities: CapabilityProbe = { bluetooth: fake.bluetooth, secureContext: true };
   let session = 0;
   const rideController = control
@@ -179,6 +195,7 @@ function run(): void {
           // to Devices — the Trainer card's, or in the control, which has no
           // ride controller, the empty state's (#1429).
           analysis={stubAnalysis(ATHLETE, [])}
+          battery={battery}
         />
       </StrictMode>,
     );

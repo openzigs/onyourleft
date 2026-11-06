@@ -2285,6 +2285,34 @@ html {
   font-size: var(--oyl-font-size-sm);
 }
 
+/* #2047: a sensor's battery — a badge in the device's row since the owner's
+   review of #2045: a small drawing filled to the level, then the number and,
+   when it is low, the word `low`. The low
+   one is ALSO drawn in the warning message's own declared pair
+   (`warningInk` on `warningSurface`), a second signal beside the words and
+   never the only one (SC 1.4.1). */
+.oyl-home__battery {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-home__battery-glyph {
+  flex: none;
+  width: 1.5rem;
+  height: 0.75rem;
+}
+
+.oyl-home__battery--low {
+  padding-inline: var(--oyl-space-xs);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-warning-surface);
+  color: var(--oyl-color-warning-ink);
+}
+
 /*
  * THE METRIC TYPE — #2041, ADR 0063 D-5. Every number a rider reads, live or
  * in a summary, in one face (Barlow, the display family), at 700, with
