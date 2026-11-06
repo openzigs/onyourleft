@@ -316,6 +316,7 @@ const KEPT: Record<RouteId, Kept> = {
     reason: 'the empty walk is an account that moderates nothing, so the page has no action on it',
   },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
+  'route-editor': { sentences: [], reason: NOTHING_TUCKED },
   'activity-detail': {
     sentences: [],
     // #805, carried from #831's review: what leaves the device, and when, on

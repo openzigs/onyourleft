@@ -54,6 +54,7 @@ import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
+import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
 import { createDiscordClient } from './voice/discord.ts';
 import { createRoomVoice, type RoomVoice } from './voice/room-voice.ts';
@@ -278,6 +279,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let voiceModeration: VoiceModeration | undefined;
   let voiceReady: Promise<void> = Promise.resolve();
   let sync: Sync | undefined;
+  let segments: Segments | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
   let stopRetrying = (): void => undefined;
@@ -600,6 +602,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ghostRider: nameFor,
           })
         : undefined;
+      // #68: published segments and their boards, beside sync and for its
+      // reason — every route is sealed-only, and a keyless instance seals
+      // nothing, so there they answer `unavailable`.
+      segments = keys.configured ? createSegments({ store, now }) : undefined;
       // #874: a Discord voice channel per private room, only where the
       // operator configured their own bot and server. Off — no RoomVoice at
       // all — otherwise, and a room works exactly as it did. Its token goes
@@ -822,6 +828,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             rooms,
             sealed: createSealed({ store, now }),
             ...(sync === undefined ? {} : { sync }),
+            ...(segments === undefined ? {} : { segments }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
             ...(sidePose === undefined ? {} : { sidePose }),

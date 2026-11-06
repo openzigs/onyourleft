@@ -146,6 +146,18 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'a race’s result for its riders only; every other rider in it is named through the choke point itself (`canSee`), and one the caller may not see is “a rider” with no name (rooms/rooms.test.ts)',
   },
+  listSegments: {
+    heldElsewhere:
+      'names no athlete; a segment whose publisher the caller may not see is left out, by the choke point’s rule applied in the read and held to `canSee` pair by pair (#68, segments/leaderboard.test.ts)',
+  },
+  getSegment: {
+    heldElsewhere:
+      'names a segment by its digest, never an athlete; one whose publisher the caller may not see is `not_found`, by the same rule (#68, segments/leaderboard.test.ts)',
+  },
+  getSegmentLeaderboard: {
+    heldElsewhere:
+      'names a segment, never an athlete; every row’s rider is held to the choke point’s rule in the one read, held to `canSee` pair by pair, and one the caller may not see is left out (#68, segments/leaderboard.test.ts)',
+  },
 };
 
 /**
@@ -169,6 +181,8 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
     'one of the CALLER’s own blocks, by an opaque random handle that is never an athlete id (#1529)',
   route:
     'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
+  segmentId:
+    'a published segment, by a digest of its definition (#68); its publisher and every rider on its board are held to the choke point’s rule inside the read',
 };
 
 /**
@@ -235,7 +249,10 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   lengthMetres: 'a room’s route length',
   grades: 'a room’s route gradients',
   gpx: 'the creator’s own route for a room',
-  visibility: 'whether a room a rider makes is private or public (#788)',
+  visibility:
+    'whether a room a rider makes is private or public (#788), or who may see one of the CALLER’s own rides (#68)',
+  segment: 'the definition of a segment the CALLER publishes: a name, a sport and a path (#68)',
+  efforts: 'the CALLER’s own efforts on a segment, from one of their own rides (#68)',
   startsAt: 'when a public room’s creator says it starts (#788)',
   lapRace: 'a room’s lap-race setting: its laps and whether items are on (#1910)',
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',

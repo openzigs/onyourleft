@@ -132,6 +132,8 @@ const SEGMENT_ID = 'the-drag';
 export const PARAMETERS: Partial<Record<RouteId, string>> = {
   'activity-detail': RIDE_ID,
   'segment-detail': SEGMENT_ID,
+  // #2007: the populated fixture's saved route, opened in the editor.
+  'route-editor': 'route-1',
 };
 
 /**
@@ -220,6 +222,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   // storage, which `PopulatedShell` writes for the populated walk and clears
   // for the empty one — see `seedRouteDraft`.
   'route-builder': { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
+  // #2007: the editor's choice of what to change is drawn only over a route it read.
+  'route-editor': { kind: 'fixture', marker: '.oyl-main fieldset' },
   'side-camera': {
     kind: 'none',
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
@@ -292,6 +296,7 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'side-camera': { kind: 'none', reason: 'a pairing flow, not a list' },
   'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
+  'route-editor': { kind: 'none', reason: 'one saved route, opened by its id' },
   more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
   'not-found': { kind: 'none', reason: 'a heading and the route list' },
 };
