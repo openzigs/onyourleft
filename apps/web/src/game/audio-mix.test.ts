@@ -47,6 +47,9 @@ function start(
     mixOf(() => store),
   );
   output.resume();
+  // The menus' music playing (#2058): until it is, the music bus is 0
+  // whatever the mix says — `web-audio.ts` §"The music".
+  output.setMusicOn(true);
   return { fake, output };
 }
 

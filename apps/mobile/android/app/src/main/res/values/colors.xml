@@ -21,4 +21,12 @@
       on every Android version.
     -->
     <drawable name="oyl_launch_background">@color/oyl_canvas</drawable>
+    <!--
+      The Android 12+ splash icon (#2052), named per palette as the canvas is:
+      the mark the brand pipeline composes for the splash
+      (apps/web/tools/brand/derive_brand.py, kind "splash"), drawn on
+      oyl_canvas. One picture serves both palettes while both start dark.
+      apps/mobile/src/android/splash-icon.test.ts resolves it in each.
+    -->
+    <drawable name="oyl_splash_icon">@drawable/oyl_splash_mark</drawable>
 </resources>

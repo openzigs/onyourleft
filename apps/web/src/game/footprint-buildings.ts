@@ -488,7 +488,9 @@ export type FootprintVerdicts = Readonly<Record<FootprintVerdict, number>>;
  * `porch-roof`, its roof, which wears the roof; and `porch-trim`, its steps
  * and its fascia, painted in the trim as `trim` is. Since #1590: `shopfront`, a
  * shop's front, its sign band and its awning, which wear the walls and which
- * the shader paints; a commercial roof's cornice is `trim`.
+ * the shader paints; a commercial roof's cornice is `trim`. Since #2206: `spire`,
+ * a steeple's or a cupola's pyramid, which wears `slate` whatever the roof does
+ * (the owner's ruling: a tagged roof material is the nave's only).
  */
 export type FootprintRole =
   | 'wall'
@@ -504,7 +506,8 @@ export type FootprintRole =
   | 'shopfront'
   | 'porch'
   | 'porch-roof'
-  | 'porch-trim';
+  | 'porch-trim'
+  | 'spire';
 
 /** Every {@link FootprintRole}, in a fixed order. */
 export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
@@ -522,6 +525,7 @@ export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
   'porch',
   'porch-roof',
   'porch-trim',
+  'spire',
 ];
 
 /**
@@ -532,6 +536,9 @@ export const PORCH_ROLES: readonly PorchRole[] = ['porch', 'porch-roof', 'porch-
 
 /** One of {@link PORCH_ROLES}. */
 export type PorchRole = Extract<FootprintRole, 'porch' | 'porch-roof' | 'porch-trim'>;
+
+/** The surface a steeple's or a cupola's spire wears — #2206: slate, whatever the plan's roof is. */
+export const SPIRE_SURFACE: StructureSurface = 'slate';
 
 /** The roles that wear a plan's roof surface — #1588, #1589; every other wears its wall surface. */
 export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set([
@@ -4941,7 +4948,9 @@ function steepleSiteOf(ring: Ring, rectangle: Rectangle, end: number): SteepleSi
  * they stand, as a wall's and a roof's do.
  */
 function steeple(
-  writing: Pick<Writing, 'wall' | 'roof' | 'trim'>,
+  writing: Pick<Writing, 'wall' | 'trim'>,
+  /** Where the spire's faces go: `roof`, or {@link Writing}'s `spire` where a tagged roof is the nave's only — #2206. */
+  spire: number[],
   site: SteepleSite,
   heights: readonly [bottom: number, top: number, floor: number],
   styles: { readonly wall: Style; readonly roof: Style },
@@ -4995,7 +5004,7 @@ function steeple(
       cz + dz * half - dx * side * half,
     ];
     triangle(
-      writing.roof,
+      spire,
       [corner(-1), corner(1), apex],
       [dx * across, up, dz * across],
       [
@@ -7110,6 +7119,12 @@ function planFootprint(
     /** #1795: a town hall's cupola. */
     cupola: boolean;
   }
+  // #2206: the owner's ruling: a tagged roof material is the nave's only, and a spire stays
+  // slate. The roof role is one surface, so a spire on a plan whose roof tag is read is a
+  // role of its own ({@link SPIRE_SURFACE}), plain; every other plan keeps it in `roof`.
+  const spireApart = roofMaterial !== null;
+  const spireInto = (writing: Writing): number[] => (spireApart ? writing.spire : writing.roof);
+  const spireStyle: Style = spireApart ? NO_STYLE : roofStyle;
   const build = (
     withHoles: boolean,
     withCornice: boolean,
@@ -7131,6 +7146,7 @@ function planFootprint(
       porch: [],
       'porch-roof': [],
       'porch-trim': [],
+      spire: [],
     };
     const drew: Extras = {
       garage: false,
@@ -7294,9 +7310,10 @@ function planFootprint(
       const towerTop = roofTop + STEEPLE.above;
       steeple(
         writing,
+        spireInto(writing),
         steepleAt,
         [base, towerTop, floor],
-        { wall: wallStyle, roof: roofStyle },
+        { wall: wallStyle, roof: spireStyle },
         // #1794: a church's spire, to its top by `CHURCH`'s height rule.
         church
           ? spireApexOf({ ground: lowest, ridge: roofTop, towerTop, mapped: mappedSpire }) -
@@ -7309,9 +7326,10 @@ function planFootprint(
     if (withSteeple && cupolaAt !== undefined) {
       steeple(
         writing,
+        spireInto(writing),
         cupolaAt,
         [roofTop - CUPOLA.half, roofTop + CUPOLA.drum, floor],
-        { wall: wallStyle, roof: roofStyle },
+        { wall: wallStyle, roof: spireStyle },
         CUPOLA.cap,
       );
       drew.cupola = true;
@@ -7565,6 +7583,7 @@ function planFootprint(
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,
-    farTriangleCount: trianglesOf(writing.wall) + trianglesOf(writing.roof),
+    farTriangleCount:
+      trianglesOf(writing.wall) + trianglesOf(writing.roof) + trianglesOf(writing.spire),
   };
 }

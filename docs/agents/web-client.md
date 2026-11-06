@@ -740,6 +740,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         Settings holds music's switch and volume beside the
                         menus' and the ride's; every sound panel there calls
                         `applyMix()` too, so a playing sound follows at once.
+                        Since #2058 `menu-music.ts` is the menus' music: only a
+                        press starts it (never the header's mute, never at
+                        load), the same `quiet` rule as the sounds stops it with
+                        a fade, a hidden page pauses it; an `<audio>` element
+                        made at that press, routed into the music bus. ⚠️ Silent
+                        until #2057 sets `MENU_MUSIC_TRACK`.
                         ⚠️ Since #1072 `ListDetail.tsx` carries a card into its
                         detail with Motion (ADR 0041), reached only through
                         that lazily loaded chunk

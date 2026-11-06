@@ -38,6 +38,7 @@
 
 import {
   Suspense,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -111,9 +112,15 @@ import {
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
+import type { MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
 import { useAndroidBack } from './android-back';
-import { isRideRoute, mayAnimateBetween, RideHasTheScreen } from './route-motion';
+import {
+  isRideRoute,
+  mayAnimateBetween,
+  RideHasTheScreen,
+  ROUTE_TRANSITION_CLASS,
+} from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
 
@@ -170,6 +177,14 @@ const MAIN_ID = 'oyl-main';
  * title's suffix (#671). One constant, so the three cannot disagree.
  */
 const APP_NAME = 'On Your Left';
+
+/**
+ * The rail's mark — #2066: the launcher icon `tools/brand/` cuts into
+ * `public/` (`brand.json`), precached with the rest of `public/`. Its
+ * intrinsic size, so the box is reserved before the file decodes.
+ */
+const NAV_MARK_FILE = 'icon-192.png';
+const NAV_MARK_PIXELS = 192;
 
 /** The id of the `h1`, which names the `main` landmark through `aria-labelledby`. */
 const VIEW_TITLE_ID = 'oyl-view-title';
@@ -334,6 +349,13 @@ export interface AppShellProps {
    * every test that does not ask for sounds render with none.
    */
   readonly menuSounds?: MenuSounds | undefined;
+  /**
+   * The menus' music — #2058. Every press is handed to it, as to
+   * {@link menuSounds}, and it is told whenever the route, the ride, immersion
+   * or the page's visibility changes (`menu-music.ts` says why only a press
+   * starts it). `undefined` is silence, as for the sounds.
+   */
+  readonly menuMusic?: MenuMusic | undefined;
   /**
    * The output the header's mute reaches — #2056. Absent, it is the app's
    * shared one (`game/web-audio.ts` §`sharedCueOutput`), which makes no audio
@@ -933,12 +955,42 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
-    props.menuSounds?.press(event.target, {
+    const context = {
       immersive,
       routeId: route.id,
       ridePhase: props.rideController?.getSnapshot().phase,
-    });
+    };
+    props.menuSounds?.press(event.target, context);
+    // #2058: the same press, and the only thing that can start the music.
+    props.menuMusic?.press(event.target, context);
   }
+
+  /*
+   * #2058: the music is told whenever it may have to stop or may carry on — a
+   * new route, the stage taking or giving back the screen, the ride
+   * controller's phase moving, the page hidden or shown. None of these is a
+   * press, so none can start it (`menu-music.ts` §"Only from the rider's first
+   * press").
+   */
+  const menuMusic = props.menuMusic;
+  const rideController = props.rideController;
+  useEffect(() => {
+    if (menuMusic === undefined) return undefined;
+    const tell = (): void => {
+      menuMusic.update({
+        immersive,
+        routeId: route.id,
+        ridePhase: rideController?.getSnapshot().phase,
+      });
+    };
+    tell();
+    const unsubscribe = rideController?.subscribe(tell);
+    document.addEventListener('visibilitychange', tell);
+    return () => {
+      unsubscribe?.();
+      document.removeEventListener('visibilitychange', tell);
+    };
+  }, [menuMusic, rideController, immersive, route.id]);
 
   const view = (
     // #1072's review (N5): a view deciding about motion of its own reads
@@ -1046,19 +1098,31 @@ export function AppShell(props: AppShellProps): JSX.Element {
           tabIndex={-1}
           aria-labelledby={VIEW_TITLE_ID}
         >
-          <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
-            {route.title}
-          </h1>
-          {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
           {/*
-            #993: one line under the title, and the rest one press away. AFTER
-            the summary rather than inside the heading, so the `h1` is the
-            title alone and `main > h1 + p` is still the line under it;
-            `theme.css` §`.oyl-help` draws the ⓘ beside the title.
+            #2065: the title block — the `h1`, the line under it and the
+            screen's ⓘ in one box, which `theme.css` §"THE TITLE BLOCK" lays
+            out as a row that wraps: the line sits beside the title where it
+            fits and under it where it does not. The `h1` is still `main`'s
+            first heading, `.oyl-view-head > h1 + p` is still the line under
+            it, and the order is still title, line, help. No class while a
+            ride has the screen (#423): the box then holds only the hidden
+            title and takes no room.
           */}
-          {immersive || route.help === undefined ? null : (
-            <ScreenHelp title={route.title} paragraphs={route.help} />
-          )}
+          <div className={immersive ? undefined : 'oyl-view-head'}>
+            <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
+              {route.title}
+            </h1>
+            {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
+            {/*
+              #993: one line under the title, and the rest one press away.
+              AFTER the line rather than inside the heading, so the `h1` is
+              the title alone; `theme.css` §`.oyl-help` draws the ⓘ at the end
+              of the title's row, and the panel opens under the row.
+            */}
+            {immersive || route.help === undefined ? null : (
+              <ScreenHelp title={route.title} paragraphs={route.help} />
+            )}
+          </div>
           {/*
             #674: a view in a lazy group is not in the entry chunk, so on its
             first visit it suspends and the fallback stands under the `h1` until
@@ -1077,12 +1141,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
             was not animated is not a first one. ⚠️ A navigation to or from a
             ride route, or while a ride has the screen, is applied outside
             `startTransition` (`route-motion.ts` says why), and React animates
-            no other update.
+            no other update. #2054: the class is by which way the navigation
+            goes (`route-motion.ts` §`ROUTE_TRANSITION_CLASS`), a slide into a
+            page below and back out of it, the cross-fade otherwise.
           */}
           <ViewTransition
             key={route.id}
-            enter="oyl-route"
-            exit="oyl-route"
+            enter={ROUTE_TRANSITION_CLASS}
+            exit={ROUTE_TRANSITION_CLASS}
             update="none"
             default="none"
           >
@@ -1138,10 +1204,29 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * colours border — is `theme.css` §"NAVIGATION", because a state keyed on
  * `aria-current` is a rule a browser control can delete through the CSSOM.
  * The span is not `aria-hidden`: it holds the label, which names the link.
+ *
+ * ## The mark — #2066
+ *
+ * The app's own mark, its launcher icon, heads the RAIL on a tablet, so the
+ * brand is where the eye starts on the column a rider steers by. It is
+ * decoration and is hidden from assistive technology twice over (`alt=""`
+ * and `aria-hidden`): the header's wordmark and its `aria-label` already name
+ * the app once, and a second name would read it twice. `theme.css`
+ * §"THE MARK" draws it only on a rail with the height to spare; whether a
+ * phone's bar carries one is the owner's open question on #2030.
  */
 function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
   return (
     <nav aria-label="Primary" className="oyl-nav">
+      <img
+        className="oyl-nav-mark"
+        src={`${import.meta.env.BASE_URL}${NAV_MARK_FILE}`}
+        width={NAV_MARK_PIXELS}
+        height={NAV_MARK_PIXELS}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
       <ul className="oyl-nav-list">
         {NAV_GROUPS.map((group) => {
           const destination = groupDestination(group.id);

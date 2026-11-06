@@ -196,7 +196,7 @@
  *   ("three bicycles in three colours"). `three-renderer.ts` §`RIDER_TINTS`
  *   multiplies {@link RIDER_PALETTE} per instance, so the bot is an orange
  *   machine and the ghost a colourless one against the rider's teal — the
- *   app's accent since #623 — and silver — a whole-vehicle hue rather than one patch of one.
+ *   house kit since #623, its own colour since #2123 — and silver — a whole-vehicle hue rather than one patch of one.
  *   ⚠️ **Since #623 the pacer and the ghost do not wear the rider's kit under
  *   their tints**: they wear {@link PACER_KIT}, the blue #368 was measured in,
  *   because a multiplier cannot pull orange out of a teal jersey.
@@ -227,10 +227,14 @@ const TAU = Math.PI * 2;
  * The owner ruled on 2026-09-27 (#623) that the rider's kit is an On Your Left
  * house kit in the app's colours. Until #2037 it was read from `tokens.ts`'s
  * `accent` and `accentHover`; #2037 replaced the page's teal with the Hi-Vis
- * palette (ADR 0063 D-1), whose light `accent` is an olive within a few
- * degrees of {@link KIT_PALETTE}'s Lime, so the two values are written here,
- * unchanged, and the house kit's colour under Hi-Vis is the owner's to choose
- * (#2123). The realistic rider's jersey is drawn from the same kit
+ * palette (ADR 0063 D-1), whose light `accent` is an olive 13 degrees of hue
+ * from {@link KIT_PALETTE}'s Lime, so the two values are written here,
+ * unchanged. ⚠️ **The owner ruled on 2026-11-05 (#2123) that the house kit
+ * stays teal and is its own colour, not the page's**, which amends #623's
+ * wording: do not read it from `tokens.ts` again, and a reviewer who wants
+ * the jersey to follow the accent is reading #623's first wording.
+ * `kit-palette.test.ts` holds it 40 degrees of hue from every other entry.
+ * The realistic rider's jersey is drawn from the same kit
  * (`three-renderer.ts` §`RIDER_KITS`, the `rider` entry), so both worlds wear
  * one colour. Since #623's second half the rider may choose another from
  * {@link KIT_PALETTE}, whose first entry is this one; what the rider wears is
@@ -252,7 +256,7 @@ const TAU = Math.PI * 2;
  * test red, which is the intended way to find out.
  */
 export const RIDER_PALETTE = {
-  /** The rider's body: jersey, tights and arms. The teal house kit (#623, #2037). */
+  /** The rider's body: jersey, tights and arms. The teal house kit, its own colour (#623, #2123). */
   jersey: 0x0b5c55,
   /** Legs and helmet — darker than the jersey, so the pedalling reads as motion. */
   limb: 0x07443f,
