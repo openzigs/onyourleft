@@ -18,6 +18,7 @@ import {
   type Viewport,
   OVERLAY_VIEWPORTS,
   RIDE_TOTAL_READINGS,
+  roomGivesWay,
   openRide,
   sharedRide,
   measure,
@@ -372,7 +373,7 @@ test.describe('a room ride’s HUD — #1356', () => {
         }
       });
 
-      test(`the room’s readings are on the stage, and the pacer, the ghost and the wind give way${tablet ? ', and the rider’s own stay' : ''}`, async ({
+      test(`the room’s readings are on the stage, and the pacer, the ghost and the wind ${roomGivesWay(viewport) ? 'give way' : 'stay'}${tablet ? ', and the rider’s own stay' : ''}`, async ({
         browser,
       }) => {
         const page = await sharedRide(browser, viewport, FOLLOWING);
@@ -382,13 +383,21 @@ test.describe('a room ride’s HUD — #1356', () => {
             expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
             expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
           }
-          // The owner's ruling of 2026-11-06 (#2034): in a room, on a tablet
-          // as on a phone, the pacer, the ghost and the wind give way FIRST.
+          // The owner's rulings of 2026-11-06 (#2034): in a room the pacer,
+          // the ghost and the wind give way FIRST where space runs out, and
+          // stay where they fit (1280×800).
           for (const name of ROOM_GIVES_WAY) {
             const reading = named(seen.items, name);
-            expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeLessThanOrEqual(
-              1,
-            );
+            if (roomGivesWay(viewport)) {
+              expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeLessThanOrEqual(
+                1,
+              );
+            } else {
+              expect(
+                inside(reading.box, viewport) && reading.onTop,
+                `${how}: ${describeItem(reading)}`,
+              ).toBe(true);
+            }
           }
           // …and the rider's own readings stay on a tablet — but the ride so
           // far on the 4:3 one, where it gives way next (ruling 3).
@@ -493,8 +502,8 @@ function onItsSide(viewport: Viewport): boolean {
 
 function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] {
   const givesWay = [
-    // The owner's ruling of 2026-11-06 (#2034): on a tablet too.
-    ...ROOM_GIVES_WAY,
+    // The owner's rulings of 2026-11-06 (#2034): where space runs out.
+    ...(roomGivesWay(viewport) ? ROOM_GIVES_WAY : []),
     ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
   ] as readonly string[];
   return seen.items

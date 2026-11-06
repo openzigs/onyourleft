@@ -11092,11 +11092,14 @@ select.oyl-input {
  *
  * ⚠️ **What gives way, recorded as #419 asks — the owner's rulings of
  * 2026-11-06 (#2034):**
- * - **in a ROOM, on every tablet and every laptop's window, the pacer's and
- *   the ghost's gaps and the wind give way first**, at every text size and in a group ride as in a
- *   race: `main`'s room order on a phone (§"A ROOM RIDE ON A PHONE": they are
- *   references a rider chose for a ride alone), and the rider's own readings
- *   stay;
+ * - **in a ROOM, where space runs out, the pacer's and the ghost's gaps and
+ *   the wind give way first**: on the 4:3 tablet, the upright tablet, a
+ *   laptop's window under 45 rem tall, and every tablet at #2079's large text
+ *   sizes; in a group ride as in a race. That is `main`'s room order on a
+ *   phone (§"A ROOM RIDE ON A PHONE": they are references a rider chose for a
+ *   ride alone). Where they fit — 1280×800 at the normal size, a 1280×720
+ *   window — they stay (the owner's second ruling of 2026-11-06, on the
+ *   screenshots). The rider's own readings always stay;
  * - **on the 4:3 tablet, in a room, the ride so far gives way too**, as it
  *   does in a room's lap race on every tablet: a room's three readings were a
  *   third row of the tier there, and a race's standings under it ran over
@@ -11109,7 +11112,14 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__field--room {
     contain: inline-size;
   }
+}
 
+/* Where a room's readings leave no row for them (the owner's second ruling of
+   2026-11-06): the 4:3 tablet, the upright tablet, and a laptop's window
+   under 45 rem tall. At 1280×800 and in a 1280×720 window they stay. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem),
+  (min-width: 46rem) and (width < 51rem) and (min-height: 47rem),
+  (min-width: 46rem) and (height > 30rem) and (height < 45rem) {
   .oyl-game--riding
     .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
     > .oyl-hud__field--gives-way {
