@@ -30,6 +30,12 @@ A11Y='vitest run --project web .a11y.test.'
 # #2154: the required run's two parts, one per CI job.
 SHARD_1='pnpm run test:required --project web'
 SHARD_2="pnpm run test:required --project '!web'"
+# #2285: the nightly coverage run's two halves, each writing the blob of its
+# own number that `test:coverage:merge` reads.
+BLOB_1='--reporter=default --reporter=blob --outputFile.blob=coverage-blobs/coverage-1.json'
+BLOB_2='--reporter=default --reporter=blob --outputFile.blob=coverage-blobs/coverage-2.json'
+COVERAGE_1="pnpm run test:coverage src/game/ ${BLOB_1}"
+COVERAGE_2="pnpm run test:coverage --exclude 'src/game/**' ${BLOB_2}"
 
 pass=0
 fail=0
@@ -40,7 +46,8 @@ trap cleanup EXIT
 
 # new_fixture [test:required] [test:uninstrumented] [test:a11y] [test:coverage]
 #             [test:required:shard-1] [test:required:shard-2]
-# -- a root whose package.json carries the six scripts. An argument of `-`
+#             [test:coverage:shard-1] [test:coverage:shard-2]
+# -- a root whose package.json carries the eight scripts. An argument of `-`
 # leaves that script out. `test:coverage` defaults to what it must be since
 # #1280: `test:required` with `--coverage` after `run`.
 new_fixture() {
@@ -49,6 +56,7 @@ new_fixture() {
   local required="${1-${REQUIRED}}" uninstrumented="${2-${UNINSTRUMENTED}}" a11y="${3-${A11Y}}"
   local coverage="${4-${required/#vitest run/vitest run --coverage}}"
   local shard1="${5-${SHARD_1}}" shard2="${6-${SHARD_2}}"
+  local coverage1="${7-${COVERAGE_1}}" coverage2="${8-${COVERAGE_2}}"
   {
     printf '{"name":"f","scripts":{"test":"vitest run"'
     [ "${required}" != '-' ] && printf ',"test:required":"%s"' "${required}"
@@ -57,6 +65,8 @@ new_fixture() {
     [ "${a11y}" != '-' ] && printf ',"test:a11y":"%s"' "${a11y}"
     [ "${shard1}" != '-' ] && printf ',"test:required:shard-1":"%s"' "${shard1}"
     [ "${shard2}" != '-' ] && printf ',"test:required:shard-2":"%s"' "${shard2}"
+    [ "${coverage1}" != '-' ] && printf ',"test:coverage:shard-1":"%s"' "${coverage1}"
+    [ "${coverage2}" != '-' ] && printf ',"test:coverage:shard-2":"%s"' "${coverage2}"
     printf '}}'
   } > "${tmp}/package.json"
   lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts \
@@ -66,7 +76,7 @@ new_fixture() {
   lists a11y apps/web/src/form.a11y.test.ts
 }
 
-# lists <all|required|uninstrumented|a11y|required-shard-N> <path...> -- what
+# lists <all|required|uninstrumented|a11y|required-shard-N|coverage-shard-N> <path...> -- what
 # `vitest list --filesOnly` would print for that selection.
 lists() {
   local name="$1"
@@ -81,11 +91,15 @@ lists() {
 
 # A case that does not write the parts' selections gets what the two default
 # patterns would select from its required run: `web` and every other project.
+# The coverage run's halves default to the same division (#2285).
 run_check() {
-  [ -f "${tmp}/required-shard-1.txt" ] || grep '^\[web\] ' "${tmp}/required.txt" \
-    > "${tmp}/required-shard-1.txt"
-  [ -f "${tmp}/required-shard-2.txt" ] || grep -v '^\[web\] ' "${tmp}/required.txt" \
-    > "${tmp}/required-shard-2.txt"
+  local part
+  for part in required coverage; do
+    [ -f "${tmp}/${part}-shard-1.txt" ] || grep '^\[web\] ' "${tmp}/required.txt" \
+      > "${tmp}/${part}-shard-1.txt"
+    [ -f "${tmp}/${part}-shard-2.txt" ] || grep -v '^\[web\] ' "${tmp}/required.txt" \
+      > "${tmp}/${part}-shard-2.txt"
+  done
   out="$(node "${CHECK}" --root "${tmp}" --lists "${tmp}" 2>&1)"
   code=$?
 }
@@ -114,6 +128,7 @@ run_check
 assert_green 'three runs that are the whole suite, once each, pass'
 assert_says 'and say what each run holds' 'all 4 test files run once — 2 in the required run, 1 without it (nightly), 1 in the Accessibility step'
 assert_says 'and how the required run is divided' "the required run's 2 are 1 in \`test:required:shard-1\`, 1 in \`test:required:shard-2\`"
+assert_says 'and how the coverage run is halved' "the coverage run's 2 are 1 in \`test:coverage:shard-1\`, 1 in \`test:coverage:shard-2\`"
 
 new_fixture 'vitest run --exclude src/a.test.ts --exclude tools/b.test.ts' \
   'vitest run apps/web/src/a.test.ts packages/fit/tools/b.test.ts'
@@ -391,6 +406,91 @@ new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/
   "${SHARD_1}" 'pnpm run test:required --project !web'
 run_check
 assert_red 'an unquoted ! fails: the check reads only plain words and whole single-quoted ones'
+
+# --- The nightly coverage run's halves, one per job (#2285) -------------------
+# Each is red here rather than a merged report that is green and counts less:
+# a file in no half is a file whose lines the report never sees.
+new_fixture
+lists coverage-shard-1 apps/web/src/fast.test.ts
+lists coverage-shard-2
+run_check
+assert_red 'a half of the coverage run that selects nothing fails'
+assert_says 'and names the half' '`test:coverage:shard-2` selects no files at all'
+
+new_fixture
+lists coverage-shard-1 apps/web/src/fast.test.ts packages/store/src/store.test.ts
+lists coverage-shard-2 packages/store/src/store.test.ts
+run_check
+assert_red 'a file in both halves of the coverage run fails'
+assert_says 'and names it and both halves' 'packages/store/src/store.test.ts runs in `test:coverage:shard-1` and `test:coverage:shard-2`'
+
+new_fixture
+lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts \
+  packages/store/src/store.test.ts packages/zz/src/new.test.ts
+lists required apps/web/src/fast.test.ts packages/store/src/store.test.ts packages/zz/src/new.test.ts
+lists required-shard-1 apps/web/src/fast.test.ts
+lists required-shard-2 packages/store/src/store.test.ts packages/zz/src/new.test.ts
+lists coverage-shard-1 apps/web/src/fast.test.ts
+lists coverage-shard-2 packages/store/src/store.test.ts
+run_check
+assert_red 'a file of the coverage run in neither half fails'
+assert_says 'and names it' 'packages/zz/src/new.test.ts is in `test:coverage` and in NONE of its halves'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "${COVERAGE_1}" -
+run_check
+assert_red 'a coverage run in one half fails: it is divided between at least two jobs'
+assert_says 'and says how many it found' 'package.json has 1 `test:coverage:shard-<n>` scripts'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "${COVERAGE_1}" -
+node -e 'const f=process.argv[1], p=JSON.parse(require("fs").readFileSync(f));
+  p.scripts["test:coverage:shard-3"]=process.argv[2]; require("fs").writeFileSync(f, JSON.stringify(p));' \
+  "${tmp}/package.json" "pnpm run test:coverage --exclude 'src/game/**' ${BLOB_2/coverage-2/coverage-3}"
+lists coverage-shard-3 packages/store/src/store.test.ts
+run_check
+assert_red 'a gap in the halves numbering fails'
+assert_says 'and names the half after it' '`test:coverage:shard-3` follows `test:coverage:shard-1`'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "pnpm run test:coverage --project web ${BLOB_1}" "${COVERAGE_2}"
+run_check
+assert_red 'a project filter on a half of the coverage run fails'
+assert_says 'and says what it would lose' 'narrows the coverage report to that project'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" 'pnpm run test:coverage src/game/' "${COVERAGE_2}"
+run_check
+assert_red 'a half that writes no blob fails: the merge would have nothing of it'
+assert_says 'and says what shape it expects' "and then \`${BLOB_1}\`"
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "pnpm run test:coverage src/game/ ${BLOB_2}" "${COVERAGE_2}"
+run_check
+assert_red 'a half writing the other half’s blob fails: one download would overwrite the other'
+assert_says 'and names the half' '`test:coverage:shard-1` is'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "pnpm run test:coverage ${BLOB_1}" "${COVERAGE_2}"
+run_check
+assert_red 'a half with no filter or exclude fails: it would be the whole run again'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "pnpm run test:coverage src/game/ --bail 1 ${BLOB_1}" "${COVERAGE_2}"
+run_check
+assert_red 'any other flag in a half of the coverage run fails'
+assert_says 'and names the half' '`test:coverage:shard-1` is'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "${COVERAGE_1}" "pnpm run test:coverage --exclude ${BLOB_2}"
+run_check
+assert_red 'a dangling --exclude in a half fails'
+assert_says 'and names the half' '`test:coverage:shard-2` is'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+  "${SHARD_1}" "${SHARD_2}" "pnpm run test:required src/game/ ${BLOB_1}" "${COVERAGE_2}"
+run_check
+assert_red 'a half that is not test:coverage fails: it would take no coverage'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ] || exit 1

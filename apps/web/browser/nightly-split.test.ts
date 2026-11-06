@@ -245,6 +245,24 @@ function requiredShardScripts(): string[] {
     .sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
 }
 
+/**
+ * The halves of the nightly coverage run, one per job — #2285.
+ * `test:coverage:shard-1`, `…-2`, in their order, from the root package;
+ * `check:test-split` (rule 6) holds what each selects and how it is written.
+ */
+function coverageShardScripts(): [name: string, script: string][] {
+  const { scripts } = JSON.parse(read(ROOT, 'package.json')) as { scripts: Record<string, string> };
+  return Object.entries(scripts)
+    .filter(([name]) => /^test:coverage:shard-\d+$/.test(name))
+    .sort(([a], [b]) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
+}
+
+/** A job's steps, each as its own lines, comments out. */
+const stepsOf = (job: string): string[] =>
+  uncommented(job)
+    .split(/^ {6}- /m)
+    .slice(1);
+
 /** The web package's scripts. */
 const webScripts = (): Record<string, string> =>
   (JSON.parse(read(BROWSER, '..', 'package.json')) as { scripts: Record<string, string> }).scripts;
@@ -796,9 +814,15 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   it('takes the coverage report nightly and publishes it, so it moved rather than stopped — #1280', () => {
     // The ruling moved the report; it did not drop it. Each of the three is a
     // way it stops being reported with nothing red: the run, the table in the
-    // run's summary, the HTML artefact.
+    // run's summary, the HTML artefact. Since #2285 the run is its halves and
+    // the report is their merge.
     const commands = runCommands(nightly);
-    expect(commands).toContain('pnpm run test:coverage');
+    const halves = coverageShardScripts();
+    expect(halves.length).toBeGreaterThanOrEqual(2);
+    for (const [name] of halves) expect(commands).toContain(`pnpm run ${name}`);
+    // The whole run beside its halves would run every file twice a night.
+    expect(commands).not.toContain('pnpm run test:coverage');
+    expect(commands).toContain('pnpm run test:coverage:merge');
     expect(commands).toContain(
       'node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true',
     );
@@ -806,41 +830,110 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
       /^ +- name: Upload the coverage report\n((?: {8}.+\n)+)/m.exec(nightly)?.[1] ?? '';
     expect(upload).toMatch(/^ +uses: actions\/upload-artifact@[0-9a-f]{40} /m);
     expect(upload).toMatch(/^ +path: coverage\/$/m);
-    // After the run that writes it, or it publishes yesterday's nothing.
-    expect(commands.indexOf('pnpm run test:coverage')).toBeLessThan(
+    // After the merge that writes it, or it publishes yesterday's nothing.
+    expect(commands.indexOf('pnpm run test:coverage:merge')).toBeLessThan(
       commands.indexOf('node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true'),
     );
-    expect(nightly.indexOf('run: pnpm run test:coverage')).toBeLessThan(
+    expect(nightly.indexOf('run: pnpm run test:coverage:merge')).toBeLessThan(
       nightly.indexOf('- name: Upload the coverage report'),
     );
   });
 
-  it('takes the coverage report in a job of its own, with no browser shard or other suite beside it — #1701', () => {
+  it('takes each half of the coverage report in a job of its own, with no browser shard or other suite beside it — #1701, #2285', () => {
     // After browser shard 1 in `heavy` the report took that job to 1 242 s of
     // its 1 800 s stop (run 40853930991): a slow runner would have stopped the
-    // job and cancelled shard 1's tests with it.
-    const homes = [...jobsOf(nightly)].filter(([, job]) =>
-      job.includes('run: pnpm run test:coverage\n'),
-    );
-    expect(homes).toHaveLength(1);
-    const [, job = ''] = homes[0] ?? [];
-    const suites = [...job.matchAll(/^ +run: pnpm (?:run )?(\S+)/gm)].map((match) =>
-      String(match[1]),
-    );
-    expect(suites).toEqual(['install', 'test:coverage']);
+    // job and cancelled shard 1's tests with it. As one job of its own it then
+    // took up to 1 798 s (#2285), so it is two, each on a runner of its own.
+    const jobs = [...jobsOf(nightly)];
+    const suitesOf = (job: string): string[] =>
+      [...job.matchAll(/^ +run: pnpm (?:run )?(\S+)/gm)].map((match) => String(match[1]));
+    const homes = coverageShardScripts().map(([name]) => {
+      const where = jobs.filter(([, job]) => job.includes(`run: pnpm run ${name}\n`));
+      expect(
+        where.map(([id]) => id),
+        name,
+      ).toHaveLength(1);
+      const [id = '', job = ''] = where[0] ?? [];
+      expect(suitesOf(job), id).toEqual(['install', name]);
+      return id;
+    });
+    expect(new Set(homes).size).toBe(homes.length);
+
+    // The merge: one job, nothing else run in it, after every half and only
+    // them, and run when a half went red so that night still has a report.
+    const merges = jobs.filter(([, job]) => job.includes('run: pnpm run test:coverage:merge\n'));
+    expect(merges).toHaveLength(1);
+    const [, merge = ''] = merges[0] ?? [];
+    expect(suitesOf(merge)).toEqual(['install', 'test:coverage:merge']);
+    const needs = (jobField(merge, 'needs') ?? '')
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map((id) => id.trim());
+    expect(needs.sort()).toEqual([...homes].sort());
+    expect(jobField(merge, 'if')).toBe('${{ !cancelled() }}');
   });
 
-  it('still takes and publishes the report when an earlier nightly step went red — #1286’s review', () => {
+  it('hands each half to the merge under its own name, and merges from where the halves write — #2285', () => {
+    // Vitest writes a half's results and coverage as a blob, and the merge
+    // reads every blob in one directory. Two halves under one artefact name or
+    // one file name would leave the merge one of them: a report of half the
+    // files, green.
+    const jobs = [...jobsOf(nightly)];
+    const { scripts } = JSON.parse(read(ROOT, 'package.json')) as {
+      scripts: Record<string, string>;
+    };
+    const merge = scripts['test:coverage:merge'] ?? '';
+    const directory = /^vitest run --merge-reports=(\S+) --coverage$/.exec(merge)?.[1] ?? '';
+    expect(directory, merge).not.toBe('');
+    const [, mergeJob = ''] =
+      jobs.find(([, job]) => job.includes('run: pnpm run test:coverage:merge\n')) ?? [];
+    const mergeSteps = stepsOf(mergeJob);
+    const mergeAt = mergeSteps.findIndex((step) =>
+      step.includes('run: pnpm run test:coverage:merge'),
+    );
+    const halves = coverageShardScripts();
+    for (const [index, [name, script]] of halves.entries()) {
+      const n = String(index + 1);
+      const file = `${directory}/coverage-${n}.json`;
+      expect(script, name).toMatch(
+        new RegExp(` --outputFile\\.blob=${file.replace(/[.]/g, '\\.')}$`),
+      );
+      const [, job = ''] = jobs.find(([, one]) => one.includes(`run: pnpm run ${name}\n`)) ?? [];
+      const upload =
+        stepsOf(job).find((step) => /^ +uses: actions\/upload-artifact@/m.test(step)) ?? '';
+      expect(upload, name).toMatch(new RegExp(`^ +name: coverage-blob-${n}$`, 'm'));
+      expect(upload, name).toMatch(new RegExp(`^ +path: ${file.replace(/[.]/g, '\\.')}$`, 'm'));
+      // A red half still counts in the report; a half that wrote nothing is red.
+      expect(upload, name).toMatch(/^ {8}if: \$\{\{ !cancelled\(\) \}\}$/m);
+      expect(upload, name).toMatch(/^ +if-no-files-found: error$/m);
+      const downloadAt = mergeSteps.findIndex(
+        (step) =>
+          /^ +uses: actions\/download-artifact@[0-9a-f]{40} /m.test(step) &&
+          new RegExp(`^ +name: coverage-blob-${n}$`, 'm').test(step),
+      );
+      expect(downloadAt, name).toBeGreaterThanOrEqual(0);
+      expect(mergeSteps[downloadAt], name).toMatch(new RegExp(`^ +path: ${directory}$`, 'm'));
+      // A download must not be skipped while the merge runs: the report would
+      // be of the other half alone.
+      expect(mergeSteps[downloadAt], name).not.toMatch(/^ {8}if:/m);
+      expect(downloadAt, name).toBeLessThan(mergeAt);
+    }
+    // Exactly the halves: a download of an artefact no half uploads fails the
+    // job every night.
+    expect(
+      mergeSteps.filter((step) => /uses: actions\/download-artifact@/.test(step)),
+    ).toHaveLength(halves.length);
+  });
+
+  it('still publishes the report when a nightly step went red — #1286’s review, #2285', () => {
     // A step runs only if every step before it succeeded, unless it says
-    // otherwise. Without this condition one red nightly browser check costs
-    // that night's coverage table too.
-    for (const name of [
-      'Tests under coverage',
-      'Publish the coverage summary',
-      'Upload the coverage report',
-    ]) {
-      const step =
-        new RegExp(`^ +- name: ${name}\\n((?: {8}.+\\n)+)`, 'm').exec(nightly)?.[1] ?? '';
+    // otherwise. Without these conditions one red case costs that night's
+    // coverage table too: the merge replays a red half's cases and exits red.
+    const [, merge = ''] =
+      [...jobsOf(nightly)].find(([, job]) => job.includes('run: pnpm run test:coverage:merge\n')) ??
+      [];
+    for (const name of ['Publish the coverage summary', 'Upload the coverage report']) {
+      const step = stepsOf(merge).find((one) => one.startsWith(`name: ${name}\n`)) ?? '';
       expect(step, name).toMatch(/^ {8}if: \$\{\{ !cancelled\(\) \}\}$/m);
     }
   });
