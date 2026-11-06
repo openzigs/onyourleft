@@ -761,7 +761,7 @@ describe('what the tablet says about the pictures — #530', () => {
   const pictures = (): string =>
     document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
   const ON_TO =
-    'Your instance sends each one on to models.example, the service your own key is for.';
+    'Your instance sends each one it reads on to models.example, the service your own key is for.';
 
   it('names the hosted service the instance sends each picture on to, before any and after — #2175', async () => {
     const { send } = await analysing(
@@ -786,13 +786,13 @@ describe('what the tablet says about the pictures — #530', () => {
       () => host,
     );
     await send(1);
-    expect(pictures()).not.toContain('sends each one on to');
+    expect(pictures()).not.toContain('sends each one it reads on to');
     host = 'models.example';
     await send(1);
     expect(pictures()).toContain(ON_TO);
     host = undefined;
     await send(1);
-    expect(pictures()).not.toContain('sends each one on to');
+    expect(pictures()).not.toContain('sends each one it reads on to');
   });
 
   it('names the service while the first picture is with the instance — #2175', () => {
@@ -818,8 +818,37 @@ describe('what the tablet says about the pictures — #530', () => {
   it('counts pictures the instance turned away for coming too often apart, and does not stop — #2175', async () => {
     const { send } = await analysing({ kind: 'rate-limited' }, 'instance');
     await send(2);
+    // #2192: they were sealed and sent, so the sent count has them in it.
     expect(pictures()).toBe(
-      'Pictures sealed and sent to your instance, and not kept here: 0, with you in 0 of them. Not sent, because one was already with your instance: 0. Turned away by your instance unread, because it was asked too often: 2.',
+      'Pictures sealed and sent to your instance, and not kept here: 2, with you in 0 of them. Of the 2 sent, turned away by your instance unread, because it was asked too often: 2. Not sent, because one was already with your instance: 0.',
+    );
+  });
+
+  it('counts a picture turned away among the pictures sent, so the two counts agree — #2192', () => {
+    const state = {
+      place: 'instance',
+      model: 'ready',
+      posed: 1,
+      noRider: 1,
+      noRiderBecause: { 'said-nobody': 1, 'too-few-points': 0, implausible: 0 },
+      unreadable: 1,
+      skipped: 4,
+      rateLimited: 3,
+      hostedService: 'models.example',
+      framing: 'no-reference',
+      finished: false,
+    } as const;
+    // Three looked at and three turned away: six sent, and the three turned
+    // away are said as a part of those six, named after the hosted sentence.
+    expect(sidePicturesText(state)).toBe(
+      'Pictures sealed and sent to your instance, and not kept here: 6, with you in 1 of them. ' +
+        `${ON_TO} Of the 6 sent, turned away by your instance unread, because it was asked too often: 3. ` +
+        `Not sent, because one was already with your instance: 4.`,
+    );
+    // None turned away: the sent count is the looked-at count, and no sentence about it.
+    expect(sidePicturesText({ ...state, rateLimited: 0 })).toBe(
+      'Pictures sealed and sent to your instance, and not kept here: 3, with you in 1 of them. ' +
+        `${ON_TO} Not sent, because one was already with your instance: 4.`,
     );
   });
 

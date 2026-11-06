@@ -11,9 +11,8 @@
  * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
  * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
  * `start-year`, since #1794 `landmark-churches` and since #1795 `landmark-civic`.
- * Its own
- * module so that a test reads the plans the page draws, and a lever parsed
- * but not handed to the planner is a red test (`town.test.ts`).
+ * Its own module so that a test reads the plans the page draws, and a lever
+ * parsed but not handed to the planner is a red test (`town.test.ts`).
  */
 
 import {
@@ -36,9 +35,9 @@ import {
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
-  mappedPaintWithLevers,
   landmarkChurchesWithLevers,
   landmarkCivicWithLevers,
+  mappedPaintWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
