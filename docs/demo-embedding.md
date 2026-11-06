@@ -20,15 +20,6 @@ routes `demo:bake` wrote into `dist/routes/` and fails if a route's ODbL notice 
 ([#1651](https://github.com/openzigs/onyourleft/issues/1651)). Without `demo:bake` there is no
 `routes/` directory, and the demo rides only its synthetic road.
 
-> ⚠️ **`demo:bake` does not start on Node 26** ([#1931](https://github.com/openzigs/onyourleft/issues/1931)),
-> the repository's Node line since 2026-10-29: its
-> script passes `--experimental-transform-types`, which Node 26 refuses (`node: bad option`). The
-> bake for this page was run on Node 24.22.1, directly:
-> `node --experimental-transform-types --import ./tools/ts-extensionless-resolve.mjs tools/demo/bake-route.ts --route upstate-climb`
-> from `apps/web`. It printed `6 of 6 tiles` and `19625 bytes (68476 uncompressed)`, and the digest
-> matched the one recorded in `demo/routes/upstate-climb.bake.json`. `build:demo` itself runs on
-> Node 26.
-
 ## The files
 
 Serve the whole of `apps/web/demo/dist/` **unchanged**, as one directory, at any path. The page loads

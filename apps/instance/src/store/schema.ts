@@ -103,6 +103,48 @@ export interface ActivityRecordTable {
    * the ride, after its privacy-zone refusal; cleared by a revocation.
    */
   readonly race_route_sha256: Generated<string | null>;
+  /**
+   * The ride's ADR 0004 visibility, as the rider's device last sent it (#68,
+   * migration 0038): `private` unless it says otherwise. Only `public`
+   * reaches a shared leaderboard.
+   */
+  readonly visibility: Generated<ActivityVisibility>;
+}
+
+/** ADR 0004 decision A's three values (#68). */
+export type ActivityVisibility = 'private' | 'followers' | 'public';
+
+/** A segment published to this instance (#68, migration 0038). */
+export interface SegmentTable {
+  /** The first 32 hex digits of the SHA-256 of `definition`'s canonical JSON. */
+  readonly id: string;
+  /** Who published it first. Their erasure takes the segment and every effort on it. */
+  readonly athlete_id: string;
+  readonly name: string;
+  readonly sport: 'ride' | 'run';
+  /** The path length the instance measured from the definition, never one it was told. */
+  readonly distance_metres: number;
+  /** The definition as published: canonical JSON, path included. */
+  readonly definition: string;
+  /** Unix seconds: when it was published HERE. Rolling-window boards start no earlier. */
+  readonly created_at: number;
+}
+
+/** One effort a rider shared on a published segment (#68, migration 0038). */
+export interface SegmentEffortTable {
+  /** Minted by the instance; opaque, and never an athlete's id. */
+  readonly id: string;
+  readonly athlete_id: string;
+  readonly segment_id: string;
+  /** The rider's synced ride it was found in: `activity_record`, by `(athlete_id, content_sha256)`. */
+  readonly content_sha256: string;
+  /** Unix seconds. */
+  readonly started_at: number;
+  readonly elapsed_seconds: number;
+  /** `private-match` is the rider's own and never on a shared board. */
+  readonly visibility: 'public' | 'private-match';
+  /** Unix seconds. */
+  readonly received_at: number;
 }
 
 /** A group ride or a race. */
@@ -707,4 +749,6 @@ export interface InstanceDatabase {
   readonly notice_step: NoticeStepTable;
   readonly notice_erasure: NoticeErasureTable;
   readonly hidden_item: HiddenItemTable;
+  readonly segment: SegmentTable;
+  readonly segment_effort: SegmentEffortTable;
 }

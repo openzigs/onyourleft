@@ -323,6 +323,9 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.
   'activity-detail': ['A write-up by your model'],
+  // #2007: where a place on the route is and what stays; the editor has
+  // sections only over a route it read, which the populated ports hold.
+  'route-editor': ['Change part of the route'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {
@@ -1319,6 +1322,63 @@ test.describe('#1050, #1087 — Save workout, with blocks in the builder', () =>
     ).toBe(true);
     expect(below.margin).toBeLessThanOrEqual(FOLD_MARGIN_PIXELS);
   });
+});
+
+/**
+ * #2007, the owner's screenshot ruling of 2026-11-06: the route editor's
+ * whole-route buttons (Out and back, Reverse, Return to start, Undo) touched,
+ * where the map's own buttons above them are held apart by `--oyl-space-sm`.
+ * jsdom performs no layout, so the gap is read here, as the engine lays it
+ * out: every two buttons of the row are apart along at least one axis by the
+ * token, wrapped or not. The row is found by its heading, not by its class,
+ * so a row that lost its class reads as buttons that touch, not as a row that
+ * was not found.
+ */
+test.describe('#2007 — the route editor’s whole-route buttons do not touch', () => {
+  /** `--oyl-space-sm`, 0.5rem, less a pixel's rounding. */
+  const LEAST_GAP_PIXELS = 7.5;
+
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`on a ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport, 'data=populated');
+      await visit(page, routeById('route-editor'));
+      const row = page.locator('main h2:text-is("Change the whole route") + div');
+      // An edit, so Undo is on the row as well.
+      await row.getByRole('button', { name: 'Reverse' }).click();
+      await expect(row.getByRole('button', { name: 'Undo' })).toBeVisible();
+      const buttons = await row.getByRole('button').evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return {
+            name: element.textContent ?? '',
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          };
+        }),
+      );
+      expect(buttons.map((button) => button.name)).toEqual(
+        expect.arrayContaining(['Out and back', 'Reverse', 'Undo']),
+      );
+      const touching: string[] = [];
+      for (const [index, a] of buttons.entries()) {
+        for (const b of buttons.slice(index + 1)) {
+          const across = Math.max(b.left - a.right, a.left - b.right);
+          const down = Math.max(b.top - a.bottom, a.top - b.bottom);
+          const apart = Math.max(across, down);
+          if (apart < LEAST_GAP_PIXELS) {
+            touching.push(`${a.name} and ${b.name}: ${apart.toFixed(1)} px apart`);
+          }
+        }
+      }
+      console.log(
+        `[#2007] ${viewport.name}: ${buttons.map((button) => button.name).join(', ')}` +
+          `${touching.length === 0 ? '' : `; touching: ${touching.join('; ')}`}`,
+      );
+      expect(touching, 'buttons closer than --oyl-space-sm').toEqual([]);
+    });
+  }
 });
 
 /**

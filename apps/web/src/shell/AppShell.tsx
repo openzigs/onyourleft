@@ -81,6 +81,7 @@ import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 import type { EffortPort } from '../efforts/store-port';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
@@ -159,6 +160,7 @@ const SegmentsView = lazyView(HISTORY_GROUP, (group) => group.SegmentsView);
 const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetailView);
 const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
 const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
+const RouteEditorView = lazyView(ROUTES_GROUP, (group) => group.RouteEditorView);
 const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
 const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
 const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
@@ -494,6 +496,12 @@ export interface AppShellProps {
    */
   readonly efforts?: EffortPort | undefined;
   /**
+   * The rider's instance's segments and leaderboards (#68), on the Segments
+   * screen and each segment's own. `undefined` with no instance, and then
+   * nothing about one renders.
+   */
+  readonly boards?: LeaderboardPort | undefined;
+  /**
    * The settings screen's one write (#238).
    *
    * Optional like every other port here, and `undefined` renders an
@@ -677,7 +685,7 @@ function viewFor(
     case 'analysis':
       return <AnalysisView port={props.analysis} />;
     case 'segments':
-      return <SegmentsView port={props.segments} match={props.match} />;
+      return <SegmentsView port={props.segments} match={props.match} boards={props.boards} />;
     case 'routes':
       return (
         <RoutesView
@@ -698,6 +706,17 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           routes={props.routes}
+        />
+      );
+    case 'route-editor':
+      return (
+        <RouteEditorView
+          // #2007: a saved route's line, kept, with one stretch at a time redrawn.
+          routes={props.routes}
+          selected={match.parameter}
+          provider={props.routing}
+          map={props.map}
+          basemap={props.basemap}
         />
       );
     case 'workouts':
@@ -743,7 +762,9 @@ function viewFor(
         />
       );
     case 'segment-detail':
-      return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
+      return (
+        <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />
+      );
     case 'camera':
       return (
         <CameraView

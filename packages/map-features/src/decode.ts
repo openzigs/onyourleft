@@ -134,10 +134,18 @@ export function decodeTile(
   }
 }
 
-/** A refusal raised from deep inside the walk, caught by {@link decodeTile}. */
+/**
+ * A refusal raised from deep inside the walk, caught by {@link decodeTile}.
+ * Plain fields here and in {@link Projector}, not parameter properties:
+ * `demo:bake` runs this file under Node's type stripping, which refuses
+ * syntax that emits code (#1931).
+ */
 class Refused extends Error {
-  constructor(readonly refusal: DecodeRefusal) {
+  readonly refusal: DecodeRefusal;
+
+  constructor(refusal: DecodeRefusal) {
     super(refusal.reason);
+    this.refusal = refusal;
   }
 }
 
@@ -407,12 +415,14 @@ class Projector {
   private readonly xPerPixel: number;
   private readonly low: number;
   private readonly rows: Float64Array;
+  private readonly tile: TileId;
+  private readonly origin: CorridorFrame;
+  private readonly extent: number;
 
-  constructor(
-    private readonly tile: TileId,
-    private readonly origin: CorridorFrame,
-    private readonly extent: number,
-  ) {
+  constructor(tile: TileId, origin: CorridorFrame, extent: number) {
+    this.tile = tile;
+    this.origin = origin;
+    this.extent = extent;
     const metresPerDegreeLongitude =
       METRES_PER_DEGREE_LATITUDE * Math.cos((origin.latitude * Math.PI) / 180);
     const west = longitudeAtColumn(tile.x);
