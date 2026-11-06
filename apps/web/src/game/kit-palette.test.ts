@@ -57,7 +57,8 @@ import { LIT_COLOURS, RiderBelt, riderKitsOf, threeGameRenderer } from './three-
  */
 const SHORT_PAIRS: ReadonlySet<string> = new Set<string>([
   // Empty since #2255. Green and Lime were 31.0 apart; the owner ruled on
-  // 2026-11-06 (#2123) to move the Lime kit to a yellow-green near 60 degrees.
+  // 2026-11-06 (#2123) to move the Lime kit to a yellow-green. It shipped at
+  // hue 78, not 60; bicycle.ts §KIT_PALETTE says why 60 was rejected.
 ]);
 
 /** A colour's three 8-bit channels, from `0xrrggbb`. */
@@ -144,7 +145,7 @@ describe('the kit palette — #623', () => {
     const saved = parseKitColour('lime');
     expect(saved).toBe('lime');
     expect(KIT_PALETTE[saved].name).toBe('Yellow-green');
-    expect(riderKitFor(saved)).toEqual({ jersey: 0x799e24, limb: 0x556e19 });
+    expect(riderKitFor(saved)).toBe(KIT_PALETTE.lime.kit);
   });
 
   it('holds every entry under the light and in the list that bounds it', () => {

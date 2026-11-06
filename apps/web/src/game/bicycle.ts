@@ -227,10 +227,11 @@ const TAU = Math.PI * 2;
  * The owner ruled on 2026-09-27 (#623) that the rider's kit is an On Your Left
  * house kit in the app's colours. Until #2037 it was read from `tokens.ts`'s
  * `accent` and `accentHover`; #2037 replaced the page's teal with the Hi-Vis
- * palette (ADR 0063 D-1), whose light `accent` is an olive that sat 13
- * degrees of hue from {@link KIT_PALETTE}'s Lime before #2255 moved it, so the
- * two values are written here,
- * unchanged. ⚠️ **The owner ruled on 2026-11-05 (#2123) that the house kit
+ * palette (ADR 0063 D-1), whose light `accent` is an olive that sat about
+ * 10 degrees of hue from {@link KIT_PALETTE}'s Lime before #2255 moved it
+ * (the page's accent tokens are now #517d00, #3e6100 and #aff13c, hue 81 to 82,
+ * which the moved Lime, at 78, is within 4 degrees of), so the two values are
+ * written here, unchanged. ⚠️ **The owner ruled on 2026-11-05 (#2123) that the house kit
  * stays teal and is its own colour, not the page's**, which amends #623's
  * wording: do not read it from `tokens.ts` again, and a reviewer who wants
  * the jersey to follow the accent is reading #623's first wording.
