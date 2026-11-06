@@ -57,6 +57,7 @@ import {
   parseBoard,
   parseSegmentList,
 } from './leaderboard-port';
+import { readInstanceAccount } from './sign-in';
 import { createSyncPort } from './sync-port';
 import { LOADED_LOCALLY } from './testing';
 
@@ -64,6 +65,15 @@ interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
   readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   answeringAs(path: string, answer: () => Response): (request: Request) => Promise<Response>;
+  /** A second connection to the instance's file: a read the instance's own store did not serve. */
+  freshRead<T>(
+    read: (store: {
+      getActivityRecord(
+        athleteId: string,
+        contentSha256: string,
+      ): Promise<{ readonly visibility?: string } | undefined>;
+    }) => Promise<T>,
+  ): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -140,7 +150,13 @@ async function device(send: InstanceSend, loadedFrom: LoadedFrom = LOADED_LOCALL
     raceRoute: (id) => raceRouteOf(store(), LOCAL_ATHLETE, webCryptoSha256)(id),
   });
   const boards = createLeaderboardPort({ ...sealing, store, athleteId: LOCAL_ATHLETE });
-  return { harness, storage, store, instance, sync, boards };
+  /** A fresh handle for the device's code after a `harness.read`, which closes the old one. */
+  const reopen = (): Promise<void> =>
+    harness.write((fresh) => {
+      open = fresh;
+      return Promise.resolve();
+    });
+  return { harness, storage, store, reopen, instance, sync, boards };
 }
 
 type Device = Awaited<ReturnType<typeof device>>;
@@ -181,15 +197,15 @@ async function syncedRide(on: Device): Promise<{ id: ActivityId; startedAt: numb
   return { id, startedAt: ride!.startedAt };
 }
 
-/** A segment on this device: a northbound 555 m with its own random id. */
-function ownSegment(visibility: SegmentVisibility = 'public', name = 'Box Hill'): SegmentRecord {
+/** A segment on this device: a northbound 555 m, at made-up coordinates, with its own random id. */
+function ownSegment(visibility: SegmentVisibility = 'public', name = 'North climb'): SegmentRecord {
   const segment = createSegment({
     id: `local-${String((counter += 1))}`,
     createdBy: LOCAL_ATHLETE,
     name,
     sport: 'ride',
     geometry: Array.from({ length: 6 }, (_, index) =>
-      geographicPosition((51.5 + index * 0.001) as DegreesLatitude, -0.12 as DegreesLongitude),
+      geographicPosition((10 + index * 0.001) as DegreesLatitude, 20 as DegreesLongitude),
     ),
     elevationSource: 'none',
     visibility,
@@ -238,7 +254,7 @@ describe('a board across two riders, through the instance (#68)', () => {
       segmentId,
       yours: true,
     });
-    expect(await bea.boards.share(segmentId, [effortOn(segment, ride, 95)])).toEqual({
+    expect(await bea.boards.share(segment, [effortOn(segment, ride, 95)])).toEqual({
       rides: 1,
       notSynced: 0,
       failed: 0,
@@ -251,12 +267,12 @@ describe('a board across two riders, through the instance (#68)', () => {
     const listed = await anna.boards.listSegments();
     expect(
       listed?.map((each) => ({ segmentId: each.segmentId, name: each.name, yours: each.yours })),
-    ).toEqual([{ segmentId, name: 'Box Hill', yours: false }]);
+    ).toEqual([{ segmentId, name: 'North climb', yours: false }]);
     // Measured by the instance from the path, never told it.
     expect(listed?.[0]?.distanceMetres).toBeCloseTo(segment.distance, 6);
     expect(await anna.boards.addSegment(segmentId)).toBe('added');
     const added = await anna.store().getSegment(LOCAL_ATHLETE, toSegmentId(segmentId));
-    expect(added?.name).toBe('Box Hill');
+    expect(added?.name).toBe('North climb');
     expect(added?.geometry).toEqual(segment.geometry);
     // Added from the instance: never offered back to it, and already on it.
     expect(await anna.boards.publishRefusal(added!)).toBe(FROM_THE_INSTANCE_REFUSAL);
@@ -281,8 +297,8 @@ describe('a board across two riders, through the instance (#68)', () => {
     // Sealed, like every instance call: no segment, ride or name leaves in the clear.
     expect(new Set(seen)).toEqual(new Set(['GET /v1/instance/keys', 'POST /v1/sealed']));
 
-    // Bea takes it off: the board is empty, and her ride private again in both places.
-    expect(await bea.boards.withdraw(segmentId, [effortOn(segment, ride, 95)])).toEqual({
+    // Bea takes it off: the board is empty, and her ride as it was.
+    expect(await bea.boards.withdraw(segment, [effortOn(segment, ride, 95)])).toEqual({
       rides: 1,
       notSynced: 0,
       failed: 0,
@@ -295,7 +311,7 @@ describe('a board across two riders, through the instance (#68)', () => {
     expect(await bea.boards.standing(segment)).toEqual({ kind: 'not-published', segmentId });
     expect(
       (await bea.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride.id)))?.visibility,
-    ).toBe('private');
+    ).toBe('public');
   }, 30_000);
 
   it('shares a `private-match` effort for the rider alone, and counts a ride not synced yet', async () => {
@@ -307,7 +323,7 @@ describe('a board across two riders, through the instance (#68)', () => {
     const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
     const unsynced = { id: toActivityId('never-synced'), startedAt: ride.startedAt };
     expect(
-      await bea.boards.share(segmentId, [
+      await bea.boards.share(segment, [
         effortOn(segment, ride, 95, 'private-match'),
         effortOn(segment, unsynced, 90),
         // An excluded effort is not sent at all (#69's).
@@ -335,7 +351,7 @@ describe('integrity, through the instance (#69)', () => {
     const segment = await withSegment(bea, ownSegment());
     expect(await bea.boards.publish(segment)).toBe('published');
     const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
-    await bea.boards.share(segmentId, [effortOn(segment, beaRide, 95)]);
+    await bea.boards.share(segment, [effortOn(segment, beaRide, 95)]);
 
     const anna = await connected(send, w, 'Anna');
     const annaRide = await syncedRide(anna);
@@ -345,7 +361,7 @@ describe('integrity, through the instance (#69)', () => {
       ?.effortId;
     expect(await anna.boards.flagEffort(segmentId, beaEffort ?? '', 'vehicle')).toBe('refused');
     const added = await anna.store().getSegment(LOCAL_ATHLETE, toSegmentId(segmentId));
-    await anna.boards.share(segmentId, [effortOn(added!, annaRide, 100)]);
+    await anna.boards.share(added!, [effortOn(added!, annaRide, 100)]);
 
     expect(await anna.boards.flagEffort(segmentId, beaEffort ?? '', 'vehicle')).toBe('flagged');
     expect(await anna.boards.flagEffort(segmentId, beaEffort ?? '', 'vehicle')).toBe('already');
@@ -364,9 +380,8 @@ describe('integrity, through the instance (#69)', () => {
     const cy = await connected(send, w, 'Cy');
     const cyRide = await syncedRide(cy);
     expect(await cy.boards.addSegment(segmentId)).toBe('added');
-    await cy.boards.share(segmentId, [
-      effortOn((await cy.store().getSegment(LOCAL_ATHLETE, toSegmentId(segmentId)))!, cyRide, 105),
-    ]);
+    const cySegment = (await cy.store().getSegment(LOCAL_ATHLETE, toSegmentId(segmentId)))!;
+    await cy.boards.share(cySegment, [effortOn(cySegment, cyRide, 105)]);
     expect(await anna.boards.flagHazard(segmentId, 'junction')).toBe('flagged');
     expect(await bea.boards.flagHazard(segmentId, 'junction')).toBe('flagged');
     expect(await bea.boards.board(segmentId, 'instance', 'all-time')).toMatchObject({
@@ -385,7 +400,7 @@ describe('integrity, through the instance (#69)', () => {
     expect(await bea.boards.publish(segment)).toBe('published');
     const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
     // Five seconds over about 555 m: more than 100 m/s, sent as though it counted.
-    expect(await bea.boards.share(segmentId, [effortOn(segment, ride, 5)])).toMatchObject({
+    expect(await bea.boards.share(segment, [effortOn(segment, ride, 5)])).toMatchObject({
       rides: 1,
     });
     const anna = await connected(send, w, 'Anna');
@@ -399,12 +414,164 @@ describe('integrity, through the instance (#69)', () => {
   }, 30_000);
 });
 
+/** A privacy zone on Bea's device, centred on `centre`. */
+async function zoneAt(on: Device, centre: SegmentRecord['start']['position']): Promise<void> {
+  await on.harness.write((store) =>
+    store.putPrivacyZone({
+      id: privacyZoneId(`zone-${String((counter += 1))}`),
+      athleteId: LOCAL_ATHLETE,
+      centre,
+      radius: metres(200),
+      label: 'Zone',
+      createdAt: NOW,
+    }),
+  );
+}
+
+/** The ride's visibility on the instance, read off a store the instance's own did not serve. */
+async function onTheInstance(w: IdentityInstance, on: Device, ride: ActivityId): Promise<unknown> {
+  const account = readInstanceAccount(on.storage);
+  const file = (await on.store().listSyncBase(LOCAL_ATHLETE)).find(
+    (row) => row.activityId === ride,
+  )?.key;
+  expect(account).toBeDefined();
+  expect(file).toBeDefined();
+  return (
+    await w.freshRead((store) =>
+      store.getActivityRecord(account!.instanceAthleteId, file as string),
+    )
+  )?.visibility;
+}
+
+/** The ride's visibility on the device, read on a fresh connection. */
+async function onDevice(on: Device, ride: ActivityId): Promise<unknown> {
+  const visibility = (await on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))
+    ?.visibility;
+  await on.reopen();
+  return visibility;
+}
+
+describe('withdrawing, and a share that fails (#68)', () => {
+  it('takes a ride’s efforts off one segment only, and leaves its visibility as it was', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const north = await withSegment(bea, ownSegment('public', 'North climb'));
+    const south = await withSegment(bea, ownSegment('public', 'South climb'));
+    expect(await bea.boards.publish(north)).toBe('published');
+    expect(await bea.boards.publish(south)).toBe('published');
+    const northId = await publishedSegmentId(publishedDefinitionOf(north), webCryptoSha256);
+    const southId = await publishedSegmentId(publishedDefinitionOf(south), webCryptoSha256);
+    expect((await bea.boards.share(north, [effortOn(north, ride, 95)])).rides).toBe(1);
+    expect((await bea.boards.share(south, [effortOn(south, ride, 80)])).rides).toBe(1);
+
+    expect((await bea.boards.withdraw(north, [effortOn(north, ride, 95)])).rides).toBe(1);
+
+    const anna = await connected(send, w, 'Anna');
+    expect((await anna.boards.board(northId, 'instance', 'all-time'))?.rows).toEqual([]);
+    // The other segment's effort is still on its board, from the same ride…
+    expect((await anna.boards.board(southId, 'instance', 'all-time'))?.rows).toEqual([
+      expect.objectContaining({ rank: 1, rider: 'Bea', yours: false, elapsedSeconds: 80 }),
+    ]);
+    // …and the ride is as the rider left it, here and there.
+    expect(await onDevice(bea, ride.id)).toBe('public');
+    expect(await onTheInstance(w, bea, ride.id)).toBe('public');
+  }, 30_000);
+
+  it('puts the ride back as it was, here and there, when the instance does not take the efforts', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    // Before the ride began: the instance refuses an effort outside its recorded time.
+    const outside = {
+      ...effortOn(segment, ride, 95),
+      startedAt: unixSeconds(ride.startedAt - 600),
+    };
+    expect(await bea.boards.share(segment, [outside])).toEqual({
+      rides: 0,
+      notSynced: 0,
+      failed: 1,
+    });
+    expect(await onDevice(bea, ride.id)).toBe('private');
+    expect(await onTheInstance(w, bea, ride.id)).toBe('private');
+  }, 30_000);
+
+  it('puts the ride back as it was on the device when the instance does not take its visibility', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const file = (await bea.store().listSyncBase(LOCAL_ATHLETE)).find(
+      (row) => row.activityId === ride.id,
+    )?.key as string;
+    const refusing = w.answeringAs(`/v1/sync/records/${file}/visibility`, () =>
+      Response.json({ error: { code: 'internal' } }, { status: 500 }),
+    );
+    const flaky = createLeaderboardPort({
+      storage: bea.storage,
+      loadedFrom: LOADED_LOCALLY,
+      signingKey: () => ensureDeviceSigningKey(bea.store(), LOCAL_ATHLETE, { now: () => NOW }),
+      send: async (url, init) => refusing(new Request(url, init)),
+      now: () => NOW * 1000,
+      store: bea.store,
+      athleteId: LOCAL_ATHLETE,
+    });
+    expect((await flaky.share(segment, [effortOn(segment, ride, 95)])).failed).toBe(1);
+    expect(await onDevice(bea, ride.id)).toBe('private');
+    expect(await onTheInstance(w, bea, ride.id)).toBe('private');
+  }, 30_000);
+});
+
+describe('a segment whose path passes through a privacy zone (#68, ADR 0004 C)', () => {
+  it('is not offered, is not asked about, and sends nothing', async () => {
+    const { w, send, seen } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const through = await withSegment(bea, ownSegment('public', 'Through a zone'));
+    // Centred on the path's middle: neither end is in it.
+    await zoneAt(bea, through.geometry[3]!);
+    seen.length = 0;
+    expect(await bea.boards.publishRefusal(through)).toBe(IN_A_ZONE_REFUSAL);
+    expect(await bea.boards.standing(through)).toEqual({
+      kind: 'withheld',
+      refusal: IN_A_ZONE_REFUSAL,
+    });
+    expect(await bea.boards.publish(through)).toBe('refused');
+    expect(seen).toEqual([]);
+  }, 30_000);
+
+  it('keeps an effort on it to the rider’s own board when the zone came after publishing', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    await zoneAt(bea, segment.geometry[3]!);
+    expect((await bea.boards.share(segment, [effortOn(segment, ride, 95)])).rides).toBe(1);
+    const anna = await connected(send, w, 'Anna');
+    expect((await anna.boards.board(segmentId, 'instance', 'all-time'))?.rows).toEqual([]);
+    expect((await bea.boards.board(segmentId, 'personal', 'all-time'))?.rows).toEqual([
+      expect.objectContaining({ rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 }),
+    ]);
+  }, 30_000);
+});
+
 describe('what is never offered, and sends nothing (#68)', () => {
   it('refuses a private segment, and one with an end in a privacy zone, before anything is sent', async () => {
     const { w, send, seen } = await world();
     const bea = await connected(send, w, 'Bea');
     const hidden = await withSegment(bea, ownSegment('private', 'Private climb'));
     expect(await bea.boards.publishRefusal(hidden)).toBe(NOT_PUBLIC_REFUSAL);
+    seen.length = 0;
+    // Not even asked about: its digest is a fingerprint of a segment the client refuses to send.
+    expect(await bea.boards.standing(hidden)).toEqual({
+      kind: 'withheld',
+      refusal: NOT_PUBLIC_REFUSAL,
+    });
+    expect(seen).toEqual([]);
     const home = await withSegment(bea, ownSegment('public', 'From home'));
     await bea.harness.write((store) =>
       store.putPrivacyZone({

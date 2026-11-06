@@ -15,7 +15,10 @@
  *
  * ## Nothing leaves without a press
  *
- * Reading the board sends the segment's digest. Publishing, sharing and
+ * Reading the board sends the segment's digest — and only for a segment that
+ * may be published or came from the instance: the digest of one the client
+ * refuses to send is a fingerprint of it, so it is not asked about at all
+ * (`SegmentStanding`'s `withheld`). Publishing, sharing and
  * withdrawing are each a button, and each says beside it what it sends
  * ({@link PUBLISH_SENTENCE}, {@link SHARE_SENTENCE}). `instance/leaderboard-port.ts`
  * says what goes in each request.
@@ -55,7 +58,7 @@ export const PUBLISH_SENTENCE =
 
 /** What sharing sends, said before the press. */
 export const SHARE_SENTENCE =
-  'Sharing puts your efforts on this segment on the board with your display name, and makes the rides they came from public here and on your instance. Only each effort’s time is sent, never a track. An effort that starts or ends in one of your privacy zones is kept to your own board.';
+  'Sharing puts your efforts on this segment on the board with your display name, and makes the rides they came from public here and on your instance. Only each effort’s time is sent, never a track. An effort that starts or ends in one of your privacy zones, or on a segment that passes through one, is kept to your own board. Taking your efforts off leaves the rides as they are.';
 
 /** What withdrawing a segment the rider published does, said before the press. */
 export const WITHDRAW_SENTENCE =
@@ -254,8 +257,8 @@ export function InstanceBoard({
     try {
       const outcome =
         kind === 'share'
-          ? await port.share(published, efforts)
-          : await port.withdraw(published, efforts);
+          ? await port.share(segment, efforts)
+          : await port.withdraw(segment, efforts);
       setSaid({
         tone: outcome.failed === 0 && outcome.notSynced === 0 ? 'success' : 'warning',
         text: shareSentence(outcome, kind === 'share' ? 'Shared' : 'Withdrew'),
@@ -287,6 +290,8 @@ export function InstanceBoard({
       <h3 id={`${scopeId}-heading`}>Leaderboard on {instance}</h3>
       {standing === undefined ? (
         <p className="oyl-muted">Asking {instance} about this segment…</p>
+      ) : standing.kind === 'withheld' ? (
+        <StatusMessage tone="info">{standing.refusal}</StatusMessage>
       ) : standing.kind === 'unavailable' ? (
         <StatusMessage tone="warning">
           {instance} could not be asked about this segment. Your own efforts above are unaffected.
