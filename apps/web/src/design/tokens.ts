@@ -1321,8 +1321,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     // to `units/no-inline-units.ts` (#238), and this ratio is not a conversion.
     measured: { light: 36 / 10, dark: 8.96 },
     where:
-      'a checked checkbox, radio or switch track on a raised panel, card or chooser tile (SC 1.4.11, #2152); ' +
-      'the last ride’s elevation profile on its Home card (SC 1.4.11, #2048)',
+      'a checked checkbox, radio or switch track on a raised panel, card or chooser tile (SC 1.4.11, #2152)',
   },
   {
     foreground: 'hudInk',
