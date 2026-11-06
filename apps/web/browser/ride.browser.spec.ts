@@ -137,6 +137,7 @@ import {
   gradientInPrimary,
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
+  LAPTOP_VIEWPORTS,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -2123,3 +2124,73 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
     ).toBeGreaterThan(fold + 0.5);
   });
 });
+
+/**
+ * The owner's ruling of 2026-11-06 (#2034): what a phone's overlay gives way
+ * — the ride so far among it — is tied to PHONES, so a laptop's or a
+ * desktop's window under 47 rem tall draws it, on a plain ride and in a
+ * room, and its layout holds the ride's own invariants there: every reading
+ * and control on the stage and uncovered, every panel whole, none over
+ * another or over the leaning rider. In a room the pacer, the ghost and the
+ * wind give way first, as on a tablet; and under 40 rem tall (1024×600), while
+ * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
+ * FAR AT ARM'S LENGTH").
+ */
+/** Two notices drawn: *Keep the screen on* and the road notice. */
+const TWO_NOTICES = '?keepalive=failed&trainer=workout';
+
+/** #2076's three, which a laptop's window under 40 rem tall gives way to two notices. */
+const RIDE_SO_FAR: readonly string[] = [
+  'reading: Distance',
+  'reading: Climbed',
+  'reading: Avg power',
+];
+
+for (const viewport of LAPTOP_VIEWPORTS) {
+  for (const query of ['', '?room=following', TWO_NOTICES]) {
+    const state =
+      query === '' ? '' : query === TWO_NOTICES ? ', with two notices drawn' : ', in a room';
+    test(`#2034 a laptop's window draws the ride so far${state} — ${viewport.name}`, async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport, query);
+      for (const [how, seen] of await bothWays(page)) {
+        const rideSoFarGivesWay = query === TWO_NOTICES && viewport.height < 640;
+        for (const name of RIDE_TOTAL_READINGS) {
+          if (rideSoFarGivesWay && RIDE_SO_FAR.includes(name)) {
+            expect(seen.givenWay, how).toContain(name);
+            continue;
+          }
+          const reading = named(seen.items, name);
+          expect(
+            inside(reading.box, viewport) && reading.onTop,
+            `${how}: ${describeItem(reading)}`,
+          ).toBe(true);
+        }
+        const clipped = seen.items
+          .filter((each) => each.box.width * each.box.height <= 1)
+          .map((each) => each.name);
+        expect(clipped, how).toEqual(
+          query === '?room=following'
+            ? ['reading: Pacer', 'reading: Your best', 'reading: Wind']
+            : [],
+        );
+        const lost = seen.items
+          .filter((each) => !clipped.includes(each.name))
+          .filter((each) => !inside(each.box, viewport) || !each.onTop)
+          .map(describeItem);
+        expect(lost, how).toEqual([]);
+        const rider = riderBox(viewport);
+        const faults: string[] = [];
+        seen.panels.forEach((a, index) => {
+          if (!inside(a.box, viewport)) faults.push(`not whole: ${describeItem(a)}`);
+          if (overlap(a.box, rider)) faults.push(`over the rider: ${describeItem(a)}`);
+          for (const b of seen.panels.slice(index + 1)) {
+            if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
+          }
+        });
+        expect(faults, how).toEqual([]);
+      }
+    });
+  }
+}

@@ -17,6 +17,7 @@ import {
   SUBPIXEL_TOLERANCE,
   type Viewport,
   OVERLAY_VIEWPORTS,
+  RIDE_TOTAL_READINGS,
   openRide,
   sharedRide,
   measure,
@@ -371,7 +372,7 @@ test.describe('a room ride’s HUD — #1356', () => {
         }
       });
 
-      test(`the room’s readings are on the stage${tablet ? ', and so is every other' : ', and the pacer, the ghost and the wind give way'}`, async ({
+      test(`the room’s readings are on the stage, and the pacer, the ghost and the wind give way${tablet ? ', and the rider’s own stay' : ''}`, async ({
         browser,
       }) => {
         const page = await sharedRide(browser, viewport, FOLLOWING);
@@ -381,15 +382,28 @@ test.describe('a room ride’s HUD — #1356', () => {
             expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
             expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
           }
+          // The owner's ruling of 2026-11-06 (#2034): in a room, on a tablet
+          // as on a phone, the pacer, the ghost and the wind give way FIRST.
           for (const name of ROOM_GIVES_WAY) {
             const reading = named(seen.items, name);
-            if (tablet) {
-              expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
-              expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
-            } else {
-              expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeLessThanOrEqual(
-                1,
-              );
+            expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeLessThanOrEqual(
+              1,
+            );
+          }
+          // …and the rider's own readings stay on a tablet — but the ride so
+          // far on the 4:3 one, where it gives way next (ruling 3).
+          if (tablet) {
+            const fourByThree = viewport.height < 800;
+            const rideSoFar = ['reading: Distance', 'reading: Climbed', 'reading: Avg power'];
+            for (const name of RIDE_TOTAL_READINGS) {
+              if (fourByThree && rideSoFar.includes(name)) {
+                expect(seen.givenWay, how).toContain(name);
+              } else {
+                const reading = named(seen.items, name);
+                expect(inside(reading.box, viewport) && reading.onTop, `${how}: ${name}`).toBe(
+                  true,
+                );
+              }
             }
           }
           // Laid out at no size, and still in the list a screen reader reads.
@@ -478,9 +492,9 @@ function onItsSide(viewport: Viewport): boolean {
 }
 
 function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] {
-  const phone = !TABLET_VIEWPORTS.includes(viewport);
   const givesWay = [
-    ...(phone ? ROOM_GIVES_WAY : []),
+    // The owner's ruling of 2026-11-06 (#2034): on a tablet too.
+    ...ROOM_GIVES_WAY,
     ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
   ] as readonly string[];
   return seen.items
