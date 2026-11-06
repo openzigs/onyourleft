@@ -7684,6 +7684,18 @@ select.oyl-input {
   gap: var(--oyl-space-sm);
 }
 
+/* #2234: a volume on Settings, its label beside the slider and centred on it.
+   As two inline boxes on one line the label's baseline sat on the slider's
+   bottom edge (a range input has no text baseline), so the words hung below
+   the thumb. On a line too narrow for both, the slider wraps under its label.
+   `controls.browser.spec.ts` §"#2234" measures it. */
+.oyl-volume-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
 .oyl-sound input[type='range'],
 .oyl-sounds input[type='range'],
 .oyl-menu-sounds input[type='range'],
