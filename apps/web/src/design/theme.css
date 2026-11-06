@@ -8150,8 +8150,8 @@ select.oyl-input {
    It WRAPS, and only *Trainer notice* is ever wrapped: a fourth control did
    not fit before #1482 either, and on a line of its own it is the panel's
    width (#437's toggle; `ride-notices.browser.spec.ts` §"#647"). On a
-   corners layout it is PUT on that line rather than left to wrap: #2271
-   below. */
+   landscape corners layout it is PUT on that line rather than left to wrap:
+   #2271 below. */
 .oyl-hud__controls {
   display: flex;
   flex-wrap: wrap;
@@ -8193,7 +8193,8 @@ select.oyl-input {
   }
 }
 
-/* #2271: ON EVERY CORNERS LAYOUT *Trainer notice* HAS A LINE OF ITS OWN.
+/* #2271: ON A LANDSCAPE CORNERS LAYOUT *Trainer notice* HAS A LINE OF ITS
+   OWN.
    The row's controls are `flex: 1` with a 72 px floor set inline, so a line
    is chosen by those floors and not by the words: in the 20 rem panel (302 px
    inside, every corners layout over 30 rem tall: 1024×600, 1280×720, a
@@ -8206,8 +8207,16 @@ select.oyl-input {
    It costs the panel one 72 px line and a gap, which the 16 rem panel of a
    phone on its side already paid. Order is untouched: it was last on the
    row and is last under it. `ride-workout.browser.spec.ts` §"#2271" holds
-   every control's words inside its box, on top, and on the stage. */
-@media (min-width: 46rem) and (min-height: 22.5rem) {
+   every control's words inside its box, on top, and on the stage.
+
+   ⚠️ **Landscape only, and what that leaves is recorded as #419 asks: the
+   upright tablet (800×1280) still has the 77 px row.** There, with a re-plan
+   waiting, the line cost the actions panel enough to begin 25 px inside the
+   leaning rider's box on the CI runner's fonts (389 px tall,
+   `ride-workout.browser.spec.ts` §"#1244" and §"#1329"), and those cases hold
+   *Trainer notice* on the stage on every tablet, so it cannot give way there
+   as it does on a phone on its side (§"#1482" above). */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (orientation: landscape) {
   .oyl-game--riding .oyl-hud__controls > .oyl-hud__notice-toggle {
     flex-basis: 100%;
   }

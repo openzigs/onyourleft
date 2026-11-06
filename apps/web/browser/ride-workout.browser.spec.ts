@@ -1111,6 +1111,9 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
  * layout, 736×480 and 736×360 the short corners layout's edges, and 640×360
  * and 320×256 the stacked layout's (SC 1.4.10's viewport is the app's least).
  *
+ * Not the upright tablet (800×1280), which `theme.css` §"#2271" leaves with
+ * the 77 px row and says why.
+ *
  * The control: `theme.css` §"#2271" deleted, which puts the four back on one
  * line in the 20 rem panel and turns 1024×600, 1280×720, 1366×657 and 960×540
  * red on *End ride*'s and *Trainer notice*'s words.
