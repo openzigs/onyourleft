@@ -1097,12 +1097,15 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
  * - its box inside the actions panel and over no other control's box, and
  *   inside the viewport — every control on a corners layout, and the
  *   ride-time ones (`design/ride-time-controls.ts`) on the stacked layout,
- *   whose stage scrolls (#419): at 320×256 *Trainer notice* is under the
- *   fold there and reached by scrolling, as it was before #2271;
+ *   whose stage scrolls (#419): at 320×256 *Trainer notice* is partly under
+ *   the fold there (its box ends at 271 px on a Mac) and reached by
+ *   scrolling, as it was before #2271. The topmost-thing checks below still
+ *   hold its centre, which is inside the viewport;
  * - the topmost thing at its centre and at the four corners of its words, so
  *   a control drawn over another's label is a red case;
  * - and Pause, End ride and the lock on one line in that order, which this
- *   change must not move (the issue's lane scope).
+ *   change must not move (the issue's lane scope), with *Trainer notice* on a
+ *   line below them on a landscape corners layout (736 px and wider).
  *
  * The viewports are the short laptop windows, down to the corners layout's
  * smallest and the stacked layout's two landscape ones under it: 1024×600 is
@@ -1145,6 +1148,9 @@ const SHORT_LAPTOPS: readonly (Viewport & { readonly scrolls?: true })[] = [
   },
   { name: 'reflow — 320×256', width: 320, height: 256, unstagedFails: true, scrolls: true },
 ];
+
+/** `theme.css` §"#2271"'s `min-width: 46rem`, in px: the corners layout begins here. */
+const CORNERS_LAYOUT_MIN_WIDTH = 736;
 
 /** The row's controls, in document order, as `HudCore.tsx` renders them. */
 const ACTIONS_ROW = ['Pause', 'End ride', 'Lock', 'Trainer notice'] as const;
@@ -1307,6 +1313,15 @@ test.describe('the actions row at a short laptop window, in a workout with a tra
       expect(lock.box.left).toBeGreaterThanOrEqual(end.box.right);
       expect(end.box.top).toBeLessThan(pause.box.bottom);
       expect(lock.box.top).toBeLessThan(pause.box.bottom);
+
+      // The notice has the line of its own the rule gives it: below the three,
+      // not before them, which `order: -1` would draw while the three stayed
+      // in order one line lower.
+      const notice = row.controls[3];
+      if (notice === undefined) throw new Error('the row lost Trainer notice');
+      if (viewport.width >= CORNERS_LAYOUT_MIN_WIDTH) {
+        expect(notice.box.top).toBeGreaterThanOrEqual(pause.box.bottom - SUBPIXEL_TOLERANCE);
+      }
     });
   }
 });

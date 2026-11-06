@@ -8209,13 +8209,17 @@ select.oyl-input {
    row and is last under it. `ride-workout.browser.spec.ts` §"#2271" holds
    every control's words inside its box, on top, and on the stage.
 
-   ⚠️ **Landscape only, and what that leaves is recorded as #419 asks: the
-   upright tablet (800×1280) still has the 77 px row.** There, with a re-plan
-   waiting, the line cost the actions panel enough to begin 25 px inside the
-   leaning rider's box on the CI runner's fonts (389 px tall,
+   ⚠️ **Landscape only, and what that leaves is recorded as #419 asks: every
+   square or portrait corners window still has the 77 px row** — the upright
+   tablet (800×1280), and also 900×900, 1200×1300 or a desktop window snapped
+   to half of a 1440p monitor, where measured *End ride*'s words run out of
+   its box and *Trainer notice*'s are covered. That predates #2271 and is
+   outside its short-window scope. On the tablet, with a re-plan waiting, the
+   line cost the actions panel enough to begin 25 px inside the leaning
+   rider's box on the CI runner's fonts (389 px tall,
    `ride-workout.browser.spec.ts` §"#1244" and §"#1329"), and those cases hold
    *Trainer notice* on the stage on every tablet, so it cannot give way there
-   as it does on a phone on its side (§"#1482" above). */
+   as it does on a phone on its side (§"#1482" above). Filed as #2278 under #2034. */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (orientation: landscape) {
   .oyl-game--riding .oyl-hud__controls > .oyl-hud__notice-toggle {
     flex-basis: 100%;
