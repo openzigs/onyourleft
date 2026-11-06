@@ -69,8 +69,8 @@
  *
  * Home was one column of cards with the last ride under the ride choices. It
  * is a grid of modules now, in ONE reading order on every layout: Next up
- * (the quick-launch), the sensors (today the Trainer card; #2045 fills the
- * slot), the last ride (#2048) — or, on a first open, the other ways to start
+ * (the quick-launch), the sensors (#2045, {@link SensorsModule}, which took
+ * the Trainer card's slot), the last ride (#2048) — or, on a first open, the other ways to start
  * — and the week (#2049); then the ride choices, fitness and the badges. On a
  * phone that is one column in that order; on a landscape tablet the first
  * four are two rows of two inside the first screen. DOM order is the visual
@@ -79,8 +79,9 @@
  * ## What it reads
  *
  * `home/home.ts` — one bounded store read and no stream decode, on every
- * launch. The trainer's state and a ride left unfinished come from the ride
- * controller's snapshot, which is already in memory. #939 added no read:
+ * launch. The sensors, the trainer's state and a ride left unfinished come
+ * from the ride controller's snapshot, which is already in memory — #2045
+ * added no store read. #939 added no read:
  * `HomeView.reads.test.tsx` counts every store call the screen makes. #1010
  * adds at most ONE record read, `getRoute`, and only when a ride was ridden
  * on a route — `home/home.ts` §`loadNextUp`.
@@ -90,16 +91,32 @@
  * the Analysis screen uses, and units go through `units/format.ts`.
  */
 
-import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
-import { useEffect, useState, type JSX } from 'react';
+import {
+  metres,
+  unixSeconds,
+  type Percent,
+  type RouteProfile,
+  type UnixSeconds,
+} from '@onyourleft/domain';
+import type { ConnectionState } from '@onyourleft/sensors';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
 import { ProfileShape, SensorGlyph } from '../design/illustration';
+import { ChartSlot } from '../design/ChartSlot';
+import type { SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
-import { formatDuration, formatStartedAt, MOVING_TIME_LABEL } from '../format';
+import {
+  formatDuration,
+  formatPowerValue,
+  formatStartedAt,
+  MOVING_TIME_LABEL,
+  POWER_UNIT,
+  shownAveragePower,
+} from '../format';
 import {
   loadHome,
   loadNextUp,
@@ -108,11 +125,21 @@ import {
   type HomePreviousWeek,
 } from '../home/home';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
+import { WeekChart } from '../home/WeekChart';
 import { ProgressPanel } from '../progress/ProgressPanel';
-import type { RideController } from '../ride/controller';
+import {
+  batteryBadgeWords,
+  isLowBattery,
+  mayBatteryBeRead,
+  useBatteryLevels,
+} from '../ride/battery-level';
+import type { BatteryLevelPort } from '../ride/battery-port';
+import type { PairedSensor, PairingRole, RideController } from '../ride/controller';
+import type { RideMetricId } from '../ride/metrics';
+import { metricSentence, metricText, presentationFor } from '../ride/MetricGrid';
 import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
-import { hrefFor, hrefForGameRoute, routeById } from '../shell/routes';
+import { hrefFor, hrefForActivity, hrefForGameRoute, routeById } from '../shell/routes';
 import { useUnits } from '../units/context';
 import {
   formatDistance,
@@ -131,6 +158,12 @@ export interface HomeViewProps {
   readonly routes?: RoutePort | undefined;
   /** The clock "this week" is measured from. A seam for tests. */
   readonly now?: (() => UnixSeconds) | undefined;
+  /**
+   * Each connected sensor's battery, for the sensors module — #2047. Absent
+   * where the platform reads none (the Android shell, today), when no level is
+   * shown at all.
+   */
+  readonly battery?: BatteryLevelPort | undefined;
 }
 
 const wallClock = (): UnixSeconds => unixSeconds(Math.floor(Date.now() / 1000));
@@ -189,9 +222,13 @@ export function HomeView(props: HomeViewProps): JSX.Element {
             the last ride (or, on a first open, the other ways to start), the
             week — and then the rest. `theme.css` §"#2044" lays them out. */}
         <NextUp next={next} />
-        {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
+        {props.controller === undefined ? null : (
+          <SensorsModule controller={props.controller} battery={props.battery} />
+        )}
         {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
-        {data?.lastRide === undefined ? null : <LastRide last={data.lastRide} />}
+        {data?.lastRide === undefined ? null : (
+          <LastRide last={data.lastRide} profile={lastRideProfile(data.lastRide, nextUp)} />
+        )}
         {data?.lastRide === undefined ? null : (
           <ThisWeek week={data.week} previous={data.previousWeek} />
         )}
@@ -218,6 +255,19 @@ export function HomeView(props: HomeViewProps): JSX.Element {
       </div>
     </div>
   );
+}
+
+/**
+ * The climb the last ride's module draws — #2048: the route Next up read,
+ * when it is the route the last ride was ridden on. The newest ride on a
+ * route is the newest ride whenever that ride has a route, so this is the
+ * same record, read once.
+ */
+function lastRideProfile(
+  last: NonNullable<HomeData['lastRide']>,
+  next: HomeNextUp | undefined,
+): RouteProfile | undefined {
+  return next?.kind === 'route' && last.routeId === next.id ? next.profile : undefined;
 }
 
 /**
@@ -258,21 +308,58 @@ function GettingStarted({
 }
 
 /**
- * *Last ride* — the module slot #2048 fills. Since #2044 it is its own
- * module, third in the reading order after Next up and the sensors, rather
- * than the first of the cards under the ride choices: a `section` named by
- * its own `h2`, as every module is — `a11y/audit.ts` §"landmarks are
- * distinguishable" (#864) refuses an unnamed `section` beside another.
+ * *Last ride* — #2048, in the slot #2044 made for it: third in the reading
+ * order after Next up and the sensors, a `section` named by its own `h2`, as
+ * every module is — `a11y/audit.ts` §"landmarks are distinguishable" (#864)
+ * refuses an unnamed `section` beside another.
+ *
+ * The NEWEST ride (`home/home.ts` reads the summaries newest first, #1107):
+ * its name as the link to its own page, when, moving time, distance, average
+ * power where it was recorded, and load. On a first open this slot is
+ * {@link GettingStarted}'s *Nothing recorded yet*, whose start is Next up's
+ * one *Start a ride* (#1429 keeps a first open to one first step).
+ *
+ * ## The climb, and no map — ⚠️ a location surface
+ *
+ * The ride's shape is its elevation, drawn with {@link ProfileShape}: never
+ * its GPS trace, which on a dashboard is where a rider lives for no gain
+ * (CLAUDE.md §6). The profile is the saved route's the ride was ridden on —
+ * the one record Next up already read (`loadNextUp`), so this costs no read
+ * and decodes no stream — with its climb in words beside it, because the
+ * drawing is `aria-hidden`. A ride on no saved route draws no profile.
+ * Nothing in this module formats a coordinate; `HomeView.last-ride.test.tsx`
+ * holds that no latitude or longitude reaches it.
  */
-function LastRide({ last }: { readonly last: NonNullable<HomeData['lastRide']> }): JSX.Element {
+function LastRide({
+  last,
+  profile,
+}: {
+  readonly last: NonNullable<HomeData['lastRide']>;
+  /** The route the ride was ridden on, when Next up has read it. */
+  readonly profile: RouteProfile | undefined;
+}): JSX.Element {
   const units = useUnits();
   const lastDistance = shownDistance(last.distance);
+  // #1054: a mean that shows as 0 W is no figure, as on the ride result card.
+  const lastPower = shownAveragePower(last.averagePower);
   return (
     <section className="oyl-panel oyl-home__last" aria-labelledby="oyl-home-last">
       <h2 id="oyl-home-last">Last ride</h2>
       <p>
-        <strong>{last.name}</strong>
+        <a href={hrefForActivity(last.id)}>
+          <strong>{last.name}</strong>
+        </a>
       </p>
+      {profile === undefined ? null : (
+        <div className="oyl-home__last-climb">
+          {/* The owner's review (2026-11-05): the near hill's dark green was
+              faint on the dark card; the accent is a declared 3:1 pair on it. */}
+          <ProfileShape className="oyl-home__last-profile" profile={profile} paintAs="mark" />
+          <p className="oyl-muted tw:m-0">
+            Climb {measurementText(formatSmallDistance(profile.totalAscent, units))}
+          </p>
+        </div>
+      )}
       <dl className="oyl-home__facts">
         <div>
           <dt>When</dt>
@@ -291,6 +378,14 @@ function LastRide({ last }: { readonly last: NonNullable<HomeData['lastRide']> }
             <dt>Distance</dt>
             <dd>
               <Reading {...formatDistance(lastDistance, units)} />
+            </dd>
+          </div>
+        )}
+        {lastPower === undefined ? null : (
+          <div>
+            <dt>Average power</dt>
+            <dd>
+              <Reading value={formatPowerValue(lastPower)} unit={POWER_UNIT} />
             </dd>
           </div>
         )}
@@ -396,37 +491,259 @@ function LeftUnfinished({
 }
 
 /**
- * The trainer, from what the ride controller already knows. Its words and its
- * link to Devices (#659) are unchanged by #939: a rider with no trainer is
- * told so in a sentence, never by a picture alone.
+ * The sensors module — #2045, in the slot #2044 kept for it: the trainer and
+ * every BLE sensor the rider paired, each in words, with what it is reading
+ * now, and ONE press to Devices (#659), where pairing lives. A `section`
+ * named by its own `h2`, second in the reading order.
  *
- * Since #2044 it is the sensor-status module's slot (#2045 fills it), second
- * in the reading order, and — like the last ride's and the week's — a
- * `section` named by its own `h2`.
+ * ## One port, and it is the ride controller's
+ *
+ * Read from {@link useRideSnapshot}, the subscription the Devices screen's
+ * `ride/SensorPairing.tsx` renders from — the same `sensors` rows, so a device
+ * paired there is listed here with no second connection path. Each row's
+ * reading is that DEVICE's own (`ride/controller.ts` §`PairedSensor.readings`),
+ * not the Ride screen's merged channel, so a trainer and a power meter both
+ * sending power each show their own number.
+ *
+ * ## Honest states only — docs/agents/web-bluetooth.md
+ *
+ * A device is *connected* or *not connected*, and nothing else. A browser has
+ * no silent reconnect and no background scan, so this never says a device is
+ * being searched for or will come back by itself: a lost link is "not
+ * connected", and the way back is the Devices screen's chooser.
+ * `HomeView.sensors.test.tsx` holds that over the real Web Bluetooth
+ * transport in every state it reports.
+ *
+ * The trainer keeps its row and its sentences from #939 — *No trainer
+ * paired*, and whether this app has control — first, because it is the one
+ * device here this app can drive. State is words, never colour (SC 1.4.1);
+ * the glyph is `aria-hidden` decoration and says nothing.
+ *
+ * ⚠️ **One link to Devices** (#1429): the trainer's own while no trainer is
+ * paired, and the module's otherwise.
+ *
+ * ## One compact row a device — the owner's screenshot review, 2026-11-05
+ *
+ * Each device is ONE row: its icon, its name, its own live reading and a
+ * connected dot. The kind of device and the reading's label are said to a
+ * screen reader in words the row's icon already shows on screen, so the
+ * row's text is still *Heart rate strap, HRM-Pro 7C1D, Heart rate: 142 bpm,
+ * Connected*. The dot is never the only signal (SC 1.4.1): connected is a
+ * filled dot, not connected a ring with the words *Not connected* beside it.
+ * The module's own link sits beside its heading, which is as tall as its
+ * glyph anyway. With four sensors paired that keeps Last ride and This week
+ * above a 1280×800 tablet's fold, which the module's first drawing (each part
+ * of a device on a line of its own, ~460 px tall) did not —
+ * `home.browser.spec.ts` §"four sensors paired" measures it.
  */
-function TrainerCard({ controller }: { readonly controller: RideController }): JSX.Element {
-  const trainer = useRideSnapshot(controller).trainer;
+function SensorsModule({
+  controller,
+  battery,
+}: {
+  readonly controller: RideController;
+  readonly battery: BatteryLevelPort | undefined;
+}): JSX.Element {
+  const snapshot = useRideSnapshot(controller);
+  const presentation = presentationFor(useUnits());
+  // #2047: each connected sensor's battery, where it reports one.
+  const levels = useBatteryLevels(battery, snapshot.sensors, mayBatteryBeRead(snapshot));
+  const { trainer } = snapshot;
+  const trainers = snapshot.sensors.filter((sensor) => sensor.role === 'trainer');
+  const others = snapshot.sensors.filter((sensor) => sensor.role !== 'trainer');
+  const noTrainer = !trainer.paired && trainers.length === 0;
+  const devices = hrefFor(routeById('devices'));
+  // #939's sentence: whether this app has control of the trainer.
+  const control = trainer.paired ? (
+    <p className="oyl-home__sensor-note">
+      {!trainer.hasControl ? (
+        <>
+          Paired, and this app has not been given control.{' '}
+          <a href={hrefFor(routeById('ride'))}>Ask for it on Ride</a>.
+        </>
+      ) : (
+        'Paired, and this app has control.'
+      )}
+    </p>
+  ) : null;
   return (
-    <section className="oyl-panel oyl-home__trainer" aria-labelledby="oyl-home-trainer">
-      <h2 id="oyl-home-trainer" className="tw:flex tw:items-center tw:gap-sm">
-        <SensorGlyph kind="trainer" className="oyl-home__glyph" />
-        Trainer
-      </h2>
-      <p>
-        {!trainer.paired ? (
-          <>
-            No trainer paired. <a href={hrefFor(routeById('devices'))}>Pair one on Devices</a>.
-          </>
-        ) : !trainer.hasControl ? (
-          <>
-            Paired, and this app has not been given control.{' '}
-            <a href={hrefFor(routeById('ride'))}>Ask for it on Ride</a>.
-          </>
+    <section className="oyl-panel oyl-home__sensors" aria-labelledby="oyl-home-sensors">
+      <div className="oyl-home__sensors-head">
+        <h2 id="oyl-home-sensors" className="tw:flex tw:items-center tw:gap-sm">
+          <SensorGlyph kind="trainer" className="oyl-home__glyph" />
+          Sensors
+        </h2>
+        {noTrainer ? null : <a href={devices}>Pair or forget devices on Devices</a>}
+      </div>
+      <ul className="oyl-home__sensor-list">
+        {noTrainer ? (
+          <li>
+            <p className="tw:m-0">
+              No trainer paired. <a href={devices}>Pair one on Devices</a>.
+            </p>
+          </li>
+        ) : trainers.length === 0 ? (
+          <li>{control}</li>
         ) : (
-          'Paired, and this app has control.'
+          trainers.map((sensor, index) => (
+            <SensorRow
+              key={sensor.id}
+              sensor={sensor}
+              presentation={presentation}
+              battery={levels.get(sensor.id)}
+            >
+              {index === 0 ? control : null}
+            </SensorRow>
+          ))
         )}
-      </p>
+        {others.map((sensor) => (
+          <SensorRow
+            key={sensor.id}
+            sensor={sensor}
+            presentation={presentation}
+            battery={levels.get(sensor.id)}
+          />
+        ))}
+      </ul>
+      {others.length === 0 ? (
+        <p className="oyl-muted tw:mb-0">No heart rate, power or cadence sensor paired.</p>
+      ) : null}
     </section>
+  );
+}
+
+/** What each kind of device is called in a row — the Devices screen's own words. */
+const SENSOR_KIND: Readonly<Record<PairingRole, string>> = {
+  trainer: 'Smart trainer',
+  'heart-rate': 'Heart rate strap',
+  'power-meter': 'Power meter',
+  'speed-cadence': 'Speed or cadence sensor',
+};
+
+/** Each kind's icon — the Devices screen's (`ride/SensorPairing.tsx`). */
+const SENSOR_ICON: Readonly<Record<PairingRole, SensorGlyphKind>> = {
+  trainer: 'trainer',
+  'heart-rate': 'heart-rate',
+  'power-meter': 'power',
+  'speed-cadence': 'cadence',
+};
+
+/**
+ * Which reading a row shows: the first of these the device supplies — a
+ * trainer's power before its cadence, a speed or cadence sensor's cadence
+ * before its speed.
+ */
+const ROW_READING: Readonly<Record<PairingRole, readonly RideMetricId[]>> = {
+  trainer: ['power', 'cadence', 'speed'],
+  'heart-rate': ['heartRate'],
+  'power-meter': ['power'],
+  'speed-cadence': ['cadence', 'speed'],
+};
+
+/**
+ * Connected, or not — the two states Home says (§"Honest states only" above).
+ * The Devices screen says WHY one is not, and what to do about it.
+ */
+function connectedWords(state: ConnectionState): string {
+  return state === 'connected' ? 'Connected' : 'Not connected';
+}
+
+/**
+ * One device, one row: its icon, its name, its own live reading, its
+ * battery badge (#2047, while it is connected and reports a level — a device
+ * that reports none shows no badge at all, never `0%`) and its connected
+ * dot. Every word the screen leaves to the icon or the dot is
+ * still in the row for a screen reader (`oyl-visually-hidden`), so the row
+ * reads as one sentence. `children` is a line under the row, the whole of its
+ * width — the trainer's control sentence.
+ */
+function SensorRow({
+  sensor,
+  presentation,
+  battery,
+  children,
+}: {
+  readonly sensor: PairedSensor;
+  readonly presentation: ReturnType<typeof presentationFor>;
+  readonly battery?: Percent | undefined;
+  readonly children?: ReactNode;
+}): JSX.Element {
+  const connected = sensor.state === 'connected';
+  const reading = ROW_READING[sensor.role]
+    .map((id) => sensor.readings?.find((each) => each.id === id))
+    .find((each) => each !== undefined);
+  const label = reading === undefined ? '' : presentation[reading.id].label;
+  return (
+    <li className="oyl-home__sensor-row">
+      <SensorGlyph kind={SENSOR_ICON[sensor.role]} className="oyl-home__sensor-icon" />
+      <span className="oyl-home__sensor-name">
+        <span className="oyl-visually-hidden">{SENSOR_KIND[sensor.role]}, </span>
+        {sensor.name}
+      </span>
+      {connected && reading !== undefined ? (
+        <span className="oyl-home__sensor-reading">
+          <span className="oyl-visually-hidden">, {label}: </span>
+          {metricSentence(label, metricText(reading.state, presentation[reading.id])).slice(
+            label.length + 2,
+          )}
+        </span>
+      ) : null}
+      {connected && battery !== undefined ? <BatteryBadge level={battery} /> : null}
+      <span className="oyl-home__sensor-state">
+        <span
+          aria-hidden="true"
+          className={`oyl-home__sensor-dot${connected ? ' oyl-home__sensor-dot--on' : ''}`}
+        />
+        <span className="oyl-visually-hidden">, </span>
+        <span className={connected ? 'oyl-visually-hidden' : undefined}>
+          {connectedWords(sensor.state)}
+        </span>
+      </span>
+      {children}
+    </li>
+  );
+}
+
+/**
+ * A sensor's battery as a badge — #2047, compact since the owner's review of
+ * #2045: the glyph filled to the level and the number on screen, and `low`
+ * beside it at or under the threshold, in words before the warning pair (SC
+ * 1.4.1). The rest of `batteryBadgeWords` is said to a screen reader only, so
+ * the badge's text is still *Battery 20%, low — charge it or change it soon*.
+ */
+function BatteryBadge({ level }: { readonly level: Percent }): JSX.Element {
+  const words = batteryBadgeWords(level);
+  return (
+    <>
+      <span className="oyl-visually-hidden">, </span>
+      <span className={`oyl-home__battery${isLowBattery(level) ? ' oyl-home__battery--low' : ''}`}>
+        <BatteryGlyph level={level} />
+        <span className="oyl-visually-hidden">{words.before}</span>
+        {words.shown}
+        {words.after === '' ? null : <span className="oyl-visually-hidden">{words.after}</span>}
+      </span>
+    </>
+  );
+}
+
+/**
+ * A battery, filled to its level — #2047. `aria-hidden` and wordless: the
+ * words beside it carry the number and, when it is low, say so.
+ */
+function BatteryGlyph({ level }: { readonly level: Percent }): JSX.Element {
+  const share = Math.max(0, Math.min(1, level / 100));
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      className="oyl-home__battery-glyph"
+      viewBox="0 0 24 12"
+    >
+      <rect x="0.5" y="0.5" width="20" height="11" rx="2" fill="none" stroke="currentColor" />
+      <rect x="21" y="3.5" width="2.5" height="5" rx="1" fill="currentColor" />
+      {share === 0 ? null : (
+        <rect x="2" y="2" width={17 * share} height="8" rx="1" fill="currentColor" />
+      )}
+    </svg>
   );
 }
 
@@ -537,18 +854,79 @@ function NextUp({ next }: { readonly next: HomeNextUp | undefined }): JSX.Elemen
   );
 }
 
+/** The week table's caption — #2049. */
+const WEEK_TABLE_CAPTION = 'Day by day';
+
+/** A day of the week table: *Today*, or its weekday and date. */
+function dayName(day: string, today: boolean): string {
+  return today
+    ? 'Today'
+    : new Intl.DateTimeFormat('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+      }).format(new Date(`${day}T12:00:00Z`));
+}
+
 /** The week before's figure, as the words under a reading — its own `dd`. */
 function weekBefore(value: string): string {
   return `Week before: ${value}`;
 }
 
 /**
+ * The seven days before this week's, figure by figure — #1010's comparison.
+ * Each term's `dd` is its own value, so a screen reader never runs it into a
+ * reading's digits. Since the owner's ruling of 2026-11-06 it is behind the
+ * week chart's disclosure, beside the table, not under each reading.
+ */
+function WeekBefore({ previous }: { readonly previous: HomePreviousWeek }): JSX.Element {
+  return (
+    <dl className="oyl-home__before-facts">
+      <div>
+        <dt>Rides</dt>
+        <dd className="oyl-home__before">{weekBefore(String(previous.rides))}</dd>
+      </div>
+      <div>
+        <dt>{MOVING_TIME_LABEL}</dt>
+        <dd className="oyl-home__before">{weekBefore(formatDuration(previous.movingTime))}</dd>
+      </div>
+      <div>
+        <dt>Load</dt>
+        <dd className="oyl-home__before">
+          {weekBefore(String(Math.round(previous.load)))}
+          {previous.ridesWithLoad < previous.rides
+            ? ` (from ${String(previous.ridesWithLoad)} of ${String(previous.rides)} rides)`
+            : ''}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+/**
  * *This week* — #1010: rides, moving time and load in big tabular numerals
- * (`Reading`), each set against the seven days before, and the days ridden as
- * a ring beside the sentence that says the same. Numbers only — no streak
- * and no target (#935 D-6). Every figure is `home/home.ts`'s arithmetic over
- * the one read. Since #2044 the week module's slot (#2049 fills it), fourth
- * in the reading order, a `section` named by its own `h2`.
+ * (`Reading`), each set against the seven days before, and since #2049 the
+ * week's distance. Numbers only — no streak and no target (#935 D-6). Every
+ * figure is `home/home.ts`'s arithmetic over the one read. Fourth in the
+ * reading order since #2044, a `section` named by its own `h2`.
+ *
+ * ## The days, drawn — #2049
+ *
+ * A bar per day of moving time (`home/WeekChart.tsx`), in the place #939's
+ * ring of the days ridden had: the bars draw the same fact — a bar on each
+ * day ridden — and how long each was, at the ring's medium size, which is
+ * what lets the four modules still stand inside a landscape tablet's first
+ * screen (`home.browser.spec.ts` §"#2044"). The chart is `aria-hidden`; its
+ * table, *Day by day*, is one press away under it, and stands alone if the
+ * chart throws (`design/ChartSlot.tsx`, `a11y/degradation.a11y.test.tsx`).
+ *
+ * The owner's ruling of 2026-11-06: the sentence that says how many days were
+ * ridden and the week before's figures are behind that same disclosure, before
+ * the table, and stand with it if the chart throws — the bars show both, and
+ * the module is as short as the chart (`home.browser.spec.ts`, four sensors
+ * paired). With no rides this week there is no chart and no disclosure, so
+ * the week before's figures stand under the sentence that says so.
  */
 function ThisWeek({
   week,
@@ -557,6 +935,8 @@ function ThisWeek({
   readonly week: HomeData['week'];
   readonly previous: HomePreviousWeek;
 }): JSX.Element {
+  const units = useUnits();
+  const weekDistance = shownDistance(metres(week.distance));
   return (
     <section className="oyl-panel oyl-home__week" aria-labelledby="oyl-home-week">
       {/* #1013: which seven days these are is the section's help. */}
@@ -568,11 +948,38 @@ function ThisWeek({
         This week
       </SectionHeading>
       {week.rides === 0 ? (
-        <p>No rides in the last seven days.</p>
+        <>
+          <p>No rides in the last seven days.</p>
+          {/* No chart, so no disclosure to put them behind: the week
+              before's figures stand under the sentence. */}
+          <WeekBefore previous={previous} />
+        </>
       ) : (
         <div className="oyl-home__days">
-          <DaysRing days={week.daysRidden} />
-          <p>You rode on {String(week.daysRidden)} of the last seven days.</p>
+          {/* #2049: moving time per day, drawn where #939's ring was, with
+              the same figures as a table one press away — and the table
+              alone if the chart throws (`design/ChartSlot.tsx`). The owner's
+              ruling of 2026-11-06: the days-ridden sentence and the week
+              before's figures go behind that disclosure with the table — the
+              bars show both — so the module is as short as the chart. */}
+          <ChartSlot
+            caption={WEEK_TABLE_CAPTION}
+            columns={['Day', 'Rides', MOVING_TIME_LABEL]}
+            rows={week.days.map((day, index) => [
+              dayName(day.day, index === week.days.length - 1),
+              String(day.rides),
+              formatDuration(day.movingTime),
+            ])}
+            emptyMessage="No rides in the last seven days."
+            chart={<WeekChart days={week.days} />}
+            tablePosition="disclosed"
+            alongside={
+              <>
+                <p>You rode on {String(week.daysRidden)} of the last seven days.</p>
+                <WeekBefore previous={previous} />
+              </>
+            }
+          />
         </div>
       )}
       <dl className="oyl-home__facts">
@@ -581,15 +988,23 @@ function ThisWeek({
           <dd>
             <Reading value={String(week.rides)} />
           </dd>
-          <dd className="oyl-home__before">{weekBefore(String(previous.rides))}</dd>
         </div>
         <div>
           <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
             <Reading value={formatDuration(week.movingTime)} />
           </dd>
-          <dd className="oyl-home__before">{weekBefore(formatDuration(previous.movingTime))}</dd>
         </div>
+        {/* #2049: the week's distance beside its rides and time. #1070: a
+            week whose rides stored no distance shows none, not 0 km. */}
+        {weekDistance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading {...formatDistance(weekDistance, units)} />
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Load</dt>
           <dd>
@@ -598,53 +1013,8 @@ function ThisWeek({
               ? ` (from ${String(week.ridesWithLoad)} of ${String(week.rides)} rides)`
               : ''}
           </dd>
-          <dd className="oyl-home__before">
-            {weekBefore(String(Math.round(previous.load)))}
-            {previous.ridesWithLoad < previous.rides
-              ? ` (from ${String(previous.ridesWithLoad)} of ${String(previous.rides)} rides)`
-              : ''}
-          </dd>
         </div>
       </dl>
     </section>
   );
 }
-
-/**
- * The days ridden in the last seven, as a ring beside the sentence that says
- * the same thing — #939's progress. Built from `home/home.ts`'s one read; no
- * streak and no badge (#935 D-6 is its own issue). The ring is decoration:
- * the sentence carries the number.
- */
-function DaysRing({ days }: { readonly days: number }): JSX.Element {
-  const share = Math.max(0, Math.min(1, days / 7));
-  return (
-    <svg
-      aria-hidden="true"
-      focusable="false"
-      className="oyl-home__ring"
-      viewBox={`0 0 ${String(RING_BOX)} ${String(RING_BOX)}`}
-    >
-      <circle
-        className="oyl-home__ring-track"
-        cx={RING_BOX / 2}
-        cy={RING_BOX / 2}
-        r={RING_RADIUS}
-      />
-      {share === 0 ? null : (
-        <circle
-          className="oyl-home__ring-fill"
-          cx={RING_BOX / 2}
-          cy={RING_BOX / 2}
-          r={RING_RADIUS}
-          strokeDasharray={`${String(share * RING_CIRCUMFERENCE)} ${String(RING_CIRCUMFERENCE)}`}
-          transform={`rotate(-90 ${String(RING_BOX / 2)} ${String(RING_BOX / 2)})`}
-        />
-      )}
-    </svg>
-  );
-}
-
-const RING_BOX = 48;
-const RING_RADIUS = 20;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;

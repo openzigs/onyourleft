@@ -150,8 +150,9 @@ const TOUCH_TARGET_PIXELS = 44;
 
 /**
  * The owner's ruling of 2026-10-01 on #935 still governs the Trainer card's
- * glyph and the days ring: about 48 px tall, and not thin strips. (#1010 made
- * the ride cards' pictures their backgrounds; see below.)
+ * glyph and the week chart (#2049, in #939's ring's place): about 48 px
+ * tall, and not thin strips. (#1010 made the ride cards' pictures their
+ * backgrounds; see below.)
  */
 const MEDIUM_DRAWING_PIXELS = { least: 44, most: 56 } as const;
 const MAXIMUM_DRAWING_ASPECT = 3;
@@ -433,9 +434,9 @@ test.describe('#1010 — the pictures are the cards, and every word is on a soli
           MEDIUM_DRAWING_PIXELS.least,
         );
       }
-      // The two drawings #1010 left medium.
+      // The drawing #1010 left medium. The week chart is not one since the
+      // owner's review of #2049: it is the card's width (§"#2049" below).
       expect(notMedium(seen.trainerGlyph), 'the Trainer card’s glyph').toBeUndefined();
-      expect(notMedium(seen.daysRing), 'the days ring').toBeUndefined();
     });
   }
 
@@ -536,6 +537,59 @@ function visualOrder(modules: readonly ModuleMeasurement[]): readonly number[] {
     .map((each) => each.index);
 }
 
+/**
+ * #2049, the owner's screenshot review of 2026-11-05: the week chart was
+ * ~135 px wide with tiny day letters and no values. It fills the week card's
+ * width now, and every bar has its value written over it, inside the chart
+ * and level with its own bar. **Control:** `?chart=narrow` puts the 8.5rem
+ * chart back.
+ */
+function weekChartFindings(seen: HomeMeasurement): readonly string[] {
+  const findings: string[] = [];
+  const chart = seen.weekChart;
+  const well = seen.weekDays;
+  if (chart === undefined || well === undefined) return ['the week chart was not drawn'];
+  if (chart.width < well.width - SUBPIXEL_TOLERANCE) {
+    findings.push(
+      `the chart is ${chart.width.toFixed(0)} px wide in a ${well.width.toFixed(0)} px card`,
+    );
+  }
+  if (seen.weekBars.length === 0) findings.push('no bar was drawn');
+  for (const { bar, value, text } of seen.weekBars) {
+    if (value === undefined || text === '') {
+      findings.push(`a bar at ${bar.left.toFixed(0)} has no value`);
+      continue;
+    }
+    const middle = (bar.left + bar.right) / 2;
+    if (Math.abs((value.left + value.right) / 2 - middle) > 2) {
+      findings.push(`${text} is not over its bar`);
+    }
+    if (value.bottom > bar.top + SUBPIXEL_TOLERANCE || value.top < chart.top - SUBPIXEL_TOLERANCE) {
+      findings.push(`${text} is not between its bar and the chart's top`);
+    }
+  }
+  return findings;
+}
+
+test.describe('#2049 — the week chart is the card’s width, with a value on each bar', () => {
+  for (const viewport of [FOLD_VIEWPORTS[3], FOLD_VIEWPORTS[0]]) {
+    test(viewport.name, async ({ page }) => {
+      const seen = await openAt(page, viewport);
+      console.log(
+        `#2049 week chart at ${viewport.name}: ${(seen.weekChart?.width ?? NaN).toFixed(0)} of ` +
+          `${(seen.weekDays?.width ?? NaN).toFixed(0)} px, ${String(seen.weekBars.length)} bars: ` +
+          seen.weekBars.map((each) => each.text).join(' '),
+      );
+      expect(weekChartFindings(seen)).toEqual([]);
+    });
+  }
+
+  test('the control — the 8.5rem chart is refused', async ({ page }) => {
+    const seen = await openAt(page, FOLD_VIEWPORTS[3], '?chart=narrow');
+    expect(weekChartFindings(seen).join('; ')).toMatch(/px wide in a/);
+  });
+});
+
 test.describe('#2044 — Home is a grid of modules', () => {
   test('a landscape tablet: Next up beside the sensors, the last ride beside the week, all four above the fold', async ({
     page,
@@ -608,6 +662,55 @@ test.describe('#2044 — Home is a grid of modules', () => {
     expect(seen.trainer?.top ?? 0).toBeGreaterThanOrEqual(
       (seen.nextUp?.card.bottom ?? Infinity) - 1,
     );
+  });
+
+  /*
+   * The owner's screenshot review of #2045 (2026-11-05): with four sensors
+   * paired the module was ~430–480 px tall and pushed Last ride and This week
+   * under the tablet's fold. Each device is one compact row now.
+   */
+  test('four sensors paired: the last ride and the week are still above the landscape tablet’s fold', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?sensors=four');
+    const four = fourModules(seen);
+    console.log(
+      `#2045 four sensors, tablet 1280×800, fold ${seen.fold.toFixed(1)}, sensors ` +
+        `${(seen.trainer?.height ?? NaN).toFixed(0)} px tall: ${describeBoxes(four)}`,
+    );
+    expect(await page.locator('.oyl-home__sensor-row').count()).toBe(4);
+    // Each device is ONE row: its name one line, however long (the strap's
+    // is too long to fit), so no row is taller than its words.
+    const names = await page.locator('.oyl-home__sensor-name').evaluateAll((all) =>
+      all.map((name) => ({
+        text: name.textContent,
+        height: name.getBoundingClientRect().height,
+        line: Number.parseFloat(getComputedStyle(name).lineHeight),
+      })),
+    );
+    for (const name of names) {
+      expect(name.height, `${name.text ?? ''} is more than one line`).toBeLessThanOrEqual(
+        name.line * 1.5,
+      );
+    }
+    for (const [name, box] of four) {
+      expect(box, `${name} was not drawn`).toBeDefined();
+      expect(box?.bottom ?? Infinity, `${name} is not wholly above the fold`).toBeLessThanOrEqual(
+        seen.fold + SUBPIXEL_TOLERANCE,
+      );
+    }
+  });
+
+  test('the control — four sensors on stacked rows push the last ride and the week under the fold', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?sensors=four&rows=stacked');
+    console.log(
+      `#2045 control, stacked rows, fold ${seen.fold.toFixed(1)}, sensors ` +
+        `${(seen.trainer?.height ?? NaN).toFixed(0)} px tall: ${describeBoxes(fourModules(seen))}`,
+    );
+    expect(seen.lastRide?.bottom ?? 0).toBeGreaterThan(seen.fold + SUBPIXEL_TOLERANCE);
+    expect(seen.week?.bottom ?? 0).toBeGreaterThan(seen.fold + SUBPIXEL_TOLERANCE);
   });
 
   test('a phone 412×915: one column, quick-launch, sensors, last ride, week, then the rest', async ({

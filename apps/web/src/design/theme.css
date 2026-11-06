@@ -1931,8 +1931,8 @@ html {
  * rail takes a different share of each window.
  *
  * ⚠️ **The DOM order is the reading order, the visual order and the tab order
- * on every layout**: Next up (the quick-launch), the sensors (the Trainer
- * card, #2045's slot), the last ride (#2048's; on a first open the other ways
+ * on every layout**: Next up (the quick-launch), the sensors (#2045's
+ * module, in the Trainer card's old slot), the last ride (#2048's; on a first open the other ways
  * to start), the week (#2049's), then the ride cards, fitness and the badges.
  * Every module is placed by its columns alone and the rows are auto, so none
  * can jump ahead of one it follows.
@@ -1973,7 +1973,7 @@ html {
   }
 
   .oyl-next-up,
-  .oyl-home__trainer {
+  .oyl-home__sensors {
     grid-column: 1 / -1;
   }
 }
@@ -1989,7 +1989,7 @@ html {
     grid-column: 1 / 3;
   }
 
-  .oyl-home__trainer,
+  .oyl-home__sensors,
   .oyl-home__week {
     grid-column: 3;
   }
@@ -2123,12 +2123,26 @@ html {
   height: calc(100% - var(--oyl-space-sm));
 }
 
-/* "Week before": under each reading, in the muted ink — a second `dd` of
-   the same term, so it is read as its own value and never run into the
-   reading's digits. */
-.oyl-home__facts .oyl-home__before {
-  color: var(--oyl-color-ink-muted);
+/* "Week before": behind the week chart's disclosure since the owner's
+   ruling of 2026-11-06, a term and its figure to a line, in the muted ink. */
+.oyl-home__before-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--oyl-space-sm);
+  margin-block: 0 var(--oyl-space-xs);
   font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-home__before-facts > div {
+  display: contents;
+}
+
+.oyl-home__before-facts dd {
+  margin: 0;
+}
+
+.oyl-home__before {
+  color: var(--oyl-color-ink-muted);
   font-weight: 400;
 }
 
@@ -2153,45 +2167,251 @@ html {
   inset: 0;
 }
 
-/* The days ridden of the last seven, as a ring beside the sentence (#939). */
-.oyl-home__days {
-  display: flex;
-  align-items: center;
-  gap: var(--oyl-space-md);
-  margin-bottom: var(--oyl-space-sm);
+/*
+ * The days ridden of the last seven, then since #2049 the week's bar chart —
+ * where #939's ring was, the same fact and each day's moving time. Since the
+ * owner's screenshot review of 2026-11-05 the chart is the card's whole width
+ * (it was 8.5rem beside the sentence), so the sentence is a line of its own
+ * above it. The sentence comes first in the DOM and is read first; the
+ * drawing is `aria-hidden`. Under it, the table's disclosure, or the table
+ * itself when the chart has thrown.
+ */
+/* The week's inset is Next up's and the sensors' (#2045), the cards it sits
+   under and beside on a landscape tablet. */
+.oyl-panel.oyl-home__week {
+  padding: var(--oyl-space-md);
 }
 
-.oyl-home__days p {
+.oyl-home__days {
+  display: grid;
+  row-gap: var(--oyl-space-xs);
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-home__days > :not(.oyl-week-chart) {
+  margin-block: 0;
+}
+
+/*
+ * #2049: this week's moving time, a bar per day (`home/WeekChart.tsx`), the
+ * card's whole width, with each day's time over its bar. The bars are one
+ * colour — `accent` on the panel's `surfaceRaised`, a declared non-text pair
+ * (3.60:1 light, `tokens.ts`) — so colour says nothing; the values are the
+ * panel's own `ink`, and the day's letter under each column and the table one
+ * press away say the rest.
+ */
+.oyl-week-chart {
+  display: grid;
+  gap: 0.125rem;
+  width: 100%;
+}
+
+.oyl-week-chart__plot {
+  position: relative;
+  height: 2.75rem;
+}
+
+.oyl-week-chart__bars {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.oyl-week-chart__bar {
+  fill: var(--oyl-color-accent);
+}
+
+/* Each bar's value, over its middle, its foot on the bar's top — a list, as
+   the day letters are, so each is a word of its own. */
+.oyl-week-chart__values {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-week-chart__value {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--oyl-color-ink);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.oyl-week-chart__base {
+  stroke: var(--oyl-color-border);
+  stroke-width: 1;
+}
+
+.oyl-week-chart__days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1;
+  text-align: center;
+}
+
+/* #2048: the last ride's climb — the route's own profile, the module's width
+   and 3rem tall, as Next up's, with the climb in words under it. */
+.oyl-home__last-climb {
+  display: grid;
+  gap: var(--oyl-space-xs);
+  margin-block-end: var(--oyl-space-sm);
+}
+
+.oyl-home__last-profile {
+  display: block;
+  width: 100%;
+  height: 3rem;
+}
+
+/* The sensors module's glyph (the Trainer card's until #2045) — a medium
+   drawing like the ring above and the cards' pictures (the owner's ruling of
+   2026-10-01 on #935), at the least a medium drawing is (44 px,
+   `home.browser.spec.ts` §`MEDIUM_DRAWING_PIXELS`), so the module with four
+   sensors paired is as short as it can be (the owner's review of #2045). */
+.oyl-home__glyph {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+/*
+ * #2045: one device to a ROW — the owner's screenshot review of 2026-11-05.
+ * Its icon, its name, its own reading and its connected dot on one line,
+ * wrapping only where a reading is too long for it. With four
+ * sensors paired the module stays short enough that Last ride and This week
+ * are above a 1280×800 tablet's fold (`home.browser.spec.ts` §"four sensors
+ * paired"); its control, `?rows=stacked`, puts each part back on a line of
+ * its own. The module's inset is Next up's, the card beside it.
+ */
+.oyl-panel.oyl-home__sensors {
+  padding: var(--oyl-space-md);
+}
+
+/* The heading, and the module's link to Devices beside it — on two short
+   lines if it must, inside the height the heading's glyph takes anyway. */
+.oyl-home__sensors-head {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-home__sensors-head > h2 {
+  flex: none;
   margin: 0;
 }
 
-.oyl-home__ring {
+.oyl-home__sensors-head > a {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--oyl-font-size-sm);
+  text-align: end;
+}
+
+.oyl-home__sensor-list {
+  display: grid;
+  gap: var(--oyl-space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1.3;
+}
+
+.oyl-home__sensor-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--oyl-space-sm);
+}
+
+.oyl-home__sensor-icon {
   flex: none;
-  width: 3rem;
-  height: 3rem;
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
-.oyl-home__ring-track,
-.oyl-home__ring-fill {
-  fill: none;
-  stroke-width: 6;
+/* A name is one line whatever its length, cut short with an ellipsis where
+   the row has no room for it all — a long name never makes its row two lines
+   tall (the Linux runner's wider font wrapped one). The whole name is still
+   the row's text, and the Devices screen shows it in full. */
+.oyl-home__sensor-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.oyl-home__ring-track {
-  stroke: var(--oyl-color-border);
-}
-
-.oyl-home__ring-fill {
-  stroke: var(--oyl-color-accent-text);
-  stroke-linecap: round;
-}
-
-/* The Trainer card's glyph — a medium drawing, 3rem, like the ring above and
-   the cards' pictures (the owner's ruling of 2026-10-01 on #935). */
-.oyl-home__glyph {
+.oyl-home__sensor-reading {
   flex: none;
-  width: 3rem;
-  height: 3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-home__sensor-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+/* Not connected: a ring, with its words beside it. Connected: the ring filled
+   in the accent — a non-text pair `tokens.ts` declares on `surfaceRaised`
+   (3.60 : 1 light, SC 1.4.11) — and the shape differs, so colour is never the
+   only signal (SC 1.4.1). */
+.oyl-home__sensor-dot {
+  box-sizing: border-box;
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+}
+
+.oyl-home__sensor-dot--on {
+  border: 0;
+  background: var(--oyl-color-accent);
+}
+
+/* The trainer's control sentence (#939), under its row and the row's width. */
+.oyl-home__sensor-note {
+  flex: 0 0 100%;
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* #2047: a sensor's battery — a badge in the device's row since the owner's
+   review of #2045: a small drawing filled to the level, then the number and,
+   when it is low, the word `low`. The low
+   one is ALSO drawn in the warning message's own declared pair
+   (`warningInk` on `warningSurface`), a second signal beside the words and
+   never the only one (SC 1.4.1). */
+.oyl-home__battery {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-home__battery-glyph {
+  flex: none;
+  width: 1.5rem;
+  height: 0.75rem;
+}
+
+.oyl-home__battery--low {
+  padding-inline: var(--oyl-space-xs);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-warning-surface);
+  color: var(--oyl-color-warning-ink);
 }
 
 /*
@@ -7348,7 +7568,7 @@ select.oyl-input {
 
 .oyl-hud__profile-svg {
   width: 100%;
-  height: 3rem;
+  height: 2.5rem;
   display: block;
 }
 
