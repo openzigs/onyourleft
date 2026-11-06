@@ -11042,6 +11042,22 @@ select.oyl-input {
   }
 }
 
+/* ⚠️ **And on an upright tablet, in a room with sounds on and a side camera
+   paired, it gives way too** — recorded as #419 asks. The sound row and the
+   side camera's row both stand on the route panel there (§"#1409"), and with
+   the graph's 4 rem in the panel the side camera's row was 45 px into the
+   leaning rider's box at 800×1280 (`ride-room.browser.spec.ts` §"#1409",
+   `[8,861 → 264,916]`), measured on PR #2231's tree merged with #2213. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__actions > .oyl-sound):has(
+      > .oyl-hud__actions > .oyl-hud__side-camera-row
+    )
+    .oyl-hud__recent {
+    display: none;
+  }
+}
+
 /* --- Capability queries (#307) --------------------------------------------- */
 
 /*
