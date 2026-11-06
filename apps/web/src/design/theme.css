@@ -10784,6 +10784,65 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE RIDE SO FAR AT ARM'S LENGTH — #2076 at #2130's sizes (PR #2213).
+ *
+ * #2076's *Distance*, *Climbed* and *Avg power* were cut for 1.5 rem
+ * secondary numerals; at #2130's 2.45 rem, measured in the pinned Chromium:
+ * - `199.9 km` is 116 px with its unit on its line, and its track was a
+ *   5.5 rem one, 105 px at 1280×800 and 95 px at 1024×768: the unit fell under
+ *   the number. So from 50 rem tall the fourth track, which the distance
+ *   takes on every ride (after *Speed*, *To go* and the moving time), has
+ *   *To go*'s 7.25 rem floor, and the gap is the 4 px the 4:3 tablet already
+ *   has, so the last two tracks keep 109 px for `4850 m` (99 px);
+ * - on the 4:3 tablet the five tracks have no width for a sixth floor, so
+ *   *Avg power* (`425 W`, 78 px) takes the first row's last, narrowest track,
+ *   and the distance and the climb the second row's first two;
+ * - a room's followed rider, named in its label, landed in the moving time's
+ *   content-sized track and took it, and the two readings after it, past the
+ *   stage's edge at 1280×800 and 800×1280: a room's readings size their track
+ *   by its width, never their label, as a round's and a race's do;
+ * - ⚠️ **what gives way, recorded as #419 asks: on the 4:3 tablet, in a ROOM,
+ *   the ride so far gives way** (hidden by clip, still read by a screen
+ *   reader), as it already does in a room's lap race on every tablet: a
+ *   room's three readings were a third row of the tier there, and a race's
+ *   standings under it ran over *Pause*. The saved ride states all three.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__field--room {
+    contain: inline-size;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    column-gap: var(--oyl-space-xs);
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr) minmax(7.25rem, 1fr)
+      repeat(2, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--average-power {
+    grid-area: 1 / 5;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
 /* --- Capability queries (#307) --------------------------------------------- */
 
 /*

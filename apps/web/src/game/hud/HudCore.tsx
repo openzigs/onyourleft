@@ -464,6 +464,9 @@ function fieldClass(reading: HudReading): string {
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
     // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
     ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
+    // #2213 with #2076: the 4:3 tablet sets *Avg power* in its narrowest
+    // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
+    ...(reading.key === 'averagePower' ? ['oyl-hud__field--average-power'] : []),
   ].join(' ');
 }
 
