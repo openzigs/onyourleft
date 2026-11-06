@@ -227,8 +227,9 @@ const TAU = Math.PI * 2;
  * The owner ruled on 2026-09-27 (#623) that the rider's kit is an On Your Left
  * house kit in the app's colours. Until #2037 it was read from `tokens.ts`'s
  * `accent` and `accentHover`; #2037 replaced the page's teal with the Hi-Vis
- * palette (ADR 0063 D-1), whose light `accent` is an olive 13 degrees of hue
- * from {@link KIT_PALETTE}'s Lime, so the two values are written here,
+ * palette (ADR 0063 D-1), whose light `accent` is an olive that sat 13
+ * degrees of hue from {@link KIT_PALETTE}'s Lime before #2255 moved it, so the
+ * two values are written here,
  * unchanged. ⚠️ **The owner ruled on 2026-11-05 (#2123) that the house kit
  * stays teal and is its own colour, not the page's**, which amends #623's
  * wording: do not read it from `tokens.ts` again, and a reviewer who wants
@@ -333,7 +334,13 @@ export interface KitPaletteEntry {
 export const KIT_PALETTE: Readonly<Record<KitColour, KitPaletteEntry>> = {
   house: { name: 'Teal, the On Your Left house kit', kit: HOUSE_KIT },
   green: { name: 'Green', kit: { jersey: 0x2e7d32, limb: 0x1b5e20 } },
-  lime: { name: 'Lime', kit: { jersey: 0x689f38, limb: 0x33691e } },
+  // Stored key `lime`, so a choice saved before #2255 still resolves; the
+  // colour and the name moved to a yellow-green (owner, 2026-11-06, #2123).
+  // ⚠️ Hue 78, not the 60 #2255 first asked for: the bot is DRAWN at hue 33.9
+  // (its orange tint over PACER_KIT's blue), so a jersey must sit between
+  // about 74 (40 from the bot) and 83 (40 from Green's 123). 60 failed both
+  // worlds' told-apart cases at 25.6 from the bot.
+  lime: { name: 'Yellow-green', kit: { jersey: 0x799e24, limb: 0x556e19 } },
   purple: { name: 'Purple', kit: { jersey: 0x6a1b9a, limb: 0x4a148c } },
   magenta: { name: 'Magenta', kit: { jersey: 0xad1457, limb: 0x880e4f } },
 };
