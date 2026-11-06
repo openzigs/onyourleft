@@ -69,7 +69,7 @@ import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
-import type { HudLayoutPreference } from './hud-layout-preference';
+import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
 import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
@@ -530,7 +530,8 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         never a live region (`RaceStandings.tsx` says why).
         */
         // #2079: and not at all when the rider turned the standings off.
-        standings === undefined || props.layout?.hidden.includes('standings') === true ? null : (
+        standings === undefined ||
+        !panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'standings') ? null : (
           <RaceStandings standings={standings} />
         )
       }

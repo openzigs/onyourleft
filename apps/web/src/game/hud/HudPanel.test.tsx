@@ -42,6 +42,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
+import { FRESH_WEEK, startRound } from '../delivery/round';
+import { hudOf, startRace } from './lap-race-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
 import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import {
@@ -765,6 +767,46 @@ describe('the rider’s HUD layout — #2079', () => {
     );
     expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
   });
+
+  /**
+   * PR #2235's review: with the readings turned off, a room's, a Delivery
+   * round's and a lap race's own readings stay, beside the ride's three
+   * times (`HudCore.tsx` §`keptWithReadingsHidden`). Each mode is drawn whole
+   * first, so the readings it marks as its own are read rather than listed.
+   */
+  const secondaryLabels = (): (string | null)[] =>
+    queryAll(mounted?.container ?? document, '.oyl-hud__fields--secondary dt').map(
+      (each) => each.textContent,
+    );
+  const modes = [
+    ['a room', '.oyl-hud__field--room', {}],
+    [
+      'a Delivery round',
+      '.oyl-hud__field--delivery',
+      {
+        room: undefined,
+        standings: undefined,
+        delivery: { round: startRound(8), week: FRESH_WEEK, score: 0 },
+      },
+    ],
+    [
+      'a lap race',
+      '.oyl-hud__field--lap-race',
+      { room: undefined, standings: undefined, lapRace: hudOf(startRace({ laps: 3 })) },
+    ],
+  ] as const;
+  for (const [mode, marked, input] of modes) {
+    it(`keeps ${mode}'s own readings, and the times, with the readings turned off`, async () => {
+      mounted = await mount(<HudPanel {...base} {...input} />);
+      const own = queryAll(mounted.container, `${marked} dt`).map((each) => each.textContent);
+      expect(own.length).toBeGreaterThan(0);
+      mounted.unmount();
+      mounted = await mount(
+        <HudPanel {...base} {...input} layout={{ hidden: ['readings'], textSize: 'normal' }} />,
+      );
+      expect(secondaryLabels()).toEqual(['Moving', 'Elapsed', 'Clock', ...own]);
+    });
+  }
 
   it('carries the text size as a class the stylesheet reads, and none at the normal size', async () => {
     mounted = await mount(<HudPanel {...base} layout={{ hidden: [], textSize: 'extra-large' }} />);
