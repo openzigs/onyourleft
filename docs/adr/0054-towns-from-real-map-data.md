@@ -504,3 +504,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   merged before that, and this entry is to be corrected or struck there if the ruling differs. What
   still holds, unchanged: the cap does not rise (D-5.6's second and third sentences), D-5.7, and
   D-3.1 to D-3.6.
+- **2026-11-06** — **D-1's *"Still true"* for ADR 0032 D-1 item 2 is proposed to stop holding for
+  the lap race's built-in circuits, under
+  [ADR 0064](0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md)**
+  ([#2293](https://github.com/openzigs/onyourleft/issues/2293), Proposed that day). If the owner
+  accepts it, each circuit's line and heights are committed under ODbL 1.0, with no corridor in them.
+  What still stands, unchanged: D-2 (a circuit's corridor, with the realistic world chosen, is read
+  per ride on the device like any route's), D-3.5 for `worldCorridors`, and D-3.6, which ADR 0064
+  D-5.3 extends with a second key (a ride on a built-in circuit) and does not reverse. This entry is
+  a pointer and changes nothing here.

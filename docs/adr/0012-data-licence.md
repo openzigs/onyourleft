@@ -320,3 +320,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-4's last paragraph asks a successor to. It also reads the ODbL text first-hand from
   `opendatacommons.org` on 2026-10-24, which D-6 could not. This ADR's decisions for segments are
   unchanged.
+- **2026-11-06** — **A second Publicly Used OSM-derived database is proposed: the lap race's
+  built-in circuit files, under
+  [ADR 0064](0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md)**
+  ([#2293](https://github.com/openzigs/onyourleft/issues/2293), Proposed that day). For that one
+  database D-4's *"§4.6 is not the plan"* would no longer describe the project: ADR 0064 offers it
+  under ODbL 1.0 and decides §4.6 a, the files themselves, as D-4's last paragraph asks a successor
+  to. This ADR's decisions for segments are unchanged.
