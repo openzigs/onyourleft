@@ -29,7 +29,9 @@ import {
   measure,
   openRide,
   sharedRide,
+  type Viewport,
 } from './ride-stage';
+import type { StageMeasurement } from './ride-harness';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 test.afterAll(releaseSharedPage);
@@ -48,6 +50,8 @@ const HARNESS_ROWS = [
 /** What a phone's stage gives up while a lap's notice is up: the route panel's cell. */
 const NOTICE_HAS_THE_ROUTE_CELL = [
   'lost: the elevation strip [0,0 → 0,0] COVERED',
+  // #2075: and the road ahead beside the strip, in the same panel.
+  'lost: the road ahead [0,0 → 0,0] COVERED',
   'lost: the plan view [0,0 → 0,0] COVERED',
   'not whole: oyl-hud__panel oyl-hud__route [0,0 → 0,0] COVERED',
 ];
@@ -55,11 +59,15 @@ const NOTICE_HAS_THE_ROUTE_CELL = [
 /** The panel's rows, once the harness's laps have reached it. */
 async function splitRows(page: Page): Promise<string[][]> {
   await page.waitForFunction(
-    () => document.querySelector('.oyl-hud__laps tbody tr:nth-child(2) td')?.textContent === '3',
+    () =>
+      document.querySelector('.oyl-hud__laps-row:nth-child(2) .oyl-hud__laps-value')
+        ?.textContent === '3',
   );
   return page.evaluate(() =>
-    [...document.querySelectorAll('.oyl-hud__laps tbody tr')].map((row) =>
-      [...row.children].map((cell) => cell.textContent ?? ''),
+    [...document.querySelectorAll('.oyl-hud__laps-row')].map((row) =>
+      [...row.querySelectorAll('.oyl-hud__laps-label, .oyl-hud__laps-value')].map(
+        (cell) => cell.textContent ?? '',
+      ),
     ),
   );
 }
@@ -72,9 +80,28 @@ async function splitsBox(page: Page): Promise<{ width: number; height: number }>
   });
 }
 
-for (const viewport of OVERLAY_VIEWPORTS) {
-  test(`#2080 a loop's lap splits hold the layout — ${viewport.name}`, async ({ browser }) => {
-    const page = await sharedRide(browser, viewport, '?lap=ended');
+/**
+ * Where each case is held: every overlay viewport at the normal size, and the
+ * tablets at #2079's large and extra large text (PR #2248's review: in a race
+ * on a loop at 800×1280 the standings were over the leaning rider at both),
+ * the only screens where the setting draws anything different.
+ */
+const SIZED_VIEWPORTS = [
+  ...OVERLAY_VIEWPORTS.map((viewport) => ({ viewport, size: '', text: '' })),
+  ...(['large', 'extra-large'] as const).flatMap((size) =>
+    TABLET_VIEWPORTS.map((viewport) => ({
+      viewport,
+      size: ` at ${size} text`,
+      text: `&text=${size}`,
+    })),
+  ),
+];
+
+for (const { viewport, size, text } of SIZED_VIEWPORTS) {
+  test(`#2080 a loop's lap splits hold the layout${size} — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport, `?lap=ended${text}`);
     expect(await splitRows(page)).toEqual(HARNESS_ROWS);
     const tablet = TABLET_VIEWPORTS.includes(viewport);
     const box = await splitsBox(page);
@@ -109,16 +136,35 @@ test('#2080 the control — a point-to-point route draws no lap splits', async (
   expect(await page.locator('.oyl-hud__laps').count()).toBe(0);
 });
 
+/**
+ * The layout's faults less those of a reading clipped to a pixel: what a
+ * layout gives way to a race (#419) — on the 4:3 tablet a room's readings
+ * (#2130), and at #2079's large text a room's gaps and wind on a landscape
+ * tablet. `ride-room.browser.spec.ts` and `ride-hud-layout.browser.spec.ts`
+ * hold which give way; here they are named in the log and set aside.
+ */
+function raceFaults(seen: StageMeasurement, viewport: Viewport, label: string): string[] {
+  const clipped = seen.items
+    .filter((each) => each.name.startsWith('reading: '))
+    .filter((each) => each.box.width * each.box.height <= 1)
+    .map((each) => each.name);
+  if (clipped.length > 0)
+    console.log(`#2080 ${label} — ${viewport.name}: gave way ${clipped.join(', ')}`);
+  return layoutFaults(seen, viewport).filter(
+    (fault) => !clipped.some((name) => fault.startsWith(`lost: ${name} [`)),
+  );
+}
+
 /** The race's swap control, by its words. */
 function swapControl(page: Page, words: string) {
   return page.locator('.oyl-hud__swap', { hasText: words });
 }
 
-for (const viewport of OVERLAY_VIEWPORTS) {
-  test(`#2080 in a race on a loop, the splits swap with the standings — ${viewport.name}`, async ({
+for (const { viewport, size, text } of SIZED_VIEWPORTS) {
+  test(`#2080 in a race on a loop, the splits swap with the standings${size} — ${viewport.name}`, async ({
     page,
   }) => {
-    await openRide(page, viewport, '?room=lap-race&lap=ended');
+    await openRide(page, viewport, `?room=lap-race&lap=ended${text}`);
     await page.waitForSelector('.oyl-hud__standings');
     const tablet = TABLET_VIEWPORTS.includes(viewport);
     if (!tablet) {
@@ -135,10 +181,12 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       const standings = seen.panels.find((each) => each.name.includes('oyl-hud__standings'));
       const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
       console.log(
-        `#2080 standings with the swap, ${how} — ${viewport.name}: ` +
+        `#2080 standings with the swap${size}, ${how} — ${viewport.name}: ` +
           `${((actions?.box.top ?? 0) - (standings?.box.bottom ?? 0)).toFixed(0)} px above the actions panel`,
       );
-      expect(layoutFaults(seen, viewport), `standings, ${how}`).toEqual([]);
+      expect(raceFaults(seen, viewport, `standings${size}, ${how}`), `standings, ${how}`).toEqual(
+        [],
+      );
     }
     await toLaps.click();
     expect(await page.locator('.oyl-hud__standings').count()).toBe(0);
@@ -148,7 +196,13 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     await expect(back).toBeFocused();
     expect((await back.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(48);
     for (const [how, seen] of await bothWays(page)) {
-      expect(layoutFaults(seen, viewport), `splits, ${how}`).toEqual([]);
+      const splits = seen.panels.find((each) => each.name.includes('oyl-hud__laps'));
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+      console.log(
+        `#2080 splits with the swap${size}, ${how} — ${viewport.name}: ` +
+          `${((actions?.box.top ?? 0) - (splits?.box.bottom ?? 0)).toFixed(0)} px above the actions panel`,
+      );
+      expect(raceFaults(seen, viewport, `splits${size}, ${how}`), `splits, ${how}`).toEqual([]);
     }
   });
 }
