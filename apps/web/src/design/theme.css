@@ -11226,6 +11226,34 @@ select.oyl-input {
  * the panel, in an outline of the label's colour that is the bar's full scale.
  * The bar is `aria-hidden`; the number and the name are never colour alone.
  */
+/* ⚠️ **At 1280×800, and in a laptop's window, in a room, the tier spans two
+   rows of the HUD's grid.** The owner's second ruling of 2026-11-06 (#2034)
+   keeps the pacer's and the ghost's gaps and the wind there beside these
+   two, which makes the tier a third row: a notice under it met the sound and
+   side-camera rows above the route panel (`ride-room.browser.spec.ts`
+   §"#1409"), and in a 1366×657 window ran into the route panel. So a notice
+   starts under the primary panel, and a race's standings under the tier,
+   whichever is taller. */
+@media (min-width: 51rem) and (min-height: 50rem),
+  (min-width: 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) {
+    grid-template-areas:
+      'primary secondary'
+      'notices secondary'
+      'notices beside'
+      'route actions';
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) :is(.oyl-hud__standings, .oyl-hud__laps) {
+    grid-area: beside;
+  }
+}
+
 /* The swatch: a square of the zone's colour beside its number, the height of
    the digits' x-height or so, so the number is still the reading. */
 .oyl-hud__zone-swatch {
