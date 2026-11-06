@@ -460,14 +460,18 @@ for (const viewport of VIEWPORTS) {
         // phone sits over the heading's start. ⚠️ Since #2065 that is the
         // title BLOCK's far end: the `h1` is as wide as its words, beside the
         // line under it, and on a phone the link covers all of it. Since #2056
-        // the far end of its CONTENT box: the padding past it is where the
-        // header's mute is drawn.
+        // short of the room the title keeps for the header's mute, which is
+        // drawn there: the block's content box, less the `h1`'s end padding.
         const headerBox = header.getBoundingClientRect();
         const heading = document.querySelector('main > .oyl-view-head');
         if (heading === null) throw new Error('no title block');
         const headingBox = heading.getBoundingClientRect();
+        const title = heading.querySelector(':scope > h1');
+        if (title === null) throw new Error('no title in the title block');
         const contentRight =
-          headingBox.right - Number.parseFloat(getComputedStyle(heading).paddingInlineEnd);
+          headingBox.right -
+          Number.parseFloat(getComputedStyle(heading).paddingInlineEnd) -
+          Number.parseFloat(getComputedStyle(title).paddingInlineEnd);
         const [target, x, y] =
           headerBox.height > 0
             ? [header, headerBox.right - 4, headerBox.top + headerBox.height / 2]
@@ -4134,6 +4138,23 @@ test.describe('#2056 — the header mute', () => {
         await page.evaluate(() => {
           window.scrollTo(0, 0);
         });
+        // Since #2054 a navigation between menu routes is a view transition,
+        // and while it runs every point on the page hits the transition's
+        // pseudo-elements on `html` — so the mute is read once it has ended.
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document
+                  .getAnimations()
+                  .filter((animation) =>
+                    (animation.effect as KeyframeEffect | null)?.pseudoElement?.startsWith(
+                      '::view-transition',
+                    ),
+                  ).length,
+            ),
+          )
+          .toBe(0);
         await settled(page);
         const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
         await expect(mute).toHaveCount(1);

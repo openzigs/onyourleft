@@ -656,13 +656,30 @@ html {
 
 @media (max-width: 37.49rem) {
   @supports (anchor-name: --oyl-view-title) {
+    /*
+     * The room is kept where the mute is, and nowhere else. The title takes
+     * the whole first row, its end padding the mute's, so the line under it
+     * is never beside it. The 44 px mute, centred on the title's first line,
+     * hangs below that line into the line under the title's first line, so a
+     * float as tall as the overhang keeps the mute's width off that one line
+     * only: the rest of the line keeps the width #2065 gave it (less the ⓘ's
+     * room), its two-line limit (`controls-first.browser.spec.ts`) holds, and
+     * the block costs not a pixel more height (its ceiling, the same file).
+     */
     .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head {
       anchor-name: --oyl-view-title;
+    }
+
+    .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head > h1 {
+      flex-basis: 100%;
       padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
     }
 
-    .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head:has(> .oyl-help) {
-      padding-inline-end: calc(2 * (2.75rem + var(--oyl-space-sm)));
+    .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head > h1 + p::before {
+      content: '';
+      float: inline-end;
+      inline-size: calc(2.75rem + var(--oyl-space-sm));
+      block-size: max(0px, calc(1.375rem - var(--oyl-font-size-lg) * 0.65));
     }
 
     .oyl-header .oyl-header__mute {
