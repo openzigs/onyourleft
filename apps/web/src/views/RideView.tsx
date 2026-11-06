@@ -84,6 +84,7 @@ import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
 import { manualLapSummary } from '../ride/manual-lap-text';
 import { useUnits } from '../units/context';
+import { formatDistance, measurementText } from '../units/format';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { hrefFor, routeById } from '../shell/routes';
@@ -1203,6 +1204,7 @@ function NoSensorsBanner(): JSX.Element {
  */
 function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
   const timeOfDay = useTimeOfDay();
+  const units = useUnits();
   return (
     <dl className="oyl-ride__clock">
       <div className="oyl-ride__time">
@@ -1223,6 +1225,22 @@ function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Eleme
         type, as the seconds recorded are: on a landscape tablet it is a
         column of its own beside them and costs the Live group no height.
       */}
+      {/*
+        #2076: how far the ride has gone — the recorder's figure
+        (`RideSnapshot.totals`, `recording/totals.ts` §`rideDistance`), the one
+        the saved ride states. In the clock row rather than as a fifth card in
+        the metric grid: on a landscape tablet a fifth card is a second row of
+        the grid, and that row put a running workout's graph under the fold
+        (`rideview.browser.spec.ts` §"#1307"). Here it is a column of its own
+        beside the two times, as the time of day is, and costs the Live group
+        no height. Not drawn with nothing recorded.
+      */}
+      {snapshot.totals === undefined ? null : (
+        <div className="oyl-ride__time oyl-ride__time--small oyl-ride__time--distance">
+          <dt>Distance</dt>
+          <dd>{measurementText(formatDistance(snapshot.totals.distance, units))}</dd>
+        </div>
+      )}
       <div className="oyl-ride__time oyl-ride__time--small">
         <dt>Clock</dt>
         <dd>{formatTimeOfDay(timeOfDay)}</dd>

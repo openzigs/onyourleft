@@ -102,6 +102,7 @@ export function idleSnapshot(): RideSnapshot {
     courseLapSeconds: undefined,
     manualLap: { available: false, last: undefined },
     sampleCount: 0,
+    totals: undefined,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
     workout: undefined,

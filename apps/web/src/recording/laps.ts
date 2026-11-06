@@ -50,8 +50,8 @@
  * add up to more than the ride moved. The HUD's figure, worked out as the
  * line is crossed, is the mark's; the saved row is the held one.
  *
- * ⚠️ **The averages are over the readings that EXIST**, `finish.ts`
- * §`averagePowerOf`'s rule: a dropout is missing data, not a stretch at
+ * ⚠️ **The averages are over the readings that EXIST**, `totals.ts`
+ * §`rideAveragePower`'s rule: a dropout is missing data, not a stretch at
  * nought. While the recording is paused the engine takes no reading
  * (`packages/domain` §`RecordingOutcome` `paused`), so a pause inside a lap
  * adds nothing to its averages either: they are averages over the lap's
@@ -298,7 +298,7 @@ export interface RecordedStretchSamples {
  * recording's own, from the samples of the lap's slots, because there is no
  * course to say it.
  *
- * - **Its distance is the ride's rule** (`finish.ts` §`distanceOf`): the speed
+ * - **Its distance is the ride's rule** (`totals.ts` §`rideDistance`): the speed
  *   channel summed over the slots, a dropout counted as no distance. So the
  *   laps of a ride with no course add up to the ride's distance, and a ride
  *   with no speed channel has laps of no distance, as the ride has.

@@ -52,6 +52,7 @@ import {
   sideCameraOnRide,
   sideCameraStoppable,
 } from '../ride/side-camera';
+import type { RideTotals } from '../recording/totals';
 import { useSideCamera, type SideCameraOnRideState } from '../ride/useSideCamera';
 import {
   KEEP_SCREEN_ON_LABEL,
@@ -709,6 +710,21 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
 }
 
 /**
+ * The ride so far — distance, climb and average power — kept current: #2076.
+ * The recorder's figures (`recording/totals.ts` §`rideTotals`), subscribed for
+ * {@link useRideMovingSeconds}'s reason. The port hands back the same object
+ * until the recording moves on, as `useSyncExternalStore` requires.
+ */
+function useRideTotals(trainer: GameTrainerPort | undefined): RideTotals | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideTotals?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * Whether the recording under the ride is paused, kept current — #1360's
  * review (N1). Subscribed for {@link useRideMovingSeconds}'s reason: the
  * rider's Pause and Resume are the Ride screen's, and the game must see them
@@ -1214,6 +1230,8 @@ function GameScreen({
   const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
+  /** @see useRideTotals */
+  const rideTotals = useRideTotals(props.trainer);
   /** @see useRecordingPaused */
   const recordingPaused = useRecordingPaused(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
@@ -3384,6 +3402,8 @@ function GameScreen({
         elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
+        // #2076: the ride so far, the recorder's again. @see useRideTotals
+        rideTotals={rideTotals}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
