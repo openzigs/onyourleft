@@ -103,6 +103,17 @@ function rowText(name: string): string {
   return copy.textContent ?? '';
 }
 
+/** An element's words as the screen shows them: every visually hidden part left out. */
+function shownText(selector: string): string {
+  const found = sensorsModule().querySelector(selector);
+  if (found === null) throw new Error(`no ${selector}`);
+  const copy = found.cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll('.oyl-visually-hidden, [aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent ?? '';
+}
+
 function expectClean(where: string): void {
   const violations = auditAccessibility(document);
   expect(
@@ -116,6 +127,7 @@ describe('each sensor’s battery on Home — #2047', () => {
     const battery = port(new Map([[STRAP, percent(37)]]));
     await openHome({ ...idleSnapshot(), sensors: [strap, meter] }, battery);
     expect(rowText('HRM 04B1')).toContain('Battery 37%');
+    expect(shownText('.oyl-home__battery')).toBe('37%');
     // The control: the meter reports nothing, so says nothing — never 0%.
     expect(rowText('Crank PM')).not.toContain('Battery');
     expect(rowText('Crank PM')).not.toMatch(/\d\s?%/);
@@ -132,6 +144,9 @@ describe('each sensor’s battery on Home — #2047', () => {
     expect(rowText('HRM 04B1')).toContain(
       `Battery ${String(LOW_BATTERY_PERCENT)}%, low — charge it or change it soon`,
     );
+    // The compact badge (the owner's review of #2045) still SHOWS the word, not
+    // only the warning colour: `low` is on screen, not only said.
+    expect(shownText('.oyl-home__battery')).toBe(`${String(LOW_BATTERY_PERCENT)}%, low`);
     expectClean('home, a low battery');
   });
 

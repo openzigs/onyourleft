@@ -161,19 +161,19 @@ test('#2045: a strap paired on Devices reads connected on Home, with its live he
   await page.evaluate(() => {
     window.location.hash = '#/';
   });
-  await expect(sensors(page).locator('.oyl-home__sensor-state')).toContainText([
-    `Heart rate strap, ${STRAP_NAME}: Connected`,
+  // One compact row (the owner's review of #2045): the kind and the label are
+  // said to a screen reader, the name and the number are on screen.
+  await expect(sensors(page).locator('.oyl-home__sensor-row')).toHaveText([
+    `Heart rate strap, ${STRAP_NAME}, Heart rate: 142 bpm, Battery ${String(STRAP_BATTERY_PERCENT)}%, Connected`,
   ]);
-  await expect(sensors(page).locator('.oyl-home__sensor-reading')).toHaveText([
-    'Heart rate: 142 bpm',
-  ]);
+  await expect(sensors(page).locator('.oyl-home__sensor-dot--on')).toHaveCount(1);
   // Read from the controller's subscription while Home is open — a copy taken
   // when Home rendered would keep the first number.
   await page.evaluate(() => {
     window.__oylDevices?.heartRate(151);
   });
-  await expect(sensors(page).locator('.oyl-home__sensor-reading')).toHaveText([
-    'Heart rate: 151 bpm',
+  await expect(sensors(page).locator('.oyl-home__sensor-row')).toHaveText([
+    `Heart rate strap, ${STRAP_NAME}, Heart rate: 151 bpm, Battery ${String(STRAP_BATTERY_PERCENT)}%, Connected`,
   ]);
 });
 
@@ -203,7 +203,10 @@ test('#2047: a strap reporting 37% reads Battery 37% on Home; the trainer, repor
   const trainerRow = sensors(page)
     .locator('li')
     .filter({ hasText: `Smart trainer, ${TRAINER_NAME}` });
-  await expect(trainerRow).toContainText(`${TRAINER_NAME}: Connected`);
+  await expect(trainerRow).toContainText(
+    `Smart trainer, ${TRAINER_NAME}, Power: waiting for the first reading, Connected`,
+  );
+  await expect(trainerRow.locator('.oyl-home__sensor-dot--on')).toHaveCount(1);
   await expect(trainerRow.locator('.oyl-home__battery')).toHaveCount(0);
   await expect(sensors(page).locator('.oyl-home__battery')).toHaveCount(1);
   expect(await sensors(page).textContent()).not.toMatch(/\b0\s?%/);

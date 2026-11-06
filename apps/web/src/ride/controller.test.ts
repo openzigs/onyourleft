@@ -894,6 +894,21 @@ describe('each paired sensor’s own readings — #2045', () => {
     expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('waiting');
     rig.controller.dispose();
   });
+
+  it('a device that is not connected reads unpaired on every channel, though it sent a moment ago', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('live');
+
+    // Gone, with the last reading still inside the stale window.
+    rig.bench.device(STRAP).script({ kind: 'disconnect' });
+    const row = rig.controller.getSnapshot().sensors.find((sensor) => sensor.id === STRAP);
+    expect(row?.state).toBe('disconnected');
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('unpaired');
+    rig.controller.dispose();
+  });
 });
 
 // --- Criterion 4: recording survives a dropout, and the gap survives with it -

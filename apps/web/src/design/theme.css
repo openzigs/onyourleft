@@ -1895,33 +1895,126 @@ html {
 }
 
 /* The sensors module's glyph (the Trainer card's until #2045) — a medium
-   drawing, 3rem, like the ring above and the cards' pictures (the owner's
-   ruling of 2026-10-01 on #935). */
+   drawing like the ring above and the cards' pictures (the owner's ruling of
+   2026-10-01 on #935), at the least a medium drawing is (44 px,
+   `home.browser.spec.ts` §`MEDIUM_DRAWING_PIXELS`), so the module with four
+   sensors paired is as short as it can be (the owner's review of #2045). */
 .oyl-home__glyph {
   flex: none;
-  width: 3rem;
-  height: 3rem;
+  width: 2.75rem;
+  height: 2.75rem;
 }
 
-/* #2045: one device to a row, the trainer first, each row its words and its
-   own reading under them — no marker, as the Devices screen's list. */
+/*
+ * #2045: one device to a ROW — the owner's screenshot review of 2026-11-05.
+ * Its icon, its name, its own reading and its connected dot on one line,
+ * wrapping only where a name or a reading is too long for it. With four
+ * sensors paired the module stays short enough that Last ride and This week
+ * are above a 1280×800 tablet's fold (`home.browser.spec.ts` §"four sensors
+ * paired"); its control, `?rows=stacked`, puts each part back on a line of
+ * its own. The module's inset is Next up's, the card beside it.
+ */
+.oyl-panel.oyl-home__sensors {
+  padding: var(--oyl-space-md);
+}
+
+/* The heading, and the module's link to Devices beside it — on two short
+   lines if it must, inside the height the heading's glyph takes anyway. */
+.oyl-home__sensors-head {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-home__sensors-head > h2 {
+  flex: none;
+  margin: 0;
+}
+
+.oyl-home__sensors-head > a {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--oyl-font-size-sm);
+  text-align: end;
+}
+
 .oyl-home__sensor-list {
   display: grid;
-  gap: var(--oyl-space-sm);
+  gap: var(--oyl-space-xs);
   margin: 0;
   padding: 0;
   list-style: none;
+  line-height: 1.3;
 }
 
-/* #2047: a sensor's battery — a small drawing filled to the level, then the
-   words, which say the number and, when it is low, that it is low. The low
+.oyl-home__sensor-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--oyl-space-sm);
+}
+
+.oyl-home__sensor-icon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.oyl-home__sensor-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.oyl-home__sensor-reading {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-home__sensor-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+/* Not connected: a ring, with its words beside it. Connected: the ring filled
+   in the accent — a non-text pair `tokens.ts` declares on `surfaceRaised`
+   (3.60 : 1 light, SC 1.4.11) — and the shape differs, so colour is never the
+   only signal (SC 1.4.1). */
+.oyl-home__sensor-dot {
+  box-sizing: border-box;
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+}
+
+.oyl-home__sensor-dot--on {
+  border: 0;
+  background: var(--oyl-color-accent);
+}
+
+/* The trainer's control sentence (#939), under its row and the row's width. */
+.oyl-home__sensor-note {
+  flex: 0 0 100%;
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* #2047: a sensor's battery — a badge in the device's row since the owner's
+   review of #2045: a small drawing filled to the level, then the number and,
+   when it is low, the word `low`. The low
    one is ALSO drawn in the warning message's own declared pair
    (`warningInk` on `warningSurface`), a second signal beside the words and
    never the only one (SC 1.4.1). */
 .oyl-home__battery {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: var(--oyl-space-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .oyl-home__battery-glyph {

@@ -35,6 +35,12 @@
  * no ride at all, ready once the empty state is drawn. It is a STATE, not a
  * control, and combines with the controls below (`?rides=none&hero=tall`).
  *
+ * `home.html?sensors=four` is another state (the owner's screenshot review of
+ * 2026-11-05 on #2045): a trainer, a heart rate strap, a power meter and a
+ * cadence sensor, all paired, connected and reading, and the trainer not
+ * handed control — the longest sensors module there is. Since #2047 three of
+ * them report a battery level, one of them low.
+ *
  * The controls, each the defect its assertion exists for:
  *
  * - `home.html?hero=tall` — a picture 90 vh tall put back across Next up above
@@ -47,7 +53,11 @@
  * - `home.html?columns=one` — #2044's: every module one column wide, which
  *   must push the week module under a landscape tablet's fold;
  * - `home.html?band=overlay` — the words laid over the picture on a clear
- *   band, which is what "text on art" would be.
+ *   band, which is what "text on art" would be;
+ * - `home.html?sensors=four&rows=stacked` — the sensors module's rows put
+ *   back the way #2045 first drew them, every part of a row on a line of its
+ *   own, which must push the last ride and the week under a landscape
+ *   tablet's fold.
  *
  * ⚠️ Since #2043 Next up has no picture of its own, so the first two put one
  * back as the card's first flex item, a whole line wide — `::before`, which
@@ -66,19 +76,23 @@ import {
   degreesLongitude,
   geographicPosition,
   metres,
+  percent,
   routeProfile,
   seconds,
   unixSeconds,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
+import { deviceId } from '@onyourleft/sensors';
 import { activityId, athleteId, type RouteRecord } from '@onyourleft/store';
 
 import { tabbableElements } from '../src/a11y/audit';
 import { stubAnalysis } from '../src/analysis/testing';
 import { routeStub, stubRouteId } from '../src/routes/testing';
 import { stubActivity } from '../src/detail/testing';
-import { idleSnapshot, stubRideController } from '../src/ride/testing';
+import type { BatteryLevelPort } from '../src/ride/battery-port';
+import type { RideSnapshot } from '../src/ride/controller';
+import { idleSnapshot, ridingSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -427,6 +441,12 @@ const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
     '.oyl-home { grid-template-columns: minmax(0, 1fr) !important; } ' +
       '.oyl-home > * { grid-column: 1 / -1 !important; }',
   ],
+  // #2045's rows as first drawn: every part of a row on a line of its own.
+  [
+    'rows=stacked',
+    '.oyl-home__sensor-row { display: block !important; } ' +
+      '.oyl-home__sensor-row > * { display: block !important; }',
+  ],
   // Words over the picture on a clear band: "text on art".
   [
     'band=overlay',
@@ -434,6 +454,66 @@ const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
       '.oyl-ride-card__body { position: relative; margin-top: 6rem; background: transparent !important; }',
   ],
 ]);
+
+/**
+ * `?sensors=four`: four devices paired and reading, none of them recording —
+ * Home's longest sensors module. The trainer has not been given control, so
+ * its row carries #939's longer sentence too.
+ */
+function fourSensors(): RideSnapshot {
+  const at = unixSeconds(Math.floor(Date.now() / 1000));
+  const live = (value: number) => ({ kind: 'live', value, at }) as const;
+  return {
+    ...idleSnapshot(),
+    trainer: { ...ridingSnapshot().trainer, hasControl: false, target: { kind: 'none' } },
+    sensors: [
+      {
+        id: deviceId('trainer'),
+        name: 'KICKR 1F2A',
+        role: 'trainer',
+        capabilities: ['power', 'cadence', 'speed'],
+        state: 'connected',
+        readings: [{ id: 'power', state: live(212) }],
+      },
+      {
+        id: deviceId('strap'),
+        name: 'HRM-Pro 7C1D',
+        role: 'heart-rate',
+        capabilities: ['heart-rate'],
+        state: 'connected',
+        readings: [{ id: 'heartRate', state: live(142) }],
+      },
+      {
+        id: deviceId('pedals'),
+        name: 'Assioma 0B44',
+        role: 'power-meter',
+        capabilities: ['power'],
+        state: 'connected',
+        readings: [{ id: 'power', state: live(208) }],
+      },
+      {
+        id: deviceId('cadence'),
+        name: 'CAD 31E9',
+        role: 'speed-cadence',
+        capabilities: ['cadence'],
+        state: 'connected',
+        readings: [{ id: 'cadence', state: live(88) }],
+      },
+    ],
+  };
+}
+
+/** `?sensors=four`'s batteries (#2047): the trainer reports none, the strap is low. */
+const FOUR_SENSOR_BATTERIES: BatteryLevelPort = {
+  readBatteryLevel: (id) =>
+    Promise.resolve(
+      new Map([
+        [deviceId('strap'), percent(15)],
+        [deviceId('pedals'), percent(82)],
+        [deviceId('cadence'), percent(100)],
+      ]).get(id),
+    ),
+};
 
 async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
   const deadline = performance.now() + PATIENCE_MS;
@@ -462,9 +542,11 @@ async function run(): Promise<void> {
   const query = new URLSearchParams(window.location.search);
   // #1429: `?rides=none` is a first open — no ride on this device at all.
   const firstOpen = query.get('rides') === 'none';
+  // The owner's review of #2045: four sensors paired and reading.
+  const sensors = query.get('sensors') === 'four';
   for (const [key, value] of query) {
     const css = STYLE_CONTROLS.get(`${key}=${value}`);
-    if (key === 'rides' && value === 'none') {
+    if ((key === 'rides' && value === 'none') || (key === 'sensors' && value === 'four')) {
       continue;
     } else if (css !== undefined) {
       const style = document.createElement('style');
@@ -500,7 +582,8 @@ async function run(): Promise<void> {
           capabilities={NO_BLUETOOTH}
           analysis={stubAnalysis(ATHLETE, rides)}
           routes={routeStub(ATHLETE, [ROUTE])}
-          rideController={stubRideController(idleSnapshot()).controller}
+          rideController={stubRideController(sensors ? fourSensors() : idleSnapshot()).controller}
+          {...(sensors ? { battery: FOUR_SENSOR_BATTERIES } : {})}
         />
       </StrictMode>,
     );
@@ -517,6 +600,12 @@ async function run(): Promise<void> {
     );
     await until('Next up on the route', () =>
       document.querySelector('.oyl-next-up__profile') === null ? undefined : true,
+    );
+  }
+  if (sensors) {
+    // #2047: the three batteries that report a level are drawn.
+    await until('the batteries', () =>
+      document.querySelectorAll('.oyl-home__battery').length === 3 ? true : undefined,
     );
   }
   await document.fonts.ready;

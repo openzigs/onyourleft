@@ -45,10 +45,27 @@ export function isLowBattery(level: Percent): boolean {
   return level <= LOW_BATTERY_PERCENT;
 }
 
-/** What a level says on the screen. */
+/** What a level says. */
 export function batteryWords(level: Percent): string {
-  const figure = `Battery ${String(Math.round(level))}%`;
-  return isLowBattery(level) ? `${figure}, low — charge it or change it soon` : figure;
+  const { before, shown, after } = batteryBadgeWords(level);
+  return `${before}${shown}${after}`;
+}
+
+/**
+ * {@link batteryWords} split for Home's compact badge (the owner's review of
+ * #2045): what is `shown` on screen beside the glyph — the number and, when
+ * it is low, `low` — and what is said only to a screen reader `before` and
+ * `after` it. The three together are always {@link batteryWords}.
+ */
+export function batteryBadgeWords(level: Percent): {
+  readonly before: string;
+  readonly shown: string;
+  readonly after: string;
+} {
+  const figure = `${String(Math.round(level))}%`;
+  return isLowBattery(level)
+    ? { before: 'Battery ', shown: `${figure}, low`, after: ' — charge it or change it soon' }
+    : { before: 'Battery ', shown: figure, after: '' };
 }
 
 /** Whether the module may ask the devices now. @see this file's header */

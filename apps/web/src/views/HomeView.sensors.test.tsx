@@ -147,7 +147,7 @@ describe('Home’s sensors module — #2045', () => {
     await settle();
 
     const rows = [...(module()?.querySelectorAll('li') ?? [])].map((row) => row.textContent);
-    expect(rows).toContain(`Heart rate strap, ${STRAP_NAME}: ConnectedHeart rate: 142 bpm`);
+    expect(rows).toContain(`Heart rate strap, ${STRAP_NAME}, Heart rate: 142 bpm, Connected`);
     // Read from the subscription, not a copy taken when Home opened: a new
     // beat is a new number on the screen.
     on.fake.bench.device('strap').notify(HEART_RATE_SERVICE, HEART_RATE_MEASUREMENT, beat(151));
@@ -196,12 +196,63 @@ describe('Home’s sensors module — #2045', () => {
     await settle();
     seen.push(words());
 
-    expect(seen[0]).toContain(`${STRAP_NAME}: Not connected`);
-    expect(seen[1]).toContain(`${STRAP_NAME}: Connected`);
-    expect(seen[2]).toContain(`${STRAP_NAME}: Not connected`);
+    expect(seen[0]).toContain(`${STRAP_NAME}, Not connected`);
+    expect(seen[1]).toContain(
+      `${STRAP_NAME}, Heart rate: waiting for the first reading, Connected`,
+    );
+    expect(seen[2]).toContain(`${STRAP_NAME}, Not connected`);
     for (const said of seen) {
       expect(said).not.toMatch(SEARCHING);
     }
+  });
+});
+
+/**
+ * The owner's screenshot review of #2045 (2026-11-05): one compact row a
+ * device. What the screen shows of a row is its icon, its name, its reading
+ * and a dot; the rest of the row's sentence is for a screen reader only. The
+ * dot is never the only sign of the state (SC 1.4.1): a device that is not
+ * connected is a ring with the words beside it, on screen.
+ */
+describe('one compact row a device — the owner’s review of #2045', () => {
+  /** A row's words as the screen shows them: every visually hidden part left out. */
+  const shown = (row: Element): string => {
+    const copy = row.cloneNode(true) as Element;
+    for (const hidden of copy.querySelectorAll('.oyl-visually-hidden, [aria-hidden="true"]')) {
+      hidden.remove();
+    }
+    return copy.textContent;
+  };
+  const strapRow = (): Element | undefined =>
+    [...(module()?.querySelectorAll('.oyl-home__sensor-row') ?? [])].find((row) =>
+      (row.textContent ?? '').includes(STRAP_NAME),
+    );
+
+  it('shows the name, the reading and a filled dot, and says the rest to a screen reader', async () => {
+    const on = rig();
+    await openHome(on);
+    await on.controller.pair('heart-rate');
+    on.fake.bench.device('strap').notify(HEART_RATE_SERVICE, HEART_RATE_MEASUREMENT, beat(142));
+    await settle();
+    const row = strapRow();
+    expect(row?.textContent).toBe(
+      `Heart rate strap, ${STRAP_NAME}, Heart rate: 142 bpm, Connected`,
+    );
+    expect(row === undefined ? undefined : shown(row)).toBe(`${STRAP_NAME}142 bpm`);
+    expect(row?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(row?.querySelectorAll('.oyl-home__sensor-dot--on')).toHaveLength(1);
+  });
+
+  it('a device not connected shows a ring and the words, never the dot alone', async () => {
+    const on = rig();
+    await openHome(on);
+    await on.controller.pair('heart-rate');
+    on.fake.bench.device('strap').drop();
+    await settle();
+    const row = strapRow();
+    expect(row === undefined ? undefined : shown(row)).toBe(`${STRAP_NAME}Not connected`);
+    expect(row?.querySelector('.oyl-home__sensor-dot')).not.toBeNull();
+    expect(row?.querySelectorAll('.oyl-home__sensor-dot--on')).toHaveLength(0);
   });
 });
 
@@ -236,7 +287,7 @@ describe('the trainer’s row — #2045 over #939', () => {
     await settle();
     const rows = [...(module()?.querySelectorAll('li') ?? [])].map((row) => row.textContent);
     expect(rows).toEqual([
-      'Smart trainer, KICKR 1F2A: ConnectedPower: 212 W' +
+      'Smart trainer, KICKR 1F2A, Power: 212 W, Connected' +
         'Paired, and this app has not been given control. Ask for it on Ride.',
     ]);
     expect(words()).toContain('No heart rate, power or cadence sensor paired.');
@@ -246,8 +297,8 @@ describe('the trainer’s row — #2045 over #939', () => {
         link.getAttribute('href'),
       ]),
     ).toEqual([
-      ['Ask for it on Ride', hrefFor(routeById('ride'))],
       ['Pair or forget devices on Devices', hrefFor(routeById('devices'))],
+      ['Ask for it on Ride', hrefFor(routeById('ride'))],
     ]);
   });
 });

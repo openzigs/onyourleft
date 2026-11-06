@@ -93,11 +93,12 @@
 
 import { unixSeconds, type Percent, type UnixSeconds } from '@onyourleft/domain';
 import type { ConnectionState } from '@onyourleft/sensors';
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
 import { ProfileShape, SensorGlyph } from '../design/illustration';
+import type { SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
@@ -112,7 +113,7 @@ import {
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { ProgressPanel } from '../progress/ProgressPanel';
 import {
-  batteryWords,
+  batteryBadgeWords,
   isLowBattery,
   mayBatteryBeRead,
   useBatteryLevels,
@@ -445,6 +446,20 @@ function LeftUnfinished({
  *
  * ⚠️ **One link to Devices** (#1429): the trainer's own while no trainer is
  * paired, and the module's otherwise.
+ *
+ * ## One compact row a device — the owner's screenshot review, 2026-11-05
+ *
+ * Each device is ONE row: its icon, its name, its own live reading and a
+ * connected dot. The kind of device and the reading's label are said to a
+ * screen reader in words the row's icon already shows on screen, so the
+ * row's text is still *Heart rate strap, HRM-Pro 7C1D, Heart rate: 142 bpm,
+ * Connected*. The dot is never the only signal (SC 1.4.1): connected is a
+ * filled dot, not connected a ring with the words *Not connected* beside it.
+ * The module's own link sits beside its heading, which is as tall as its
+ * glyph anyway. With four sensors paired that keeps Last ride and This week
+ * above a 1280×800 tablet's fold, which the module's first drawing (each part
+ * of a device on a line of its own, ~460 px tall) did not —
+ * `home.browser.spec.ts` §"four sensors paired" measures it.
  */
 function SensorsModule({
   controller,
@@ -462,61 +477,61 @@ function SensorsModule({
   const others = snapshot.sensors.filter((sensor) => sensor.role !== 'trainer');
   const noTrainer = !trainer.paired && trainers.length === 0;
   const devices = hrefFor(routeById('devices'));
+  // #939's sentence: whether this app has control of the trainer.
+  const control = trainer.paired ? (
+    <p className="oyl-home__sensor-note">
+      {!trainer.hasControl ? (
+        <>
+          Paired, and this app has not been given control.{' '}
+          <a href={hrefFor(routeById('ride'))}>Ask for it on Ride</a>.
+        </>
+      ) : (
+        'Paired, and this app has control.'
+      )}
+    </p>
+  ) : null;
   return (
     <section className="oyl-panel oyl-home__sensors" aria-labelledby="oyl-home-sensors">
-      <h2 id="oyl-home-sensors" className="tw:flex tw:items-center tw:gap-sm">
-        <SensorGlyph kind="trainer" className="oyl-home__glyph" />
-        Sensors
-      </h2>
+      <div className="oyl-home__sensors-head">
+        <h2 id="oyl-home-sensors" className="tw:flex tw:items-center tw:gap-sm">
+          <SensorGlyph kind="trainer" className="oyl-home__glyph" />
+          Sensors
+        </h2>
+        {noTrainer ? null : <a href={devices}>Pair or forget devices on Devices</a>}
+      </div>
       <ul className="oyl-home__sensor-list">
-        <li>
-          {noTrainer ? (
+        {noTrainer ? (
+          <li>
             <p className="tw:m-0">
               No trainer paired. <a href={devices}>Pair one on Devices</a>.
             </p>
-          ) : (
-            <>
-              {trainers.map((sensor) => (
-                <SensorLine
-                  key={sensor.id}
-                  sensor={sensor}
-                  presentation={presentation}
-                  battery={levels.get(sensor.id)}
-                />
-              ))}
-              {trainer.paired ? (
-                <p className="tw:m-0">
-                  {!trainer.hasControl ? (
-                    <>
-                      Paired, and this app has not been given control.{' '}
-                      <a href={hrefFor(routeById('ride'))}>Ask for it on Ride</a>.
-                    </>
-                  ) : (
-                    'Paired, and this app has control.'
-                  )}
-                </p>
-              ) : null}
-            </>
-          )}
-        </li>
-        {others.map((sensor) => (
-          <li key={sensor.id}>
-            <SensorLine
+          </li>
+        ) : trainers.length === 0 ? (
+          <li>{control}</li>
+        ) : (
+          trainers.map((sensor, index) => (
+            <SensorRow
+              key={sensor.id}
               sensor={sensor}
               presentation={presentation}
               battery={levels.get(sensor.id)}
-            />
-          </li>
+            >
+              {index === 0 ? control : null}
+            </SensorRow>
+          ))
+        )}
+        {others.map((sensor) => (
+          <SensorRow
+            key={sensor.id}
+            sensor={sensor}
+            presentation={presentation}
+            battery={levels.get(sensor.id)}
+          />
         ))}
       </ul>
       {others.length === 0 ? (
-        <p className="oyl-muted">No heart rate, power or cadence sensor paired.</p>
+        <p className="oyl-muted tw:mb-0">No heart rate, power or cadence sensor paired.</p>
       ) : null}
-      {noTrainer ? null : (
-        <p>
-          <a href={devices}>Pair or forget devices on Devices</a>
-        </p>
-      )}
     </section>
   );
 }
@@ -527,6 +542,14 @@ const SENSOR_KIND: Readonly<Record<PairingRole, string>> = {
   'heart-rate': 'Heart rate strap',
   'power-meter': 'Power meter',
   'speed-cadence': 'Speed or cadence sensor',
+};
+
+/** Each kind's icon — the Devices screen's (`ride/SensorPairing.tsx`). */
+const SENSOR_ICON: Readonly<Record<PairingRole, SensorGlyphKind>> = {
+  trainer: 'trainer',
+  'heart-rate': 'heart-rate',
+  'power-meter': 'power',
+  'speed-cadence': 'cadence',
 };
 
 /**
@@ -550,44 +573,79 @@ function connectedWords(state: ConnectionState): string {
 }
 
 /**
- * One device: what it is, its name and state, its own live reading, and —
- * since #2047, while it is connected and reports one — its battery
- * (`ride/battery-level.ts`). A device that reports no level shows no battery
- * line at all, never `0%`.
+ * One device, one row: its icon, its name, its own live reading, its
+ * battery badge (#2047, while it is connected and reports a level — a device
+ * that reports none shows no badge at all, never `0%`) and its connected
+ * dot. Every word the screen leaves to the icon or the dot is
+ * still in the row for a screen reader (`oyl-visually-hidden`), so the row
+ * reads as one sentence. `children` is a line under the row, the whole of its
+ * width — the trainer's control sentence.
  */
-function SensorLine({
+function SensorRow({
   sensor,
   presentation,
   battery,
+  children,
 }: {
   readonly sensor: PairedSensor;
   readonly presentation: ReturnType<typeof presentationFor>;
-  readonly battery: Percent | undefined;
+  readonly battery?: Percent | undefined;
+  readonly children?: ReactNode;
 }): JSX.Element {
+  const connected = sensor.state === 'connected';
   const reading = ROW_READING[sensor.role]
     .map((id) => sensor.readings?.find((each) => each.id === id))
     .find((each) => each !== undefined);
+  const label = reading === undefined ? '' : presentation[reading.id].label;
+  return (
+    <li className="oyl-home__sensor-row">
+      <SensorGlyph kind={SENSOR_ICON[sensor.role]} className="oyl-home__sensor-icon" />
+      <span className="oyl-home__sensor-name">
+        <span className="oyl-visually-hidden">{SENSOR_KIND[sensor.role]}, </span>
+        {sensor.name}
+      </span>
+      {connected && reading !== undefined ? (
+        <span className="oyl-home__sensor-reading">
+          <span className="oyl-visually-hidden">, {label}: </span>
+          {metricSentence(label, metricText(reading.state, presentation[reading.id])).slice(
+            label.length + 2,
+          )}
+        </span>
+      ) : null}
+      {connected && battery !== undefined ? <BatteryBadge level={battery} /> : null}
+      <span className="oyl-home__sensor-state">
+        <span
+          aria-hidden="true"
+          className={`oyl-home__sensor-dot${connected ? ' oyl-home__sensor-dot--on' : ''}`}
+        />
+        <span className="oyl-visually-hidden">, </span>
+        <span className={connected ? 'oyl-visually-hidden' : undefined}>
+          {connectedWords(sensor.state)}
+        </span>
+      </span>
+      {children}
+    </li>
+  );
+}
+
+/**
+ * A sensor's battery as a badge — #2047, compact since the owner's review of
+ * #2045: the glyph filled to the level and the number on screen, and `low`
+ * beside it at or under the threshold, in words before the warning pair (SC
+ * 1.4.1). The rest of `batteryWords` is said to a screen reader only, so the
+ * badge's text is still *Battery 20%, low — charge it or change it soon*.
+ */
+function BatteryBadge({ level }: { readonly level: Percent }): JSX.Element {
+  const words = batteryBadgeWords(level);
   return (
     <>
-      <p className="oyl-home__sensor-state tw:m-0">
-        {SENSOR_KIND[sensor.role]}, {sensor.name}: {connectedWords(sensor.state)}
-      </p>
-      {sensor.state === 'connected' && reading !== undefined ? (
-        <p className="oyl-home__sensor-reading tw:m-0">
-          {metricSentence(
-            presentation[reading.id].label,
-            metricText(reading.state, presentation[reading.id]),
-          )}
-        </p>
-      ) : null}
-      {sensor.state === 'connected' && battery !== undefined ? (
-        <p
-          className={`oyl-home__battery tw:m-0${isLowBattery(battery) ? ' oyl-home__battery--low' : ''}`}
-        >
-          <BatteryGlyph level={battery} />
-          {batteryWords(battery)}
-        </p>
-      ) : null}
+      <span className="oyl-visually-hidden">, </span>
+      <span className={`oyl-home__battery${isLowBattery(level) ? ' oyl-home__battery--low' : ''}`}>
+        <BatteryGlyph level={level} />
+        <span className="oyl-visually-hidden">{words.before}</span>
+        {words.shown}
+        {words.after === '' ? null : <span className="oyl-visually-hidden">{words.after}</span>}
+      </span>
     </>
   );
 }
