@@ -248,6 +248,14 @@ process, `apps/web`, after):
 | **Before**, merge queue for #2236 | [42263160979](https://github.com/openzigs/onyourleft/actions/runs/42263160979) | EPYC 9V74 | 4 019 MB, 3 987 MB live after its last mark-compact | — | 320 s | out of memory at 283 s, exit 134 |
 | **Before**, #2272's first commit | [42274420331](https://github.com/openzigs/onyourleft/actions/runs/42274420331) attempt 1 | EPYC 9V74 | 3 990 MB | 4 456 MB | 268 s | passed |
 | **Before**, the same, rerun | [42274420331](https://github.com/openzigs/onyourleft/actions/runs/42274420331) attempt 2 | Xeon Platinum 8573C | 4 013 MB | 4 435 MB | 323 s | passed |
+| **After**, #2272's second commit | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 1 | Xeon Platinum 8573C | 3 254 MB (`apps/web`) | 3 689 MB | 302 s | passed |
+| **After**, the same, rerun | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 2 | EPYC 7763 | 3 132 MB (`apps/web`) | 3 758 MB | 342 s | passed |
+| **After**, the same, rerun | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 3 | EPYC 9V74 | 3 283 MB (`apps/web`) | 3 705 MB | 260 s | passed |
+
+The next largest processes were `apps/instance` (1 092 to 1 354 MB) and `packages/store` (about
+525 MB); the rest of the tree took about 210 MB. The `Checks` job took as long as it did before
+(5 m 11 s and 6 m 12 s before; 5 m 48 s, 6 m 37 s and 5 m 08 s after), and `lint` is still the
+concurrent step's long pole: `apps/instance`, first, shares four CPUs with 28 other commands.
 
 Locally (an Apple M4 Pro, 4 144 MB limit, run alone), on the same tree: the whole-tree process
 died at the limit after 124 s; the split run passed in 107 to 154 s, `apps/web` peaking at
