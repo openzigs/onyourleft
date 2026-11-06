@@ -128,6 +128,7 @@ import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
 import type { SignalStrengthPort } from './ride/signal-port';
+import type { BatteryLevelPort } from './ride/battery-port';
 import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
@@ -311,6 +312,12 @@ interface ClientPlatform {
    * `plugin`, a browser's on the same `navigator.bluetooth`.
    */
   readonly steering: SteeringController | undefined;
+  /**
+   * Each connected sensor's battery, for Home's sensors module — #2047. A
+   * browser's, from the Web Bluetooth transport; `undefined` in the shell,
+   * whose plugin reads no Battery Service yet.
+   */
+  readonly battery: BatteryLevelPort | undefined;
 }
 
 /**
@@ -467,6 +474,8 @@ async function buildPlatform(
       systemSettings,
       launch,
       steering,
+      // #2047: the plugin reads no Battery Service, so the shell shows no level.
+      battery: undefined,
     };
   }
 
@@ -480,13 +489,21 @@ async function buildPlatform(
       systemSettings: undefined,
       launch: NO_LAUNCH,
       steering: undefined,
+      battery: undefined,
     };
   }
   const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
     bluetooth: probe.bluetooth,
+    // #2047: the Battery Service in every pairing's grant, for Home's levels.
+    batteryLevel: true,
   });
   return {
+    // #2047. The same transport, so the level read is of the link the ride
+    // controller holds; a refusal (an id it no longer holds) is no level.
+    battery: {
+      readBatteryLevel: async (id) => browserTransport.readBatteryLevel(id).catch(() => undefined),
+    },
     rideController: createRideController({
       ...shared,
       transport: browserTransport,
@@ -1685,6 +1702,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
       };
     },
     hidden: () => document.hidden,
+    // #2253: the rider's own player, which the loop yields to. None yet: #2242
+    // supplies the Android shell's `OtherPlayer` (`platform.otherPlayer`).
+    riderPlayer: undefined,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
@@ -1716,6 +1736,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(platform.signal === undefined ? {} : { signal: platform.signal })}
+          {...(platform.battery === undefined ? {} : { battery: platform.battery })}
           {...(platform.bluetoothAsk === undefined ? {} : { bluetoothAsk: platform.bluetoothAsk })}
           {...(platform.systemSettings === undefined
             ? {}

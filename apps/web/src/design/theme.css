@@ -104,6 +104,11 @@
   --oyl-color-hud-ink-muted: #9da3a8;
   --oyl-color-hud-border: #787c82;
   --oyl-color-hud-stale-ink: #f1af48;
+  --oyl-color-hud-grade-descent: #4f9fe0;
+  --oyl-color-hud-grade-flat: #6b7177;
+  --oyl-color-hud-grade-climb: #d8b630;
+  --oyl-color-hud-grade-steep: #e8812c;
+  --oyl-color-hud-grade-wall: #e5484d;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -1558,8 +1563,19 @@ html {
   }
 }
 
+/*
+ * Three tracks from 64rem — but not for `.oyl-sections--halves` (#2197): a
+ * screen with two sections that sit in a column, Analysis (its thresholds and
+ * its duration bests, the rest spanning) and Segments. In three tracks those
+ * two filled two thirds of a landscape tablet's row and left the third track
+ * empty; in two they share the row. The view names itself, because how many
+ * of its sections span is decided by what it holds (`:has()` cannot count
+ * them, as it cannot nest) — Segments only once it lists a segment, because
+ * with none it has three column sections. `sections.browser.spec.ts` holds every
+ * screen to no track without a section, and these two to no short last row.
+ */
 @container oyl-pane (min-width: 64rem) {
-  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--halves, .oyl-sections--pair) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -1915,8 +1931,8 @@ html {
  * rail takes a different share of each window.
  *
  * ⚠️ **The DOM order is the reading order, the visual order and the tab order
- * on every layout**: Next up (the quick-launch), the sensors (the Trainer
- * card, #2045's slot), the last ride (#2048's; on a first open the other ways
+ * on every layout**: Next up (the quick-launch), the sensors (#2045's
+ * module, in the Trainer card's old slot), the last ride (#2048's; on a first open the other ways
  * to start), the week (#2049's), then the ride cards, fitness and the badges.
  * Every module is placed by its columns alone and the rows are auto, so none
  * can jump ahead of one it follows.
@@ -1957,7 +1973,7 @@ html {
   }
 
   .oyl-next-up,
-  .oyl-home__trainer {
+  .oyl-home__sensors {
     grid-column: 1 / -1;
   }
 }
@@ -1973,7 +1989,7 @@ html {
     grid-column: 1 / 3;
   }
 
-  .oyl-home__trainer,
+  .oyl-home__sensors,
   .oyl-home__week {
     grid-column: 3;
   }
@@ -2107,12 +2123,26 @@ html {
   height: calc(100% - var(--oyl-space-sm));
 }
 
-/* "Week before": under each reading, in the muted ink — a second `dd` of
-   the same term, so it is read as its own value and never run into the
-   reading's digits. */
-.oyl-home__facts .oyl-home__before {
-  color: var(--oyl-color-ink-muted);
+/* "Week before": behind the week chart's disclosure since the owner's
+   ruling of 2026-11-06, a term and its figure to a line, in the muted ink. */
+.oyl-home__before-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--oyl-space-sm);
+  margin-block: 0 var(--oyl-space-xs);
   font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-home__before-facts > div {
+  display: contents;
+}
+
+.oyl-home__before-facts dd {
+  margin: 0;
+}
+
+.oyl-home__before {
+  color: var(--oyl-color-ink-muted);
   font-weight: 400;
 }
 
@@ -2137,45 +2167,251 @@ html {
   inset: 0;
 }
 
-/* The days ridden of the last seven, as a ring beside the sentence (#939). */
-.oyl-home__days {
-  display: flex;
-  align-items: center;
-  gap: var(--oyl-space-md);
-  margin-bottom: var(--oyl-space-sm);
+/*
+ * The days ridden of the last seven, then since #2049 the week's bar chart —
+ * where #939's ring was, the same fact and each day's moving time. Since the
+ * owner's screenshot review of 2026-11-05 the chart is the card's whole width
+ * (it was 8.5rem beside the sentence), so the sentence is a line of its own
+ * above it. The sentence comes first in the DOM and is read first; the
+ * drawing is `aria-hidden`. Under it, the table's disclosure, or the table
+ * itself when the chart has thrown.
+ */
+/* The week's inset is Next up's and the sensors' (#2045), the cards it sits
+   under and beside on a landscape tablet. */
+.oyl-panel.oyl-home__week {
+  padding: var(--oyl-space-md);
 }
 
-.oyl-home__days p {
+.oyl-home__days {
+  display: grid;
+  row-gap: var(--oyl-space-xs);
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-home__days > :not(.oyl-week-chart) {
+  margin-block: 0;
+}
+
+/*
+ * #2049: this week's moving time, a bar per day (`home/WeekChart.tsx`), the
+ * card's whole width, with each day's time over its bar. The bars are one
+ * colour — `accent` on the panel's `surfaceRaised`, a declared non-text pair
+ * (3.60:1 light, `tokens.ts`) — so colour says nothing; the values are the
+ * panel's own `ink`, and the day's letter under each column and the table one
+ * press away say the rest.
+ */
+.oyl-week-chart {
+  display: grid;
+  gap: 0.125rem;
+  width: 100%;
+}
+
+.oyl-week-chart__plot {
+  position: relative;
+  height: 2.75rem;
+}
+
+.oyl-week-chart__bars {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.oyl-week-chart__bar {
+  fill: var(--oyl-color-accent);
+}
+
+/* Each bar's value, over its middle, its foot on the bar's top — a list, as
+   the day letters are, so each is a word of its own. */
+.oyl-week-chart__values {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-week-chart__value {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--oyl-color-ink);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.oyl-week-chart__base {
+  stroke: var(--oyl-color-border);
+  stroke-width: 1;
+}
+
+.oyl-week-chart__days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1;
+  text-align: center;
+}
+
+/* #2048: the last ride's climb — the route's own profile, the module's width
+   and 3rem tall, as Next up's, with the climb in words under it. */
+.oyl-home__last-climb {
+  display: grid;
+  gap: var(--oyl-space-xs);
+  margin-block-end: var(--oyl-space-sm);
+}
+
+.oyl-home__last-profile {
+  display: block;
+  width: 100%;
+  height: 3rem;
+}
+
+/* The sensors module's glyph (the Trainer card's until #2045) — a medium
+   drawing like the ring above and the cards' pictures (the owner's ruling of
+   2026-10-01 on #935), at the least a medium drawing is (44 px,
+   `home.browser.spec.ts` §`MEDIUM_DRAWING_PIXELS`), so the module with four
+   sensors paired is as short as it can be (the owner's review of #2045). */
+.oyl-home__glyph {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+/*
+ * #2045: one device to a ROW — the owner's screenshot review of 2026-11-05.
+ * Its icon, its name, its own reading and its connected dot on one line,
+ * wrapping only where a reading is too long for it. With four
+ * sensors paired the module stays short enough that Last ride and This week
+ * are above a 1280×800 tablet's fold (`home.browser.spec.ts` §"four sensors
+ * paired"); its control, `?rows=stacked`, puts each part back on a line of
+ * its own. The module's inset is Next up's, the card beside it.
+ */
+.oyl-panel.oyl-home__sensors {
+  padding: var(--oyl-space-md);
+}
+
+/* The heading, and the module's link to Devices beside it — on two short
+   lines if it must, inside the height the heading's glyph takes anyway. */
+.oyl-home__sensors-head {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-home__sensors-head > h2 {
+  flex: none;
   margin: 0;
 }
 
-.oyl-home__ring {
+.oyl-home__sensors-head > a {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--oyl-font-size-sm);
+  text-align: end;
+}
+
+.oyl-home__sensor-list {
+  display: grid;
+  gap: var(--oyl-space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1.3;
+}
+
+.oyl-home__sensor-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--oyl-space-sm);
+}
+
+.oyl-home__sensor-icon {
   flex: none;
-  width: 3rem;
-  height: 3rem;
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
-.oyl-home__ring-track,
-.oyl-home__ring-fill {
-  fill: none;
-  stroke-width: 6;
+/* A name is one line whatever its length, cut short with an ellipsis where
+   the row has no room for it all — a long name never makes its row two lines
+   tall (the Linux runner's wider font wrapped one). The whole name is still
+   the row's text, and the Devices screen shows it in full. */
+.oyl-home__sensor-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.oyl-home__ring-track {
-  stroke: var(--oyl-color-border);
-}
-
-.oyl-home__ring-fill {
-  stroke: var(--oyl-color-accent-text);
-  stroke-linecap: round;
-}
-
-/* The Trainer card's glyph — a medium drawing, 3rem, like the ring above and
-   the cards' pictures (the owner's ruling of 2026-10-01 on #935). */
-.oyl-home__glyph {
+.oyl-home__sensor-reading {
   flex: none;
-  width: 3rem;
-  height: 3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-home__sensor-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+/* Not connected: a ring, with its words beside it. Connected: the ring filled
+   in the accent — a non-text pair `tokens.ts` declares on `surfaceRaised`
+   (3.60 : 1 light, SC 1.4.11) — and the shape differs, so colour is never the
+   only signal (SC 1.4.1). */
+.oyl-home__sensor-dot {
+  box-sizing: border-box;
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+}
+
+.oyl-home__sensor-dot--on {
+  border: 0;
+  background: var(--oyl-color-accent);
+}
+
+/* The trainer's control sentence (#939), under its row and the row's width. */
+.oyl-home__sensor-note {
+  flex: 0 0 100%;
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* #2047: a sensor's battery — a badge in the device's row since the owner's
+   review of #2045: a small drawing filled to the level, then the number and,
+   when it is low, the word `low`. The low
+   one is ALSO drawn in the warning message's own declared pair
+   (`warningInk` on `warningSurface`), a second signal beside the words and
+   never the only one (SC 1.4.1). */
+.oyl-home__battery {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-home__battery-glyph {
+  flex: none;
+  width: 1.5rem;
+  height: 0.75rem;
+}
+
+.oyl-home__battery--low {
+  padding-inline: var(--oyl-space-xs);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-warning-surface);
+  color: var(--oyl-color-warning-ink);
 }
 
 /*
@@ -5139,6 +5375,11 @@ select.oyl-input {
   min-height: 12rem;
 }
 
+/* #2194: a slot whose read failed holds a warning, not a chart, so it keeps no chart's height. */
+.oyl-trace-slot--failed {
+  min-height: 0;
+}
+
 /*
  * The shared cursor (#2068): a native range across the stack's width, with
  * the readings at its time in words under it. The input is given the 44 px
@@ -7332,21 +7573,134 @@ select.oyl-input {
 
 .oyl-hud__profile-svg {
   width: 100%;
-  height: 3rem;
+  height: 2.5rem;
   display: block;
 }
 
-.oyl-hud__profile-line {
-  fill: none;
-  stroke: var(--oyl-color-hud-ink-muted);
-  stroke-width: 1;
+/* #2075: the whole route FILLED, in the HUD's edge colour (4.47:1 on its
+   surface), and the rider's marker in its ink over a wider stroke of the
+   surface, so the marker reads against the fill (3.90:1) and against the
+   empty strip above it alike. Both pairs are declared in `tokens.ts`. */
+.oyl-hud__profile-fill {
+  fill: var(--oyl-color-hud-border);
+}
+
+.oyl-hud__profile-here-edge {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 7;
   vector-effect: non-scaling-stroke;
 }
 
 .oyl-hud__profile-here {
   stroke: var(--oyl-color-hud-ink);
-  stroke-width: 2;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
+}
+
+/*
+ * THE ROAD AHEAD — #2075, `game/hud/look-ahead.ts`.
+ *
+ * ⚠️ **Its own row, the panel's full width, and taller than the whole
+ * route's strip — the owner's screenshot review of 2026-11-05.** Beside the
+ * whole route's strip it was 3 rem tall and three fifths of an 18 rem panel,
+ * and with the bands drawn under the road's line a descent or a flat stretch
+ * was a sliver at its floor. Now each band is a column of the strip's full
+ * height (`HudCore.tsx` §`LookAheadStrip`) and the road is a line over them,
+ * so a descent is as readable as a climb; and the strip is under the whole
+ * route's, across the panel, 3.5 rem tall, where the route panel is at the
+ * bottom of a screen 30 rem tall or more. The panel is taller by that row,
+ * and `ride.browser.spec.ts` holds every panel clear of the leaning rider at
+ * every overlay viewport. A phone has no row to give, upright or on its side,
+ * so there the two strips stay side by side at one height (§"COLUMN", and
+ * §"A SHORT corners layout" below).
+ *
+ * Each band is its colour under marks of the panel's own surface: none on the
+ * flat, dots on a descent, one hatch on a climb, a denser one on a steep
+ * stretch and a cross-hatch on a very steep one, so no band is told by colour
+ * alone (SC 1.4.1). The rider is the left edge, a 4 px ink line. The strip
+ * does not clip what is drawn on it, so a road on the window's floor or at
+ * its top, and the rider's line at its edge, are drawn whole: the bands
+ * themselves end at its box.
+ *
+ * The next climb is a caption of its own beside the route's sentence, on the
+ * same line where the panel is wide enough and wrapping under it where not.
+ */
+.oyl-hud__strips {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__ahead-svg {
+  display: block;
+  width: 100%;
+  height: 3.5rem;
+  overflow: visible;
+}
+
+.oyl-hud__ahead-road-edge {
+  fill: none;
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__ahead-road {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__band-mark {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__band-dot {
+  fill: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__band--descent .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-descent);
+}
+
+.oyl-hud__band--flat .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-flat);
+}
+
+.oyl-hud__band--climb .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-climb);
+}
+
+.oyl-hud__band--steep .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-steep);
+}
+
+.oyl-hud__band--wall .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-wall);
+}
+
+.oyl-hud__ahead-here {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__profile-captions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__ahead-text {
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink);
 }
 
 /* #285 — the route in plan, with the rider on it.
@@ -8738,6 +9092,20 @@ select.oyl-input {
     height: 2rem;
   }
 
+  /* #2075: beside it, at its height, as on an upright phone (§"COLUMN"). A
+     phone on its side has no row to give either: under it, the road ahead
+     made the route panel 36 px taller, and with sounds on and a side camera
+     filming, or above a gesture bar's inset (#1441), the ride's controls left
+     the stage at 844×390 and 736×360. The bands are still the strip's full
+     height (the owner's review of 2026-11-05). */
+  .oyl-game--riding .oyl-hud__strips {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__ahead-svg {
+    height: 2rem;
+  }
+
   .oyl-game--riding .oyl-hud__actions,
   .oyl-game--riding .oyl-hud__route {
     width: min(100%, 16rem);
@@ -9057,7 +9425,28 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__route {
     display: grid;
     gap: var(--oyl-space-sm);
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(0, 1fr) 4.5rem;
+  }
+
+  /* #2075, and the owner's screenshot review of 2026-11-05: *"on the phone
+     the strips and caption use only the left half of the route panel"*. The
+     plan view takes 4.5 rem, `plan.ts` §PLAN_SMALLEST_PIXELS (the width its
+     rider's mark is sized for), and the strips and their captions take the
+     rest: 248 of 328 px at 360 wide, where three fifths was 191. The strips
+     stay side by side — under each other, or with the plan view under them,
+     the panel is taller, and at 360×752 a Delivery ride's map credit ends
+     about a pixel above the leaning rider (§"#2072 — AN UPRIGHT PHONE UNDER
+     24 REM") — and are 2.75 rem tall, so that the route's sentence and the
+     next climb, two lines where the column is too narrow for both on one,
+     still end inside the plan view's 5 rem beside them: 44 + 4 + 2 × 15.4 =
+     79 px of 80. */
+  .oyl-game--riding .oyl-hud__strips {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__profile-svg,
+  .oyl-game--riding .oyl-hud__ahead-svg {
+    height: 2.75rem;
   }
 }
 

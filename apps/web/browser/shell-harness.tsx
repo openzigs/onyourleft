@@ -922,6 +922,7 @@ function main(): void {
                     };
                   },
                   hidden: () => document.hidden,
+                  riderPlayer: undefined,
                 }),
               }
             : {})}

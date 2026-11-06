@@ -37,7 +37,12 @@
  */
 
 import type { FootprintPlan, FootprintRole } from './footprint-buildings';
-import { FOOTPRINT_SURFACES, FOOTPRINT_VERTEX_FLOATS, ROOF_ROLES } from './footprint-buildings';
+import {
+  FOOTPRINT_SURFACES,
+  FOOTPRINT_VERTEX_FLOATS,
+  ROOF_ROLES,
+  SPIRE_SURFACE,
+} from './footprint-buildings';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
@@ -132,7 +137,7 @@ export function mappedChunk(distanceMetres: number): number {
 }
 
 /** The roles a building's far level keeps: its walls and its roof (#1540's `farTriangleCount`). */
-export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'roof'];
+export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'roof', 'spire'];
 
 /**
  * The roles a building's near level draws: all of them, #1581's chimney and
@@ -153,6 +158,8 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
   'porch',
   'porch-roof',
   'porch-trim',
+  // #2206: last, so it follows the roof's run in the slate slot and moves no earlier one.
+  'spire',
 ];
 
 /**
@@ -173,6 +180,7 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
  * the photograph instead (`three-renderer.ts` §`withFacade`).
  */
 export function surfaceOfRole(plan: FootprintPlan, role: FootprintRole): StructureSurface {
+  if (role === 'spire') return SPIRE_SURFACE;
   return ROOF_ROLES.has(role) ? plan.surfaces.roof : plan.surfaces.wall;
 }
 
@@ -429,14 +437,22 @@ export function selectMappedBuildings(
     }
     const wall = slotOf(into, plan.surfaces.wall);
     const roof = slotOf(into, plan.surfaces.roof);
+    // #2206: and a spire's slate, where the plan has one and neither its walls nor its roof wear it.
+    const spired = roleTriangles(plan, 'spire') > 0;
+    const spire = spired ? SPIRE_SURFACE : plan.surfaces.roof;
     const opened =
-      (wall < 0 ? 1 : 0) + (roof < 0 && plan.surfaces.roof !== plan.surfaces.wall ? 1 : 0);
+      (wall < 0 ? 1 : 0) +
+      (roof < 0 && plan.surfaces.roof !== plan.surfaces.wall ? 1 : 0) +
+      (slotOf(into, spire) < 0 && spire !== plan.surfaces.wall && spire !== plan.surfaces.roof
+        ? 1
+        : 0);
     if (into.surfaces.length + opened + modelGroup > slots) {
       into.passed += 1;
       continue;
     }
     if (wall < 0) into.surfaces.push(plan.surfaces.wall);
     if (slotOf(into, plan.surfaces.roof) < 0) into.surfaces.push(plan.surfaces.roof);
+    if (slotOf(into, spire) < 0) into.surfaces.push(spire);
     for (const role of far ? FAR_ROLES : NEAR_ROLES) {
       const slot = slotOf(into, surfaceOfRole(plan, role));
       into.surfaceTriangles[slot] = (into.surfaceTriangles[slot] ?? 0) + roleTriangles(plan, role);

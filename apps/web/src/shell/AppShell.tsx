@@ -97,6 +97,7 @@ import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
+import type { BatteryLevelPort } from '../ride/battery-port';
 import type { SteeringController } from '../ride/steering-controller';
 import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { SystemSettingsPort } from '../support/system-settings-port';
@@ -231,6 +232,12 @@ export interface AppShellProps {
    * Present only inside the Android shell, built beside {@link shell}.
    */
   readonly signal?: SignalStrengthPort | undefined;
+  /**
+   * Each connected sensor's battery on Home's sensors module — #2047.
+   * Present in a browser, where the Web Bluetooth transport reads the Battery
+   * Service; absent inside the shell, whose plugin reads none yet.
+   */
+  readonly battery?: BatteryLevelPort | undefined;
   /**
    * Inside the shell: whether the rider has been told why Android asks for
    * Bluetooth, and the way to Android's settings — #1436. Built beside
@@ -638,6 +645,7 @@ function viewFor(
           controller={props.rideController}
           routes={props.routes}
           now={props.homeNow}
+          battery={props.battery}
         />
       );
     case 'ride':

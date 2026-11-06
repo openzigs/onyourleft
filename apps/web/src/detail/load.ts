@@ -198,7 +198,7 @@ export async function loadTrace(
   channel: TraceChannel,
   units: UnitSystem,
   targetPoints: number = CHART_POINTS,
-  /** Seconds one stored sample covers (the stream summary's), for the distance profile. */
+  /** Seconds one stored sample covers (the stream summary's), for the distance profile and the points. */
   sampleInterval: number = 1,
 ): Promise<Trace | undefined> {
   const samples = await port.store.getStreamChannel(port.athleteId, id, channel);
@@ -210,7 +210,9 @@ export async function loadTrace(
   return {
     channel,
     points: reduced.map((value) => (value === undefined ? undefined : series.display(value))),
-    secondsPerPoint: reduced.length === 0 ? 0 : samples.length / reduced.length,
+    // #2194: in true seconds, as the distance profile is, so the two agree at
+    // any recording rate and not only at 1 Hz.
+    secondsPerPoint: reduced.length === 0 ? 0 : (samples.length * sampleInterval) / reduced.length,
     sampleCount: samples.length,
     missingSamples: gapSamples(samples),
     ...(channel === 'power'
