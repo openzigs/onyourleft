@@ -213,23 +213,40 @@ export interface HeldSegment {
 /**
  * Where this device records which of its segments it published, or shared
  * efforts on, and under which identifier — for the instance it is signed in
- * to, by its address. Only identifiers: no name, no path. Forgotten on a
- * disconnect and an erase, with the rest of what names the instance
+ * to, by its address, AND the account there, so another account on the same
+ * instance is never offered this one's buttons. Only identifiers: no name, no
+ * path. Written when this device publishes or shares, and whenever the
+ * instance answers that a segment is this rider's or ranks their effort on
+ * it — so a disconnect and a sign-in again lose nothing for good. Forgotten
+ * on a disconnect and an erase, with the rest of what names the instance
  * (`instance-port.ts` §`INSTANCE_AGREEMENT_STORAGE_KEYS`).
  */
 export const HELD_STORAGE_KEY = INSTANCE_AGREEMENT_STORAGE_KEYS[4];
 
 type HeldRecord = Readonly<Record<string, HeldSegment>>;
 
-/** This device's record for `origin`, or none: anything else is read as none. */
-function readHeld(storage: InstanceStorage, origin: string): HeldRecord {
+/** Whose record it is: the instance's address and the account there. */
+interface HeldOwner {
+  readonly origin: string;
+  readonly athlete: string;
+}
+
+/** This device's record for `owner`, or none: anything else is read as none. */
+function readHeld(storage: InstanceStorage, owner: HeldOwner): HeldRecord {
   let parsed: unknown;
   try {
     parsed = JSON.parse(storage.getItem(HELD_STORAGE_KEY) ?? 'null');
   } catch {
     return {};
   }
-  if (!isRecord(parsed) || parsed.origin !== origin || !isRecord(parsed.segments)) return {};
+  if (
+    !isRecord(parsed) ||
+    parsed.origin !== owner.origin ||
+    parsed.athlete !== owner.athlete ||
+    !isRecord(parsed.segments)
+  ) {
+    return {};
+  }
   const held: Record<string, HeldSegment> = {};
   for (const [local, value] of Object.entries(parsed.segments)) {
     if (
@@ -425,35 +442,51 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     return rides;
   }
 
-  const origin = (): string | undefined => readInstanceAccount(dependencies.storage)?.origin;
+  /** The instance and the account this device is signed in to, or none. */
+  const owner = (): HeldOwner | undefined => {
+    const account = readInstanceAccount(dependencies.storage);
+    return account === undefined
+      ? undefined
+      : { origin: account.origin, athlete: account.instanceAthleteId };
+  };
 
-  /** What this device recorded of `segment` on the instance it is signed in to. */
+  /**
+   * Which of this device's segments each identifier the instance was asked
+   * about belongs to, for this run of the app: a board names a segment only
+   * by its identifier.
+   */
+  const asked = new Map<string, string>();
+
+  /** What this device recorded of `segment` on the instance and account it is signed in to. */
   function heldOf(segment: SegmentRecord): HeldSegment | undefined {
-    const at = origin();
-    return at === undefined ? undefined : readHeld(dependencies.storage, at)[segment.id];
+    const who = owner();
+    return who === undefined ? undefined : readHeld(dependencies.storage, who)[segment.id];
   }
 
-  /** Rewrite this device's record for the instance it is signed in to. */
+  /** Rewrite this device's record for the instance and account it is signed in to. */
   function rewriteHeld(rewrite: (all: Record<string, HeldSegment>) => void): void {
-    const at = origin();
-    if (at === undefined) return;
-    const all: Record<string, HeldSegment> = { ...readHeld(dependencies.storage, at) };
+    const who = owner();
+    if (who === undefined) return;
+    const all: Record<string, HeldSegment> = { ...readHeld(dependencies.storage, who) };
     rewrite(all);
     for (const [key, held] of Object.entries(all)) {
       if (!held.yours && !held.shared) delete all[key];
     }
-    dependencies.storage.setItem(HELD_STORAGE_KEY, JSON.stringify({ origin: at, segments: all }));
+    dependencies.storage.setItem(
+      HELD_STORAGE_KEY,
+      JSON.stringify({ origin: who.origin, athlete: who.athlete, segments: all }),
+    );
   }
 
   /** Record what this device now holds of one of its segments on the instance. */
   function hold(
-    segment: SegmentRecord,
+    local: string,
     change: (was: HeldSegment | undefined) => HeldSegment | undefined,
   ): void {
     rewriteHeld((all) => {
-      const next = change(all[segment.id]);
-      if (next === undefined) delete all[segment.id];
-      else all[segment.id] = next;
+      const next = change(all[local]);
+      if (next === undefined) delete all[local];
+      else all[local] = next;
     });
   }
 
@@ -545,10 +578,10 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
       else failed += 1;
     }
     if (kind === 'share' && rides > 0) {
-      hold(segment, (was) => ({ segmentId, yours: was?.yours ?? false, shared: true }));
+      hold(segment.id, (was) => ({ segmentId, yours: was?.yours ?? false, shared: true }));
     }
     if (kind === 'withdraw' && failed === 0) {
-      hold(segment, (was) => (was === undefined ? undefined : { ...was, shared: false }));
+      hold(segment.id, (was) => (was === undefined ? undefined : { ...was, shared: false }));
     }
     return { rides, notSynced, failed };
   }
@@ -599,7 +632,14 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
       if (answer === undefined) return { kind: 'unavailable' };
       if (answer.status === 404) return { kind: 'not-published', segmentId };
       if (answer.status !== 200 || !isRecord(answer.body)) return { kind: 'unavailable' };
-      return { kind: 'published', segmentId, yours: answer.body.yours === true };
+      const yours = answer.body.yours === true;
+      asked.set(segmentId, segment.id);
+      // The instance says it is this rider's: recorded, so it stays
+      // withdrawable once it is withheld, however this device lost its record.
+      if (yours) {
+        hold(segment.id, (was) => ({ segmentId, yours: true, shared: was?.shared ?? false }));
+      }
+      return { kind: 'published', segmentId, yours };
     },
 
     publish: async (segment) => {
@@ -616,7 +656,7 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
       // Recorded, so it can still be withdrawn once it is withheld. Yours only
       // when this call published it, or an earlier one of this device's did.
       const fresh = isRecord(answer.body) && answer.body.published === true;
-      hold(segment, (was) => ({
+      hold(segment.id, (was) => ({
         segmentId,
         yours: fresh || was?.yours === true,
         shared: was?.shared ?? false,
@@ -626,9 +666,11 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
 
     withdrawSegment: async (segmentId) => {
       if (!PUBLISHED_SEGMENT_ID.test(segmentId)) return false;
-      const withdrawn = (await call('DELETE', `/v1/segments/${segmentId}`))?.status === 204;
-      // Gone, with every effort on it: nothing of it is left to take off.
-      if (withdrawn) {
+      const status = (await call('DELETE', `/v1/segments/${segmentId}`))?.status;
+      const withdrawn = status === 204;
+      // Gone, with every effort on it — or gone already (`404`): nothing of it
+      // is left to take off, so it is not offered again.
+      if (withdrawn || status === 404) {
         rewriteHeld((all) => {
           for (const [key, held] of Object.entries(all)) {
             if (held.segmentId === segmentId) delete all[key];
@@ -645,7 +687,14 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
         period,
       });
       if (answer?.status !== 200) return undefined;
-      return parseBoard(answer.body);
+      const parsed = parseBoard(answer.body);
+      // A board ranking an effort of this rider's: recorded as shared, so it
+      // can still be taken off once the segment is withheld.
+      const local = asked.get(segmentId);
+      if (local !== undefined && parsed?.rows.some((row) => row.yours) === true) {
+        hold(local, (was) => ({ segmentId, yours: was?.yours ?? false, shared: true }));
+      }
+      return parsed;
     },
 
     share: (segment, efforts) => sendRides(segment, efforts, 'share'),
