@@ -91,8 +91,9 @@
  * The workout's clock stops, so the last two lanes stop with it: nothing is
  * sampled, and after the pause the lines carry on from where they stopped —
  * the pause itself is not a stretch of the picture. ⚠️ The HUD's strip goes
- * further (#1313, the owner's ruling): its lane draws NO line at all while
- * paused, in either kind, and keeps only its bar and text
+ * further (#1313, the owner's ruling of 2026-11-05): while paused its lane
+ * draws no dashed target, nor a hold's dashed range, and keeps the line
+ * already ridden, its bar and its text; all of it is back on resume
  * ({@link WorkoutStripPaths.lane}). What the trainer holds
  * through it (it is eased to its floor) is WRITTEN: the caption and the
  * strip say "Paused" and the target the trainer confirmed, with the power
@@ -933,11 +934,14 @@ export interface WorkoutStripPaths {
    * carries a range): the range's outline and heart rate. `power` otherwise:
    * the confirmed target's stepped edge and the rider's power.
    *
-   * ⚠️ **While the workout is paused BOTH paths of either kind are empty
-   * strings** (#1313, the owner's ruling of 2026-10-13): no target, range,
-   * power or heart-rate line is drawn. The kind and {@link laneHeight} are
-   * kept, so the lane holds its place, and the bar and the text are drawn as
-   * ever. {@link workoutStripName} says no more than is drawn.
+   * ⚠️ **While the workout is paused the dashed path is an empty string** —
+   * `target`, or a hold's `range` (#1313, the owner's ruling of 2026-11-05,
+   * which replaced the 2026-10-13 one that emptied both): what was asked
+   * before the pause is not what is asked now. The solid path, `power` or
+   * `heartRate`, is the line already ridden and is kept. The kind and
+   * {@link laneHeight} are kept, so the lane holds its place, and the bar and
+   * the text are drawn as ever. {@link workoutStripName} says no more than is
+   * drawn.
    */
   readonly lane:
     | { readonly kind: 'power'; readonly target: string; readonly power: string }
@@ -953,8 +957,8 @@ export interface WorkoutStripPaths {
 }
 
 /**
- * What the HUD's strip draws: one lane, and the bar. Paused, the lane's two
- * paths are both empty and only the bar is drawn (@see WorkoutStripPaths.lane).
+ * What the HUD's strip draws: one lane, and the bar. Paused, the lane's
+ * dashed path is empty and its line ridden is kept (@see WorkoutStripPaths.lane).
  */
 export function workoutStripPaths(input: WorkoutGraphInput): WorkoutStripPaths {
   const samples = windowed(input);
@@ -965,23 +969,24 @@ export function workoutStripPaths(input: WorkoutGraphInput): WorkoutStripPaths {
   const heartRate =
     samples.at(-1)?.range === undefined ? undefined : heartRateLane(samples, input.elapsedSeconds);
   const trace = heartRate === undefined ? traceLane(samples, input.elapsedSeconds) : undefined;
-  // ⚠️ Paused, the lane is left EMPTY (#1313, the owner's ruling): the
-  // strip's text and bar say the pause, and a dashed target and a trace
-  // running to the right edge say a ride that is not happening. The lane
-  // keeps its kind and height so the panel does not move.
-  const drawn = !isPaused(input);
+  // ⚠️ Paused, no DASHED path (#1313, the owner's ruling of 2026-11-05): the
+  // strip's text and bar say the pause, and the pre-pause target running to
+  // the right edge says an ask the trainer is not holding. The line already
+  // ridden stays: it is what happened. The lane keeps its kind and height so
+  // the panel does not move.
+  const asked = !isPaused(input);
   return {
     lane:
       heartRate !== undefined
         ? {
             kind: 'heart-rate',
-            range: drawn ? heartRate.rangeEdges : '',
-            heartRate: drawn ? heartRate.line : '',
+            range: asked ? heartRate.rangeEdges : '',
+            heartRate: heartRate.line,
           }
         : {
             kind: 'power',
-            target: drawn ? (trace?.targetEdge ?? '') : '',
-            power: drawn ? (trace?.power ?? '') : '',
+            target: asked ? (trace?.targetEdge ?? '') : '',
+            power: trace?.power ?? '',
           },
     laneHeight: heartRate !== undefined ? HEART_RATE_LANE_HEIGHT : TRACE_LANE_HEIGHT,
     progress: {
@@ -1243,11 +1248,11 @@ export function workoutStripLines(input: WorkoutGraphInput): readonly [string, .
  */
 export function workoutGraphText(
   input: WorkoutGraphInput,
-  options: { readonly lines?: boolean } = {},
+  options: { readonly range?: boolean } = {},
 ): string {
-  // `lines: false` is the HUD strip in a pause (#1313): it draws no line, so
-  // its name does not give the numbers a line would have shown.
-  const lines = options.lines ?? true;
+  // `range: false` is the HUD strip in a pause (#1313): it draws no dashed
+  // range, so its name does not give one. It still draws the heart rate.
+  const withRange = options.range ?? true;
   const parts = [
     `Workout graph.${isPaused(input) ? ' Paused.' : ''} ${durationText(
       Math.max(0, input.elapsedSeconds),
@@ -1278,18 +1283,20 @@ export function workoutGraphText(
     );
   }
   const now = readingsNow(input);
-  if (lines && finite(now.power)) {
+  if (finite(now.power)) {
     parts.push(`Your power: ${String(Math.round(now.power))} W.`);
   }
   // ⚠️ While the heart-rate lane is DRAWN — a hold inside the window — and
   // not only while one is running: the name says every number on the image.
   const range = rangedSamples(windowed(input)).at(-1)?.range;
-  if (lines && range !== undefined) {
+  if (range !== undefined) {
+    const chosen = withRange
+      ? `, with a chosen range of ${String(range.low)}–${String(range.high)} bpm`
+      : '';
     parts.push(
       finite(now.heartRate)
-        ? `Heart rate: ${String(Math.round(now.heartRate))} bpm, with a chosen range of ` +
-            `${String(range.low)}–${String(range.high)} bpm.`
-        : `No heart rate, with a chosen range of ${String(range.low)}–${String(range.high)} bpm.`,
+        ? `Heart rate: ${String(Math.round(now.heartRate))} bpm${chosen}.`
+        : `No heart rate${chosen}.`,
     );
   }
   if ((input.replaced ?? []).length > 0) {
@@ -1300,6 +1307,6 @@ export function workoutGraphText(
 
 /** The HUD strip's name: the graph's, without what the strip does not draw. */
 export function workoutStripName(input: WorkoutGraphInput): string {
-  // No outline: the strip draws none. No power or heart rate while paused: it draws no line.
-  return workoutGraphText({ ...input, replaced: undefined }, { lines: !isPaused(input) });
+  // No outline: the strip draws none. No range while paused: it draws no dashed range (#1313).
+  return workoutGraphText({ ...input, replaced: undefined }, { range: !isPaused(input) });
 }

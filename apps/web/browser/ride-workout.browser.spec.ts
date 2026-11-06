@@ -278,29 +278,29 @@ const STRIP_FIXTURES = [
   },
   {
     // Paused: the trainer was eased to its 50 W minimum. The line says THAT.
-    // #1313 (the owner's ruling): no target or trace line is drawn through a
-    // pause, so the lane is empty, and the name says nothing a line would.
+    // #1313 (the owner's ruling of 2026-11-05): through a pause the stale
+    // dashed target is not drawn, and the power already ridden is.
     graph: 'paused',
     paused: true,
     lane: 'power',
     text: 'Paused · Target 50 W',
     named: 'Workout graph. Paused.',
     asked: undefined,
-    doing: undefined,
-    absent: /target|power|range|heart-rate/,
+    doing: 'oyl-workout-strip__power',
+    absent: /target|range|heart-rate/,
   },
   {
     // #1313: the same in a heart-rate hold. The lane is the heart-rate one
-    // (the newest sample still carries the range and a heart rate) and draws
-    // neither; the name gives neither.
+    // (the newest sample still carries the range and a heart rate): no
+    // dashed range, and the heart rate ridden; the name gives no range.
     graph: 'paused-hold',
     paused: true,
     lane: 'heart-rate',
     text: 'Paused · Target 50 W',
     named: 'Workout graph. Paused.',
     asked: undefined,
-    doing: undefined,
-    absent: /target|power|range|heart-rate/,
+    doing: 'oyl-workout-strip__heart-rate',
+    absent: /target|power|range/,
   },
 ] as const;
 
@@ -336,9 +336,15 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   if (fixture.doing !== undefined) {
     expect(mark(fixture.doing).paint).toBe(HUD_INK);
   }
-  // By what the fixture IS, not by its name (#1331's review).
+  // By what the fixture IS, not by its name (#1331's review). #1313: the
+  // name says the lane's reading now, as it does running, and no range, as
+  // the strip draws none. (The paused hold's strap has no reading now: "No
+  // heart rate.", which the Ride screen's graph says of it too.)
   if (fixture.paused) {
-    expect(graph.name).not.toMatch(/Your power|Heart rate|chosen range/);
+    expect(graph.name).not.toContain('chosen range');
+    expect(graph.name).toMatch(
+      fixture.lane === 'power' ? /Your power: \d+ W\./ : /(Heart rate: \d+ bpm|No heart rate)\./,
+    );
   }
   for (const name of [
     ...(fixture.asked === undefined ? [] : [fixture.asked]),
