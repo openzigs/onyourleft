@@ -11076,9 +11076,14 @@ select.oyl-input {
    (`[8,270 → 360,440]` on the CI runner's fonts, 32 px shorter on a Mac's)
    ran over the route panel (`ride-notices.browser.spec.ts`
    §"#647") and under the map's credit at 386 px (`ride-attribution.browser.spec.ts`
-   §"#1552"), measured in CI on PR #2231's tree merged with #2213. */
+   §"#1552"), measured in CI on PR #2231's tree merged with #2213. Two
+   DRAWN notices: the road notice folded away keeps its wrapper in the cell,
+   visually hidden (`HudCore.tsx` §`STANDING_NOTICE_ID`), and does not count
+   (the owner's ruling of 2026-11-06, `ride-notices.browser.spec.ts`). */
 @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
-  .oyl-game--riding .oyl-hud:has(> .oyl-hud__notices > * + *) .oyl-hud__recent {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__notices > :not(.oyl-visually-hidden) ~ :not(.oyl-visually-hidden))
+    .oyl-hud__recent {
     display: none;
   }
 }
