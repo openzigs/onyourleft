@@ -2227,6 +2227,17 @@ for (const viewport of LAPTOP_VIEWPORTS) {
             `${how}: ${describeItem(reading)}`,
           ).toBe(true);
         }
+        // #2078: and the recent graph, which gives way under 40 rem tall
+        // (1024×600) and, as on the 4:3 tablet, while two notices are drawn.
+        const graphDrawn = viewport.height >= 640 && query !== TWO_NOTICES;
+        if (graphDrawn) {
+          const graph = named(seen.items, 'the recent graph');
+          expect(inside(graph.box, viewport) && graph.onTop, `${how}: ${describeItem(graph)}`).toBe(
+            true,
+          );
+        } else {
+          expect(seen.givenWay, how).toContain('the recent graph');
+        }
         const clipped = seen.items
           .filter((each) => each.box.width * each.box.height <= 1)
           .map((each) => each.name);

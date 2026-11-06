@@ -11292,7 +11292,9 @@ select.oyl-input {
  * panel. Every line is 2 px whatever box it is given.
  *
  * ⚠️ **Not drawn on a phone's overlay** — the column layout upright and the
- * corners layouts under 47 rem tall — recorded as #419 asks, and as #2078
+ * short corners layout on its side, 30 rem tall or less (the owner's ruling
+ * of 2026-11-06, #2034: a laptop's window draws it) — recorded as #419 asks,
+ * and as #2078
  * itself allows (*"hidden on phone portrait if it does not fit the layout
  * rules"*): a phone's route panel is measured to within a few pixels of the
  * leaning rider and of the primary panel above it, and 4 rem more does not
@@ -11352,7 +11354,7 @@ select.oyl-input {
   fill: var(--oyl-color-hud-zone-band7);
 }
 
-@media (min-width: 46rem) and (min-height: 22.5rem) and (height < 47rem),
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud__recent {
     display: none;
@@ -11375,8 +11377,8 @@ select.oyl-input {
   }
 }
 
-/* ⚠️ **And on the 4:3 tablet, while two notices share their cell, it gives
-   way too** — recorded as #419 asks. #2130's secondary tier is three rows
+/* ⚠️ **And on the 4:3 tablet — and a laptop's window — while two notices
+   share their cell, it gives way too** — recorded as #419 asks. #2130's secondary tier is three rows
    there, the notices start under it, and the route panel with the graph's
    4 rem starts at 414 px: *Keep the screen on* beside the road notice
    (`[8,270 → 360,440]` on the CI runner's fonts, 32 px shorter on a Mac's)
@@ -11386,10 +11388,23 @@ select.oyl-input {
    DRAWN notices: the road notice folded away keeps its wrapper in the cell,
    visually hidden (`HudCore.tsx` §`STANDING_NOTICE_ID`), and does not count
    (the owner's ruling of 2026-11-06, `ride-notices.browser.spec.ts`). */
-@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+@media (min-width: 46rem) and (height > 30rem) and (height < 50rem) {
   .oyl-game--riding
     .oyl-hud:has(> .oyl-hud__notices > :not(.oyl-visually-hidden) ~ :not(.oyl-visually-hidden))
     .oyl-hud__recent {
+    display: none;
+  }
+}
+
+/* ⚠️ **And on a laptop's or a desktop's window under 40 rem tall (1024×600),
+   it gives way** — recorded as #419 asks. The owner's ruling of 2026-11-06
+   (#2034) draws it in a laptop's window, and from 1280×720 up it fits; at
+   1024×600 its 4 rem ran the route panel 24 px below the stage on a
+   Delivery round and 46 px into a workout's notice, measured on PR #2231's
+   tree. The rule above holds it there too, and at 1366×657, while two
+   notices are drawn. */
+@media (min-width: 46rem) and (height > 30rem) and (height < 40rem) {
+  .oyl-game--riding .oyl-hud__recent {
     display: none;
   }
 }
