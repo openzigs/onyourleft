@@ -116,12 +116,14 @@ async function openShell(path: string): Promise<void> {
 
 /**
  * Every image on the page that is not the app's own artwork — the wordmark is
- * a committed PNG under `src/brand/`, in the header of every route.
+ * a committed PNG under `src/brand/`, in the header of every route, and since
+ * #2066 the rail's mark is the launcher icon `public/icon-192.png`.
  */
 function picturesOnPage(): Element[] {
-  return [...document.querySelectorAll('img, canvas, video, picture')].filter(
-    (element) => !(element.getAttribute('src') ?? '').startsWith('/src/brand/'),
-  );
+  return [...document.querySelectorAll('img, canvas, video, picture')].filter((element) => {
+    const source = element.getAttribute('src') ?? '';
+    return !source.startsWith('/src/brand/') && source !== '/icon-192.png';
+  });
 }
 
 /** Everything a picture could be on the page, and everything that would make one. */
