@@ -26,7 +26,9 @@
     an external source is committed for the game world"*, and the *"Still true"* that
     [ADR 0054](0054-towns-from-real-map-data.md) D-1's table gives it;
   - [ADR 0012](0012-data-licence.md) **D-4**, *"§4.6 is not the plan"*, for this one database, as
-    D-4's last paragraph asks a successor to decide.
+    D-4's last paragraph asks a successor to decide;
+  - [ADR 0054](0054-towns-from-real-map-data.md) **D-3.6**, only where it says a stylised-world ride
+    shows no credit: a stylised-world ride on a built-in circuit shows one (D-5.3).
 
   Each gains one dated `## Amendments` entry pointing here, in this pull request (ADR 0013).
   [ADR 0056](0056-the-demos-shipped-map-under-odbl.md) is **not** superseded: D-1 says why
@@ -75,7 +77,8 @@ ADR 0056 was written for the demo build and says so where it matters:
 A circuit **drawn from our own basemap** and **shipped in the app** fails all three: the line
 follows the basemap's mapped streets, so it is derived from OpenStreetMap; it must be committed,
 because there is nothing to regenerate it from at build time (a line on real roads needs the roads,
-and the app build has no routing engine and must not read the archive in CI, ADR 0056 D-9); and it
+and the app build has no routing engine, and ADR 0056 D-9 keeps a real-data bake out of a pull
+request's checks, though the owner or the release job may run one); and it
 lands in `apps/web/dist` and the APK.
 
 ### Why an ADR and not an amendment
@@ -107,9 +110,12 @@ took for ADR 0010 D-1, on the owner's ruling that a reversed decision is a new A
   confirmed first-hand"*, rejected for the **world** on fitness, not on licence (ADR 0032 D-1's
   table; D-3 says the route's elevation is not that ADR's question).
 - **The licence gates.** `LIC001` and `LIC002` scan source file types, not `.json`.
-  `ASSETS.toml` records committed **binaries**, and `ASSET004` admits a licence by where the file
-  lands; ADR 0056 D-7.5 records that an `ODbL-1.0` file needs that licence admitted at its path
-  first.
+  `ASSETS.toml` records committed binaries, and since #937 `ASSET008` also demands a row for an
+  `.svg`, `.lottie`, `.riv` or Lottie `.json`. A circuit's JSON is none of those, so `ASSET008` does
+  not discover it, but the manifest may name any file voluntarily, and a named file gets `ASSET002`
+  (present), `ASSET003` (digest), `ASSET004` (the licence admitted at its path), `ASSET006`
+  (attribution) and `ASSET007` (derivation). ADR 0056 D-7.5 records that an `ODbL-1.0` file needs
+  that licence admitted at its path first.
 
 ### How much OpenStreetMap is in a short loop
 
@@ -132,7 +138,7 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
 | ADR 0032 **D-1 item 2**, *"No dataset derived from an external source is committed for the game world"*, and ADR 0054 D-1's *"Still true"* | **Superseded for the circuit files of D-2 only.** They are committed (D-6). Nothing else derived from an external source is committed, and ADR 0032 D-1 items 1 and 3 hold: `game/` makes no request for them, and no store persists them |
 | ADR 0012 **D-4**, *"§4.6 is not the plan"* | **Superseded for this one database**, as ADR 0056 did for the demo bundle: §4.6 a, the entire database (D-4) |
 | ADR 0054 **D-2** (the corridor read per route, on the device) and **D-3.5** (`worldCorridors` never leaves the device) | **Unchanged.** A circuit's corridor, when the realistic world is chosen, is read like any route's (D-2.2) |
-| ADR 0054 **D-3.6** (the ride's credit, keyed on the corridor) | **Extended, not reversed**: the credit is also owed for the whole of a ride on a built-in circuit (D-5.3) |
+| ADR 0054 **D-3.6** (the ride's credit, keyed on the corridor) | **Extended, and superseded in part**: the credit is also owed for the whole of a ride on a built-in circuit, in every world, so the stylised world no longer always shows none (D-5.3) |
 | ADR 0056, every decision | **Unchanged.** Its bundle stays in the demo build only (D-2.4). A circuit file is a different database with no corridor in it (D-2.1), so D-2.4 is not reached; if the owner answers Q2 (b), D-2.4 is superseded for the app and this row changes |
 | ADR 0060 D-11 and ADR 0028 D-7.1 | **Unchanged**: D-14 Q6 already allows a bundled circuit for solo bot races; D-8 here holds it there |
 
@@ -144,9 +150,15 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    identifier, no street or place name, no address, no owner, no route id and no device time.**
    A file of this shape is a few tens of kilobytes at most; the build issue states the real sizes.
 2. **No corridor is shipped** (option (a), recommended, D-11 Q2). With the realistic world chosen,
-   the circuit's corridor is read from the configured archive while the rider chooses, exactly as a
-   rider's own route's is (ADR 0054 D-2), and with no archive reachable the world is procedural (ADR
-   0054 D-4). The stylised world needs none.
+   the circuit's corridor is read from the configured archive while the rider chooses, by the same
+   code as a rider's own route's (ADR 0054 D-2), and with no archive reachable the world is
+   procedural (ADR 0054 D-4). The stylised world needs none. **The `worldCorridors` port is keyed by
+   owner and a branded route id** (`corridor-port.ts`), and a circuit is not a `RouteRecord` (D-8.2).
+   So a circuit's corridor key is a **reserved id namespace**, `circuit:` followed by the stable
+   circuit id, which no route id may carry (the build issue checks this against how route ids are made, and
+   a test fails if a route id can start with it).
+   The read keeps the owner filter, and `activity-store.scoping.test.ts` still derives it (CLAUDE.md
+   §6); the build adds a case that a circuit's kept corridor is not visible to another owner.
 3. **Rejected, for Q2: (b) a baked corridor per circuit, ADR 0056's bundle shape, in the app.** It
    would let the realistic world draw a circuit offline and the same every time, but it puts a
    corridor-sized ODbL database (ADR 0056's ceiling is 8 MiB a route) in `apps/web/dist`, the APK
@@ -165,7 +177,9 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    contributors*, `https://www.openstreetmap.org/copyright`, through the project's own archive, ADR
    0062) and the §4.3 notice that ADR 0056 D-3.3 quotes. A `LICENCE-ODbL.txt` sits beside the files
    in the repository, and the same notice is copied into the app's `apps/web/public/licences/` and
-   named on its credits screen (§4.2 d).
+   named on its credits screen (§4.2 d). **That naming is new work**: the credits screen's *Map data*
+   entry says today that the map is "Not a file this app ships" (`CreditsView.tsx`), which stops
+   being true, so the build rewrites that comment and entry (D-5.2).
 3. **Why not lean on the Substantial guideline.** It may well put four short loops under its 100
    features, but it counts the four as one, the count is not measured, and it is guidance rather
    than a licence term. Offering the files under ODbL costs a notice and a file the repository
@@ -187,19 +201,31 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    client from an instance, Publicly Conveys the files. They comply by shipping the build unchanged,
    which carries the files with their licence fields and the notice in `public/licences/`; nobody
    has to know this ADR exists.
+3. **§4.6 for a published Produced Work.** §4.6 also asks that the database be offered to recipients
+   of a Produced Work made from it, and ADR 0056 D-4.3 met that for videos by naming a release-asset
+   URL beside them. D-4.1 reaches only people who receive the build. So a screenshot or video of a
+   ride on a built-in circuit that is published outside the app (a store listing, a promo clip, a
+   pull request) carries, beside the D-5.4 credit, the stable repository URL of the circuit files'
+   directory, which the build issue names. Where a place cannot hold a URL, the image is not
+   published.
 
 ### D-5 — Attribution
 
 1. **The course picker** shows `© OpenStreetMap contributors` (`apps/web/src/map/basemap.ts`
    §`OSM_ATTRIBUTION`, never a copy) beside the built-in circuits, linking or beside a link to the
    §4.3 notice.
-2. **The credits screen** keeps its *Map data* entry (`CreditsView.tsx`); its §4.3 sentence already
-   covers the files.
+2. **The credits screen** keeps its *Map data* entry (`CreditsView.tsx`) and its §4.3 sentence, and
+   the build **adds** to it a sentence that the app ships the circuits' files under ODbL 1.0 with a
+   link to the notice (D-3.2), and corrects the code comment that calls the map data "not a file
+   this app ships".
 3. **The ride screen shows the credit for the whole of a ride on a built-in circuit**, in every
    world, because the road it draws is the circuit's line: the frame is a Produced Work of the file.
-   This extends ADR 0054 D-3.6's key (the corridor) with a second one (a built-in circuit), and
-   `docs/odbl.md`'s *"a ride drawn wholly from the procedural world shows no credit"* stays true,
-   because such a ride is not wholly procedural.
+   This adds a second key (a built-in circuit) to ADR 0054 D-3.6's (the corridor). **It narrows
+   D-3.6's statement for the stylised world**: `docs/odbl.md` lists *"the stylised world"* by name
+   among the worlds that show no credit, and that stops being true for a stylised-world ride on a
+   circuit. So ADR 0054 D-3.6 is superseded **in part** (the Supersedes list), the build updates that
+   parenthesis in `docs/odbl.md` and the comment beside the corridor-keyed credit in `GameView.tsx`,
+   and a ride on the stylised world with no circuit still shows none.
 4. **A screenshot or video of a ride on a built-in circuit that is published** (an owner-review
    screenshot on a pull request included) shows that credit in the frame. Video export follows ADR
    0056 D-8.2 if it is ever offered for the game.
@@ -210,11 +236,15 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    `LICENCE-ODbL.txt` beside them. They are data, not source: no SPDX header, as ADR 0056 D-6 has it,
    and **never under `packages/`**, whose consumers must be able to take a package with no ODbL
    obligation.
-2. **`ODbL-1.0` is admitted for that directory's JSON files and for nothing else.** The build issue
-   adds a repository rule beside the `ASSET` rules that fails when a file there lacks the licence
-   fields of D-3.2 or the notice file is missing, and that fails on an `ODbL-1.0` file anywhere
-   else. *Author's reading* of how ADR 0015 D-2's per-path admission applies to a text data file
-   `ASSETS.toml` does not cover.
+2. **`ODbL-1.0` is admitted for that directory's JSON files and for nothing else.** The
+   default, and the recommendation, is to **name each file in `ASSETS.toml`** (Context: a named text
+   file gets `ASSET002` to `ASSET004`, `ASSET006` and `ASSET007`), with `ASSET004`'s per-path
+   admission extended to `ODbL-1.0` at that one directory. That gives the digest (D-6.3), the
+   attribution and the derivation record with no new rule. A new repository rule is needed only for
+   what the manifest cannot say, that the licence fields of D-3.2 are inside each file and the
+   notice file is present; the build issue adds that small check, or says why `ASSETS.toml` alone
+   suffices. *Author's reading* of how ADR 0015 D-2's per-path admission applies.
+
 3. **A digest per file** is recorded with the archive build it was drawn from (ADR 0062 D-1.4's
    build record), so a later redraw is a reviewable change and not a silent one.
 4. **Tests use a synthetic fixture circuit** wherever they draw or screenshot a ride, so no CI
@@ -263,7 +293,10 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
 
 1. **Every circuit runs on public roads and starts and ends at a public place**, chosen as no
    person's home and not beside one. The circuits are the project's, not any rider's, so no rider's
-   location is published.
+   location is published. **Where they are drawn is also a disclosure**: loops authored by one
+   identifiable maintainer on roads they know reveal that maintainer's home area, and committed
+   history is permanent. So the circuits are **not drawn in the owner's home area, or the owner
+   accepts that they may be** (Q5), and under Q1 (b) the same applies to the owner's own GPX.
 2. **No coordinate and no place name in public text** (the ruling): not in an issue, a pull request,
    a commit message, a review, this ADR, `docs/`, or a rider-facing word. The files' own points are
    the only coordinates, and a circuit's name is ours and is not a place name.
@@ -290,6 +323,7 @@ guideline was read on 2026-11-06.
    **(a)**. (c) costs every circuit its hills, which the trainer would otherwise put in the legs.
 5. **Q4 — Treat the circuits as ODbL 1.0 whatever the Substantial guideline says (D-3.3)?**
    Recommended: **yes**.
+6. **Q5 — Are the circuits kept out of the owner's home area (D-9.1)?** Recommended: **yes**.
 
 ---
 

@@ -510,6 +510,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   ([#2293](https://github.com/openzigs/onyourleft/issues/2293), Proposed that day). If the owner
   accepts it, each circuit's line and heights are committed under ODbL 1.0, with no corridor in them.
   What still stands, unchanged: D-2 (a circuit's corridor, with the realistic world chosen, is read
-  per ride on the device like any route's), D-3.5 for `worldCorridors`, and D-3.6, which ADR 0064
-  D-5.3 extends with a second key (a ride on a built-in circuit) and does not reverse. This entry is
-  a pointer and changes nothing here.
+  per ride on the device like any route's), D-3.5 for `worldCorridors`, and D-3.6's corridor key, to
+  which ADR 0064 D-5.3 would add a second (a ride on a built-in circuit), so that a stylised-world
+  ride on a circuit shows the credit that D-3.6 says that world does not. This entry is a pointer and
+  changes nothing here.

@@ -124,6 +124,9 @@ accepts it and #2293 lands; until then the sentence above stays true.
   `LICENCE-ODbL.txt` beside it. §4.6 a is the files themselves, in the repository and in every build.
 - **Where attribution is shown.** Beside the circuits in the course picker, on the credits screen,
   and on the ride screen for the whole of a ride on a circuit, in every world.
+- **The no-credit sentence above changes when it is built.** A stylised-world ride on a circuit
+  shows the credit, so the list of worlds that show none loses that parenthesis then, and not
+  before.
 - **The on-device store is unchanged.** A circuit's corridor, with the realistic world chosen, is
   read and kept like any route's, and never leaves the device.
 
