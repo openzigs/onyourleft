@@ -36,7 +36,11 @@
  *   with no whole block is not baked. **`--record`** adds the bake's
  *   digests: the file's SHA-256, the archive's URL and identity, the GPX's own
  *   SHA-256 and the reader version (D-5.2). Without it, a bake that disagrees
- *   with the recorded digests fails, naming which field moved.
+ *   with the recorded digests fails, naming which field moved. CI holds the
+ *   committed records too (#2268): every pull request checks the archive URL,
+ *   reader version and GPX digest offline (`bake-route.test.ts`); the
+ *   archive's identity and the file's digest need the archive, which
+ *   `preset-bake-archive.test.ts` bakes from when asked to.
  *
  * ## Adding a preset route (the owner)
  *
@@ -427,6 +431,36 @@ export function recordDrift(committed: BakeRecord, baked: BakeRecord): (keyof Ba
   return (Object.keys(baked) as (keyof BakeRecord)[]).filter(
     (key) => committed[key] !== baked[key],
   );
+}
+
+/**
+ * The fields of a committed record this checkout would bake differently,
+ * known without reading the archive (#2268): the archive the bake reads by
+ * default, the reader version, and the committed GPX's digest. The other two,
+ * the file's digest and the archive's identity, need the archive itself; the
+ * nightly `preset-bake-archive.test.ts` bakes from it for those. A record
+ * with no digests yet differs in all three.
+ */
+export function offlineRecordDrift(
+  committed: Partial<BakeRecord>,
+  gpx: string,
+): (keyof BakeRecord)[] {
+  const expected: Partial<BakeRecord> = {
+    archiveUrl: PUBLISHED_BASEMAP_URL,
+    readerVersion: CORRIDOR_READER_VERSION,
+    gpxSha256: sha256(gpx),
+  };
+  return (Object.keys(expected) as (keyof BakeRecord)[]).filter(
+    (key) => committed[key] !== expected[key],
+  );
+}
+
+/** The preset routes committed in `directory`: each `<id>.bake.json`'s id, sorted. */
+export function presetRouteIds(directory: string): string[] {
+  return readdirSync(directory)
+    .filter((name) => name.endsWith('.bake.json'))
+    .map((name) => name.slice(0, -'.bake.json'.length))
+    .sort();
 }
 
 /** A `pmtiles` source over a local file — an archive on disk, such as CI's synthetic fixture. */
