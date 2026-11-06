@@ -1876,9 +1876,9 @@ function HudLayoutPanel({
         help={
           <p className="oyl-muted">
             What the game shows while you ride, from your next ride. Power, cadence, heart rate and
-            gradient, the ride controls and every notice are always shown. Larger numbers are drawn
-            on a tablet; a phone keeps its size, because its screen has no room for them beside the
-            road.
+            gradient, the ride controls and every notice are always shown. The text size applies on
+            tablets: a phone or a short window keeps the normal size, because it has no room for
+            larger numbers beside the road.
           </p>
         }
       >
