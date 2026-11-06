@@ -202,13 +202,12 @@ describe('the look-ahead strip on the HUD (#2075)', () => {
     // "Climb in 400 metres, 6 percent", spoken; "Climb in 400 m · 6 %", shown.
     const [, spokenMetres, spokenPercent] =
       /Climb in (\d+) metres, (\d+) percent/.exec(said ?? '') ?? [];
-    // #2291: and where its top is, a kilometre on (`look-ahead.ts` §`climbAhead`).
+    // #2291: and where its top is, a kilometre on, in its name (`look-ahead.ts`
+    // §`climbAhead`). Not in the caption: §`nextClimbText` says why.
     const top = lookAhead(profile, 600).climb?.topIn ?? Number.NaN;
     const topMetres = String(Math.round(top / 10) * 10);
     const shown = hud.querySelector('[data-testid="oyl-hud-next-climb"]')?.textContent ?? '';
-    expect(shown).toBe(
-      `Climb in ${spokenMetres ?? '?'} m · ${spokenPercent ?? '?'} % · top in ${topMetres} m`,
-    );
+    expect(shown).toBe(`Climb in ${spokenMetres ?? '?'} m · ${spokenPercent ?? '?'} %`);
     expect(
       hud.querySelector('[data-testid="oyl-hud-look-ahead"]')?.getAttribute('aria-label'),
     ).toBe(
@@ -302,7 +301,7 @@ describe('the climb view on the HUD (#2291)', () => {
     expect(hud.querySelector('[data-testid="oyl-hud-climb-top"]')).toBeNull();
     // The caption still says where it is.
     expect(hud.querySelector('[data-testid="oyl-hud-next-climb"]')?.textContent).toMatch(
-      /^Climb in \d+0 m · 4 % · top in \d+0 m$/,
+      /^Climb in \d+0 m · 4 %$/,
     );
   });
 });

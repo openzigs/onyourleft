@@ -752,7 +752,7 @@ function ElevationStrip(props: {
         chart (#77's, #50's). A profile is a picture of a number, and the number
         is available. The next climb is its own line beside it (#2075), so a
         sentence other features read whole stays the sentence it was; since
-        #2291 it names the top of the climb, and the climb the rider is on.
+        #2291 it names the top of the climb the rider is on.
       */}
       <div className="oyl-hud__profile-captions">
         <p className="oyl-hud__profile-text">{props.reading.text}</p>
@@ -782,9 +782,11 @@ function ElevationStrip(props: {
  * `role="img"` with the next climb as its name, as the whole route's strip is
  * named by its sentence.
  *
- * #2291: the top of the climb in the caption, when it is in the window, is a
- * dashed ink line across the strip where the climb ends — a SHAPE, unlike
- * the rider's solid edge — so where the top is can be seen as well as read.
+ * #2291: the top of the climb the rider is on, or of the next one, is a
+ * dashed ink line across the strip where the climb ends, when the window
+ * reaches it — a SHAPE, unlike the rider's solid edge. On a climb the caption
+ * says how far it is; before one, the strip's name does, and the caption
+ * keeps #2075's phrase (`look-ahead.ts` §`nextClimbText` says why).
  */
 function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: string }): JSX.Element {
   // React's ids carry punctuation a `url(#…)` reference need not survive.

@@ -314,22 +314,32 @@ export function routeBands(profile: RouteProfile): readonly RouteBandRun[] {
 
 /**
  * The climb in a short phrase for the strip, or `undefined` when there is
- * none: `Climb in 350 m · 6 % · top in 950 m` before it, and `Top in 420 m ·
- * 7 %` on it (#2291). The start's distance and the grade are what #2075 wrote
- * and the announcer says; the top is #2291's. The distance is the rider's own
- * unit, as everywhere on the HUD; the grade is the whole climb's average, in
- * whole percent, as the announcer says it.
+ * none: `Climb in 350 m · 6 %` before it, as #2075 wrote it and the
+ * announcer says it, and `Top in 420 m · 7 %` on it (#2291). The distance is
+ * the rider's own unit, as everywhere on the HUD; the grade is the whole
+ * climb's average, in whole percent, as the announcer says it.
+ *
+ * ⚠️ **Before a climb its top is on the strip, not in this phrase**: a dashed
+ * line where the window reaches it (`HudCore.tsx` §`LookAheadStrip`), and in
+ * the strip's accessible name ({@link nextClimbLabel}). Both in one phrase,
+ * `Climb in 400 m · 6 % · top in 1010 m`, is 215 px at the caption's size,
+ * and on an upright phone's 246 px column it wraps under the route's
+ * sentence where #2075's 125 px phrase did not. That extra line put a
+ * Delivery round's map credit over the leaning rider at 360 × 752
+ * (`ride-delivery.browser.spec.ts`, measured for #2291), where the layout
+ * has a pixel to spare. So no phrase here is longer than #2075's was.
  */
 export function nextClimbText(
   climb: ClimbAhead | undefined,
   units: UnitSystem,
 ): string | undefined {
   if (climb === undefined) return undefined;
-  const top = measurementText(formatSmallDistance(roundedAhead(climb.topIn), units));
   const grade = `${String(Math.round(Math.abs(climb.slope.grade)))} %`;
-  if (climb.where === 'on') return `Top in ${top} · ${grade}`;
+  if (climb.where === 'on') {
+    return `Top in ${measurementText(formatSmallDistance(roundedAhead(climb.topIn), units))} · ${grade}`;
+  }
   const start = measurementText(formatSmallDistance(roundedAhead(climb.startsIn), units));
-  return `Climb in ${start} · ${grade} · top in ${top}`;
+  return `Climb in ${start} · ${grade}`;
 }
 
 /** The same, for a screen reader: the units in words, and "per cent". */

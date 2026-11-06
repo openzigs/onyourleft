@@ -175,7 +175,7 @@ describe('the next kilometre of a synthetic climb (#2075)', () => {
     expect(ahead.nextClimb).toEqual(announced);
     expect(ahead.nextClimb?.slope.grade).toBeGreaterThan(5);
     expect(ahead.nextClimb?.slope.grade).toBeLessThan(7);
-    expect(nextClimbText(ahead.climb, 'metric')).toMatch(/^Climb in \d+0 m · 6 % · top in \d+0 m$/);
+    expect(nextClimbText(ahead.climb, 'metric')).toMatch(/^Climb in \d+0 m · 6 %$/);
     expect(nextClimbLabel(ahead.climb, 'metric')).toMatch(
       /^next climb in \d+0 metres, 6 per cent average, top in \d+0 metres$/,
     );
@@ -183,9 +183,7 @@ describe('the next kilometre of a synthetic climb (#2075)', () => {
 
   it('says it in the rider’s own unit', () => {
     const ahead = lookAhead(profile, 600);
-    expect(nextClimbText(ahead.climb, 'imperial')).toMatch(
-      /^Climb in \d+ ft · 6 % · top in \d+ ft$/,
-    );
+    expect(nextClimbText(ahead.climb, 'imperial')).toMatch(/^Climb in \d+ ft · 6 %$/);
   });
 
   it('names no climb when none starts within the window, and says so', () => {
