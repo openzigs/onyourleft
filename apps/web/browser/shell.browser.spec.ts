@@ -72,6 +72,7 @@ import {
   type Insets,
 } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
+import { PAUSE_MUSIC_NAME } from '../src/shell/OtherPlayerControls';
 import { isRideRoute } from '../src/shell/route-motion';
 import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
@@ -4282,5 +4283,32 @@ test.describe('#2058 — the menus’ music, in a real engine', () => {
       await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
     }
     expect((await readMusic(page)).elements, 'one element for the visit').toBe(1);
+  });
+});
+
+/**
+ * #2253 through the harness's composition, which is `main.tsx`'s: the one
+ * `OtherPlayer` the header shows (`?own-player=heard`) is also the menus'
+ * music's `riderPlayer`. Heard playing, a press makes no loop at all — the
+ * same press that starts it in the case above.
+ */
+test.describe('#2253 — the menus’ music yields to the rider’s own player, in a real engine', () => {
+  test('with the rider’s player heard playing, a press starts nothing', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?music=fixture&own-player=heard');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    // The header heard it playing: its play/pause offers to pause.
+    await expect(page.getByRole('button', { name: PAUSE_MUSIC_NAME })).toBeVisible();
+
+    await pressSomethingElse(page);
+    // The press's handler has run once focus has left the skip link.
+    await expect(page.locator('.oyl-skip-link')).not.toBeFocused();
+    expect(await readMusic(page), 'the loop started over the rider’s own player').toEqual({
+      elements: 0,
+      playing: false,
+      time: 0,
+      bus: null,
+    });
   });
 });

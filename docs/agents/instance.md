@@ -183,6 +183,20 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         key through `source.ts` §`modelForSource` — the
                         gate a job passes — answering a closed word and
                         never the service's own.
+                        Since #68 it also holds `src/segments/` —
+                        segments published to the instance (named by a
+                        digest of their definition, `@onyourleft/domain`
+                        §`publishedSegmentId`), the efforts riders share on
+                        them, and instance-scoped leaderboards, sealed-only
+                        (ADR 0047's amendment of 2026-11-05), with migration
+                        0038's `segment`, `segment_effort` and
+                        `activity_record.visibility`. ⚠️ A board is the one
+                        read across athletes' efforts, and it applies the
+                        choke point's rule IN SQL (`sql-store.ts`
+                        §`seenBy`), held to `canSee` pair by pair in
+                        `segments/leaderboard.test.ts`;
+                        docs/architecture.md §"Segments and leaderboards
+                        (#68)" says what it keeps.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
