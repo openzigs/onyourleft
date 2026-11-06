@@ -324,7 +324,9 @@ function LastRide({
       </p>
       {profile === undefined ? null : (
         <div className="oyl-home__last-climb">
-          <ProfileShape className="oyl-home__last-profile" profile={profile} />
+          {/* The owner's review (2026-11-05): the near hill's dark green was
+              faint on the dark card; the accent is a declared 3:1 pair on it. */}
+          <ProfileShape className="oyl-home__last-profile" profile={profile} paintAs="mark" />
           <p className="oyl-muted tw:m-0">
             Climb {measurementText(formatSmallDistance(profile.totalAscent, units))}
           </p>

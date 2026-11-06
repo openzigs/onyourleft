@@ -27,6 +27,9 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../design/contrast';
+import { ILLUSTRATION_PAINTS } from '../design/illustration/paint';
+import { CONTRAST_REQUIREMENTS, THEMES, paletteColours } from '../design/tokens';
 import { AppShell } from '../shell/AppShell';
 import { hrefFor, hrefForActivity, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -204,6 +207,54 @@ describe('Home’s last ride — #2048', () => {
     expect(found.html).not.toContain(String(ORIGIN_LATITUDE).slice(0, 7));
     expect(found.text).not.toMatch(/°|\d+\.\d{3,}/);
     expect(found.attributes.join(' ')).not.toMatch(/°|-?\d+\.\d{3,}/);
+  });
+
+  /*
+   * The owner's screenshot review of 2026-11-05: the profile was the near
+   * hill's faint dark green on the dark card. It is painted with a token whose
+   * pair on the card's `surfaceRaised` is DECLARED at the non-text 3:1 (SC
+   * 1.4.11) — so `contrast.a11y.test.ts` holds its measured ratio in both
+   * palettes — and that ratio is at least 3:1 in each here as well.
+   */
+  it('paints the climb in a declared non-text pair on the card, at least 3:1 in both palettes', async () => {
+    const open = await seeded();
+    const route = await seedRoute(open, ATHLETE_A, { name: 'Hill loop' });
+    await open.write(async (store) => {
+      await store.putActivity(
+        rideFor(ATHLETE_A, {
+          id: activityId('on-route'),
+          name: 'Round the hill',
+          startedAt: unixSeconds(NOW - DAY),
+          routeId: route.id,
+        }),
+      );
+    });
+    const classes = await withHome(open, (module) => [
+      ...new Set(
+        [...(module?.querySelectorAll('svg path') ?? [])].map((path) => path.getAttribute('class')),
+      ),
+    ]);
+    const paints = Object.values(ILLUSTRATION_PAINTS).filter((each) =>
+      classes.includes(each.className),
+    );
+    expect(paints.map((each) => each.property)).toEqual(['fill']);
+    const token = paints[0]?.token;
+    expect(
+      CONTRAST_REQUIREMENTS.filter(
+        (pair) =>
+          pair.foreground === token &&
+          pair.background === 'surfaceRaised' &&
+          pair.minimum >= AA_LARGE_TEXT_OR_NON_TEXT,
+      ),
+      `${String(token)} on surfaceRaised is not a declared non-text pair`,
+    ).toHaveLength(1);
+    for (const theme of THEMES) {
+      const colours = paletteColours(theme);
+      if (token === undefined) throw new Error('the climb has no paint');
+      expect(contrastRatio(colours[token], colours.surfaceRaised), theme).toBeGreaterThanOrEqual(
+        AA_LARGE_TEXT_OR_NON_TEXT,
+      );
+    }
   });
 
   it('a ride on no saved route draws no climb — not even the route an OLDER ride was on, which Next up offers', async () => {
