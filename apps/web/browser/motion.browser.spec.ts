@@ -132,6 +132,7 @@ async function sampleFrames({
   hash,
   untilMs,
   inside,
+  dispatchNow,
 }: {
   hash: string;
   untilMs: number;
@@ -141,6 +142,15 @@ async function sampleFrames({
    * preparing — the old page captured, the update not yet run.
    */
   inside?: string;
+  /**
+   * Fire `hashchange` in the task that sets `hash`, as `inside` does, so the
+   * router hears of the navigation at once (#2239). The browser's own
+   * `hashchange` is a task of its own. When the renderer stalls before that
+   * task runs, Chromium draws a frame first, and that frame still shows the
+   * menu fading, because the router has not heard of Ride yet. That is the
+   * browser's scheduling, not the router's.
+   */
+  dispatchNow?: boolean;
 }): Promise<Frame[]> {
   const frames: Frame[] = [];
   let fadingBefore = false;
@@ -152,6 +162,9 @@ async function sampleFrames({
   };
   if (inside === undefined) {
     navigate();
+    if (dispatchNow === true) {
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    }
   } else {
     // In a microtask, so React has finished the commit that started the
     // transition. The browser fires `hashchange` in a task of its own, which
@@ -546,6 +559,7 @@ test.describe('the route cross-fade — #945', () => {
           frames = await page.evaluate(sampleFrames, {
             hash: hrefFor(ride),
             untilMs: 3 * MOTION_DURATION_MS.medium,
+            dispatchNow: true,
           });
         }
         expect(
@@ -566,11 +580,18 @@ test.describe('the route cross-fade — #945', () => {
             first,
           );
           if (source === 'commit') {
-            // Before the menu's fade would have ended by itself: without the skip,
-            // Ride is not committed until it has.
-            expect(first?.ms ?? Infinity, 'Ride waited for the menu fade').toBeLessThan(
-              MOTION_DURATION_MS.medium,
-            );
+            // Before the menu's fade would have ended by itself: without the
+            // skip, Ride is not committed until it has. Counted in frames, not
+            // milliseconds (#2239, as #1487 did for focus above). No frame drawn
+            // before Ride's commit may show the fade. A stalled runner then
+            // costs time but fails nothing, and a Ride that waited behind the
+            // fade is drawn behind it in every frame until it commits.
+            const waited = frames
+              .slice(0, first === undefined ? 0 : frames.indexOf(first))
+              .filter(
+                (frame) => frame.source === 'frame' && (frame.fading || frame.pseudoAnimations > 0),
+              );
+            expect(waited, 'Ride waited for the menu fade').toStrictEqual([]);
           }
           expect(first?.fading, `a view transition was still live over Ride (${source})`).toBe(
             false,
