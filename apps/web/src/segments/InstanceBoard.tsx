@@ -60,6 +60,10 @@ export const PUBLISH_SENTENCE =
 export const SHARE_SENTENCE =
   'Sharing puts your efforts on this segment on the board with your display name, and makes the rides they came from public here and on your instance. Only each effort’s time is sent, never a track. An effort that starts or ends in one of your privacy zones, or on a segment that passes through one, is kept to your own board. Taking your efforts off leaves the rides as they are.';
 
+/** What taking efforts off a withheld segment's board does, said before the press. */
+export const HELD_EFFORTS_SENTENCE =
+  'You shared efforts on this segment before. Taking them off sends its identifier to your instance, so it can find them; nothing else of it is sent.';
+
 /** What withdrawing a segment the rider published does, said before the press. */
 export const WITHDRAW_SENTENCE =
   'You published this segment. Withdrawing it deletes it from your instance, with every effort any rider shared on it; their own copies stay on their devices.';
@@ -190,6 +194,10 @@ export function InstanceBoard({
   }, [port, segment]);
 
   const published = standing?.kind === 'published' ? standing.segmentId : undefined;
+  // A segment withheld now that this device published, or shared on, before:
+  // it may still be taken off, by the identifier this device recorded.
+  const held = standing?.kind === 'withheld' ? standing.held : undefined;
+  const onTheInstance = published ?? held?.segmentId;
 
   const load = useCallback(async (): Promise<void> => {
     if (published === undefined) return;
@@ -252,7 +260,7 @@ export function InstanceBoard({
   }
 
   async function send(kind: 'share' | 'withdraw'): Promise<void> {
-    if (published === undefined) return;
+    if (published === undefined && (kind === 'share' || held === undefined)) return;
     setBusy(true);
     try {
       const outcome =
@@ -263,17 +271,18 @@ export function InstanceBoard({
         tone: outcome.failed === 0 && outcome.notSynced === 0 ? 'success' : 'warning',
         text: shareSentence(outcome, kind === 'share' ? 'Shared' : 'Withdrew'),
       });
-      await load();
+      if (published === undefined) setStanding(await port.standing(segment));
+      else await load();
     } finally {
       setBusy(false);
     }
   }
 
   async function withdrawSegment(): Promise<void> {
-    if (published === undefined) return;
+    if (onTheInstance === undefined) return;
     setBusy(true);
     try {
-      const withdrawn = await port.withdrawSegment(published);
+      const withdrawn = await port.withdrawSegment(onTheInstance);
       setSaid(
         withdrawn
           ? { tone: 'success', text: `Withdrew this segment from ${instance}.` }
@@ -291,7 +300,25 @@ export function InstanceBoard({
       {standing === undefined ? (
         <p className="oyl-muted">Asking {instance} about this segment…</p>
       ) : standing.kind === 'withheld' ? (
-        <StatusMessage tone="info">{standing.refusal}</StatusMessage>
+        <>
+          <StatusMessage tone="info">{standing.refusal}</StatusMessage>
+          {held?.shared === true && efforts.length > 0 ? (
+            <>
+              <p className="oyl-muted">{HELD_EFFORTS_SENTENCE}</p>
+              <Button variant="tertiary" onClick={() => void send('withdraw')} disabled={busy}>
+                Take my efforts off this board
+              </Button>
+            </>
+          ) : null}
+          {held?.yours === true ? (
+            <>
+              <p className="oyl-muted">{WITHDRAW_SENTENCE}</p>
+              <Button variant="danger" onClick={() => void withdrawSegment()} disabled={busy}>
+                Withdraw this segment from {instance}
+              </Button>
+            </>
+          ) : null}
+        </>
       ) : standing.kind === 'unavailable' ? (
         <StatusMessage tone="warning">
           {instance} could not be asked about this segment. Your own efforts above are unaffected.

@@ -52,6 +52,7 @@ import {
   PUBLISH_SENTENCE,
   SHARE_SENTENCE,
   WITHDRAW_SENTENCE,
+  HELD_EFFORTS_SENTENCE,
 } from './InstanceBoard';
 import { ADD_SENTENCE, InstanceSegments } from './InstanceSegments';
 
@@ -271,6 +272,36 @@ describe('a segment’s board on the instance (#68)', () => {
     await settle();
     expect(calls.withdrawn).toEqual([[EFFORT]]);
     expect(text()).toContain('Withdrew efforts from 1 ride.');
+  });
+
+  it('still offers a withheld segment’s publisher its withdrawal, and its sharer their efforts back', async () => {
+    const { port, calls } = stubPort({
+      standing: {
+        kind: 'withheld',
+        refusal: 'Part of this segment is in one of your privacy zones.',
+        held: { segmentId: 'a'.repeat(32), yours: true, shared: true },
+      },
+    });
+    mounted = await mount(
+      onAPage(<InstanceBoard port={port} segment={SEGMENT} efforts={[EFFORT]} />),
+    );
+    await settle();
+    expect(text()).toContain('Part of this segment is in one of your privacy zones.');
+    expect(text()).toContain(HELD_EFFORTS_SENTENCE);
+    expect(text()).toContain(WITHDRAW_SENTENCE);
+    // Never the board, and never a way to share or publish more.
+    expect(calls.boards).toEqual([]);
+    expect(queryAll(document, 'button').map((each) => each.textContent)).toEqual([
+      'Take my efforts off this board',
+      'Withdraw this segment from rides.example.org',
+    ]);
+    clean();
+    button(/^Take my efforts off/).click();
+    await settle();
+    expect(calls.withdrawn).toEqual([[EFFORT]]);
+    button(/^Withdraw this segment/).click();
+    await settle();
+    expect(calls.added).toEqual([`withdrawn ${'a'.repeat(32)}`]);
   });
 
   it('lets the rider who published it withdraw it, saying what that deletes — and nobody else', async () => {

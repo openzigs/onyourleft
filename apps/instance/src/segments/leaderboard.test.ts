@@ -516,6 +516,26 @@ function effortsOn(segmentId: string): number {
 }
 
 describe('sharing an effort', () => {
+  it('answers a ride’s visibility with what it was before, so a device can put it back', async () => {
+    const ann = await rider('Ann');
+    const content = await ride(ann);
+    expect((await visibility(ann, content, 'public')).body).toEqual({
+      visibility: 'public',
+      previous: 'private',
+    });
+    expect((await visibility(ann, content, 'followers')).body).toEqual({
+      visibility: 'followers',
+      previous: 'public',
+    });
+    // Another rider's ride is none of theirs: not found, and unchanged.
+    const bea = await rider('Bea');
+    expect((await visibility(bea, content, 'private')).status).toBe(404);
+    expect((await visibility(ann, content, 'private')).body).toEqual({
+      visibility: 'private',
+      previous: 'followers',
+    });
+  });
+
   it('only from the caller’s own synced ride: another rider’s file is `not_found`', async () => {
     const ann = await rider('Ann');
     const segmentId = await segmentBy(ann);

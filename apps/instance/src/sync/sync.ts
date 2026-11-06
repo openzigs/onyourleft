@@ -413,7 +413,9 @@ export interface Sync {
     caller: Caller,
     contentSha256: string,
     body: Readonly<Record<string, unknown>>,
-  ): Promise<Outcome<{ readonly visibility: ActivityVisibility }>>;
+  ): Promise<
+    Outcome<{ readonly visibility: ActivityVisibility; readonly previous: ActivityVisibility }>
+  >;
   /**
    * #331: offer one of the caller's consented rides to be raced on a route,
    * by the SHA-256 of the route's canonical GPX — or withdraw the offer with
@@ -774,8 +776,13 @@ export function createSync(options: SyncOptions): Sync {
       if (visibility !== 'private' && visibility !== 'followers' && visibility !== 'public') {
         return invalid('visibility', 'must be private, followers or public');
       }
+      // What it was, answered so a device that changes it can put it back
+      // exactly: its own copy of the ride may hold another visibility (#68).
+      const held = await store.getActivityRecord(caller.athleteId, contentSha256);
+      if (held === undefined) return refuse('not_found');
+      const previous = held.visibility ?? 'private';
       const set = await store.setActivityVisibility(caller.athleteId, contentSha256, visibility);
-      return set ? { ok: true, value: { visibility } } : refuse('not_found');
+      return set ? { ok: true, value: { visibility, previous } } : refuse('not_found');
     },
 
     setRaceRoute: async (caller, contentSha256, body) => {

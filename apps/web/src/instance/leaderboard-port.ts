@@ -84,7 +84,13 @@ import {
   type Visibility,
 } from '@onyourleft/store';
 
-import { heldInstanceSession, heldSealedSession, type SealingDependencies } from './instance-port';
+import {
+  heldInstanceSession,
+  heldSealedSession,
+  INSTANCE_AGREEMENT_STORAGE_KEYS,
+  type InstanceStorage,
+  type SealingDependencies,
+} from './instance-port';
 import { sealedRouteGate } from './instance-pin';
 import { readInstanceAccount } from './sign-in';
 
@@ -142,8 +148,13 @@ export interface InstanceSegment {
 
 /** Whether one of this device's segments is on the instance. */
 export type SegmentStanding =
-  /** Not asked: the segment is not offered to the instance, for this reason. */
-  | { readonly kind: 'withheld'; readonly refusal: string }
+  /**
+   * Not asked: the segment is not offered to the instance, for this reason.
+   * `held` when this device published it, or shared efforts on it, before it
+   * was withheld — known from this device's own record ({@link HELD_STORAGE_KEY}),
+   * never from asking — so the rider can still take it off.
+   */
+  | { readonly kind: 'withheld'; readonly refusal: string; readonly held?: HeldSegment }
   | { readonly kind: 'published'; readonly segmentId: string; readonly yours: boolean }
   | { readonly kind: 'not-published'; readonly segmentId: string }
   | { readonly kind: 'unavailable' };
@@ -214,6 +225,51 @@ export interface LeaderboardPortDependencies extends SealingDependencies {
   readonly sha256?: Sha256;
 }
 
+/** A segment this device published, or shared efforts on, on the instance it is signed in to. */
+export interface HeldSegment {
+  /** Its identifier there: the digest it was published under. */
+  readonly segmentId: string;
+  /** This device published it, so may withdraw it. */
+  readonly yours: boolean;
+  /** This device shared efforts on it, so may take them off. */
+  readonly shared: boolean;
+}
+
+/**
+ * Where this device records which of its segments it published, or shared
+ * efforts on, and under which identifier — for the instance it is signed in
+ * to, by its address. Only identifiers: no name, no path. Forgotten on a
+ * disconnect and an erase, with the rest of what names the instance
+ * (`instance-port.ts` §`INSTANCE_AGREEMENT_STORAGE_KEYS`).
+ */
+export const HELD_STORAGE_KEY = INSTANCE_AGREEMENT_STORAGE_KEYS[4];
+
+type HeldRecord = Readonly<Record<string, HeldSegment>>;
+
+/** This device's record for `origin`, or none: anything else is read as none. */
+function readHeld(storage: InstanceStorage, origin: string): HeldRecord {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(storage.getItem(HELD_STORAGE_KEY) ?? 'null');
+  } catch {
+    return {};
+  }
+  if (!isRecord(parsed) || parsed.origin !== origin || !isRecord(parsed.segments)) return {};
+  const held: Record<string, HeldSegment> = {};
+  for (const [local, value] of Object.entries(parsed.segments)) {
+    if (
+      isRecord(value) &&
+      typeof value.segmentId === 'string' &&
+      PUBLISHED_SEGMENT_ID.test(value.segmentId) &&
+      typeof value.yours === 'boolean' &&
+      typeof value.shared === 'boolean'
+    ) {
+      held[local] = { segmentId: value.segmentId, yours: value.yours, shared: value.shared };
+    }
+  }
+  return held;
+}
+
 /** What a rider is told when a segment is not offered for publishing. */
 export const NOT_PUBLIC_REFUSAL =
   'This segment is private on this device, so it is not offered to your instance.';
@@ -222,20 +278,52 @@ export const IN_A_ZONE_REFUSAL =
 export const FROM_THE_INSTANCE_REFUSAL =
   'This segment came from your instance, so it is already there.';
 
+/** The mean Earth radius, in metres, for the flat neighbourhood of one zone. */
+const EARTH_RADIUS_METRES = 6_371_008.8;
+
 /**
- * Whether any point of `path` lies inside any of `zones` — every point, not
- * only the two ends: a published path is served to every rider on the
- * instance, so a segment that passes THROUGH a zone would publish the points
- * inside it (ADR 0004 C). A segment's path is a span of the rider's own
- * recorded samples, metres apart, against a zone of at least 250 m (ADR 0004
- * B), so no chord between two points crosses a zone that holds neither.
+ * Whether the straight line from `a` to `b` comes within `zone`: its closest
+ * point to the zone's centre, on a plane laid flat around that centre. Flat
+ * is close enough across one zone and one gap in a recording.
+ */
+function lineEntersZone(
+  a: GeographicPosition,
+  b: GeographicPosition,
+  zone: PrivacyCircle,
+): boolean {
+  const radians = Math.PI / 180;
+  const across = Math.cos(zone.centre.latitude * radians);
+  const east = (position: GeographicPosition): number => {
+    let degrees = position.longitude - zone.centre.longitude;
+    if (degrees > 180) degrees -= 360;
+    if (degrees < -180) degrees += 360;
+    return degrees * radians * EARTH_RADIUS_METRES * across;
+  };
+  const north = (position: GeographicPosition): number =>
+    (position.latitude - zone.centre.latitude) * radians * EARTH_RADIUS_METRES;
+  const [ax, ay, bx, by] = [east(a), north(a), east(b), north(b)];
+  const [dx, dy] = [bx - ax, by - ay];
+  const length = dx * dx + dy * dy;
+  const along = length === 0 ? 0 : Math.min(1, Math.max(0, -(ax * dx + ay * dy) / length));
+  return Math.hypot(ax + along * dx, ay + along * dy) <= zone.radius;
+}
+
+/**
+ * Whether any part of `path` lies inside any of `zones` — every point, and
+ * every line between two neighbouring points, not only the two ends: a
+ * published path is served to every rider on the instance, and a renderer
+ * draws those lines, so a segment that passes THROUGH a zone would publish
+ * where it went inside (ADR 0004 C). The lines matter where a recording has a
+ * gap, or a zone is small: two points either side of a zone, both outside it.
  */
 export function pathEntersPrivacyZone(
   path: readonly GeographicPosition[],
   zones: readonly PrivacyCircle[],
 ): boolean {
-  return path.some((position) =>
-    zones.some((zone) => distanceBetween(zone.centre, position) <= zone.radius),
+  return zones.some(
+    (zone) =>
+      path.some((position) => distanceBetween(zone.centre, position) <= zone.radius) ||
+      path.some((position, index) => index > 0 && lineEntersZone(path[index - 1]!, position, zone)),
   );
 }
 
@@ -255,6 +343,7 @@ export function publishRefusal(
 }
 
 const SCOPES: readonly BoardScope[] = ['instance', 'personal'];
+const VISIBILITIES: readonly Visibility[] = ['private', 'followers', 'public'];
 const PERIODS: readonly BoardPeriod[] = ['all-time', 'last-90-days', 'last-30-days'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -386,6 +475,38 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     return rides;
   }
 
+  const origin = (): string | undefined => readInstanceAccount(dependencies.storage)?.origin;
+
+  /** What this device recorded of `segment` on the instance it is signed in to. */
+  function heldOf(segment: SegmentRecord): HeldSegment | undefined {
+    const at = origin();
+    return at === undefined ? undefined : readHeld(dependencies.storage, at)[segment.id];
+  }
+
+  /** Rewrite this device's record for the instance it is signed in to. */
+  function rewriteHeld(rewrite: (all: Record<string, HeldSegment>) => void): void {
+    const at = origin();
+    if (at === undefined) return;
+    const all: Record<string, HeldSegment> = { ...readHeld(dependencies.storage, at) };
+    rewrite(all);
+    for (const [key, held] of Object.entries(all)) {
+      if (!held.yours && !held.shared) delete all[key];
+    }
+    dependencies.storage.setItem(HELD_STORAGE_KEY, JSON.stringify({ origin: at, segments: all }));
+  }
+
+  /** Record what this device now holds of one of its segments on the instance. */
+  function hold(
+    segment: SegmentRecord,
+    change: (was: HeldSegment | undefined) => HeldSegment | undefined,
+  ): void {
+    rewriteHeld((all) => {
+      const next = change(all[segment.id]);
+      if (next === undefined) delete all[segment.id];
+      else all[segment.id] = next;
+    });
+  }
+
   /** One instance call, as whether it was taken. */
   const took = async (path: string, body: Readonly<Record<string, unknown>>): Promise<boolean> =>
     (await call('POST', path, body))?.status === 200;
@@ -394,8 +515,9 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
    * Share one ride's efforts: the ride is made `public` here first, so no
    * effort is ever ranked from a ride this device has not made public, then
    * on the instance, then its efforts sent. When either instance call fails
-   * the ride is put back as the rider had it, here and there: a share that
-   * did not happen changes nothing.
+   * the ride is put back as it was, here and there — on the instance to what
+   * the instance itself answered it had been, which need not be what this
+   * device had: a share that did not happen changes nothing.
    */
   async function shareRide(
     activity: ActivityId,
@@ -409,7 +531,14 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     if (before === undefined) return false;
     if (!(await store.setActivityVisibility(athleteId, activity, 'public'))) return false;
     const visibilityPath = `/v1/sync/records/${file}/visibility`;
-    const madePublic = await took(visibilityPath, { visibility: 'public' });
+    const made = await call('POST', visibilityPath, { visibility: 'public' });
+    const madePublic = made?.status === 200;
+    // What the instance had: its own answer. One it did not give is taken as
+    // `private`, the default — putting back too little never ranks anything.
+    const previous =
+      isRecord(made?.body) && VISIBILITIES.includes(made.body.previous as Visibility)
+        ? (made.body.previous as Visibility)
+        : 'private';
     if (
       madePublic &&
       (await took(`/v1/segments/${segmentId}/efforts/${file}`, {
@@ -422,10 +551,8 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     ) {
       return true;
     }
-    if (before !== 'public') {
-      if (madePublic) await took(visibilityPath, { visibility: before });
-      await store.setActivityVisibility(athleteId, activity, before);
-    }
+    if (madePublic && previous !== 'public') await took(visibilityPath, { visibility: previous });
+    if (before !== 'public') await store.setActivityVisibility(athleteId, activity, before);
     return false;
   }
 
@@ -434,7 +561,10 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     efforts: readonly SegmentEffortRecord[],
     kind: 'share' | 'withdraw',
   ): Promise<ShareOutcome> {
-    const segmentId = await idOf(segment);
+    // Taking efforts off a segment this device shared on goes by the identifier
+    // they were shared under, which this device recorded.
+    const segmentId =
+      (kind === 'withdraw' ? heldOf(segment)?.segmentId : undefined) ?? (await idOf(segment));
     const content = await contents();
     // ADR 0004 C: an effort whose span intersects a zone is not published.
     // Its span is this segment's path, so a path that enters one of the
@@ -463,6 +593,12 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
           : await took(`/v1/segments/${segmentId}/efforts/${file}`, { efforts: [] });
       if (sent) rides += 1;
       else failed += 1;
+    }
+    if (kind === 'share' && rides > 0) {
+      hold(segment, (was) => ({ segmentId, yours: was?.yours ?? false, shared: true }));
+    }
+    if (kind === 'withdraw' && failed === 0) {
+      hold(segment, (was) => (was === undefined ? undefined : { ...was, shared: false }));
     }
     return { rides, notSynced, failed };
   }
@@ -500,9 +636,14 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
         await dependencies.store().listPrivacyZones(athleteId),
         segmentId,
       );
-      // Asked only of a segment that is, or may be, on the instance.
+      // Asked only of a segment that is, or may be, on the instance. One this
+      // device published or shared on before is answered from its own record,
+      // so the rider can still take it off — and still nothing is asked.
       if (refusal !== undefined && refusal !== FROM_THE_INSTANCE_REFUSAL) {
-        return { kind: 'withheld', refusal };
+        const held = heldOf(segment);
+        return held === undefined
+          ? { kind: 'withheld', refusal }
+          : { kind: 'withheld', refusal, held };
       }
       const answer = await call('GET', `/v1/segments/${segmentId}`);
       if (answer === undefined) return { kind: 'unavailable' };
@@ -516,16 +657,35 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
       // lives only in a render is a guard whose absence is invisible.
       const zones = await dependencies.store().listPrivacyZones(athleteId);
       if (publishRefusal(segment, zones, await idOf(segment)) !== undefined) return 'refused';
+      const segmentId = await idOf(segment);
       const answer = await call('POST', '/v1/segments', {
         segment: publishedDefinitionOf(segment),
       });
       if (answer === undefined) return 'unavailable';
-      return answer.status === 200 ? 'published' : 'refused';
+      if (answer.status !== 200) return 'refused';
+      // Recorded, so it can still be withdrawn once it is withheld. Yours only
+      // when this call published it, or an earlier one of this device's did.
+      const fresh = isRecord(answer.body) && answer.body.published === true;
+      hold(segment, (was) => ({
+        segmentId,
+        yours: fresh || was?.yours === true,
+        shared: was?.shared ?? false,
+      }));
+      return 'published';
     },
 
     withdrawSegment: async (segmentId) => {
       if (!PUBLISHED_SEGMENT_ID.test(segmentId)) return false;
-      return (await call('DELETE', `/v1/segments/${segmentId}`))?.status === 204;
+      const withdrawn = (await call('DELETE', `/v1/segments/${segmentId}`))?.status === 204;
+      // Gone, with every effort on it: nothing of it is left to take off.
+      if (withdrawn) {
+        rewriteHeld((all) => {
+          for (const [key, held] of Object.entries(all)) {
+            if (held.segmentId === segmentId) delete all[key];
+          }
+        });
+      }
+      return withdrawn;
     },
 
     board: async (segmentId, scope, period) => {

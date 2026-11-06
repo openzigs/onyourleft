@@ -56,6 +56,7 @@ import {
   NOT_PUBLIC_REFUSAL,
   parseBoard,
   parseSegmentList,
+  pathEntersPrivacyZone,
 } from './leaderboard-port';
 import { readInstanceAccount } from './sign-in';
 import { createSyncPort } from './sync-port';
@@ -498,6 +499,25 @@ describe('withdrawing, and a share that fails (#68)', () => {
     expect(await onTheInstance(w, bea, ride.id)).toBe('private');
   }, 30_000);
 
+  it('puts the instance’s visibility back to what the INSTANCE had, not what the device had', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    // Public here, private there: the instance's default for every synced ride.
+    await bea.harness.write((store) =>
+      store.setActivityVisibility(LOCAL_ATHLETE, ride.id, 'public'),
+    );
+    const outside = {
+      ...effortOn(segment, ride, 95),
+      startedAt: unixSeconds(ride.startedAt - 600),
+    };
+    expect((await bea.boards.share(segment, [outside])).failed).toBe(1);
+    expect(await onDevice(bea, ride.id)).toBe('public');
+    expect(await onTheInstance(w, bea, ride.id)).toBe('private');
+  }, 30_000);
+
   it('puts the ride back as it was on the device when the instance does not take its visibility', async () => {
     const { w, send } = await world();
     const bea = await connected(send, w, 'Bea');
@@ -526,6 +546,21 @@ describe('withdrawing, and a share that fails (#68)', () => {
 });
 
 describe('a segment whose path passes through a privacy zone (#68, ADR 0004 C)', () => {
+  it('is refused when a line between two points crosses a zone that holds neither', () => {
+    // Two points about 445 m apart, as across a gap in a recording.
+    const at = (latitude: number) =>
+      geographicPosition(latitude as DegreesLatitude, 20 as DegreesLongitude);
+    const sparse = [at(10), at(10.004), at(10.008)];
+    const zone = (latitude: number, longitude: number) => ({
+      centre: geographicPosition(latitude as DegreesLatitude, longitude as DegreesLongitude),
+      radius: metres(100),
+    });
+    // Centred between the first two points: neither is within 100 m of it.
+    expect(pathEntersPrivacyZone(sparse, [zone(10.002, 20)])).toBe(true);
+    // The same zone 300 m to the side: the line passes it by.
+    expect(pathEntersPrivacyZone(sparse, [zone(10.002, 20.0027)])).toBe(false);
+  });
+
   it('is not offered, is not asked about, and sends nothing', async () => {
     const { w, send, seen } = await world();
     const bea = await connected(send, w, 'Bea');
@@ -556,6 +591,58 @@ describe('a segment whose path passes through a privacy zone (#68, ADR 0004 C)',
     expect((await bea.boards.board(segmentId, 'personal', 'all-time'))?.rows).toEqual([
       expect.objectContaining({ rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 }),
     ]);
+  }, 30_000);
+});
+
+describe('a segment this rider published, withheld afterwards (#68)', () => {
+  it('can still be withdrawn, efforts and all, once a zone covers part of it — and nothing is asked on the way', async () => {
+    const { w, send, seen } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    expect(await bea.boards.publish(segment)).toBe('published');
+    expect((await bea.boards.share(segment, [effortOn(segment, ride, 95)])).rides).toBe(1);
+    await zoneAt(bea, segment.geometry[3]!);
+
+    seen.length = 0;
+    expect(await bea.boards.standing(segment)).toEqual({
+      kind: 'withheld',
+      refusal: IN_A_ZONE_REFUSAL,
+      held: { segmentId, yours: true, shared: true },
+    });
+    // Known from this device's own record: the instance was not asked.
+    expect(seen).toEqual([]);
+
+    expect((await bea.boards.withdraw(segment, [effortOn(segment, ride, 95)])).rides).toBe(1);
+    expect((await bea.boards.board(segmentId, 'personal', 'all-time'))?.rows).toEqual([]);
+    expect(await bea.boards.withdrawSegment(segmentId)).toBe(true);
+    expect(await bea.boards.standing(segment)).toEqual({
+      kind: 'withheld',
+      refusal: IN_A_ZONE_REFUSAL,
+    });
+
+    // Gone for everybody: not listed, and its path no longer served.
+    const anna = await connected(send, w, 'Anna');
+    expect((await anna.boards.listSegments())?.map((each) => each.segmentId)).toEqual([]);
+    expect(await anna.boards.addSegment(segmentId)).toBe('unavailable');
+  }, 30_000);
+
+  it('can still be withdrawn once the rider makes it private on this device', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const segment = await withSegment(bea, ownSegment());
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const hidden = await withSegment(bea, { ...segment, visibility: 'private' });
+    expect(await bea.boards.standing(hidden)).toEqual({
+      kind: 'withheld',
+      refusal: NOT_PUBLIC_REFUSAL,
+      held: { segmentId, yours: true, shared: false },
+    });
+    expect(await bea.boards.withdrawSegment(segmentId)).toBe(true);
+    const anna = await connected(send, w, 'Anna');
+    expect(await anna.boards.listSegments()).toEqual([]);
   }, 30_000);
 });
 
