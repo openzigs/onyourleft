@@ -778,6 +778,21 @@ export {
   sampleHeading,
   startBearing,
 } from './segment/segment';
+// A segment as it is published to an instance (#68): one definition the device
+// sends, the instance ranks against and another rider's device adds, named by
+// a digest of itself.
+export type { PublishedDefinitionParse, PublishedSegmentDefinition } from './segment/published';
+export {
+  canonicalDefinition,
+  MAXIMUM_PUBLISHED_NAME_LENGTH,
+  MAXIMUM_PUBLISHED_POSITIONS,
+  parsePublishedDefinition,
+  PUBLISHED_SEGMENT_ID,
+  PUBLISHED_SEGMENT_ID_LENGTH,
+  publishedDefinitionOf,
+  publishedSegmentId,
+  segmentFromPublished,
+} from './segment/published';
 
 // --- Structured workouts (#14) ----------------------------------------------
 //

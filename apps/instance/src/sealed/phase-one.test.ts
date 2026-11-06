@@ -244,7 +244,8 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     .replace('{route}', 'a'.repeat(64))
     .replace('{roomId}', 'room-1')
     .replace('{statementId}', '1')
-    .replace('{handle}', f.beaBlockHandle);
+    .replace('{handle}', f.beaBlockHandle)
+    .replace('{segmentId}', '0'.repeat(32));
   const reason = { reason: 'Checked against the rules' };
   const bodies: Record<string, unknown> = {
     'POST /v1/auth/link-codes': {},
@@ -274,6 +275,24 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     // #1516
     'POST /v1/rooms/{roomId}/blocks': { row: 1 },
     'POST /v1/rooms/{roomId}/remove': { riderId: 1, reason: 'An edge’s removal' },
+    // #68
+    'POST /v1/sync/records/{content}/visibility': { visibility: 'public' },
+    'POST /v1/segments': {
+      segment: {
+        name: 'An edge’s segment',
+        sport: 'ride',
+        geometry: [
+          [51.5, -0.12],
+          [51.502, -0.12],
+          [51.504, -0.12],
+        ],
+        endpointRadiusMetres: 15,
+        bearingToleranceDegrees: 60,
+      },
+    },
+    'POST /v1/segments/{segmentId}/efforts/{content}': {
+      efforts: [{ startedAt: 1_790_000_000, elapsedSeconds: 60, visibility: 'public' }],
+    },
   };
   const body =
     bodies[key(route)] ?? (route.path.startsWith('/v1/moderation/') ? reason : undefined);
@@ -534,7 +553,7 @@ describe('the edge’s token opens nothing (#1192, ADR 0047 D-8)', () => {
     const f = await fixture();
     const edge = await testDevice();
     const before = everyRow(f.w.path);
-    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(27);
+    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(33);
     for (const route of PHASE_TWO_SEALED_ROUTES) {
       const { path, body } = requestFor(route, f);
       const tried = await asTheEdge(f, edge, f.bea.token, route.method, path, body);

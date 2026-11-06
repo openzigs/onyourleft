@@ -33,6 +33,7 @@ import {
   HISTORY_FIXTURE_CONVENTION,
   HISTORY_FIXTURE_DIMENSION,
   HISTORY_FIXTURE_MODEL,
+  publishedSegmentFixture,
   seedStatements,
   seedWorld,
   type StoreHarness,
@@ -472,6 +473,55 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   renewInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
   releaseInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
+  // #68: published segments and their boards.
+  setActivityVisibility: {
+    notAScopedRead:
+      'a write; only the caller’s own ride, held in segments/leaderboard.test.ts (#68)',
+  },
+  publishSegment: {
+    notAScopedRead: 'a write: a segment published to every rider on the instance (#68)',
+  },
+  getPublishedSegment: {
+    notAScopedRead:
+      'cross-athlete by design: a segment published to every rider, its publisher held to the choke point’s rule (`seenBy`) pair by pair in segments/leaderboard.test.ts (#68)',
+  },
+  listPublishedSegments: {
+    notAScopedRead:
+      'cross-athlete by design: segments published to every rider, their publishers held to the choke point’s rule (`seenBy`) in segments/leaderboard.test.ts (#68)',
+  },
+  withdrawSegment: {
+    notAScopedRead:
+      'a write; only the publisher withdraws, held in segments/leaderboard.test.ts (#68)',
+  },
+  replaceSegmentEfforts: {
+    notAScopedRead:
+      'a write; only the caller’s own ride, held in segments/leaderboard.test.ts (#68)',
+  },
+  listOwnSegmentEfforts: {
+    probe: async (store, athleteId) => {
+      // Asked of EVERY athlete's segment: each holds an effort from all three.
+      const found = [];
+      for (const owner of ATHLETES) {
+        found.push(
+          ...(await store.listOwnSegmentEfforts(
+            athleteId,
+            publishedSegmentFixture(owner).id,
+            0,
+            50,
+          )),
+        );
+      }
+      return found;
+    },
+  },
+  listSegmentsPublishedBy: {
+    probe: async (store, athleteId) => store.listSegmentsPublishedBy(athleteId),
+  },
+  listSharedEfforts: { probe: (store, athleteId) => store.listSharedEfforts(athleteId) },
+  listSegmentBoard: {
+    notAScopedRead:
+      'cross-athlete by design: a shared board, every row held to the choke point’s rule, a public ride and a public effort, in segments/leaderboard.test.ts with three athletes (#68)',
+  },
   close: { notAScopedRead: 'not a read' },
 };
 

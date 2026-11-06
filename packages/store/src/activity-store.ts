@@ -222,7 +222,7 @@ import {
   type StreamSet,
   type StreamSetSummary,
 } from './streams';
-import { DEFAULT_VISIBILITY } from './visibility';
+import { DEFAULT_VISIBILITY, parseVisibility, type Visibility } from './visibility';
 
 /** How `listActivitySummaries` orders its results. */
 export type ActivityOrder = 'startedAt' | 'distance';
@@ -1541,6 +1541,33 @@ export class ActivityStore {
       }
       await this.#activities.put(
         toPersistedActivity({ ...fromPersistedActivity(row), mayBeRaced }),
+      );
+      return true;
+    });
+  }
+
+  /**
+   * Sets one of this athlete's rides' **visibility** (ADR 0004 decision A,
+   * #68): the narrow write behind sharing a ride's efforts on an instance's
+   * leaderboard, which makes the ride `public` there and here alike, and
+   * withdrawing them, which makes it `private` again. Answers `false`, and
+   * writes nothing, when the athlete holds no such ride.
+   *
+   * @throws {StoreValidationError} for a value outside the three.
+   */
+  async setActivityVisibility(
+    owner: AthleteId,
+    activity: ActivityId,
+    visibility: Visibility,
+  ): Promise<boolean> {
+    const checked = parseVisibility(visibility);
+    return this.#db.transaction('rw', [this.#activities], async () => {
+      const row = await this.#activities.get(activity);
+      if (row === undefined || row.athleteId !== owner) {
+        return false;
+      }
+      await this.#activities.put(
+        toPersistedActivity({ ...fromPersistedActivity(row), visibility: checked }),
       );
       return true;
     });

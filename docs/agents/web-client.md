@@ -468,7 +468,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         schema v14) — a synced ride missing here is deleted on
                         the instance, a local item change is pushed, and only
                         an item unchanged here whose instance copy moved is
-                        pulled
+                        pulled. Since #68 `leaderboard-port.ts` is the
+                        segment screens' way to the instance's segments and
+                        boards (`segments/InstanceBoard.tsx`,
+                        `InstanceSegments.tsx`): publishing only a segment
+                        `public` here with no part in a privacy zone (and
+                        only such a segment is asked about, but one it
+                        published or shared on stays withdrawable from
+                        `oyl.instance-leaderboards.v1`), sharing a ride's
+                        efforts makes the ride `public` here AND there (put
+                        back if the instance refuses; withdrawing takes that
+                        segment's efforts off and leaves the ride), and an
+                        added segment is checked to hash to its id
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a
@@ -690,7 +701,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         profile and where its numbers came from; since #2102
                         `loop.ts`, a short loop for a lap race: Close the loop,
                         a target length, and a drawn line that ends where it
-                        starts saved as a loop. ⚠️ The
+                        starts saved as a loop; since #2007 `route-edit.ts`,
+                        a saved route edited with its line kept: one stretch
+                        spliced into the saved profile and every other sample
+                        left as it was (`views/RouteEditorView.tsx`,
+                        `#/routes/edit/<id>`). ⚠️ The
                         RoutingProvider INTERFACE is in packages/domain; there
                         is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),

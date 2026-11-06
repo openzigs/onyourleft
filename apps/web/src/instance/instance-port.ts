@@ -622,6 +622,10 @@ export const INSTANCE_AGREEMENT_STORAGE_KEYS = [
   // #909: the terms of service this device last marked read, with the
   // instance's address ({@link TERMS_READ_STORAGE_KEY}).
   'oyl.instance-terms-read.v1',
+  // #68: which segments this device published to the instance, or shared
+  // efforts on, by their identifiers (`leaderboard-port.ts` §`HELD_STORAGE_KEY`),
+  // so the rider can still take them off once the device would no longer send them.
+  'oyl.instance-leaderboards.v1',
 ] as const;
 
 /** Where the terms this device last marked read are kept (#909): `{ origin, version }`. */

@@ -29,6 +29,8 @@ import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration } from '../format';
 import { loadHistory, loadOverlay, type EffortHistory, type OverlayResult } from '../efforts/load';
 import type { EffortPort } from '../efforts/store-port';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
+import { InstanceBoard } from '../segments/InstanceBoard';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatSmallDistance, measurementText } from '../units/format';
@@ -56,9 +58,14 @@ export interface SegmentDetailViewProps {
   readonly port: EffortPort | undefined;
   /** The `:segment` capture. Absent when the audit renders the bare route. */
   readonly segment: string | undefined;
+  /**
+   * The rider's instance's boards (#68), or `undefined` with no instance — in
+   * which case nothing about one renders and nothing is sent.
+   */
+  readonly boards?: LeaderboardPort | undefined;
 }
 
-export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JSX.Element {
+export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewProps): JSX.Element {
   const [history, setHistory] = useState<EffortHistory | undefined>(undefined);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
@@ -231,6 +238,15 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
       )}
 
       {overlay === undefined ? null : <Overlay result={overlay} />}
+
+      {/* #68: only with an instance this copy can seal to; otherwise nothing. */}
+      {boards?.offered() === true ? (
+        <InstanceBoard
+          port={boards}
+          segment={history.segment}
+          efforts={history.rows.map((row) => row.effort)}
+        />
+      ) : null}
     </section>
   );
 }
