@@ -703,4 +703,49 @@ describe('this week, against the week before — #1010', () => {
     expect(befores).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
     expectClean('home, this week');
   });
+
+  /*
+   * The owner's ruling of 2026-11-06: the days-ridden sentence and the week
+   * before's figures are behind the chart's *Day by day* disclosure, with the
+   * table, so the week module is as short as its chart. Read through the
+   * disclosure a rider opens, and nothing of either left outside it.
+   */
+  it('puts the days-ridden sentence and the week before behind the chart’s disclosure — 2026-11-06', async () => {
+    await openHome([ride('before-a', 9), ride('before-b', 12), ride('this', 2)]);
+    const week = document.querySelector('.oyl-home__week');
+    const disclosure = week?.querySelector<HTMLDetailsElement>('details.oyl-chart-table');
+    expect(disclosure?.querySelector('summary')?.textContent).toBe(
+      'Day by day: the readings as a table',
+    );
+    expect(disclosure?.open).toBe(false);
+    expect(
+      [...(disclosure?.querySelectorAll('.oyl-home__before') ?? [])].map(
+        (each) => each.textContent,
+      ),
+    ).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
+    expect([...(disclosure?.querySelectorAll('dt') ?? [])].map((each) => each.textContent)).toEqual(
+      ['Rides', 'Moving time', 'Load'],
+    );
+    expect(disclosure?.textContent).toContain('You rode on 1 of the last seven days.');
+    // Outside the disclosure: the readings, and neither the sentence nor a
+    // week-before figure.
+    const outside = [...(week?.querySelectorAll('p, dd') ?? [])].filter(
+      (each) => each.closest('.oyl-chart-table') === null,
+    );
+    expect(outside.map((each) => each.textContent).join(' | ')).not.toMatch(
+      /Week before|of the last seven days/,
+    );
+    expectClean('home, this week, disclosed');
+  });
+
+  it('with no rides this week, no chart and no disclosure: the week before stands under the sentence', async () => {
+    await openHome([ride('before-a', 9), ride('before-b', 12)]);
+    const week = document.querySelector('.oyl-home__week');
+    expect(week?.querySelector('details.oyl-chart-table')).toBeNull();
+    expect(week?.textContent).toContain('No rides in the last seven days.');
+    expect(
+      [...(week?.querySelectorAll('.oyl-home__before') ?? [])].map((each) => each.textContent),
+    ).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
+    expectClean('home, no rides this week');
+  });
 });

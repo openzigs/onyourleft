@@ -91,7 +91,13 @@
  * the Analysis screen uses, and units go through `units/format.ts`.
  */
 
-import { metres, unixSeconds, type Percent, type RouteProfile, type UnixSeconds } from '@onyourleft/domain';
+import {
+  metres,
+  unixSeconds,
+  type Percent,
+  type RouteProfile,
+  type UnixSeconds,
+} from '@onyourleft/domain';
 import type { ConnectionState } from '@onyourleft/sensors';
 import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
@@ -869,6 +875,36 @@ function weekBefore(value: string): string {
 }
 
 /**
+ * The seven days before this week's, figure by figure — #1010's comparison.
+ * Each term's `dd` is its own value, so a screen reader never runs it into a
+ * reading's digits. Since the owner's ruling of 2026-11-06 it is behind the
+ * week chart's disclosure, beside the table, not under each reading.
+ */
+function WeekBefore({ previous }: { readonly previous: HomePreviousWeek }): JSX.Element {
+  return (
+    <dl className="oyl-home__before-facts">
+      <div>
+        <dt>Rides</dt>
+        <dd className="oyl-home__before">{weekBefore(String(previous.rides))}</dd>
+      </div>
+      <div>
+        <dt>{MOVING_TIME_LABEL}</dt>
+        <dd className="oyl-home__before">{weekBefore(formatDuration(previous.movingTime))}</dd>
+      </div>
+      <div>
+        <dt>Load</dt>
+        <dd className="oyl-home__before">
+          {weekBefore(String(Math.round(previous.load)))}
+          {previous.ridesWithLoad < previous.rides
+            ? ` (from ${String(previous.ridesWithLoad)} of ${String(previous.rides)} rides)`
+            : ''}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+/**
  * *This week* — #1010: rides, moving time and load in big tabular numerals
  * (`Reading`), each set against the seven days before, and since #2049 the
  * week's distance. Numbers only — no streak and no target (#935 D-6). Every
@@ -877,14 +913,20 @@ function weekBefore(value: string): string {
  *
  * ## The days, drawn — #2049
  *
- * Beside the sentence that says how many days were ridden, a bar per day of
- * moving time (`home/WeekChart.tsx`), in the place #939's ring of the days
- * ridden had: the bars draw the same fact — a bar on each day ridden — and
- * how long each was, at the ring's medium size, which is what lets the four
- * modules still stand inside a landscape tablet's first screen
- * (`home.browser.spec.ts` §"#2044"). The chart is `aria-hidden`; its table,
- * *Day by day*, is one press away under it, and stands alone if the chart
- * throws (`design/ChartSlot.tsx`, `a11y/degradation.a11y.test.tsx`).
+ * A bar per day of moving time (`home/WeekChart.tsx`), in the place #939's
+ * ring of the days ridden had: the bars draw the same fact — a bar on each
+ * day ridden — and how long each was, at the ring's medium size, which is
+ * what lets the four modules still stand inside a landscape tablet's first
+ * screen (`home.browser.spec.ts` §"#2044"). The chart is `aria-hidden`; its
+ * table, *Day by day*, is one press away under it, and stands alone if the
+ * chart throws (`design/ChartSlot.tsx`, `a11y/degradation.a11y.test.tsx`).
+ *
+ * The owner's ruling of 2026-11-06: the sentence that says how many days were
+ * ridden and the week before's figures are behind that same disclosure, before
+ * the table, and stand with it if the chart throws — the bars show both, and
+ * the module is as short as the chart (`home.browser.spec.ts`, four sensors
+ * paired). With no rides this week there is no chart and no disclosure, so
+ * the week before's figures stand under the sentence that says so.
  */
 function ThisWeek({
   week,
@@ -906,13 +948,20 @@ function ThisWeek({
         This week
       </SectionHeading>
       {week.rides === 0 ? (
-        <p>No rides in the last seven days.</p>
+        <>
+          <p>No rides in the last seven days.</p>
+          {/* No chart, so no disclosure to put them behind: the week
+              before's figures stand under the sentence. */}
+          <WeekBefore previous={previous} />
+        </>
       ) : (
         <div className="oyl-home__days">
-          <p>You rode on {String(week.daysRidden)} of the last seven days.</p>
           {/* #2049: moving time per day, drawn where #939's ring was, with
               the same figures as a table one press away — and the table
-              alone if the chart throws (`design/ChartSlot.tsx`). */}
+              alone if the chart throws (`design/ChartSlot.tsx`). The owner's
+              ruling of 2026-11-06: the days-ridden sentence and the week
+              before's figures go behind that disclosure with the table — the
+              bars show both — so the module is as short as the chart. */}
           <ChartSlot
             caption={WEEK_TABLE_CAPTION}
             columns={['Day', 'Rides', MOVING_TIME_LABEL]}
@@ -924,6 +973,12 @@ function ThisWeek({
             emptyMessage="No rides in the last seven days."
             chart={<WeekChart days={week.days} />}
             tablePosition="disclosed"
+            alongside={
+              <>
+                <p>You rode on {String(week.daysRidden)} of the last seven days.</p>
+                <WeekBefore previous={previous} />
+              </>
+            }
           />
         </div>
       )}
@@ -933,14 +988,12 @@ function ThisWeek({
           <dd>
             <Reading value={String(week.rides)} />
           </dd>
-          <dd className="oyl-home__before">{weekBefore(String(previous.rides))}</dd>
         </div>
         <div>
           <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
             <Reading value={formatDuration(week.movingTime)} />
           </dd>
-          <dd className="oyl-home__before">{weekBefore(formatDuration(previous.movingTime))}</dd>
         </div>
         {/* #2049: the week's distance beside its rides and time. #1070: a
             week whose rides stored no distance shows none, not 0 km. */}
@@ -958,12 +1011,6 @@ function ThisWeek({
             <Reading value={String(Math.round(week.load))} />
             {week.ridesWithLoad < week.rides
               ? ` (from ${String(week.ridesWithLoad)} of ${String(week.rides)} rides)`
-              : ''}
-          </dd>
-          <dd className="oyl-home__before">
-            {weekBefore(String(Math.round(previous.load)))}
-            {previous.ridesWithLoad < previous.rides
-              ? ` (from ${String(previous.ridesWithLoad)} of ${String(previous.rides)} rides)`
               : ''}
           </dd>
         </div>
