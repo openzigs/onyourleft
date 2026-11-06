@@ -22,7 +22,14 @@ import { writeAudioBus, writeMasterMuted, readMusicAndMaster } from '../game/aud
 import { fakeAudioContext, musicPath, type FakeAudio } from '../game/audio-testing';
 import type { CueOutput } from '../game/audio-port';
 import type { PreferenceStorage } from '../game/hud/announce-preference';
-import { deviceAudioMix, webAudioOutput } from '../game/web-audio';
+import {
+  deviceAudioMix,
+  MUSIC_DUCK_BACK_SECONDS,
+  MUSIC_DUCK_DOWN_SECONDS,
+  MUSIC_DUCK_LEVEL,
+  MUSIC_FADE_SECONDS,
+  webAudioOutput,
+} from '../game/web-audio';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -30,6 +37,8 @@ import { mount, settle, type Mounted } from '../testing/mount';
 import { AppShell } from './AppShell';
 import { HEADER_MUTE_NAME } from './HeaderMute';
 import { createMenuMusic, type MenuMusic } from './menu-music';
+import { readMenuSoundPreference, writeMenuSoundPreference } from './menu-sound-preference';
+import { createMenuSounds, type MenuSounds } from './menu-sounds';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -143,6 +152,7 @@ afterEach(() => {
 async function shell(
   music: Rig,
   rideController?: ReturnType<typeof stubRideController>['controller'],
+  menuSounds?: MenuSounds,
 ): Promise<void> {
   mounted = await mount(
     <AppShell
@@ -150,6 +160,7 @@ async function shell(
       menuMusic={music.music}
       soundOutput={music.output}
       {...(rideController === undefined ? {} : { rideController })}
+      {...(menuSounds === undefined ? {} : { menuSounds })}
     />,
   );
   await settle();
@@ -404,3 +415,66 @@ describe('the rider’s mix while the loop plays — #2058', () => {
     expect(musicPath(music.fake).master.gain.value).toBe(1);
   });
 });
+
+describe(
+  'the music under the menus’ effects, and out when a ride route opens — #2059',
+  { timeout: RIDE_VIEWS_TIMEOUT_MS },
+  () => {
+    it('a menu effect while the music plays ducks it, by ramps, and brings it back after', async () => {
+      const store = disk();
+      writeMenuSoundPreference(store, { enabled: true, volume: 0.5 });
+      const music = rig(store);
+      await shell(
+        music,
+        undefined,
+        createMenuSounds(music.output, () => readMenuSoundPreference(store)),
+      );
+      // The first press starts the music; its own sound was before the music.
+      await pressWithoutLeaving(homeControl());
+      const { duck } = musicPath(music.fake);
+      expect(duck.automation.filter((event) => event.method !== 'value')).toEqual([]);
+
+      (music.fake.context as { currentTime: number }).currentTime = 4;
+      await pressWithoutLeaving(homeControl());
+      // A press on a link selects (one note, 60 ms); a button may confirm (130 ms).
+      const plan = duck.automation.filter((event) => event.method !== 'value');
+      expect(plan).toHaveLength(2);
+      expect(plan[0]).toEqual({
+        method: 'setTargetAtTime',
+        value: MUSIC_DUCK_LEVEL,
+        at: 4,
+        constant: MUSIC_DUCK_DOWN_SECONDS,
+      });
+      expect(plan[1]).toMatchObject({
+        method: 'setTargetAtTime',
+        value: 1,
+        constant: MUSIC_DUCK_BACK_SECONDS,
+      });
+      expect(plan[1] !== undefined && 'at' in plan[1] ? plan[1].at : 0).toBeGreaterThan(4);
+    });
+
+    it('opening a ride route schedules a ramp of the music bus to 0, and no step change', async () => {
+      const music = rig(disk());
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const bus = musicPath(music.fake).music;
+      const before = bus.automation.length;
+      (music.fake.context as { currentTime: number }).currentTime = 7;
+
+      await go('#/ride');
+      const after = bus.automation.slice(before);
+      expect(after).toEqual([
+        { method: 'setTargetAtTime', value: 0, at: 7, constant: MUSIC_FADE_SECONDS },
+      ]);
+      // Nothing on the bus since the music started has been a step.
+      expect(
+        bus.automation.filter((event) => event.method === 'setValueAtTime'),
+        'a set value is a cut',
+      ).toEqual([]);
+      expect(
+        bus.automation.filter((event) => event.method === 'value'),
+        'only the level the bus was made at',
+      ).toHaveLength(1);
+    });
+  },
+);
