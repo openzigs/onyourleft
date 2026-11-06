@@ -176,7 +176,7 @@ export interface SegmentIntegrityLogTable {
   /** Unix seconds. */
   readonly at: number;
   readonly action: 'excluded' | 'flagged_effort' | 'flagged_hazardous';
-  /** Who did it, or `null` for the instance's own rule. */
+  /** Who did it, or `null` for the instance's own rule or a flagger who erased their account. */
   readonly actor_athlete_id: string | null;
   /** Whose effort it was about, or `null` for a segment. */
   readonly subject_athlete_id: string | null;

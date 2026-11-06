@@ -92,7 +92,8 @@ function rowsOf(path: string, table: string, column: string, athleteId: string):
  * here by its NAME, from the schema — every column ending `athlete_id` — so a
  * later table that names an athlete another way fails until it says which.
  *
- * - `erased`: `eraseAthlete` deletes the rows naming the erased athlete.
+ * - `erased`: no row names the erased athlete afterwards — `eraseAthlete`
+ *   deletes the rows, or, in an append-only log, empties the column.
  * - `kept`: the rows stay, naming an id that no longer resolves to anybody,
  *   and the reason is recorded here.
  */
@@ -128,9 +129,8 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
   'segment_flag.subject_athlete_id': { erased: true },
-  'segment_integrity_log.actor_athlete_id': {
-    kept: 'the leaderboard integrity log is append-only: who flagged what stays, so a flag can be judged after its flagger has gone (#69)',
-  },
+  // Emptied, not deleted: the entry stays, and an erased flagger is named nowhere (#69, owner 2026-11-06).
+  'segment_integrity_log.actor_athlete_id': { erased: true },
   'segment_integrity_log.subject_athlete_id': {
     kept: 'the leaderboard integrity log is append-only: what was excluded or flagged, and whose it was, is the record an appeal reads (#69)',
   },

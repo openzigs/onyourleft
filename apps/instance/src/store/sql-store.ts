@@ -204,7 +204,7 @@ export interface SegmentIntegrityLogEntry {
   /** Unix seconds. */
   readonly at: number;
   readonly action: 'excluded' | 'flagged_effort' | 'flagged_hazardous';
-  /** Who did it, or `null` for the instance's own rule. */
+  /** Who did it, or `null` for the instance's own rule or a flagger who erased their account. */
   readonly actorAthleteId: string | null;
   /** Whose effort it was about, or `null` for a segment. */
   readonly subjectAthleteId: string | null;
@@ -6250,6 +6250,15 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .where('blocked_athlete_id', '=', athleteId)
               .execute();
             await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
+            // An erased FLAGGER is named nowhere (#69, the owner's ruling of
+            // 2026-11-06): the integrity log keeps what was flagged, whose it
+            // was, why and when, and forgets who flagged it. The log's trigger
+            // allows this one update, and only once the athlete row is gone.
+            await trx
+              .updateTable('segment_integrity_log')
+              .set({ actor_athlete_id: null })
+              .where('actor_athlete_id', '=', athleteId)
+              .execute();
             return held.map((row) => row.content_sha256);
           }),
         ),

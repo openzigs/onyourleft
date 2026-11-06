@@ -438,7 +438,7 @@ describe('the community flag (#69’s fourth to sixth criteria)', () => {
     }
   });
 
-  it('gives a flagged effort back when its flagger erases their account; the record stays', async () => {
+  it('gives a flagged effort back when its flagger erases their account; the record stays, naming them nowhere', async () => {
     const ann = await rider('Ann');
     const segmentId = await segmentBy(ann);
     const bea = await onTheBoard('Bea', segmentId, 300);
@@ -452,10 +452,19 @@ describe('the community flag (#69’s fourth to sixth criteria)', () => {
       body: { recoveryCode: flagger.recoveryCodes[0] },
     });
     expect(names(await board(ann, segmentId))).toEqual(['Bea']);
-    expect(await logOf(segmentId)).toEqual([
-      expect.objectContaining({ action: 'flagged_effort', actorAthleteId: flagger.athleteId }),
+    // The entry stays — what was flagged, whose, why and when — and its
+    // flagger is named nowhere in it (the owner's ruling on #69, 2026-11-06).
+    const log = await logOf(segmentId);
+    expect(log).toEqual([
+      expect.objectContaining({
+        action: 'flagged_effort',
+        actorAthleteId: null,
+        subjectAthleteId: bea.athleteId,
+        effortId,
+        reason: 'vehicle',
+      }),
     ]);
-    void bea;
+    expect(JSON.stringify(log)).not.toContain(flagger.athleteId);
   });
 });
 

@@ -435,6 +435,31 @@ describe('the migrations (#769)', () => {
         /append-only/,
       );
       expect(() => database.exec('DELETE FROM segment_integrity_log')).toThrow(/append-only/);
+      // The one update (#69, owner 2026-11-06): an erased flagger's id emptied,
+      // nothing else, and only once no athlete holds it.
+      const actor = () =>
+        (
+          database.prepare('SELECT actor_athlete_id AS actor FROM segment_integrity_log').get() as {
+            actor: string | null;
+          }
+        ).actor;
+      expect(actor()).toBe('a');
+      // Athlete `a` is seeded: while it exists, its id stays.
+      expect(() =>
+        database.exec('UPDATE segment_integrity_log SET actor_athlete_id = NULL'),
+      ).toThrow(/append-only/);
+      // Erased (the seed's other rows still point at it, so without their keys checked).
+      database.exec('PRAGMA foreign_keys = OFF');
+      database.exec("DELETE FROM athlete WHERE id = 'a'");
+      expect(() =>
+        database.exec("UPDATE segment_integrity_log SET actor_athlete_id = NULL, reason = 'other'"),
+      ).toThrow(/append-only/);
+      expect(() =>
+        database.exec("UPDATE segment_integrity_log SET actor_athlete_id = 'b'"),
+      ).toThrow(/append-only/);
+      expect(actor()).toBe('a');
+      database.exec('UPDATE segment_integrity_log SET actor_athlete_id = NULL');
+      expect(actor()).toBeNull();
     } finally {
       database.close();
     }

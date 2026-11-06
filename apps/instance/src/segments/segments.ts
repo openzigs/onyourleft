@@ -194,7 +194,7 @@ export interface IntegrityLogView {
   readonly id: number;
   readonly at: number;
   readonly action: 'excluded' | 'flagged_effort' | 'flagged_hazardous';
-  /** The flagger, or `null` for the instance's own rule. */
+  /** The flagger, or `null` for the instance's own rule or a flagger who erased their account. */
   readonly actorAthleteId: string | null;
   readonly subjectAthleteId: string | null;
   readonly segmentId: string;
