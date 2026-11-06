@@ -64,6 +64,14 @@ const TABLET_NORMAL_PRIMARY_PIXELS = 61.04;
  */
 const PRIMARY_PIXELS = { large: 70, 'extra-large': 80 } as const;
 
+/** The owner's least clearance between a race's standings and the actions panel. */
+const STANDINGS_MARGIN_PIXELS = 16;
+
+/** The landscape tablets, where the standings hang over the actions panel. */
+const LANDSCAPE_TABLET = new Set(
+  TABLET_VIEWPORTS.filter((each) => each.width > each.height).map((each) => each.name),
+);
+
 /** The rides the ride specs measure, by the harness's query. */
 const MODES = [
   ['a plain ride', ''],
@@ -119,6 +127,21 @@ for (const size of ['large', 'extra-large'] as const) {
           for (const name of ALWAYS_DRAWN) {
             expect(names, how).toContain(name);
             expect(clipped, how).not.toContain(name);
+          }
+          // The owner's ruling of 2026-11-06 (#2034): a race's standings keep
+          // 16 px or more above the actions panel on the landscape tablets.
+          const standings = seen.panels.find((each) => each.name.includes('oyl-hud__standings'));
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          if (
+            LANDSCAPE_TABLET.has(viewport.name) &&
+            standings !== undefined &&
+            actions !== undefined
+          ) {
+            const margin = actions.box.top - standings.box.bottom;
+            console.log(
+              `#2079 ${size} ${mode} ${viewport.name} ${how}: ${margin.toFixed(0)} px above the actions panel`,
+            );
+            expect(margin, how).toBeGreaterThanOrEqual(STANDINGS_MARGIN_PIXELS);
           }
           // Drawn at the rider's size on a tablet, and at the normal size on a
           // phone, which Settings says has no room for it.
