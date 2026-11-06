@@ -155,12 +155,17 @@ interface SectionsLayout {
   readonly pageHeight: number;
 }
 
-async function open(page: Page, viewport: Viewport, control = ''): Promise<void> {
+async function open(
+  page: Page,
+  viewport: Viewport,
+  control = '',
+  data: 'populated' | 'empty' = 'populated',
+): Promise<void> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   await applyInsets(page, viewport.insets);
   // `bluetooth=available` so Devices renders its garage (#699's review, N4);
   // no other route reads it.
-  const response = await page.goto(`/reflow.html?data=populated&bluetooth=available${control}`);
+  const response = await page.goto(`/reflow.html?data=${data}&bluetooth=available${control}`);
   expect(
     response?.status(),
     'reflow.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
@@ -329,13 +334,26 @@ function expectSomethingToCount(seen: SectionsLayout, label: string): void {
 /**
  * #2197: every track of the grid holds a section. Analysis laid out its two
  * column sections in three tracks at 1280×800 and left the third empty on
- * every row; a grid with more tracks than sections to put in them is that
- * page. A section that spans is in every track, so a screen with one is
- * held only on its column sections: those are the ones a row is made of.
+ * every row; a grid with more tracks than the tracks that hold a section is
+ * that page. `columns` is the distinct left edges of the sections that do not
+ * span, which is the tracks holding one. It does not catch a partial last row.
  */
 function emptyTrackFault(seen: SectionsLayout): string | undefined {
-  return seen.tracks > Math.max(seen.counted, 1)
-    ? `${String(seen.tracks)} tracks for ${String(seen.counted)} sections in a column`
+  return seen.tracks > Math.max(seen.columns, 1)
+    ? `${String(seen.tracks)} tracks, ${String(seen.columns)} holding a section`
+    : undefined;
+}
+
+/**
+ * #2197's review: the tracks can all hold a section and the last row still be
+ * short, as three sections in two tracks leave one alone in row 2 beside an
+ * empty cell. Held only where a screen has no section spanning between its
+ * column sections, which is the first-run fixture of the two screens that
+ * choose their tracks.
+ */
+function shortLastRowFault(seen: SectionsLayout): string | undefined {
+  return seen.tracks > 0 && seen.counted % seen.tracks !== 0
+    ? `${String(seen.counted)} sections in ${String(seen.tracks)} tracks leave a row short`
     : undefined;
 }
 
@@ -473,6 +491,19 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
     }
     // The screens #2197 gave two tracks, and only they, have an empty one again.
     expect(failed.sort()).toEqual(['analysis', 'segments']);
+  });
+
+  test('first run (no data) — Analysis and Segments hold no empty track (#2197)', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, '', 'empty');
+    for (const route of SECTIONS.filter((r) => r.id === 'analysis' || r.id === 'segments')) {
+      const seen = await layoutAt(page, hashOf(route), 'main');
+      expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expectSomethingToCount(seen, route.id);
+      expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
+      expect(shortLastRowFault(seen), `${route.id}: a row is short`).toBeUndefined();
+    }
   });
 
   test('the control — switched back to prose, every route fails in landscape', async ({ page }) => {

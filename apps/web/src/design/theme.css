@@ -1319,8 +1319,9 @@ html {
  * two filled two thirds of a landscape tablet's row and left the third track
  * empty; in two they share the row. The view names itself, because how many
  * of its sections span is decided by what it holds (`:has()` cannot count
- * them, as it cannot nest), and `sections.browser.spec.ts` holds every screen
- * to "no track without a section" both ways up.
+ * them, as it cannot nest) — Segments only once it lists a segment, because
+ * with none it has three column sections. `sections.browser.spec.ts` holds every
+ * screen to no track without a section, and these two to no short last row.
  */
 @container oyl-pane (min-width: 64rem) {
   .oyl-sections:not(.oyl-sections--broad, .oyl-sections--halves) {
