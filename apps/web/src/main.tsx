@@ -125,6 +125,7 @@ import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
 import { THERMAL_FORECAST_SECONDS } from './game/thermal';
+import { OtherPlayer, otherPlayerOffered } from './shell/other-player';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -304,6 +305,12 @@ interface ClientPlatform {
    * `plugin`, a browser's on the same `navigator.bluetooth`.
    */
   readonly steering: SteeringController | undefined;
+  /**
+   * The rider's own music player, another app — #2073. Inside the Android
+   * shell only (`shell/other-player.ts` §`otherPlayerOffered`): a browser
+   * cannot reach another app's player, so it gets none and no control.
+   */
+  readonly otherPlayer: OtherPlayer | undefined;
 }
 
 /**
@@ -451,6 +458,11 @@ async function buildPlatform(
     const steering = createSteeringController(
       mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
     );
+    // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
+    // others in `MainActivity`: media keys have nothing to do with a link.
+    const otherPlayer = otherPlayerOffered(platformCapacitor())
+      ? new OtherPlayer(mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()))
+      : undefined;
     return {
       rideController,
       shell,
@@ -460,6 +472,7 @@ async function buildPlatform(
       systemSettings,
       launch,
       steering,
+      otherPlayer,
     };
   }
 
@@ -473,6 +486,7 @@ async function buildPlatform(
       systemSettings: undefined,
       launch: NO_LAUNCH,
       steering: undefined,
+      otherPlayer: undefined,
     };
   }
   const browserTransport = createWebBluetoothTransport({
@@ -494,6 +508,7 @@ async function buildPlatform(
     bluetoothAsk: undefined,
     systemSettings: undefined,
     launch: NO_LAUNCH,
+    otherPlayer: undefined,
     // #1826. Its own client on the same `navigator.bluetooth`: each pairing
     // is the rider's press, as every device's is in a browser.
     steering: createSteeringController(
@@ -1619,6 +1634,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(sidePairing === undefined ? {} : { sidePairing })}
           {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
+          otherPlayer={platform.otherPlayer}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
           // ⚠️ The **stored** mass, read before the first paint, and passed on

@@ -72,6 +72,7 @@ import {
 } from '../src/design/illustration/specimens-testing';
 import { StatusMessage, type StatusTone } from '../src/design/StatusMessage';
 import { AppShell } from '../src/shell/AppShell';
+import { OtherPlayer } from '../src/shell/other-player';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -154,6 +155,9 @@ const SPACER_PIXELS = 4000;
  * selector for it is satisfied by an empty page.
  */
 const READY_ATTRIBUTE = 'data-oyl-shell-ready';
+
+/** `?music=heard`: the rider's own music player's controls are showing — #2073. */
+const MUSIC_HEARD = 'heard';
 
 /**
  * The `.oyl-button` controls a rider touches mid-ride, rendered so that a real
@@ -834,17 +838,38 @@ function main(): void {
     schedule: () => () => undefined,
   });
 
+  // #2073: `?music=heard` is the rider's own player already heard, so the
+  // header's controls show — as they do only inside the Android shell. A port
+  // that always hears music and a clock with no timer: `AppShell` asks once as
+  // it mounts, and the second reading in a row is asked for below.
+  const otherPlayer =
+    params.get('music') === MUSIC_HEARD
+      ? new OtherPlayer(
+          { sendKey: () => Promise.resolve(), otherAudioActive: () => Promise.resolve(true) },
+          { now: () => 0, every: () => () => undefined },
+        )
+      : undefined;
+
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
         <AppShell
           capabilities={NO_BLUETOOTH}
           camera={camera}
+          otherPlayer={otherPlayer}
           {...(wantsPairing ? { sidePairing: sidePairingPort({ peer: () => undefined }) } : {})}
         />
       </StrictMode>,
     );
   });
+
+  if (otherPlayer !== undefined) {
+    // After a task, so the reading the mount asked for has settled: one still
+    // in flight is not asked again, and two in a row is what shows the control.
+    setTimeout(() => {
+      void otherPlayer.poll().then(() => otherPlayer.poll());
+    }, 0);
+  }
 
   if (wantsCamera) {
     camera.agree({ acknowledgedBystanders: true, allowLocal: true });
