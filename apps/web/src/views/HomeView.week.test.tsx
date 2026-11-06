@@ -66,9 +66,30 @@ interface Seen {
     readonly fill: string | null;
     readonly x: number;
     readonly y: number;
+    readonly width: number;
     readonly height: number;
+    readonly units: boolean;
+    readonly value: string | null;
+    readonly valueX: number;
+    readonly valueBottom: number;
   }[];
+  readonly values: readonly (string | null)[];
   readonly facts: string;
+}
+
+/** The value laid over one day's bar, and where (percent of the plot). */
+function valueOf(
+  week: Element | null,
+  day: string | null,
+): { readonly value: string | null; readonly valueX: number; readonly valueBottom: number } {
+  const value = week?.querySelector<HTMLElement>(
+    `.oyl-week-chart__value[data-oyl-week-day="${day ?? ''}"]`,
+  );
+  return {
+    value: value?.textContent ?? null,
+    valueX: Number.parseFloat(value?.style.left ?? ''),
+    valueBottom: Number.parseFloat(value?.style.bottom ?? ''),
+  };
 }
 
 async function openWeek(rides: readonly ReturnType<typeof rideOn>[]): Promise<Seen> {
@@ -104,10 +125,21 @@ async function openWeek(rides: readonly ReturnType<typeof rideOn>[]): Promise<Se
         day: bar.getAttribute('data-oyl-week-day'),
         classes: bar.getAttribute('class') ?? '',
         fill: bar.getAttribute('fill'),
-        x: Number(bar.getAttribute('x')),
-        y: Number(bar.getAttribute('y')),
-        height: Number(bar.getAttribute('height')),
+        // Percent of the drawing (the owner's review: the chart is the card's
+        // width, with no viewBox to stretch its values).
+        x: Number.parseFloat(bar.getAttribute('x') ?? ''),
+        y: Number.parseFloat(bar.getAttribute('y') ?? ''),
+        width: Number.parseFloat(bar.getAttribute('width') ?? ''),
+        height: Number.parseFloat(bar.getAttribute('height') ?? ''),
+        units: [bar.getAttribute('x'), bar.getAttribute('height')].every((each) =>
+          (each ?? '').endsWith('%'),
+        ),
+        // The value written over this bar: the one for the same day.
+        ...valueOf(week, bar.getAttribute('data-oyl-week-day')),
       })),
+      values: [...(week?.querySelectorAll('.oyl-week-chart__value') ?? [])].map(
+        (value) => value.textContent,
+      ),
       facts: week?.querySelector('.oyl-home__facts')?.textContent ?? '',
     };
   });
@@ -134,13 +166,25 @@ describe('Home’s week, day by day — #2049', () => {
       ['Today', '1', '1:00:00'],
     ]);
     expect(seen.bars.map((bar) => bar.day)).toEqual(['2027-01-11', '2027-01-13', '2027-01-15']);
-    // The geometry: the longest day (Wed, 120 min) fills the 40-unit drawing,
-    // the others are their share of it, and each bar sits in its own day's
-    // column (ten wide, the bar centred): Mon is the third, Wed the fifth,
-    // today the seventh.
-    expect(seen.bars.map((bar) => bar.height)).toEqual([15, 40, 20]);
-    expect(seen.bars.map((bar) => bar.y)).toEqual([25, 0, 20]);
-    expect(seen.bars.map((bar) => bar.x)).toEqual([22, 42, 62]);
+    // The geometry, in percent of the drawing: the longest day (Wed, 120 min)
+    // fills the 70 % of its height the bars are given, the others are their
+    // share of it, and each bar sits in its own day's column (a seventh of the
+    // width, the bar its middle 60 %): Mon is the third, Wed the fifth, today
+    // the seventh.
+    expect(seen.bars.every((bar) => bar.units)).toBe(true);
+    expect(seen.bars.map((bar) => bar.height)).toEqual([26.25, 70, 35]);
+    expect(seen.bars.map((bar) => bar.y)).toEqual([73.75, 30, 65]);
+    expect(seen.bars.map((bar) => bar.x)).toEqual([31.429, 60, 88.571]);
+    expect(seen.bars.map((bar) => bar.width)).toEqual([8.571, 8.571, 8.571]);
+    // The owner's review (2026-11-05): a value on each bar — that day's moving
+    // time, over its own bar's middle — and none where there is no bar.
+    expect(seen.bars.map((bar) => bar.value)).toEqual(['0:45', '2:00', '1:00']);
+    expect(seen.values).toEqual(['0:45', '2:00', '1:00']);
+    for (const bar of seen.bars) {
+      // Over the bar's middle, its foot on the bar's top.
+      expect(bar.valueX).toBeCloseTo(bar.x + bar.width / 2, 2);
+      expect(bar.valueBottom).toBeCloseTo(bar.height, 2);
+    }
     // The totals, in text: rides, moving time and distance.
     expect(seen.facts).toContain('Rides4');
     expect(seen.facts).toContain('3:45:00');

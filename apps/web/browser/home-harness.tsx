@@ -37,6 +37,9 @@
  *
  * The controls, each the defect its assertion exists for:
  *
+ * - `home.html?chart=narrow` — the week chart back at the 8.5rem it had
+ *   beside the sentence, which is the chart the owner's review of #2049
+ *   (2026-11-05) found too small to read;
  * - `home.html?hero=tall` — a picture 90 vh tall put back across Next up above
  *   its words, which must push its Ride under a phone's fold;
  * - `home.html?picture=back` — #2043's: the picture #1010 drew put back above
@@ -159,6 +162,18 @@ export interface HomeMeasurement {
    * place — or `undefined` when none was drawn.
    */
   readonly weekChart: Box | undefined;
+  /**
+   * The box the chart is laid out in (`.oyl-home__days`, the week card's
+   * content width), and each bar with the value written over it — the owner's
+   * review of #2049 (2026-11-05): the chart fills the card's width, and every
+   * bar says its value.
+   */
+  readonly weekDays: Box | undefined;
+  readonly weekBars: readonly {
+    readonly bar: Box;
+    readonly value: Box | undefined;
+    readonly text: string;
+  }[];
   /** Every `.oyl-button` in main that is a PRIMARY, by its text. */
   readonly primaries: readonly string[];
 }
@@ -301,6 +316,12 @@ function measure(): HomeMeasurement {
     start: boxOrNothing(document.querySelector('.oyl-home__start')),
     trainerGlyph: boxOrNothing(document.querySelector('.oyl-home__glyph')),
     weekChart: boxOrNothing(document.querySelector('.oyl-week-chart')),
+    weekDays: boxOrNothing(document.querySelector('.oyl-home__days')),
+    weekBars: [...document.querySelectorAll('.oyl-week-chart__bar')].map((bar) => {
+      const day = bar.getAttribute('data-oyl-week-day') ?? '';
+      const value = document.querySelector(`.oyl-week-chart__value[data-oyl-week-day="${day}"]`);
+      return { bar: boxOf(bar), value: boxOrNothing(value), text: value?.textContent ?? '' };
+    }),
     primaries: [...document.querySelectorAll('main .oyl-button')]
       .filter(
         (button) =>
@@ -424,6 +445,8 @@ const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
   ['hero=tall', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 90vh; }"],
   // #2043's: an approximation of the card #2043 replaced, a 12rem picture back above the words (main's card was taller).
   ['picture=back', ".oyl-next-up::before { content: ''; flex: 0 0 100%; min-height: 12rem; }"],
+  // #2049's: the week chart back at the 8.5rem it was beside the sentence.
+  ['chart=narrow', '.oyl-week-chart { width: 8.5rem !important; }'],
   // #2044's: every module one column wide, the layout the grid replaced.
   [
     'columns=one',
