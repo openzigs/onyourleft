@@ -240,9 +240,13 @@ const ICC_TAG_TABLE_START = 132;
  * between two scans, or after `EOI`, or in a whole second JPEG after `EOI`; a
  * non-JFIF `APP0`, a `JPG0`, or a `DQT` padded with text; and an ICC
  * `APP2` carrying a GPS block. A denylist is complete on the day it is written;
- * a list of what the one encoder here writes is complete by construction, and
- * a segment whose length must equal its declared contents has no room for a
- * sentence.
+ * a list of what the one encoder here writes is complete by construction.
+ * Every admitted segment's length must equal what its own fields declare, so
+ * no segment carries bytes past its declared contents. That is all the walk
+ * enforces about room: inside the one admitted ICC profile, the bytes of each
+ * allowed tag are never parsed, so its description and copyright may each
+ * hold up to {@link MAXIMUM_ICC_TEXT_TAG_BYTES} bytes of free text, and any
+ * other colour tag's data is taken as it comes (§{@link colourProfileProblem}).
  *
  * ⚠️ **What it cannot see** is anything in the PIXELS — a picture of a street
  * sign is a picture of a street sign — and the residue a colour profile is
