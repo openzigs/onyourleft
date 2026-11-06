@@ -99,6 +99,11 @@
   --color-hud-zone-band5: var(--oyl-color-hud-zone-band5);
   --color-hud-zone-band6: var(--oyl-color-hud-zone-band6);
   --color-hud-zone-band7: var(--oyl-color-hud-zone-band7);
+  --color-hud-grade-descent: var(--oyl-color-hud-grade-descent);
+  --color-hud-grade-flat: var(--oyl-color-hud-grade-flat);
+  --color-hud-grade-climb: var(--oyl-color-hud-grade-climb);
+  --color-hud-grade-steep: var(--oyl-color-hud-grade-steep);
+  --color-hud-grade-wall: var(--oyl-color-hud-grade-wall);
 
   /* Spacing — `p-md`, `gap-sm`, `mb-lg`. `0` is the one length that is not a
      token, because nobody chooses it: `mt-0` has to exist to undo a margin. */

@@ -248,6 +248,128 @@ describe('a HUD value that is a word is set small enough for its track (#259)', 
   });
 });
 
+/**
+ * The tablet's readings at arm's length — #2130, ADR 0063 D-5.
+ *
+ * `theme.css` §"THE TABLET'S READINGS AT ARM'S LENGTH" sets the HUD's two
+ * tiers larger on the corners layout of a tablet, in one media block. These
+ * read that block as text, as everything above reads the file, and the browser
+ * gate reads what Chromium made of it (`metric-numerals.browser.spec.ts`
+ * §"#2130" measures the cap height; `ride.browser.spec.ts` the tier ratio and
+ * every panel against the leaning rider).
+ */
+describe('a tablet’s HUD numerals clear ADR 0063 D-5’s floor (#2130)', () => {
+  /** The media query the block is written under, exactly. */
+  const TABLET_QUERY = '@media (min-width: 46rem) and (min-height: 47rem)';
+
+  /**
+   * D-5's floor for a numeral a rider reads from the bars: 16 arc-minutes at
+   * a 1 m mount is 4.65 mm of cap height; Barlow's cap is 0.700 em; one CSS px
+   * on the 10.1-inch 1280×800 tablet is taken as 0.1700 mm (an assumption: the
+   * owner's tablet has not been measured). 4.65 / 0.17 / 0.7 / 16 = 2.442 rem,
+   * and D-5 states 2.45, because the `display` step, 2.441 rem, misses.
+   *
+   * ⚠️ A number, not `FONT_SIZE_TOKENS.display`, for the reason the supporting
+   * floor below gives: a floor that is "whatever the token is" cannot go red.
+   */
+  const D5_SECONDARY_FLOOR_REM = 2.45;
+
+  /**
+   * Every block written under {@link TABLET_QUERY}, in source order. The query
+   * opens several blocks in `theme.css` (the standings, the room's rules), so
+   * each is read and, as everywhere above, the last rule for a selector wins.
+   */
+  function tabletBlocks(): string[] {
+    const blocks: string[] = [];
+    let start = declarations.indexOf(`${TABLET_QUERY} {`);
+    while (start !== -1) {
+      let depth = 0;
+      for (let index = declarations.indexOf('{', start); index < declarations.length; index += 1) {
+        if (declarations[index] === '{') depth += 1;
+        if (declarations[index] === '}') depth -= 1;
+        if (depth === 0) {
+          blocks.push(declarations.slice(start, index + 1));
+          break;
+        }
+      }
+      start = declarations.indexOf(`${TABLET_QUERY} {`, start + 1);
+    }
+    return blocks;
+  }
+
+  /** Every rule body for exactly `selector` in `blocks`, in source order. */
+  function rulesIn(blocks: readonly string[], selector: string): string[] {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(?<=[{}]\\s*)${escaped}\\s*\\{([^}]*)\\}`, 'g');
+    return blocks.flatMap((block) => [...block.matchAll(pattern)].map((match) => match[1] ?? ''));
+  }
+
+  /** The `font-size`, in rem, the tablet blocks give `selector`; undefined when they give none. */
+  function tabletFontSizeRem(selector: string): number | undefined {
+    const size = /font-size:\s*([\d.]+)rem/.exec(
+      rulesIn(tabletBlocks(), selector).at(-1) ?? '',
+    )?.[1];
+    return size === undefined ? undefined : Number(size);
+  }
+
+  /**
+   * The secondary tier's narrowest track floor on any tablet, in CSS px: every
+   * `minmax()` floor of every tablet rule that lays the tier out — those under
+   * {@link TABLET_QUERY} and those a tablet's height or width narrows further
+   * (`(min-width: 46rem) and …`, with a `min-height` of 47 or 50 rem).
+   */
+  function narrowestTabletTrackPixels(): number | undefined {
+    const tierBlocks: string[] = [];
+    for (const match of declarations.matchAll(
+      /@media \(min-width: 46rem\)[^{]*\(min-height: (?:47|50)rem\)[^{]*\{/g,
+    )) {
+      let depth = 0;
+      for (let index = match.index + match[0].length - 1; index < declarations.length; index += 1) {
+        if (declarations[index] === '{') depth += 1;
+        if (declarations[index] === '}') depth -= 1;
+        if (depth === 0) {
+          tierBlocks.push(declarations.slice(match.index, index + 1));
+          break;
+        }
+      }
+    }
+    const floors = rulesIn(tierBlocks, '.oyl-game--riding .oyl-hud__fields--secondary').flatMap(
+      (rule) => [...rule.matchAll(/minmax\(\s*([\d.]+)rem\s*,/g)].map((match) => Number(match[1])),
+    );
+    return floors.length === 0 ? undefined : Math.min(...floors) * ROOT_PIXELS;
+  }
+
+  const PRIMARY = '.oyl-game--riding .oyl-hud__fields--primary .oyl-hud__value';
+  const SECONDARY = '.oyl-game--riding .oyl-hud__fields--secondary .oyl-hud__value';
+  const WORD = '.oyl-game--riding .oyl-hud__fields--secondary .oyl-hud__value--word';
+
+  it('declares the block and both tiers in it, so nothing below is taken over nothing', () => {
+    expect(tabletBlocks(), `theme.css has no "${TABLET_QUERY}" block`).not.toEqual([]);
+    expect(tabletFontSizeRem(PRIMARY)).toBeDefined();
+    expect(tabletFontSizeRem(SECONDARY)).toBeDefined();
+    expect(tabletFontSizeRem(WORD)).toBeDefined();
+    expect(narrowestTabletTrackPixels()).toBeDefined();
+  });
+
+  it('sets a secondary numeral at D-5’s 2.45 rem or more', () => {
+    expect(tabletFontSizeRem(SECONDARY) ?? 0).toBeGreaterThanOrEqual(D5_SECONDARY_FLOOR_REM);
+  });
+
+  it('keeps the primary tier visibly larger than the secondary (#423)', () => {
+    const primary = tabletFontSizeRem(PRIMARY) ?? 0;
+    const secondary = tabletFontSizeRem(SECONDARY) ?? Number.POSITIVE_INFINITY;
+    expect(primary / secondary).toBeGreaterThanOrEqual(MINIMUM_TIER_RATIO);
+  });
+
+  it('keeps an outcome word smaller than the numerals and inside the narrowest track (#259)', () => {
+    const word = tabletFontSizeRem(WORD) ?? Number.POSITIVE_INFINITY;
+    expect(word).toBeLessThan(tabletFontSizeRem(SECONDARY) ?? 0);
+    expect((WIDEST_WORD_PIXELS * word) / MEASURED_AT_REM).toBeLessThanOrEqual(
+      narrowestTabletTrackPixels() ?? 0,
+    );
+  });
+});
+
 describe('the HUD’s supporting text has a floor (#307 review)', () => {
   /**
    * The smallest a HUD label, detail or staleness mark may be set, in rem.

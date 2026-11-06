@@ -757,7 +757,7 @@ const VOLUME = 'sound: Sound volume';
 /** `REPORT_REASONS_MS` in `RoomReport.tsx`: the reasons close by themselves. */
 const REPORT_REASONS_TIMEOUT_MS = 15_000;
 
-const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
+const ROUTE_READINGS = ['the elevation strip', 'the road ahead', 'the plan view'] as const;
 
 /** What `theme.css` records as giving way in this state at this viewport. */
 function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
@@ -1358,8 +1358,13 @@ test.describe('a room ride with sounds on, a side camera paired or a notice stan
     }
   }
 
+  // ⚠️ Not on a tablet since #2130's owner review (2026-11-05): with every
+  // unit on its number's line the 4:3 tablet's secondary panel is 41 px
+  // shorter, and with §"#1409" taken out its standings still clear the
+  // actions panel (by 12 px), as they do at 1280×800 and 800×1280. The case
+  // above still holds the tablets; a control there would measure nothing.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
-    ['1024×768', '736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
+    ['736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
   )) {
     test(`the control — with §"#1409" taken out, the same measurement fails — ${viewport.name}`, async ({
       page,

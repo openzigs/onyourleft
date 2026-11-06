@@ -194,6 +194,38 @@ describe('releasing the launch splash after the first route has painted (#2051)'
     await Promise.resolve();
   });
 
+  it('tells the intro the moment it releases the splash, once, and whether the render failed (#2053)', () => {
+    const clock = frames();
+    const port = fakePort(container);
+    const told: { failed: boolean; splash: readonly string[] }[] = [];
+    const launch = launchRelease(port, clock.frame, (failed) => {
+      told.push({ failed, splash: [...port.seen] });
+    });
+    root = createRoot(container, launchRootOptions(launch));
+    act(() => {
+      root?.render(
+        <StrictMode>
+          <Home />
+          <FirstRender onRendered={launch.rendered} />
+        </StrictMode>,
+      );
+    });
+    clock.next();
+    expect(told).toEqual([]);
+    clock.next();
+    // In the same frame as the release, after the shell was asked.
+    expect(told).toEqual([{ failed: false, splash: ['Home'] }]);
+    launch.failed();
+    clock.next();
+    expect(told).toHaveLength(1);
+
+    const failing = launchRelease(fakePort(container), clock.frame, (failed) => {
+      told.push({ failed, splash: [] });
+    });
+    failing.failed();
+    expect(told.at(-1)).toEqual({ failed: true, splash: [] });
+  });
+
   it('is a no-op in a browser', async () => {
     await expect(NO_LAUNCH.releaseSplash()).resolves.toBeUndefined();
   });
