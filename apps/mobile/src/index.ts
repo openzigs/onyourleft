@@ -70,6 +70,16 @@ export {
 } from './secure-window/secure-window';
 export type { SecureWindowPlugin } from './secure-window/secure-window';
 export {
+  capacitorOtherPlayer,
+  capacitorOtherPlayerPlugin,
+  OTHER_PLAYER_CALL_DEADLINE_MILLISECONDS,
+} from './other-player/other-player';
+export type {
+  CapacitorOtherPlayer,
+  OtherPlayerKey,
+  OtherPlayerPlugin,
+} from './other-player/other-player';
+export {
   capacitorRecordingServicePlugin,
   recordingServiceKeepAlive,
   recordingServiceNotificationPermission,

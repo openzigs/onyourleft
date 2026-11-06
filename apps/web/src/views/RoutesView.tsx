@@ -44,7 +44,13 @@ import {
   ListDetail,
   SELECTED_HEADING_ID,
 } from '../shell/ListDetail';
-import { hrefFor, hrefForSelection, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import {
+  hrefFor,
+  hrefForSelection,
+  routeById,
+  ROUTE_BUILDER_ROUTE,
+  ROUTE_EDITOR_ROUTE,
+} from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 
@@ -819,6 +825,10 @@ function SelectedRoute({
         </StatusMessage>
       )}
       <h3>Change</h3>
+      {/* #2007: its line, kept, with a stretch redrawn, in the planner. */}
+      <p>
+        <a href={hrefFor(ROUTE_EDITOR_ROUTE, route.id)}>Edit in planner</a>
+      </p>
       <form aria-label={`Change ${route.name}`} onSubmit={(event) => void onEdit(event, route)}>
         <p>
           <label htmlFor={`name-${route.id}`}>Name</label>

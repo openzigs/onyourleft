@@ -10,10 +10,12 @@
  * reads the file back — from the bytes, or from disk where the bake wrote it.
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { BUILDING_FIELD_NAMES, NO_BUILDING_FIELDS } from '@onyourleft/map-features';
 import {
@@ -606,5 +608,49 @@ describe('demo:bake’s preset-route inputs — #1651, ADR 0056 D-7', () => {
     const out = stripPresetGpx(argumentsFor(['--gpx', path, '--strip']), directory);
     expect(out).toBe(join(directory, 'climb.gpx'));
     expect(readFileSync(out, 'utf8')).toBe(strippedFixture());
+  });
+});
+
+describe('demo:bake starts under the repository’s Node — #1931', () => {
+  // Not `new URL('../..', import.meta.url)`, which Vite rewrites under jsdom.
+  const WEB = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+  /** `demo:bake` from this app's `package.json`, split into its words. */
+  function bakeCommand(): string[] {
+    const manifest = JSON.parse(readFileSync(join(WEB, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    return (manifest.scripts['demo:bake'] ?? '').split(/\s+/);
+  }
+
+  it('names no experimental Node flag, which a later Node may refuse to start with', () => {
+    const [node, ...rest] = bakeCommand();
+    expect(node).toBe('node');
+    expect(rest.filter((word) => word.startsWith('--experimental'))).toEqual([]);
+  });
+
+  it('runs the script as package.json spells it, through its whole import graph, to the bake', async () => {
+    // The script's real command line, under the Node running this suite — CI's
+    // is `.nvmrc`'s. Node strips the types of every file in the graph and
+    // refuses one with syntax that emits code (a parameter property, an
+    // `enum`), so reaching the bake's own refusal means every module loaded.
+    // The archive's bounds are elsewhere, so the bake refuses before it
+    // writes anything into `demo/dist/routes/`.
+    const archive = join(scratch, 'elsewhere.pmtiles');
+    writeFileSync(
+      archive,
+      await buildArchive({ tiles: [], bounds: { west: 10, south: 10, east: 11, north: 11 } }),
+    );
+    const gpx = join(scratch, 'started.gpx');
+    writeFileSync(gpx, fixtureGpx());
+    const [, ...nodeArguments] = bakeCommand();
+    const run = spawnSync(
+      process.execPath,
+      [...nodeArguments, '--', '--route', 'started', '--gpx', gpx, '--archive', archive],
+      { cwd: WEB, encoding: 'utf8', timeout: 60_000 },
+    );
+    expect(run.stderr).not.toMatch(/bad option|ERR_[A-Z_]+/);
+    expect(run.stderr).toMatch(/outside the archive/);
+    expect(run.status).toBe(1);
   });
 });
