@@ -685,10 +685,12 @@ function ElevationStrip(props: {
  * The viewBox is the window itself: {@link LOOK_AHEAD_METRES} across and
  * {@link LOOK_AHEAD_RISE_METRES} of height up, so a metre of climb is the same
  * height on every route and a steeper road is a steeper line. The rider is the
- * left edge. Each run of one grade band is filled with its band's PATTERN —
- * the band's colour under hatching or dots in the panel's own surface — so a
- * band is never told by colour alone (SC 1.4.1); the caption beside the whole
- * route's says the next climb in words.
+ * left edge. Each run of one grade band is a column of the strip's full
+ * height filled with its band's PATTERN — the band's colour under hatching or
+ * dots in the panel's own surface — so a band is never told by colour alone
+ * (SC 1.4.1), and a descent is as tall as a climb (the owner's review of
+ * 2026-11-05). The road is a line over the bands; the caption under the
+ * strips says the next climb in words.
  *
  * `role="img"` with the next climb as its name, as the whole route's strip is
  * named by its sentence.
@@ -699,6 +701,9 @@ function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: stri
   const { ahead } = props;
   const yOf = (height: number): number =>
     LOOK_AHEAD_RISE_METRES - Math.min(LOOK_AHEAD_RISE_METRES, Math.max(0, height));
+  const road = ahead.points
+    .map((point) => `${String(point.ahead)},${String(yOf(point.height))}`)
+    .join(' ');
   return (
     <svg
       className="oyl-hud__ahead-svg"
@@ -713,25 +718,32 @@ function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: stri
           <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} />
         ))}
       </defs>
-      {ahead.runs.map((run) => {
-        const inside = ahead.points.filter(
-          (point) => point.ahead >= run.start && point.ahead <= run.end,
-        );
-        const outline = inside.map(
-          (point) => `${String(point.ahead)},${String(yOf(point.height))}`,
-        );
-        return (
-          <polygon
-            key={`${run.band}-${String(run.start)}`}
-            className={`oyl-hud__ahead-run oyl-hud__ahead-run--${run.band}`}
-            points={`${String(run.start)},${String(LOOK_AHEAD_RISE_METRES)} ${outline.join(' ')} ${String(run.end)},${String(LOOK_AHEAD_RISE_METRES)}`}
-            fill={`url(#${id}-${run.band})`}
-            data-band={run.band}
-            data-start={String(run.start)}
-            data-end={String(run.end)}
-          />
-        );
-      })}
+      {ahead.runs.map((run) => (
+        // The owner's review of 2026-11-05: each band at the strip's FULL
+        // height, not under the road's line. At the fixed scale a descent or
+        // a flat ends at the window's floor and was a sliver a pixel or two
+        // tall; a band's height now says nothing, so every band is as
+        // readable as a climb's, and the road's shape is the line below.
+        <rect
+          key={`${run.band}-${String(run.start)}`}
+          className={`oyl-hud__ahead-run oyl-hud__ahead-run--${run.band}`}
+          x={run.start}
+          y={0}
+          width={run.end - run.start}
+          height={LOOK_AHEAD_RISE_METRES}
+          fill={`url(#${id}-${run.band})`}
+          data-band={run.band}
+          data-start={String(run.start)}
+          data-end={String(run.end)}
+        />
+      ))}
+      {/*
+        The road itself, at the fixed scale, over the bands: the ink line on a
+        wider stroke of the panel's surface, as the whole route's marker is
+        drawn, so it reads on every band's colour and pattern alike.
+      */}
+      <polyline className="oyl-hud__ahead-road-edge" points={road} />
+      <polyline className="oyl-hud__ahead-road" points={road} data-testid="oyl-hud-road-ahead" />
       <line
         className="oyl-hud__ahead-here"
         x1={0}

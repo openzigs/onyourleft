@@ -30,7 +30,7 @@ import { atStartLine, type GameState } from '../simulation';
 
 import { slopeEvent, slopesOf } from './climb-ahead';
 import { HudPanel } from './HudPanel';
-import { GRADE_BANDS, LOOK_AHEAD_METRES } from './look-ahead';
+import { GRADE_BANDS, LOOK_AHEAD_METRES, LOOK_AHEAD_RISE_METRES, lookAhead } from './look-ahead';
 
 let mounted: Mounted | undefined;
 
@@ -82,7 +82,7 @@ async function hudAt(profile: RouteProfile, distance: number): Promise<HTMLEleme
 describe('the look-ahead strip on the HUD (#2075)', () => {
   const profile = climb();
 
-  it('is in the route panel, beside the whole route’s strip', async () => {
+  it('is in the route panel, with the whole route’s strip', async () => {
     const hud = await hudAt(profile, 600);
     const strip = hud.querySelector('.oyl-hud__route [data-testid="oyl-hud-look-ahead"]');
     expect(strip).not.toBeNull();
@@ -113,6 +113,52 @@ describe('the look-ahead strip on the HUD (#2075)', () => {
     mounted?.unmount();
     const nearer = await hudAt(profile, 600);
     expect(start(nearer) - at800).toBeCloseTo(200, -1);
+  });
+
+  /*
+   * The owner's screenshot review of 2026-11-05: at the fixed scale a flat or
+   * a descent ends on the window's floor, and drawn UNDER the road it was a
+   * sliver. Every band is the strip's full height now, so its height says
+   * nothing about its grade and each is as readable as the climb's.
+   */
+  it('draws every band at the strip’s full height, a descent and a flat as tall as a climb', async () => {
+    // From 1500 m the window holds the top of the climb and the flat after it.
+    const hud = await hudAt(profile, 1500);
+    const runs = queryAll(hud, '.oyl-hud__ahead-run');
+    const bands = runs.map((run) => run.getAttribute('data-band'));
+    expect(bands).toContain('flat');
+    expect(bands).toContain('steep');
+    for (const run of runs) {
+      expect(run.tagName.toLowerCase(), run.getAttribute('data-band') ?? '').toBe('rect');
+      expect(run.getAttribute('y')).toBe('0');
+      expect(run.getAttribute('height')).toBe(String(LOOK_AHEAD_RISE_METRES));
+      expect(Number(run.getAttribute('x'))).toBe(Number(run.getAttribute('data-start')));
+      expect(Number(run.getAttribute('width'))).toBe(
+        Number(run.getAttribute('data-end')) - Number(run.getAttribute('data-start')),
+      );
+    }
+  });
+
+  it('draws the road over the bands at the fixed scale, from the ride’s own distance', async () => {
+    const hud = await hudAt(profile, 1500);
+    const road = hud.querySelector('[data-testid="oyl-hud-road-ahead"]');
+    const strip = hud.querySelector('[data-testid="oyl-hud-look-ahead"]');
+    // After every band, so it is drawn over them.
+    const last = queryAll(hud, '.oyl-hud__ahead-run').at(-1);
+    expect(last === undefined || road === null).toBe(false);
+    expect(
+      (last?.compareDocumentPosition(road as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(strip?.querySelector('.oyl-hud__ahead-road-edge')?.getAttribute('points')).toBe(
+      road?.getAttribute('points'),
+    );
+    const expected = lookAhead(profile, 1500)
+      .points.map(
+        (point) =>
+          `${String(point.ahead)},${String(LOOK_AHEAD_RISE_METRES - Math.min(LOOK_AHEAD_RISE_METRES, point.height))}`,
+      )
+      .join(' ');
+    expect(road?.getAttribute('points')).toBe(expected);
   });
 
   it('fills every band with its own pattern, so colour is never the only signal', async () => {

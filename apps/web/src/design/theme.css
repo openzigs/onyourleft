@@ -7054,33 +7054,57 @@ select.oyl-input {
 /*
  * THE ROAD AHEAD — #2075, `game/hud/look-ahead.ts`.
  *
- * Beside the whole route's strip and stretched to its height
- * (`.oyl-hud__profile-svg` is the one that is sized), two to three, so the route panel is no taller than it
- * was. Each grade band is its colour under marks of the panel's own surface:
- * none on the flat, dots on a descent, one hatch on a climb, a denser one on
- * a steep stretch and a cross-hatch on a very steep one, so no band is told by
- * colour alone (SC 1.4.1). The rider is the left edge, a 4 px ink line of
- * which the strip's edge clips half.
+ * ⚠️ **Its own row, the panel's full width, and taller than the whole
+ * route's strip — the owner's screenshot review of 2026-11-05.** Beside the
+ * whole route's strip it was 3 rem tall and three fifths of an 18 rem panel,
+ * and with the bands drawn under the road's line a descent or a flat stretch
+ * was a sliver at its floor. Now each band is a column of the strip's full
+ * height (`HudCore.tsx` §`LookAheadStrip`) and the road is a line over them,
+ * so a descent is as readable as a climb; and the strip is under the whole
+ * route's, across the panel: 3.5 rem where the route panel is at the bottom
+ * of a taller screen, 2.5 rem on a phone on its side (below). The panel is
+ * taller by that row, and `ride.browser.spec.ts` holds every panel clear of
+ * the leaning rider at every overlay viewport. An upright phone has no row to
+ * give, so there the two strips stay side by side (§"COLUMN").
+ *
+ * Each band is its colour under marks of the panel's own surface: none on the
+ * flat, dots on a descent, one hatch on a climb, a denser one on a steep
+ * stretch and a cross-hatch on a very steep one, so no band is told by colour
+ * alone (SC 1.4.1). The rider is the left edge, a 4 px ink line. The strip
+ * does not clip what is drawn on it, so a road on the window's floor or at
+ * its top, and the rider's line at its edge, are drawn whole: the bands
+ * themselves end at its box.
  *
  * The next climb is a caption of its own beside the route's sentence, on the
  * same line where the panel is wide enough and wrapping under it where not.
  */
 .oyl-hud__strips {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--oyl-space-xs);
-}
-
-.oyl-hud__strips > .oyl-hud__profile-svg {
-  flex: 2 1 0;
-  min-width: 0;
 }
 
 .oyl-hud__ahead-svg {
   display: block;
-  flex: 3 1 0;
-  min-width: 0;
-  height: auto;
-  align-self: stretch;
+  width: 100%;
+  height: 3.5rem;
+  overflow: visible;
+}
+
+.oyl-hud__ahead-road-edge {
+  fill: none;
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__ahead-road {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .oyl-hud__band-mark {
@@ -8521,6 +8545,12 @@ select.oyl-input {
     height: 2rem;
   }
 
+  /* #2075, the owner's review of 2026-11-05: the road ahead under it, the
+     panel's width, half a rem taller. */
+  .oyl-game--riding .oyl-hud__ahead-svg {
+    height: 2.5rem;
+  }
+
   .oyl-game--riding .oyl-hud__actions,
   .oyl-game--riding .oyl-hud__route {
     width: min(100%, 16rem);
@@ -8840,17 +8870,28 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__route {
     display: grid;
     gap: var(--oyl-space-sm);
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(0, 1fr) 4.5rem;
   }
 
-  /* #2075: the strips 2.25 rem rather than 3, so that the route's sentence
-     and the next climb, two lines where the column is too narrow for both on
-     one (190 px at 360 wide), still end above the plan view's 5 rem beside
-     them: 36 + 4 + 2 × 15.4 = 71 px of 80. A third line would make the panel
-     taller, and at 360×752 a Delivery ride's map credit ends about a pixel
-     above the leaning rider (§"#2072 — AN UPRIGHT PHONE UNDER 24 REM"). */
-  .oyl-game--riding .oyl-hud__profile-svg {
-    height: 2.25rem;
+  /* #2075, and the owner's screenshot review of 2026-11-05: *"on the phone
+     the strips and caption use only the left half of the route panel"*. The
+     plan view takes 4.5 rem, `plan.ts` §PLAN_SMALLEST_PIXELS (the width its
+     rider's mark is sized for), and the strips and their captions take the
+     rest: 248 of 328 px at 360 wide, where three fifths was 191. The strips
+     stay side by side — under each other, or with the plan view under them,
+     the panel is taller, and at 360×752 a Delivery ride's map credit ends
+     about a pixel above the leaning rider (§"#2072 — AN UPRIGHT PHONE UNDER
+     24 REM") — and are 2.75 rem tall, so that the route's sentence and the
+     next climb, two lines where the column is too narrow for both on one,
+     still end inside the plan view's 5 rem beside them: 44 + 4 + 2 × 15.4 =
+     79 px of 80. */
+  .oyl-game--riding .oyl-hud__strips {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__profile-svg,
+  .oyl-game--riding .oyl-hud__ahead-svg {
+    height: 2.75rem;
   }
 }
 
