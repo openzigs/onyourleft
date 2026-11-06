@@ -335,7 +335,7 @@ describe('what the buffers hold — #1549', () => {
       const roles = drawn.far ? FAR_ROLES : NEAR_ROLES;
       const walls = floatsOf(
         plan,
-        roles.filter((role) => !ROOF_ROLES.has(role)),
+        roles.filter((role) => !ROOF_ROLES.has(role) && role !== 'spire'),
       );
       // Since #1588 a dormer's roof wears the roof, after it in the roof's run.
       const roof = floatsOf(
@@ -362,6 +362,47 @@ describe('what the buffers hold — #1549', () => {
     expect(belt.drawnAt(stats.buildings)).toBeUndefined();
   });
 
+  it('draws a spire in slate beside a roof that is not — #2206', () => {
+    const base = planned.find(
+      (plan) =>
+        plan.triangles.roof.length >= 4 * 3 * FOOTPRINT_VERTEX_FLOATS &&
+        plan.surfaces.roof !== 'slate' &&
+        plan.surfaces.wall !== 'slate' &&
+        plan.triangles.spire.length === 0,
+    ) as FootprintPlan;
+    expect(base).toBeDefined();
+    // A tagged church's plan, made by hand: four of the roof's triangles are its spire's.
+    const spire = base.triangles.roof.slice(0, 4 * 3 * FOOTPRINT_VERTEX_FLOATS);
+    const church: FootprintPlan = {
+      ...base,
+      triangles: {
+        ...base.triangles,
+        roof: base.triangles.roof.slice(spire.length),
+        spire,
+      },
+    };
+    const belt = aBelt(mappedBuildingsOf([church]));
+    const rider = { x: church.centroid.x + 30, z: church.centroid.z };
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    expect(stats.buildings).toBe(1);
+    const drawn = belt.drawnAt(0);
+    if (drawn === undefined) throw new Error('the church is not drawn');
+    expect(drawn.far).toBe(false);
+    const position = belt.mesh.geometry.getAttribute('position');
+    const readBack = (at: number, floats: Float32Array): void => {
+      for (let vertex = 0; vertex < floats.length / FOOTPRINT_VERTEX_FLOATS; vertex += 1) {
+        expect(position.getX(at + vertex)).toBe(floats[vertex * FOOTPRINT_VERTEX_FLOATS]);
+        expect(position.getZ(at + vertex)).toBe(floats[vertex * FOOTPRINT_VERTEX_FLOATS + 2]);
+      }
+    };
+    readBack(drawn.spireAt, spire);
+    // Its own group, in the slate's slot: the roof's slot holds the nave's, not the spire's.
+    const slate = belt.mesh.geometry.groups.find((group) => group.start === drawn.spireAt);
+    expect(slate?.count).toBe(spire.length / FOOTPRINT_VERTEX_FLOATS);
+    expect(belt.mesh.geometry.groups.some((group) => group.start === drawn.roofAt)).toBe(true);
+    expect(drawn.spireAt).not.toBe(drawn.roofAt);
+  });
+
   it('shades each vertex by its role and, on a building with a plinth, by its height above the foundation — #1549', () => {
     // The shades are written out, not read from the renderer: a plinth is
     // darker than the wall it wears the photograph of, and a chimney a
@@ -384,6 +425,8 @@ describe('what the buffers hold — #1549', () => {
       porch: 1,
       'porch-roof': 1,
       'porch-trim': 1,
+      // #2206: a spire is shaded as the roof it is built of.
+      spire: 1,
     };
     // And the paint, written out too: the wall surface's list on everything
     // but the roof, the door and the trim, which wear their own — and since
