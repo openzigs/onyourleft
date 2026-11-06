@@ -286,6 +286,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     // #1905: and the lap race's, the same way.
     'Lap race',
     'Menu sounds',
+    // #2056: what the music is and that the header's mute silences it.
+    'Music',
     'Appearance',
     'Announcements',
     'Sounds',
