@@ -160,6 +160,10 @@ export interface SegmentFlagTable {
   readonly segment_id: string;
   /** The effort flagged, or `null` for the segment itself as hazardous. */
   readonly effort_id: string | null;
+  /** Whose effort was flagged (`null` for a hazard flag); no foreign key. */
+  readonly subject_athlete_id: string | null;
+  /** The ride that effort was on: a flag outlasts the effort's id, which a re-share mints anew. */
+  readonly subject_content_sha256: string | null;
   /** From a closed list: `segments.ts` §`EFFORT_FLAG_REASONS`, §`HAZARD_REASONS`. */
   readonly reason: string;
   /** Unix seconds. */

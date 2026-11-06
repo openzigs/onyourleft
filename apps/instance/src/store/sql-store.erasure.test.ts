@@ -127,6 +127,7 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
+  'segment_flag.subject_athlete_id': { erased: true },
   'segment_integrity_log.actor_athlete_id': {
     kept: 'the leaderboard integrity log is append-only: who flagged what stays, so a flag can be judged after its flagger has gone (#69)',
   },
@@ -320,6 +321,19 @@ describe('erasing an athlete (#769, #35)', () => {
         filedAt: 1_790_001_100,
       });
     });
+    // #69: A flagged one of B's efforts. Written straight to the table, because
+    // the seed's blocks (everybody blocks everybody) would refuse the store's own route.
+    const flagging = openDatabase(harness.path);
+    try {
+      flagging
+        .prepare(
+          `INSERT INTO segment_flag (athlete_id, segment_id, effort_id, subject_athlete_id, subject_content_sha256, reason, created_at)
+           VALUES (?, 'segment-of-a', 'effort-of-b', ?, 'ride-of-b', 'vehicle', 1790000190)`,
+        )
+        .run(ATHLETE_A, ATHLETE_B);
+    } finally {
+      flagging.close();
+    }
     for (const column of columns) {
       expect(count(column, ATHLETE_B), `${column} names B before`).toBeGreaterThan(0);
     }

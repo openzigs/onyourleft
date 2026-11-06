@@ -13,6 +13,11 @@
  *   a reason from a closed list and when. A flagged effort leaves every shared
  *   board; a hazardous segment awards nothing to anybody. `athlete_id` is the
  *   FLAGGER, so the schema-derived erasure takes a rider's flags with them.
+ *   `subject_athlete_id` and `subject_content_sha256` name the RIDE the flagged
+ *   effort was on, because an effort's own id is minted anew each time a ride is
+ *   shared again: a flag that named only the id could be shed by sharing the
+ *   ride with a different start, or by withdrawing and sharing it. The board
+ *   holds back every effort of that rider, on that segment, from that ride.
  *   `segment_id` and `effort_id` carry no foreign key, for 0038's reason: a
  *   flag is one athlete's row about another's.
  * - **`segment_integrity_log`** — every exclusion and every flag, with its
@@ -37,9 +42,16 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('athlete_id', 'text', (column) => column.notNull().references('athlete.id'))
     .addColumn('segment_id', 'text', (column) => column.notNull())
     .addColumn('effort_id', 'text')
+    .addColumn('subject_athlete_id', 'text')
+    .addColumn('subject_content_sha256', 'text')
     .addColumn('reason', 'text', (column) => column.notNull())
     .addColumn('created_at', 'integer', (column) => column.notNull())
     .modifyEnd(sql`strict`)
+    .execute();
+  await db.schema
+    .createIndex('segment_flag_by_subject')
+    .on('segment_flag')
+    .columns(['segment_id', 'subject_athlete_id', 'subject_content_sha256'])
     .execute();
   await db.schema
     .createIndex('segment_flag_by_effort')
@@ -96,6 +108,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   await db.schema.dropIndex('segment_flag_by_flagger').execute();
   await db.schema.dropIndex('segment_flag_by_segment').execute();
   await db.schema.dropIndex('segment_flag_by_effort').execute();
+  await db.schema.dropIndex('segment_flag_by_subject').execute();
   await db.schema.dropTable('segment_flag').execute();
   await db.schema.alterTable('segment_effort').dropColumn('excluded_reason').execute();
 }

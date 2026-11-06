@@ -128,7 +128,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   segment: `INSERT INTO segment VALUES ('${'a'.repeat(32)}', 'a', 'S', 'ride', 555.5, '{}', 33)`,
   // The columns named, so migration 0039's `excluded_reason` is NULL (#69).
   segment_effort: `INSERT INTO segment_effort (id, athlete_id, segment_id, content_sha256, started_at, elapsed_seconds, visibility, received_at) VALUES ('effort-a', 'a', '${'a'.repeat(32)}', '${'1'.repeat(64)}', 34, 60.5, 'public', 35)`,
-  segment_flag: `INSERT INTO segment_flag VALUES (1, 'a', '${'a'.repeat(32)}', 'effort-a', 'vehicle', 36)`,
+  segment_flag: `INSERT INTO segment_flag VALUES (1, 'a', '${'a'.repeat(32)}', 'effort-a', 'a', 'sha-a', 'vehicle', 36)`,
   segment_integrity_log: `INSERT INTO segment_integrity_log VALUES (1, 37, 'flagged_effort', 'a', 'a', '${'a'.repeat(32)}', 'effort-a', 'vehicle')`,
 };
 

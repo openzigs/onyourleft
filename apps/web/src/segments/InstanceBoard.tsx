@@ -26,20 +26,19 @@
 
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
-import { RANKING_BASIS_LABEL } from '@onyourleft/domain';
+import {
+  EFFORT_FLAG_REASONS,
+  HAZARD_REASONS,
+  RANKING_BASIS_LABEL,
+  type EffortFlagReason,
+  type HazardReason,
+} from '@onyourleft/domain';
 import type { SegmentEffortRecord, SegmentRecord } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration } from '../format';
-import {
-  EFFORT_FLAG_REASONS,
-  HAZARD_REASONS,
-  type EffortFlagReason,
-  type HazardReason,
-} from '@onyourleft/domain';
-
 import type {
   BoardPeriod,
   BoardScope,
@@ -68,11 +67,15 @@ export const FLAG_SENTENCE =
 
 /** What flagging the segment does, said before the press (#69). */
 export const HAZARD_SENTENCE =
-  'If riding this segment fast is dangerous — through a junction, down steps, in traffic — flag it. Nothing on it is ranked any more, for anybody, and no personal best is awarded on it.';
+  'If riding this segment fast is dangerous — through a junction, down steps, in traffic — flag it. Once 3 different riders have, nothing on it is ranked any more, for anybody, and no personal best is awarded on it. Nobody can undo that yet.';
+
+/** The question the hazard flag asks before it is raised (#69): the flag is board-wide and cannot yet be taken back. */
+export const HAZARD_CONFIRM_SENTENCE =
+  'Are you sure? Your flag counts toward switching this segment’s board off for every rider, and you cannot take it back.';
 
 /** What the board says of a segment flagged hazardous (#69). */
 export const HAZARDOUS_BOARD_SENTENCE =
-  'A rider flagged this segment as hazardous, so nothing on it is ranked and no personal best is awarded on it.';
+  'Riders flagged this segment as hazardous, so nothing on it is ranked and no personal best is awarded on it.';
 
 const EFFORT_REASON_LABELS: Readonly<Record<EffortFlagReason, string>> = {
   vehicle: 'Ridden in a vehicle',
@@ -99,7 +102,7 @@ export function flagSentence(outcome: FlagOutcome, instance: string): string {
     case 'rate-limited':
       return 'You have flagged as many as you may today, so nothing was flagged.';
     case 'refused':
-      return `${instance} did not take the flag: you may flag only on a segment you have shared an effort of your own on.`;
+      return `${instance} did not take the flag: either you have no counted effort of your own shared on this segment, or what you flagged is no longer there.`;
     case 'unavailable':
       return `${instance} could not be reached, so nothing was flagged.`;
   }
@@ -161,6 +164,7 @@ export function InstanceBoard({
   const [period, setPeriod] = useState<BoardPeriod>('all-time');
   const [board, setBoard] = useState<Board | 'unavailable' | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [confirmingHazard, setConfirmingHazard] = useState(false);
   const [said, setSaid] = useState<{ tone: 'success' | 'warning'; text: string } | undefined>(
     undefined,
   );
@@ -216,6 +220,7 @@ export function InstanceBoard({
         tone: outcome === 'flagged' ? 'success' : 'warning',
         text: flagSentence(outcome, instance),
       });
+      if (kind === 'hazard') setConfirmingHazard(false);
       await load();
     } finally {
       setBusy(false);
@@ -435,6 +440,11 @@ export function InstanceBoard({
                 aria-labelledby={`${flagId}-hazard`}
                 onSubmit={(event) => {
                   event.preventDefault();
+                  // Board-wide and not yet reversible: asked twice.
+                  if (!confirmingHazard) {
+                    setConfirmingHazard(true);
+                    return;
+                  }
                   void flag('hazard', event.currentTarget);
                 }}
               >
@@ -450,9 +460,21 @@ export function InstanceBoard({
                     ))}
                   </select>
                 </p>
+                {confirmingHazard ? (
+                  <StatusMessage tone="warning">{HAZARD_CONFIRM_SENTENCE}</StatusMessage>
+                ) : null}
                 <Button variant="secondary" type="submit" disabled={busy}>
-                  Flag it as hazardous
+                  {confirmingHazard ? 'Yes, flag it as hazardous' : 'Flag it as hazardous'}
                 </Button>
+                {confirmingHazard ? (
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => setConfirmingHazard(false)}
+                  >
+                    No, keep it as it is
+                  </Button>
+                ) : null}
               </form>
             </>
           )}

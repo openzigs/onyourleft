@@ -66,13 +66,14 @@ hazardous**. Each flag carries a reason from a closed list:
 | --- | --- |
 | You may flag only on a segment **you have an effort of your own on** | Checked in the same transaction as the flag. Anyone else is refused. This is the brake the incumbent uses against drive-by flagging |
 | **10 flags a day** per rider, of either kind | Counted from the flags themselves, so restarting the instance does not reset it. An unlimited flag button would be a harassment tool |
+| An effort the instance itself excluded as impossible gives no standing | Only an effort that is counted lets you flag |
 | You cannot flag your own effort, an effort on another segment, or an effort by a rider who blocked you or whom you blocked | Each is answered `not_found`, the same answer as for an effort that does not exist |
 
-**What a flag on an effort does.** The effort comes off every shared board at once. Its rider still
+**What a flag on an effort does.** The effort comes off every shared board at once, and so does every other effort of that rider on that segment from the same ride: the flag names the ride, so sharing it again with a different start, or withdrawing it and sharing it, does not shed it. A different ride of theirs is unaffected. Its rider still
 sees it on their own board, with a sentence saying it was flagged. **The ride itself is unchanged**:
 the ride's own pages answer exactly what they answered before.
 
-**What a hazard flag does.** Nothing on that segment is ranked any more, for anybody. There is no
+**What a hazard flag does.** Once 3 different riders have flagged a segment hazardous, nothing on it is ranked any more, for anybody. One rider's flag, however often repeated, does nothing to the board, because nothing yet reverses it and a single account must not be able to switch a board off. There is no
 board, no first place and no personal best on it. This is for a segment down a stairwell or through
 a junction.
 

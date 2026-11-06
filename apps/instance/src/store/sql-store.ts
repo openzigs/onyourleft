@@ -2744,15 +2744,22 @@ const publishedSegmentFrom = (
   hazardous: Number(row.hazardous) === 1,
 });
 
-/** #69: whether any rider flagged the selected segment hazardous, as a column of the same read. */
+/**
+ * #69: how many DIFFERENT riders must flag a segment hazardous before nothing
+ * on it is ranked. One rider's flag cannot switch a board off for everyone, and
+ * nothing yet reverses it (docs/leaderboard-integrity.md, "What is not built yet").
+ */
+export const HAZARD_FLAGGERS = 3;
+
+/** #69: whether enough riders flagged the selected segment hazardous, as a column of the same read. */
 const hazardousColumn =
-  sql<number>`exists (select 1 from segment_flag where segment_flag.segment_id = segment.id and segment_flag.effort_id is null)`.as(
+  sql<number>`(select count(distinct segment_flag.athlete_id) from segment_flag where segment_flag.segment_id = segment.id and segment_flag.effort_id is null) >= ${HAZARD_FLAGGERS}`.as(
     'hazardous',
   );
 
 /** #69: whether any rider flagged the selected effort, as a column of the same read. */
 const flaggedColumn =
-  sql<number>`exists (select 1 from segment_flag where segment_flag.effort_id = segment_effort.id)`.as(
+  sql<number>`exists (select 1 from segment_flag where segment_flag.segment_id = segment_effort.segment_id and segment_flag.subject_athlete_id = segment_effort.athlete_id and segment_flag.subject_content_sha256 = segment_effort.content_sha256)`.as(
     'flagged',
   );
 
@@ -4145,6 +4152,14 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (kept.length > 0) gone = gone.where('started_at', 'not in', kept);
           await gone.execute();
           for (const effort of efforts) {
+            const before = await trx
+              .selectFrom('segment_effort')
+              .select('excluded_reason')
+              .where('athlete_id', '=', athleteId)
+              .where('segment_id', '=', segmentId)
+              .where('content_sha256', '=', contentSha256)
+              .where('started_at', '=', effort.startedAt)
+              .executeTakeFirst();
             const stored = await trx
               .insertInto('segment_effort')
               .values({
@@ -4173,7 +4188,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .executeTakeFirstOrThrow();
             // #69: every exclusion is recorded, in the same transaction as the
             // effort it excludes, with no actor — it is the instance's rule.
-            if (effort.excludedReason !== null) {
+            // Once: sharing an already-excluded effort again adds nothing.
+            if (
+              effort.excludedReason !== null &&
+              before?.excluded_reason !== effort.excludedReason
+            ) {
               await trx
                 .insertInto('segment_integrity_log')
                 .values({
@@ -4271,7 +4290,12 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               and effort.excluded_reason is null
               and ride.visibility = 'public'
               and effort.started_at >= ${since}
-              and not exists (select 1 from segment_flag as flag where flag.effort_id = effort.id)
+              and not exists (
+                select 1 from segment_flag as flag
+                where flag.segment_id = effort.segment_id
+                  and flag.subject_athlete_id = effort.athlete_id
+                  and flag.subject_content_sha256 = effort.content_sha256
+              )
               and ${seenBy(viewerId)}
           )
           select best.id, best.athlete_id, best.started_at, best.elapsed_seconds,
@@ -4300,31 +4324,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .select('id')
             .where('athlete_id', '=', flag.athleteId)
             .where('segment_id', '=', flag.segmentId)
+            // An effort the instance itself excluded as impossible is no
+            // standing to flag anybody.
+            .where('excluded_reason', 'is', null)
             .executeTakeFirst();
           if (mine === undefined) return 'no-effort-of-yours' as const;
-          const recent = await trx
-            .selectFrom('segment_flag')
-            .select((eb) => eb.fn.countAll<number>().as('n'))
-            .where('athlete_id', '=', flag.athleteId)
-            .where('created_at', '>', flag.at - flag.windowSeconds)
-            .executeTakeFirstOrThrow();
-          if (Number(recent.n) >= flag.limit) return 'rate_limited' as const;
-          let subject: string | null = null;
-          if (flag.effortId !== null) {
-            // An effort on THIS segment, somebody else's, by a rider the
-            // flagger may see — the choke point's rule, as on the board.
-            const target = await trx
-              .selectFrom('segment_effort')
-              .innerJoin('athlete', 'athlete.id', 'segment_effort.athlete_id')
-              .select('segment_effort.athlete_id')
-              .where('segment_effort.id', '=', flag.effortId)
-              .where('segment_effort.segment_id', '=', flag.segmentId)
-              .where('segment_effort.athlete_id', '!=', flag.athleteId)
-              .where(seenBy(flag.athleteId))
-              .executeTakeFirst();
-            if (target === undefined) return 'not-found' as const;
-            subject = target.athlete_id;
-          }
           let already = trx
             .selectFrom('segment_flag')
             .select('id')
@@ -4334,13 +4338,41 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             flag.effortId === null
               ? already.where('effort_id', 'is', null)
               : already.where('effort_id', '=', flag.effortId);
+          // Before the limit: saying it again is not a new flag.
           if ((await already.executeTakeFirst()) !== undefined) return 'already' as const;
+          const recent = await trx
+            .selectFrom('segment_flag')
+            .select((eb) => eb.fn.countAll<number>().as('n'))
+            .where('athlete_id', '=', flag.athleteId)
+            .where('created_at', '>', flag.at - flag.windowSeconds)
+            .executeTakeFirstOrThrow();
+          if (Number(recent.n) >= flag.limit) return 'rate_limited' as const;
+          let subject: string | null = null;
+          let subjectRide: string | null = null;
+          if (flag.effortId !== null) {
+            // An effort on THIS segment, somebody else's, by a rider the
+            // flagger may see — the choke point's rule, as on the board.
+            const target = await trx
+              .selectFrom('segment_effort')
+              .innerJoin('athlete', 'athlete.id', 'segment_effort.athlete_id')
+              .select(['segment_effort.athlete_id', 'segment_effort.content_sha256'])
+              .where('segment_effort.id', '=', flag.effortId)
+              .where('segment_effort.segment_id', '=', flag.segmentId)
+              .where('segment_effort.athlete_id', '!=', flag.athleteId)
+              .where(seenBy(flag.athleteId))
+              .executeTakeFirst();
+            if (target === undefined) return 'not-found' as const;
+            subject = target.athlete_id;
+            subjectRide = target.content_sha256;
+          }
           await trx
             .insertInto('segment_flag')
             .values({
               athlete_id: flag.athleteId,
               segment_id: flag.segmentId,
               effort_id: flag.effortId,
+              subject_athlete_id: subject,
+              subject_content_sha256: subjectRide,
               reason: flag.reason,
               created_at: flag.at,
             })
@@ -6170,6 +6202,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .deleteFrom('segment_flag')
               .where((eb) =>
                 eb.or([
+                  eb('subject_athlete_id', '=', athleteId),
                   eb(
                     'effort_id',
                     'in',

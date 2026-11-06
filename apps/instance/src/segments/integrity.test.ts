@@ -28,7 +28,7 @@ import {
   type TestDevice,
 } from '../auth/identity-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
-import type { SegmentIntegrityLogEntry } from '../store/sql-store.ts';
+import { HAZARD_FLAGGERS, type SegmentIntegrityLogEntry } from '../store/sql-store.ts';
 import { claimsFor, longGpx } from '../sync/sync-testing.ts';
 import { sha256Bytes, toBase64 } from '../sync/sync.ts';
 import { definitionFixture, publish, RIDE_STARTED_AT } from './segments-testing.ts';
@@ -194,6 +194,15 @@ describe('automatic exclusion (#69’s first and second criteria)', () => {
     expect(entry?.reason).toMatch(/^Excluded automatically/);
   });
 
+  it('records an exclusion once, however often the same effort is shared again', async () => {
+    const ann = await rider('Ann');
+    const segmentId = await segmentBy(ann);
+    const cy = await onTheBoard('Cy', segmentId, IMPOSSIBLE_SECONDS);
+    expect((await share(cy, segmentId, cy.content, IMPOSSIBLE_SECONDS)).status).toBe(200);
+    expect((await share(cy, segmentId, cy.content, IMPOSSIBLE_SECONDS)).status).toBe(200);
+    expect(await logOf(segmentId)).toHaveLength(1);
+  });
+
   it('judges with the domain’s rule, against the length the instance measured', () => {
     for (const sport of ['ride', 'run'] as const) {
       const ceiling = IMPLAUSIBLE_SPEED_METRES_PER_SECOND[sport];
@@ -272,6 +281,74 @@ describe('the community flag (#69’s fourth to sixth criteria)', () => {
     expect(await logOf(segmentId)).toHaveLength(1);
   });
 
+  it('outlasts the effort’s id: sharing the ride again, or withdrawing it and sharing it, does not shed the flag', async () => {
+    const ann = await rider('Ann');
+    const segmentId = await segmentBy(ann);
+    await share(ann, segmentId, await publicRide(ann), 330);
+    const bea = await onTheBoard('Bea', segmentId, 300);
+    const effortId = (await board(ann, segmentId)).rows.find((row) => !row.yours)?.effortId ?? '';
+    await flagEffort(ann, segmentId, effortId);
+    expect(names(await board(ann, segmentId))).toEqual(['Ann']);
+
+    const shareAt = (startedAt: number, efforts = [{ startedAt, elapsedSeconds: 300 }]) =>
+      world.call('POST', `/v1/segments/${segmentId}/efforts/${bea.content}`, {
+        token: bea.token,
+        body: { efforts: efforts.map((each) => ({ ...each, visibility: 'public' })) },
+      });
+    // A different start: the effort is minted anew, under a new id.
+    expect((await shareAt(RIDE_STARTED_AT + 61)).status).toBe(200);
+    expect(names(await board(ann, segmentId))).toEqual(['Ann']);
+    // Withdrawn, then shared again.
+    expect((await shareAt(0, [])).status).toBe(200);
+    expect((await shareAt(RIDE_STARTED_AT + 62)).status).toBe(200);
+    expect(names(await board(ann, segmentId))).toEqual(['Ann']);
+    // Bea still sees her own effort, flagged, under whichever id it has now.
+    expect((await board(bea, segmentId, '?scope=personal')).rows).toEqual([
+      expect.objectContaining({ rank: null, excluded: FLAGGED_SENTENCE }),
+    ]);
+    // The control: a DIFFERENT ride of hers is not caught by it.
+    await share(bea, segmentId, await publicRide(bea), 290);
+    expect(names(await board(ann, segmentId))).toEqual(['Bea', 'Ann']);
+  });
+
+  it('is not open to a rider whose only effort the instance itself excluded as impossible', async () => {
+    const ann = await rider('Ann');
+    const segmentId = await segmentBy(ann);
+    const bea = await onTheBoard('Bea', segmentId, 300);
+    const effortId = (await board(ann, segmentId)).rows[0]?.effortId ?? '';
+    const cheat = await onTheBoard('Cheat', segmentId, IMPOSSIBLE_SECONDS);
+    const refused = await flagEffort(cheat, segmentId, effortId);
+    expect(refused.status).toBe(400);
+    const hazard = await world.call('POST', `/v1/segments/${segmentId}/hazard`, {
+      token: cheat.token,
+      body: { reason: 'traffic' },
+    });
+    expect(hazard.status).toBe(400);
+    expect(names(await board(ann, segmentId))).toEqual(['Bea']);
+    void bea;
+  });
+
+  it('answers a rider at their limit who says it again as “already”, not as limited', async () => {
+    const flagger = await rider('Flagger');
+    const content = await publicRide(flagger);
+    const segments: string[] = [];
+    for (let index = 0; index < FLAG_LIMIT.limit; index += 1) {
+      const segmentId = await segmentBy(flagger);
+      await share(flagger, segmentId, content, 300);
+      segments.push(segmentId);
+      await world.call('POST', `/v1/segments/${segmentId}/hazard`, {
+        token: flagger.token,
+        body: { reason: 'traffic' },
+      });
+    }
+    const again = await world.call('POST', `/v1/segments/${segments[0] ?? ''}/hazard`, {
+      token: flagger.token,
+      body: { reason: 'traffic' },
+    });
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ flagged: false });
+  });
+
   it('answers a flag on the caller’s own effort, another segment’s, or a rider who blocked them as on none', async () => {
     const ann = await rider('Ann');
     const segmentId = await segmentBy(ann);
@@ -280,16 +357,16 @@ describe('the community flag (#69’s fourth to sixth criteria)', () => {
     await share(ann, segmentId, annRide, 330);
     const bea = await onTheBoard('Bea', segmentId, 300);
     await share(bea, other, bea.content, 300);
+    // Ann has an effort on `other` too, so only the segment check can refuse it.
+    await share(ann, other, annRide, 330);
     const rows = (await board(ann, segmentId)).rows;
     const mine = rows.find((row) => row.yours)?.effortId ?? '';
     const theirs = rows.find((row) => !row.yours)?.effortId ?? '';
     const nobody = await flagEffort(ann, segmentId, 'f'.repeat(32));
     expect(nobody.status).toBe(404);
     expect(await flagEffort(ann, segmentId, mine)).toEqual(nobody);
-    expect(await flagEffort(ann, other, theirs)).toEqual(
-      // On `other` Ann has no effort: refused for that first.
-      expect.objectContaining({ status: 400 }),
-    );
+    // Bea's effort is on `segmentId`; flagged under `other`, it is on no board there.
+    expect(await flagEffort(ann, other, theirs)).toEqual(nobody);
     await world.call('POST', `/v1/blocks/${ann.athleteId}`, { token: bea.token });
     expect(await flagEffort(ann, segmentId, theirs)).toEqual(nobody);
     expect(await logOf(segmentId)).toEqual([]);
@@ -370,20 +447,34 @@ describe('the community flag (#69’s fourth to sixth criteria)', () => {
 });
 
 describe('a hazardous segment (#69’s seventh criterion)', () => {
-  it('awards nothing on it — no board, no first place, no personal best — and records who said so', async () => {
+  const hazard = (who: Rider, segmentId: string, reason = 'junction') =>
+    world.call('POST', `/v1/segments/${segmentId}/hazard`, {
+      token: who.token,
+      body: { reason },
+    });
+
+  it('awards nothing on it — no board, no first place, no personal best — once enough riders say so, and records who', async () => {
     const ann = await rider('Ann');
     const segmentId = await segmentBy(ann);
     const annRide = await publicRide(ann);
     await share(ann, segmentId, annRide, 250);
     const bea = await onTheBoard('Bea', segmentId, 300);
+    const others: Rider[] = [];
+    for (let index = 2; index < HAZARD_FLAGGERS; index += 1) {
+      others.push(await onTheBoard(`Dee ${String(index)}`, segmentId, 310 + index));
+    }
     expect((await board(ann, segmentId, '?scope=personal')).rows[0]?.rank).toBe(1);
 
-    const flagged = await world.call('POST', `/v1/segments/${segmentId}/hazard`, {
-      token: bea.token,
-      body: { reason: 'junction' },
-    });
-    expect(flagged.body).toEqual({ flagged: true });
+    const flaggers = [bea, ...others];
+    expect(flaggers).toHaveLength(HAZARD_FLAGGERS - 1);
+    for (const who of flaggers) {
+      expect((await hazard(who, segmentId)).body).toEqual({ flagged: true });
+    }
+    // One short of the threshold: the board is still there for everybody.
+    expect((await board(ann, segmentId)).hazardous).toBe(false);
+    expect((await board(ann, segmentId)).rows.length).toBeGreaterThan(0);
 
+    expect((await hazard(ann, segmentId)).body).toEqual({ flagged: true });
     for (const who of [ann, bea]) {
       const shared = await board(who, segmentId);
       expect(shared.hazardous).toBe(true);
@@ -398,15 +489,28 @@ describe('a hazardous segment (#69’s seventh criterion)', () => {
     const listed = (await world.call('GET', '/v1/segments?limit=200', { token: ann.token }))
       .body as { items: { segmentId: string }[] };
     expect(listed.items.some((each) => each.segmentId === segmentId)).toBe(true);
-    expect(await logOf(segmentId)).toEqual([
-      expect.objectContaining({
-        action: 'flagged_hazardous',
-        actorAthleteId: bea.athleteId,
-        subjectAthleteId: null,
-        effortId: null,
-        reason: 'junction',
-      }),
-    ]);
+    const entries = (await logOf(segmentId)).filter(
+      (entry) => entry.action === 'flagged_hazardous',
+    );
+    expect(entries).toHaveLength(HAZARD_FLAGGERS);
+    expect(entries[0]).toMatchObject({
+      actorAthleteId: bea.athleteId,
+      subjectAthleteId: null,
+      effortId: null,
+      reason: 'junction',
+    });
+  });
+
+  it('is not switched on by one rider saying it again, or by one rider alone', async () => {
+    const ann = await rider('Ann');
+    const segmentId = await segmentBy(ann);
+    const bea = await onTheBoard('Bea', segmentId, 300);
+    await share(ann, segmentId, await publicRide(ann), 320);
+    expect((await hazard(bea, segmentId)).body).toEqual({ flagged: true });
+    expect((await hazard(bea, segmentId)).body).toEqual({ flagged: false });
+    expect((await hazard(bea, segmentId, 'traffic')).body).toEqual({ flagged: false });
+    expect((await board(ann, segmentId)).hazardous).toBe(false);
+    expect(names(await board(ann, segmentId))).toEqual(['Bea', 'Ann']);
   });
 });
 
@@ -445,5 +549,6 @@ describe('the rule as docs/leaderboard-integrity.md states it (#69’s first and
       `${String(MEASURED_DETECTION.falselyExcluded)} of the ${String(MEASURED_DETECTION.genuine)} genuine ones`,
     );
     expect(doc).toContain(`${String(FLAG_LIMIT.limit)} flags a day`);
+    expect(doc).toContain(`${String(HAZARD_FLAGGERS)} different riders`);
   });
 });

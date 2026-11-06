@@ -45,6 +45,7 @@ import { chooseOption, mount, queryAll, settle, type Mounted } from '../testing/
 
 import {
   FLAG_SENTENCE,
+  HAZARD_CONFIRM_SENTENCE,
   HAZARD_SENTENCE,
   HAZARDOUS_BOARD_SENTENCE,
   InstanceBoard,
@@ -346,6 +347,17 @@ describe('flagging, and what is not counted (#69)', () => {
     expect(calls.added).toEqual([`flag ${BEA_EFFORT} gps-error on ${'a'.repeat(32)}`]);
     expect(text()).toContain('Flagged. It is off the board.');
     button(/^Flag it as hazardous/).click();
+    await settle();
+    // Asked before it is raised: the first press sends nothing.
+    expect(calls.added).toHaveLength(1);
+    expect(text()).toContain(HAZARD_CONFIRM_SENTENCE);
+    button(/^No, keep it/).click();
+    await settle();
+    expect(text()).not.toContain(HAZARD_CONFIRM_SENTENCE);
+    expect(calls.added).toHaveLength(1);
+    button(/^Flag it as hazardous/).click();
+    await settle();
+    button(/^Yes, flag it as hazardous/).click();
     await settle();
     expect(calls.added.at(-1)).toBe(`hazard traffic on ${'a'.repeat(32)}`);
     expect(text()).toContain('You have flagged as many as you may today');
