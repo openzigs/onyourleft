@@ -1952,7 +1952,7 @@ sequenceDiagram
     participant B as Bea's device
     participant I as Instance (apps/instance/src/segments/)
     participant A as Anna's device
-    B->>I: POST /v1/segments {segment} — a public segment, neither end in a privacy zone
+    B->>I: POST /v1/segments {segment} — a public segment, no point of it in a privacy zone
     I->>I: id = first 32 hex of SHA-256(canonical definition); distance measured here
     A->>I: GET /v1/segments — names and distances, never a path or a publisher
     A->>I: GET /v1/segments/{id} — the definition; the device checks it hashes to {id}, keeps a copy
@@ -1973,7 +1973,7 @@ sequenceDiagram
 | A segment's identity | A digest of its definition (`@onyourleft/domain` §`publishedSegmentId`): the same definition published twice is one segment, a device knows which of its own segments is published without being told, and an added segment is filed under that id | `packages/domain/src/segment/published.ts` |
 | Erasure (#35, decided here) | An erased account's efforts go, and so does every segment it published, with every effort anybody shared on those — explicitly, because `segment_effort.segment_id` has no foreign key (one athlete's row may not point at another's, #842). The other riders' copies stay on their devices (ADR 0036 D-3). A ride deleted here takes its efforts by `ON DELETE CASCADE`; a publisher's *Withdraw* takes the segment and its efforts | `src/store/sql-store.ts` §`eraseAthlete`, §`withdrawSegment` |
 | Sealed | Every route sealed-only from the first (ADR 0047's amendment of 2026-11-05) | `src/sealed/phase-two.ts` |
-| The client | `apps/web/src/instance/leaderboard-port.ts`: publishing offered only for a segment that is `public` on the device with neither end in a privacy zone NOW; sharing makes the ride `public` here and there alike (one vocabulary, ADR 0004) and withdrawing makes it `private` in both; a board's answer held to its shape. With no instance nothing renders and nothing is sent | `apps/web/src/segments/InstanceBoard.tsx`, `InstanceSegments.tsx` |
+| The client | `apps/web/src/instance/leaderboard-port.ts`: publishing offered only for a segment that is `public` on the device with no point of its path in a privacy zone NOW (ADR 0004 C), and the instance asked whether a segment is there only for one that may be published or came from it; sharing makes the ride `public` here and there alike (one vocabulary, ADR 0004), and puts it back as it was in both when the instance does not take the efforts; every effort on a segment whose path enters a zone is sent `private-match`; withdrawing takes that segment's efforts off and changes nothing else; a board's answer held to its shape. With no instance nothing renders and nothing is sent | `apps/web/src/segments/InstanceBoard.tsx`, `InstanceSegments.tsx` |
 
 #### The history index (#835, ADR 0040)
 

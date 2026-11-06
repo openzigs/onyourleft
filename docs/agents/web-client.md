@@ -472,9 +472,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         segment screens' way to the instance's segments and
                         boards (`segments/InstanceBoard.tsx`,
                         `InstanceSegments.tsx`): publishing only a segment
-                        `public` here with neither end in a privacy zone,
-                        sharing a ride's efforts makes the ride `public` here
-                        AND there (withdrawing, `private` in both), and an
+                        `public` here with no point in a privacy zone (and
+                        only such a segment is asked about), sharing a ride's
+                        efforts makes the ride `public` here AND there (put
+                        back if the instance refuses; withdrawing takes that
+                        segment's efforts off and leaves the ride), and an
                         added segment is checked to hash to its id
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the

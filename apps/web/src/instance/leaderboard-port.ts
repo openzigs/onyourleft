@@ -20,16 +20,24 @@
  *   endpoint radius and bearing tolerance (`@onyourleft/domain`
  *   §`publishedDefinitionOf`). The path is a stretch of the rider's own ride,
  *   so it is offered only for a segment that is `public` here, and refused
- *   when either end lies in one of the rider's privacy zones as they are NOW
- *   ({@link publishRefusal}) — a zone added since the segment was made counts.
+ *   when ANY point of it lies in one of the rider's privacy zones as they are
+ *   NOW ({@link publishRefusal}) — a zone added since the segment was made
+ *   counts. ADR 0004 C: the bytes that cross a boundary hold no point inside a
+ *   zone, and a segment's path is served to every rider on the instance.
  * - **Sharing efforts** sends, per ride, its visibility (`public`) and each
  *   effort's start, elapsed time and three-state visibility — never a
  *   position. The ride must already be synced (the device knows its file's
- *   hash only from the sync base). An effort with an end in a privacy zone is
- *   sent `private-match`: the instance keeps it for the rider's own board and
+ *   hash only from the sync base). An effort with an end in a privacy zone,
+ *   and every effort on a segment whose path enters one (ADR 0004 C: an
+ *   effort whose span intersects a zone is not published), is sent
+ *   `private-match`: the instance keeps it for the rider's own board and
  *   ranks it on nobody else's. The ride is made `public` HERE as well, so the
  *   device and the instance never disagree about it (ADR 0004's one
- *   vocabulary); withdrawing makes it `private` in both places again.
+ *   vocabulary) — and put back as it was when either instance call fails, so
+ *   a share that did not happen changes nothing.
+ * - **Withdrawing efforts** takes this segment's efforts off and nothing
+ *   else: the ride's visibility is the rider's, and its efforts on other
+ *   segments stay where they are.
  * - **Adding another rider's segment** fetches its definition, checks it is
  *   the one its identifier names, and stores it as this device's own segment,
  *   under that identifier, to match this device's rides against.
@@ -56,7 +64,9 @@ import {
   publishedDefinitionOf,
   publishedSegmentId,
   segmentFromPublished,
-  touchesPrivacyZone,
+  distanceBetween,
+  type GeographicPosition,
+  type PrivacyCircle,
   type Sha256,
 } from '@onyourleft/domain';
 import {
@@ -111,6 +121,8 @@ export interface InstanceSegment {
 
 /** Whether one of this device's segments is on the instance. */
 export type SegmentStanding =
+  /** Not asked: the segment is not offered to the instance, for this reason. */
+  | { readonly kind: 'withheld'; readonly refusal: string }
   | { readonly kind: 'published'; readonly segmentId: string; readonly yours: boolean }
   | { readonly kind: 'not-published'; readonly segmentId: string }
   | { readonly kind: 'unavailable' };
@@ -133,7 +145,12 @@ export interface LeaderboardPort {
   instanceName(): string | undefined;
   /** Why this segment may not be published, in a sentence, or `undefined` when it may. */
   publishRefusal(segment: SegmentRecord): Promise<string | undefined>;
-  /** Whether this device's segment is on the instance, by its definition's digest. */
+  /**
+   * Whether this device's segment is on the instance, by its definition's
+   * digest — asked only of a segment {@link publishRefusal} would offer, or
+   * one that came from the instance: the digest of a segment the client
+   * refuses to send is a fingerprint of it, and is not sent either.
+   */
   standing(segment: SegmentRecord): Promise<SegmentStanding>;
   publish(segment: SegmentRecord): Promise<'published' | 'refused' | 'unavailable'>;
   /** Withdraw a segment the rider published, with every effort anybody shared on it. */
@@ -144,9 +161,9 @@ export interface LeaderboardPort {
     period: BoardPeriod,
   ): Promise<InstanceBoard | undefined>;
   /** Share the rider's efforts on a published segment, ride by ride. */
-  share(segmentId: string, efforts: readonly SegmentEffortRecord[]): Promise<ShareOutcome>;
-  /** Take them off again, and make their rides private here and there. */
-  withdraw(segmentId: string, efforts: readonly SegmentEffortRecord[]): Promise<ShareOutcome>;
+  share(segment: SegmentRecord, efforts: readonly SegmentEffortRecord[]): Promise<ShareOutcome>;
+  /** Take them off this segment's board again; the rides' visibility is left as it is. */
+  withdraw(segment: SegmentRecord, efforts: readonly SegmentEffortRecord[]): Promise<ShareOutcome>;
   /** The segments published on the instance, newest first, or `undefined` when it could not be asked. */
   listSegments(): Promise<readonly InstanceSegment[] | undefined>;
   /** Add one to this device, to match its rides against. */
@@ -157,6 +174,10 @@ export interface LeaderboardPort {
 export interface LeaderboardStore {
   listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]>;
   listSyncBase(owner: AthleteId): Promise<SyncBaseRecord[]>;
+  getActivity(
+    owner: AthleteId,
+    id: ActivityId,
+  ): Promise<{ readonly visibility: Visibility } | undefined>;
   setActivityVisibility(owner: AthleteId, id: ActivityId, visibility: Visibility): Promise<boolean>;
   getSegment(owner: AthleteId, id: SegmentId): Promise<SegmentRecord | undefined>;
   putSegment(record: SegmentRecord): Promise<SegmentId>;
@@ -172,9 +193,26 @@ export interface LeaderboardPortDependencies extends SealingDependencies {
 export const NOT_PUBLIC_REFUSAL =
   'This segment is private on this device, so it is not offered to your instance.';
 export const IN_A_ZONE_REFUSAL =
-  'One end of this segment is in one of your privacy zones, so it is not offered to your instance.';
+  'Part of this segment is in one of your privacy zones, so it is not offered to your instance.';
 export const FROM_THE_INSTANCE_REFUSAL =
   'This segment came from your instance, so it is already there.';
+
+/**
+ * Whether any point of `path` lies inside any of `zones` — every point, not
+ * only the two ends: a published path is served to every rider on the
+ * instance, so a segment that passes THROUGH a zone would publish the points
+ * inside it (ADR 0004 C). A segment's path is a span of the rider's own
+ * recorded samples, metres apart, against a zone of at least 250 m (ADR 0004
+ * B), so no chord between two points crosses a zone that holds neither.
+ */
+export function pathEntersPrivacyZone(
+  path: readonly GeographicPosition[],
+  zones: readonly PrivacyCircle[],
+): boolean {
+  return path.some((position) =>
+    zones.some((zone) => distanceBetween(zone.centre, position) <= zone.radius),
+  );
+}
 
 /**
  * Why `segment` may not be published, or `undefined` when it may. Pure: the
@@ -187,8 +225,7 @@ export function publishRefusal(
 ): string | undefined {
   if (segment.id === publishedId) return FROM_THE_INSTANCE_REFUSAL;
   if (segment.visibility !== 'public') return NOT_PUBLIC_REFUSAL;
-  const ends = [segment.start.position, segment.end.position];
-  if (touchesPrivacyZone(ends, 0, 1, zones)) return IN_A_ZONE_REFUSAL;
+  if (pathEntersPrivacyZone(segment.geometry, zones)) return IN_A_ZONE_REFUSAL;
   return undefined;
 }
 
@@ -299,12 +336,65 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     return rides;
   }
 
-  async function sendRides(
+  /** One instance call, as whether it was taken. */
+  const took = async (path: string, body: Readonly<Record<string, unknown>>): Promise<boolean> =>
+    (await call('POST', path, body))?.status === 200;
+
+  /**
+   * Share one ride's efforts: the ride is made `public` here first, so no
+   * effort is ever ranked from a ride this device has not made public, then
+   * on the instance, then its efforts sent. When either instance call fails
+   * the ride is put back as the rider had it, here and there: a share that
+   * did not happen changes nothing.
+   */
+  async function shareRide(
+    activity: ActivityId,
+    file: string,
     segmentId: string,
     efforts: readonly SegmentEffortRecord[],
-    visibility: 'public' | 'private',
+    zoned: boolean,
+  ): Promise<boolean> {
+    const store = dependencies.store();
+    const before = (await store.getActivity(athleteId, activity))?.visibility;
+    if (before === undefined) return false;
+    if (!(await store.setActivityVisibility(athleteId, activity, 'public'))) return false;
+    const visibilityPath = `/v1/sync/records/${file}/visibility`;
+    const madePublic = await took(visibilityPath, { visibility: 'public' });
+    if (
+      madePublic &&
+      (await took(`/v1/segments/${segmentId}/efforts/${file}`, {
+        efforts: efforts.map((effort) => ({
+          startedAt: Math.round(effort.startedAt),
+          elapsedSeconds: effort.elapsed,
+          visibility: zoned ? 'private-match' : effort.visibility,
+        })),
+      }))
+    ) {
+      return true;
+    }
+    if (before !== 'public') {
+      if (madePublic) await took(visibilityPath, { visibility: before });
+      await store.setActivityVisibility(athleteId, activity, before);
+    }
+    return false;
+  }
+
+  async function sendRides(
+    segment: SegmentRecord,
+    efforts: readonly SegmentEffortRecord[],
+    kind: 'share' | 'withdraw',
   ): Promise<ShareOutcome> {
+    const segmentId = await idOf(segment);
     const content = await contents();
+    // ADR 0004 C: an effort whose span intersects a zone is not published.
+    // Its span is this segment's path, so a path that enters one of the
+    // rider's zones keeps every effort on it to the rider's own board.
+    const zoned =
+      kind === 'share' &&
+      pathEntersPrivacyZone(
+        segment.geometry,
+        await dependencies.store().listPrivacyZones(athleteId),
+      );
     let rides = 0;
     let notSynced = 0;
     let failed = 0;
@@ -314,28 +404,13 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
         notSynced += 1;
         continue;
       }
-      // Withdrawing takes the efforts off first, then makes the ride private;
-      // sharing makes the ride public first, so no effort is ever ranked from
-      // a ride the device has not made public.
+      // Withdrawing takes this segment's efforts off and nothing else: the
+      // ride's visibility is the rider's, and its efforts on other segments
+      // stay ranked.
       const sent =
-        visibility === 'public'
-          ? (await dependencies.store().setActivityVisibility(athleteId, activity, 'public')) &&
-            (await call('POST', `/v1/sync/records/${file}/visibility`, { visibility }))?.status ===
-              200 &&
-            (
-              await call('POST', `/v1/segments/${segmentId}/efforts/${file}`, {
-                efforts: mine.map((effort) => ({
-                  startedAt: Math.round(effort.startedAt),
-                  elapsedSeconds: effort.elapsed,
-                  visibility: effort.visibility,
-                })),
-              })
-            )?.status === 200
-          : (await call('POST', `/v1/segments/${segmentId}/efforts/${file}`, { efforts: [] }))
-              ?.status === 200 &&
-            (await call('POST', `/v1/sync/records/${file}/visibility`, { visibility }))?.status ===
-              200 &&
-            (await dependencies.store().setActivityVisibility(athleteId, activity, 'private'));
+        kind === 'share'
+          ? await shareRide(activity, file, segmentId, mine, zoned)
+          : await took(`/v1/segments/${segmentId}/efforts/${file}`, { efforts: [] });
       if (sent) rides += 1;
       else failed += 1;
     }
@@ -370,6 +445,15 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
 
     standing: async (segment) => {
       const segmentId = await idOf(segment);
+      const refusal = publishRefusal(
+        segment,
+        await dependencies.store().listPrivacyZones(athleteId),
+        segmentId,
+      );
+      // Asked only of a segment that is, or may be, on the instance.
+      if (refusal !== undefined && refusal !== FROM_THE_INSTANCE_REFUSAL) {
+        return { kind: 'withheld', refusal };
+      }
       const answer = await call('GET', `/v1/segments/${segmentId}`);
       if (answer === undefined) return { kind: 'unavailable' };
       if (answer.status === 404) return { kind: 'not-published', segmentId };
@@ -404,8 +488,8 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
       return parseBoard(answer.body);
     },
 
-    share: (segmentId, efforts) => sendRides(segmentId, efforts, 'public'),
-    withdraw: (segmentId, efforts) => sendRides(segmentId, efforts, 'private'),
+    share: (segment, efforts) => sendRides(segment, efforts, 'share'),
+    withdraw: (segment, efforts) => sendRides(segment, efforts, 'withdraw'),
 
     listSegments: async () => {
       const answer = await call('GET', '/v1/segments', undefined, { limit: '200' });

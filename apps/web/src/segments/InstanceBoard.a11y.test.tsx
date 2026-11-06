@@ -288,13 +288,26 @@ describe('a segment’s board on the instance (#68)', () => {
   it('shows the refusal, and no publish control, for a segment that may not go', async () => {
     const { port, calls } = stubPort({
       standing: { kind: 'not-published', segmentId: 'a'.repeat(32) },
-      refusal: 'One end of this segment is in one of your privacy zones.',
+      refusal: 'Part of this segment is in one of your privacy zones.',
     });
     mounted = await mount(onAPage(<InstanceBoard port={port} segment={SEGMENT} efforts={[]} />));
     await settle();
-    expect(text()).toContain('One end of this segment is in one of your privacy zones.');
+    expect(text()).toContain('Part of this segment is in one of your privacy zones.');
     expect(queryAll(document, 'button')).toEqual([]);
     expect(calls.published).toEqual([]);
+    clean();
+  });
+
+  it('shows the refusal, and reads no board, for a segment the instance was never asked about', async () => {
+    const { port, calls } = stubPort({
+      standing: { kind: 'withheld', refusal: 'This segment is private on this device.' },
+    });
+    mounted = await mount(onAPage(<InstanceBoard port={port} segment={SEGMENT} efforts={[]} />));
+    await settle();
+    expect(text()).toContain('This segment is private on this device.');
+    expect(text()).not.toContain('could not be asked');
+    expect(queryAll(document, 'button')).toEqual([]);
+    expect(calls.boards).toEqual([]);
     clean();
   });
 });
