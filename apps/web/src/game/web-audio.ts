@@ -56,8 +56,27 @@
  * The bus gains are set from the rider's mix (`audio-mix.ts`), read again at
  * every press that resumes the context and before every sound is scheduled, so
  * a choice made in Settings or on the ride's own controls is heard on the very
- * next sound, with nothing to subscribe to. The music bus has no source yet
- * (#2058), and nothing moves the duck yet (#2059): it stays at 1.
+ * next sound, with nothing to subscribe to.
+ *
+ * ## The duck — #2059
+ *
+ * While the music plays, every short sound ducks it: the duck gain ramps down
+ * to {@link MUSIC_DUCK_LEVEL} as the sound starts and back up to 1 once it has
+ * ended, so an effect over full-volume music is heard and the music is never
+ * cut. Ramps on the AudioParam (`setTargetAtTime`), no library, and a second
+ * sound inside the first one's duck moves the way back up rather than letting
+ * it land mid-sound. Music never plays during a ride, so in practice it is the
+ * menus' effects that duck it; the ride's cues would reuse this unchanged.
+ *
+ * ## The music — #2058
+ *
+ * `shell/menu-music.ts` decides when the menus' loop plays, and hands its
+ * `<audio>` element here ({@link CueOutput.attachMusic}): it is routed with
+ * `createMediaElementSource` into the music bus, never decoded whole into an
+ * `AudioBuffer` (a two-minute stereo loop decodes to tens of MB). The music
+ * bus sits at 0 until {@link CueOutput.setMusicOn} brings it up to the rider's
+ * music level, and goes back down over {@link MUSIC_FADE_SECONDS} — a ramp,
+ * never a step — when a ride route opens.
  *
  * ## What only a person with headphones can check
  *
@@ -77,7 +96,14 @@ import { deviceStorage, type PreferenceStorage } from './hud/announce-preference
 /** The half of `AudioContext` this file uses, so a test can hand in a fake. */
 export type AudioContextLike = Pick<
   AudioContext,
-  'currentTime' | 'destination' | 'state' | 'resume' | 'suspend' | 'createOscillator' | 'createGain'
+  | 'currentTime'
+  | 'destination'
+  | 'state'
+  | 'resume'
+  | 'suspend'
+  | 'createOscillator'
+  | 'createGain'
+  | 'createMediaElementSource'
 >;
 
 /** One note of a short sound: its pitch, when it starts, how long it lasts. */
@@ -126,11 +152,41 @@ const NOTE_ATTACK_SECONDS = 0.01;
 /** How quickly a tone follows a new pitch or level, in seconds (a time constant). */
 const GLIDE_SECONDS = 0.04;
 
+/**
+ * How long the music takes to come up or go down when it starts or a ride
+ * route opens — #2058 — in seconds: the time constant of the music bus's ramp.
+ * Five of them is under 1 % of where it began, which is when
+ * `shell/menu-music.ts` pauses the element ({@link MUSIC_FADE_MS}).
+ */
+export const MUSIC_FADE_SECONDS = 0.2;
+
+/** Five time constants of {@link MUSIC_FADE_SECONDS}, in ms: the fade is over. */
+export const MUSIC_FADE_MS = MUSIC_FADE_SECONDS * 5 * 1000;
+
+/**
+ * Where the music sits under a short sound — #2059: 0.35 of its level, about
+ * 9 dB down. Enough for a 60 ms note to be heard over it; not a cut.
+ */
+export const MUSIC_DUCK_LEVEL = 0.35;
+
+/**
+ * How quickly the duck goes down and comes back, in seconds (time constants).
+ * Down fast, so the sound's attack is not masked; back slower, so the music
+ * returns rather than jumps.
+ */
+export const MUSIC_DUCK_DOWN_SECONDS = 0.015;
+export const MUSIC_DUCK_BACK_SECONDS = 0.12;
+
+/** How long a short sound lasts, from its first note's start to its last note's end. */
+function soundSeconds(name: CueName): number {
+  return Math.max(...SOUNDS[name].map((note) => note.at + note.seconds));
+}
+
 /** The graph's gains — built once, with the context. @see the module note */
 interface Graph {
   readonly master: GainNode;
   readonly music: GainNode;
-  /** On music only, at 1 until #2059 ducks it. */
+  /** On music only: at 1, and ramped down under each short sound while music plays (#2059). */
   readonly duck: GainNode;
   readonly effects: GainNode;
   readonly cues: GainNode;
@@ -144,10 +200,11 @@ function busLevel(bus: BusSetting): number {
   return bus.muted ? 0 : bus.volume;
 }
 
-function mixLevels(mix: AudioMix): MixLevels {
+/** The levels the mix asks for, with music at 0 while it is not playing (#2058). */
+function mixLevels(mix: AudioMix, musicOn: boolean): MixLevels {
   return {
     master: mix.masterMuted ? 0 : 1,
-    music: busLevel(mix.music),
+    music: musicOn ? busLevel(mix.music) : 0,
     effects: busLevel(mix.effects),
     cues: busLevel(mix.cues),
   };
@@ -171,6 +228,13 @@ export function webAudioOutput(
    */
   let applied: MixLevels | undefined;
   let tone: { readonly oscillator: OscillatorNode; readonly gain: GainNode } | undefined;
+  /** Whether the menus' music is meant to be heard — #2058. The bus is 0 otherwise. */
+  let musicOn = false;
+  /**
+   * The element routed into the music bus. ⚠️ `createMediaElementSource` may be
+   * called ONCE per element — a second call throws — so it is remembered.
+   */
+  let music: HTMLMediaElement | undefined;
   /**
    * A `suspend()` has been ASKED for — #447. ⚠️ `state` does not change until
    * the platform has done it, so a rider who ends a workout and presses *Ride*
@@ -206,7 +270,7 @@ export function webAudioOutput(
    * not is left alone, so a sound at the same mix schedules nothing on it.
    */
   const buses = (into: AudioContextLike): Graph => {
-    const levels = mixLevels(mix());
+    const levels = mixLevels(mix(), musicOn);
     if (graph === undefined) {
       const gain = (to: AudioNode, value: number): GainNode => {
         const node = into.createGain();
@@ -263,6 +327,26 @@ export function webAudioOutput(
     isRunning() {
       return context?.state === 'running' && !asleep;
     },
+    applyMix() {
+      // No context, no graph: the mix is read when the first press builds it.
+      if (context === undefined) return;
+      buses(context);
+    },
+    attachMusic(element) {
+      if (context === undefined || music === element) return;
+      const bus = buses(context).music;
+      context.createMediaElementSource(element).connect(bus);
+      music = element;
+    },
+    setMusicOn(on) {
+      musicOn = on;
+      if (context === undefined || graph === undefined) return;
+      const level = mixLevels(mix(), on).music;
+      if (applied?.music === level) return;
+      // A ramp over the fade, never a step: a cut is jarring (#2059's reason).
+      graph.music.gain.setTargetAtTime(level, context.currentTime, MUSIC_FADE_SECONDS);
+      applied = { ...(applied ?? mixLevels(mix(), on)), music: level };
+    },
     suspend() {
       // ⚠️ `waking > 0` is #455: a resume in flight has not moved `state` yet,
       // and it WILL land — so `suspended` here is not a reason to do nothing.
@@ -300,8 +384,17 @@ export function webAudioOutput(
     },
     playCue(name, level) {
       if (context === undefined) return;
-      const bus = buses(context)[BUS_OF[name]];
+      const graph = buses(context);
+      const bus = graph[BUS_OF[name]];
       const start = context.currentTime;
+      if (musicOn) {
+        // #2059: under the music's ramp, never a cut. Anything scheduled from
+        // now on — an earlier sound's way back up — gives way to this sound's.
+        const duck = graph.duck.gain;
+        duck.cancelScheduledValues(start);
+        duck.setTargetAtTime(MUSIC_DUCK_LEVEL, start, MUSIC_DUCK_DOWN_SECONDS);
+        duck.setTargetAtTime(1, start + soundSeconds(name), MUSIC_DUCK_BACK_SECONDS);
+      }
       for (const note of SOUNDS[name]) {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
