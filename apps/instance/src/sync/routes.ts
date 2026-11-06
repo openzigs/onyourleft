@@ -278,13 +278,16 @@ export const SYNC_ROUTES: readonly Route[] = [
     operationId: 'setActivityVisibility',
     reaches: 'own',
     summary:
-      'Say who may see one of your rides on this instance, by the SHA-256 of its file — its visibility on your device (ADR 0004): private, followers or public. Private unless you set it. Only a public ride’s efforts are ranked on a shared leaderboard (#68); followers is inert until there is a follow. Not part of the signed record, and never the race consent.',
+      'Say who may see one of your rides on this instance, by the SHA-256 of its file — its visibility on your device (ADR 0004): private, followers or public. Private unless you set it. Only a public ride’s efforts are ranked on a shared leaderboard (#68); followers is inert until there is a follow. Answers what it is now and what it was before, so a device can put it back. Not part of the signed record, and never the race consent.',
     ...SESSION,
     request: object({ visibility: { type: 'string', enum: ['private', 'followers', 'public'] } }),
     errors: ['unauthenticated', 'validation_failed', 'not_found'],
     response: {
       contentType: 'application/json',
-      schema: object({ visibility: { type: 'string', enum: ['private', 'followers', 'public'] } }),
+      schema: object({
+        visibility: { type: 'string', enum: ['private', 'followers', 'public'] },
+        previous: { type: 'string', enum: ['private', 'followers', 'public'] },
+      }),
     },
     handle: async (context) =>
       answer(

@@ -162,7 +162,7 @@ export const SEGMENT_ROUTES: readonly Route[] = [
     operationId: 'shareSegmentEfforts',
     reaches: 'own',
     summary:
-      'Share your efforts on a published segment from one of your synced rides, by the SHA-256 of its file, replacing what you shared from that ride before; none withdraws them. Each is its start, its elapsed time and its visibility as your device decided it: `private-match` — an end in one of your privacy zones — is kept for your own board and never ranked on anybody else’s. Each must lie within the ride’s recorded time.',
+      'Share your efforts on a published segment from one of your synced rides, by the SHA-256 of its file, replacing what you shared from that ride before; none withdraws them. Each is its start, its elapsed time and its visibility as your device decided it: `private-match` — an end in one of your privacy zones, or any effort on a segment whose path passes through one — is kept for your own board and never ranked on anybody else’s. Each must lie within the ride’s recorded time.',
     ...SESSION,
     request: object({
       efforts: {
