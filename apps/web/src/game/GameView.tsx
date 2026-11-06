@@ -3560,6 +3560,10 @@ function GameScreen({
         // procedural world owes nothing, and a credit there would be false.
         // Since #1549 the realistic world draws its mapped buildings from it.
         attribution={rideHasCorridor ? OSM_ATTRIBUTION : undefined}
+        // #2290: and the plan view draws that corridor as a street map around
+        // the rider — on exactly the rides that carry the credit, from the
+        // corridor fixed at the press, so it makes no request during the ride.
+        corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}

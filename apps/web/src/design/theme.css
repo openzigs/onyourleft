@@ -7843,6 +7843,27 @@ select.oyl-input {
   vector-effect: non-scaling-stroke;
 }
 
+/* #2290: the street map a ride with a corridor draws in the plan view's box
+   (`StreetMap.tsx`). Its colours are attributes, the ride map's own dark
+   cartography (`basemap.ts` §MAP_COLOURS); this only keeps every line the
+   width `StreetMap.tsx` states in screen pixels, whatever the box's scale.
+   The rider's mark is `.oyl-hud__plan-here` above.
+
+   ⚠️ Its own layer (`will-change`), so that the readings that change on every
+   frame around it never make the engine raster the map again: it is
+   repainted when its own DOM changes, once per 5 m ridden
+   (`street-map.ts` §"The cost"). `street-map.browser.spec.ts` publishes what
+   a paced ride costs with it. */
+.oyl-hud__street-map-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__street-map {
+  will-change: transform;
+}
+
 .oyl-hud__profile-text {
   margin: 0;
   font-size: var(--oyl-font-size-sm);
