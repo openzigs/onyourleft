@@ -11372,15 +11372,17 @@ select.oyl-input {
  * 3.75 rem, PR #2235's review). The panels are re-cut for them, every number
  * measured in the pinned Chromium with the widest ordinary values set
  * (`1999` W, `199` rpm and bpm, `-19.9` %): at 5 rem `1999` is 174 px, in a
- * 179 px track at 1280×800, 177 at 1024×768 and 181 upright, and `199` is
- * 131 px in 138, 136 and 181:
+ * 180 px track at 1280×800, 183 at 1024×768 and 181 upright, and `199` is
+ * 131 px in 137, 138 and 181 — with #2130's 8 px between every reading (the
+ * owner's ruling of 2026-11-06), which `metric-numerals.browser.spec.ts` holds
+ * at both sizes:
  *
  * - LANDSCAPE (51 rem wide or more) the primary readings stay one row, so the
  *   row the secondary tier shares with them stays short and a race's
  *   standings (#1347) and a notice hang under it as they do at the normal
  *   size, clear of *Pause*: the four in a 41.5 rem column at 1280×800, power
  *   and the gradient the wider tracks, and on the 4:3 tablet the three in
- *   29.75 rem with the gradient in the secondary tier's first cell, as #2130
+ *   30.25 rem with the gradient in the secondary tier's first cell, as #2130
  *   draws it there. The secondary tier is four tracks beside them;
  * - UPRIGHT (800×1280) there is no width for four in a row and the tier, so
  *   the four stand two by two in 24 rem, the tier spans the stage under them,
@@ -11453,28 +11455,6 @@ select.oyl-input {
     .oyl-hud__standings {
     grid-area: beside;
   }
-
-  /* ⚠️ **What gives way, recorded as #419 asks: on a landscape tablet at
-     these sizes, in a ROOM, the pacer's and the ghost's gaps and the wind
-     give way** to the room's readings, as they do on a phone (§"A ROOM RIDE
-     ON A PHONE"): in four tracks they were a third row, and a race's
-     standings under it ran 23 px over *Pause* with *Report*'s reasons open on
-     the 4:3 tablet, and 15 px at 1280×800 with #2080's swap in them. Hidden
-     by clip, so a screen reader still reads them. */
-  .oyl-game--riding
-    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
-    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
-    > .oyl-hud__field--gives-way {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border: 0;
-  }
 }
 
 @media (min-width: 51rem) and (min-height: 50rem) {
@@ -11486,20 +11466,25 @@ select.oyl-input {
 /* The 4:3 tablet: three in a row, and the gradient's cell first in the tier. */
 @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
   .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
-    grid-template-columns: minmax(0, 29.75rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 30.25rem) minmax(0, 1fr);
   }
 
+  /* 30.25 rem and 1.33 to 1, from 29.75 and 1.3: at 5 rem `1999` sat 7.2 px
+     from `199`, under the owner's 8 px between readings (2026-11-06,
+     `metric-numerals.browser.spec.ts`), and 1.35 to 1 in 29.75 left `199`
+     7.8 px from the next. The tier gives the 8 px back from its gradient
+     cell, 7 rem as #2130's is here at the normal size (110.4 px drawn). */
   .oyl-game--riding
     :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
     .oyl-hud__fields--primary {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.33fr) minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .oyl-game--riding
     :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
     .oyl-hud__fields--secondary {
     grid-template-columns:
-      minmax(7.25rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr)
+      minmax(7rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr)
       minmax(max-content, 1fr);
   }
 
@@ -11509,6 +11494,17 @@ select.oyl-input {
     > .oyl-hud__field--gradient
     .oyl-hud__value {
     font-size: 2.45rem;
+  }
+
+  /* In a room the rider's own W/kg and zone stay (the owner's ruling of
+     2026-11-06, #2034), and in four tracks they make the tier a third row
+     here: a race's standings under it ran 23 px into the actions panel with
+     *Report*'s reasons open. So here the standings' lines give up their own
+     padding, 28 px over seven lines; nothing gives way and no control moves. */
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings-line {
+    padding-block: 0;
   }
 }
 
