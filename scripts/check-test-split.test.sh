@@ -467,7 +467,7 @@ assert_says 'and says what shape it expects' "and then \`${BLOB_1}\`"
 new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
   "${SHARD_1}" "${SHARD_2}" "pnpm run test:coverage src/game/ ${BLOB_2}" "${COVERAGE_2}"
 run_check
-assert_red 'a half writing the other half’s blob fails: one download would overwrite the other'
+assert_red 'a half writing the blob of the other half fails: one download would overwrite the other'
 assert_says 'and names the half' '`test:coverage:shard-1` is'
 
 new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
